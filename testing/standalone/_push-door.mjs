@@ -34,6 +34,8 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
+import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
+import { fakeResponse } from './_fake-response.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -74,6 +76,17 @@ export const FAMILIES = Object.freeze({
   links:    { coll: 'links',    type: null,     single: null },
   filemeta: { coll: 'files',    type: 'file',   single: null },
 });
+
+/**
+ * A valid document of a replicated family, by the name the family goes by on the wire (`REPLICATED_FAMILIES`'s
+ * `payloadKey`) — the one place that name is turned into a `build` entry, so a test that loops over the families asks
+ * this instead of spelling its own table. A family without a builder throws here, at the call, rather than being skipped.
+ */
+export function buildOf(payloadKey) {
+  const builder = { facts: build.fact, entities: build.entity, edges: build.edge, chrono: build.chrono, links: build.link, filemeta: build.filemeta }[payloadKey];
+  if (!builder) throw new Error(`no document builder for the replicated family '${payloadKey}' — add one to \`build\` and to buildOf`);
+  return builder;
+}
 
 /**
  * The body keys `batch-upsert` reads, derived from `REPLICATED_FAMILIES` — after checking the route reads every one
@@ -241,26 +254,19 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
       params: {}, body, authToken: token, get: () => undefined, headers: {} };
     await new Promise((resolve, reject) => resolveNetworkSpaceAlias(req, {}, (e) => (e ? reject(e) : resolve())));
     const localSpace = req.query.spaceId;
-    const res = {
-      code: 200, body: undefined, sent: false, counterAtResponse: undefined,
-      status(c) { this.code = c; return this; },
-      json(b) {
-        this.body = b; this.sent = true;
-        this.counterAtResponse = landed.get(localSpace) ?? 0;
-        return this;
-      },
-    };
+    let counterAtResponse;
+    const res = fakeResponse({ onAnswer: () => { counterAtResponse = landed.get(localSpace) ?? 0; } });
     await handlerFor('post', routePath)(req, res);
     assert.ok(res.sent, `POST ${routePath} settled without answering`);
-    return { code: res.code, body: res.body, counterAtResponse: res.counterAtResponse };
+    return { code: res.statusCode, body: res.body, counterAtResponse };
   }
 
   /** A GET page, for the cases that assert what a peer pulling from this instance is served. */
   async function pull(routePath, query) {
     const req = { method: 'GET', query: { full: 'true', ...query }, params: {}, authToken: PEER_TOKEN, get: () => undefined };
-    const res = { code: 200, body: undefined, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+    const res = fakeResponse();
     await handlerFor('get', routePath)(req, res);
-    assert.equal(res.code, 200, JSON.stringify(res.body));
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
     return res.body;
   }
 
@@ -275,9 +281,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   }
   async function wipe(space) {
     await settled();
-    for (const part of ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']) {
-      await coll(space, part).deleteMany({});
-    }
+    await wipeParts(mongo, space, RECORD_PARTS);
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);
   }

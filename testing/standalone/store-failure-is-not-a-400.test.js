@@ -88,8 +88,7 @@ describe('the reported condition, verbatim from both reports', () => {
 });
 
 describe('the store cases, each identified positively — by the driver\'s own classes', () => {
-  it('built from the driver\'s classes (floor), not from names on plain Errors', () => {
-    assert.ok(DRIVER_SIDE.length >= 25, `only ${DRIVER_SIDE.length} driver classes built`);
+  it('built from the driver\'s classes (the derivation asserts its floor), not from names on plain Errors', () => {
     for (const name of STORE_SIDE_NAMES) assert.ok(driverError(name) instanceof driver.MongoError, `${name} is not a MongoError`);
   });
 

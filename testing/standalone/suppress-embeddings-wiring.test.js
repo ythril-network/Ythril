@@ -20,6 +20,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
+import { suppressionBranchOf, UNSETS_THE_VECTOR } from './_suppression-branch.mjs';
+
+const { UNSET_VECTOR } = await import('../../server/dist/sync/local-only-fields.js');
 
 /*
  * TWO FILES, because the wiring is now split across them and each half is asserted below.
@@ -29,13 +33,10 @@ import { readFileSync } from 'node:fs';
  * runtime import cycle. What stayed in `embed-record.ts` is the CONSEQUENCE: unsetting a stale vector and
  * returning `excluded`. Reading only one file would silently stop checking half of this.
  */
-const SRC = [
-  '../../server/src/brain/suppress-embeddings.ts',
-  '../../server/src/brain/embed-record.ts',
-].map(f => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
-
 /** Comments must not satisfy any of these — several of them describe the very trap being asserted. */
-const CODE = SRC.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+const codeOf = f => stripComments(readFileSync(new URL(f, import.meta.url), 'utf8'));
+const EMBED_RECORD = codeOf('../../server/src/brain/embed-record.ts');
+const CODE = [codeOf('../../server/src/brain/suppress-embeddings.ts'), EMBED_RECORD].join('\n');
 
 describe('the suppression decision reaches the embed path', () => {
   it('calls the shared resolver rather than re-deciding locally', () => {
@@ -77,27 +78,20 @@ describe('a file skips the schema tier', () => {
 describe('suppression removes a stale vector', () => {
   it('unsets both the vector and its model', () => {
     // Declining to write a new vector is not enough: the old one still answers vector search, which is the whole
-    // bug the flag exists to prevent.
-    const branch = CODE.slice(CODE.indexOf('embeddingSuppressed({'));
-    const unset = branch.slice(0, branch.indexOf("return 'excluded'"));
-    assert.match(unset, /\$unset/);
-    if (/\$unset:\s*UNSET_VECTOR/.test(unset)) {
-      // The one spelling of the vector half is `UNSET_VECTOR` (`sync/local-only-fields.ts`); what it unsets is read
-      // from the field set it is built from, so the vector and its model are still both asserted.
-      const fields = readFileSync(new URL('../../server/src/sync/local-only-fields.ts', import.meta.url), 'utf8');
-      const vectorFields = fields.match(/const VECTOR_FIELDS[^=]*=\s*new Set\(\[([^\]]*)\]\)/)?.[1] ?? '';
-      assert.match(vectorFields, /'embedding'/);
-      assert.match(vectorFields, /'embeddingModel'/);
-    } else {
-      assert.match(unset, /embedding:/);
-      assert.match(unset, /embeddingModel:/);
-    }
+    // bug the flag exists to prevent. Asserted on the SUPPRESSION branch's own block — the failure path of the same
+    // function writes the same unset, so a match anywhere in the file would hold with this branch's deleted.
+    assert.match(suppressionBranchOf(EMBED_RECORD), UNSETS_THE_VECTOR,
+      'the suppression branch does not unset the stale vector');
+    // What `UNSET_VECTOR` unsets is read from the value the product uses, not from its source text: both halves of
+    // the vector are still asserted.
+    assert.ok('embedding' in UNSET_VECTOR && 'embeddingModel' in UNSET_VECTOR,
+      'UNSET_VECTOR must remove the vector AND the model that produced it');
   });
 
   it('returns a distinct outcome rather than reporting success', () => {
     // `'embedded'` here would make a suppressed record indistinguishable from an embedded one in every caller
-    // and every metric.
-    assert.match(CODE, /return 'excluded';/);
+    // and every metric. Inside the suppression branch, not merely somewhere in the file.
+    assert.match(suppressionBranchOf(EMBED_RECORD), /return 'excluded';/);
   });
 });
 

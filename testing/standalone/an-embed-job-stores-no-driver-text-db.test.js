@@ -37,7 +37,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { HOST_TEXT, LEAK, SENTENCES, driver } from './_store-failure-fixtures.mjs';
+import { HOST_TEXT, LEAK, SENTENCES, wrappers, driver } from './_store-failure-fixtures.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -49,6 +49,7 @@ const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
 fs.mkdirSync(EMPTY_CACHE, { recursive: true });
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+const WRAPPERS = await wrappers();
 
 let mongo, memory, queue, worker, embed;
 
@@ -130,6 +131,20 @@ describe('an embed job stores no driver text in its lastError (real MongoDB)', {
     assert.doesNotMatch(lastError, LEAK);
     assert.ok(lastError.includes('MongoServerSelectionError'), lastError);
   });
+
+  // The three fields an error travels inside another by (`cause`, `underlying`, `errorResponse`), each built by its own
+  // class: the wrapper's message quotes the driver's, so a store that looked only at the outermost error would keep it.
+  for (const { label, wrap } of WRAPPERS) {
+    it(`a driver failure carried in \`${label}\`: the record carries our sentence, none of the driver's text`, async () => {
+      await writeFact('a record whose read fails inside a wrapper');
+      assert.equal(await failingOnRead(wrap(new driver.MongoNetworkError(HOST_TEXT))), true);
+      const [lastError] = await lastErrors();
+      assert.ok(lastError, 'the failure left no lastError at all');
+      assert.doesNotMatch(lastError, LEAK, `the record stores the driver's text: ${lastError}`);
+      assert.ok(lastError.includes(SENTENCES.incomplete), `not our sentence: ${lastError}`);
+      assert.match(lastError, /\(Mongo\w*Error\)$/, `the class an operator groups by is missing: ${lastError}`);
+    });
+  }
 
   it('PIN: an own error wrapping nothing of the driver stays in its own words even when it names a host-like thing', async () => {
     await writeFact('own');

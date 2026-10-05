@@ -5,9 +5,9 @@
  * ## Why a module
  *
  * Two gates read it — `schema-descriptions-agree-with-help` (no description repeats a corrected claim) and
- * `delete-entity-states-its-cascade` (a cascade tool says what it cascades) — and each walked the schema by hand
- * (bundle-30 I6, T7). The copies differed in what they could miss: one recursed into arrays explicitly and the other
- * reached them only because an array is an object.
+ * `delete-entity-states-its-cascade` (a cascade tool says what it cascades) — and each walked the schema by hand.
+ * The copies differed in what they could miss: one recursed into arrays explicitly and the other reached them only
+ * because an array is an object.
  *
  * ## The case a hand-written walk drops
  *

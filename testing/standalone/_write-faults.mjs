@@ -44,15 +44,20 @@ export async function withValidator(db, collName, validator, fn) {
 
 /**
  * `name` is a VIEW on `viewOn` while `fn` runs: every write to it fails at the command level, and a read of it reads
- * `viewOn`. Put back as an empty ordinary collection afterwards, with whatever indexes `restore` recreates.
+ * `viewOn`. Put back as an empty ordinary collection afterwards, with the indexes it held BEFORE the fault.
+ *
+ * The indexes are captured here and recreated here, not by a `restore` each caller must remember to pass: dropping the
+ * collection drops its unique indexes with it (an edge collection loses its endpoint-triplet index), and a later case
+ * in the same file would then run against a store that no longer refuses a duplicate, passing for the wrong reason.
  */
-export async function withCollectionAsView(db, name, viewOn, fn, { restore } = {}) {
+export async function withCollectionAsView(db, name, viewOn, fn) {
+  const held = (await db.collection(name).indexes().catch(() => [])).filter(i => i.name !== '_id_');
   await db.collection(name).drop().catch(() => {});
   await db.createCollection(name, { viewOn, pipeline: [] });
   try { return await fn(); } finally {
     await db.collection(name).drop();
     await db.createCollection(name);
-    if (restore) await restore();
+    if (held.length > 0) await db.command({ createIndexes: name, indexes: held });
   }
 }
 

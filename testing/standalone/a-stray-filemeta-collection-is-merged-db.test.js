@@ -46,6 +46,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { within } from './_within.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'strayfm';
@@ -78,8 +79,6 @@ const arrivedRow = (space, id, extra = {}) => {
   const { author: _none, ...row } = build.filemeta(space, id, 0);
   return { ...row, ...extra };
 };
-/** Fail rather than hang when a hold is never reached. */
-const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} was never reached`)), 5000))]);
 
 async function auditFor(space, operation) {
   const audit = door.mongo.getDb().collection('audit_log');

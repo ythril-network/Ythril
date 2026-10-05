@@ -97,6 +97,8 @@ describe('an edge delete writes its tombstone first', { skip }, () => {
       raised = await edges.deleteEdge(S, ID).then(() => null, (e) => e);
     });
     assert.ok(raised, 'fixture check: the delete the store refuses reported success');
+    assert.ok((await door.coll(S, 'edges').indexes()).some(i => i.unique),
+      'the fault put the edges back WITHOUT their unique endpoint index, so every later case runs against a store that no longer refuses a duplicate');
     assert.ok(await tombstone(),
       'the delete failed and NO tombstone was written first: had it landed, a peer would hold the deletion');
     assert.ok(await door.mongo.getDb().collection(`${S}_edges_src`).findOne({ _id: ID }), 'fixture check: the edge itself changed');

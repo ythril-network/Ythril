@@ -39,15 +39,30 @@ import { eventually } from './_write-faults.mjs';
 const skip = await mongoSkipReason();
 
 const S = 'violations';
-let door, subscribeBrainChanges, linkIdFor, forkIdFor, unsubscribe, events;
+let door, subscribeBrainChanges, linkIdFor, forkIdFor, unsubscribe, events, proto, priorUpdateOne;
 
 const violations = () => door.coll(S, 'link_violations');
 const rows = () => violations().find({}).sort({ field: 1 }).toArray();
 
-/** Wait for the fire-and-forget check of a delivery to have written `n` records, then leave room for a stray extra one. */
-async function settleAt(n) {
-  assert.ok(await eventually(async () => (await violations().countDocuments({})) >= n, 5_000, 25), `fewer than ${n} violation record(s) appeared`);
-  await new Promise(r => setTimeout(r, 400));
+/**
+ * The check of a delivery is fire-and-forget, so the answer says nothing of whether it has run. What a delivery's own
+ * completion is observable as: each violation it checks ends in ONE write to the violations collection, whether that
+ * write inserts a record or finds the one it already holds. The writes are counted as they COMPLETE (the same probe the
+ * push door puts on the counter), so "nothing new was recorded" is asserted AFTER the check that could have recorded
+ * it has finished — never after a guess of how long that takes.
+ */
+let writesCompleted = 0;
+let writesExpected = 0;
+
+/**
+ * Wait for the checks of the deliveries so far to have completed — `checks` more violation writes than last time —
+ * and answer how many records the collection holds then. More writes than the deliveries make is a failure too.
+ */
+async function settleAfter(checks) {
+  writesExpected += checks;
+  assert.ok(await eventually(() => writesCompleted >= writesExpected, 5_000, 10),
+    `${writesExpected - writesCompleted} of the ${checks} expected violation write(s) never completed`);
+  assert.equal(writesCompleted, writesExpected, 'a delivery wrote more violation checks than it should have');
   return violations().countDocuments({});
 }
 
@@ -57,11 +72,25 @@ describe('a link violation is one record however often it is delivered', { skip 
     ({ subscribeBrainChanges } = await import('../../server/dist/brain/brain-events.js'));
     ({ linkIdFor } = await import('../../server/dist/brain/links.js'));
     ({ forkIdFor } = await import('../../server/dist/sync/upsert-plan.js'));
+    // The completion probe, on top of the door's own (the door's close puts its originals back, so ours is removed first).
+    proto = Object.getPrototypeOf(door.mongo.col('probe'));
+    priorUpdateOne = proto.updateOne;
+    proto.updateOne = async function observed(...args) {
+      try { return await priorUpdateOne.apply(this, args); } finally {
+        if (this.collectionName === `${S}_link_violations`) writesCompleted++;
+      }
+    };
   });
-  after(async () => { await door?.close(); });
+  after(async () => {
+    unsubscribe?.();
+    if (proto && priorUpdateOne) proto.updateOne = priorUpdateOne;
+    await door?.close();
+  });
   beforeEach(async () => {
     await door.wipe(S);
     await violations().deleteMany({});
+    writesCompleted = 0;
+    writesExpected = 0;
     events = [];
     unsubscribe?.();
     unsubscribe = subscribeBrainChanges(S, (ev) => { if (ev.event === 'link_violation.created') events.push(ev); });
@@ -72,33 +101,46 @@ describe('a link violation is one record however often it is delivered', { skip 
 
   it('control: an edge whose two ends are missing records one violation per end', async () => {
     assert.equal((await deliver(edge('e1', 5))).code, 200);
-    assert.equal(await settleAt(2), 2);
+    assert.equal(await settleAfter(2), 2);
     assert.deepEqual((await rows()).map(r => r.field), ['from', 'to']);
   });
 
   it('delivering the same edge again records nothing new', async () => {
     const e = edge('e1', 5);
     await deliver(e);
-    assert.equal(await settleAt(2), 2);
+    assert.equal(await settleAfter(2), 2);
     await deliver(e);
-    assert.equal(await settleAt(2), 2, 'a re-delivery added records');
+    assert.equal(await settleAfter(2), 2, 'a re-delivery added records');
   });
 
   it('an edit of the edge that leaves the same ends dangling records nothing new', async () => {
     const e = edge('e1', 5);
     await deliver(e);
-    assert.equal(await settleAt(2), 2);
+    assert.equal(await settleAfter(2), 2);
     await deliver({ ...e, seq: 6, description: 'edited' });
-    assert.equal(await settleAt(2), 2, 'an edit added records');
+    assert.equal(await settleAfter(2), 2, 'an edit added records');
+  });
+
+  it('two documents that dangle at the same field and target are two records, not one', async () => {
+    // The id names the DOCUMENT as well as the field and the target: a dangling end shared by two edges is a violation
+    // of each of them, and the Review list is where an operator finds out which edges to repair.
+    const [from, to] = [randomUUID(), randomUUID()];
+    // A distinct label keeps the second edge from being refused as a duplicate of the first's relationship.
+    await deliver(edge('e1', 5, { from, to, label: 'one' }));
+    await deliver(edge('e2', 5, { from, to, label: 'two' }));
+    assert.equal(await settleAfter(4), 4, 'two edges with the same dangling ends were folded into one record per end');
+    const stored = await rows();
+    assert.deepEqual(stored.map(r => r.docId).sort(), ['e1', 'e1', 'e2', 'e2']);
+    assert.equal(new Set(stored.map(r => r._id)).size, 4);
   });
 
   it('the announcement fires once per record INSERTED, not once per delivery', async () => {
     const e = edge('e1', 5);
     await deliver(e);
-    await settleAt(2);
+    await settleAfter(2);
     await deliver(e);
     await deliver({ ...e, seq: 6 });
-    await settleAt(2);
+    await settleAfter(4);
     assert.equal(events.length, 2, `${events.length} link_violation.created events for two records`);
   });
 
@@ -110,7 +152,8 @@ describe('a link violation is one record however often it is delivered', { skip 
       const r = await door.push('/batch-upsert', { links: [link(seq)] }, { spaceId: S });
       assert.equal(r.code, 200, JSON.stringify(r.body));
     }
-    assert.equal(await settleAt(1), 1);
+    // The re-send at the same seq is not applied, so it is not checked; the edit at seq 6 is, and finds the record.
+    assert.equal(await settleAfter(2), 1);
   });
 
   it('PIN different violations stay different records: another target, and the two ends of one edge', async () => {
@@ -118,9 +161,9 @@ describe('a link violation is one record however often it is delivered', { skip 
     const [m1, m2] = [randomUUID(), randomUUID()];
     const link = (to) => build.link(S, linkIdFor(fact, 'fact', to, 'entity'), 5, { from: fact, fromKind: 'fact', to, toKind: 'entity' });
     await door.push('/batch-upsert', { links: [link(m1), link(m2)] }, { spaceId: S });
-    assert.equal(await settleAt(2), 2, 'two dangling targets of one record were folded into one');
+    assert.equal(await settleAfter(2), 2, 'two dangling targets of one record were folded into one');
     await deliver(edge('e1', 5));
-    assert.equal(await settleAt(4), 4, 'the two ends of one edge were folded into one');
+    assert.equal(await settleAfter(2), 4, 'the two ends of one edge were folded into one');
     assert.equal(new Set((await rows()).map(r => r._id)).size, 4);
   });
 
@@ -129,7 +172,7 @@ describe('a link violation is one record however often it is delivered', { skip 
     const huge = `docs/${'x'.repeat(20_000)}.md`;
     const r = await door.push('/batch-upsert', { links: [build.link(S, linkIdFor(fact, 'fact', huge, 'file'), 5, { from: fact, fromKind: 'fact', to: huge, toKind: 'file' })] }, { spaceId: S });
     assert.equal(r.code, 200, JSON.stringify(r.body));
-    assert.equal(await settleAt(1), 1);
+    assert.equal(await settleAfter(1), 1);
     const [row] = await rows();
     assert.ok(row.reason.length < 5_000, `a ${row.reason.length}-character reason was stored: ${row.reason.slice(0, 80)}…`);
     assert.match(row.reason, /non-existent file/, 'the reason lost what it says');
@@ -141,10 +184,10 @@ describe('a link violation is one record however often it is delivered', { skip 
       reason: `from references non-existent entity '${e.from}'`, peerInstanceId: 'push-door-peer', detectedAt: '2026-09-01T00:00:00.000Z' };
     await violations().insertOne(stale);
     await deliver(e);
-    await settleAt(3);
+    assert.equal(await settleAfter(2), 3, 'the first delivery after 5.6.3 adds its derived twin and the missing end');
     await deliver({ ...e, seq: 6 });
     await deliver(e);
-    assert.ok(await settleAt(3) <= 3, 'a stored random-id row kept producing new records on each delivery');
+    assert.equal(await settleAfter(4), 3, 'a stored random-id row kept producing new records on each delivery');
   });
 
   it('PIN forkIdFor answers byte-for-byte what 5.6.3 answered', () => {

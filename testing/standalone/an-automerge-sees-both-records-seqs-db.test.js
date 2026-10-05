@@ -45,6 +45,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, waitUntilServing } from './_vector-harness.mjs';
+import { fakeResponse } from './_fake-response.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -95,14 +96,6 @@ async function warnings(fn) {
 }
 const refusals = (lines) => lines.filter(l => /Auto-merge REFUSED/.test(l));
 
-function response() {
-  return {
-    statusCode: 200, body: undefined,
-    status(c) { this.statusCode = c; return this; },
-    json(b) { this.body = b; return this; },
-    setHeader() { return this; }, set() { return this; }, get() { return undefined; },
-  };
-}
 const token = () => ({ id: `amseq-${++serial}`, name: 'amseq', rights: ADMIN });
 const request = (extra) => ({ params: {}, query: {}, body: {}, headers: {}, ip: '127.0.0.1', authToken: token(), get: () => undefined, ...extra });
 
@@ -222,7 +215,7 @@ describe('the duplicate scanner sees both records of a pair at their real seq', 
       const _id = `entity:${LOW.length}:${LOW}:${HIGH}`;
       await coll(space, 'dupe_candidates').insertOne({ _id, spaceId: space, type: 'entity', aId: LOW, bId: HIGH,
         aSeq: stored[0], bSeq: stored[1], score: 1, status: 'open', detectedAt: T0, updatedAt: T0 });
-      const res = response();
+      const res = fakeResponse();
       await handlers.merge(request({ params: { id: _id } }), res);
       assert.equal(res.statusCode, 200, JSON.stringify(res.body));
       return res.body.survivorId;
@@ -249,7 +242,7 @@ describe('the duplicate scanner sees both records of a pair at their real seq', 
   describe('the answer of similar carries no seq on its source (the seq the scanner reads is internal)', () => {
     it('REST: POST /api/brain/similar', async () => {
       await seedPair(OLDER, 10, 20);
-      const res = response();
+      const res = fakeResponse();
       await handlers.similar(request({ resolvedSpaceId: OLDER, authorisedSpaces: [OLDER],
         body: { space: OLDER, entryId: LOW, entryType: 'entity', topK: 5, targetTypes: ['entity'] } }), res);
       assert.equal(res.statusCode, 200, JSON.stringify(res.body));

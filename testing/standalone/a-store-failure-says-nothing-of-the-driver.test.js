@@ -42,35 +42,22 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HOST_TEXT, LEAK, SENTENCES, STORE_SIDE, STORE_SIDE_NAMES, driverSideErrors, serverError, wrapping, linesDuring,
+  HOST_TEXT, LEAK, SENTENCES, STORE_SIDE, STORE_SIDE_NAMES, STORE_CODES, ADDRESS_CODES, SERVER_REFUSALS, addressError,
+  wrappers, driverSideErrors, serverError, wrapping,
   moduleExporting, sendReadFailureOf, driver,
 } from './_store-failure-fixtures.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const { classifyReadFailure } = await import('../../server/dist/brain/store-failure.js');
 const refs = await import('../../server/dist/brain/entity-refs.js');
 
 const DRIVER_SIDE = driverSideErrors();
-
-/** `MongoServerError` codes the classifier answers `503` — the store cannot answer right now, and will. */
-const STORE_CODES = [[11600, 'InterruptedAtShutdown'], [91, 'ShutdownInProgress'], [11602, 'InterruptedDueToReplStateChange'],
-  [189, 'PrimarySteppedDown'], [13436, 'NotPrimaryOrSecondary'], [50, 'MaxTimeMSExpired'], [262, 'ExceededTimeLimit']];
-/** Server codes whose text carries an address: "could not reach another member". The words go; the `400` stays. */
-const ADDRESS_CODES = [[6, 'HostUnreachable'], [7, 'HostNotFound'], [89, 'NetworkTimeout'], [9001, 'SocketException'],
-  [10107, 'NotWritablePrimary'], [13435, 'NotPrimaryNoSecondaryOk'], [134, 'ReadConcernMajorityNotAvailableYet']];
-/** What the server refused for a reason the caller can fix: its own words, kept, at `400`. */
-const SERVER_REFUSALS = [
-  [2, 'BadValue', 'cannot set maxTimeMS on getMore command for a non-awaitData cursor'],
-  [51091, 'Location51091', 'Regular expression is invalid: missing closing parenthesis'],
-  [18, 'AuthenticationFailed', 'Authentication failed.'],
-  [121, 'DocumentValidationFailure', 'Document failed validation'],
-  [11000, 'DuplicateKey', 'E11000 duplicate key error collection: x.y index: _id_ dup key: { _id: "a" }'],
-];
+const WRAPPERS = await wrappers();
 
 const answer = (err) => classifyReadFailure(err);
 
 describe('the derivation works', () => {
-  it('built a real driver instance of every class that is not a server\'s answer (floor)', () => {
-    assert.ok(DRIVER_SIDE.length >= 25, `only ${DRIVER_SIDE.length} driver-side classes built — the derivation from the package is broken`);
+  it('built a real driver instance of every class that is not a server\'s answer (the floor is asserted by the derivation)', () => {
     for (const name of [...STORE_SIDE_NAMES, 'MongoPoolClearedError']) {
       assert.ok(DRIVER_SIDE.some(d => d.name === name), `the driver exports no class named ${name} that takes a message — re-anchor`);
     }
@@ -152,7 +139,7 @@ describe('a server\'s answer', () => {
 
   for (const [code, codeName] of ADDRESS_CODES) {
     it(`code ${code} (${codeName}) names a member's address: the words go, the 400 stays`, () => {
-      const f = answer(serverError(code, codeName, `could not reach mongo-a.internal:27017 — ${HOST_TEXT}`));
+      const f = answer(addressError(code, codeName));
       assert.equal(f.status, 400, 'a status the release line answered changed');
       assert.equal(f.retryable, false);
       assert.equal(f.error, SENTENCES.incomplete);
@@ -237,10 +224,30 @@ describe('our own capability refusal is still a store failure, in its own senten
 });
 
 describe('a wrapper around a driver failure says nothing of the driver either', () => {
-  it('an own error whose CAUSE is the driver\'s: no host in the answer', () => {
-    for (const { name, make } of DRIVER_SIDE) {
-      const f = answer(wrapping(make()));
-      assert.doesNotMatch(f.error, LEAK, `${name} inside a wrapper: ${f.error}`);
+  /** Whether a text is one of our three sentences about a store failure. */
+  const isOurs = (text) => text === SENTENCES.unavailable || text === SENTENCES.incomplete || STORE_SIDE.test(text);
+
+  // Every way an error travels inside another (`cause`, `underlying`, `errorResponse`), each built by its own class: the
+  // wrapper's text quotes the driver's, so a door that does not look through it answers the host.
+  for (const { label, wrap } of WRAPPERS) {
+    it(`the driver's failure carried in \`${label}\`: no host in the answer, and one of our sentences`, () => {
+      const wrong = [];
+      for (const { name, make } of DRIVER_SIDE) {
+        const f = answer(wrap(make()));
+        if (LEAK.test(f.error)) wrong.push(`${name}: carries the text — ${f.error}`);
+        else if (!isOurs(f.error)) wrong.push(`${name}: ${f.error}`);
+      }
+      assert.deepEqual(wrong, []);
+    });
+  }
+
+  it('a wrapper two levels over a driver failure, in different fields, says nothing of it', () => {
+    const inner = DRIVER_SIDE.find(d => d.name === 'MongoNetworkError').make();
+    for (const outer of WRAPPERS.filter(w => w.carriesAnyError)) {
+      for (const middle of WRAPPERS) {
+        const f = answer(outer.wrap(middle.wrap(inner)));
+        assert.doesNotMatch(f.error, LEAK, `${outer.label} over ${middle.label}: ${f.error}`);
+      }
     }
   });
 
@@ -255,13 +262,23 @@ describe('the REST read door: the answer, the status, the header, and the one lo
   for (const { name, make } of DRIVER_SIDE) {
     it(`${name}: no driver text in the body, the status the base gave it, and the text logged ONCE`, async () => {
       const err = make();
-      const { lines, result: out } = await linesDuring(() => sendReadFailureOf(err));
+      const { lines, result: out } = await logLinesDuring(() => sendReadFailureOf(err));
       assert.doesNotMatch(JSON.stringify(out.body), LEAK, `the body carries the driver's text: ${JSON.stringify(out.body)}`);
       assert.equal(out.status, STORE_SIDE_NAMES.includes(name) ? 503 : 400);
       assert.equal(typeof out.body.retryable, 'boolean', '`retryable` is on every failure body');
       if (out.status === 503) assert.ok(Number(out.headers['retry-after']) > 0);
       const logged = lines.filter(l => l.includes('172.16.0.9') || l.includes('mongo-a.internal'));
       assert.equal(logged.length, 1, `the operator reads the driver's text once, in the log — logged: ${JSON.stringify(lines.map(l => l.slice(0, 120)))}`);
+    });
+  }
+
+  // The body only: the log is reported once per window for each (operation, kind), and the cases above already spent it.
+  for (const { label, wrap } of WRAPPERS) {
+    it(`a driver failure carried in \`${label}\`: no driver text in the body of the REST read answer`, async () => {
+      for (const name of ['MongoNetworkError', 'MongoServerSelectionError']) {
+        const out = await sendReadFailureOf(wrap(DRIVER_SIDE.find(d => d.name === name).make()));
+        assert.doesNotMatch(JSON.stringify(out.body), LEAK, `${name}: ${JSON.stringify(out.body)}`);
+      }
     });
   }
 });
@@ -297,6 +314,16 @@ describe('isDriverSide: one predicate, asked of what an error IS', () => {
     assert.equal(isDriverSide(wrapping(wrapping(wrapping(inner)))), true, 'three levels down');
     assert.equal(isDriverSide(wrapping(serverError(11000, 'DuplicateKey', 'E11000'))), false, 'a server answer in the chain is not the driver\'s own condition');
   });
+
+  for (const { label, wrap } of WRAPPERS) {
+    it(`a driver failure carried in \`${label}\` is driver-side; a server answer or an own error carried there is not`, async () => {
+      const isDriverSide = await moduleExporting('isDriverSide');
+      const missed = DRIVER_SIDE.filter(d => isDriverSide(wrap(d.make())) !== true).map(d => d.name);
+      assert.deepEqual(missed, [], 'the walk of the chain does not follow this field');
+      assert.equal(isDriverSide(wrap(serverError(11000, 'DuplicateKey', 'E11000'))), false, 'a server answer is not the driver\'s own condition');
+      assert.equal(isDriverSide(wrap(new Error('mine'))), false, 'an own error is not the driver\'s');
+    });
+  }
 
   it('never throws, and ends on a cyclic or hostile chain', async () => {
     const isDriverSide = await moduleExporting('isDriverSide');
@@ -344,15 +371,28 @@ describe('caughtFailureText: what a catch that answers an error\'s own text says
     }
   });
 
+  for (const { label, wrap } of WRAPPERS) {
+    it(`a driver failure carried in \`${label}\` gives one of our sentences, with none of the text`, async () => {
+      const caughtFailureText = await moduleExporting('caughtFailureText');
+      const wrong = [];
+      for (const { name, make } of DRIVER_SIDE) {
+        const text = caughtFailureText(wrap(make()), OPERATION);
+        if (LEAK.test(text)) wrong.push(`${name}: carries the text — ${text}`);
+        else if (text !== SENTENCES.incomplete && text !== SENTENCES.unavailable && !STORE_SIDE.test(text)) wrong.push(`${name}: ${text}`);
+      }
+      assert.deepEqual(wrong, []);
+    });
+  }
+
   it('logs the driver\'s text ONCE, at warn, naming the operation — and an own error logs nothing of its own', async () => {
     const caughtFailureText = await moduleExporting('caughtFailureText');
     const err = DRIVER_SIDE.find(d => d.name === 'MongoServerSelectionError').make();
-    const { lines } = await linesDuring(() => caughtFailureText(err, OPERATION));
+    const { lines } = await logLinesDuring(() => caughtFailureText(err, OPERATION));
     const logged = lines.filter(l => l.includes('172.16.0.9'));
     assert.equal(logged.length, 1, `logged: ${JSON.stringify(lines)}`);
     assert.match(logged[0], /WARN/, 'the level an operator watches');
     assert.ok(logged[0].includes(`${OPERATION} failed`), `the line does not name the operation: ${logged[0]}`);
-    const own = await linesDuring(() => caughtFailureText(new Error('Missing required fields'), OPERATION));
+    const own = await logLinesDuring(() => caughtFailureText(new Error('Missing required fields'), OPERATION));
     assert.deepEqual(own.lines.filter(l => l.includes('172.16.0.9')), []);
   });
 

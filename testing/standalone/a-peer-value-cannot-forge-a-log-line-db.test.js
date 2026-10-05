@@ -19,8 +19,10 @@
  *    raw `member.label`, `round.roundId`, `remote.path` and `${err}` interpolations survived the first pass. So in
  *    EVERY file on the push, pull, import and gossip paths, every `${…}` inside a `log.*(…)` call is either wrapped
  *    whole in `logSafe(…)` / `peerText(…)` / `peerList(…)` (the same rule under three names, the last two also
- *    cutting) or is on `LOCAL_VALUES` — a short list of values this instance owns (a validated space id,
- *    a family name, a number). The file set is DERIVED: every tracked file under `server/src/sync`,
+ *    cutting), a number, a literal, a list escaped element by element, a call of a helper declared in the same file
+ *    whose whole result is escaped — or of a TYPE that cannot carry text (the compiler's answer: a union of literals).
+ *    There is no list of "values this instance owns" here: that ruling has one home, the steerable gate's `LOCAL` table.
+ *    The file set is DERIVED: every tracked file under `server/src/sync`,
  *    `server/src/api/sync` and `server/src/networks` (where gossip's acts log what a peer told it), and every file
  *    that calls `writeArrivals(`, with floors. Comments are blanked before reading (so a comment
  *    explaining the fix neither trips nor satisfies the gate) with line numbers kept, so a finding names the real line.
@@ -37,20 +39,14 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
+import { interpolationsCannotCarryText } from './_interpolation-type.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'pushforge';
 const FORGED = 'FORGED [ERROR] this line was written by a peer';
 let door, logMod;
-
-/** Every line the server logged while `fn` ran, split the way a log reader splits them. */
-async function linesDuring(fn) {
-  const lines = [];
-  const stop = logMod.subscribeLogLines((l) => lines.push(l));
-  try { await fn(); } finally { stop(); }
-  return lines.join('\n').split(/\r\n|\r|\n/);
-}
 
 describe('a peer value cannot forge a log line', { skip }, () => {
   before(async () => {
@@ -81,7 +77,7 @@ describe('a peer value cannot forge a log line', { skip }, () => {
   ]) {
     it(`${label}: its id is named, escaped, and starts no line of its own`, async () => {
       const body = await page();
-      const lines = await linesDuring(async () => {
+      const { lines } = await logLinesDuring(async () => {
         const r = await door.push('/batch-upsert', body, { spaceId: S });
         assert.equal(r.code, 200, JSON.stringify(r.body));
         assert.equal(r.body.facts.rejected, 1, 'fixture check: the document was not refused, so nothing was logged');
@@ -96,20 +92,14 @@ describe('a peer value cannot forge a log line', { skip }, () => {
 
 // ── 2. the source rule, over every file on the arrival paths ──────────────────────────────────────────────────────
 
-/**
- * Values this instance OWNS, so a peer cannot steer their text. Exact expressions, never patterns, each for a reason:
- *
- *  - ids this instance configured, read after the route checked them against config (`spaceAllowed`) or out of the
- *    config itself: `spaceId`, `networkId`, `net.id`, and a scheduler's own `schedule` / `cronExpr`;
- *  - registry names: a family, its collection, its payload key, an import type, a document type;
- *  - text built from parts that were ALREADY escaped: the writer's `message(err)` (it is `logSafe` inside) and its
- *    summary `shown` (each part `logSafe`d where it is built), and the writer's own `what` (a literal at each call).
+/*
+ * There is NO list of values this instance owns here. Which values a peer cannot steer is a ruling about the VALUE and
+ * it has one home, `a-steerable-value-reaches-a-log-line-only-bounded` (its `LOCAL` table, empty unless a defining site
+ * is shown to be this instance's own, with the reason). This gate asks the narrower question of the arrival paths'
+ * source: is the interpolation wrapped, a number, a literal — or of a TYPE that cannot carry text (a union of literals:
+ * a family's collection, a payload key, a document type), which the compiler answers and no list of names can.
  */
-const LOCAL_VALUES = new Set([
-  'spaceId', 'networkId', 'net.id', 'schedule', 'cronExpr',
-  'family', 'family.collection', 'payloadKey', 'urlSuffix', 'kind', 't', 'collName', 'docType',
-  'message(err)', "shown.join(', ')", 'what',
-]);
+
 /**
  * A NUMBER, and only what is a number BY CONSTRUCTION: an integer literal, a module constant, a `.length` or `.size`. Never a
  * NAME that sounds numeric (`status`, `seq`, `count`, `v` ...): a name says nothing about the value's type, and a
@@ -117,12 +107,50 @@ const LOCAL_VALUES = new Set([
  * through `logSafe`, which prints a number unchanged.
  */
 const NUMERIC = /^(?:\d+|[A-Z][A-Z_]+|[\w.!]*\.(?:length|size))$/;
-/** An arithmetic of numbers (`items.length - shown.length`), or a slice/case of a locally-owned name (`kind.slice(1)`). */
-const derivedLocal = (e) =>
-  e.split(/\s*[-+]\s*/).every(part => NUMERIC.test(part))
-  || (/^(\w+)(?:\[\d+\]!?|\.(?:slice|toUpperCase|toLowerCase)\([\d, ]*\))+$/.test(e) && LOCAL_VALUES.has(e.match(/^\w+/)[0]));
-/** A list whose every element was escaped as it was joined: `xs.map(x => logSafe(x)).join(', ')`. */
-const joinedSafe = (e) => /^[\w.]+\.map\(\(?(\w+)\)? => logSafe\(\1\)\)\.join\('[^']*'\)$/.test(e);
+/** An arithmetic of numbers (`items.length - shown.length`). */
+const arithmetic = (e) => e.split(/\s*[-+]\s*/).every(part => NUMERIC.test(part));
+/**
+ * A list whose every element was escaped as it was joined — any receiver, any arrow over it, any literal separator:
+ * `xs.map(x => logSafe(x)).join(', ')`, `Object.keys(m).map((k: string) => peerText(k)).join("; ")`,
+ * `xs.slice(0, 5).map(x => peerText(x, { max: 40 })).join(',')`. The arrow's body must be a bounding renderer wrapping the
+ * WHOLE body and reading the arrow's own parameter; `xs.map(x => logSafe(x) + y)` is not escaped as a whole.
+ */
+function joinedSafe(e) {
+  const join = e.match(/\.join\((?:'[^']*'|"[^"]*"|`[^`$]*`)?\)$/);
+  if (!join) return false;
+  const head = e.slice(0, join.index);
+  const at = head.lastIndexOf('.map(');
+  if (at < 0) return false;
+  const open = at + '.map'.length;
+  if (closing(head, open) !== head.length - 1) return false;
+  const arrow = head.slice(open + 1, -1).trim().match(/^\(?\s*(\w+)\s*(?::\s*[\w<>[\]| ]+)?\)?\s*=>\s*([\s\S]+)$/);
+  if (!arrow) return false;
+  const body = arrow[2].trim();
+  return wholeLogSafe(body) && new RegExp(`\\b${arrow[1]}\\b`).test(body);
+}
+/**
+ * A helper declared in the same file whose whole result is an escaped value: `const message = (err) => logSafe(messageOf(err))`
+ * or `function shown(x) { return peerText(x); }`. A call of one, wrapping nothing else, is escaped. Derived from the file
+ * being read, so a new helper is recognised and a helper that stops escaping stops being.
+ */
+function escapingHelpers(src) {
+  const names = new Set();
+  for (const m of src.matchAll(/\bconst\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*[\w<>[\]| ]+)?\s*=>\s*(?!\{)/g)) {
+    const start = m.index + m[0].length;
+    let end = start;
+    while (end < src.length && src[end] !== ';' && src[end] !== '\n') end++;
+    if (wholeLogSafe(src.slice(start, end).trim())) names.add(m[1]);
+  }
+  for (const m of src.matchAll(/\bfunction\s+(\w+)\s*\([^)]*\)\s*(?::\s*[\w<>[\]| ]+)?\s*\{\s*return\s+([^;]+);\s*\}/g)) {
+    if (wholeLogSafe(m[2].trim())) names.add(m[1]);
+  }
+  return names;
+}
+/** A call of one of `helpers` taking the whole expression: `message(err)`. */
+const callsEscapingHelper = (e, helpers) => {
+  const m = e.match(/^(\w+)\(/);
+  return m !== null && helpers.has(m[1]) && closing(e, e.indexOf('(')) === e.length - 1;
+};
 
 /**
  * The files on the push, pull and import paths, and on gossip's: derived, with floors. `server/src/networks` is in
@@ -218,29 +246,58 @@ function literalsOnly(e) {
   return values.every(v => v.trim() === '""');
 }
 
-describe('every interpolation in a log call on the arrival paths is escaped or locally owned (R6)', () => {
+describe('every interpolation in a log call on the arrival paths is escaped or cannot carry text (R6)', () => {
   it('the file set is derived from the tree and the writer\'s callers, and every ${…} in a log.* call passes', () => {
     const files = arrivalPathFiles();
     assert.ok(files.length >= 15, `only ${files.length} arrival-path file(s): ${files}`);
-    const raw = [];
+    const suspects = [];
     let calls = 0;
     for (const f of files) {
       const text = readFileSync(join(REPO_ROOT, f), 'utf8');
       const src = blankComments(text);
+      const helpers = escapingHelpers(src);
       for (const m of src.matchAll(/\blog\.(?:warn|error|info|debug)\(/g)) {
         calls++;
         const open = m.index + m[0].length - 1;
         for (const { expr, at } of interpolations(src, open + 1, closing(src, open))) {
-          if (wholeLogSafe(expr) || LOCAL_VALUES.has(expr) || NUMERIC.test(expr) || literalsOnly(expr)
-            || derivedLocal(expr) || joinedSafe(expr)) continue;
+          if (wholeLogSafe(expr) || NUMERIC.test(expr) || arithmetic(expr) || literalsOnly(expr) || joinedSafe(expr)
+            || callsEscapingHelper(expr, helpers)) continue;
           if (BOUNDING_CALL.test(expr) === false && /\b(?:logSafe|peerText|peerList)\(/.test(expr) && interpolationsOnlySafe(expr)) continue;
-          raw.push(`${f}:${src.slice(0, at).split('\n').length}: \${${expr}}`);
+          const lead = src.slice(at + 2).length - src.slice(at + 2).trimStart().length;
+          suspects.push({ f, line: src.slice(0, at).split('\n').length, expr, exprStart: at + 2 + lead });
         }
       }
     }
     assert.ok(calls >= 50, `only ${calls} log call(s) read — the scan is broken, not the code`);
+    // What is left is text unless the COMPILER says it cannot be: a union of literals (a family's collection, a payload
+    // key) is a name this instance chose; a plain `string` under any name is whatever its caller passed.
+    const typed = interpolationsCannotCarryText(suspects.map(s => ({ file: s.f, exprStart: s.exprStart })));
+    const raw = suspects.filter((_, i) => typed[i] !== true).map(s => `${s.f}:${s.line}: \${${s.expr}}`);
     assert.deepEqual(raw, [], 'a log line on the push, pull or import path interpolates a value that is neither '
-      + 'escaped with logSafe nor owned by this instance: a peer that controls it can end the line and forge the next');
+      + 'escaped with logSafe/peerText/peerList nor of a type that cannot carry text: a peer that controls it can end the line and forge the next');
+  });
+
+  it('the shape rules accept what escapes a whole list or a whole call, and refuse what escapes a part', () => {
+    // Accepted: any receiver, any parameter spelling or annotation, any literal separator, a bounded renderer with options.
+    for (const e of [
+      'xs.map(x => logSafe(x)).join(\', \')',
+      'ids.map((id) => peerText(id)).join("; ")',
+      'Object.keys(byId).map((k: string) => logSafe(k)).join(\',\')',
+      'xs.slice(0, 5).map(x => peerText(x, { max: 40 })).join(`, `)',
+    ]) assert.ok(joinedSafe(e), `should be accepted: ${e}`);
+    // Refused: the element is not escaped, only part of it is, the arrow ignores its parameter, the separator is a value.
+    for (const e of [
+      'xs.map(x => x).join(\', \')',
+      'xs.map(x => logSafe(x) + y).join(\', \')',
+      'xs.map(x => logSafe(y)).join(\', \')',
+      'xs.map(x => logSafe(x)).join(sep)',
+      'xs.join(\', \')',
+    ]) assert.ok(!joinedSafe(e), `should be refused: ${e}`);
+    const helpers = escapingHelpers('const message = (err: unknown): string => logSafe(messageOf(err));\n'
+      + 'const raw = (err: unknown): string => messageOf(err);\nfunction shown(x: string) { return peerText(x); }\n');
+    assert.deepEqual([...helpers].sort(), ['message', 'shown'], 'a helper is escaping when its whole result is a bounding call');
+    assert.ok(callsEscapingHelper('message(err)', helpers));
+    assert.ok(!callsEscapingHelper('message(err) + tail', helpers) && !callsEscapingHelper('raw(err)', helpers));
   });
 });
 

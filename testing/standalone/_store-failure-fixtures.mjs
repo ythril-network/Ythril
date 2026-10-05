@@ -23,10 +23,12 @@
  * imported a path would be a second place to say it. `moduleExporting(name)` reads `server/dist` for the one module that
  * exports the name, and fails if there is none or more than one (one question, one function).
  */
+import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fakeResponse } from './_fake-response.mjs';
 
 const requireFromServer = createRequire(path.resolve('server/package.json'));
 export const driver = requireFromServer('mongodb');
@@ -58,9 +60,16 @@ function driverClasses() {
 const answeredByServer = C => C === driver.MongoServerError || C.prototype instanceof driver.MongoServerError;
 
 /**
+ * The fewest driver-side classes the derivation may find. A floor and not a count: a driver upgrade that adds a class
+ * adds a case, one that drops several is the break this guards.
+ */
+const DRIVER_SIDE_FLOOR = 25;
+
+/**
  * One instance of every driver class that is NOT a server's answer and takes the host text, as `{ name, make }`. A class
  * that ignores its message (it has nothing to leak) is left out; a class the generic constructors cannot build is left out
- * and counted by the floor, so a driver that stops accepting a message cannot empty the list quietly.
+ * and counted by the floor, which THIS function asserts, so a driver that stops accepting a message cannot empty the list
+ * quietly and no caller has to remember the check. It throws rather than return a short list.
  */
 export function driverSideErrors() {
   const out = [];
@@ -80,39 +89,57 @@ export function driverSideErrors() {
     make: () => new PoolClearedError({ address: 'mongo-a.internal:27017', id: 5, generation: 1 },
       `Connection pool for mongo-a.internal:27017 was cleared because another operation failed with: "${HOST_TEXT}"`),
   });
+  assert.ok(out.length >= DRIVER_SIDE_FLOOR,
+    `only ${out.length} driver-side classes built — the derivation from the package is broken`);
   return out;
 }
 
 /** A server's answer: `MongoServerError` as the driver builds it from the reply document. */
 export const serverError = (code, codeName, errmsg) => new driver.MongoServerError({ ok: 0, code, codeName, errmsg });
 
-/** An own error of ours that wraps what the driver raised — the shape `ArrivalWriteError` has. */
+/** `MongoServerError` codes the classifier answers `503` — the store cannot answer right now, and will. Literal expected values. */
+export const STORE_CODES = [[11600, 'InterruptedAtShutdown'], [91, 'ShutdownInProgress'], [11602, 'InterruptedDueToReplStateChange'],
+  [189, 'PrimarySteppedDown'], [13436, 'NotPrimaryOrSecondary'], [50, 'MaxTimeMSExpired'], [262, 'ExceededTimeLimit']];
+/** Server codes whose text carries an address: "could not reach another member". The words go; the `400` stays. */
+export const ADDRESS_CODES = [[6, 'HostUnreachable'], [7, 'HostNotFound'], [89, 'NetworkTimeout'], [9001, 'SocketException'],
+  [10107, 'NotWritablePrimary'], [13435, 'NotPrimaryNoSecondaryOk'], [134, 'ReadConcernMajorityNotAvailableYet']];
+/** What the server refused for a reason the caller can fix: its own words, kept, at `400`. */
+export const SERVER_REFUSALS = [
+  [2, 'BadValue', 'cannot set maxTimeMS on getMore command for a non-awaitData cursor'],
+  [51091, 'Location51091', 'Regular expression is invalid: missing closing parenthesis'],
+  [18, 'AuthenticationFailed', 'Authentication failed.'],
+  [121, 'DocumentValidationFailure', 'Document failed validation'],
+  [11000, 'DuplicateKey', 'E11000 duplicate key error collection: x.y index: _id_ dup key: { _id: "a" }'],
+];
+/** A server's answer of an ADDRESS code, with the member's address in its words. */
+export const addressError = (code, codeName) => serverError(code, codeName, `could not reach mongo-a.internal:27017 — ${HOST_TEXT}`);
+
+/** An own error of ours that wraps what the driver raised in its `cause` — the field a plain `new Error(…, { cause })` fills. */
 export const wrapping = (inner, message = `could not write the page: ${inner.message}`) => Object.assign(new Error(message), { cause: inner });
 
-/** A `res` that records what was sent. */
-export function fakeRes() {
-  const out = { status: 200, headers: {}, body: undefined, sent: false };
-  const res = {
-    headersSent: false,
-    setHeader: (k, v) => { out.headers[k.toLowerCase()] = v; return res; },
-    set: (k, v) => { out.headers[String(k).toLowerCase()] = v; return res; },
-    status: (s) => { out.status = s; return res; },
-    json: (b) => { out.body = b; out.sent = true; res.headersSent = true; return res; },
-    send: (b) => { out.body = b; out.sent = true; res.headersSent = true; return res; },
-  };
-  return { res, out };
-}
-
-/** The log lines the server emitted while `fn` ran (the ring every line reaches), with the console silenced. */
-export async function linesDuring(fn) {
-  const log = await import('../../server/dist/util/log.js');
-  const lines = [];
-  const stop = log.subscribeLogLines(l => lines.push(l));
-  const saved = { log: console.log, warn: console.warn, error: console.error };
-  console.log = console.warn = console.error = () => {};
-  let result;
-  try { result = await fn(); } finally { Object.assign(console, saved); stop(); }
-  return { lines, result };
+/**
+ * The three ways an error travels inside another, each built by the class that does it — `cause` (an own error, and the
+ * driver's `PoolClearedError`), `underlying` (`ArrivalWriteError`, the real class, whose message quotes the driver's), and
+ * `errorResponse` (the driver's `MongoBulkWriteError`, which keeps what a bulk write THREW there and copies its text).
+ * `db/error-chain.ts` walks all three; a door that looks at only the outermost error, or only at `cause`, answers the
+ * wrapper's text, and the wrapper quotes the driver.
+ *
+ * `wrap(inner)` is the wrapper around `inner`; `carriesAnyError` says whether it can sit over ANOTHER wrapper (the
+ * driver builds a `MongoBulkWriteError` only over what a bulk write threw, and copies that error's enumerable fields,
+ * which an own error with a `name` field refuses). The three together are one question ("a driver failure inside a
+ * wrapper"), so a test that loops over them states the rule for every way an error is carried.
+ *
+ * A FUNCTION and not a constant, called after the test has set `CONFIG_PATH`: `ArrivalWriteError` lives in a module whose
+ * import reads the configuration path once, and a fixture file imported first would bind it before the test's own temporary
+ * path exists.
+ */
+export async function wrappers() {
+  const { ArrivalWriteError } = await import('../../server/dist/sync/arrivals.js');
+  return [
+    { label: 'cause', carriesAnyError: true, wrap: (inner) => wrapping(inner) },
+    { label: 'underlying (ArrivalWriteError)', carriesAnyError: true, wrap: (inner) => new ArrivalWriteError('a-space', 'facts', inner) },
+    { label: 'errorResponse (MongoBulkWriteError)', carriesAnyError: false, wrap: (inner) => new driver.MongoBulkWriteError(inner, {}) },
+  ];
 }
 
 const distFiles = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap(d =>
@@ -133,13 +160,13 @@ export async function moduleExporting(name) {
   return mod[name];
 }
 
-/**
- * `sendReadFailure` as the REST read routes call it. The release line's is `(res, err)`; a version that names the
- * operation takes it between (`(res, operation, err)`), so the call is made in the shape the function declares.
- */
+/** What the REST read routes pass as `where` — the operation, as the operator will search for it. */
+export const READ_OPERATION = 'a test read';
+
+/** `sendReadFailure(res, where, err)` as the REST read routes call it, and what it answered. */
 export async function sendReadFailureOf(err) {
   const { sendReadFailure } = await import('../../server/dist/api/brain/_read-failure.js');
-  const { res, out } = fakeRes();
-  if (sendReadFailure.length >= 3) sendReadFailure(res, 'a test read', err); else sendReadFailure(res, err);
-  return out;
+  const res = fakeResponse();
+  sendReadFailure(res, READ_OPERATION, err);
+  return { status: res.statusCode, headers: res.headers, body: res.body, sent: res.sent };
 }

@@ -34,6 +34,11 @@
  * bad reference is echoed whole by `invalidRefsMessage`, and the same megabyte key comes back whole in
  * `unrecognized_keys` and in the MCP `unexpected property`.
  *
+ * Round R (5.6.4): the bound is `NAME_QUOTED` from the module, asserted exactly (kept characters, and the number the tail
+ * states) on REST's `unrecognized_keys`, on the MCP unexpected-property quote and on the MCP error PATH. Seen red by
+ * widening each of the two MCP `peerText` calls in `mcp/validate-args.ts` to twice the bound (one case each), and the
+ * list tail by `peerList` counting one left-out too few; restored by hand.
+ *
  * Run: node --test testing/standalone/a-refusal-quotes-an-outside-value-through-the-one-renderer.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -48,6 +53,21 @@ const LINE_BREAKING = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${LS}${String.fromCharC
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const CUT = /…\(\+(\d+) chars\)$/;
 const MORE = /…\(\+(\d+) more\)$/;
+/** How much of one name a refusal quotes — the renderer's own number, shared by every door that names a caller's keys. */
+const { NAME_QUOTED } = log;
+assert.ok(Number.isInteger(NAME_QUOTED) && NAME_QUOTED > 0, 'util/log.ts exports no whole `NAME_QUOTED`');
+
+/**
+ * `quoted` is `original` cut after exactly `NAME_QUOTED` characters, with the renderer's `…(+N chars)` saying N: the
+ * characters that were cut. Exact, not "short enough": a cut one character too early or too late is a different bound.
+ */
+function assertCutAtNameQuoted(quoted, original, what) {
+  const cut = CUT.exec(quoted);
+  assert.ok(cut, `${what}: an oversized name was not cut with …(+N chars): ${quoted.length} characters came back`);
+  assert.equal(cut.index, NAME_QUOTED, `${what}: kept ${cut.index} characters, not NAME_QUOTED (${NAME_QUOTED})`);
+  assert.equal(Number(cut[1]), original.length - NAME_QUOTED, `${what}: the tail does not say how much was cut`);
+  assert.equal(quoted.slice(0, NAME_QUOTED), original.slice(0, NAME_QUOTED), `${what}: what is kept is not the front of the name`);
+}
 
 describe('the renderer takes a narrower bound, and only a narrower one', () => {
   it('peerText cuts at the `max` it is given, in rendered characters, and says by how much', () => {
@@ -161,12 +181,39 @@ describe('a caller\'s unknown key is quoted by the same bound on both doors (C18
     assert.deepEqual(r.unrecognized_keys.slice(1, 4), ['key-1', 'key-2', 'key-3'], 'an ordinary key is not changed');
   });
 
-  it('each element of unrecognized_keys is cut at NAME_QUOTED, the array keeping its length', async () => {
+  it('each element of unrecognized_keys is cut at NAME_QUOTED, saying by how much, the array keeping its length', async () => {
     const { unknownBodyFields } = await import('../../server/dist/brain/query.js');
     const body = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`${i === 0 ? HUGE : 'key'}-${i}`, i]));
     const r = unknownBodyFields(body, new Set(['query']));
     assert.equal(r.unrecognized_keys.length, 30, 'the array of unrecognized keys changed length');
-    for (const k of r.unrecognized_keys) assert.ok(k.length <= 256 + 32, `an element of ${k.length} characters`);
+    const [first, ...rest] = r.unrecognized_keys;
+    assertCutAtNameQuoted(first, `${HUGE}-0`, 'unrecognized_keys[0]');
+    // The sentence quotes the same key by the same bound (`peerList`'s `each`), so the two REST spellings agree.
+    assert.ok(r.error.includes(`Unknown field(s): ${first}, `), `the error sentence does not quote the key as unrecognized_keys does: ${r.error.slice(0, 200)}`);
+    for (const k of rest) assert.ok(k.length < NAME_QUOTED, `an ordinary element was cut: ${k}`);
+  });
+
+  it('the MCP validator cuts an unknown property at NAME_QUOTED, the same bound REST names a key by', async () => {
+    const [message] = await doors.mcp();
+    // The huge key is quoted between single quotes, as `unexpected property '…'`; the key after it is named in full.
+    const quoted = [...message.matchAll(/unexpected property '([^']*)'/g)].map(m => m[1]);
+    const huge = quoted.find(q => q.startsWith(HUGE.slice(0, 20)));
+    assert.ok(huge, `fixture check: the oversized key is not quoted as an unexpected property: ${message.slice(0, 200)}`);
+    assertCutAtNameQuoted(huge, HUGE, 'the MCP unexpected property');
+  });
+
+  it('the MCP validator cuts the PATH of an error at NAME_QUOTED too: a megabyte key inside a map is not echoed whole', async () => {
+    const { makeArgsValidator } = await import('../../server/dist/mcp/validate-args.js');
+    const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+    const v = makeArgsValidator({ requiredSpace: { type: 'string', enum: ['general'] }, optionalSpace: { type: 'string', enum: ['general'] } }, ['general']);
+    // `properties` of a save is a map of scalar values: a key under it that holds an array fails the schema AT a path
+    // that carries the caller's key.
+    const message = v.validate(ALL_TOOLS.find(t => t.name === 'save_fact'), { space: 'general', fact: 'x', properties: { [HUGE]: [1] } });
+    assert.ok(message, 'fixture check: the arguments were accepted, so no path was quoted');
+    const path = /^Invalid arguments for 'save_fact': (\/properties\/[^:]*): /.exec(message);
+    assert.ok(path, `fixture check: the error is not at the key's path: ${message.slice(0, 200)}`);
+    // The whole path is the quoted value, so the cut counts the `/properties/` in front of the key too.
+    assertCutAtNameQuoted(path[1], `/properties/${HUGE}`, 'the MCP error path');
   });
 
   it('PIN: an ordinary unknown key is named exactly as before on both doors', async () => {

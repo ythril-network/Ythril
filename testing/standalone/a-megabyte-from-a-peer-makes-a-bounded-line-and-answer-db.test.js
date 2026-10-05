@@ -14,9 +14,24 @@
  * (`_log-lines.mjs`) and over the answer as it would be serialised. Each case also checks that the refusal happened
  * at all, so a case that refused nothing cannot pass by logging nothing.
  *
- * `LIMIT` is 64 KiB for a line and for an answer: far above any honest line (the bound per value is at most 16 KiB,
- * which `a-peer-value-is-rendered-escaped-redacted-and-bounded` holds `LOG_VALUE_MAX` to, and each case refuses one
- * document), and far below the megabyte each case sends.
+ * `LIMIT` is DERIVED, not a round number: `VALUES_QUOTED` outside values, each cut at the renderer's own `LOG_VALUE_MAX`
+ * (`util/log.ts`), plus `OWN_WORDS` for the server's sentence around them. A line or an answer in these cases quotes
+ * the one refused id and at most one reason built from a field of it. So the limit is the renderer's own bound and not a
+ * round number beside it (it was 64 KiB, sixteen times the bound): a door that stops cutting is a megabyte against a
+ * limit of a few KiB. What `LOG_VALUE_MAX` itself may be is held by the unit test (`a-peer-value-is-rendered-escaped-
+ * redacted-and-bounded`), so a widened bound fails THERE and cannot be waved through by a limit that widened with it.
+ *
+ * The PULL half drives the real engine against a fake peer (`_pull-door.mjs`): a pulled record, a pulled schema-failing
+ * record (a megabyte PROPERTY NAME, which the schema's issue path carries into the reason) and a pulled tombstone under a
+ * megabyte `_id` are the doors a peer reaches with no request of its own, and what comes back to anyone is the log and the
+ * sync history `network_sync_history` serves. The whole file runs on the pull door, so it needs the host address the SSRF
+ * guards admit (`privateAddressSkipReason`: a skip locally, a failure under CI).
+ *
+ * ## Seen red (round R, 5.6.4)
+ *
+ * `warnArrivalsNotStored` naming `named.slice(0, N).join(', ')` instead of `peerList` turns red the push tombstone cases,
+ * the pulled record and the pulled tombstone; with `reasonOf` (`sync/arrival-shape.ts`) also joining raw, the pulled
+ * schema-failing record as well. Each restored by hand.
  *
  * The megabyte values are digits after a short prefix, never a long run of letters: redaction backtracks over a run
  * of scheme characters and that cost is its own case in the unit test — here it would only make a red run slow.
@@ -42,26 +57,36 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openPushDoor, build } from './_push-door.mjs';
+import { privateAddressSkipReason } from './_private-address.mjs';
+import { build } from './_push-door.mjs';
+import { openPullDoor } from './_pull-door.mjs';
+import { eventually } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
+const skipPull = skip || privateAddressSkipReason();
+
+const { LOG_VALUE_MAX } = await import('../../server/dist/util/log.js');
 
 const S = 'peerflood';
-const LIMIT = 64 * 1024;
+/** How many outside values one line or answer in these cases quotes: the refused id, and a reason built from a field of it. */
+const VALUES_QUOTED = 2;
+/** The server's own words around the values: a timestamp, a level, a space id, a peer label and the sentence. */
+const OWN_WORDS = 1024;
+const LIMIT = VALUES_QUOTED * LOG_VALUE_MAX + OWN_WORDS;
 const MEGA = 1 << 20;
 const BIG_SEQ = '9'.repeat(MEGA);
 const BIG_ID = `big-${'9'.repeat(MEGA)}`;
 let door, MAX_INGEST_SEQ, CAP;
 
-const kib = n => `${Math.round(n / 1024)} KiB`;
+const kib = n => `${n} chars (the limit is ${LIMIT})`;
 
 /** Every line `fn` emitted is under the limit; returns the lines and `fn`'s result. */
 async function boundedLinesDuring(fn) {
   const { emitted, lines, result } = await logLinesDuring(fn);
   const long = emitted.filter(l => l.length > LIMIT).map(l => `${kib(l.length)}: ${l.slice(0, 120)}…`);
   assert.deepEqual(long, [], 'a log line carries what a peer sent unbounded');
-  return { lines, result };
+  return { lines, result, emitted };
 }
 
 function assertBoundedAnswer(body, what) {
@@ -69,9 +94,11 @@ function assertBoundedAnswer(body, what) {
   assert.ok(size <= LIMIT, `${what} is ${kib(size)}: the megabyte went back in the answer`);
 }
 
-describe('a megabyte from a peer makes a bounded line and a bounded answer', { skip }, () => {
+describe('a megabyte from a peer makes a bounded line and a bounded answer', { skip: skipPull }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: 'peerflood', spaces: [{ id: S, label: 'Flood', folders: [], meta: {} }] });
+    // The pull door IS the push door plus a fake peer (`_pull-door.mjs`): one process holds one config, so the push cases
+    // and the pull cases below share it.
+    door = await openPullDoor({ suite: 'peerflood', spaces: [S] });
     ({ MAX_INGEST_SEQ } = await import('../../server/dist/util/seq.js'));
     ({ MAX_FORK_DEPTH: CAP } = await import('../../server/dist/api/sync/_shared.js'));
   });
@@ -160,5 +187,62 @@ describe('a megabyte from a peer makes a bounded line and a bounded answer', { s
     assert.deepEqual({ ...result.results.facts }, { inserted: 2, updated: 0, errors: 0 },
       'the import now refuses a document 5.6.3 stored: a behaviour change, not a fix');
     assertBoundedAnswer(result, 'the import result');
+  });
+
+  describe('by PULL: the engine against a fake peer — the lines and the sync history record are bounded', () => {
+    let engine, history;
+    /** A megabyte id that starts with `tag`, so a case finds its own line and one refused id is named once per window. */
+    const bigId = tag => `${tag}-${'9'.repeat(MEGA)}`;
+
+    before(async () => {
+      engine = await import('../../server/dist/sync/engine.js');
+      history = await import('../../server/dist/sync/history.js');
+    });
+    beforeEach(async () => { await door.reset(); });
+
+    /**
+     * One sync cycle of the real engine, every line bounded, and the history record that cycle wrote (the engine writes
+     * it after the cycle returns, so it is waited for: the answer `network_sync_history` serves is what is asserted).
+     */
+    async function cycle() {
+      const since = new Date().toISOString();
+      const { lines } = await boundedLinesDuring(() => engine.runSyncForNetwork(door.NET));
+      let record;
+      const written = await eventually(async () => {
+        record = (await history.getSyncHistory(door.NET)).find(r => r.completedAt >= since);
+        return record !== undefined;
+      }, 5000);
+      assert.ok(written, 'fixture check: the cycle wrote no history record to hold the answer to');
+      assertBoundedAnswer(record, 'the sync history record');
+      return { lines, record };
+    }
+
+    it('a pulled record under a megabyte _id that the arrival writer refuses: the refusal line is bounded, and the record is not stored', async () => {
+      const id = bigId('pullrec');
+      door.state.records[S] = { facts: [build.fact(S, id, MAX_INGEST_SEQ + 1)] };
+      const { lines } = await cycle();
+      assert.ok(lines.some(l => l.includes('pullrec-9999')), `fixture check: the refusal was not logged at all: ${JSON.stringify(lines.map(l => l.slice(0, 100)))}`);
+      assert.equal(await door.coll(S, 'facts').countDocuments(), 0, 'fixture check: the refused record was stored, so nothing was refused');
+    });
+
+    it('a pulled record that is STORED though it fails its schema, under a megabyte property name: the summary line is bounded', async () => {
+      // The reason the summary gives is built from the schema's issue PATH, and a path carries the peer's own key: a
+      // property name of any length, nested where the schema takes only scalars.
+      door.state.records[S] = { entities: [build.entity(S, 'pull-ent', 8, { properties: { [`k${'9'.repeat(MEGA)}`]: { nested: 1 } } })] };
+      const { lines } = await cycle();
+      const summary = lines.filter(l => /do not match their schema/.test(l));
+      assert.equal(summary.length, 1, `fixture check: the schema summary was not logged once: ${JSON.stringify(lines.map(l => l.slice(0, 100)))}`);
+      assert.ok(summary[0].includes('k99999'), `fixture check: the reason does not carry the peer's key, so nothing steerable was bounded: ${summary[0].slice(0, 200)}`);
+      assert.equal(await door.coll(S, 'entities').countDocuments(), 1, 'fixture check: the release line stores what 5.6.3 stored');
+    });
+
+    it('a pulled tombstone under a megabyte _id with a seq no counter can carry: the refusal line is bounded', async () => {
+      const id = bigId('pulltomb');
+      await door.seedPeer(S, [build.tombstone(S, id, 'fact', 5)]);
+      door.state.tamper = body => ({ ...body, facts: body.facts.map(t => (t._id === id ? { ...t, seq: MAX_INGEST_SEQ + 1 } : t)) });
+      const { lines } = await cycle();
+      assert.ok(lines.some(l => l.includes('pulltomb-9999')), `fixture check: the refusal was not logged at all: ${JSON.stringify(lines.map(l => l.slice(0, 100)))}`);
+      assert.equal(await door.coll(S, 'tombstones').countDocuments(), 0, 'fixture check: the refused tombstone was stored');
+    });
   });
 });

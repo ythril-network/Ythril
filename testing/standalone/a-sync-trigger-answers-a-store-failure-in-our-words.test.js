@@ -11,8 +11,9 @@
  *
  * ## What changes and what does not
  *
- * The TEXT: the answer says one of our sentences (`caughtFailureText`), the driver's message goes to the log, which already
- * carries it once (`Synchronous trigger … failed`). The STATUS stays `500`: main answers `503` and `Retry-After` for a store
+ * The TEXT: the answer says one of our sentences (`caughtFailureText`), the driver's message goes to the log
+ * (`Synchronous trigger … failed`) — asserted present, and once (the once-cases are `todo` while the trigger logs it
+ * twice, see below). The STATUS stays `500`: main answers `503` and `Retry-After` for a store
  * failure, a change of status that a patch (D-10, fixes only) does not take. Pinned, so the fix cannot drift into it.
  *
  * Run: node --test testing/standalone/a-sync-trigger-answers-a-store-failure-in-our-words.test.js
@@ -22,23 +23,28 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-
-const { MongoNetworkError } = createRequire(path.resolve('server/package.json'))('mongodb');
-const LEAK = /10\.1\.2\.3|27017/;
+import { HOST_TEXT, LEAK, driver } from './_store-failure-fixtures.mjs';
+import { fakeResponse } from './_fake-response.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 let tmp, getConfig, trigger;
 
 /** A network whose member list cannot be read: the cycle's read of it throws the driver's error. */
 function failingNetwork(id) {
   const net = { id, label: id, type: 'pubsub', spaces: [], pendingRounds: [], votingDeadlineHours: 24, createdAt: '2026-01-01T00:00:00.000Z' };
-  Object.defineProperty(net, 'members', { enumerable: true, get() { throw new MongoNetworkError('connection 3 to 10.1.2.3:27017 closed'); } });
+  Object.defineProperty(net, 'members', { enumerable: true, get() { throw new driver.MongoNetworkError(HOST_TEXT); } });
   return net;
 }
 
-const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
-  status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-  json(b) { this.body = b; this.headersSent = true; return this; } });
+/** Run `call(res)` against a network that cannot be read; what was answered, and the log lines it wrote. */
+async function triggered(id, call) {
+  getConfig().networks.push(failingNetwork(id));
+  const res = fakeResponse();
+  try {
+    const { lines } = await logLinesDuring(() => call(res));
+    return { out: { status: res.statusCode, headers: res.headers, body: res.body }, lines };
+  } finally { getConfig().networks.pop(); }
+}
 
 describe('a sync trigger answers a store failure in our words', () => {
   before(async () => {
@@ -53,34 +59,57 @@ describe('a sync trigger answers a store failure in our words', () => {
   after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } });
 
   it('the network trigger: no driver text', async () => {
-    getConfig().networks.push(failingNetwork('net-down'));
-    const res = fakeRes();
-    try { await trigger.triggerNetworkSync(res, 'net-down', { wait: true, timeoutMs: 5_000 }); } finally { getConfig().networks.pop(); }
-    assert.doesNotMatch(JSON.stringify(res.body), LEAK, `the trigger answered with the driver's text: ${JSON.stringify(res.body)}`);
+    const { out } = await triggered('net-down', res => trigger.triggerNetworkSync(res, 'net-down', { wait: true, timeoutMs: 5_000 }));
+    assert.doesNotMatch(JSON.stringify(out.body), LEAK, `the trigger answered with the driver's text: ${JSON.stringify(out.body)}`);
   });
 
   it('PIN: the network trigger still answers 500 (the 503 of main is a status change the patch does not take)', async () => {
-    getConfig().networks.push(failingNetwork('net-down-pin'));
-    const res = fakeRes();
-    try { await trigger.triggerNetworkSync(res, 'net-down-pin', { wait: true, timeoutMs: 5_000 }); } finally { getConfig().networks.pop(); }
-    assert.equal(res.code, 500, `a store failure under the cycle answered ${res.code}`);
-    assert.equal(res.body?.ok, false);
-    assert.equal(res.body?.status, 'error');
-    assert.equal(res.headers['retry-after'], undefined);
+    const { out } = await triggered('net-down-pin', res => trigger.triggerNetworkSync(res, 'net-down-pin', { wait: true, timeoutMs: 5_000 }));
+    assert.equal(out.status, 500, `a store failure under the cycle answered ${out.status}`);
+    assert.equal(out.body?.ok, false);
+    assert.equal(out.body?.status, 'error');
+    assert.equal(out.headers['retry-after'], undefined);
+  });
+
+  it('the network trigger: the driver\'s text is in the log, naming the network', async () => {
+    const { lines } = await triggered('net-down-log', res => trigger.triggerNetworkSync(res, 'net-down-log', { wait: true, timeoutMs: 5_000 }));
+    const logged = lines.filter(l => LEAK.test(l));
+    assert.ok(logged.length >= 1, `the answer withholds the cause and the log does not carry it: ${JSON.stringify(lines)}`);
+    assert.ok(logged.every(l => l.includes('net-down-log')), `a line does not name the network: ${logged}`);
+  });
+
+  // `triggerNetworkSync` / `triggerPeerSync` log the throw themselves (`log.error(… String(err))`) and then answer through
+  // `caughtFailureText`, which logs the driver's text again at warn: two lines for one failure. Found by writing this
+  // case (Q-361 round R). Left `todo` until `sync/trigger.ts` logs the cause once; it turns into a plain pass then.
+  const DOUBLE_LOG = { todo: 'sync/trigger.ts logs the driver\'s cause twice: its own log.error and caughtFailureText\'s warn' };
+
+  it('the network trigger: the driver\'s text is in the log ONCE', DOUBLE_LOG, async () => {
+    const { lines } = await triggered('net-down-once', res => trigger.triggerNetworkSync(res, 'net-down-once', { wait: true, timeoutMs: 5_000 }));
+    const logged = lines.filter(l => LEAK.test(l));
+    assert.equal(logged.length, 1, `the operator reads the cause once: ${JSON.stringify(lines.map(l => l.slice(0, 160)))}`);
   });
 
   it('the peer trigger: no driver text', async () => {
-    getConfig().networks.push(failingNetwork('net-down-peer'));
-    const res = fakeRes();
-    try { await trigger.triggerPeerSync(res, 'any-peer', { wait: true }); } finally { getConfig().networks.pop(); }
-    assert.doesNotMatch(JSON.stringify(res.body), LEAK, `the trigger answered with the driver's text: ${JSON.stringify(res.body)}`);
+    const { out } = await triggered('net-down-peer', res => trigger.triggerPeerSync(res, 'any-peer', { wait: true }));
+    assert.doesNotMatch(JSON.stringify(out.body), LEAK, `the trigger answered with the driver's text: ${JSON.stringify(out.body)}`);
   });
 
   it('PIN: the peer trigger still answers 500', async () => {
-    getConfig().networks.push(failingNetwork('net-down-peer-pin'));
-    const res = fakeRes();
-    try { await trigger.triggerPeerSync(res, 'any-peer', { wait: true }); } finally { getConfig().networks.pop(); }
-    assert.equal(res.code, 500, `a store failure under the cycle answered ${res.code}`);
-    assert.equal(res.body?.status, 'error');
+    const { out } = await triggered('net-down-peer-pin', res => trigger.triggerPeerSync(res, 'any-peer', { wait: true }));
+    assert.equal(out.status, 500, `a store failure under the cycle answered ${out.status}`);
+    assert.equal(out.body?.status, 'error');
+  });
+
+  it('the peer trigger: the driver\'s text is in the log, naming the peer', async () => {
+    const { lines } = await triggered('net-down-peer-log', res => trigger.triggerPeerSync(res, 'any-peer-log', { wait: true }));
+    const logged = lines.filter(l => LEAK.test(l));
+    assert.ok(logged.length >= 1, `the answer withholds the cause and the log does not carry it: ${JSON.stringify(lines)}`);
+    assert.ok(logged.every(l => l.includes('any-peer-log')), `a line does not name the peer: ${logged}`);
+  });
+
+  it('the peer trigger: the driver\'s text is in the log ONCE', DOUBLE_LOG, async () => {
+    const { lines } = await triggered('net-down-peer-once', res => trigger.triggerPeerSync(res, 'any-peer-once', { wait: true }));
+    const logged = lines.filter(l => LEAK.test(l));
+    assert.equal(logged.length, 1, `the operator reads the cause once: ${JSON.stringify(lines.map(l => l.slice(0, 160)))}`);
   });
 });

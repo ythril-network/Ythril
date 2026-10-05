@@ -345,7 +345,7 @@ function blanked(text) {
  */
 export function callSitesIn(body, { closures = false } = {}) {
   const sites = [];
-  for (const m of callableText(body, closures).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+  for (const m of blankedLiterals(callableText(body, closures)).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
     if (!NOT_A_CALL.has(m[1])) sites.push({ name: m[1], at: m.index, paren: m.index + m[0].length - 1 });
   }
   return sites;
@@ -358,7 +358,7 @@ export function callSitesIn(body, { closures = false } = {}) {
  */
 export function memberCallSitesIn(body, { closures = false } = {}) {
   const sites = [];
-  for (const m of callableText(body, closures).matchAll(/(?<![.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+  for (const m of blankedLiterals(callableText(body, closures)).matchAll(/(?<![.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
     sites.push({ obj: m[1], prop: m[2], at: m.index, paren: m.index + m[0].length - 1 });
   }
   return sites;
@@ -400,6 +400,53 @@ export function referencesIn(body) {
     if (!NOT_A_CALL.has(m[2])) names.add(m[2]);
   }
   return names;
+}
+
+/**
+ * `text` with the TEXT of every string and template literal blanked (quotes, `${` and `}` kept, offsets kept), so a
+ * `name(` written inside a message — `throw new Error('call accessibleSpaces(req) first')` — is not read as a call.
+ * What an interpolation holds IS code and is kept: `\`x ${f(1)}\`` calls `f`.
+ *
+ * Comments are not this function's business: the module index strips them before it cuts a body (`moduleIndex`),
+ * and a body handed to a scan directly is the caller's to strip. A quote that has no partner on its own line is left
+ * as it is — it is a regular expression's, or a typo's, and blanking the rest of the line would hide a real call.
+ *
+ * Only the POSITIONED scans read through this. `callsIn` and `memberCallsIn` keep reading literals as text on the
+ * release line, because re-pointing them would change the edges of every call-graph gate (see `callSitesIn`).
+ */
+function blankedLiterals(text) {
+  const out = text.split('');
+  let i = 0;
+  const blank = (from, to) => { for (let k = from; k < to; k++) if (out[k] !== '\n' && out[k] !== '\r') out[k] = ' '; };
+  const quoted = (quote) => {
+    const start = i++;
+    while (i < text.length && text[i] !== quote && text[i] !== '\n') i += text[i] === '\\' ? 2 : 1;
+    if (text[i] === quote) blank(start + 1, i);
+    i++;
+  };
+  const template = () => {
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '`') { i++; return; }
+      if (c === '$' && text[i + 1] === '{') { i += 2; code(true); i++; continue; }
+      const width = c === '\\' ? 2 : 1;
+      blank(i, i + width);
+      i += width;
+    }
+  };
+  function code(inTemplate) {
+    let depth = 0;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '\'' || c === '"') { quoted(c); continue; }
+      if (c === '`') { i++; template(); continue; }
+      if (inTemplate && c === '{') depth++;
+      else if (inTemplate && c === '}') { if (depth === 0) return; depth--; }
+      i++;
+    }
+  }
+  code(false);
+  return out.join('');
 }
 
 /**

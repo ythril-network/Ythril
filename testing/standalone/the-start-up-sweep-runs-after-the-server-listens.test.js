@@ -10,7 +10,8 @@
  * would never run it; placed under a condition inside the bootstrap, some starts would skip it. So both places that make
  * an instance configured — the boot of a configured instance and the setup route — call the one bootstrap function; that
  * function hands the sweep to `afterListening` unconditionally (a statement at the top level of its body); and the
- * callback it hands over starts the sweep unconditionally (a statement at the top level of the callback's block). Both
+ * callback it hands over starts the sweep unconditionally (a statement at the top level of the callback's block) and
+ * AWAITS it, so a failure of the sweep is a rejection `afterListening` logs rather than one that escapes it. Both
  * levels are read by structure, not by a leading `if` on the line.
  *
  * `afterListening` (`util/after-listening.ts`) is the one place "once the server listens" is answered: it holds work
@@ -36,11 +37,16 @@ const BOOT_FN = 'startConfiguredInstanceServices';
 const SWEEP = 'sweepEverySpaceAtBoot';
 const MODULE = 'server/dist/util/after-listening.js';
 
+/** What may stand ahead of a call that is not conditional: nothing, or `void` / `await`. */
+const UNCONDITIONAL_LEAD = /^\s*(?:void\s+|await\s+)?$/;
+/** What may stand ahead of a call whose outcome the enclosing function hands on: `await` or `return`. */
+const AWAITED_LEAD = /^\s*(?:await|return)\s+$/;
+
 /**
- * Whether the statement holding `at` sits at the top level of `block` (the text between its braces) with nothing
- * conditional before it in that statement: no enclosing bracket, and only `void` / `await` ahead of the call.
+ * Whether the statement holding `at` sits at the top level of `block` (the text between its braces) with only `lead`
+ * ahead of the call in that statement: no enclosing bracket, nothing conditional.
  */
-function unconditionalAt(block, at) {
+function leadsWith(block, at, lead) {
   let depth = 0;
   let start = 0;
   for (let i = 0; i < at; i++) {
@@ -49,8 +55,9 @@ function unconditionalAt(block, at) {
     else if (')]}'.includes(c)) depth--;
     if (depth === 0 && (c === ';' || c === '}' || c === '\n')) start = i + 1;
   }
-  return depth === 0 && /^\s*(?:void\s+|await\s+)?$/.test(block.slice(start, at));
+  return depth === 0 && lead.test(block.slice(start, at));
 }
+const unconditionalAt = (block, at) => leadsWith(block, at, UNCONDITIONAL_LEAD);
 
 describe('the start-up suppression sweep runs at every start', () => {
   it('PIN both doors to a configured instance run the one bootstrap function', () => {
@@ -59,7 +66,7 @@ describe('the start-up suppression sweep runs at every start', () => {
     }
   });
 
-  it('the bootstrap hands the sweep to afterListening unconditionally, and the callback starts it unconditionally', () => {
+  it('the bootstrap hands the sweep to afterListening unconditionally, and the callback starts it unconditionally and awaits it', () => {
     const body = bodyOf(src('server/src/bootstrap.ts'), BOOT_FN);
     const inner = body.slice(body.indexOf('{') + 1, body.lastIndexOf('}'));
     const mentions = [...inner.matchAll(new RegExp(`\\b${SWEEP}\\b`, 'g'))].map(m => m.index)
@@ -82,6 +89,10 @@ describe('the start-up suppression sweep runs at every start', () => {
     assert.ok(sweepAt > -1, 'the afterListening callback does not start the sweep');
     assert.ok(unconditionalAt(blockInner, sweepAt),
       `the boot sweep is started under a condition inside the afterListening callback: ${blockInner.trim().split('\n')[0]}`);
+    // The callback hands its outcome to afterListening, which logs a rejection: a sweep started with `void` (or not
+    // awaited at all) leaves a failure to surface as an unhandled rejection, which ends the process.
+    assert.ok(leadsWith(blockInner, sweepAt, AWAITED_LEAD),
+      `the afterListening callback does not await the sweep — its failure would escape afterListening's handler: ${blockInner.slice(sweepAt).split('\n')[0]}`);
   });
 });
 
@@ -99,20 +110,23 @@ describe('the boot sweep waits for the server and runs one space at a time', () 
     assert.deepEqual(ran, ['early', 'late'], 'work handed over after the listen was held');
   });
 
-  it('the listen callback marks it, and the bootstrap starts the sweep through it', () => {
+  it('the listen callback marks the server listening', () => {
     const index = src('server/src/index.ts');
     const at = index.indexOf('server.listen(');
     assert.ok(at > 0, 'index.ts no longer calls server.listen — re-anchor this gate');
     assert.match(index.slice(at, index.indexOf('});', at)), /markListening\(\)/, 'the listen callback does not mark the server listening');
-    const boot = bodyOf(src('server/src/bootstrap.ts'), BOOT_FN);
-    assert.match(boot, /afterListening\([^]*sweepEverySpaceAtBoot/, 'the bootstrap starts the sweep without waiting for the listen');
   });
 
   it('the sweep settles once every space is swept, one space at a time', () => {
     const body = bodyOf(src('server/src/brain/suppression-sweep.ts'), SWEEP);
     assert.match(body, /async function sweepEverySpaceAtBoot\([^)]*\):\s*Promise<void>/, 'the boot sweep is not a promise of its own completion');
-    const loop = body.slice(body.search(/for \(const \w+ of concreteSpaces\(\)\)/));
-    assert.ok(loop.length < body.length, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
-    assert.match(loop, /\bawait\b/, 'the boot sweep starts every space\'s sweep without waiting for the one before');
+    // A search that finds nothing is -1, and `slice(-1)` would hand back the last character: say so instead.
+    const walk = body.search(/for \(const \w+ of concreteSpaces\(\)\)/);
+    assert.ok(walk > -1, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
+    const inner = blockAfter(body, walk, 'the per-space walk').slice(1, -1);
+    const sweepsOne = inner.search(/\b[A-Za-z_]\w*\(/);
+    assert.ok(sweepsOne > -1, 'the per-space walk no longer calls anything to sweep a space — re-anchor this gate');
+    assert.ok(leadsWith(inner, sweepsOne, /^\s*await\s+$/),
+      'the boot sweep starts a space\'s sweep without waiting for it, so the spaces run together');
   });
 });

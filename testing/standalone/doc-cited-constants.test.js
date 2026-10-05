@@ -69,6 +69,15 @@ const CITED = [
     text: (v) => new RegExp(`is cut at ${v} characters, the line saying how much`),
   },
   {
+    // The same constant as the row above, on the page the OPERATOR reads for it (the Server Log sub-tab): two pages
+    // state the figure, and each is somebody's authoritative source.
+    what: 'the most characters of one outside value a log line carries, as the operator\'s page states it',
+    source: 'server/src/util/log.ts',
+    code: /export const LOG_VALUE_MAX = ([0-9_]+);/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`is cut at ${v} characters, saying how much`),
+  },
+  {
     what: 'sync peer request timeout',
     source: 'server/src/sync/engine.ts',
     code: /const FETCH_TIMEOUT_MS = ([0-9_]+);/,

@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { fakeResponse } from './_fake-response.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -58,12 +59,7 @@ async function writtenCount() {
 
 /** POST /api/brain/spaces/:spaceId/bulk, through the route's own final handler. */
 async function viaRest(body) {
-  const res = {
-    statusCode: 200, body: undefined,
-    status(c) { this.statusCode = c; return this; },
-    json(b) { this.body = b; return this; },
-    setHeader() { return this; }, set() { return this; },
-  };
+  const res = fakeResponse();
   await restHandler({ params: { spaceId: SPACE }, query: {}, body, headers: {}, ip: '127.0.0.1' }, res);
   return { refused: res.statusCode >= 400, status: res.statusCode, text: JSON.stringify(res.body ?? '') };
 }

@@ -22,6 +22,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { eventually } from './_write-faults.mjs';
 
 let createCoalescingRunner;
 
@@ -208,7 +209,11 @@ describe('coalescing runner — failure does not wedge a key', () => {
       const first = runner.run('net', job);
       void runner.run('net', job);                  // queues the rerun
       await first;
-      await new Promise(r => setTimeout(r, 50));
+      // Wait for the event itself (the runner's own log line), then let the process drain a few ticks: an
+      // unhandled rejection is reported after the microtask queue empties, so by then it has been or never will be.
+      await eventually(() => warned.length > 0, 2000);
+      await new Promise(r => setImmediate(r));
+      await new Promise(r => setImmediate(r));
     } finally {
       process.off('unhandledRejection', onUnhandled);
       log.warn = warn;

@@ -34,7 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { snapshotParts, changedParts } from './_space-snapshot.mjs';
+import { snapshotParts, changedParts, wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,10 +50,9 @@ const { LINK_CLASSES } = await import('../../server/dist/brain/link-adjacency.js
 /** The kinds of record that can name an entity, with the collection each lives in. */
 const BLOCKER_CLASSES = LINK_CLASSES.filter(c => c.toKind === 'entity');
 
-let mongo, cascade, linkIdFor;
+let mongo, cascade, linkIdFor, enqueueEmbedJob;
 let seq = 0;
 const coll = (n) => mongo.col(`${S}_${n}`);
-const PARTS = ['entities', 'edges', 'facts', 'chrono', 'files', 'links', 'tombstones'];
 
 /** A record of each kind that can name an entity — the smallest body each collection holds. */
 const RECORD = {
@@ -63,8 +62,8 @@ const RECORD = {
   file: (id) => ({ _id: id, spaceId: S, path: id, tags: [], author: AUTHOR, createdAt: T0, updatedAt: T0, seq: ++seq }),
 };
 
-/** Every part this file seeds, whole and in a stable order (`_space-snapshot.mjs`). */
-const snapshot = () => snapshotParts(mongo, S, PARTS);
+/** Every record part, the embed jobs a cascade cancels included, whole and in a stable order (`_space-snapshot.mjs`). */
+const snapshot = () => snapshotParts(mongo, S, RECORD_PARTS);
 
 describe('a refused cascade removes nothing', { skip }, () => {
   before(async () => {
@@ -77,12 +76,13 @@ describe('a refused cascade removes nothing', { skip }, () => {
     (await import('../../server/dist/config/loader.js')).loadConfig();
     cascade = await import('../../server/dist/brain/entity-delete-cascade.js');
     ({ linkIdFor } = await import('../../server/dist/brain/links.js'));
+    ({ enqueueEmbedJob } = await import('../../server/dist/brain/embed-queue.js'));
   });
   after(async () => {
     await closeTestMongo();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
-  beforeEach(async () => { for (const p of PARTS) await coll(p).deleteMany({}); });
+  beforeEach(async () => { await wipeParts(mongo, S, RECORD_PARTS); });
 
   it('the blocker kinds are derived, and there is a record builder for each', () => {
     const kinds = BLOCKER_CLASSES.map(c => c.kind);
@@ -114,6 +114,9 @@ describe('a refused cascade removes nothing', { skip }, () => {
         { _id: randomUUID(), spaceId: S, from: other, to: hub, label: 'knows_back', tags: [], author: AUTHOR, seq: ++seq },
       ];
       await coll('edges').insertMany(edges);
+      // The hub's embed job: a cascade that goes through retires it with the entity, so a refusal that retired it first
+      // would leave the entity standing with nothing queued to embed it — `embed_jobs` is a part of the snapshot for this.
+      await enqueueEmbedJob(S, 'entity', hub);
       const recordId = kind === 'file' ? `docs/${randomUUID()}.md` : randomUUID();
       await coll(cls.collection).insertOne(RECORD[kind](recordId));
       await coll('links').insertOne({ _id: linkIdFor(recordId, kind, hub, 'entity'), spaceId: S, from: recordId,
@@ -125,6 +128,7 @@ describe('a refused cascade removes nothing', { skip }, () => {
       assert.ok(edges.every(e => p.removes.some(b => b.type === 'edge' && b._id === e._id)), 'the preview does not list both edges');
 
       const before_ = await snapshot();
+      assert.ok((before_.embed_jobs ?? []).length >= 1, 'the hub has no embed job, so the snapshot of embed_jobs asks nothing');
       const r = await cascade.deleteEntityCascade(S, hub, p.token);
       const after_ = await snapshot();
 

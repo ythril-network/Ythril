@@ -225,7 +225,8 @@ describe('divergesFrom and seqGuard — the fork rule and the write guard are ea
     const { divergesFrom } = await import('../../server/dist/sync/upsert-plan.js');
     assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'b' }), true);
     assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'a' }), false, 'the same text is one version, not a divergence');
-    assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 6, fact: 'b' }), false, 'a different seq is newer or older, not a fork');
+    assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 6, fact: 'b' }), false, 'a newer seq is newer, not a fork');
+    assert.equal(divergesFrom({ seq: 6, fact: 'a' }, { seq: 5, fact: 'b' }), false, 'an older seq is older, not a fork');
     assert.equal(divergesFrom(null, { seq: 5, fact: 'b' }), false, 'nothing stored: nothing to diverge from');
     assert.equal(divergesFrom(undefined, { seq: 5, fact: 'b' }), false);
     assert.equal(divergesFrom({ seq: 5 }, { seq: 5 }), false, 'a record with no text (an entity) never diverges');

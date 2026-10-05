@@ -34,7 +34,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { build } from './_push-door.mjs';
+import { build, buildOf } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -42,15 +42,18 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'pullval';
 let door;
 
-/** The family key a pull page is served under, the collection it is stored in, and the builder of a valid document. */
-const FAMILIES = {
-  facts: { coll: 'facts', make: (id, seq, x) => build.fact(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-  entities: { coll: 'entities', make: (id, seq, x) => build.entity(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-  edges: { coll: 'edges', make: (id, seq, x) => build.edge(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-  chrono: { coll: 'chrono', make: (id, seq, x) => build.chrono(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-  links: { coll: 'links', make: (id, seq, x) => build.link(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-  filemeta: { coll: 'files', make: (id, seq, x) => build.filemeta(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }) },
-};
+/**
+ * The family key a pull page is served under, the collection it is stored in, and the builder of a valid document — one row
+ * per replicated family, read out of `REPLICATED_FAMILIES` (so a family added there is a case here, or `buildOf` throws).
+ */
+const { REPLICATED_FAMILIES } = await import('../../server/dist/sync/replicated-families.js');
+const FAMILIES = Object.fromEntries(REPLICATED_FAMILIES.map(({ payloadKey, collection }) => [payloadKey, {
+  coll: collection,
+  /** A file's id is its path; every other family's is any string. */
+  id: (name) => (payloadKey === 'filemeta' ? `docs/${name}.md` : name),
+  make: (id, seq, x) => buildOf(payloadKey)(S, id, seq, { author: { ...PEER_AUTHOR }, ...x }),
+}]));
+assert.ok(Object.keys(FAMILIES).length >= 6, `only ${Object.keys(FAMILIES).length} replicated families found — the list is broken`);
 const watermark = () => door.member().lastSeqReceived?.[S] ?? 0;
 const storedIds = async (coll) => (await door.coll(S, coll).find({}).sort({ _id: 1 }).toArray()).map(d => d._id);
 /** The lines of a sync that name `id`. */
@@ -107,8 +110,8 @@ describe('a pull refuses what corrupts and reports what it stores', { skip }, ()
   describe('a document that fails its schema is stored as received, and reported once per page', () => {
     for (const [family, f] of Object.entries(FAMILIES)) {
       it(`${family}: stored exactly as received, and named in the one summary line`, async () => {
-        const doc = f.make(family === 'filemeta' ? 'docs/odd.md' : 'odd', 8, { author: 'not an author block' });
-        const { lines } = await pull(family, [doc, f.make(family === 'filemeta' ? 'docs/fine.md' : 'fine', 9)]);
+        const doc = f.make(f.id('odd'), 8, { author: 'not an author block' });
+        const { lines } = await pull(family, [doc, f.make(f.id('fine'), 9)]);
         const stored = await door.coll(S, f.coll).findOne({ _id: doc._id });
         assert.ok(stored, `${family}: a document 5.6.3 stored was refused`);
         assert.equal(stored.author, 'not an author block', `${family}: what was stored is not what was received`);
@@ -116,7 +119,7 @@ describe('a pull refuses what corrupts and reports what it stores', { skip }, ()
         assert.equal(mine.length, 1, `${family}: expected one summary line, got ${JSON.stringify(lines)}`);
         assert.equal(SCHEMA_LINE.exec(mine[0])[1], '1', `${family}: the line does not count what it names: ${mine[0]}`);
         assert.ok(mine[0].includes(doc._id), `${family}: the line does not name the document: ${mine[0]}`);
-        assert.ok(!mine[0].includes(family === 'filemeta' ? 'docs/fine.md' : "fine'"), `${family}: the line names a document that matched`);
+        assert.ok(!mine[0].includes(f.id('fine')), `${family}: the line names a document that matched`);
       });
     }
 
@@ -137,12 +140,13 @@ describe('a pull refuses what corrupts and reports what it stores', { skip }, ()
       assert.deepEqual(await storedIds('files'), ['docs/odd.md']);
     });
 
-    it('the line is bounded: a peer\'s oversized value in a reason is cut', async () => {
-      const huge = 'x'.repeat(50_000);
-      const { lines } = await pull('links', [FAMILIES.links.make('docs-link', 8, { fromKind: huge })]);
+    it('the line says which field failed and how, and carries none of the outside value that failed', async () => {
+      const outside = `OUTSIDE-VALUE-${'x'.repeat(50_000)}`;
+      const { lines } = await pull('links', [FAMILIES.links.make('docs-link', 8, { fromKind: outside })]);
       const mine = lines.filter(l => SCHEMA_LINE.test(l));
       assert.equal(mine.length, 1, JSON.stringify(lines.map(l => l.slice(0, 120))));
-      assert.ok(mine[0].length < 20_000, `a ${mine[0].length}-character line carries the peer's whole text`);
+      assert.match(mine[0], /fromKind: [a-z_]+/, `the line does not name the failing field: ${mine[0].slice(0, 200)}`);
+      assert.ok(!mine[0].includes('OUTSIDE-VALUE'), `the line carries the peer's value: ${mine[0].slice(0, 200)}`);
     });
   });
 
@@ -165,7 +169,8 @@ describe('a pull refuses what corrupts and reports what it stores', { skip }, ()
     it('PIN an unknown key on a file row never reaches the stored row (stripped, as 5.6.3 strips it)', async () => {
       await pull('filemeta', [FAMILIES.filemeta.make('docs/inject.md', 8, { injectedByThePeer: 'x', $where: 'sleep(1)' })]);
       const stored = await door.coll(S, 'files').findOne({ _id: 'docs/inject.md' });
-      if (stored) assert.deepEqual(['injectedByThePeer', '$where'].filter(k => k in stored), [], 'an undeclared key reached the stored row');
+      assert.ok(stored, 'the row was not stored at all, so nothing was asserted about its keys');
+      assert.deepEqual(['injectedByThePeer', '$where'].filter(k => k in stored), [], 'an undeclared key reached the stored row');
     });
   });
 });

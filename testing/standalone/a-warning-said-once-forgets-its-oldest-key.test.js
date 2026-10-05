@@ -12,8 +12,10 @@
  * - `LruMap` — what it keeps — drops the least recently USED entry, touches on `get` and not on `peek`, and refuses a bound
  *   that is not a positive integer.
  *
- * Seen red by hand: the eviction loop of `LruMap.set` removed; the bound case fails (the map grows to the number of keys
- * sent); restored by hand.
+ * Seen red by hand, each restored by hand: `seen.peek` changed to `seen.get` in `warnOnce` (the least-recently-REPORTED
+ * case fails: "a sighting that reported nothing kept its key alive past the bound"); the re-insert in `LruMap.get`
+ * removed (the LruMap case fails: "the entry read last was thrown away instead of the one never read"); and, recorded
+ * when the bound case was written, the eviction loop of `LruMap.set` removed (the map grows to the number of keys sent).
  *
  * Run: node --test testing/standalone/a-warning-said-once-forgets-its-oldest-key.test.js
  * (requires a prior `npm run build` in server/)
@@ -54,6 +56,17 @@ describe('warnOnce reports a key once and forgets its oldest', () => {
     assert.equal(once.size, 3, `the map holds ${once.size} keys past its bound of 3`);
     assert.equal(once('e', () => {}), false, 'the newest key was forgotten');
     assert.equal(once('a', () => {}), true, 'a forgotten key that came back was not reported again');
+  });
+
+  it('a key seen again but not reported stays the oldest: the forgotten one is the least recently REPORTED', () => {
+    const once = warnOnce({ max: 3 });
+    for (const k of ['a', 'b', 'c']) once(k, () => {});
+    // `a` is met again and suppressed. Were a sighting a use, `a` would now be the newest and `b` the oldest.
+    assert.equal(once('a', () => {}), false, 'a repeated key was reported again');
+    once('d', () => {});
+    assert.equal(once('c', () => {}), false, 'a key reported after the oldest was forgotten');
+    assert.equal(once('d', () => {}), false, 'the newest key was forgotten');
+    assert.equal(once('a', () => {}), true, 'a sighting that reported nothing kept its key alive past the bound');
   });
 
   it('forget re-arms one key', () => {

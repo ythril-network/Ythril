@@ -18,18 +18,23 @@
  *
  * ## What is derived, and from where
  *
- *  - **The doors**: every mounted route (`_routes.mjs`, which resolves routers mounted without a prefix) served under
- *    `/api/sync/`, `/api/networks/`, `/api/invite/` and `/api/brain/`; every route whose handler reaches the admin
- *    importer; `POST /mcp` together with every tool it dispatches (each tool object with a `name` literal and a
- *    `handle`, which is how `toolHandlerRoot` knows a tool) and the shared dispatch `callTool`; and every function
- *    of the sync engine and of file sync, which run on the scheduler rather than behind a route.
+ *  - **The doors**: EVERY mounted route (`_routes.mjs`, which resolves routers mounted without a prefix — not a list of
+ *    areas, which is how the files, the audit and the admin routes went unread); `POST /mcp` together with every tool it
+ *    dispatches (each tool object with a `name` literal and a `handle`, which is how `toolHandlerRoot` knows a tool) and
+ *    the shared dispatch `callTool`; every function of the sync engine and of file sync, which run on the scheduler
+ *    rather than behind a route; and the boot path: `startConfiguredInstanceServices` and every function of the process
+ *    entry (the file `npm start` runs), which start the workers and the sweeps with nobody behind them.
  *  - **What runs**: the call graph (`_call-graph.mjs`) from those roots, `closures: true` — a line written inside a
  *    `.map(async …)` or a `.catch(err => …)` is caused by the door as surely as one in its body.
- *  - **The sinks**, in what runs: every call of a method of the `log` object `util/log.ts` exports (however it was
- *    imported or renamed); every call of a property a log method was HANDED ON as (`{ warn: log.warn }` makes the
- *    callee's `opts.warn(…)` a sink — `resolveWatermark` is one); and every function whose RESULT is a sink's
- *    message (`truncationWarn`), whose returned text is read as if it were the sink's. `reportServerFailure` is a
- *    function with a `log.error` in it, so it is reached and read like any other.
+ *  - **The sinks**: every call of a method of the `log` object `util/log.ts` exports (however it was imported or
+ *    renamed) ANYWHERE in the program; every call of a property a log method was HANDED ON as (`{ warn: log.warn }` makes
+ *    the callee's `opts.warn(…)` a sink — `resolveWatermark` is one); and every function whose RESULT is a sink's message
+ *    (`truncationWarn`), whose returned text is read as if it were the sink's. `reportServerFailure` is a function with a
+ *    `log.error` in it, so it is read like any other. The doors say which half a sink is in (reached, or outside what
+ *    the call graph can follow), and the report says it; both halves are judged. The call graph is regex-built and
+ *    cannot follow a method on an instance, a function passed as a value or a destructured dynamic import, and the
+ *    lines it cannot follow are written by the same server about the same values — a boot migration's network id, a
+ *    push door's space id, an external endpoint's error text were the first it missed.
  *  - **The slots**: every `${…}` of a message, every operand of a `+` that builds one, both arms of a `?:` / `??` /
  *    `||`, and every `.join(…)` — a joined list must go through `peerList`.
  *
@@ -49,11 +54,15 @@
  *
  * ## Scope, stated rather than implied
  *
- * What the call graph cannot resolve is not judged: a method on a class instance (class bodies are not read; in the
- * files the doors reach they are error types), a function passed as a value other than a log method (see
- * `_call-graph.mjs`), and `console.*` writes. A sink in code no door reaches is not judged either; the doors are the
- * surfaces a caller or a peer can steer. The module scope of every reached file IS read, because a closure built
- * there runs when that file's functions call what it was handed to.
+ * What the call graph cannot resolve is not WALKED (see `_call-graph.mjs`), but no log call depends on it any more: the
+ * sinks are found in every file of the program. What is not judged at all: a `console.*` write, and a message that is
+ * not built in the call (`log.warn(someFunctionReturningText())` is read when the function is in this tree and returns
+ * a string; a value handed in from outside is judged as a slot). The module scope of every reached file IS read as
+ * reached, because a closure built there runs when that file's functions call what it was handed to.
+ *
+ * The floors are relations between two independent readings, not numbers: the route table against the AST's own count of
+ * registrations, the MCP door against the tools `TOOL_RIGHTS` prices, the boot walk against the modules the boot path
+ * imports at run time, and the sinks against a comment-free text count of `log.<method>(`.
  *
  * The AST carries no comments, so the docblock explaining a fix can neither satisfy this gate nor fail it.
  *
@@ -70,26 +79,34 @@
  * `sync/tombstone-apply.ts` to `${where}` raised the report by one slot and named the line; the original
  * spelling was put back by hand.
  *
+ * Mutation-checked again for the widened doors, by reverting one of 5.6.4 part 1's newly wrapped slots at a time: one
+ * in `api/files.ts` (a file route, in no area the earlier gate walked) and one in boot code (`bootstrap.ts`). Each named
+ * the line and nothing else; the original spelling was put back by hand each time.
+ *
  * Run: node --test testing/standalone/a-steerable-value-reaches-a-log-line-only-bounded.test.js
  * (requires a prior `npm run build` in server/ — the import door is found through the compiled route tables)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { REPO_ROOT } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const LOG_MODULE = 'server/src/util/log.ts';
 /** The functions that bound a value for a log line. `logSafe` is the older name, kept as an alias of `peerText`. */
 const BOUNDING = ['peerText', 'peerList', 'logSafe'];
 const ENGINE = 'server/src/sync/engine.ts';
 const FILE_SYNC = 'server/src/sync/file-sync.ts';
-const IMPORTER = 'server/src/api/admin-import.ts';
 const CALL_TOOL = 'server/src/mcp/call-tool.ts:callTool';
-/** The served-path prefixes whose routes are doors. Everything under each is derived from the mounted routes. */
-const AREAS = { sync: '/api/sync/', networks: '/api/networks/', invite: '/api/invite/', brain: '/api/brain/' };
+/** The function that starts every service of a configured instance: the boot root, and the name its callers are found by. */
+const BOOT_SERVICES = 'startConfiguredInstanceServices';
+const RIGHTS_MODULE = 'server/src/auth/space-rights.ts';
+/** The one route file served by a second process with its own port: `mountedRoutes` leaves it out, and so does the count it is held to. */
+const CONNECTOR = 'server/src/local-agent-connector/index.ts';
 
 /**
  * Values that are this instance's own, keyed by the declaration they are read from, grouped under the reason.
@@ -141,16 +158,32 @@ const dispatchedTools = entry => [...entry.body.matchAll(DISPATCH_BY_NAME)].map(
 const walk = roots => walkFrom(INDEX, roots, { closures: true, edges: dispatchedTools }).seen;
 const routeDoor = r => ({ name: `${r.method} ${r.path}`, roots: ROUTE_ROOTS.get(`${r.method} ${r.path}`) });
 
+const bodiesOf = file => [...INDEX.bodies.keys()].filter(k => k.startsWith(`${file}:`));
+
+/** The process entry: the file `npm start` runs (`node dist/<entry>.js`), read from the server's own package.json. */
+const ENTRY = (() => {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'server', 'package.json'), 'utf8'));
+  const m = /\bnode\s+dist\/(\S+?)\.js\b/.exec(pkg.scripts?.start ?? '');
+  assert.ok(m, 'server/package.json `scripts.start` no longer runs `node dist/<entry>.js` — re-anchor the boot root');
+  return `server/src/${m[1]}.ts`;
+})();
+/** Where the instance's services are started: the key of `startConfiguredInstanceServices` wherever it is defined. */
+const BOOT_SERVICES_KEY = [...INDEX.bodies.keys()].find(k => k.endsWith(`:${BOOT_SERVICES}`));
+
+/**
+ * Every door, by what it is. A route is a door because the server MOUNTS it (`mountedRoutes`, all of them: a hand-picked
+ * list of areas is how the files, the audit and the admin routes went unread), `POST /mcp` carries every tool, the
+ * scheduler runs the sync engine and file sync with no request behind them, and the boot path runs
+ * `startConfiguredInstanceServices` and the process entry with nobody behind them at all.
+ */
 const DOORS = (() => {
   const doors = {};
-  for (const [area, prefix] of Object.entries(AREAS)) doors[area] = ROUTES.filter(r => r.path.startsWith(prefix)).map(routeDoor);
-  doors.import = ROUTES
-    .filter(r => [...walk(ROUTE_ROOTS.get(`${r.method} ${r.path}`))].some(k => k.startsWith(`${IMPORTER}:`)))
-    .map(routeDoor);
+  doors.routes = ROUTES.map(routeDoor);
   const mcp = ROUTES.filter(r => r.method === 'POST' && r.path === '/mcp');
   doors.mcp = mcp.map(r => ({ ...routeDoor(r), roots: [...routeDoor(r).roots, CALL_TOOL, ...TOOL_ROOTS] }));
-  doors.engine = [{ name: 'the sync engine', roots: [...INDEX.bodies.keys()].filter(k => k.startsWith(`${ENGINE}:`)) }];
-  doors.fileSync = [{ name: 'file sync', roots: [...INDEX.bodies.keys()].filter(k => k.startsWith(`${FILE_SYNC}:`)) }];
+  doors.boot = [{ name: 'boot', roots: [...(BOOT_SERVICES_KEY ? [BOOT_SERVICES_KEY] : []), ...bodiesOf(ENTRY)] }];
+  doors.engine = [{ name: 'the sync engine', roots: bodiesOf(ENGINE) }];
+  doors.fileSync = [{ name: 'file sync', roots: bodiesOf(FILE_SYNC) }];
   return doors;
 })();
 
@@ -475,9 +508,22 @@ const SINKS = (() => {
       readNodes.push(st);
     }
   }
+  /*
+   * What the walk read is `readNodes`; the sinks are then found in EVERY file of the program, not only there. The call
+   * graph is regex-built and cannot follow a method on an instance, a function passed as a value or a destructured dynamic
+   * import — and the log lines in what it could not follow are written by the same server, about the same steerable values
+   * (a network id in a boot migration, a push door's space id, an external endpoint's error text). A sink the walk did not
+   * reach is judged all the same and tagged, so a report says which half it came from.
+   */
+  const reachedByFile = new Map();
+  for (const n of readNodes) {
+    const f = fileOf(n);
+    if (!reachedByFile.has(f)) reachedByFile.set(f, []);
+    reachedByFile.get(f).push(n);
+  }
   const addCall = (call, how) => {
     const id = `${fileOf(call)}@${call.pos}`;
-    if (!calls.has(id)) calls.set(id, { call, how });
+    if (!calls.has(id)) calls.set(id, { call, how, reached: (reachedByFile.get(fileOf(call)) ?? []).some(n => n.pos <= call.pos && call.end <= n.end) });
   };
   const visit = n => {
     if (ts.isCallExpression(n) && isLogMethod(n.expression)) addCall(n, 'log');
@@ -485,7 +531,7 @@ const SINKS = (() => {
     else if (ts.isCallExpression(n) && n.arguments.some(a => isLogMethod(a))) rawHandOff.push(n);
     ts.forEachChild(n, visit);
   };
-  for (const node of readNodes) visit(node);
+  for (const [file, sf] of SOURCE) if (inTree(file) && !file.endsWith('.d.ts')) visit(sf);
 
   // `{ warn: log.warn }` handed to a function makes that function's `opts.warn(…)` / `warn(…)` a sink.
   for (const prop of handedOn) {
@@ -506,6 +552,40 @@ const SINKS = (() => {
   return { calls: [...calls.values()], unread, rawHandOff, readNodes };
 })();
 
+/** Every `log.<method>(` a comment-free reading of the same files spells — a count the AST match is held to, found without the checker. */
+const TEXTUAL_LOG_CALLS = [...SOURCE.keys()]
+  .filter(f => inTree(f) && !f.endsWith('.d.ts'))
+  .reduce((n, f) => n + (stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).match(new RegExp(`\\blog\\.(?:${[...LOG_METHODS].join('|')})\\s*\\(`, 'g')) ?? []).length, 0);
+
+/** The route registrations the program spells — `router.get('/x', …)`, `app.post('/y', …)` — found by the AST, not by `mountedRoutes`' pattern. */
+const REGISTERED_ROUTES = (() => {
+  const keys = [];
+  for (const [file, sf] of SOURCE) {
+    if (!inTree(file) || file === CONNECTOR) continue;
+    const visit = n => {
+      const c = ts.isCallExpression(n) ? n.expression : null;
+      if (c && ts.isPropertyAccessExpression(c) && ['get', 'post', 'put', 'patch', 'delete'].includes(c.name.text)
+        && ts.isIdentifier(c.expression) && /(?:\w*[Rr]outer|^app)$/.test(c.expression.text)
+        && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) keys.push(`${file}:${c.name.text} ${n.arguments[0].text}`);
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  return keys;
+})();
+
+/** The tools `TOOL_RIGHTS` prices — every one is a tool the MCP door dispatches. Read from the table's own AST. */
+const PRICED_TOOLS = (() => {
+  const sf = SOURCE.get(RIGHTS_MODULE);
+  const table = sf && topLevelNamed(sf, 'TOOL_RIGHTS');
+  const list = table && ts.isVariableDeclaration(table) ? unwrap(table.initializer) : null;
+  if (!list || !ts.isArrayLiteralExpression(list)) return [];
+  return list.elements.map(el => unwrap(el))
+    .filter(el => ts.isObjectLiteralExpression(el))
+    .map(el => el.properties.find(p => p.name && p.name.getText() === 'tool')?.initializer)
+    .filter(init => init && ts.isStringLiteralLike(init)).map(init => init.text);
+})();
+
 const where = node => {
   const sf = node.getSourceFile();
   const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
@@ -515,11 +595,11 @@ const where = node => {
 const VIOLATIONS = (() => {
   const out = [];
   const seenBuilders = new Set();
-  for (const { call, how } of SINKS.calls) {
+  for (const { call, how, reached } of SINKS.calls) {
     const msg = call.arguments[0];
     if (!msg) continue;
     const slots = slotsOf(msg, seenBuilders, []);
-    for (const s of slots) out.push({ ...s, at: where(s.node), text: s.node.getText().replace(/\s+/g, ' ').slice(0, 90), how });
+    for (const s of slots) out.push({ ...s, at: where(s.node), text: s.node.getText().replace(/\s+/g, ' ').slice(0, 90), how, reached });
   }
   // One finding per slot node, whichever sink reached it first.
   const byNode = new Map();
@@ -530,30 +610,67 @@ const VIOLATIONS = (() => {
 // ---------------------------------------------------------------------------------------------------------------
 
 /*
- * Floors on every enumeration, set a little under what the tree held when they were written (the values are the
- * constants below, and the only copy of them). Raise them as the tree grows; a run below one means the derivation
- * stopped matching, and a thin set makes every door clean.
+ * Every floor below is DERIVED: it compares one reading of the tree with a second, independent one (the route table
+ * against the AST's own count of registrations, the doors against the tool table, the sinks against a comment-free
+ * text count) or with a structural minimum. A number written here would be the one place the tree could outgrow
+ * unnoticed; a relation between two readings fails the moment either stops matching.
  */
 describe('the derivation works', () => {
-  it('found the doors in every area (floors)', () => {
-    const floors = { sync: 30, networks: 20, invite: 4, brain: 32, import: 1, mcp: 1 };
-    for (const [area, floor] of Object.entries(floors)) {
-      assert.ok(DOORS[area].length >= floor, `only ${DOORS[area].length} door(s) found for ${area} (floor ${floor}) — re-anchor`);
-    }
-    assert.ok(TOOL_ROOTS.length >= 65, `only ${TOOL_ROOTS.length} MCP tool handler(s) found — re-anchor`);
-    assert.ok(DOORS.engine[0].roots.length >= 10, `only ${DOORS.engine[0].roots.length} function(s) in ${ENGINE} — re-anchor`);
-    assert.ok(DOORS.fileSync[0].roots.length >= 2, `only ${DOORS.fileSync[0].roots.length} function(s) in ${FILE_SYNC} — re-anchor`);
+  it('every route the program registers is a door, and every door has a handler to walk from', () => {
+    assert.ok(REGISTERED_ROUTES.length > 0, 'the AST finds no route registration — the independent reading is broken');
+    const mounted = new Set(ROUTES.map(r => `${r.file}:${r.method.toLowerCase()} ${r.routePath}`));
+    assert.deepEqual(REGISTERED_ROUTES.filter(k => !mounted.has(k)), [],
+      'registered in the program but absent from the mounted routes — mount it, or drop the dead route: a door the scan cannot see is a door unread');
+    assert.deepEqual(DOORS.routes.filter(d => !d.roots || d.roots.length === 0).map(d => d.name), [],
+      'mounted routes whose handler the call graph could not root — their log lines would go unjudged by the walk');
+    assert.equal(DOORS.routes.length, ROUTES.length, 'a mounted route is not a door');
   });
 
-  it('reached enough code, read every function it reached, and found the sinks in it (floors)', () => {
+  it('the MCP door dispatches every tool the rights table prices', () => {
+    assert.ok(PRICED_TOOLS.length > 0, `${RIGHTS_MODULE} \`TOOL_RIGHTS\` yields no tool names — re-anchor how it is read`);
+    assert.deepEqual(PRICED_TOOLS.filter(t => !TOOL_BY_NAME.has(t)), [], 'priced tools with no handler the MCP door can root');
+    assert.ok(TOOL_ROOTS.length >= PRICED_TOOLS.length, `${TOOL_ROOTS.length} tool handler(s) rooted for ${PRICED_TOOLS.length} priced tool(s)`);
+    assert.ok(DOORS.mcp.length > 0, 'no `POST /mcp` among the mounted routes');
+  });
+
+  it('the boot door starts at the process entry and at the function that starts the services, and walks beyond them', () => {
+    assert.ok(BOOT_SERVICES_KEY, `no function \`${BOOT_SERVICES}\` is indexed — re-anchor BOOT_SERVICES`);
+    const roots = DOORS.boot[0].roots;
+    assert.ok(bodiesOf(ENTRY).length > 0, `the process entry ${ENTRY} has no indexed function`);
+    const reached = walk(roots);
+    assert.ok(reached.has(BOOT_SERVICES_KEY), 'the boot walk does not reach the function that starts the services');
+    assert.ok(reached.size > roots.length, 'the boot walk reaches nothing beyond its own roots');
+    // Everything `startConfiguredInstanceServices` and the entry import at run time (`await import('./x.js')`) must have a
+    // function the walk reached — or the walk went blind on dynamic imports and "what it starts" is unread.
+    const reachedFiles = new Set([...reached].map(k => k.slice(0, k.indexOf('.ts:') + 3)));
+    const blind = [];
+    for (const file of new Set([BOOT_SERVICES_KEY.slice(0, BOOT_SERVICES_KEY.indexOf('.ts:') + 3), ENTRY])) {
+      const text = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
+      for (const m of text.matchAll(/\bimport\(\s*'(\.[^']+)\.js'\s*\)/g)) {
+        const target = posix(join(file, '..', `${m[1]}.ts`));
+        if (bodiesOf(target).length > 0 && !reachedFiles.has(target)) blind.push(`${file} imports ${target} at run time, and the boot walk reaches none of it`);
+      }
+    }
+    assert.deepEqual(blind, []);
+  });
+
+  it('the sync engine and file sync have functions to root at, and the doors together reach more files than there are routes', () => {
+    for (const [door, file] of [[DOORS.engine[0], ENGINE], [DOORS.fileSync[0], FILE_SYNC]]) {
+      assert.ok(door.roots.length > 0, `no function of ${file} is indexed — re-anchor`);
+    }
     const files = new Set([...REACHED].map(k => k.slice(0, k.indexOf('.ts:') + 3)));
-    assert.ok(REACHED.size >= 1300, `the doors reach only ${REACHED.size} function(s) — the walk is broken`);
-    assert.ok(files.size >= 300, `the doors reach only ${files.size} file(s) — the walk is broken`);
+    assert.ok(files.size > ROUTES.length, `the doors reach ${files.size} file(s) for ${ROUTES.length} routes — the walk is broken`);
+  });
+
+  it('read every function it reached, and found every log call the program spells', () => {
     assert.deepEqual(SINKS.unread, [], 'reached function(s) the gate could not find in the AST, so their log lines '
       + 'would go unjudged — teach nodesOf their shape');
-    assert.ok(SINKS.calls.length >= 340, `only ${SINKS.calls.length} sink call(s) found in what the doors reach — the sink match is broken`);
+    assert.ok(TEXTUAL_LOG_CALLS > 0, 'the comment-free text count finds no `log.<method>(` — the independent reading is broken');
+    assert.ok(SINKS.calls.length >= TEXTUAL_LOG_CALLS,
+      `the AST resolves ${SINKS.calls.length} log call(s) and the text spells ${TEXTUAL_LOG_CALLS} — a call to \`log\` the checker cannot resolve goes unjudged`);
+    assert.ok(SINKS.calls.some(s => s.reached), 'no log call lies inside what the doors reach — the walk is broken');
     assert.ok(SINKS.calls.some(s => s.how.startsWith('handed on')), 'no handed-on log method found (`warn: log.warn`) — '
-      + 'resolveWatermark used to be one; re-anchor or drop this floor with the reason');
+      + 'resolveWatermark used to be one; re-anchor or drop this check with the reason');
   });
 });
 
@@ -594,13 +711,13 @@ describe('a steerable value reaches a log line only bounded', () => {
     assert.deepEqual(SINKS.rawHandOff.map(n => `${where(n)}  ${n.getText().replace(/\s+/g, ' ').slice(0, 90)}`), []);
   });
 
-  it('every slot of every message a door can cause is bounded, or a LOCAL value with its reason', () => {
+  it('every slot of every log message in the program is bounded, or a LOCAL value with its reason', () => {
     // A joined list is never LOCAL: its COUNT is unbounded whatever its elements are, which is what peerList is for.
     const raw = VIOLATIONS.filter(v => !(v.kind === 'value' && LOCAL_SITES.has(v.site)));
     const bySite = new Map();
     for (const v of raw) {
       if (!bySite.has(v.site)) bySite.set(v.site, []);
-      bySite.get(v.site).push(`    ${v.at}  ${v.kind}: ${v.text}`);
+      bySite.get(v.site).push(`    ${v.at}  ${v.kind}${v.reached ? '' : ' (outside what the doors reach)'}: ${v.text}`);
     }
     const groups = [...bySite].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
       .map(([site, lines]) => `  ${site}  (${lines.length})\n${lines.sort().join('\n')}`);

@@ -33,6 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { fakeResponse } from './_fake-response.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -57,11 +58,11 @@ const stacks = {};
 
 const coll = (space, kind) => mongo.col(spaceCollection(space, kind));
 
-/** Full rights, every area `none` unless named — the matrix shape `TokenRights` stores. */
-function rights(perSpace) {
+/** Full rights, every area `none` unless named — the matrix shape `TokenRights` stores. `floor` is the minimum held in every space. */
+function rights(perSpace, floor = null) {
   const row = (named) => Object.fromEntries(SPACE_AREAS.map(a => [a, named[a] ?? 'none']));
   return {
-    instanceAdmin: false, createSpaces: false, floor: null,
+    instanceAdmin: false, createSpaces: false, floor: floor ? row(floor) : null,
     perSpace: Object.fromEntries(Object.entries(perSpace).map(([space, named]) => [space, row(named)])),
   };
 }
@@ -73,12 +74,7 @@ function rights(perSpace) {
  */
 async function merge(id, tokenRights) { return act(stack, id, tokenRights); }
 async function act(layers, id, tokenRights) {
-  const res = {
-    statusCode: 200, body: undefined, sent: false,
-    status(c) { this.statusCode = c; return this; },
-    json(b) { this.body = b; this.sent = true; return this; },
-    setHeader() { return this; }, set() { return this; },
-  };
+  const res = fakeResponse();
   const req = {
     params: { id }, query: {}, body: {}, headers: {}, ip: '127.0.0.1',
     authToken: { id: 'tok-dupe-merge', name: 'dupe merge test', rights: tokenRights },
@@ -180,6 +176,61 @@ describe('a duplicate merge needs the merge rights where the pair lives', { skip
     const after = await untouched();
     assert.deepEqual(after.ids, [OLDER], 'the absorbed entity must be gone after a merge');
     assert.equal(after.status, 'resolved');
+  });
+
+  /*
+   * A FLOOR is a rung held in every space, so it counts where the pair lives. The rows above all name the space, which
+   * would pass for an implementation that read `perSpace` alone and refused every floor token; these are the rows
+   * that tell the two apart, from both sides of the line.
+   */
+  it('PIN: merges for a token whose FLOOR holds dataQuality and knowledge write, naming no space', async () => {
+    const out = await merge(CANDIDATE, rights({}, { dataQuality: 'write', knowledge: 'write' }));
+    assert.equal(out.status, 200, `the merge was refused for a token whose floor holds both rights: ${JSON.stringify(out.body)}`);
+    assert.deepEqual((await untouched()).ids, [OLDER]);
+  });
+
+  it('PIN: merges when the floor holds one right and the pair\'s space holds the other', async () => {
+    const out = await merge(CANDIDATE, rights({ [S]: { knowledge: 'write' } }, { dataQuality: 'write' }));
+    assert.equal(out.status, 200, `the floor's dataQuality and the space's knowledge did not add up: ${JSON.stringify(out.body)}`);
+    assert.deepEqual((await untouched()).ids, [OLDER]);
+  });
+
+  it("refuses as not found a token whose floor holds dataQuality write but knowledge only 'read'", async () => {
+    const out = await merge(CANDIDATE, rights({}, { dataQuality: 'write', knowledge: 'read' }));
+    assert.equal(out.status, 404, JSON.stringify(out.body));
+    assert.deepEqual(await untouched(), { ids: [OLDER, NEWER], status: 'open' });
+  });
+
+  /*
+   * Only an ENTITY pair is merged by this door. The refusal follows the rights check and does not replace it: a token
+   * that may not merge in the space is told the candidate is not there, whatever it is.
+   */
+  describe('a candidate that is not an entity pair', () => {
+    const FACT_A = 'bbbbbbbb-0000-4000-8000-0000000000a1';
+    const FACT_B = 'bbbbbbbb-0000-4000-8000-0000000000b2';
+    const FACT_CANDIDATE = `fact:${FACT_A}:${FACT_B}`;
+
+    beforeEach(async () => {
+      const now = new Date().toISOString();
+      await coll(S, 'dupeCandidates').insertOne({
+        _id: FACT_CANDIDATE, spaceId: S, type: 'fact',
+        aId: FACT_A, aSummary: 'one', aSeq: 1, bId: FACT_B, bSummary: 'two', bSeq: 2,
+        score: 0.96, status: 'open', detectedAt: now, updatedAt: now,
+      });
+    });
+
+    it('answers 400 for a token that may merge, and changes nothing', async () => {
+      const out = await merge(FACT_CANDIDATE, rights({ [S]: { dataQuality: 'write', knowledge: 'write' } }));
+      assert.equal(out.status, 400, JSON.stringify(out.body));
+      assert.match(out.body?.error ?? '', /only supported for entity candidates/);
+      assert.equal((await coll(S, 'dupeCandidates').findOne({ _id: FACT_CANDIDATE })).status, 'open');
+      assert.deepEqual(await untouched(), { ids: [OLDER, NEWER], status: 'open' }, 'the entity pair changed');
+    });
+
+    it('answers 404, not 400, for a token that may not merge in the space', async () => {
+      const out = await merge(FACT_CANDIDATE, rights({ [S]: { dataQuality: 'write', knowledge: 'read' }, [T]: { dataQuality: 'write', knowledge: 'write' } }));
+      assert.equal(out.status, 404, `a refused token was told what kind of candidate it is: ${JSON.stringify(out.body)}`);
+    });
   });
 
   /*

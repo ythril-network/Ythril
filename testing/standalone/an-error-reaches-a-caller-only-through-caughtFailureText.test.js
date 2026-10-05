@@ -23,16 +23,23 @@
  *
  * ## What it concludes, stated rather than implied
  *
- * It reads SYNTAX. It does not follow a value through a function it cannot see into (`return text` from a helper that read
- * `err.message` is the helper's own catch, and is judged there), and it does not read a catch's use of the binding in a
- * LOG line — a log is where the driver's text is supposed to go. A response built from a binding other than the catch's
- * (a string held across an `await` in an outer variable) is not tracked. Those are named so a reader does not take
- * "clean" for "no door can answer a driver's text", only for "no catch we can read does".
+ * It reads SYNTAX. A function that RETURNS a caught error's text is followed to its callers by name (a text-maker, and
+ * whoever returns its result), and a property assignment of the text onto an object (`run.error = …`) is an exit; what is
+ * not followed is a value through a function it cannot see into (`return handle(err)` is not a text-maker: whether `handle`
+ * hands the text back is `handle`'s own catch), and a catch's use of the binding in a LOG line — a log is where the
+ * driver's text is supposed to go. A response built from a binding other than the catch's (a string held across an `await`
+ * in an outer variable) is not tracked. Those are named so a reader does not take "clean" for "no door can answer a
+ * driver's text", only for "no catch we can read does".
  *
  * ## Seen red
  *
  * On 6eb5a333 (v5.6.3): every site in the failure message below — `res.status(500).json({ error: msg })` and its kin —
  * answers the text unfiltered, and no function named `caughtFailureText` exists.
+ *
+ * On the code before 74adf3cb (5.6.4 part 1), one revert at a time, by hand: `firstMissingEnd` in `brain/bulk.ts`
+ * returning `err.message` (a returned text, pushed into a batch's `errors` by its caller), `run.error = err.message` in
+ * `extractor/ingest.ts` (a property assignment, served by `ingest_status`) and `delivery.error = err.message` in
+ * `webhooks/dispatcher.ts` (the same, kept in the delivery history). Each is the only flag the gate reports after its revert.
  *
  * Run: node --test testing/standalone/an-error-reaches-a-caller-only-through-caughtFailureText.test.js
  */
@@ -118,6 +125,26 @@ describe('the derivation works', () => {
   it('caughtFailureText is a top-level function of the server — the sanitizer the rule names exists', () => {
     assert.ok(env.functions.has('caughtFailureText'), 'no top-level function `caughtFailureText` under server/src');
   });
+
+  it('the senders and text-makers the read routes and the stored records answer through are DERIVED sanitizers', () => {
+    // `sendReadFailure(res, where, err)` calls `classifyAndReportFailure`, which calls the named classifier: it is a sanitizer
+    // only because the derivation holds it to the rule (nothing it does with `err` lets the text out) and it passes. If it
+    // stopped being one, every route answering through it would be flagged as a sender handing `err` to something unknown.
+    for (const name of ['sendReadFailure', 'classifyAndReportFailure', 'storedFailureText']) {
+      assert.ok(env.derived.has(name), `${name} is not a derived sanitizer — it leaks its error parameter, or is no longer found`);
+    }
+    assert.ok(exits.some(e => e.form === 'sanitized sender' && /\bsendReadFailure\(/.test(e.text)),
+      'no route answers through sendReadFailure in a catch — the real-tree case of a derived sender has gone unseen');
+  });
+
+  it('the stored-record forms are in the population (an ingest run\'s and a delivery\'s `error`)', () => {
+    const assignments = exits.filter(e => e.form === 'property assignment');
+    assert.ok(assignments.length >= 2, `only ${assignments.length} property assignments of a caught error's text found`);
+    assert.ok(assignments.every(e => !e.flagged), 'a property assignment of the error\'s text is unfiltered');
+    for (const file of ['server/src/extractor/ingest.ts', 'server/src/webhooks/dispatcher.ts']) {
+      assert.ok(assignments.some(e => e.file === file), `no property assignment of a caught error's text is seen in ${file}`);
+    }
+  });
 });
 
 describe('every exit of an error\'s text passes through a sanitizer, is one of our own errors, or is exempt with a reason', () => {
@@ -147,6 +174,12 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     { sanitizers: SANITIZERS, deciders: DECIDERS }).exits.filter(e => e.flagged).map(e => e.form);
   const populationIn = (src) => analyse(new Map([['fixture.ts', src]]), { sanitizers: SANITIZERS, deciders: DECIDERS }).exits.length;
 
+  /** A helper whose catch RETURNS the error's text (the `firstMissingEnd` shape), then a caller written after it. */
+  const FIRST_MISSING = 'async function firstMissing(ends) { for (const e of ends) { try { await f(e); } catch (err) { return err instanceof Error ? err.message : String(err); } } return null; }\n';
+  const TEXT_MAKER = caller => FIRST_MISSING + caller;
+  const TEXT_MAKER_CALLER = body => TEXT_MAKER(
+    `async function bulk(items) { const errors = []; for (const i of items) { const missing = await firstMissing([i]); if (missing) { ${body} } } return errors; }`);
+
   const FORMS = {
     'a response built from err.message': 'async function h(req, res) { try { await f(); } catch (err) { res.status(500).json({ error: err.message }); } }',
     'a response built from an alias of it': 'async function h(req, res) { try { await f(); } catch (err) { const msg = err instanceof Error ? err.message : String(err); res.status(400).json({ error: msg }); } }',
@@ -169,6 +202,36 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
       'async function failJob(id, errorMessage) { await jobs.updateOne({ _id: id }, { $set: { lastError: errorMessage } }); }\nasync function run() { try { await f(); } catch (err) { await failJob(1, err instanceof Error ? err.message : String(err)); } }',
     'a stored lastError with the shorthand property':
       'async function failEmbed(id, errorMessage) { const lastError = errorMessage.slice(0, 500); await jobs.updateOne({ _id: id }, { $set: { lastError } }); }\nasync function run() { try { await f(); } catch (e) { const msg = e.message; await failEmbed(2, msg); } }',
+    'a property assignment onto a run record (ingest_status)':
+      'async function runIngest(run) { try { await f(); } catch (err) { run.phase = "failed"; run.error = err instanceof Error ? err.message : String(err); } }',
+    'a property assignment onto a delivery kept in the history':
+      'async function attempt(delivery) { try { await f(); } catch (err) { delivery.error = `${err}`; } }',
+    'a property assignment through an element access':
+      'async function probe(out) { try { await f(); } catch (err) { out["why"] = String(err); } }',
+    'a property assignment of an alias':
+      'async function probe(rec) { try { await f(); } catch (err) { const why = err.message; rec.detail = why; } }',
+    'a text returned by a helper, pushed by its caller (a bulk edge end)': TEXT_MAKER_CALLER('errors.push({ index: i, reason: missing });'),
+    'a text returned by a helper, answered by its caller':
+      TEXT_MAKER('async function h(req, res) { const why = await firstMissing([1]); if (why) { res.status(400).json({ error: why }); } }'),
+    'a text returned by a helper, stored by its caller':
+      TEXT_MAKER('async function failJob(id, errorMessage) { await jobs.updateOne({ _id: id }, { $set: { lastError: errorMessage } }); }\n'
+        + 'async function run() { const why = await firstMissing([1]); await failJob(1, why); }'),
+    'a text returned through a second helper':
+      TEXT_MAKER('async function wrapped(ends) { return await firstMissing(ends); }\n'
+        + 'async function bulk() { const errors = []; const why = await wrapped([1]); errors.push({ reason: why }); return errors; }'),
+    'a text returned by a method, called as this.method()':
+      'class B { async check(x) { try { await f(x); } catch (err) { return err.message; } return null; }\n'
+        + '  async run(xs) { const failed = []; for (const x of xs) { const why = await this.check(x); if (why) failed.push({ x, why }); } return failed; } }',
+    'a helper that logs through caughtFailureText and returns the raw text':
+      'function describe(err, op) { log.warn(`${op}: ${caughtFailureText(err, op)}`); return err.message; }\n'
+        + 'async function h(req, res) { try { await f(); } catch (err) { res.status(500).json({ error: describe(err, "doing f") }); } }',
+    'a helper that calls caughtFailureText and discards what it said':
+      'function describe(err, op) { caughtFailureText(err, op); return { detail: String(err) }; }\n'
+        + 'async function h(req, res) { try { await f(); } catch (err) { res.status(500).json(describe(err, "doing f")); } }',
+    'the true arm of a NEGATED own-class test (the error is not ours there)':
+      'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { if (!(err instanceof Refusal)) { res.status(500).json({ error: err.message }); } } }',
+    'the else arm of an own-class test':
+      'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { if (err instanceof Refusal) { log.warn("refused"); } else { res.status(500).json({ error: err.message }); } } }',
   };
   for (const [form, src] of Object.entries(FORMS)) {
     it(`flags ${form}`, () => assert.ok(flaggedIn(src).length > 0, `the walk did not flag: ${src}`));
@@ -195,10 +258,58 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     'one of our own errors, after a guard that throws for any other': 'class Refusal extends Error { check = 1 }\nasync function h() { try { await f(); } catch (err) { if (!(err instanceof Refusal)) throw err; const c = err.check; return { message: c.message, text: `Error: ${c.message}` }; } }',
     'a push that does not read the error': 'async function walk() { const seen = []; try { await f(); } catch (err) { seen.push("f failed"); } return seen; }',
     'the error only logged': 'async function h(req, res) { try { await f(); } catch (err) { log.warn(`failed: ${err}`); res.status(500).json({ error: "Internal error" }); } }',
+    'a property assignment through caughtFailureText': 'async function runIngest(run) { try { await f(); } catch (err) { run.error = caughtFailureText(err, "ingest a conversation"); } }',
+    'a property assignment of text that is not the error\'s': 'async function runIngest(run) { try { await f(); } catch (err) { run.phase = "failed"; run.error = "ingest failed"; } }',
+    'a text returned through caughtFailureText, pushed by its caller':
+      'async function firstMissing(ends) { for (const e of ends) { try { await f(e); } catch (err) { return caughtFailureText(err, "resolve"); } } return null; }\n'
+        + 'async function bulk(items) { const errors = []; for (const i of items) { const missing = await firstMissing([i]); if (missing) errors.push({ index: i, reason: missing }); } return errors; }',
+    'a text returned by a helper whose caller only logs it':
+      TEXT_MAKER('async function bulk(items) { for (const i of items) { const missing = await firstMissing([i]); if (missing) log.warn(`edge ${i}: ${missing}`); } }'),
+    'a text returned by a helper that is an own error, narrowed':
+      'class Refusal extends Error {}\nasync function check(x) { try { await f(x); } catch (err) { if (err instanceof Refusal) return err.message; throw err; } return null; }\n'
+        + 'async function bulk(xs) { const errors = []; for (const x of xs) { const why = await check(x); if (why) errors.push({ x, why }); } return errors; }',
+    'a returned call that only takes the error (it does not return its text)':
+      'async function swallow(err) { log.warn(String(err)); return []; }\nasync function one(x) { try { return await f(x); } catch (err) { return swallow(err); } }\n'
+        + 'async function many(xs) { const out = []; for (const x of xs) out.push(...await one(x)); return out; }',
+    'a helper that returns only what caughtFailureText said':
+      'function describe(err, op) { return caughtFailureText(err, op); }\nasync function h(req, res) { try { await f(); } catch (err) { res.status(500).json({ error: describe(err, "doing f") }); } }',
+    'the class and the code of a failure (they are labels, not its message)':
+      'async function h(req, res) { try { await f(); } catch (err) { res.status(500).json({ error: `${err.name} ${err.code}`, codeName: err.codeName }); } }',
+    'the else arm of a negated own-class test':
+      'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { if (!(err instanceof Refusal)) { log.warn("not ours"); } else { res.status(400).json({ error: err.message }); } } }',
+    'a guard that returns for a driver-side failure narrows what follows':
+      'async function h(req, res) { try { await f(); } catch (err) { if (isDriverSide(err)) { res.status(503).json({ error: "The store could not complete this request." }); return; } res.status(400).json({ error: err.message }); } }',
+    'a text-maker that decides with isDriverSide, in either arm':
+      'function textOf(err) { if (!isDriverSide(err)) return err.message; return "The store could not complete this request."; }\nasync function h(req, res) { try { await f(); } catch (err) { res.status(400).json({ error: textOf(err) }); } }',
   };
   for (const [form, src] of Object.entries(CLEAN)) {
     it(`passes ${form}`, () => assert.deepEqual(flaggedIn(src), [], `the walk flagged: ${src}`));
   }
+
+  const envOf = src => analyse(new Map([['fixture.ts', src]]), { sanitizers: SANITIZERS, deciders: DECIDERS }).env;
+
+  it('a helper that logs through caughtFailureText and returns the raw text is NOT a sanitizer', () => {
+    const env = envOf('function describe(err, op) { log.warn(`${op}: ${caughtFailureText(err, op)}`); return err.message; }');
+    assert.ok(!env.sanitizers.has('describe'), 'a helper that returns the error\'s own text was derived to be a sanitizer');
+  });
+
+  it('a helper that returns only what caughtFailureText said, and a sender built on one, ARE sanitizers', () => {
+    const env = envOf([
+      'function describe(err, op) { return caughtFailureText(err, op); }',
+      'function sendDescribed(res, err, op) { res.status(500).json({ error: describe(err, op) }); }',
+    ].join('\n'));
+    assert.ok(env.sanitizers.has('describe') && env.sanitizers.has('sendDescribed'), `derived: ${[...env.sanitizers]}`);
+  });
+
+  it('a function that takes no error is not a sanitizer, however many it calls', () => {
+    const env = envOf('function start() { return caughtFailureText(new Error("x"), "start"); }');
+    assert.ok(!env.sanitizers.has('start'));
+  });
+
+  it('a function whose catch returns the error\'s text is a text-maker, and so is one that returns a text-maker\'s result', () => {
+    const env = envOf(`${FIRST_MISSING}async function wrapped(ends) { return await firstMissing(ends); }`);
+    assert.ok(env.textMakers.has('firstMissing') && env.textMakers.has('wrapped'), `derived: ${[...env.textMakers]}`);
+  });
 
   it('a sender derived from a sanitizer is a sanitizer: calling it with the error passes', () => {
     const src = 'function sendCaught(res, err, op) { res.status(500).json({ error: caughtFailureText(err, op) }); }\n'

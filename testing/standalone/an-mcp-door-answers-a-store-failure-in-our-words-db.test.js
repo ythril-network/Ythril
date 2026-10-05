@@ -36,8 +36,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import {
-  HOST_TEXT, LEAK, SENTENCES, STORE_SIDE, STORE_SIDE_NAMES, driverSideErrors, serverError, wrapping, linesDuring,
+  HOST_TEXT, LEAK, SENTENCES, STORE_SIDE, STORE_SIDE_NAMES, STORE_CODES, ADDRESS_CODES, SERVER_REFUSALS, addressError,
+  driverSideErrors, serverError, sendReadFailureOf, wrappers,
 } from './_store-failure-fixtures.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -46,6 +48,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-storetool-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = tmpDir;
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
+const WRAPPERS = await wrappers();
 
 const TOOL = 'space_stats';
 let callTool, tool, original, refs;
@@ -59,7 +62,7 @@ const caller = () => ({
 /** What the dispatcher answers when the tool's handler throws `err`, with the lines it logged. */
 async function throwing(err) {
   tool.handle = async () => { throw err; };
-  const { lines, result } = await linesDuring(() => callTool({ name: TOOL, args: { space: S }, caller: caller() }));
+  const { lines, result } = await logLinesDuring(() => callTool({ name: TOOL, args: { space: S }, caller: caller() }));
   return { ...result, lines };
 }
 
@@ -172,11 +175,60 @@ describe('the tool dispatcher answers a store failure in our words', { skip }, (
     assert.match(textOf(out), /Upgrade to MongoDB 8\.2\+/);
   });
 
-  it('a wrapper that quotes the driver says nothing of it', async () => {
-    for (const { name, make } of driverSideErrors().filter(d => ['MongoNetworkError', 'MongoServerSelectionError'].includes(d.name))) {
-      const out = await throwing(wrapping(make()));
+  // Every way an error travels inside another (`cause`, `underlying`, `errorResponse`), each built by its own class.
+  for (const { label, wrap } of WRAPPERS) {
+    it(`a driver failure carried in \`${label}\` says nothing of the driver`, async () => {
+      for (const { name, make } of driverSideErrors().filter(d => ['MongoNetworkError', 'MongoServerSelectionError'].includes(d.name))) {
+        const out = await throwing(wrap(make()));
+        const everything = `${textOf(out)} ${JSON.stringify(out.result.structuredContent ?? {})}`;
+        assert.doesNotMatch(everything, LEAK, `${name} inside a wrapper: ${everything.slice(0, 200)}`);
+        assert.ok(everything.includes(SENTENCES.incomplete), `not our sentence: ${everything.slice(0, 200)}`);
+      }
+    });
+  }
+
+  for (const [code, codeName] of ADDRESS_CODES) {
+    it(`code ${code} (${codeName}) names a member's address: the words go, the 400 stays`, async () => {
+      const out = await throwing(addressError(code, codeName));
       const everything = `${textOf(out)} ${JSON.stringify(out.result.structuredContent ?? {})}`;
-      assert.doesNotMatch(everything, LEAK, `${name} inside a wrapper: ${everything.slice(0, 200)}`);
+      assert.doesNotMatch(everything, LEAK, `the answer carries the member's address: ${everything.slice(0, 300)}`);
+      assert.equal(out.status, 400, 'a status the release line answered changed');
+      assert.equal(out.result.isError, true);
+      assert.equal(textOf(out), `Error: ${SENTENCES.incomplete}`);
+      assert.equal(out.result.structuredContent?.storeSideFailure, undefined, 'a 400 is not a store-side failure');
+      assert.notEqual(out.result.structuredContent?.retryable, true);
+    });
+  }
+
+  /*
+   * PARITY. The same error, thrown once at each door: `sendReadFailure` (the REST read routes) and `callTool` (the
+   * dispatcher, which every `POST /api/<tool>` is too). Each classifies on its own, so a parity break is one of them
+   * answering differently — the text, or the status. The set spans every kind the classifier distinguishes: a driver class
+   * of each sort, a store code, an address code, a server refusal, an own error, and a wrapped driver failure.
+   */
+  const parityCases = () => [
+    ...driverSideErrors().map(({ name, make }) => [name, make()]),
+    ...STORE_CODES.map(([c, n]) => [`store code ${c} (${n})`, serverError(c, n, `${n}: ${HOST_TEXT}`)]),
+    ...ADDRESS_CODES.map(([c, n]) => [`address code ${c} (${n})`, addressError(c, n)]),
+    ...SERVER_REFUSALS.map(([c, n, m]) => [`refusal code ${c} (${n})`, serverError(c, n, m)]),
+    ['an own error', new Error('Missing required fields: name')],
+    ...WRAPPERS.map(w => [`carried in ${w.label}`, w.wrap(driverSideErrors().find(d => d.name === 'MongoNetworkError').make())]),
+  ];
+
+  it('PARITY: every kind of failure gets the same status and the same text from the REST read door and the MCP door', async () => {
+    const all = parityCases();
+    assert.ok(all.length > driverSideErrors().length + STORE_CODES.length + ADDRESS_CODES.length + SERVER_REFUSALS.length,
+      `only ${all.length} kinds built — the derivation is broken`);
+    const apart = [];
+    for (const [label, err] of all) {
+      const rest = await sendReadFailureOf(err);
+      const mcp = await throwing(err);
+      const mcpStatus = mcp.status;
+      const mcpText = textOf(mcp).replace(/^Error: /, '');
+      if (rest.status !== mcpStatus) apart.push(`${label}: REST ${rest.status}, MCP ${mcpStatus}`);
+      else if (rest.body.error !== mcpText) apart.push(`${label}: REST "${rest.body.error}", MCP "${mcpText}"`);
+      else if (rest.body.retryable !== (mcp.result.structuredContent?.retryable === true)) apart.push(`${label}: retryable differs`);
     }
+    assert.deepEqual(apart, [], 'the doors answer one failure differently — which client the caller picked decides what they read');
   });
 });

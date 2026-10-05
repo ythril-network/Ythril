@@ -8,6 +8,9 @@
  *  - **Redact BEFORE the cut.** The userinfo pattern needs the `@` that ends it. Cut first, and a URL whose
  *    password straddles the cut loses its `@`, so the redactor no longer recognises it and the first half of the
  *    password is written to the log.
+ *  - **Redact an authority the window cuts open.** Only `max + REDACT_MARGIN` characters of a long value are redacted, so
+ *    a password longer than the margin has no `@` inside the window; the open authority at the window's end is redacted
+ *    to its end (`OPEN_USERINFO_AT_END`) or the front of the password reaches the line.
  *  - **Cut on a code-point boundary.** Half a surrogate pair is not a character; a line holding one is invalid UTF-16
  *    and some log shippers drop or mangle the whole line.
  *  - **Say how much was cut.** `…(+N chars)`: an operator reading a cut value knows it was cut and by how much.
@@ -47,14 +50,38 @@
  * a BigInt; `fmt` appends the meta argument raw — a meta value's `\r\n` starts a new line and a megabyte meta makes a
  * megabyte line; `redactSecrets` takes seconds on 100 000 letters.
  *
+ * ## Seen red (round R, 5.6.4)
+ *
+ * Each by a mutation of the part it covers, restored by hand: `OPEN_USERINFO_AT_END`'s replacement written as `$&` (the
+ * password-across-the-window case, under both names); `peerList`'s count of what it left out one short (both exact-tail
+ * cases); `fmt` returning its line without `escapeLineBreaks` (the message-slot case, which the meta cases do not see
+ * because they escape through `peerText` first). The fuzz is held to floors on its own strings, so a generator that falls
+ * into a cycle (the one it replaced drew 1 081 distinct strings in 20 000) fails by name.
+ *
  * Run: node --test testing/standalone/a-peer-value-is-rendered-escaped-redacted-and-bounded.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { logLinesDuring } from './_log-lines.mjs';
+import { REPO_ROOT } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const mod = await import('../../server/dist/util/log.js');
+
+/**
+ * How far past `LOG_VALUE_MAX` a value is read for redaction before it is cut (`REDACT_MARGIN` in `util/log.ts`). The
+ * module does not export it, so it is READ out of the source: the case below that puts a URL authority across that
+ * window is placed by the number the renderer uses, never by a copy of it that could go stale beside it.
+ */
+const REDACT_MARGIN = (() => {
+  const src = stripComments(readFileSync(join(REPO_ROOT, 'server', 'src', 'util', 'log.ts'), 'utf8'));
+  const m = /const REDACT_MARGIN = (\d+);/.exec(src);
+  assert.ok(m, 'util/log.ts no longer declares `const REDACT_MARGIN = <number>;` — the window a value is redacted over');
+  return Number(m[1]);
+})();
 
 /** U+2028 and U+2029, built from their numbers: written literally they end a line inside a regex or a string. */
 const LS = String.fromCharCode(0x2028);
@@ -157,6 +184,28 @@ describe('peerText: redacted, cut, escaped, never throws', () => {
         assert.ok(!render('Authorization: Bearer ythril_abcdef123456').includes('ythril_abcdef123456'), 'a bearer token was not redacted');
       });
 
+      it('redacts a URL authority the redaction WINDOW cuts open: a password whose `@` lies past max + margin never reaches the line', () => {
+        // Only `max + REDACT_MARGIN` characters of a long value are redacted, and the userinfo pattern needs the `@`
+        // that ends the userinfo. A password longer than the margin has no `@` inside the window, so the pattern sees
+        // nothing to redact and the front of the password would be written — unless the open authority at the window's
+        // end is redacted to its end (`OPEN_USERINFO_AT_END`). The URL starts before the bound, so the front of the
+        // password is inside what the line shows; its `@` is far past the window.
+        const render = renderer(name);
+        const max = bound();
+        const password = Array.from({ length: REDACT_MARGIN + 400 }, (_, i) => `Pw${(i * 7919).toString(36)}`).join('').slice(0, REDACT_MARGIN + 400);
+        const scheme = 'https://admin:';
+        const shownPassword = 12;
+        for (let pad = max - 200; pad <= max - scheme.length - shownPassword; pad += 13) {
+          const text = `${'_'.repeat(pad)}${scheme}${password}@peer.example/api/sync`;
+          assert.ok(pad + scheme.length + password.length > max + REDACT_MARGIN, 'fixture check: the `@` is inside the window, so this places nothing across it');
+          assert.ok(text.indexOf('@') > max + REDACT_MARGIN, 'fixture check: the `@` is not past the window');
+          const out = render(text);
+          assert.ok(!out.includes(password.slice(0, shownPassword)),
+            `pad ${pad}: the front of a password whose \`@\` lies past the window reached the line: …${out.slice(-60)}`);
+          assert.ok(out.startsWith(`${'_'.repeat(pad)}https://[redacted]`), `pad ${pad}: the authority was not redacted to its end: …${out.slice(pad).split('\n')[0]}`);
+        }
+      });
+
       it('cuts on a code-point boundary: no lone surrogate, whichever side of a pair the bound falls on', () => {
         const render = renderer(name);
         const max = bound();
@@ -224,11 +273,34 @@ describe('peerList: a joined list bounded by count and length', () => {
     const ids = Array.from({ length: 10_000 }, (_, i) => `id-${i}`);
     const out = peerList(ids);
     assert.ok(out.length <= max + 64, `a list of 10 000 ids rendered as ${out.length} chars`);
-    const shown = (out.match(/id-\d+/g) ?? []).length;
-    assert.ok(shown >= 1, 'no element was shown at all');
-    assert.ok(out.includes(String(ids.length - shown)) || out.includes(String(ids.length)),
-      `the list does not say how many of its ${ids.length} elements were left out: ${out.slice(-80)}`);
+    assertExactTail(out, ids, 'ten thousand short ids');
   });
+
+  it('a list cut by LENGTH rather than count says exactly how many it left out', () => {
+    const peerList = renderer('peerList');
+    // Each element is a fifth of the bound, so the length bound stops the list long before the count bound could.
+    const ids = Array.from({ length: 60 }, (_, i) => `${'e'.repeat(Math.floor(bound() / 5))}-${i}`);
+    const out = peerList(ids);
+    const shown = assertExactTail(out, ids, 'sixty long elements');
+    assert.ok(shown < 10, `fixture check: ${shown} elements fit, so the length bound was not what stopped the list`);
+  });
+
+  /**
+   * `out` ends `<shown elements> …(+K more)` with K EXACTLY the number of elements left out: the elements are counted from
+   * what the line shows (each id is distinct and carries its index), the tail is read at its end, and the two must add up.
+   * Returns the number shown.
+   */
+  function assertExactTail(out, ids, what) {
+    const tail = / …\(\+(\d+) more\)$/.exec(out);
+    assert.ok(tail, `${what}: the list does not end with a space and …(+K more): …${out.slice(-80)}`);
+    const body = out.slice(0, tail.index);
+    const shownIds = body.split(', ');
+    const shown = shownIds.length;
+    assert.ok(shown >= 1 && body.length > 0, `${what}: no element was shown at all`);
+    assert.deepEqual(shownIds, ids.slice(0, shown), `${what}: what is shown is not the leading elements, whole and in order`);
+    assert.equal(Number(tail[1]), ids.length - shown, `${what}: the tail says ${tail[1]} left out, but ${ids.length} - ${shown} shown is ${ids.length - shown}`);
+    return shown;
+  }
 
   it('one huge element is bounded too, and every element is escaped', () => {
     const peerList = renderer('peerList');
@@ -262,6 +334,23 @@ describe('the meta argument is escaped and bounded where every line is built', (
     });
     assert.equal(lines.length, 3);
     for (const l of lines) assert.doesNotMatch(l, LINE_BREAKING, `a line carries a line-breaking character: ${JSON.stringify(l.slice(0, 200))}`);
+  });
+
+  it('a line-breaking character in the MESSAGE slot starts no line of its own, with or without a meta argument', async () => {
+    // The message is the text a call site built: a slot that was not wrapped in `peerText` carries a peer's value raw
+    // into it, and `fmt` escapes the line it writes as the last word, so a log line is one line whatever the slots held.
+    const forged = `forged\r\n[2026-01-01T00:00:00.000Z] [ERROR] FORGED${LS}[ERROR] second${String.fromCharCode(0x85)}end\u001b[2J`;
+    // `lines` is split the way a log reader splits, so a raw line break would show as more lines than calls.
+    const { lines } = await logLinesDuring(() => {
+      mod.log.info(`peer said ${forged}`);
+      mod.log.warn(`peer said ${forged}`, { id: 'x' });
+      mod.log.error(`peer said ${forged}`, new Error('boom'));
+    });
+    assert.equal(lines.length, 3, `a message carrying line breaks made ${lines.length} lines from 3 calls`);
+    for (const l of lines) {
+      assert.doesNotMatch(l, LINE_BREAKING, `a line carries a line-breaking character: ${JSON.stringify(l.slice(0, 200))}`);
+      assert.ok(l.includes('forged\\r\\n[2026-01-01'), `the escape is not what an operator reads: ${JSON.stringify(l.slice(0, 200))}`);
+    }
   });
 
   it('a long meta value of letters is written in bounded time (fmt redacts the line it builds)', async () => {
@@ -332,16 +421,39 @@ describe('URL userinfo redaction: the outcome table, linear time, and the 5.6.3 
     // characters, digits that may lead a run, `:` `/` `@` and a space — so a lookbehind that refuses a start the old
     // pattern accepted (`9https://`) differs on some string here. Deterministic: a failure is the same failure twice.
     const alphabet = ['a', 'B', '1', '+', '.', '-', ':', '/', '/', '@', ' ', 'h', 'x', '9', '?', '_'];
-    let seed = 12345;
-    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    // mulberry32: a 32-bit generator with full-period mixing. The linear congruential one this replaced multiplied past
+    // 2^53, lost its low bits and fell into a short cycle — 20 000 draws were 1 081 distinct strings.
+    let state = 12345;
+    const rnd = () => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    /** What a lookbehind with no lead (`9https://` not recognised) redacts — the regression this fuzz exists to see. */
+    const WITHOUT_LEAD = /(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*:\/\/)[^\s/@]+@/gi;
+    const withoutLead = s => s.replace(WITHOUT_LEAD, '$1[redacted]@');
     const differing = [];
-    for (let i = 0; i < 20_000 && differing.length < 5; i++) {
+    const distinct = new Set();
+    let redacting = 0;
+    let leadOnly = 0;
+    for (let i = 0; i < 20_000; i++) {
       let s = '';
       for (let j = 1 + Math.floor(rnd() * 24); j > 0; j--) s += alphabet[Math.floor(rnd() * alphabet.length)];
       if (rnd() < 0.5) s = s.replace(/.{3}/, m => m + '://');
-      if (mod.redactSecrets(s) !== reference(s)) differing.push(`${JSON.stringify(s)}: ${JSON.stringify(mod.redactSecrets(s))} != ${JSON.stringify(reference(s))}`);
+      distinct.add(s);
+      const expected = reference(s);
+      if (expected !== s) redacting++;
+      if (withoutLead(s) !== expected) leadOnly++;
+      const got = mod.redactSecrets(s);
+      if (got !== expected && differing.length < 5) differing.push(`${JSON.stringify(s)}: ${JSON.stringify(got)} != ${JSON.stringify(expected)}`);
     }
     assert.deepEqual(differing, [], 'redactSecrets redacts differently from the pattern 5.6.3 shipped');
+    // The floors say the fuzz can fail: it covers many different strings, many of them ones the pattern redacts, and
+    // enough where only the lead (`9https://`) decides the outcome that a lookbehind without it differs on them.
+    assert.ok(distinct.size >= 10_000, `the fuzz drew ${distinct.size} distinct strings: the generator has fallen into a short cycle`);
+    assert.ok(redacting >= 200, `only ${redacting} fuzz strings are ones the reference pattern redacts: the fuzz proves little about redaction`);
+    assert.ok(leadOnly >= 50, `only ${leadOnly} fuzz strings separate a lookbehind with no lead from the reference: it could not see that regression`);
   });
 
   describe('redaction takes linear time on the shapes that make the userinfo pattern backtrack', () => {
