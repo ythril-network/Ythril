@@ -82,13 +82,18 @@ jobs:
         # Vitest + jsdom (see client/vitest.config.ts). This is what makes change-detection work (OnPush / zoneless)
         # verifiable rather than shipped on a green build: OnPush's failure mode is a silently-stale view, invisible
         # to `ng build`.
-        run: npm run test:client
+        # The JSON report beside the console one is what `Build & Test` reads for skips (scripts/unexpected-skips.mjs:
+        # no skip is expected in the client). `--outputFile.json` is relative to the workspace, hence `../`; the default
+        # reporter is named so the log reads as it did. Called as the workspace script, NOT `npm run test:client --`:
+        # that script is itself an `npm run`, so flags after one `--` land on the INNER npm as unknown config and
+        # vitest never sees them (no report is written, and the upload then fails on an empty folder).
+        run: npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json
 
       - name: Build client (production)
         # Not redundant with the unit tests. Measured by injecting a template reference to a non-existent member: in
         # a component that HAS a render spec, Vitest catches it; in a component with NO spec, Vitest passes green and
-        # only the AOT build reports it (TS2339). 19 of 67 components have no spec, so the second case is the common
-        # one. Bundle budgets (angular.json) are likewise enforced only here. The image build repeats it inside
+        # only the AOT build reports it (TS2339). Components without a spec are a standing share of the client, so the
+        # second case is not a rarity. Bundle budgets (angular.json) are likewise enforced only here. The image build repeats it inside
         # Docker ten minutes into a buildx log; here it fails in about thirty seconds.
         run: npm run build:client
 
@@ -608,14 +613,10 @@ jobs:
       - name: Timings summary
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -f scripts/test-times.mjs ]; then
-            node scripts/test-times.mjs
-          else
-            echo "::warning title=ci-advisory::scripts/test-times.mjs is not in this checkout, so no timings summary was written"
-            echo "### CI advisory" >> "$GITHUB_STEP_SUMMARY"
-            echo "scripts/test-times.mjs is not in this checkout: no timings summary for this run." >> "$GITHUB_STEP_SUMMARY"
-          fi
+        # Per-suite totals, the slowest files and tests, every skip with its reason, the failures, and (GH_TOKEN, for
+        # the Actions API) the files and suites slower than the last ten runs of main. Written to this run's step
+        # summary and to the log. A baseline GitHub will not give is a warning here, never a failed summary.
+        run: node scripts/test-times.mjs --summary --results test-results
 
   # THE merge gate, and nothing else. The ruleset requires the check context "Build & Test" by exactly this name
   # (renaming it silently drops the gate), and the merge monitor (`gh pr merge` on green) waits for that context.
@@ -631,9 +632,12 @@ jobs:
     needs: [client-tests, standalone-pure, standalone-db, prepare, standalone-instance, integration, sync, redteam]
     if: always()
     runs-on: ubuntu-latest
-    # A shell function over the results.
+    # A shell function over the results, then two node scripts over a few megabytes of JSONL.
     timeout-minutes: 10
     steps:
+      # Everything after this first step runs ONLY when it passed (a step that follows a failed one is skipped, and none
+      # below has an `if` that would change that: `ci-workflow-is-sound` holds it). So the checks below read a COMPLETE
+      # set, never the partial one a failed job leaves — a verdict about half a run would be worse than none.
       - name: Every job succeeded
         run: |
           fail=0
@@ -647,3 +651,31 @@ jobs:
           check sync "${{ needs.sync.result }}"
           check redteam "${{ needs.redteam.result }}"
           exit $fail
+
+      # The run's own evidence, read once every job succeeded. Both scripts import only node built-ins, so this job
+      # installs nothing (held by `unexpected-skips-fail-the-ci-gate`); it needs the checkout for the list of tracked
+      # test files (`git ls-files`) and the scripts themselves.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download every job's test results
+        uses: actions/download-artifact@v4
+        with:
+          # This attempt's artifacts only: a re-run of one job must not read the first attempt's files beside its own.
+          pattern: test-results-*-${{ github.run_attempt }}
+          path: test-results
+          merge-multiple: true
+
+      - name: Every tracked test file produced a test event
+        # A file a job's glob matched that loaded and registered nothing is "all tests pass" about a test that never ran.
+        run: node scripts/executed-tests.mjs --results test-results
+
+      - name: No skip nobody expected
+        # Exit 1 names each skipped test (file, test, reason); only `expected-in-ci:` in a listed file
+        # (testing/_shared/expected-in-ci.mjs) may stand. Exit 2 is a results set that cannot answer.
+        run: node scripts/unexpected-skips.mjs --results test-results

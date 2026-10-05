@@ -126,6 +126,20 @@ recorded run so a short history is not read as a long one. `--flags` also judges
 ones before it and names a file or a suite that is slower than it has been. The thresholds are constants beside the
 function that applies them in `scripts/test-times.mjs`; read them there.
 
+### The summary of one run
+
+```bash
+node scripts/test-times.mjs --summary --results <folder of downloaded results>
+```
+
+This is what the `CI advisory` job runs over the artifacts it downloads (`test-results-*` of this attempt, merged into one
+folder: every job's `*.jsonl` and the client's `client.json`). It prints, and writes to the run's step summary: a row per
+suite (tests, passed, failed, skipped, files, test time, wall time, outcome, where `incomplete` means the results were cut
+off and are not read as passed), the slowest files and tests, every skip with its reason (the ones CI does not expect are
+marked), and the failures. With `GH_TOKEN` it also names the files and suites slower than the last ten runs of `main`, read
+from their artifacts, so it needs no Ythril instance; a baseline GitHub will not give is a warning and the summary still
+prints. It records nothing.
+
 ## Recording runs to a Ythril instance (optional)
 
 This is for maintainers who want a long history of how long main takes. A contributor needs none of it, and the line
@@ -186,13 +200,15 @@ can fix there, and refused in CI unless it is expected.**
   non-empty, which GitHub Actions always does.
 - **`requireEmbedding(t, available)`** is that rule for the embedder, and is how every test that needs a model asks for it.
 - **A skip that is expected in CI** carries the reason prefix `expected-in-ci:` followed by exactly one cause, for example
-  `expected-in-ci: corpus not fetched`. Only the files on the list in
-  `testing/standalone/a-skip-that-expects-ci-lives-in-a-listed-file.test.js` may use it, each with the reason it is
-  allowed and the causes it may name; the gate checks the list both ways. Adding a row is a decision about what CI is
+  `expected-in-ci: corpus not fetched`. Only the files on the list in `testing/_shared/expected-in-ci.mjs` may use it,
+  each with the reason it is allowed and the causes it may name; the source gate
+  (`a-skip-that-expects-ci-lives-in-a-listed-file`) checks the list both ways, and the CI gate reads the same list. Adding a row is a decision about what CI is
   allowed not to run, made in review, and it must be the absence of something CI never has, not of something it is
   supposed to bring up. One cause per skip: a message that joins two causes with `||` excuses the one that should fail.
-- **CI fails on any other skip**, in the gate job, from the JSONL: `scripts/unexpected-skips.mjs`. The client suite has no
-  expected skips at all.
+- **CI fails on any other skip**, in the gate job, from the JSONL: `scripts/unexpected-skips.mjs`, which also reads the
+  client's Vitest report (`client.json`, written by the client job). A skipped test fails the run unless its reason starts
+  `expected-in-ci:` AND its file is on the list; the client suite has no expected skips at all, so anything it does not
+  pass or fail is named. It exits 2, not 0, when the results cannot answer (a missing or cut-off file).
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.
 
 A test that needs a precondition (a session, a prior test's output) throws once in its `before` hook or in one assert

@@ -241,6 +241,19 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
 }
 
 /*
+ * ── every test file is REACHED by a CI job's selection ──
+ *
+ * A tracked test file that no job selects is a test nobody runs, and it is green in review because it never ran: a file
+ * under `testing/bench/`, a spec outside `client/src`, a test one directory deeper than a glob reaches. CI's aggregator
+ * asks the run half of this (which file produced no test event); this is the static half, derived from the workflow, the
+ * package scripts and the vitest config, and it needs nothing a developer's machine lacks.
+ */
+console.log('\n── every tracked test file is reached by a CI job ──');
+try { run('node scripts/unrun-tests.mjs'); } catch {
+  failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
+}
+
+/*
  * ── the route list, checked against what express actually serves ──
  *
  * Every gate that says "every route" reads one module, and that module reads SOURCE. This is the only check

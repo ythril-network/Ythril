@@ -35,23 +35,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
+import { readFileSync } from 'node:fs';
 import { testAndHelperFiles, parseSource, staticText, lineOf, inSkipPosition } from './_test-bodies.mjs';
+import { EXPECTED_IN_CI, EXPECTED_IN_CI_PREFIX as PREFIX } from '../_shared/expected-in-ci.mjs';
+import { REPO_ROOT } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
-const PREFIX = 'expected-in-ci:';
-
-/**
- * THE LIST. A file here may carry `expected-in-ci:` skips whose reason is exactly one of its causes.
- * Adding a row is a decision about what CI is allowed not to run — write why, and make it a cause that is the
- * absence of something CI never has, not of something it is supposed to bring up.
- */
-const CORPUS_WHY = 'the LoCoMo / LongMemEval corpora are fetched by URL against a pinned sha256 and never committed '
-  + '(redistribution), so a CI runner that did not fetch them cannot run the sweep over them';
-const EXPECTED_IN_CI = {
-  'testing/standalone/an-extraction-describes-the-conversation-it-names.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
-  'testing/standalone/the-extractor-finds-its-mentions.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
-  'testing/standalone/the-extractor-shortlists-before-it-asks.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
-  'testing/standalone/the-extractor-cannot-see-the-questions.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
-};
+// THE LIST lives in `testing/_shared/expected-in-ci.mjs`, because two readers ask it two questions: this gate (may a
+// SOURCE carry the prefix) and `scripts/unexpected-skips.mjs` (may a RUN's skip stand). Written in this file it was one
+// reader's copy; a second reader would have kept its own and the two lists could disagree about which files CI excuses.
 
 /** Every skip reason in `text` that carries the prefix: `{ line, reason }`. */
 export function expectedInCiSkips(file, text) {
@@ -146,6 +138,31 @@ describe('the rules, on fixtures (the real tree is below)', () => {
   it('prose and fixtures that mention the prefix are not skips', () => {
     assert.deepEqual(expectedInCiSkips('x.test.js',
       "// expected-in-ci: corpus not fetched\nconst doc = 'a skip reason may start expected-in-ci: and then the cause'; it('x', () => {});"), []);
+  });
+});
+
+describe('the list is one list', () => {
+  const read = (f) => readFileSync(`${REPO_ROOT}/${f}`, 'utf8');
+  const READERS = ['testing/standalone/a-skip-that-expects-ci-lives-in-a-listed-file.test.js', 'scripts/unexpected-skips.mjs'];
+
+  it('the list module is data with a reason per row, and the prefix is spelled once', () => {
+    assert.equal(PREFIX, 'expected-in-ci:');
+    const rows = Object.entries(EXPECTED_IN_CI);
+    assert.ok(rows.length >= 1, 'an empty list allows nothing and checks nothing');
+    for (const [file, { causes, why }] of rows) {
+      assert.ok(Array.isArray(causes) && causes.length >= 1 && why.length > 40, `${file} is listed with no cause or no reason`);
+    }
+  });
+
+  it('both readers import it, and neither keeps a literal of its own', () => {
+    for (const f of READERS) {
+      const text = read(f);
+      assert.match(text, /expected-in-ci\.mjs'/, `${f} does not import the list module`);
+      // A row of the real list names a real file; a fixture row (`corpus.test.js`) does not, so the file names are the tell.
+      const code = stripComments(text);
+      const listedFile = Object.keys(EXPECTED_IN_CI).find(name => code.includes(name));
+      assert.equal(listedFile, undefined, `${f} writes a row of the list itself (${listedFile})`);
+    }
   });
 });
 

@@ -1,23 +1,28 @@
 ##
 ## Multi-instance test Docker Compose
 ##
-## Spins up three independent Ythril instances (a, b, c) each with their own
-## MongoDB.  Use this to test sync networks without any shared state.
+## Four independent Ythril instances (a, b, c, d), each with its own MongoDB, and the two document sidecars
+## (doc-render, and doc-office under the `office` profile). Nothing is shared between instances; a suite starts
+## only the services it drives (the sets are named in .github/workflows/ci.yml, one per job).
 ##
-## Node topology for tests:
+## What each instance is for (the sets each CI job starts are in ci.yml):
+##   a       the standalone @needs-instance files (with c), the integration, sync and red-team suites
+##   b       the second instance of the integration, sync and red-team suites
+##   c       the third sync member, and the second instance of the standalone @needs-instance files
+##   d       the infra-managed migration lock test (red-team) and the fourth sync member
+##
+## Node topology for the sync tests:
 ##   Closed network:     a <-> b (both directions)
 ##   Braintree:          a (root) -> b (node) -> c (leaf)
 ##   Democratic:         a, b, c  (3-way vote)
 ##
-## Usage:
-##   docker compose -f docker-compose.test.yml up --build -d
-##   docker compose -f docker-compose.test.yml down -v
+## Usage (locally; `npm run test:up` does all of it, `npm run test:down` removes it):
+##   docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait
+##   node testing/sync/setup.js [a b ...]   # completes setup and writes each instance's token under testing/sync/configs/
+##   docker compose -p ythril-test -f testing/docker-compose.test.yml down -v
 ##
-## Pre-requisites:
-##   scripts/test-setup/init-a.json  — config for instance A
-##   scripts/test-setup/init-b.json  — config for instance B
-##   scripts/test-setup/init-c.json  — config for instance C
-##   (See testing/sync/README.md for setup instructions)
+## In CI the image is built once, by the `prepare` job, and every stack job loads it and starts its services with
+## `--no-build --pull never`; `ythril-a` below is the only service that carries a build, for a local `up`.
 ##
 
 services:
@@ -25,10 +30,11 @@ services:
   # Instance A  (port 3200)
   # ──────────────────────────────────────────
   ythril-a:
-    # Sole builder of the shared test image. Instances b/c/d only reference the tag
+    # Sole builder of the shared test image for a LOCAL `up`. Instances b/c/d only reference the tag
     # below — building the same tag from four services at once races on the export
-    # and intermittently corrupts the image locally. CI skips this entirely: it
-    # pre-builds `ythril-test:latest` once with a shared layer cache (see ci.yml).
+    # and intermittently corrupts the image locally. CI never builds here: its `prepare` job builds
+    # `ythril-test:latest` once (with a shared layer cache, see ci.yml) and each stack job loads it and starts
+    # its services with `--no-build --pull never`.
     build: ..
     image: ythril-test:latest
     container_name: ythril-a
@@ -163,7 +169,7 @@ services:
   # Instance B  (port 3201)
   # ──────────────────────────────────────────
   ythril-b:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-b
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
@@ -239,7 +245,7 @@ services:
   # Instance C  (port 3202)  — braintree leaf
   # ──────────────────────────────────────────
   ythril-c:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-c
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
@@ -299,7 +305,7 @@ services:
   # Used exclusively by red-team-tests/infra-managed-migration.test.js.
   # ──────────────────────────────────────────
   ythril-d:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-d
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"

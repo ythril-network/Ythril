@@ -31,6 +31,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { stripComments } from './_strip-comments.mjs';
 
 const PREFLIGHT = readFileSync('scripts/preflight.mjs', 'utf8');
 /*
@@ -172,5 +173,26 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     const oneLine = files.map(f => ` ${f}`).join('');
     assert.ok(oneLine.length * 4 > WINDOWS_LIMIT / 8,
       'the enumerated list is far from the limit; if that is genuinely true, this guard can go');
+  });
+});
+
+/**
+ * Preflight asks the question CI's aggregator asks about reach: is every tracked test file selected by a CI job?
+ *
+ * `scripts/unrun-tests.mjs` is the static half of Q-283 (`executed-tests.mjs`, the run half, needs a run's results and
+ * is the aggregator's). The static half needs nothing a developer's machine lacks, and a test file added under a
+ * directory no job selects is found in a second here, or by a reader of a CI log after the push. So preflight runs it
+ * and a non-zero exit is a failure of its own, named - not folded into another gate's.
+ *
+ * Read from the script's CODE (comments stripped): the comment that explains this gate also names the script.
+ */
+describe('preflight runs the CI-reach check', () => {
+  const code = stripComments(readFileSync('scripts/preflight.mjs', 'utf8'));
+
+  it('runs scripts/unrun-tests.mjs, and a non-zero exit becomes a named failure rather than a swallowed one', () => {
+    // One statement, matched by structure (not a character window, which a CRLF checkout shifts): the run, then a catch
+    // whose body records the failure under the script's own name.
+    assert.match(code, /try\s*\{\s*run\(\s*['"`]node scripts\/unrun-tests\.mjs['"`]\s*\);?\s*\}\s*catch\s*\{\s*failures\.push\(\{\s*name:\s*['"`]unrun-tests['"`]/,
+      'preflight does not run scripts/unrun-tests.mjs into its failures list');
   });
 });

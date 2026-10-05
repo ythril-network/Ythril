@@ -8,6 +8,7 @@
  *     node scripts/test-times.mjs --record-ci         record the trusted CI runs not yet recorded
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
+ *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
  *
  * ## What this prevents
@@ -51,13 +52,16 @@
  * Run the tests: `node --test testing/standalone/test-times-*.test.js`
  */
 import { inflateRawSync, crc32 } from 'node:zlib';
-import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import { readTimingLog, maskSecrets } from '../testing/_shared/timing-reporter.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
+import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
+import { readClientResults } from './unexpected-skips.mjs';
+import { renderRunSummary } from './_shared/run-summary.mjs';
 
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
 
@@ -302,7 +306,7 @@ function endLineOf(text) {
 }
 
 /** The suite a results file belongs to: what its lines say, else the part of its name before the first `-`. */
-function suiteOf(text, fileName) {
+export function suiteOf(text, fileName) {
   const { lines } = readTimingLog(text);
   const said = lines.find(l => typeof l?.suite === 'string' && SUITE_NAME.test(l.suite))?.suite ?? endLineOf(text)?.suite;
   if (typeof said === 'string' && SUITE_NAME.test(said)) return said;
@@ -323,7 +327,7 @@ const isCount = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
  *
  * @param {{ texts: string[], root: string }} input
  */
-function summariseSuite({ texts, root }) {
+export function summariseSuite({ texts, root }) {
   const logs = texts.map(text => ({ ...readTimingLog(text), end: endLineOf(text) }));
   let malformed = 0;
   const byFile = new Map();
@@ -690,6 +694,25 @@ const startedOf = (run) => isoOrNull(run.run_started_at) ?? isoOrNull(run.create
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
 
 /**
+ * The latest attempt's results artifact per job (`test-results-<job>-<attempt>`), by job name. An artifact of an attempt
+ * later than the run's own, an expired one, or one whose job name is not a plain name is not believed. Read by the
+ * recorder and by the summary's baseline: the one place that says which artifact of a run counts.
+ *
+ * @returns {Map<string, { attempt: number, id: number, size: number }>}
+ */
+function latestResultArtifacts(artifacts, run) {
+  const latest = new Map();
+  for (const a of artifacts) {
+    const m = /^test-results-(.+)-(\d+)$/.exec(a?.name ?? '');
+    if (!m || a.expired || !Number.isSafeInteger(a.id) || !JOB_NAME.test(m[1])) continue;
+    const attempt = Number(m[2]);
+    if (attempt < 1 || attempt > run.run_attempt) continue;
+    if (!latest.has(m[1]) || latest.get(m[1]).attempt < attempt) latest.set(m[1], { attempt, id: a.id, size: a.size_in_bytes });
+  }
+  return latest;
+}
+
+/**
  * The payloads of one trusted, completed run. Identity (`runId`, `attempt`, `commit`, `branch`, `source`, `dirty`,
  * `layout`) is the run object's and the jobs' - the artifact supplies figures and a suite name, nothing else.
  */
@@ -706,15 +729,7 @@ async function ciPayloads(gh, run) {
   const layout = jobs.some(j => j?.name === 'prepare') ? 'ci-parallel-v2' : 'ci-serial-v1';
   const common = { source: 'ci', runId, commit: run.head_sha, branch: run.head_branch, layout, dirty: false, startsAt, endsAt };
 
-  // The latest attempt's artifact per job (an artifact of an attempt later than the run's own is not believed).
-  const latest = new Map();
-  for (const a of artifacts) {
-    const m = /^test-results-(.+)-(\d+)$/.exec(a?.name ?? '');
-    if (!m || a.expired || !Number.isSafeInteger(a.id) || !JOB_NAME.test(m[1])) continue;
-    const attempt = Number(m[2]);
-    if (attempt < 1 || attempt > run.run_attempt) continue;
-    if (!latest.has(m[1]) || latest.get(m[1]).attempt < attempt) latest.set(m[1], { attempt, id: a.id, size: a.size_in_bytes });
-  }
+  const latest = latestResultArtifacts(artifacts, run);
 
   const payloads = [];
   const problems = [];
@@ -939,6 +954,132 @@ async function trend({ last, flags }) {
   return 0;
 }
 
+// ---- --summary ----------------------------------------------------------------------------------------------------
+
+/** Trusted runs of main the baseline reads at most: the same ten `--trend --flags` judges against. */
+const SUMMARY_BASELINE_RUNS = BASELINE_RUNS;
+/** The baseline's whole time budget, and the largest artifact it will fetch. A summary never waits on history. */
+const SUMMARY_BASELINE_BUDGET_MS = 120_000;
+const SUMMARY_ARTIFACT_CAP = 20_000_000;
+
+/** The figures of one suite as the summary shows them, from the recorder's own counting (`summariseSuite`). */
+function suiteFigures(suite, texts, root) {
+  const s = summariseSuite({ texts, root });
+  const m = JSON.parse(s.measurements);
+  const files = Array.isArray(m.files) ? m.files : [];
+  const wall = s.startedAt && s.endedAt ? Math.max(0, Date.parse(s.endedAt) - Date.parse(s.startedAt)) : undefined;
+  return {
+    suite, tests: s.tests, passed: s.passed, failed: s.failed, skipped: s.skipped, files: s.fileCount, ms: s.ms, wallMs: wall,
+    outcome: s.outcome, scope: s.scope,
+    fileTimes: files.map(f => ({ file: f.file, ms: f.ms })),
+    slowestTests: Array.isArray(m.slowest) ? m.slowest : [],
+    skips: files.flatMap(f => (f.skips ?? []).map(k => ({ file: f.file, test: k.test, reason: k.reason, expected: isExpectedInCiSkip(f.file, k.reason) }))),
+    failures: files.flatMap(f => (f.failures ?? []).map(k => ({ file: f.file, test: k.test, message: k.message }))),
+  };
+}
+
+/** `[{name, text}]` as one figures object per suite (the suite a file's own lines name). */
+function suitesOf(results, root) {
+  const bySuite = new Map();
+  for (const { name, text } of results) {
+    const suite = suiteOf(text, name) ?? '(unnamed)';
+    if (!bySuite.has(suite)) bySuite.set(suite, []);
+    bySuite.get(suite).push(text);
+  }
+  return [...bySuite].sort(([a], [b]) => a.localeCompare(b)).map(([suite, texts]) => suiteFigures(suite, texts, root));
+}
+
+/** A GitHub Actions annotation: one line of its own, so the run page shows it. */
+const annotate = (what, message) => `::warning title=${what}::${String(message).split('\n')[0].replace(/[\r%]/g, ' ')}`;
+
+/**
+ * Files and suites slower than the last {@link SUMMARY_BASELINE_RUNS} trusted, successful runs of main, read from their
+ * `test-results-*` artifacts. Never throws: a baseline that cannot be had is a line and an annotation, and the summary
+ * goes on without it. Bounded: ten runs, {@link SUMMARY_ARTIFACT_CAP} bytes an artifact, {@link SUMMARY_BASELINE_BUDGET_MS}
+ * in all; the judged run is not one of them, and neither is a run `trustedRuns` does not admit (its artifacts are never
+ * asked for).
+ *
+ * @returns {Promise<{ lines: string[], warnings: string[] }>}
+ */
+async function summaryBaseline(figures) {
+  const warnings = [];
+  if (!process.env.GH_TOKEN) return { lines: ['baseline skipped: GH_TOKEN is not set, so the last runs of main were not read'], warnings };
+  const deadline = Date.now() + SUMMARY_BASELINE_BUDGET_MS;
+  let gh;
+  const currentId = process.env.GITHUB_RUN_ID ?? '';
+  const history = [];
+  try {
+    gh = githubClient();
+    const listed = await gh.json(`/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100`);
+    const runs = trustedRuns(listed?.workflow_runs ?? [])
+      .filter(r => r.status === 'completed' && r.conclusion === 'success' && String(r.id) !== currentId && runIdOf(r) && startedOf(r))
+      .sort((a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id))
+      .slice(0, SUMMARY_BASELINE_RUNS);
+    for (const run of runs) {
+      if (Date.now() > deadline) { warnings.push(annotate('baseline', `the time budget (${seconds(SUMMARY_BASELINE_BUDGET_MS)}) ended before run ${run.id}; the remaining runs were not read`)); break; }
+      try {
+        const artifacts = (await gh.json(`/repos/${REPO}/actions/runs/${runIdOf(run)}/artifacts?per_page=100`)).artifacts ?? [];
+        const results = [];
+        for (const [job, found] of latestResultArtifacts(artifacts, run)) {
+          if (Number.isFinite(found.size) && found.size > SUMMARY_ARTIFACT_CAP) throw new Error(`${job}: the artifact is larger than ${SUMMARY_ARTIFACT_CAP} bytes`);
+          for (const e of parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`))) {
+            if (e.name.endsWith('.jsonl')) results.push({ name: e.name.split('/').at(-1), text: e.data.toString('utf8') });
+          }
+        }
+        if (!results.length) continue;
+        const suites = suitesOf(results, process.cwd());
+        history.push({
+          runId: String(run.id), startsAt: startedOf(run), branch: 'main', outcome: 'passed',
+          scope: suites.every(s => s.scope === 'full') ? 'full' : 'subset',
+          suites: Object.fromEntries(suites.map(s => [s.suite, { ms: s.ms, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }])),
+        });
+      } catch (err) {
+        warnings.push(annotate('baseline', `run ${run.id} was not read: ${String(err?.message ?? err).split('\n')[0]}`));
+      }
+    }
+  } catch (err) {
+    warnings.push(annotate('baseline', `the last runs of main could not be listed: ${String(err?.message ?? err).split('\n')[0]}`));
+    return { lines: ['baseline not read: GitHub could not be reached (see the warning), the figures above stand alone'], warnings };
+  }
+  if (!history.length) return { lines: ['no baseline: none of the last runs of main left results that could be read'], warnings };
+
+  const judged = {
+    runId: currentId || 'this-run', startsAt: new Date().toISOString(), branch: 'main', scope: 'full', outcome: 'passed',
+    suites: Object.fromEntries(figures.map(s => [s.suite, { ms: s.ms, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }])),
+  };
+  const lines = [
+    ...flagFiles(judged, history).map(f => `slow file: ${f.file} in ${f.suite} took ${seconds(f.ms)}, over ${seconds(f.limit)}`),
+    ...flagSuites(judged, history).map(s => `slow suite: ${s.suite} took ${seconds(s.ms)}, over ${seconds(s.limit)}`),
+  ];
+  const compared = `compared with ${history.length} run(s) of main`;
+  return { lines: lines.length ? [...lines, compared] : [`no flags: nothing is slower than the last runs of main (${compared})`], warnings };
+}
+
+/** `--summary --results <dir>`: the run's page. Markdown to $GITHUB_STEP_SUMMARY when set, and to stdout always. */
+async function summarise({ results }) {
+  const dir = resolve(results);
+  const names = existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort() : [];
+  if (!names.length) { console.error(`test-times: no results to summarise: ${dir} ${existsSync(dir) ? 'holds no *.jsonl' : 'does not exist'}`); return 1; }
+  const figures = suitesOf(names.map(name => ({ name, text: readFileSync(join(dir, name), 'utf8') })), process.cwd());
+
+  let client = null;
+  let clientNote = '';
+  try {
+    const c = readClientResults(dir);
+    client = { ...c, skips: c.unexpected.map(u => ({ ...u, expected: false })) };
+  } catch (err) { clientNote = String(err?.message ?? err).split('\n')[0]; }
+
+  const { lines, warnings } = await summaryBaseline(figures);
+  const markdown = renderRunSummary({ suites: figures, client, clientNote, baseline: lines });
+  for (const w of warnings) console.log(w);
+  console.log(markdown);
+  const target = process.env.GITHUB_STEP_SUMMARY;
+  if (target) {
+    try { appendFileSync(target, `${markdown}\n`); } catch (err) { console.log(annotate('summary', `could not write $GITHUB_STEP_SUMMARY: ${err?.code ?? err?.message}`)); }
+  }
+  return 0;
+}
+
 // ---- command line -------------------------------------------------------------------------------------------------
 
 export const HELP = `usage: node scripts/test-times.mjs <command>
@@ -952,6 +1093,12 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
   --trend [--last N] [--flags]
                            print the recorded runs (branch main, scope full, outcome passed; default newest ${TREND_RUNS});
                            --flags also judges the newest run of each suite against its last ${BASELINE_RUNS}
+  --summary --results <dir>
+                           print the run's page from the downloaded results of every job (a folder of *.jsonl and
+                           client.json): per-suite totals, the slowest files and tests, every skip with its reason,
+                           the failures, and (with GH_TOKEN) the files and suites slower than the last ${SUMMARY_BASELINE_RUNS}
+                           runs of main. Markdown to $GITHUB_STEP_SUMMARY when set, and to stdout. Runs in CI's
+                           advisory job; the baseline is read from artifacts, so it needs no Ythril instance
 
 environment (read, never printed):
   YTHRIL_TEST_RUNS_URL     the Ythril instance to record to: https, or http to 127.0.0.1, localhost or [::1]
@@ -968,6 +1115,7 @@ async function main(argv) {
   if (command === '--record' && !rest.length) return recordLocal();
   if (command === '--record-ci' && !rest.length) return recordCi();
   if (command === '--rewrite' && rest.length === 1) return rewriteLocal(rest[0]);
+  if (command === '--summary' && rest.length === 2 && rest[0] === '--results') return summarise({ results: rest[1] });
   if (command === '--trend') {
     let last = TREND_RUNS;
     let flags = false;

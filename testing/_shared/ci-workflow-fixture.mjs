@@ -94,7 +94,7 @@ jobs:
           node-version: '22'
           cache: npm${NPM_CI}
       - name: Client unit tests
-        run: npm run test:client${UPLOAD_RESULTS('client-tests')}
+        run: npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json${UPLOAD_RESULTS('client-tests')}
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
@@ -143,7 +143,19 @@ jobs:
       contents: read
       actions: read
     steps:
-      - run: node scripts/test-times.mjs --summary
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*-@{{ github.run_attempt }}
+          path: test-results
+          merge-multiple: true
+      - name: Timings summary
+        env:
+          GH_TOKEN: @{{ github.token }}
+        run: node scripts/test-times.mjs --summary --results test-results
   test:
     name: Build & Test
     if: always()
@@ -154,4 +166,18 @@ jobs:
       - name: Every needed job succeeded
         run: |
 ${verdictLines}
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download every job's test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*-@{{ github.run_attempt }}
+          path: test-results
+          merge-multiple: true
+      - name: Every tracked test file produced a test event
+        run: node scripts/executed-tests.mjs --results test-results
+      - name: No skip nobody expected
+        run: node scripts/unexpected-skips.mjs --results test-results
 `.replaceAll('@{{', '${{');

@@ -24,11 +24,10 @@
  * are not "unexecuted" — nobody knows. So an incomplete file, an empty results directory and a results directory with no
  * test event at all each EXIT 2 with the cause, never 0. Exit 1 means files were named; exit 0 means none.
  */
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { trackedTestFiles } from './_shared/tracked-test-files.mjs';
-import { readTimingLog } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingResults } from './_shared/timing-results.mjs';
 
 /** A reporter's `file` as the repository-relative, forward-slash path this script compares. */
 const normal = (f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '');
@@ -41,28 +40,12 @@ const normal = (f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '');
  * @throws when `dir` holds no results, or any of them is incomplete
  */
 export function executedFiles(dir) {
-  if (!existsSync(dir)) throw new Error(`the results directory ${dir} does not exist — nothing ran, or nothing was kept`);
-  const logs = readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort();
-  if (logs.length === 0) throw new Error(`no *.jsonl results in ${dir}. An empty run is not a clean one`);
-  const executed = new Set();
-  let events = 0;
-  const incomplete = [];
-  for (const name of logs) {
-    const { lines, complete } = readTimingLog(readFileSync(join(dir, name), 'utf8'));
-    if (!complete) { incomplete.push(name); continue; }
-    for (const line of lines) {
-      if (line.type === 'test' && typeof line.file === 'string' && line.file !== '') {
-        executed.add(normal(line.file));
-        events++;
-      }
-    }
-  }
-  if (incomplete.length > 0) {
-    throw new Error(`incomplete results (no closing sentinel, a torn line, or a count that does not match): ${incomplete.join(', ')}. `
-      + 'A cut-off run cannot say which files ran, so it is not read as "these files did not".');
-  }
-  if (events === 0) throw new Error(`${logs.length} results file(s) in ${dir} hold no test event at all — an empty run is not a clean one`);
-  return { executed, logs: logs.length, events };
+  // The reading, and the refusals that make it whole-or-nothing, are `readTimingResults` (shared with unexpected-skips).
+  const { lines, logs, events } = readTimingResults(dir);
+  const executed = new Set(lines
+    .filter(l => l.type === 'test' && typeof l.file === 'string' && l.file !== '')
+    .map(l => normal(l.file)));
+  return { executed, logs, events };
 }
 
 /** @returns {{ missing: string[], total: number, logs: number }} */
