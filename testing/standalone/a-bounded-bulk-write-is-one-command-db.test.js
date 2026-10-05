@@ -35,15 +35,31 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
   let mongo;
   let counting = false;
   let commands = [];
+  let batches = [];
 
   before(async () => {
     mongo = await openTestMongo(SUITE, { query: '&monitorCommands=true' });
     // Only the commands aimed at the probe collection: anything else the server's modules send to this database in the
-    // window (a background delete was seen) is not the bulk write under count.
+    // window (a background delete was seen) is not the bulk write under count. Each command's operation count is kept too.
     mongo.getMongo().on('commandStarted', (ev) => {
-      if (counting && ev.databaseName === DB && ev.command?.[ev.commandName] === 'probe') commands.push(ev.commandName);
+      if (!(counting && ev.databaseName === DB && ev.command?.[ev.commandName] === 'probe')) return;
+      commands.push(ev.commandName);
+      const ops = ev.command.documents ?? ev.command.updates ?? ev.command.deletes;
+      if (Array.isArray(ops)) batches.push(ops.length);
     });
   });
+
+  /**
+   * How many operations each command `fn` sent carried. The property under test is what ONE command carries, so this is
+   * asserted on rather than on how many commands went out: a retryable write the driver sends again after a transient
+   * error is a second command with the same operations (CI, under load, counted three delete commands for a batch the
+   * driver splits in two).
+   */
+  async function batchesDuring(fn) {
+    batches = [];
+    await commandsDuring(fn);
+    return [...batches];
+  }
   after(async () => { await closeTestMongo(); });
 
   /** The command names sent while `fn` ran. */
@@ -80,8 +96,9 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     const chunks = inOneCommandChunks(ops, { maxItems: 500, bytesOf: bytesOfOp });
     assert.ok(chunks.length >= 2, `${chunks.length} slice(s) for ~18 MiB`);
     for (const [k, chunk] of chunks.entries()) {
-      const n = await updatesDuring(() => coll().bulkWrite(chunk, { ordered: false }));
-      assert.equal(n, 1, `slice ${k} (${chunk.length} operations) was sent as ${n} update commands`);
+      const sent = await batchesDuring(() => coll().bulkWrite(chunk, { ordered: false }));
+      assert.ok(sent.length > 0 && sent.every(n => n === chunk.length),
+        `slice ${k} (${chunk.length} operations) went out as commands of ${JSON.stringify(sent)} operations: the driver split it`);
     }
     assert.equal(await coll().countDocuments({}), 6, 'a slice did not land');
   });
@@ -99,8 +116,9 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     total += bytesOfOp(last);
     assert.ok(total <= ONE_COMMAND_BYTES && ONE_COMMAND_BYTES - total < 1024, `the fixture is not at the limit (${ONE_COMMAND_BYTES - total} bytes short)`);
     assert.equal(inOneCommandChunks(ops, { maxItems: 500, bytesOf: bytesOfOp }).length, 1, 'the slicer would split a slice at the limit');
-    const n = await updatesDuring(() => coll().bulkWrite(ops, { ordered: false }));
-    assert.equal(n, 1, `a batch at ONE_COMMAND_BYTES was sent as ${n} update commands: the limit leaves too little room for the command's framing`);
+    const sent = await batchesDuring(() => coll().bulkWrite(ops, { ordered: false }));
+    assert.ok(sent.length > 0 && sent.every(n => n === ops.length),
+      `a batch at ONE_COMMAND_BYTES went out as commands of ${JSON.stringify(sent)} operations: the limit leaves too little room for the command's framing`);
   });
 
   it('the slice the module makes by default IS one command at the cap, which is one fewer than the server\'s maxWriteBatchSize (the driver\'s `size + 1 >= max` batching)', async () => {
@@ -114,15 +132,20 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     // this case inserted 200 000 documents, and in CI the database container was shut down under it mid-run ("interrupted at
     // shutdown"), taking the next file's cases with it.
     const ops = Array.from({ length: ONE_COMMAND_MAX_OPERATIONS + 1 }, (_, i) => ({ deleteOne: { filter: { _id: `absent${i}` } } }));
-    // The premise first: handed to the driver whole, one operation over the cap is two delete commands.
-    const whole = (await commandsDuring(() => coll().bulkWrite(ops, { ordered: false }))).filter(c => c === 'delete').length;
-    assert.equal(whole, 2, `${ops.length} deletes were sent as ${whole} delete command(s): the driver no longer batches at maxWriteBatchSize - 1`);
-    // Then the module: its slices are the cap and the rest, and EACH is exactly one delete command.
+    // The premise first: handed to the driver whole, one operation over the cap does not fit one command — the largest
+    // command carries exactly the cap, and the batch is split (a retried command repeats a size; it never merges two).
+    const whole = await batchesDuring(() => coll().bulkWrite(ops, { ordered: false }));
+    assert.equal(Math.max(...whole), ONE_COMMAND_MAX_OPERATIONS,
+      `${ops.length} deletes went out as commands of ${JSON.stringify(whole)} operations: the driver no longer batches at maxWriteBatchSize - 1`);
+    assert.deepEqual([...new Set(whole)].sort((a, b) => b - a), [ONE_COMMAND_MAX_OPERATIONS, 1],
+      `${ops.length} deletes went out as commands of ${JSON.stringify(whole)} operations`);
+    // Then the module: its slices are the cap and the rest, and every command a slice sends carries the WHOLE slice — the
+    // driver did not split it. (A retried command carries the whole slice again, which is the same property.)
     const perSlice = await writeInOneCommands(ops, async (slice, { ordered }) => {
-      const sent = await commandsDuring(() => coll().bulkWrite(slice, { ordered }));
-      return { operations: slice.length, deletes: sent.filter(c => c === 'delete').length };
+      const sent = await batchesDuring(() => coll().bulkWrite(slice, { ordered }));
+      return { operations: slice.length, unsplit: sent.length > 0 && sent.every(n => n === slice.length) };
     }, { ordered: false });
-    assert.deepEqual(perSlice, [{ operations: ONE_COMMAND_MAX_OPERATIONS, deletes: 1 }, { operations: 1, deletes: 1 }],
+    assert.deepEqual(perSlice, [{ operations: ONE_COMMAND_MAX_OPERATIONS, unsplit: true }, { operations: 1, unsplit: true }],
       `the slices the module makes were sent as ${JSON.stringify(perSlice)}`);
     assert.deepEqual(await coll().find({}).toArray(), [{ _id: 'kept' }], 'a delete of an absent id removed something');
   });
@@ -137,9 +160,9 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     assert.ok(all.filter(c => ['insert', 'update', 'delete'].includes(c)).length >= 3, `one slice of three operation types was sent as ${JSON.stringify(all)}`);
     await coll().deleteMany({});
     const answers = await writeInOneCommands(mixed, async (slice, { ordered }) => {
-      const sent = await commandsDuring(() => coll().bulkWrite(slice, { ordered }));
-      return sent.filter(c => ['insert', 'update', 'delete'].includes(c)).length;
+      const sent = await batchesDuring(() => coll().bulkWrite(slice, { ordered }));
+      return sent.length > 0 && sent.every(n => n === slice.length);
     }, { ordered: false, commandKindOf: bulkCommandOf });
-    assert.deepEqual(answers, [1, 1, 1], `a slice of one operation type was sent as ${JSON.stringify(answers)} command(s)`);
+    assert.deepEqual(answers, [true, true, true], `a slice of one operation type was split by the driver: ${JSON.stringify(answers)}`);
   });
 });
