@@ -25,6 +25,7 @@ import {
 } from '../config/model-egress-policy.js';
 import { listUrlFor, type VlmWire } from '../files/converters/vlm-endpoint.js';
 import { log } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { providerSignature, getActiveProviderSignature } from '../files/media/worker.js';
 import { MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
@@ -892,7 +893,7 @@ mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => 
   }
 
   const result = await probeModelEndpoint({ baseUrl, model, apiKey, external, slot: target, ...(wire ? { wire } : {}) })
-    .catch(err => ({ ok: false, reachable: false, verdict: 'unreachable' as const, detail: err instanceof Error ? err.message : String(err), latencyMs: 0 }));
+    .catch(err => ({ ok: false, reachable: false, verdict: 'unreachable' as const, detail: caughtFailureText(err, 'probe a model endpoint'), latencyMs: 0 }));
   res.json({ target, external, model: model ?? null, ...result });
 });
 

@@ -25,6 +25,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { getDataRoot } from '../config/loader.js';
 import { log } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { activeSecret, encryptInPlace, isStoredEncrypted } from './stored-bytes.js';
 import { seedFileHash } from './manifest.js';
 import { getFileMeta } from './file-meta.js';
@@ -61,7 +62,7 @@ export function startAtRestMigration(): void {
   if (started) return;
   started = true;
   void runAtRestMigration().catch(err => {
-    state = { ...state, phase: 'stopped', stoppedBecause: err instanceof Error ? err.message : String(err) };
+    state = { ...state, phase: 'stopped', stoppedBecause: caughtFailureText(err, 'migrate stored files at rest') };
     log.error(`Files at rest: the background pass failed: ${state.stoppedBecause}`);
   });
 }

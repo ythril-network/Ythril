@@ -38,6 +38,7 @@ import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
 import { log } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
 
@@ -148,7 +149,7 @@ async function probeSidecar(s: (typeof SIDECARS)[number]): Promise<SidecarStatus
     if (res.ok) return { ...base, state: 'ok', latencyMs };
     return { ...base, state: 'down', latencyMs, detail: `HTTP ${res.status}` };
   } catch (err) {
-    return { ...base, state: 'down', latencyMs: Date.now() - started, detail: err instanceof Error ? err.message : String(err) };
+    return { ...base, state: 'down', latencyMs: Date.now() - started, detail: caughtFailureText(err, 'check a pipeline sidecar') };
   }
 }
 
@@ -410,7 +411,7 @@ async function probeModelStages(): Promise<ModelStageStatus[]> {
     // `/v1/models` first, which is right for four targets and wrong for the one whose base already
     // carries `/v1` — producing `/v1/v1/models` and a red dot over a working vision pipeline.
     const res = await probeModelEndpoint({ baseUrl: baseUrl!, apiKey, external, wire: group[0].wire, slot })
-      .catch(err => ({ reachable: false, verdict: 'unreachable' as const, detail: err instanceof Error ? err.message : String(err), latencyMs: 0 }));
+      .catch(err => ({ reachable: false, verdict: 'unreachable' as const, detail: caughtFailureText(err, 'probe a model endpoint'), latencyMs: 0 }));
     results.set(id, res);
   }));
 

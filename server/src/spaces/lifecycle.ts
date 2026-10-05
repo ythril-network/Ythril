@@ -903,6 +903,6 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
     }
   } catch (err) {
     log.error(`reconcilePendingSpaceOp for ${target} failed; marker kept for the next space op or restart: ${peerText(err)}`);
-    return { completed: false, reason: err instanceof Error ? err.message : String(err) };
+    return { completed: false, reason: caughtFailureText(err, 'resume an interrupted space operation') };
   }
 }
