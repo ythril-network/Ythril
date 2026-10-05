@@ -295,6 +295,18 @@ async function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<void
 const nextSweep = new Map<string, SpaceMeta>();
 const metaSweeps = createCoalescingRunner<void>();
 
+/**
+ * True when no meta sweep of `id` is running or queued. A run's rerun is registered synchronously in the runner's
+ * `finally`, so there is no instant between a run and its rerun at which this reads idle.
+ *
+ * It exists so a caller that must know the sweeps have STOPPED can ask, rather than infer it from an effect: waiting
+ * for one run's effect returned while a rerun queued behind it was still to read, and a count of runs taken in the
+ * next window included it (a-meta-write-sweeps-once-wherever-it-lands-db, 2026-10-05).
+ */
+export function metaSweepIdle(id: string): boolean {
+  return !metaSweeps.isRunning(id) && !nextSweep.has(id);
+}
+
 /** One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once. */
 async function sweepLatestMeta(id: string): Promise<void> {
   await new Promise<void>(resolve => setImmediate(resolve));

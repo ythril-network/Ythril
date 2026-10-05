@@ -33,8 +33,9 @@
  * **The window is closed by the sweep, not by a pause.** A negative assertion ("no second run") needs the runs to have
  * stopped, and a fixed sleep proves only that a slow one had not started yet. So after the change under test the case
  * writes a SETTLING meta and waits for its own effect: a stranded vector on a flagged FILE, the last kind a run sweeps.
- * Runs of one space are serial, so by the time that vector is gone every run the change asked for has read every
- * collection. The settling write is itself one run, which the count states.
+ * Runs of one space are serial, but a rerun can be queued behind the run that removed it, so the case then also waits
+ * for the sweep to be idle; only then has every run the change asked for read every collection. The settling write
+ * is itself one run, which the count states.
  *
  * ## Where a meta write lands
  *
@@ -66,7 +67,7 @@ const N1 = 'metasweep-net-1';
 const N2 = 'metasweep-net-2';
 const network = (id) => ({ id, label: id, type: 'closed', spaces: [L], members: [], votes: [], votingDeadlineHours: 24 });
 
-let door, spaces, effective, layerActs, config, RECORD_SUPPRESS_FIELD;
+let door, spaces, effective, layerActs, config, sweep, RECORD_SUPPRESS_FIELD;
 
 const VECTOR = { embedding: [0.1, 0.2, 0.3], embeddingModel: 'test-model' };
 const fact = (_id, type, space = S) => ({ _id, spaceId: space, type, fact: `fact ${_id}`, tags: [], seq: 1, ...VECTOR });
@@ -88,8 +89,11 @@ const until = async (check, what) => assert.ok(await eventually(check, SWEEP_DEA
  * Every run the sweep has made for `space` has finished reading, and the sweep is idle.
  *
  * A write of the space's meta (unchanged) asks for one more run; the run clears the vector of a FILE that carries its
- * own flag, the last kind a run sweeps, and the helper waits for that. Runs of one space are serial, so what ran before
- * this one has already read every collection. It is ONE run of its own, which a caller counting runs subtracts.
+ * own flag, the last kind a run sweeps, and the helper waits for that — and then for the sweep to be IDLE
+ * (`metaSweepIdle`). The effect alone was not enough: if the settling write landed while an earlier run was still
+ * reading, it queued a rerun behind it, that run removed the vector, and the rerun read the chrono collection inside
+ * the next case's window, which then counted two runs for one change (2026-10-05, a full run under load). It is ONE
+ * run of its own, which a caller counting runs subtracts.
  */
 let settlingRows = 0;
 async function sweepsSettled(space) {
@@ -98,6 +102,7 @@ async function sweepsSettled(space) {
   spaces.updateSpace(space, { meta: { ...config.getConfig().spaces.find(s => s.id === space).meta } });
   await until(async () => (await door.coll(space, 'files').findOne({ _id: id }))?.embedding === undefined,
     'the settling sweep did not remove the flagged file\'s vector');
+  await until(() => sweep.metaSweepIdle(space), 'the sweep did not go idle after the settling run');
 }
 
 /**
@@ -135,6 +140,7 @@ describe('a meta write sweeps once, wherever it lands', { skip }, () => {
     effective = await import('../../server/dist/spaces/effective-meta.js');
     layerActs = await import('../../server/dist/spaces/schema-layers-acts.js');
     config = await import('../../server/dist/config/loader.js');
+    sweep = await import('../../server/dist/brain/suppression-sweep.js');
     ({ RECORD_SUPPRESS_FIELD } = await import('../../server/dist/brain/record-flag.js'));
   });
   after(async () => { await door?.close(); });
