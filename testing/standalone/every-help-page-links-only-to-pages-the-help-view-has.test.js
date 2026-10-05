@@ -217,6 +217,22 @@ describe('the pages the Help view renders, and what it does with their links', (
       'no fragmentless sibling link was found: the case this test is about is not exercised');
   });
 
+  it('every part anchor keeps an accessible name through the sanitizer: it is what a link to the part moves focus to (round X, W3)', () => {
+    let anchors = 0;
+    const nameless = [];
+    for (const guide of guides.filter(g => g.parts)) {
+      const files = renderedPagesOf(guide);
+      const doc = renderedDocumentOf(joinHelpParts(files.map(f => read(`docs/${f}`)), files));
+      for (const part of guide.parts) {
+        const anchor = [...doc.querySelectorAll('[id]')].find(n => n.id === partAnchorId(part));
+        anchors++;
+        if (!anchor || !(anchor.getAttribute('aria-label') ?? '').trim() || anchor.getAttribute('role') !== 'group') nameless.push(`${guide.id}: ${part}`);
+      }
+    }
+    assert.ok(anchors >= 20, `only ${anchors} part anchor(s) checked`);
+    assert.deepEqual(nameless, [], 'a part anchor has lost its name or role in the sanitized document: focus would land on an element a screen reader cannot name');
+  });
+
   it('no heading of any guide loses its id to the sanitizer (`## Links` was `id=""`: it is a property of `document`)', () => {
     let headings = 0;
     const lost = [];

@@ -25,6 +25,8 @@ function setup(opts: { doc?: string | null; fragment?: string | null; get?: unkn
   const get = opts.get ?? vi.fn(() => of('# Title\n\nbody'));
   const navigate = vi.fn(() => Promise.resolve(true));
   const render = opts.render ?? ((t: string) => Promise.resolve(`<p>${t}</p>`));
+  /** The route's `fragment`: what the URL carries now, which can change while the view is open (Back, a pasted link). */
+  const fragment$ = new Subject<string | null>();
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [HelpComponent, getTranslocoModule()],
@@ -33,13 +35,14 @@ function setup(opts: { doc?: string | null; fragment?: string | null; get?: unkn
       { provide: MarkdownRenderService, useValue: { render } },
       { provide: ActivatedRoute, useValue: {
         snapshot: { queryParamMap: { get: () => opts.doc ?? null }, fragment: opts.fragment ?? null },
+        fragment: fragment$.asObservable(),
       } },
       { provide: Router, useValue: { navigate } },
     ],
   });
   const f = TestBed.createComponent(HelpComponent);
   f.detectChanges();  // ngOnInit
-  return { f, c: f.componentInstance, get: get as ReturnType<typeof vi.fn>, navigate };
+  return { f, c: f.componentInstance, get: get as ReturnType<typeof vi.fn>, navigate, fragment$ };
 }
 
 /** Click the first anchor in the rendered article and return the event, so callers can check preventDefault. */
@@ -209,8 +212,8 @@ describe('HelpComponent', () => {
         // The parts are one joined document, so the page a link names is already on screen — far away. A click that kept
         // the reader where they were was a silent no-op: not a dead tab any more, and not a link either.
         const guideHtml = '<a href="LINK">go</a>'
-          + `<div id="${partAnchorId('integration-guide/02-hosting.md')}"></div><h2 id="hosting">Hosting</h2><p>x</p>`
-          + `<div id="${partAnchorId('integration-guide/04-brain-api.md')}"></div><h2 id="brain">Brain</h2>`;
+          + `<div id="${partAnchorId('integration-guide/02-hosting.md')}" role="group" aria-label="Hosting"></div><p>A part may open with prose before its first heading.</p><h2 id="hosting">Hosting</h2><p>x</p>`
+          + `<div id="${partAnchorId('integration-guide/04-brain-api.md')}" role="group" aria-label="Brain API"></div><h2 id="brain">Brain</h2>`;
 
         const clickWith = async (href: string, doc = 'integration-guide') => {
           const s = setup({ render: () => Promise.resolve(guideHtml.replace('LINK', href)), doc });
@@ -228,20 +231,31 @@ describe('HelpComponent', () => {
           return { s, ev, scrolled, opened, root };
         };
 
-        it('a sibling part with no fragment scrolls to the start of that part and moves focus to its heading', async () => {
+        it('a sibling part with no fragment scrolls to the start of that part and moves focus to the PART ANCHOR, not past its opening prose (round X, W3)', async () => {
           const { ev, scrolled, opened, root } = await clickWith('02-hosting.md');
           expect(ev.defaultPrevented).toBe(true);
           expect(opened).toEqual([]);
           expect(scrolled).toEqual([partAnchorId('integration-guide/02-hosting.md')]);
-          const heading = root.querySelector<HTMLElement>('#hosting')!;
-          expect(document.activeElement).toBe(heading);
-          expect(heading.getAttribute('tabindex')).toBe('-1');
+          const anchor = root.querySelector<HTMLElement>(`[id="${partAnchorId('integration-guide/02-hosting.md')}"]`)!;
+          expect(document.activeElement).toBe(anchor);
+          expect(anchor.getAttribute('tabindex')).toBe('-1');
+          expect(anchor.getAttribute('aria-label')).toBeTruthy();   // a focused element with no name announces nothing
         });
 
         it('another sibling part is another place', async () => {
           const { scrolled, root } = await clickWith('04-brain-api.md');
           expect(scrolled).toEqual([partAnchorId('integration-guide/04-brain-api.md')]);
-          expect(document.activeElement).toBe(root.querySelector('#brain'));
+          expect(document.activeElement).toBe(root.querySelector(`[id="${partAnchorId('integration-guide/04-brain-api.md')}"]`));
+        });
+
+        it('a part link updates the URL to the anchor of the part, as a #fragment link does, so reload and Back keep the place (round X, W3)', async () => {
+          const { s } = await clickWith('02-hosting.md');
+          expect(s.navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { doc: 'integration-guide' }, fragment: partAnchorId('integration-guide/02-hosting.md') }));
+        });
+
+        it('the guide itself in the same guide clears the URL fragment: the top is the place', async () => {
+          const { s } = await clickWith('../integration-guide.md');
+          expect(s.navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { doc: 'integration-guide' }, fragment: undefined }));
         });
 
         it('the guide itself (`../integration-guide.md`) scrolls to the top of the document and focuses its first heading', async () => {
@@ -271,6 +285,33 @@ describe('HelpComponent', () => {
         it('a link whose target is not in the document moves nothing and throws nothing', async () => {
           const { scrolled } = await clickWith('#nowhere');
           expect(scrolled).toEqual([]);
+        });
+      });
+
+      describe('a link into ANOTHER guide with no fragment (round X, W3)', () => {
+        // Opening a guide removes the article the focused link sat in, so focus falls to the body. A link with a fragment already
+        // moved focus to its heading; one without lands at the top of the new guide and must do the same, or the keyboard and the
+        // screen-reader reader are left on nothing. A guide merely OPENED (the first load, the index) is not a link and moves nothing.
+        const guideHtml = '<a href="../integration-guide.md">go</a><h2 id="first">First</h2><h2 id="second">Second</h2>';
+        const settle = async (f: { detectChanges(): void }) => { await new Promise(r => setTimeout(r, 0)); f.detectChanges(); };
+
+        it('moves focus to the first heading of that guide once it has rendered', async () => {
+          const s = setup({ doc: 'userguide', render: () => Promise.resolve(guideHtml) });
+          await settle(s.f);
+          clickLink(s.f);
+          await settle(s.f);
+          expect(s.c.active()).toBe('integration-guide');
+          expect(document.activeElement).toBe((s.f.nativeElement as HTMLElement).querySelector('#first'));
+        });
+
+        it('a guide that is only opened (first load, or the index) does not take focus', async () => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          const s = setup({ doc: 'userguide', render: () => Promise.resolve(guideHtml) });
+          await settle(s.f);
+          expect(document.activeElement).toBe(document.body);
+          s.c.open('integration-guide');
+          await settle(s.f);
+          expect(document.activeElement).toBe(document.body);
         });
       });
 
@@ -356,6 +397,83 @@ describe('HelpComponent', () => {
       await flush();
       s.f.detectChanges();
       expect(heading()).toBeTruthy();
+    });
+
+    describe('the URL fragment changing while the view is open (round X, W3)', () => {
+      // The fragment used to be read once, in ngOnInit: a pasted link, Back, or another control pointing at this view with a new
+      // fragment changed the URL and nothing else. It is a route observable, and a change scrolls and focuses like a link click.
+      const html = '<a href="#brain">go</a><h2 id="hosting">Hosting</h2><h2 id="brain">Brain</h2>';
+      const opened = async (extra: Record<string, unknown> = {}) => {
+        const s = withHtml(html, extra);
+        await flush();
+        s.f.detectChanges();
+        const root = s.f.nativeElement as HTMLElement;
+        const scrolls: string[] = [];
+        for (const el of Array.from(root.querySelectorAll<HTMLElement>('.doc article [id]'))) el.scrollIntoView = vi.fn(() => { scrolls.push(el.id); });
+        return { ...s, root, scrolls };
+      };
+
+      it('a new fragment scrolls to its heading and focuses it', async () => {
+        const s = await opened();
+        s.fragment$.next('brain');
+        expect(s.scrolls).toEqual(['brain']);
+        expect(document.activeElement).toBe(s.root.querySelector('#brain'));
+      });
+
+      it('the fragment this view just wrote to the URL itself is not acted on twice', async () => {
+        const s = await opened();
+        clickLink(s.f);                         // #brain: scrolled once, URL written
+        expect(s.scrolls).toEqual(['brain']);
+        s.fragment$.next('brain');              // the router echoing it back
+        expect(s.scrolls).toEqual(['brain']);
+        s.fragment$.next('hosting');            // a real change
+        expect(s.scrolls).toEqual(['brain', 'hosting']);
+      });
+
+      it('the fragment the view was opened with is not acted on a second time when the route announces it', async () => {
+        const s = await opened({ fragment: 'hosting' });
+        const before = s.scrolls.length;
+        s.fragment$.next('hosting');
+        expect(s.scrolls.length).toBe(before);
+      });
+
+      it('no fragment, or one that matches nothing, moves nothing and throws nothing', async () => {
+        const s = await opened();
+        s.fragment$.next(null);
+        s.fragment$.next('nowhere');
+        expect(s.scrolls).toEqual([]);
+        expect(s.c.error()).toBe('');
+      });
+
+      it('a fragment that arrives while the guide is still loading is applied once it has rendered', async () => {
+        let release!: (html: string) => void;
+        const s = setup({ render: () => new Promise<string>(resolve => { release = resolve; }) });
+        await flush();
+        expect(s.c.loading()).toBe(true);
+        s.fragment$.next('brain');
+        release(html);
+        await new Promise(r => setTimeout(r, 0));
+        s.f.detectChanges();
+        expect(s.c.loading()).toBe(false);
+        expect(document.activeElement).toBe((s.f.nativeElement as HTMLElement).querySelector('#brain'));
+      });
+
+      it('stops listening when the view goes away', async () => {
+        const s = await opened();
+        s.f.destroy();
+        expect(() => s.fragment$.next('brain')).not.toThrow();
+        expect(s.fragment$.observed).toBe(false);
+      });
+    });
+
+    describe('the element that takes focus shows it to a keyboard user (round X, W3)', () => {
+      it('the view styles :focus-visible on what it focuses by script ([tabindex="-1"]): headings and part anchors', async () => {
+        const s = withHtml('<h2 id="a">A</h2>');
+        await flush();
+        s.f.detectChanges();
+        const css = Array.from(document.querySelectorAll('style')).map(n => n.textContent ?? '').join('\n');
+        expect(css).toMatch(/\[tabindex="-1"\]:focus-visible\s*\{[^}]*outline:\s*2px solid/);
+      });
     });
 
     it('a fragment matching no heading leaves the reader at the top rather than throwing', async () => {

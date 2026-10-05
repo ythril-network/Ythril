@@ -11,10 +11,13 @@
  *   server restarted reported none of them, and one that swallowed none failed the first time a connection was refused;
  * - **whether a probe that never answers can outlast the deadline** — a `before` hook awaiting a hung request never
  *   ended, so the file was cancelled by its own parent instead of failing at the deadline with a name;
+ * - **whether a diagnosis that never answers can keep a FAILED wait from failing** — a `diagnose` that reads what a lock holds
+ *   (a counter whose write is stalled) was awaited with no bound, so the failure never came and the test ended at the
+ *   runner's own timeout with a message about the runner (round W, V10; decided here in round X, W2);
  * - **whether a timer is left armed** — a deadline timer not cleared when the wait returned held the process open
  *   for the rest of the budget.
  *
- * This module is the one place those four are decided. `a-poll-is-written-once` is how a copy does not come back: a
+ * This module is the one place those five are decided. `a-poll-is-written-once` is how a copy does not come back: a
  * loop with a deadline, a sleep and a condition that is not in this file says why it waits differently or fails.
  * `settleWithin` (`standalone/_write-faults.mjs`) is the other question — nothing may arrive during a window — and
  * stays its own function, not a flag here. {@link holdsWithin} (a verdict instead of a throw), {@link waitForValue}
@@ -34,7 +37,10 @@
  *                wait that held at once.
  * - `diagnose`   a string, or a function (sync or async) returning one, appended to the timeout message after
  *                ` — `. AWAITED, so a diagnostic may go and look at something: the sender's watermark, the record's
- *                state. It used to be called synchronously and interpolated a promise as `[object Promise]`.
+ *                state. It used to be called synchronously and interpolated a promise as `[object Promise]`. It is BOUNDED
+ *                by {@link DIAGNOSE_MS} (`diagnoseMs` for a caller that knows better): one that does not answer in time is
+ *                reported as such, and one that throws is reported with its message — neither replaces the timeout.
+ * - `diagnoseMs` the bound on `diagnose` (default {@link DIAGNOSE_MS}).
  * - `what`       the phrase completing "waiting for …". A timeout then names it and the LAST VALUE the condition
  *                returned, or that the last probe threw, or was still pending at the deadline. Without it the
  *                message stays `waitFor timed out after Nms`, the shape existing pins read.
@@ -59,6 +65,12 @@ export const WAIT_TIMING_ENV = 'YTHRIL_TEST_WAIT_TIMING_FILE';
 
 /** Above this share of the budget, a PASS is worth reporting: it is one slow runner from being a failure. */
 const TIGHT_MARGIN = 0.6;
+
+/**
+ * How long a failed wait gives its `diagnose` to answer before saying it did not. Short on purpose: a diagnosis is a look at
+ * where things stand, and one that needs longer is waiting on the thing that failed.
+ */
+export const DIAGNOSE_MS = 2_000;
 
 /** What a probe that outlasted the deadline resolves to in the race against it. Never a value a condition returns. */
 const DEADLINE = Symbol('the deadline came first');
@@ -119,6 +131,25 @@ function showReading(value) {
 export class WaitTimeout extends Error {}
 
 /**
+ * What a failed wait says about WHY: `diagnose` as a string, or what the function answers within `ms`. A diagnosis that does not
+ * answer in time, or throws, is said so in its place — it never keeps the wait from failing or replaces the failure with its own.
+ */
+async function diagnosisOf(diagnose, ms) {
+  if (typeof diagnose !== 'function') return diagnose;
+  let timer;
+  try {
+    const asked = Promise.resolve().then(() => diagnose());
+    asked.catch(() => {}); // abandoned at the bound, it may still reject later; nobody is left to hear it
+    const answer = await Promise.race([asked, new Promise((resolve) => { timer = setTimeout(() => resolve(DEADLINE), ms); })]);
+    return answer === DEADLINE ? `the diagnosis did not answer within ${ms}ms` : answer;
+  } catch (error) {
+    return `the diagnosis threw: ${error?.message ?? String(error)}`;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Wait until `condition` holds, or throw saying what never did.
  *
  * Each probe is raced against the time that is left, so a probe that never answers ends the wait at its deadline
@@ -128,11 +159,11 @@ export class WaitTimeout extends Error {}
  * @param {number} [timeout]  ms
  * @param {number} [interval] ms between probes
  * @param {string | (() => string | undefined | Promise<string | undefined>)} [diagnose]
- * @param {{ what?: string, thinMargin?: boolean, tolerate?: (error: unknown) => boolean }} [options]
+ * @param {{ what?: string, thinMargin?: boolean, tolerate?: (error: unknown) => boolean, diagnoseMs?: number }} [options]
  * @returns {Promise<true>}
  */
 export async function waitFor(condition, timeout = 15_000, interval = 500, diagnose, options = {}) {
-  const { what, thinMargin = false, tolerate } = options;
+  const { what, thinMargin = false, tolerate, diagnoseMs = DIAGNOSE_MS } = options;
   const start = Date.now();
   const deadline = start + timeout;
   let last = { kind: 'value', value: undefined };
@@ -171,7 +202,7 @@ export async function waitFor(condition, timeout = 15_000, interval = 500, diagn
   }
 
   record({ what, ms: Date.now() - start, held: false });
-  const detail = typeof diagnose === 'function' ? await diagnose() : diagnose;
+  const detail = await diagnosisOf(diagnose, diagnoseMs);
   const lastSaid = last.kind === 'threw' ? `last probe threw: ${last.message}`
     : last.kind === 'pending' ? 'last probe still pending'
       : `last value: ${show(last.value)}`;

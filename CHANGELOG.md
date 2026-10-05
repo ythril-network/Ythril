@@ -375,7 +375,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   driver itself cuts a batch there) and 16 MiB, so a set under those limits is the one command it was before; a bulk that
   mixes inserts, updates and deletes is sliced by type, in the order the driver sends them (inserts, updates, deletes),
   because the driver sends one command per type, and an unordered one still attempts every chunk and reports every chunk
-  that failed in one error, whose cause is the first failure. The entity merge writes its relinked edges, files and links in
+  that failed in one error, whose cause is the failure that ended the write when the store or a bound did (so a duplicate
+  key followed by a timeout is answered as the retryable `503`, not as a `400`) and otherwise the first failure. The entity merge writes its relinked edges, files and links in
   its transaction, which the server aborts at the first error, so it stops at the first failed chunk and answers with that
   failure as the driver would. When the client backstop does end a write, the log line now says which collection and space it was, and
   the server warns once at boot if `MONGO_URI` carries a `socketTimeoutMS` below the write bound, which the server
@@ -1031,6 +1032,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `user-content-` form of the id, and a link to `#links` finds it. A heading with an `&` in it (`## Duplicate Scanner & Action Rules`)
     got the id `…-amp-…` instead of the GitHub one every link and help control uses, so linking to it scrolled nowhere;
     the id is now slugged from the heading's text. The gate now replays both rules over every link and `#anchor`.
+    A link inside a guide also writes its place to the URL (so a reload and Back keep it); keyboard focus lands on the
+    part's own anchor, named with the part's title, rather than on the first heading after it; a link into another guide
+    with no place in it takes focus to that guide's first heading; and a change of the URL's `#fragment` while Help is
+    open scrolls and focuses like a link click.
   - The suite READMEs and the contribution guide no longer carry hand-written file lists or container counts.
 - **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
   dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after

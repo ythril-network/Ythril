@@ -39,12 +39,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { BSON, MongoBulkWriteError, MongoServerError } from 'mongodb';
+import { BSON, MongoBulkWriteError, MongoNetworkError, MongoServerError } from 'mongodb';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
 import { MONGO_MAX_WRITE_BATCH_SIZE, ONE_COMMAND_BYTES, ONE_COMMAND_MAX_OPERATIONS, SlicedBulkWriteError, bulkCommandOf, inOneCommandChunks, writeInOneCommands } from '../../server/dist/db/one-command.js';
 import { classifyReadFailure } from '../../server/dist/brain/store-failure.js';
+import { isWriteTimeout } from '../../server/dist/db/write-timeout.js';
 import { ROWS_PER_BULK_COMMAND } from '../../server/dist/util/chunks.js';
 import { READ_CHUNK } from '../../server/dist/db/read-by-id.js';
 import { BULK_MAX_PER_TYPE } from '../../server/dist/brain/bulk.js';
@@ -133,20 +134,29 @@ describe('writeInOneCommands', () => {
     // The real bulk classes of the installed driver over a topology that reports the server's limits, as `hello` does. This is
     // the premise the constant is derived from; `a-bounded-bulk-write-is-one-command-db` repeats it against a real server.
     const mongodbDir = dirname(createRequire(import.meta.url).resolve('mongodb/package.json'));
-    const driver = (file) => createRequire(import.meta.url)(join(mongodbDir, 'lib', 'bulk', file));
-    const { BatchType } = driver('common.js');
     const topology = { lastHello: () => ({ maxBsonObjectSize: MAX_BSON_OBJECT_SIZE, maxWriteBatchSize: MONGO_MAX_WRITE_BATCH_SIZE }), s: { options: {} } };
     const collection = () => ({ db: { options: {}, s: { client: { topology } } }, s: { namespace: { db: 'x', collection: 'y' } }, client: { topology }, fullNamespace: {} });
+    // The row reads the driver's INTERNALS (`@internal`: the bulk classes by file path, their `s` state). A driver release that moves
+    // them must fail with the premise NAMED, not with a TypeError from the middle of a batching loop (round X, W4).
+    const MOVED = 'the driver\'s bulk batching internals moved: re-derive the one-command cap against bulk/ordered.js and unordered.js';
+    const driver = (file) => {
+      try { return createRequire(import.meta.url)(join(mongodbDir, 'lib', 'bulk', file)); } catch (error) { return assert.fail(`${MOVED} (lib/bulk/${file} does not load: ${error.message})`); }
+    };
+    const { BatchType } = driver('common.js');
+    assert.ok(BatchType && BatchType.INSERT !== undefined, `${MOVED} (common.js has no BatchType.INSERT)`);
     const batchesOf = (Class, finalBatches, n) => {
       const bulk = new Class(collection(), {});
       for (let i = 0; i < n; i++) bulk.addToOperationsList(BatchType.INSERT, { _id: i });
       return finalBatches(bulk).filter(Boolean).map(b => b.operations.length);
     };
-    for (const [file, name, finalBatches] of [
-      ['ordered.js', 'OrderedBulkOperation', (b) => [...b.s.batches, b.s.currentBatch]],
-      ['unordered.js', 'UnorderedBulkOperation', (b) => [...b.s.batches, b.s.currentInsertBatch]],
-    ]) {
+    for (const [file, name, current] of [['ordered.js', 'OrderedBulkOperation', 'currentBatch'], ['unordered.js', 'UnorderedBulkOperation', 'currentInsertBatch']]) {
       const Class = driver(file)[name];
+      assert.equal(typeof Class, 'function', `${MOVED} (${file} exports no ${name})`);
+      assert.equal(typeof Class.prototype.addToOperationsList, 'function', `${MOVED} (${name}.addToOperationsList is gone)`);
+      const probe = new Class(collection(), {});
+      assert.ok(Array.isArray(probe.s?.batches), `${MOVED} (${name} keeps no s.batches array)`);
+      assert.ok(current in probe.s, `${MOVED} (${name} keeps no s.${current})`);
+      const finalBatches = (bulk) => [...bulk.s.batches, bulk.s[current]];
       assert.deepEqual(batchesOf(Class, finalBatches, ONE_COMMAND_MAX_OPERATIONS), [ONE_COMMAND_MAX_OPERATIONS], `${name}: a slice of the cap is not one batch`);
       assert.equal(batchesOf(Class, finalBatches, ONE_COMMAND_MAX_OPERATIONS + 1).length, 2, `${name}: one operation more is not a second batch, so the cap could be higher`);
     }
@@ -156,6 +166,20 @@ describe('writeInOneCommands', () => {
     let calls = 0;
     for (const ordered of [true, false]) assert.deepEqual(await writeInOneCommands([], async () => { calls++; }, { ordered }), []);
     assert.equal(calls, 0, 'the write was called for nothing');
+  });
+
+  it('`maxItems` is refused the same way with and without `commandKindOf`, an empty list included (round X, W5)', async () => {
+    const kind = () => 'insert';
+    for (const maxItems of [0, -1, 1.5, NaN, '10']) {
+      for (const [label, extra] of [['without commandKindOf', {}], ['with commandKindOf', { commandKindOf: kind }]]) {
+        for (const items of [[], docs(3)]) {
+          let calls = 0;
+          await assert.rejects(writeInOneCommands(items, async () => { calls++; }, { ordered: false, maxItems, ...extra }), /maxItems/,
+            `${label}, ${items.length} items, maxItems ${String(maxItems)}: accepted`);
+          assert.equal(calls, 0, `${label}: a slice was written before maxItems was refused`);
+        }
+      }
+    }
   });
 
   it('`ordered` is required: a caller cannot get a default it did not choose', async () => {
@@ -175,7 +199,7 @@ describe('writeInOneCommands', () => {
   describe('a slice that fails', () => {
     /** The driver's per-operation failure: a `MongoBulkWriteError` carrying `writeErrors` (a duplicate key, a refusal). */
     const operationFailure = (n) => new MongoBulkWriteError({ message: `E11000 duplicate key ${n}`, code: 11000, writeErrors: [{ index: 0, code: 11000, errmsg: `dup ${n}` }] }, {});
-    const networkFailure = () => Object.assign(new Error('connection reset'), { name: 'MongoNetworkError' });
+    const networkFailure = () => new MongoNetworkError('connection reset'); // the driver's own class: a door classifies by it, not by a name
 
     it('ORDERED: stops the rest and rejects with its own error — the slices before it landed', async () => {
       let calls = 0;
@@ -201,7 +225,7 @@ describe('writeInOneCommands', () => {
       assert.ok(err instanceof SlicedBulkWriteError, `rejected with ${err?.constructor?.name}`);
       assert.deepEqual(err.failures.map(f => [f.slice, f.error]), [[0, e1], [2, e3]], 'the error does not carry every failure, in slice order');
       assert.deepEqual(err.landed.map(l => [l.slice, l.answer]), [[1, 'landed 2'], [3, 'landed 4'], [4, 'landed 5']], 'the error does not say what landed');
-      assert.equal(err.cause, e1, 'the first failure is the cause, so a classifier looking through the wrapper reads the driver\'s error');
+      assert.equal(err.cause, e1, 'with nothing stopping the write, the first failure is the cause, so a classifier looking through the wrapper reads the driver\'s error');
       assert.match(err.message, /2 of 5 slices/);
     });
 
@@ -219,7 +243,7 @@ describe('writeInOneCommands', () => {
       assert.equal(calls, 2, 'a slice was written after the store failed');
     });
 
-    it('UNORDERED: a store failure after an operation failure still stops, and the one error carries both with the FIRST as its cause', async () => {
+    it('UNORDERED: a store failure after an operation failure still stops, and the one error carries both with the STOPPING failure as its cause', async () => {
       let calls = 0;
       const e1 = operationFailure(1);
       const down = networkFailure();
@@ -231,26 +255,59 @@ describe('writeInOneCommands', () => {
       assert.equal(calls, 2);
       assert.ok(err instanceof SlicedBulkWriteError);
       assert.deepEqual(err.failures.map(f => f.error), [e1, down]);
-      assert.equal(err.cause, e1, 'the first failure explains the rest (a later one can be its consequence); the last is never the cause');
+      assert.equal(err.cause, down, 'the failure that ENDED the write is the cause when it is the store\'s; the dup key before it is in `failures`');
     });
 
-    it('UNORDERED in a transaction: a dup key in slice 1 and an aborted-transaction error in slice 2 answers as the DUP KEY (400), not a retryable 503', async () => {
-      // Any error inside a transaction aborts it on the server, so the slice after a failed one is sent into a dead
-      // transaction and fails `NoSuchTransaction` (a TransientTransactionError). That is the CONSEQUENCE; the dup key is the cause.
-      const dup = operationFailure(1);
-      const aborted = new MongoServerError({ message: 'Transaction 1 has been aborted.', code: 251, codeName: 'NoSuchTransaction', errorLabels: ['TransientTransactionError'] });
-      const raw = classifyReadFailure(dup);
-      assert.equal(raw.status, 400, `the premise: a raw dup key is a 400 (${JSON.stringify(raw)})`);
-      let calls = 0;
-      const err = await writeInOneCommands(docs(30), async () => {
-        const k = ++calls;
-        if (k === 1) throw dup;
-        if (k === 2) throw aborted;
-      }, { ordered: false, maxItems: 10 }).then(() => null, (x) => x);
-      assert.ok(err instanceof SlicedBulkWriteError);
-      const wrapped = classifyReadFailure(err);
-      assert.equal(wrapped.status, raw.status, `the wrapped error answered ${JSON.stringify(wrapped)}, the raw one ${JSON.stringify(raw)}`);
-      assert.equal(wrapped.retryable ?? false, raw.retryable ?? false);
+    describe('what a door answers for the wrapper is what ended the write (round X, W1)', () => {
+      // `errorChain` follows `cause` only, so the cause decides the answer a door gives. The failure that STOPPED the write (a bound,
+      // a store failure) is retryable (503) and the caller must be told so; a per-operation failure is the caller's (400). A
+      // dup key first and a timeout second used to be answered 400 — a sender told not to retry what a retry would have landed.
+      const bulkTimeout = () => new MongoBulkWriteError({ message: 'Timed out during socket read', code: 50, writeErrors: [{ index: 0, code: 50, errmsg: 'x' }] }, {});
+      const serverDeadline = () => new MongoServerError({ message: 'operation exceeded time limit', code: 50, codeName: 'MaxTimeMSExpired' });
+      const runWith = async (failures) => {
+        let calls = 0;
+        return writeInOneCommands(docs(30), async () => { const f = failures[calls++]; if (f) throw f; }, { ordered: false, maxItems: 10 })
+          .then(() => null, (x) => x);
+      };
+
+      it('a dup key, then a bound ending the write: answered as the bound (retryable 503), through errorChain', async () => {
+        const dup = operationFailure(1);
+        assert.equal(classifyReadFailure(dup).status, 400, 'the premise: a raw dup key is a 400');
+        for (const stop of [bulkTimeout(), serverDeadline()]) {
+          const err = await runWith([dup, stop]);
+          assert.ok(err instanceof SlicedBulkWriteError);
+          assert.ok(isWriteTimeout(err), `${stop.message}: the wrapper does not read as a bound ending the write`);
+          const answer = classifyReadFailure(err);
+          assert.equal(answer.status, 503, `answered ${JSON.stringify(answer)}`);
+          assert.equal(answer.retryable, true);
+        }
+      });
+
+      it('a dup key, then the store going away: answered as the store (retryable 503)', async () => {
+        const err = await runWith([operationFailure(1), networkFailure()]);
+        assert.ok(err instanceof SlicedBulkWriteError);
+        const answer = classifyReadFailure(err);
+        assert.equal(answer.status, 503, `answered ${JSON.stringify(answer)}`);
+        assert.equal(answer.retryable, true);
+      });
+
+      it('a dup key, then another dup key: still the first (400 duplicate key)', async () => {
+        const dup = operationFailure(1);
+        const err = await runWith([dup, operationFailure(2)]);
+        assert.ok(err instanceof SlicedBulkWriteError);
+        assert.equal(err.cause, dup);
+        const answer = classifyReadFailure(err);
+        assert.equal(answer.status, classifyReadFailure(dup).status, `the wrapper answered ${JSON.stringify(answer)}`);
+        assert.equal(answer.status, 400);
+        assert.equal(answer.retryable ?? false, false);
+      });
+
+      it('a dup key and a later slice that lands: the dup key, as before', async () => {
+        const dup = operationFailure(1);
+        const err = await runWith([dup]);
+        assert.equal(err.cause, dup);
+        assert.equal(classifyReadFailure(err).status, 400);
+      });
     });
 
     it('UNORDERED: a bulk error that is a write concern failure or a timeout is the store\'s, not an operation\'s', async () => {

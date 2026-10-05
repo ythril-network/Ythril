@@ -11,7 +11,8 @@
  * The markdown goes through `MarkdownRenderService` — the same sanitizing pipeline as the Files preview,
  * because the sanitization rules are a security boundary and a second copy is a second place to drift.
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { from, firstValueFrom } from 'rxjs';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -23,7 +24,7 @@ import { MdScrollersDirective } from '../../shared/md-scrollers.directive';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { httpErrorReason } from '../../core/http-error';
 import { elementIdsFor } from '../../shared/heading-slug';
-import { guideDir, joinHelpParts, landingOf, renderedPagesOf, resolveHelpLink } from './help-links';
+import { guideDir, isPartAnchorId, joinHelpParts, landingOf, renderedPagesOf, resolveHelpLink } from './help-links';
 
 /**
  * The guides this page offers, in reading order.
@@ -209,6 +210,10 @@ export type HelpDocId = typeof HELP_DOCS[number]['id'];
     .doc ::ng-deep pre { background: var(--bg-elevated); border: 1px solid var(--border-muted); border-radius: 8px; padding: 12px 14px; }
     .doc ::ng-deep blockquote { margin: 14px 0; padding: 2px 14px; border-left: 3px solid var(--accent); color: var(--text-secondary); }
     .doc ::ng-deep hr { border: 0; border-top: 1px solid var(--border-muted); margin: 26px 0; }
+    /* What a link moves focus to is a heading or an empty part anchor, both tabindex -1. Without an explicit rule the ring
+       depends on the browser default for a script-focused element; this one shows for a keyboard user (focus-visible) and
+       not for a mouse click. */
+    .doc ::ng-deep [tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
     .loading { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: 13px; }
   `],
@@ -254,6 +259,16 @@ export class HelpComponent implements OnInit {
   private markdown = inject(MarkdownRenderService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
+
+  /**
+   * The fragment the URL carries as far as this view knows: what it was opened with, what it wrote itself (`syncUrl`), or what the
+   * route last announced. A route announcement equal to it is the echo of our own navigation, or the fragment already acted
+   * on, and is not acted on again; a different one is a change from outside (Back, a pasted link) and is (`onUrlFragment`).
+   */
+  private urlFragment: string | undefined;
+  /** Where the guide being loaded lands once it has rendered: a fragment, or the top of it (a link into the guide), or nowhere (merely opened). */
+  private landing: { fragment: string | undefined; top: boolean } = { fragment: undefined, top: false };
 
   readonly active = signal<HelpDocId>(HELP_DOCS[0].id);
   readonly loading = signal(true);
@@ -269,19 +284,39 @@ export class HelpComponent implements OnInit {
     // help control can open the *section* that explains its screen rather than the top of a long guide.
     const requested = this.route.snapshot.queryParamMap.get('doc');
     const known = HELP_DOCS.find(d => d.id === requested);
-    this.load(known?.id ?? HELP_DOCS[0].id, this.route.snapshot.fragment ?? undefined);
+    const fragment = this.route.snapshot.fragment ?? undefined;
+    this.urlFragment = fragment;
+    this.load(known?.id ?? HELP_DOCS[0].id, fragment);
+    // The fragment is not only read once: it changes while the view is open (Back, a pasted link, another control pointing here).
+    this.route.fragment.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(f => this.onUrlFragment(f ?? undefined));
   }
 
-  open(id: HelpDocId, fragment?: string): void {
+  /** The URL's fragment changed under the view: go there like a link click does. A fragment this view wrote itself is not a change. */
+  private onUrlFragment(fragment: string | undefined): void {
+    if (fragment === this.urlFragment) return;
+    this.urlFragment = fragment;
+    if (!fragment) return;
+    // A guide still on its way lands there once it has rendered; one on screen is scrolled now.
+    if (this.loading()) this.landing = { fragment, top: false }; else this.scrollTo(fragment);
+  }
+
+  /** Reflect where the reader is in the URL, so the place survives a reload and Back; the route's echo of it is not a change (`urlFragment`). */
+  private syncUrl(id: HelpDocId, fragment: string | undefined): void {
+    this.urlFragment = fragment || undefined;
+    void this.router.navigate([], {
+      relativeTo: this.route, queryParams: { doc: id }, fragment: fragment || undefined, replaceUrl: true,
+    });
+  }
+
+  /** @param landAtTop the guide is opened by a link that names no place in it: land on its first heading once rendered (`follow`) */
+  open(id: HelpDocId, fragment?: string, landAtTop = false): void {
     if (id === this.active() && !this.error()) {
       if (fragment) this.scrollTo(fragment);
       return;
     }
     // Reflected in the URL so the guide can be linked to and survives a reload.
-    void this.router.navigate([], {
-      relativeTo: this.route, queryParams: { doc: id }, fragment: fragment || undefined, replaceUrl: true,
-    });
-    this.load(id, fragment);
+    this.syncUrl(id, fragment);
+    this.load(id, fragment, landAtTop);
   }
 
   /**
@@ -307,9 +342,7 @@ export class HelpComponent implements OnInit {
       ev.preventDefault();
       const fragment = decodeURIComponent(href.slice(1));
       this.scrollTo(fragment);
-      void this.router.navigate([], {
-        relativeTo: this.route, queryParams: { doc: this.active() }, fragment, replaceUrl: true,
-      });
+      this.syncUrl(this.active(), fragment);
       return;
     }
 
@@ -347,11 +380,15 @@ export class HelpComponent implements OnInit {
    * Take the reader to where a link inside a guide lands (`landingOf`): in another guide, that guide opened at the place; in
    * this one, a scroll to it — an `anchor` of `undefined` being the top of the guide. Following a link always MOVES the reader
    * (round W, V2): the parts are one joined document, so the page a sibling link names is already on screen, far away, and a
-   * click that kept the reader where they were looked like a link that did nothing.
+   * click that kept the reader where they were looked like a link that did nothing. The place is also written to the URL, as a
+   * `#fragment` link does, so a reload and Back keep it (round X, W3); and a guide opened by a link that names no place in it
+   * (`../integration-guide.md`) takes the reader to its first heading once rendered, as one that names a place does, because the
+   * link that had focus went with the article that held it.
    */
   private follow(id: HelpDocId, anchor: string | undefined): void {
-    if (id !== this.active() || this.error()) { this.open(id, anchor); return; }
+    if (id !== this.active() || this.error()) { this.open(id, anchor, anchor === undefined); return; }
     if (anchor) this.scrollTo(anchor); else this.scrollToTop();
+    this.syncUrl(id, anchor);
   }
 
   /** The guide that offers the page at `path` (a guide's `file`, or one of its `parts`), or `undefined`. */
@@ -390,24 +427,27 @@ export class HelpComponent implements OnInit {
   }
 
   /**
-   * Scroll `el` to the top of the view and move focus to the heading it stands for: itself when it is one, else the first heading
-   * after it (a part's anchor is an empty element whose heading is the next thing the reader meets). Scrolling alone leaves a
-   * keyboard or screen-reader user where they were, so the heading takes focus (`tabindex="-1"`: focusable by script, not a tab
-   * stop) without scrolling again. Scrolling is a nicety layered on top of rendering the guide; it must never be able to break it.
-   * This runs inside the async render handler, where a throw would leave the page mid-update.
+   * Scroll `el` to the top of the view and move focus to what it stands for: itself when it is a heading or a part's anchor (a
+   * part may open with prose before its first heading, and focusing the heading after it skipped that prose; the anchor carries
+   * the part's title as its accessible name, `joinHelpParts`), else the first heading after it (and, for the article itself, the
+   * first heading of the guide). Scrolling alone leaves a keyboard or screen-reader user where they were, so the target takes focus
+   * (`tabindex="-1"`: focusable by script, not a tab stop) without scrolling again. Scrolling is a nicety layered on top of
+   * rendering the guide; it must never be able to break it. This runs inside the async render handler, where a throw would leave
+   * the page mid-update.
    */
   private reveal(el: HTMLElement, root: HTMLElement): void {
     if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
-    const heading = /^H[1-6]$/.test(el.tagName) ? el : Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+    const target = /^H[1-6]$/.test(el.tagName) || isPartAnchorId(el.id) ? el : Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
       .find(h => el === root || !!(el.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING));
-    if (!heading) return;
-    if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
-    heading.focus({ preventScroll: true });
+    if (!target) return;
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
   }
 
   reload(): void { this.load(this.active()); }
 
-  private load(id: HelpDocId, fragment?: string): void {
+  private load(id: HelpDocId, fragment?: string, landAtTop = false): void {
+    this.landing = { fragment, top: landAtTop };
     this.active.set(id);
     this.loading.set(true);
     this.error.set('');
@@ -429,9 +469,11 @@ export class HelpComponent implements OnInit {
         this.rendered.set(this.sanitizer.bypassSecurityTrustHtml(html));
         this.loading.set(false);
         // The heading only exists once the view has rendered the new HTML, so the scroll waits a turn.
-        if (fragment) {
+        // `landing` is read now, not at the call: a fragment the URL changed to while the guide loaded wins (`onUrlFragment`).
+        const { fragment: landingFragment, top } = this.landing;
+        if (landingFragment || top) {
           this.cdr.detectChanges();
-          this.scrollTo(fragment);
+          if (landingFragment) this.scrollTo(landingFragment); else this.scrollToTop();
         }
       },
       // Bundled assets do not normally 404 — if one does, the build dropped it, and saying so beats

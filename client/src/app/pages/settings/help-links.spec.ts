@@ -6,7 +6,7 @@
  * `page: null` (a tab on the raw document), not a different page.
  */
 import { describe, it, expect } from 'vitest';
-import { guideDir, joinHelpParts, landingOf, partAnchorId, renderedPagesOf, resolveHelpLink } from './help-links';
+import { guideDir, isPartAnchorId, joinHelpParts, landingOf, partAnchorId, renderedPagesOf, resolveHelpLink } from './help-links';
 import { headingSlug } from '../../shared/heading-slug';
 
 const PAGES = new Set([
@@ -79,6 +79,31 @@ describe('joinHelpParts', () => {
     // each anchor sits BEFORE the part's content, so the scroll lands at its start
     expect(first).toBeLessThan(joined.indexOf('See [b]'));
     expect(second).toBeLessThan(joined.indexOf('## Thing'));
+  });
+
+  it('every part anchor has an accessible name, the title of the part, because it is what takes focus when a link lands on the part (round X, W3)', () => {
+    const joined = joinHelpParts([a, b], files);
+    expect(joined).toContain(`<div id="${partAnchorId('g/01-a.md')}" role="group" aria-label="A"></div>`);
+    expect(joined).toContain(`<div id="${partAnchorId('g/02-b.md')}" role="group" aria-label="B"></div>`);
+  });
+
+  it('the name is the title as a reader sees it: markdown marks dropped, and nothing that can end the attribute', () => {
+    const odd = ['# The `recall` & [graph](x.md) "API" <b>', '', 'body'].join('\n');
+    const joined = joinHelpParts([odd, '# Two\n'], ['g/01-a.md', 'g/02-b.md']);
+    expect(joined).toContain('aria-label="The recall &amp; graph &quot;API&quot; &lt;b&gt;"');
+  });
+
+  it('a part with no title is named from its file, never left without a name', () => {
+    const joined = joinHelpParts(['no heading here\n', 'text\n'], ['g/04a-recall-api.md', 'g/05-files.md']);
+    expect(joined).toContain('aria-label="recall api"');
+    expect(joined).toContain('aria-label="files"');
+  });
+});
+
+describe('isPartAnchorId', () => {
+  it('is true of the ids partAnchorId makes and of no heading id', () => {
+    expect(isPartAnchorId(partAnchorId('g/02-hosting.md'))).toBe(true);
+    for (const id of ['', 'hosting', 'part-02-hosting', 'user-content-links', 'a:b']) expect(isPartAnchorId(id)).toBe(false);
   });
 });
 

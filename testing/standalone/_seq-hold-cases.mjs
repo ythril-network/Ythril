@@ -52,26 +52,6 @@ export async function loadHolderModules() {
  */
 export const SEEDED_COUNTER = 6;
 
-/** How long the failure message of `heldSeqAllocated` waits for the counter before saying it could not read it. */
-const DIAGNOSIS_COUNTER_MS = 1500;
-
-/**
- * The counter for a failure MESSAGE, which must never be what keeps a failed wait from failing: `door.counter` waits for every
- * counter write already started, and a counter-row lock leaves one pending for ever. So the read is bounded and a read that
- * does not finish is reported as such (round W, V10).
- */
-async function counterForDiagnosis(door, space) {
-  let timer;
-  try {
-    return await Promise.race([
-      Promise.resolve().then(() => door.counter(space)),
-      new Promise(resolve => { timer = setTimeout(() => resolve(`unreadable: a counter write did not answer within ${DIAGNOSIS_COUNTER_MS} ms (a counter-row lock? this wait is for a stall that is NOT on the counter row)`), DIAGNOSIS_COUNTER_MS); }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * The seq a stalled write holds, once the store has GIVEN it one: waits until the seq hold is registered AND the space's
  * counter has moved past `SEEDED_COUNTER`, then answers `lowestUncommittedSeq(space)`.
@@ -93,7 +73,7 @@ async function counterForDiagnosis(door, space) {
  * and the write behind it stalls — so the counter moving is the observable proof that the allocation was answered. A
  * counter-row lock (`lock: 'counter'`) stalls the `$inc` itself: the counter never moves past the seed and this waits for
  * nothing, so those cases keep reading the floor, which is all their messages use. Called for one anyway it still ENDS —
- * at its deadline, with a message that says the counter was unreadable (`counterForDiagnosis`), never at the runner's. It assumes ONE allocator in flight, as
+ * at its deadline, with a message that says its diagnosis did not answer (`waitFor` bounds every diagnosis itself, round X, W2), never at the runner's. It assumes ONE allocator in flight, as
  * the cases are: a second would make "the counter moved" ambiguous about whose allocation it was.
  *
  * @param {{ counter: (space: string) => Promise<number> }} door  the push door (`openPushDoor`)
@@ -102,7 +82,7 @@ async function counterForDiagnosis(door, space) {
 export async function heldSeqAllocated(door, space, { ms = 5000 } = {}) {
   const seq = await import('../../server/dist/util/seq.js');
   await waitFor(async () => seq.lowestUncommittedSeq(space) !== undefined && (await door.counter(space)) > SEEDED_COUNTER, ms, 5,
-    async () => `hold ${seq.lowestUncommittedSeq(space)}, counter ${await counterForDiagnosis(door, space)} (seeded at ${SEEDED_COUNTER})`,
+    async () => `hold ${seq.lowestUncommittedSeq(space)}, counter ${await door.counter(space)} (seeded at ${SEEDED_COUNTER})`,
     { what: `a seq hold on '${space}' whose allocation the store has answered` });
   const held = seq.lowestUncommittedSeq(space);
   if (held === undefined) throw new Error(`heldSeqAllocated: the hold on '${space}' ended before it could be read — the write was not stalled`);

@@ -36,7 +36,7 @@ describe('heldSeqAllocated never hangs', () => {
     assert.notEqual(outcome, 'HUNG', 'the wait was still running 10 s after its own 50 ms deadline: its diagnosis awaits a counter read that never settles');
     assert.ok(outcome.error, 'it resolved although no hold exists');
     assert.match(outcome.error.message, /timed out after 50ms/);
-    assert.match(outcome.error.message, /counter .*(?:unreadable|not answer)/i, 'the message does not say the counter could not be read');
+    assert.match(outcome.error.message, /diagnosis did not answer/i, 'the message does not say the diagnosis could not be read');
   });
 
   it('with a counter that answers, the message reads it as it did', async () => {

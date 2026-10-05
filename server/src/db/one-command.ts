@@ -32,6 +32,7 @@
  */
 
 import { BSON, MongoBulkWriteError } from 'mongodb';
+import { classifyReadFailure } from '../brain/store-failure.js';
 import { wrapsAThrownError } from './error-chain.js';
 import { isWriteTimeout } from './write-timeout.js';
 
@@ -64,6 +65,15 @@ export const MONGO_MAX_WRITE_BATCH_SIZE = 100_000;
 export const ONE_COMMAND_MAX_OPERATIONS = MONGO_MAX_WRITE_BATCH_SIZE - 1;
 
 /**
+ * A count that is not a positive integer is refused, whatever else the call carries and however many items it has: asked once
+ * here so the two entry points cannot disagree (the empty list and the kind-sliced call both reached a loop that never
+ * looked at it — round X, W5).
+ */
+function requireMaxItems(maxItems: number, caller: string): void {
+  if (!Number.isInteger(maxItems) || maxItems < 1) throw new Error(`${caller}: maxItems must be a positive integer, got ${maxItems}`);
+}
+
+/**
  * @param items the operations, in the order they are to be written
  * @param opts.maxItems the most operations in a slice (a positive integer)
  * @param opts.bytesOf the BSON size of one operation as the command carries it
@@ -73,7 +83,7 @@ export const ONE_COMMAND_MAX_OPERATIONS = MONGO_MAX_WRITE_BATCH_SIZE - 1;
 export function inOneCommandChunks<T>(
   items: readonly T[], { maxItems, bytesOf }: { maxItems: number; bytesOf: (item: T) => number },
 ): T[][] {
-  if (!Number.isInteger(maxItems) || maxItems < 1) throw new Error(`inOneCommandChunks: maxItems must be a positive integer, got ${maxItems}`);
+  requireMaxItems(maxItems, 'inOneCommandChunks');
   const out: T[][] = [];
   let current: T[] = [];
   let bytes = 0;
@@ -123,10 +133,14 @@ function isOperationFailure(err: unknown): boolean {
 /**
  * What an UNORDERED `writeInOneCommands` raises when a slice failed: every slice's failure and what landed, as ONE error.
  *
- * `cause` is the FIRST failure, always (`errorChain` follows it, so a door that classifies the wrapper answers as it would the
- * driver's own first error). The first is the one that explains the rest: inside a transaction every error aborts it, so
- * the slice after a failed one fails with an aborted-transaction error that is its consequence, and a classifier that read
- * the last failure answered a deterministic duplicate key as a retryable `503`. Every failure is still in `failures`.
+ * `cause` is what ENDED the write when the store did — a bound (`isWriteTimeout`) or a store failure, the failure the write
+ * stopped at — and otherwise the first per-operation failure (see `causeOfFailures`). `errorChain` follows `cause` only, so
+ * it decides what a door that classifies the wrapper answers: a duplicate key followed by a timeout is a retryable `503`, not
+ * the `400` that told a sender not to retry a write a retry would have landed. When nothing stopped the write every failure is
+ * a per-operation one, and the first stands for them as the driver's own first error would. Every failure is still in
+ * `failures`. (An earlier version took the first failure ALWAYS, because inside a transaction the slice after a failed one
+ * fails with an aborted-transaction error that is its consequence; a write in a session is `ordered` now and stops at its
+ * first failure, so no such consequence is ever a later slice's failure.)
  */
 export class SlicedBulkWriteError extends Error {
   /** Every slice that failed, by its position in the write (0-based), in order. */
@@ -190,6 +204,7 @@ export async function writeInOneCommands<T, R>(
   const ordered = opts?.ordered;
   if (typeof ordered !== 'boolean') throw new Error(`writeInOneCommands: ordered must be true or false (the value the bulk write is given), got ${String(ordered)}`);
   const { maxItems = ONE_COMMAND_MAX_OPERATIONS, bytesOf = operationBytes, commandKindOf } = opts;
+  requireMaxItems(maxItems, 'writeInOneCommands');
   if (ordered && commandKindOf) {
     throw new Error('writeInOneCommands: ordered: true and commandKindOf contradict each other (an ordered write is a sequence; commandKindOf regroups the operations by kind). Say which one is meant.');
   }
@@ -211,7 +226,19 @@ export async function writeInOneCommands<T, R>(
   if (failures.length === 0) return landed.map(l => l.answer);
   // The store's failure with nothing before it is the store's failure, as it was before the write was sliced.
   if (failures.length === 1 && stopped) throw failures[0]!.error;
-  throw new SlicedBulkWriteError(failures, landed, slices.length, failures[0]!.error);
+  throw new SlicedBulkWriteError(failures, landed, slices.length, causeOfFailures(failures, stopped));
+}
+
+/**
+ * Which failure a door should answer for when a write failed in several slices: the one that STOPPED the write if it is the
+ * store's (a bound that ended the call, or any failure the door answers as server-side: the store down, a pool cleared), else
+ * the first. A stop is by construction the last failure, and it is the only one the next slice would also have met, so it is
+ * what a retry has to be told about; the failures before it are the operations' own and are in the error beside it.
+ */
+function causeOfFailures(failures: ReadonlyArray<{ slice: number; error: unknown }>, stopped: boolean): unknown {
+  const stopping = stopped ? failures[failures.length - 1]!.error : undefined;
+  if (stopped && (isWriteTimeout(stopping) || classifyReadFailure(stopping).status >= 500)) return stopping;
+  return failures[0]!.error;
 }
 
 /** The wire command types a bulk write is sent in, in the order the driver sends an unordered bulk's batches (`lib/bulk/common.js`). */

@@ -109,17 +109,45 @@ export function foldPartLinks(text: string, files: readonly string[]): string {
  * characters, spaces and hyphens and nothing else, so no heading's id can equal it, and two parts of a guide differ in their
  * file name. A link to a page of the guide with no fragment scrolls here (`landingOf`).
  */
-export const partAnchorId = (file: string): string => `part:${file.split('/').pop()!.replace(/\.md$/i, '')}`;
+export const partAnchorId = (file: string): string => `${PART_ANCHOR_PREFIX}${file.split('/').pop()!.replace(/\.md$/i, '')}`;
+
+/** What every part anchor's id starts with, and no heading id can (`partAnchorId`). */
+export const PART_ANCHOR_PREFIX = 'part:';
+
+/** Is this the id of a part anchor (`partAnchorId`) and not a heading's? The view focuses a part anchor itself and a heading's first heading after it. */
+export const isPartAnchorId = (id: string): boolean => id.startsWith(PART_ANCHOR_PREFIX);
+
+/** A text as an HTML attribute value: nothing in it can end the attribute or open a tag. */
+const escapeAttribute = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The name of a part, for the anchor that stands for it: its H1 as a reader sees it (code marks, emphasis and link syntax
+ * dropped), else the file's name without its number (`04a-recall-api.md` → `recall api`). A part's anchor takes focus when a link
+ * lands on the part, and a focused element with no name announces nothing.
+ */
+function partTitleOf(chunk: string, file: string): string {
+  const h1 = /^#[ \t]+(.+?)[ \t]*$/m.exec(chunk)?.[1];
+  const fromHeading = h1?.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*_]/g, '').trim();
+  if (fromHeading) return fromHeading;
+  return file.split('/').pop()!.replace(/\.md$/i, '').replace(/^\d+[a-z]?-/i, '').replace(/-/g, ' ');
+}
 
 /**
  * A split guide's parts as ONE document, the way the view renders it (`HelpComponent`). One file is returned as it is.
  *
  * Each part starts at an anchor of its own (`partAnchorId`): the part's H1 is stripped, so without one a link to the part
- * (`](02-hosting.md)`, no fragment) names a place the document has no element at, and the click was a no-op (round W, V2).
+ * (`](02-hosting.md)`, no fragment) names a place the document has no element at, and the click was a no-op (round W, V2). The
+ * anchor is also what a link to the part moves focus to, rather than the first heading after it (a part may open with prose),
+ * so it carries the part's title as its accessible name (round X, W3).
  */
 export function joinHelpParts(chunks: readonly string[], files: readonly string[]): string {
   if (chunks.length === 1) return chunks[0]!;
-  return foldPartLinks(chunks.map((chunk, i) => `<div id="${partAnchorId(files[i]!)}"></div>\n\n${stripPartHeader(chunk)}`).join('\n\n'), files);
+  return foldPartLinks(chunks.map((chunk, i) => {
+    const file = files[i]!;
+    // `role="group"`, not a landmark: thirty-odd regions would bury the page's real ones in a screen reader's landmark list.
+    return `<div id="${partAnchorId(file)}" role="group" aria-label="${escapeAttribute(partTitleOf(chunk, file))}"></div>\n\n${stripPartHeader(chunk)}`;
+  }).join('\n\n'), files);
 }
 
 /**
