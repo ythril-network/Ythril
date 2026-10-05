@@ -23,7 +23,7 @@ import { resolveMasterSecret, deriveKey, encryptWithKey, type DerivedKey } from 
 import path from 'node:path';
 import { MongoClient } from 'mongodb';
 import { EJSON } from 'bson';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 
@@ -167,7 +167,7 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
       });
 
       manifestCollections.push({ name, count });
-      log.debug(`dump: ${name} → ${count} docs`);
+      log.debug(`dump: ${peerText(name)} → ${count} docs`);
     }
 
     const ythrilVersion = process.env['npm_package_version'] ?? 'unknown';
@@ -187,7 +187,7 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
       'utf8',
     );
 
-    log.info(`dump: complete — ${manifestCollections.length} collections in ${destDir}`);
+    log.info(`dump: complete — ${manifestCollections.length} collections in ${peerText(destDir)}`);
     return manifest;
   } finally {
     await client.close().catch(() => {});

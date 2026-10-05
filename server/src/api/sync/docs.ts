@@ -18,11 +18,12 @@ import { withSeq, bumpSeq, seqRefusal, MAX_INGEST_SEQ, settledSeqRange } from '.
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc, BrainCollection } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { writeArrivals, type ArrivalOutcome, type ArrivalOptions } from '../../sync/arrivals.js';
-import { RECORD_TYPE_OF } from '../../sync/replicated-families.js';
-import { forkIdFor, isNewerCopy, tombstoneGoverns } from '../../sync/upsert-plan.js';
+import { RECORD_TYPE_OF, type PayloadKey } from '../../sync/replicated-families.js';
+import { forkIdFor, isNewerCopy, tombstoneGoverns, divergesFrom } from '../../sync/upsert-plan.js';
+import { parseIncoming } from '../../sync/arrival-shape.js';
 
 export const syncDocsRouter = Router();
 
@@ -225,10 +226,11 @@ async function landOne(
 }
 
 /** What one document's write came to, read off the writer's outcome. */
-type Landing = 'inserted' | 'updated' | 'newer-here' | 'duplicate' | 'derived' | 'store-refused';
+type Landing = 'inserted' | 'updated' | 'newer-here' | 'diverged' | 'duplicate' | 'derived' | 'store-refused';
 function landingOf(out: ArrivalOutcome, id: string): Landing {
   if (out.inserted.includes(id)) return 'inserted';
   if (out.updated.includes(id)) return 'updated';
+  if (out.diverged.includes(id)) return 'diverged';
   if (out.duplicates.includes(id)) return 'duplicate';
   if (out.derived.includes(id)) return 'derived';
   if (out.storeRefused.some(r => r._id === id)) return 'store-refused';
@@ -337,9 +339,22 @@ async function applyPushVerdict<S extends { seq?: number }>(
  */
 const forkIdOf = (incoming: FactDoc): string => forkIdFor(incoming._id, incoming.seq, incoming.fact);
 
-/** A divergent copy at the stored seq: a fork, unless it is the stored copy's own text. */
-const divergent = (stored: FactDoc | null, incoming: FactDoc): boolean =>
-  stored !== null && incoming.seq === stored.seq && incoming.fact !== stored.fact;
+/**
+ * Does `incoming` FORK from the copy of its fact stored now — the same seq, other text? The one question both push doors
+ * ask of a fact the verdict left unlanded, so the single route and the batch loop cannot judge it differently.
+ *
+ * The verdict's copy was read before the write, and a write that came back `diverged` found a same-seq copy with other
+ * text stored in between (`Q-232`), so the fork rules judge the copy that is there, not the one the race replaced
+ * (`verdictCopy` is used only when the write did not say `diverged`). A copy that is gone is no divergence.
+ */
+async function forksFromStoredCopy(
+  spaceId: string, incoming: FactDoc, landing: Landing | null, verdictCopy: FactDoc | null,
+): Promise<boolean> {
+  const stored = landing === 'diverged'
+    ? await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null
+    : verdictCopy;
+  return divergesFrom(stored, incoming);
+}
 
 /**
  * The fork this divergence already made, if it is stored (`Q-218` R9). A fork's id is derived from what it forks
@@ -361,11 +376,11 @@ async function heldFork(spaceId: string, incoming: FactDoc): Promise<string | nu
  */
 function writeFork(spaceId: string, incoming: FactDoc, from: string): Promise<{ doc: FactDoc; landing: Landing }> {
   return withSeq(spaceId, async (forkSeq) => {
-    const now = new Date().toISOString();
-    const doc: FactDoc = {
-      ...incoming, _id: forkIdOf(incoming), forkOf: incoming._id, seq: forkSeq,
-      createdAt: now, updatedAt: now,
-    };
+    // The divergent copy's own `createdAt`/`updatedAt` stay (`Q-361` item 8): a fork holds the text the other peer wrote,
+    // when it wrote it. Stamped "now" it was a record whose age was this instance's sync schedule — a fresh retention
+    // window however old the text, and two receivers forking one divergence on different days stored two different
+    // documents under one derived id. Neither stamp is in the id, so a re-send still finds the fork it made.
+    const doc: FactDoc = { ...incoming, _id: forkIdOf(incoming), forkOf: incoming._id, seq: forkSeq };
     return { doc, landing: landingOf(await landOne(spaceId, 'facts', doc, from), doc._id) };
   });
 }
@@ -383,7 +398,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
     if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
-    const parsed = IncomingFactDoc.safeParse(req.body);
+    const parsed = parseIncoming('facts', req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid fact document' });
       return;
@@ -405,12 +420,14 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
       // The skip and fork branches keep 5.6.1's cleanup of a stale tombstone.
       const landing = verdict.kind === 'tombstoned' ? null
         : await applyPushVerdict(spaceId, 'facts', verdict, incoming, pushedBy(req));
+      // A write that found a same-seq copy with other text stored meanwhile (`diverged`) goes the way a planned fork
+      // does, judged against the copy that is stored now — by the same re-send check and the same caps.
       if (verdict.kind === 'tombstoned') {
         answer = { code: 200, body: { status: 'tombstoned' } };
-      } else if (landing !== null) {
+      } else if (landing !== null && landing !== 'diverged') {
         failOnStoreRefusal(landing, 'facts', incoming._id);
         if (landed(landing)) answer = { code: 200, body: withSchemaViolations({ status: landing }, violations) };
-      } else if (divergent(verdict.stored, incoming)) {
+      } else if (await forksFromStoredCopy(spaceId, incoming, landing, verdict.stored)) {
         const resent = await heldFork(spaceId, incoming);
         if (resent !== null) {
           answer = { code: 200, body: withSchemaViolations({ status: 'forked', forkId: resent }, violations) };
@@ -421,7 +438,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
           const siblingCount = depth >= MAX_FORK_DEPTH ? 0 : await col<FactDoc>(spaceCollection(spaceId, 'facts'))
             .countDocuments(asFilter<FactDoc>({ forkOf: incoming._id }), { limit: MAX_FORK_DEPTH + 1 });
           if (depth >= MAX_FORK_DEPTH || siblingCount >= MAX_FORK_DEPTH) {
-            answer = { code: 400, body: { error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` } };
+            answer = { code: 400, body: { error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${logSafe(incoming._id)}'` } };
           } else {
             toFork = true;
           }
@@ -461,7 +478,7 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
     if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
-    const parsed = IncomingEntityDoc.safeParse(req.body);
+    const parsed = parseIncoming('entities', req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid entity document' });
       return;
@@ -516,7 +533,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
     if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
-    const parsed = IncomingEdgeDoc.safeParse(req.body);
+    const parsed = parseIncoming('edges', req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid edge document' });
       return;
@@ -593,7 +610,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
     if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
-    const parsed = IncomingChronoDoc.safeParse(req.body);
+    const parsed = parseIncoming('chrono', req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid chrono document' });
       return;
@@ -692,28 +709,28 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     // count the sender subtracts from what it calls pushed. Filled by the two drops below and the in-loop refusals.
     const dropped: Record<string, number> = {};
     const drop = (kind: string) => { dropped[kind] = (dropped[kind] ?? 0) + 1; };
-    const parsed = <T>(raw: unknown[], schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } }, kind: string): T[] =>
+    const parsed = <T>(raw: unknown[], key: PayloadKey, kind: string): T[] =>
       raw.flatMap(d => {
-        const r = schema.safeParse(d);
+        const r = parseIncoming(key, d);
         if (r.success) return [r.data as T];
         drop(kind);
         const id = (d as { _id?: unknown })?._id;
         // The id, the peer and the issues are a peer's text: `logSafe`, so none can start a log line of its own.
         log.warn(
-          `batch-upsert: REJECTED ${kind} '${typeof id === 'string' ? logSafe(id) : '(no id)'}' for space '${spaceId}' `
+          `batch-upsert: REJECTED ${logSafe(kind)} '${typeof id === 'string' ? logSafe(id) : '(no id)'}' for space '${logSafe(spaceId)}' `
           + `from peer '${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}' — it did not `
-          + `match ${kind === 'fact' ? 'IncomingFactDoc' : `Incoming${kind[0]!.toUpperCase()}${kind.slice(1)}Doc`}. `
+          + `match ${kind === 'fact' ? 'IncomingFactDoc' : `Incoming${logSafe(kind[0]!.toUpperCase())}${logSafe(kind.slice(1))}Doc`}. `
           + `The sender will advance past it and not offer it again. Issues: `
-          + `${logSafe(JSON.stringify(r.error?.issues ?? []).slice(0, 400))}`,
+          + `${logSafe(JSON.stringify(r.error?.issues ?? []), { max: 400 })}`,
         );
         return [];
       });
 
-    const factsRaw = parsed<FactDoc>(Array.isArray(body?.facts) ? body.facts.slice(0, 500) : [], IncomingFactDoc, 'fact');
-    const entitiesRaw = parsed<EntityDoc>(Array.isArray(body?.entities) ? body.entities.slice(0, 500) : [], IncomingEntityDoc, 'entity');
-    const edgesRaw = parsed<EdgeDoc>(Array.isArray(body?.edges) ? body.edges.slice(0, 500) : [], IncomingEdgeDoc, 'edge');
-    const chronoRaw = parsed<ChronoEntry>(Array.isArray(body?.chrono) ? body.chrono.slice(0, 500) : [], IncomingChronoDoc, 'chrono');
-    const linksRaw = parsed<LinkDoc>(Array.isArray(body?.links) ? body.links.slice(0, 500) : [], IncomingLinkDoc, 'link');
+    const factsRaw = parsed<FactDoc>(Array.isArray(body?.facts) ? body.facts.slice(0, 500) : [], 'facts', 'fact');
+    const entitiesRaw = parsed<EntityDoc>(Array.isArray(body?.entities) ? body.entities.slice(0, 500) : [], 'entities', 'entity');
+    const edgesRaw = parsed<EdgeDoc>(Array.isArray(body?.edges) ? body.edges.slice(0, 500) : [], 'edges', 'edge');
+    const chronoRaw = parsed<ChronoEntry>(Array.isArray(body?.chrono) ? body.chrono.slice(0, 500) : [], 'chrono', 'chrono');
+    const linksRaw = parsed<LinkDoc>(Array.isArray(body?.links) ? body.links.slice(0, 500) : [], 'links', 'link');
     /*
      * A file's METADATA — the sixth family (`P-32`).
      *
@@ -723,7 +740,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const fileMetaRaw = parsed<FileMetaDoc & { seq: number }>(
       Array.isArray(body?.filemeta) ? body.filemeta.slice(0, 500) : [],
-      IncomingFileMetaDoc as never, 'filemeta');
+      'filemeta', 'filemeta');
 
     // Drop documents whose seq is too close to the protocol ceiling — one such
     // doc would otherwise drag the counter toward it via the bumpSeq below (see
@@ -736,8 +753,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         if (seqRefusal(d.seq, { optional: false }) === null) return true;
         drop(kind);
         log.warn(
-          `batch-upsert: dropped ${kind} '${logSafe(d._id)}' with implausible seq ${logSafe(d.seq)} ` +
-          `for space '${spaceId}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
+          `batch-upsert: dropped ${logSafe(kind)} '${logSafe(d._id)}' with implausible seq ${logSafe(d.seq)} ` +
+          `for space '${logSafe(spaceId)}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
           `'${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}'.`,
         );
         return false;
@@ -792,14 +809,16 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       if (verdict.kind === 'tombstoned') { memStats.tombstoned++; continue; }
       // The skip and fork branches keep 5.6.1's cleanup of a stale tombstone.
       const landing = await applyPushVerdict(spaceId, 'facts', verdict, incoming, from);
-      if (landing !== null) {
+      if (landing !== null && landing !== 'diverged') {
         if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
         if (landing === 'inserted') memStats.inserted++;
         else if (landing === 'updated') memStats.updated++;
         else memStats.skipped++;
         continue;
       }
-      if (divergent(verdict.stored, incoming)) {
+      // `diverged`: the write found a same-seq copy with other text stored meanwhile (`Q-232`) — forked by the rules below,
+      // judged against the copy stored now (the verdict's was read before the race).
+      if (await forksFromStoredCopy(spaceId, incoming, landing, verdict.stored)) {
         // A re-send of a fork already made is delivered, not a new fork: counted before any cap (`Q-218` R9).
         if (await heldFork(spaceId, incoming) !== null) { memStats.forked++; continue; }
         // Cap fork chains to prevent unbounded growth. Depth only on this door — no fan-out cap (cut `C1`, as 5.6.1).
@@ -820,7 +839,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
            * every cycle. The fix is visibility, exactly as the media-worker swallow was.
            */
           memStats.forkDepthRefused++;
-          log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${spaceId}' — divergent content at `
+          log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${logSafe(spaceId)}' — divergent content at `
             + `seq ${logSafe(incoming.seq)} and the fork chain is already ${logSafe(depth)} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
             + 'The sender will not offer it again. Resolve the fork chain to accept it.');
           continue;
@@ -969,7 +988,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const range = (docs: { seq?: number }[]): string =>
       docs.length === 0 ? '-' : `${Math.min(...docs.map(d => d.seq ?? 0))}..${Math.max(...docs.map(d => d.seq ?? 0))}`;
-    log.debug(`Batch-upsert accepted for space '${spaceId}': `
+    log.debug(`Batch-upsert accepted for space '${logSafe(spaceId)}': `
       + `facts ${logSafe(JSON.stringify(memStats))} seq ${logSafe(range(facts))}; `
       + `entities ${logSafe(JSON.stringify(entStats))} seq ${logSafe(range(entities))}; `
       + `edges ${logSafe(JSON.stringify(edgeStats))} seq ${logSafe(range(edges))}; `
@@ -1001,7 +1020,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     if (storeRefused.length > 0) {
       // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
-      log.error(`sync POST batch-upsert: the store refused ${storeRefused.length} document(s) in space '${spaceId}'; `
+      log.error(`sync POST batch-upsert: the store refused ${storeRefused.length} document(s) in space '${logSafe(spaceId)}'; `
         + 'every other document of the page was written, and the page answers 500 so the sender keeps its watermark.');
       res.status(500).json({ error: 'Internal error' });
       return;

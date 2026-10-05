@@ -12,7 +12,7 @@
  * fact CRUD, so the dependency runs one way: fact.ts -> recall.ts -> filter.ts.
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, StoreCapabilityError } from '../util/errors.js';
 import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
 import { getEmbeddingConfig } from '../config/loader.js';
@@ -26,6 +26,7 @@ import { recallPredicate, andPredicates, isRawFilter, type RecallFilter } from '
 import { predicateRecall, type PredicateIdMemo } from './predicate-recall.js';
 import type { DegradedReason } from './degraded-reasons.js';
 import { isMaxTimeExpired } from '../db/max-time.js';
+import { isIndexNotQueryableYet } from './index-not-queryable.js';
 import { observeRecallPath, type RecallPathObservation } from './recall-path.js';
 export { observeRecallPath, type RecallPathObservation };
 import { deriveChronoStatus } from './chrono-status.js';
@@ -38,7 +39,7 @@ import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -105,7 +106,7 @@ async function settleSearches(
   for (const s of settled) {
     if (s.status === 'fulfilled') { kept.push(s.value); continue; }
     if (s.reason instanceof RecallSearchTimeout) {
-      log.warn(`Recall: ${s.reason.message} — returning a partial answer`);
+      log.warn(`Recall: ${peerText(s.reason.message)} — returning a partial answer`);
       noteDegraded('search_timeout');
       continue;
     }
@@ -305,10 +306,7 @@ export async function recall(
   },
 ): Promise<RecallResult[]> {
   if (!isVectorSearchAvailable()) {
-    throw new Error(
-      'Semantic recall is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
-      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
-    );
+    throw new StoreCapabilityError('Semantic recall');
   }
   if (needsReindex(spaceId)) {
     const embCfg = getEmbeddingConfig();
@@ -606,8 +604,8 @@ async function introduceLexicalOnly(
       const local = atlasVectorScore(vec as number[], queryVector, similarity);
       if (local === null || !scoresAgree(local, known)) {
         log.warn(
-          `Hybrid recall: local score reproduction disagrees with the search engine for ${collName} ` +
-          `(local ${local === null ? 'n/a' : local.toFixed(6)} vs reported ${known.toFixed(6)}, ` +
+          `Hybrid recall: local score reproduction disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${local === null ? 'n/a' : peerText(local.toFixed(6))} vs reported ${peerText(known.toFixed(6))}, ` +
           `similarity '${similarity}'). Not introducing lexical-only records.`,
         );
         return [];
@@ -630,7 +628,7 @@ async function introduceLexicalOnly(
     return out;
   } catch (err) {
     // Best-effort like the rest of this path: a failure here leaves the vector order untouched.
-    log.debug(`Lexical introduction skipped for ${collName}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Lexical introduction skipped for ${peerText(collName)}: ${peerText(err)}`);
     return [];
   }
 }
@@ -748,8 +746,8 @@ export async function checkDuplicates(
       const known = reported.get(f._id);
       if (typeof known === 'number' && !scoresAgree(f.score, known)) {
         log.warn(
-          `Duplicate check: fresh-write score disagrees with the search engine for ${collName} ` +
-          `(local ${f.score.toFixed(6)} vs reported ${known.toFixed(6)}). Using the index alone.`,
+          `Duplicate check: fresh-write score disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${peerText(f.score.toFixed(6))} vs reported ${peerText(known.toFixed(6))}). Using the index alone.`,
         );
         return [...matches.values()];
       }
@@ -939,14 +937,11 @@ async function recallByType(
     }
   }
 
+  // A missing OR not-yet-queryable vector index means "no results from this collection", not a failure: a
+  // collection's index is built after its first record, asynchronously. Every wording mongot uses for it is
+  // `isIndexNotQueryableYet`'s to know (Q-325) — the copy that lived here missed the first one and answered 503.
   const swallowIndexError = (err: unknown): RecallResult[] => {
-    const msg = err instanceof Error ? err.message : String(err);
-    // A missing OR not-yet-queryable vector index means "no results from this collection", not a
-    // failure: a new space builds its indexes asynchronously (B1) and Atlas refuses queries against
-    // an index still in INITIAL_SYNC. Transient empty state, not an error to surface.
-    if (/index.*not.*found|no.*such.*index|search.*index|cannot query.*vector index|while in state (INITIAL_SYNC|PENDING|BUILDING|STARTING)/i.test(msg)) {
-      return [];
-    }
+    if (isIndexNotQueryableYet(err)) return [];
     throw err;
   };
 
@@ -1213,7 +1208,7 @@ async function getEntryEmbedding(
   const collName = `${spaceId}_${collSuffix}`;
   const doc = await col(collName).findOne(
     asFilter({ _id: entryId, spaceId }),
-    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
+    { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;
   const vector = doc['embedding'] as number[] | undefined;
@@ -1243,10 +1238,7 @@ export async function findSimilar(
   crossSpaceIds?: string[],
 ): Promise<FindSimilarResult> {
   if (!isVectorSearchAvailable()) {
-    throw new Error(
-      'Vector search is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
-      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
-    );
+    throw new StoreCapabilityError('Vector search');
   }
 
   // Fetch the source entry's stored embedding

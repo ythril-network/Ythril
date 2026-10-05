@@ -33,19 +33,21 @@ On connect, the server sends global instructions listing all available space IDs
 > longer fitted uneditable until an unrelated field was repaired in the same request.
 >
 > **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read fails
-> because the store could not answer — a search index re-initialising after a restart, a replica set stepping
-> down, a search process that died — the result carries:
+> because the store could not answer — a replica set stepping down, a search process that died or stopped
+> answering — the result carries (a search index that is merely absent or still building answers with nothing
+> from the meaning channel yet, not as a failure):
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
->   "error": "Executor error during aggregate command … :: caused by :: the store reported no cause (this is a
->            store-side failure, not a problem with your request — it can be retried)",
+>   "error": "A store-side failure stopped this operation; it is not a problem with your request and can be retried.",
 >   "code": 8, "codeName": "InternalError" }
 > ```
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —
-> the same information in the envelope this transport has.
+> the same information in the envelope this transport has. The text is ours and names no host, port or
+> collection; the driver's own words go to the server log, and any other driver-side failure reads
+> `Error: The store could not complete this request.`
 >
 > Why it matters more than a clearer message: until this release these failed as an ordinary tool error with a
 > message that ended mid-sentence at `caused by ::`. An agent fleet built correctly around "continue on
@@ -315,7 +317,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0 — the field to poll after `space_reindex`, which returns as soon as the job starts |
 | `save_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
-| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking |
+| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. With `cascadeToken` it removes the blocking edges first, but refuses before removing anything when something other than an edge still names the entity. Face labels are unlabelled rather than blocking |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
 | `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts |
 | `save_edge` | Create or update a directed relationship |

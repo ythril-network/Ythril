@@ -1,12 +1,13 @@
 import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
-import type { TokenRights, Rung } from '../config/rights-shape.js';
+import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { Router } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { deleteStored, moveStored } from '../files/stored-bytes.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
@@ -17,32 +18,11 @@ export const conflictsRouter = Router();
 const VALID_ACTIONS = ['keep-local', 'keep-incoming', 'keep-both', 'save-to-space'] as const;
 type ResolveAction = typeof VALID_ACTIONS[number];
 
-/** Return the space IDs the authenticated token is allowed to access. */
-/**
- * The space IDs this token may act on at the given Data-quality level.
- *
- * These routes take no space in the path — they walk every space the token can reach — so this list IS the
- * enforcement point. It also removes the copy of a conflation that lived here: `tokenSpaces.length === 0`
- * used to mean "unrestricted". An ABSENT allowlist means every space; an EMPTY one means none. Anything
- * holding `spaces: []` was handed the whole instance.
+/*
+ * These routes take no space in the path: they walk every space the token can reach, so the space list each one
+ * walks IS its enforcement point (`auth/reachable-spaces.ts`). Every walk names its area and rung at the call —
+ * `spacesWhereTokenMay` for a list, `findWhereTokenMay` for a record by id — and neither has a default (`Q-304`).
  */
-function accessibleSpaces(req: { authToken?: unknown }, needs: Rung = 'read'): string[] {
-  const t = req.authToken as { rights?: TokenRights; spaces?: string[] } | undefined;
-  return spacesWhereTokenMay(t?.rights, 'dataQuality', needs);
-}
-
-/** Find a conflict document across accessible spaces. Returns doc + spaceId, or null. */
-async function findConflict(
-  conflictId: string,
-  spaces: string[],
-): Promise<{ doc: ConflictDoc; spaceId: string } | null> {
-  for (const spaceId of spaces) {
-    const doc = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
-      .findOne(asFilter<ConflictDoc>({ _id: conflictId })) as ConflictDoc | null;
-    if (doc) return { doc, spaceId };
-  }
-  return null;
-}
 
 /** Perform the file operations for a given resolve action, then delete the conflict record. */
 async function executeResolve(
@@ -114,7 +94,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     // `?spaceId=` narrows to one space, as 10-mfa-and-conflicts.md has always said; it was read nowhere, so a
     // caller asking about one space got every space's conflicts and read them as that space's.
     const requested = typeof req.query['spaceId'] === 'string' ? req.query['spaceId'] : undefined;
-    const reachable = accessibleSpaces(req, 'read');
+    const reachable = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'read');
     if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${requested}'` }); return; }
     const spaces = requested ? [requested] : reachable;
     const results: ConflictDoc[] = [];
@@ -145,7 +125,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       truncated,
     });
   } catch (err) {
-    log.error(`GET /api/conflicts: ${err}`);
+    log.error(`GET /api/conflicts: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -157,7 +137,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 // GET /api/conflicts/link-violations — list all link violations
 conflictsRouter.get('/link-violations', globalRateLimit, requireAuth, async (_req, res) => {
   try {
-    const spaces = accessibleSpaces(_req, 'read');
+    const spaces = spacesWhereTokenMay(_req.authToken?.rights, 'dataQuality', 'read');
     const results: LinkViolationDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {
@@ -174,7 +154,7 @@ conflictsRouter.get('/link-violations', globalRateLimit, requireAuth, async (_re
     if (results.length > MAX_TOTAL) { results.length = MAX_TOTAL; truncated = true; }
     res.json({ violations: results, returned: results.length, truncated });
   } catch (err) {
-    log.error(`GET /api/conflicts/link-violations: ${err}`);
+    log.error(`GET /api/conflicts/link-violations: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -182,7 +162,7 @@ conflictsRouter.get('/link-violations', globalRateLimit, requireAuth, async (_re
 // DELETE /api/conflicts/link-violations/:id — dismiss a single link violation
 conflictsRouter.delete('/link-violations/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaces = accessibleSpaces(req, 'write');
+    const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
     for (const spaceId of spaces) {
       const result = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations'))
         .deleteOne(asFilter<LinkViolationDoc>({ _id: req.params['id'] }));
@@ -193,7 +173,7 @@ conflictsRouter.delete('/link-violations/:id', globalRateLimit, requireAuth, den
     }
     res.status(404).json({ error: 'Link violation not found' });
   } catch (err) {
-    log.error(`DELETE /api/conflicts/link-violations/:id: ${err}`);
+    log.error(`DELETE /api/conflicts/link-violations/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -201,7 +181,7 @@ conflictsRouter.delete('/link-violations/:id', globalRateLimit, requireAuth, den
 // DELETE /api/conflicts/link-violations — dismiss all link violations for accessible spaces
 conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyReadOnly, async (_req, res) => {
   try {
-    const spaces = accessibleSpaces(_req, 'write');
+    const spaces = spacesWhereTokenMay(_req.authToken?.rights, 'dataQuality', 'write');
     let total = 0;
     for (const spaceId of spaces) {
       const result = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).deleteMany({});
@@ -209,7 +189,7 @@ conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyRea
     }
     res.json({ dismissed: total });
   } catch (err) {
-    log.error(`DELETE /api/conflicts/link-violations: ${err}`);
+    log.error(`DELETE /api/conflicts/link-violations: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -217,26 +197,23 @@ conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyRea
 // GET /api/conflicts/:id — get a single conflict record
 conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   try {
-    const spaces = accessibleSpaces(req, 'read');
-    for (const spaceId of spaces) {
-      const doc = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
-        .findOne(asFilter<ConflictDoc>({ _id: req.params['id'] })) as ConflictDoc | null;
-      if (doc) {
-        res.json({
-          id: doc._id,
-          spaceId: doc.spaceId,
-          originalPath: doc.originalPath,
-          conflictPath: doc.conflictPath,
-          peerInstanceId: doc.peerInstanceId,
-          peerInstanceLabel: doc.peerInstanceLabel,
-          detectedAt: doc.detectedAt,
-        });
-        return;
-      }
+    const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'read', 'conflicts', req.params['id'] as string);
+    if (found) {
+      const { doc } = found;
+      res.json({
+        id: doc._id,
+        spaceId: doc.spaceId,
+        originalPath: doc.originalPath,
+        conflictPath: doc.conflictPath,
+        peerInstanceId: doc.peerInstanceId,
+        peerInstanceLabel: doc.peerInstanceLabel,
+        detectedAt: doc.detectedAt,
+      });
+      return;
     }
     res.status(404).json({ error: 'Conflict not found' });
   } catch (err) {
-    log.error(`GET /api/conflicts/:id: ${err}`);
+    log.error(`GET /api/conflicts/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -261,7 +238,7 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
       res.status(400).json({ error: 'targetSpaceId is required for save-to-space action' });
       return;
     }
-    const spaces = accessibleSpaces(req, 'write');
+    const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
     if (action === 'save-to-space' && !spaces.includes(targetSpaceId)) {
       res.status(403).json({ error: 'Token does not have access to target space' });
       return;
@@ -272,7 +249,7 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
 
     for (const id of ids) {
       try {
-        const found = await findConflict(id, spaces);
+        const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', id);
         if (!found) {
           failed.push({ id, error: 'Conflict not found' });
           continue;
@@ -280,13 +257,13 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
         await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
         resolved++;
       } catch (err: unknown) {
-        failed.push({ id, error: err instanceof Error ? err.message : 'Unknown error' });
+        failed.push({ id, error: caughtFailureText(err, 'resolve a conflict') });
       }
     }
 
     res.json({ resolved, failed });
   } catch (err) {
-    log.error(`POST /api/conflicts/bulk-resolve: ${err}`);
+    log.error(`POST /api/conflicts/bulk-resolve: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -305,7 +282,7 @@ conflictsRouter.post('/seed', globalRateLimit, requireAdmin, denyReadOnly, async
       res.status(400).json({ error: 'Missing required fields: _id, spaceId, originalPath, conflictPath' });
       return;
     }
-    const spaces = accessibleSpaces(req, 'write');
+    const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
     if (!spaces.includes(spaceId)) {
       res.status(403).json({ error: 'Token does not have access to this space' });
       return;
@@ -322,7 +299,7 @@ conflictsRouter.post('/seed', globalRateLimit, requireAdmin, denyReadOnly, async
     await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(doc));
     res.status(201).json({ id: _id });
   } catch (err) {
-    log.error(`POST /api/conflicts/seed: ${err}`);
+    log.error(`POST /api/conflicts/seed: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -342,7 +319,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
       return;
     }
 
-    const spaces = accessibleSpaces(req, 'write');
+    const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
 
     // Validate target space access for save-to-space
     if (action === 'save-to-space' && !spaces.includes(targetSpaceId)) {
@@ -350,7 +327,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
       return;
     }
 
-    const found = await findConflict(req.params['id'] as string, spaces);
+    const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', req.params['id'] as string);
     if (!found) {
       res.status(404).json({ error: 'Conflict not found' });
       return;
@@ -359,7 +336,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
     await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
     res.status(200).json({ status: 'resolved' });
   } catch (err) {
-    log.error(`POST /api/conflicts/:id/resolve: ${err}`);
+    log.error(`POST /api/conflicts/:id/resolve: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

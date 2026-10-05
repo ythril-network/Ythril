@@ -25,7 +25,7 @@ import { getMongoUri, getDataRoot } from '../config/loader.js';
 import { dumpDatabase, type DumpManifest } from './dump.js';
 import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js';
 import { loadBackupConfig } from './backup-config.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 
 const DEFAULT_KEEP_OFFSITE = 14;
@@ -65,11 +65,11 @@ export async function runBackupNow(): Promise<BackupResult> {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const destDir = path.join(dataRoot, 'backups', ts);
 
-  log.info(`Backup starting → ${destDir}`);
+  log.info(`Backup starting → ${peerText(destDir)}`);
   // The one setting, reaching the one choke point. The offsite copy below copies whatever this wrote, so it
   // inherits the choice rather than needing its own flag.
   const manifest = await dumpDatabase(getMongoUri(), destDir, { encrypt: cfg?.encrypt === true });
-  log.info(`Backup dump complete: ${ts}`);
+  log.info(`Backup dump complete: ${peerText(ts)}`);
 
   const result: BackupResult = {
     id: ts,
@@ -91,11 +91,11 @@ export async function runBackupNow(): Promise<BackupResult> {
     const destRoot = cfg.offsite.destPath;
     try {
       const offsiteDir = copyBackupOffsite(destDir, destRoot, ts);
-      log.info(`Offsite DB copy complete → ${offsiteDir}`);
+      log.info(`Offsite DB copy complete → ${peerText(offsiteDir)}`);
 
       const filesDir = path.join(dataRoot, 'files');
       const filesDest = copyFilesOffsite(filesDir, destRoot, ts);
-      if (filesDest) log.info(`Offsite files copy complete → ${filesDest}`);
+      if (filesDest) log.info(`Offsite files copy complete → ${peerText(filesDest)}`);
 
       const keepOffsite = cfg.offsite.retention?.keepCount ?? DEFAULT_KEEP_OFFSITE;
       const offsitePruned = pruneBackups(destRoot, keepOffsite);
@@ -109,7 +109,7 @@ export async function runBackupNow(): Promise<BackupResult> {
         ...(offsitePruned > 0 ? { pruned: offsitePruned } : {}),
       };
     } catch (err) {
-      log.error(`Offsite backup copy failed (local backup is intact): ${err}`);
+      log.error(`Offsite backup copy failed (local backup is intact): ${peerText(err)}`);
       // Do not re-throw — the local backup succeeded
     }
   }
@@ -158,16 +158,16 @@ export function startBackupScheduler(): void {
   if (!cfg?.schedule) return;
 
   if (!validate(cfg.schedule)) {
-    log.warn(`backup.json: invalid cron expression "${cfg.schedule}" — scheduled backups disabled`);
+    log.warn(`backup.json: invalid cron expression "${peerText(cfg.schedule)}" — scheduled backups disabled`);
     return;
   }
 
   _task = schedule(cfg.schedule, () => {
-    runBackupNow().catch(err => log.error(`Scheduled backup error: ${err}`));
+    runBackupNow().catch(err => log.error(`Scheduled backup error: ${peerText(err)}`));
   });
   _armed.note(ARMED, cfg.schedule);
 
-  log.info(`Scheduled backup enabled (cron: "${cfg.schedule}")`);
+  log.info(`Scheduled backup enabled (cron: "${peerText(cfg.schedule)}")`);
 }
 
 /**

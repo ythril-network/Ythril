@@ -27,6 +27,7 @@ import { slugify } from './_shared.js';
 import { createSpace, type SpaceCreator } from './lifecycle.js';
 import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -146,7 +147,7 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
     const space = await createSpace(plan.args, creator);
     return { outcome: 'created', space };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = caughtFailureText(err, 'create a space');
     if (msg.includes('already exists')) return { outcome: 'conflict', error: msg };
     return { outcome: 'failed', error: 'Failed to create space' };
   }

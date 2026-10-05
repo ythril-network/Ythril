@@ -22,7 +22,8 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { runExclusive } from '../util/single-flight.js';
 import { tombstoneFloorForSpace } from '../sync/served-watermark.js';
 import type { TombstoneFloor } from '../sync/served-watermark.js';
@@ -61,7 +62,7 @@ export async function pruneTombstonesToFloor(spaceId: string, floor: TombstoneFl
       .deleteMany(asFilter<TombstoneDoc>({ seq: { $lte: floor.upTo } }));
     return res.deletedCount ?? 0;
   } catch (err) {
-    log.warn(`Tombstone prune (${spaceId}): ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Tombstone prune (${peerText(spaceId)}): ${peerText(messageOf(err))}`);
     return -1;
   }
 }
@@ -88,7 +89,7 @@ export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
     } else {
       result.blocked[floor.reason] = (result.blocked[floor.reason] ?? 0) + 1;
       if (floor.blockedBy) {
-        log.debug(`Tombstone prune: space '${s.id}' held by '${floor.blockedBy}' (${floor.reason})`);
+        log.debug(`Tombstone prune: space '${peerText(s.id)}' held by '${peerText(floor.blockedBy)}' (${floor.reason})`);
       }
     }
 
@@ -99,7 +100,7 @@ export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
     } else {
       result.blocked[fileFloor.reason] = (result.blocked[fileFloor.reason] ?? 0) + 1;
       if (fileFloor.blockedBy) {
-        log.debug(`File tombstone prune: space '${s.id}' held by '${fileFloor.blockedBy}' (${fileFloor.reason})`);
+        log.debug(`File tombstone prune: space '${peerText(s.id)}' held by '${peerText(fileFloor.blockedBy)}' (${fileFloor.reason})`);
       }
     }
   }
@@ -129,7 +130,7 @@ export async function pruneFileTombstonesToFloor(spaceId: string, floor: FileTom
       .deleteMany(asFilter<FileTombstoneDoc>({ deletedAt: { $lte: floor.upTo } }));
     return res.deletedCount ?? 0;
   } catch (err) {
-    log.warn(`File tombstone prune (${spaceId}): ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`File tombstone prune (${peerText(spaceId)}): ${peerText(messageOf(err))}`);
     return -1;
   }
 }

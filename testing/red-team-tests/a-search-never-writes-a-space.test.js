@@ -37,7 +37,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, get, patch, waitForIndexed } from '../sync/helpers.js';
+import { INSTANCES, post, get, patch, waitForIndexed, waitForEmbedQueueEmpty } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { spaceFootprint, spillRows } from '../_shared/space-footprint.mjs';
@@ -149,6 +149,10 @@ before(async () => {
   // `similar` reads the SEED's vector, so the seeds must be embedded, not merely fresh.
   if (embeddingAvailable) {
     await waitForIndexed(A, admin, S, [hubId, twinId, ...vaultIds].filter(Boolean), ['entity']);
+    // S2 and D feed spills too (the cross-space spill and the delete case): their seeds have to be embedded for a
+    // recall to find enough of them to overflow 1000 bytes, and a REST write does not embed inline (Q-99).
+    await waitForEmbedQueueEmpty(A, admin, S2);
+    await waitForEmbedQueueEmpty(A, admin, D);
   }
 
   [reader, readerId] = await mint('never-writes-reader', [S, S2]);

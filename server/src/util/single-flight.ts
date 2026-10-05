@@ -27,7 +27,8 @@
  * 412 s" says the sweep is slower than its schedule and roughly by how much — the same reason the stalled-job
  * warning carries its elapsed time rather than just announcing a re-queue.
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
+import { messageOf } from './errors.js';
 
 /** Label → when the in-flight pass started. Absent means nothing is running. */
 const _inFlight = new Map<string, number>();
@@ -43,7 +44,7 @@ export async function runExclusive(label: string, fn: () => Promise<unknown>): P
   const startedAt = _inFlight.get(label);
   if (startedAt !== undefined) {
     const seconds = Math.round((Date.now() - startedAt) / 1000);
-    log.warn(`${label}: skipping this tick — the previous pass has been running for ${seconds}s. `
+    log.warn(`${peerText(label)}: skipping this tick — the previous pass has been running for ${seconds}s. `
       + `The sweep is slower than its schedule; overlapping passes would duplicate its work.`);
     return false;
   }
@@ -53,7 +54,7 @@ export async function runExclusive(label: string, fn: () => Promise<unknown>): P
     await fn();
     return true;
   } catch (err) {
-    log.error(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`${peerText(label)} failed: ${peerText(messageOf(err))}`);
     return true;   // it ran; it simply did not succeed
   } finally {
     // A `finally` and not a trailing statement: a throw that escaped the catch above (an error thrown while

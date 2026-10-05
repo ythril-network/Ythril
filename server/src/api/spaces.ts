@@ -27,7 +27,8 @@ import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
@@ -75,9 +76,8 @@ spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaSc
     await buildSpaceVectorIndexes(spaceId, false, { force: true });
     res.json({ ok: true, spaceId, status: 'rebuilding' });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/spaces/${spaceId}/rebuild-indexes: ${err}`);
-    res.status(500).json({ error: msg });
+    log.error(`POST /api/spaces/${peerText(spaceId)}/rebuild-indexes: ${peerText(err)}`);
+    res.status(500).json({ error: caughtFailureText(err, 'rebuild a space\'s indexes') });
   }
 });
 
@@ -392,7 +392,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
       const backupContent = JSON.stringify({ typeSchemas: previousTypeSchemas }, null, 2);
       await writeSpaceFile(id, `_schema-backup-${backupTimestamp}.json`, backupContent);
     } catch (err) {
-      log.warn(`PUT /${id}/schema: could not write schema backup: ${err}`);
+      log.warn(`PUT /${peerText(id)}/schema: could not write schema backup: ${peerText(err)}`);
       // Non-fatal — proceed with replacement
     }
   }
@@ -829,8 +829,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       return;
     }
     const ok = await removeSpace(id).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: caughtFailureText(err, 'delete a space') });
       return null;
     });
     if (ok === null) return; // error already sent
@@ -884,7 +883,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
           data: { spaceId: id, spaceLabel: space.label },
         }),
         signal: AbortSignal.timeout(5_000),
-      }).catch(err => log.warn(`notify ${member.label} of space_deletion_pending: ${err}`));
+      }).catch(err => log.warn(`notify ${peerText(member.label)} of space_deletion_pending: ${peerText(err)}`));
     }
   }
 

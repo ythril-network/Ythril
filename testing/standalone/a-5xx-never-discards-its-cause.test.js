@@ -141,10 +141,13 @@ describe('a 5xx never discards the exception that caused it', () => {
     // "Cannot read properties of undefined" without a stack sends the reader back to grep for which of eleven
     // `undefined`s it was — and the reader is an operator on another team who cannot grep this source at all.
     const helper = stripComments(readFileSync('server/src/util/report-failure.ts', 'utf8'));
-    assert.match(helper, /cause\.stack/, 'reportServerFailure must include the stack');
+    // Either spelling keeps the frames: the stack read off the error, or the error handed to `log.error` as its meta
+    // argument, which `fmt` renders with its frames kept and its message bounded (`errorWithStack`, `util/log.ts`).
+    assert.match(helper, /cause\.stack|log\.error\(`[^`]*`,\s*cause\)/, 'reportServerFailure must include the stack');
     assert.match(helper, /log\.error\(/, 'a 5xx is an error, not a warning — it must be findable at that level');
     assert.match(
-      helper, /\$\{where\}/,
+      // `where` is named through the bounded renderer (`peerText`, `Q-231`): the same operation, one rule under two spellings.
+      helper, /\$\{(?:peerText\()?where\)?\}/,
       'the report must name the operation, or an operator greping for the route they called finds nothing',
     );
   });

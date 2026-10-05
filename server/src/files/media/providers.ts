@@ -14,7 +14,7 @@
 
 import type { MediaProviderConfig } from '../../config/types.js';
 import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { ssrfSafeFetch } from '../../util/ssrf.js';
 import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-policy.js';
 import { slotTimeoutMs, reasoningEffortBody } from '../../config/model-slots.js';
@@ -394,7 +394,7 @@ class FallbackVisionProvider implements VisionProvider {
     try {
       return await this.primary.caption(imageBytes, mimeType);
     } catch (err) {
-      log.warn(`Vision primary failed, falling back to external: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Vision primary failed, falling back to external: ${peerText(err)}`);
       return this.fallback.caption(imageBytes, mimeType);
     }
   }
@@ -410,7 +410,7 @@ class FallbackSttProvider implements SttProvider {
     try {
       return await this.primary.transcribe(audioBytes, mimeType);
     } catch (err) {
-      log.warn(`STT primary failed, falling back to external: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`STT primary failed, falling back to external: ${peerText(err)}`);
       return this.fallback.transcribe(audioBytes, mimeType);
     }
   }

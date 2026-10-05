@@ -40,7 +40,8 @@ import { getMediaEmbeddingConfig, getEmbeddingConfig } from '../config/loader.js
 import { createMediaProviders } from '../files/media/providers.js';
 import { embed } from '../brain/embedding.js';
 import { repairMarkdownExternal } from '../files/converters/vlm-client.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { assistProbeTarget } from '../config/assist-backend.js';
 import { envInt } from '../config/env-num.js';
 
@@ -187,8 +188,8 @@ export async function verifyTarget(target: z.infer<typeof VerifySchema>['target'
       ? done('ok', { sample: r.value.text?.trim() ? r.value.text.slice(0, 120) : '(silence transcribed to no text, as expected)' })
       : done('failed', { detail: 'the endpoint returned no transcription object' });
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    log.warn(`Model verify (${target}) failed: ${detail}`);
+    const detail = caughtFailureText(err, 'verify a model endpoint');
+    log.warn(`Model verify (${target}) failed: ${peerText(detail)}`);
     return done('failed', { detail });
   }
 }

@@ -54,7 +54,8 @@
 import { getConfig } from '../config/loader.js';
 import { convertSpaceLinks, linkConversionConcerns } from './links-conversion.js';
 import { updateSpace } from '../spaces/spaces.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 
 /**
  * Convert and mark every space that is not yet converted.
@@ -75,7 +76,7 @@ export async function convertLinksOnBoot(): Promise<void> {
      * the statement that reads the spaces it was going to convert. The call site is guarded too; this is
      * the half that holds whatever the call site does next year.
      */
-    log.error(`Link conversion could not run: ${err instanceof Error ? err.message : String(err)}. `
+    log.error(`Link conversion could not run: ${peerText(messageOf(err))}. `
       + 'No space was marked, so every space keeps reading its arrays exactly as before.');
   }
 }
@@ -104,7 +105,7 @@ async function convertPendingSpaces(): Promise<void> {
       // array writes, so marking one whose walk was partial would start refusing writes for links that
       // were never created.
       updateSpace(space.id, { completeLinkage: true });
-      log.info(`Link conversion: ${space.id} converted — ${report.added} link(s) created, marked complete`);
+      log.info(`Link conversion: ${peerText(space.id)} converted — ${report.added} link(s) created, marked complete`);
     } catch (err) {
       failures.push(`${space.id} (${err instanceof Error ? err.message : String(err)})`);
     }
@@ -112,7 +113,7 @@ async function convertPendingSpaces(): Promise<void> {
 
   if (failures.length > 0) {
     log.error(
-      `Link conversion FAILED for ${failures.length} space(s): ${failures.join('; ')}. `
+      `Link conversion FAILED for ${failures.length} space(s): ${peerList(failures, '; ')}. `
       + 'Those spaces are NOT marked `completeLinkage`, so they keep reading their arrays and keep '
       + 'accepting array writes — nothing is lost and nothing has changed for them. The next boot retries. '
       + 'Until they convert, the 5.0 removal of the array fields would lose their links.');

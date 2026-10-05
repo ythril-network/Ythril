@@ -34,6 +34,7 @@ import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log, logSafe } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { networkRole } from './network-role.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
@@ -178,12 +179,12 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
     net.syncSchedule = parsed.data.syncSchedule.trim();
     import('../sync/scheduler.js').then(({ scheduleSyncForNetwork }) => {
       scheduleSyncForNetwork(net.id, net.syncSchedule);
-    }).catch(err => log.warn(`Failed to reschedule sync for ${net.id}: ${logSafe(String(err))}`));
+    }).catch(err => log.warn(`Failed to reschedule sync for ${logSafe(net.id)}: ${logSafe(String(err))}`));
   }
   if (parsed.data.label) net.label = parsed.data.label;
   if (parsed.data.requireSignedVotes !== undefined) net.requireSignedVotes = parsed.data.requireSignedVotes;
   saveConfig(cfg);
-  log.info(`Updated network ${net.id}`);
+  log.info(`Updated network ${logSafe(net.id)}`);
   return {
     status: 200,
     body: networkView(net),
@@ -260,7 +261,7 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
     // Evaluated now: on a club, and on a network with no other member, the proposer's yes already carries it (Q-49).
     if (!concludeRoundIfReady(net, round)) {
       saveConfig(cfg);
-      log.info(`Network ${net.id}: opened space_addition round ${logSafe(round.roundId)} for '${spaceId}'`);
+      log.info(`Network ${logSafe(net.id)}: opened space_addition round ${logSafe(round.roundId)} for '${logSafe(spaceId)}'`);
       return { status: 202, body: { status: 'vote_pending', round } };
     }
   }
@@ -268,7 +269,7 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   if (caller.id) net.spaceOrigins = recordOrigin(net.spaceOrigins ?? {}, spaceId, caller.id);
   widenPeerTokens(cfg, net, [spaceId]);
   saveConfig(cfg);
-  log.info(`Network ${net.id}: added space '${spaceId}'`);
+  log.info(`Network ${logSafe(net.id)}: added space '${logSafe(spaceId)}'`);
   // F-42: a structural change drafts its own note for the members below (a no-op where nobody is below).
   void queueGeneratedNote(net.id, `${cfg.instanceLabel} added the space '${spaceId}' to '${net.label}'. It is adopted with its schema${layerOnAdd.validationMode ? ` and its ${layerOnAdd.validationMode} validation` : ''} where the token that joined the network may create spaces; otherwise it waits under "Announced, waiting for you".`, [spaceId]);
   return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces] } } };
@@ -324,7 +325,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
     // on the next sync cycle, which made dismissing a snooze).
     net.dismissedSpaces = [...(net.dismissedSpaces ?? []), spaceId];
     saveConfig(cfg);
-    log.info(`Network ${net.id}: dismissed pending space '${spaceId}'`);
+    log.info(`Network ${logSafe(net.id)}: dismissed pending space '${logSafe(spaceId)}'`);
     return { status: 200, body: networkView(net), audit: { before, after: pendingSnapshot(net) } };
   }
 
@@ -345,7 +346,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
     if (why) return { status: 409, error: why };
     dropPending();
     saveConfig(cfg);
-    log.info(`Network ${net.id}: the network's '${spaceId}' now reaches the carried space '${logSafe(localId)}' (pending space accepted onto it)`);
+    log.info(`Network ${logSafe(net.id)}: the network's '${logSafe(spaceId)}' now reaches the carried space '${logSafe(localId)}' (pending space accepted onto it)`);
     return { status: 200, body: networkView(net), audit: { before, after: pendingSnapshot(net) } };
   }
   const exists = cfg.spaces.some(s => s.id === localId);
@@ -396,7 +397,7 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
       });
       if (!r.ok) warnings.push(`${member.label}: HTTP ${r.status}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = caughtFailureText(err, 'tell a peer this instance left the network');
       log.warn(`member_departed to ${logSafe(member.label)}: ${logSafe(msg)}`);
       warnings.push(`${member.label}: ${msg}`);
     }
@@ -406,7 +407,7 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
   const fresh = getConfig();
   const i = fresh.networks.findIndex(n => n.id === id);
   if (i >= 0) { fresh.networks.splice(i, 1); saveConfig(fresh); }
-  log.info(`Deleted network id=${net.id}`);
+  log.info(`Deleted network id=${logSafe(net.id)}`);
 
   for (const member of net.members) {
     if (member.instanceId === cfg.instanceId) continue;

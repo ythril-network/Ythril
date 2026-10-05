@@ -29,6 +29,7 @@
  * records that satisfy the filter, and the response says which one ran when it was the slow one.
  */
 import { sanitizeFilter } from './query.js';
+import { caughtFailureText } from './store-failure.js';
 import { validateFilterExpression, buildMongoFilter, type FilterExpression } from './filter.js';
 
 /**
@@ -169,7 +170,7 @@ export function resolveRecallFilter(raw: unknown): ResolvedRecallFilter {
   } catch (err: unknown) {
     // `sanitizeFilter` throws on a disallowed operator, excessive depth, or an unsafe regex. Its message is the one
     // `query` gives for the same filter, which is the point of sharing it.
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: caughtFailureText(err, 'check a recall filter') };
   }
 }
 

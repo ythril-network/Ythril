@@ -32,16 +32,18 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
+import { suppressionBranchOf, UNSETS_THE_VECTOR } from './_suppression-branch.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
-/** Line comments first, then block — a block-open inside a line comment otherwise swallows real code. */
-const strip = (src) => src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+/** Source with its comments out: a sentence that explains a rule must not satisfy the assertion about it. */
+const code = (p) => stripComments(read(p));
 
 describe('the exclusion is a missing vector, never a read-time filter', () => {
   it('the graph walk does not consult the flag', () => {
     // If this ever grew a filter on the record tier, a suppressed record would silently vanish from
     // `_graph` — the exact behaviour the owner asked us NOT to have, and invisible from any single result.
-    const src = strip(read('server/src/brain/recall-graph.ts'));
+    const src = code('server/src/brain/recall-graph.ts');
     assert.doesNotMatch(src, /suppressEmbeddings|excludeFromVectorSearch|recordSuppression/,
       'traversal must reach a suppressed record; it walks edges and must not read the flag under EITHER '
       + 'spelling, nor through the shared reader');
@@ -53,7 +55,7 @@ describe('the exclusion is a missing vector, never a read-time filter', () => {
     // Read from `suppress-embeddings.ts`, which is where the resolution moved when the record creators needed
     // it before their inline embed. Keeping it in `embed-record.ts` would have put six brain modules in a
     // runtime import cycle, since that file imports `edges.ts`.
-    const embed = strip(read('server/src/brain/suppress-embeddings.ts'));
+    const embed = code('server/src/brain/suppress-embeddings.ts');
     assert.match(embed, /recordSuppression\(doc\)/, 'the embed path is where the flag is honoured');
     /*
      * THE VECTOR REMOVAL IS IN `embed-record.ts`, and this asserted it in the wrong file.
@@ -63,8 +65,9 @@ describe('the exclusion is a missing vector, never a read-time filter', () => {
      * gate went red over a property that still holds, which is how a match on the wrong thing announces
      * itself: only when the thing it was really matching disappears.
      */
-    const store = strip(read('server/src/brain/embed-record.ts'));
-    assert.match(store, /\$unset: \{ embedding/,
+    // Bounded to the SUPPRESSION branch: the failure path of the same function spells the same unset, so a match
+    // anywhere in the file is satisfied by it after the suppression branch's own has been deleted.
+    assert.match(suppressionBranchOf(code('server/src/brain/embed-record.ts')), UNSETS_THE_VECTOR,
       'setting it must REMOVE the vector, not mark the record');
   });
 });

@@ -1,4 +1,4 @@
-import { log } from './util/log.js';
+import { log, peerText } from './util/log.js';
 
 /**
  * Initialise space collections + indexes and start every background service a
@@ -29,7 +29,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const added = seedShippedLibraryEntries();
     if (added > 0) log.info(`Schema Library: added ${added} shipped entr${added === 1 ? 'y' : 'ies'}`);
   } catch (err) {
-    log.error(`Seeding the shipped Schema Library entries failed: ${err}`);
+    log.error(`Seeding the shipped Schema Library entries failed: ${peerText(err)}`);
   }
 
   // Peer tokens whose instance shares no network with us — left by handshakes that applied and never finalized,
@@ -40,7 +40,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { orphanedPeerInstanceIds, revokePeerCredentialsIfOrphaned } = await import('./auth/tokens.js');
     for (const id of orphanedPeerInstanceIds(getConfig())) await revokePeerCredentialsIfOrphaned(id);
   } catch (err) {
-    log.error(`Sweeping orphaned peer tokens failed: ${err}`);
+    log.error(`Sweeping orphaned peer tokens failed: ${peerText(err)}`);
   }
 
   // Peer tokens a newer handshake with the same peer replaced, from before a handshake revoked them itself (Q-163).
@@ -52,7 +52,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     for (const id of ids) await revokeToken(id);
     if (ids.length > 0) log.info(`Revoked ${ids.length} peer token(s) a newer handshake had replaced`);
   } catch (err) {
-    log.error(`Sweeping replaced peer tokens failed: ${err}`);
+    log.error(`Sweeping replaced peer tokens failed: ${peerText(err)}`);
   }
 
   // The read-spill TTL index in its OWN try, ahead of phase 1 (Q-92): a failure below would otherwise skip it,
@@ -61,7 +61,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { ensureReadSpillIndexes } = await import('./brain/read-spill-store.js');
     await ensureReadSpillIndexes();
   } catch (err) {
-    log.error(`Read-spill indexes could not be ensured (spills will not expire until they are): ${err}`);
+    log.error(`Read-spill indexes could not be ensured (spills will not expire until they are): ${peerText(err)}`);
   }
 
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
@@ -90,7 +90,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     await ensureActivityIndexes();
 
   } catch (err) {
-    log.error(`Instance DB initialisation failed (background services will still start): ${err}`);
+    log.error(`Instance DB initialisation failed (background services will still start): ${peerText(err)}`);
   }
 
   // ── Phase 2: start background services (always) ───────────────────────────
@@ -138,7 +138,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   startAuditChangeRetention();
 
   const { cleanupStaleChunks } = await import('./files/chunks.js');
-  cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`));
+  cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${peerText(err)}`));
 
   // Stored files (F-43). Orphaned temp files first — nothing has written yet, so any that exist were left by a
   // crash — then the one check that makes every file write fail if it is wrong, then the background pass that
@@ -153,7 +153,7 @@ export async function startConfiguredInstanceServices(): Promise<void> {
         + '.stored-tmp/ from the same one.');
     }
   } catch (err) {
-    log.error(`Files at rest: the boot checks failed: ${err}`);
+    log.error(`Files at rest: the boot checks failed: ${peerText(err)}`);
   }
   const { startAtRestMigration } = await import('./files/at-rest-migration.js');
   startAtRestMigration();
@@ -163,4 +163,15 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   const { startBrainEmbeddingWorker } = await import('./brain/embed-worker.js');
   startBrainEmbeddingWorker();
+
+  // The stored vectors of every suppressed record, at EVERY start (`Q-230`): the repair for vectors stranded before a
+  // meta write swept files, removed the model name, or heard of a network's suppression. Once the server listens, so it
+  // does not compete with the boot, and one space at a time (`sweepEverySpaceAtBoot`). Unconditional here and in the
+  // callback — a start that skipped it would leave the repair to the next meta write — and handed to `afterListening`
+  // rather than started by `index.ts`, so the setup route, which runs after the listen, reaches it too.
+  const { afterListening } = await import('./util/after-listening.js');
+  afterListening(async () => {
+    const { sweepEverySpaceAtBoot } = await import('./brain/suppression-sweep.js');
+    await sweepEverySpaceAtBoot();
+  });
 }

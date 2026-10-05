@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfa } from '../auth/middleware.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { isLoopbackHost, LOCAL_AGENT_DEFAULT_URL } from './local-agent-url.js';
 import { envInt } from '../config/env-num.js';
 
@@ -121,7 +123,7 @@ async function waitForAgentReady(maxAttempts = 60, delayMs = 500): Promise<boole
     } catch (err) {
       // Connection refused / ECONNREFUSED — connector not listening yet, keep trying.
       if (i % 5 === 0) {
-        log.info(`[local-agent] ready-poll ${i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+        log.info(`[local-agent] ready-poll ${i + 1}: ${peerText(messageOf(err))}`);
       }
     }
     await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -144,7 +146,7 @@ function getOrCreateConnectorToken(): string {
     fs.mkdirSync(connectorDir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(tokenFile, token + '\n', { encoding: 'utf8', mode: 0o600 });
   } catch (e) {
-    log.warn(`[local-agent] could not write token file: ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(`[local-agent] could not write token file: ${peerText(messageOf(e))}`);
   }
   return token;
 }
@@ -195,11 +197,11 @@ function spawnConnector(entry: string, tsx?: string): void {
     // Inject token via env so connector uses it immediately without waiting for file.
     env: { ...process.env, YTHRIL_CONNECTOR_TOKEN: token },
   });
-  child.on('error', (err) => log.warn(`[local-agent] connector spawn error: ${err.message}`));
+  child.on('error', (err) => log.warn(`[local-agent] connector spawn error: ${peerText(err.message)}`));
   if (child.pid) {
     try { fs.writeFileSync(CONNECTOR_PID_FILE, String(child.pid), { encoding: 'utf8', mode: 0o600 }); } catch { /* ignore */ }
   }
-  log.info(`[local-agent] connector spawned (pid ${child.pid ?? '?'}), log: ${logFile}`);
+  log.info(`[local-agent] connector spawned (pid ${child.pid ?? '?'}), log: ${peerText(logFile)}`);
   child.unref();
 }
 
@@ -208,19 +210,19 @@ function tryStartLocalConnector(): void {
   const tsEntry = path.resolve(__dirname, '..', 'local-agent-connector', 'index.ts');
 
   if (fs.existsSync(jsEntry)) {
-    log.info(`[local-agent] starting connector (compiled): ${jsEntry}`);
+    log.info(`[local-agent] starting connector (compiled): ${peerText(jsEntry)}`);
     spawnConnector(jsEntry);
   } else if (fs.existsSync(tsEntry)) {
     // Dev mode — tsx lives in repo root node_modules (hoisted).
     const tsxCli = path.resolve(__dirname, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
     if (!fs.existsSync(tsxCli)) {
-      log.warn(`[local-agent] tsx not found at ${tsxCli} — start connector manually: npm run local-connector:dev`);
+      log.warn(`[local-agent] tsx not found at ${peerText(tsxCli)} — start connector manually: npm run local-connector:dev`);
       return;
     }
-    log.info(`[local-agent] starting connector (dev/tsx): ${tsEntry}`);
+    log.info(`[local-agent] starting connector (dev/tsx): ${peerText(tsEntry)}`);
     spawnConnector(tsEntry, tsxCli);
   } else {
-    log.warn(`[local-agent] connector entry not found — jsEntry=${jsEntry}, tsEntry=${tsEntry}`);
+    log.warn(`[local-agent] connector entry not found — jsEntry=${peerText(jsEntry)}, tsEntry=${peerText(tsEntry)}`);
   }
 }
 
@@ -244,7 +246,7 @@ localAgentRouter.post('/bootstrap', globalRateLimit, requireAdminMfa, async (req
     }
     log.info(`[local-agent] pre-ping returned HTTP ${ping.status} — proceeding to spawn`);
   } catch (pingErr) {
-    log.info(`[local-agent] pre-ping failed (expected if not running): ${pingErr instanceof Error ? pingErr.message : String(pingErr)}`);
+    log.info(`[local-agent] pre-ping failed (expected if not running): ${peerText(messageOf(pingErr))}`);
   }
 
   try {
@@ -273,8 +275,8 @@ localAgentRouter.post('/bootstrap', globalRateLimit, requireAdminMfa, async (req
     res.json({ ok: true, message: 'Local connector bootstrapped and reachable.' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`local-agent bootstrap failed: ${msg}`);
-    res.status(502).json({ error: `Local agent bootstrap failed: ${msg}` });
+    log.warn(`local-agent bootstrap failed: ${peerText(msg)}`);
+    res.status(502).json({ error: `Local agent bootstrap failed: ${caughtFailureText(err, 'bootstrap the local agent')}` });
   }
 });
 
@@ -339,12 +341,11 @@ localAgentRouter.get('/status', globalRateLimit, requireAdminMfa, async (_req, r
       agent: body,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     res.json({
       configured: true,
       reachable: false,
       canExecute: false,
-      message: `Local agent unreachable: ${msg}`,
+      message: `Local agent unreachable: ${caughtFailureText(err, 'reach the local agent')}`,
     });
   }
 });
@@ -398,7 +399,7 @@ localAgentRouter.post('/enable-networks/execute', globalRateLimit, requireAdminM
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`local-agent execute failed: ${msg}`);
-    res.status(502).json({ error: `Local agent execution failed: ${msg}` });
+    log.warn(`local-agent execute failed: ${peerText(msg)}`);
+    res.status(502).json({ error: `Local agent execution failed: ${caughtFailureText(err, 'run the local agent')}` });
   }
 });

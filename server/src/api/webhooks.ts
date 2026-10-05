@@ -23,7 +23,7 @@ import {
 import { deliverToWebhook } from '../webhooks/dispatcher.js';
 import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 export const webhooksRouter = Router();
 
@@ -60,7 +60,7 @@ webhooksRouter.get('/', async (_req, res) => {
     const webhooks = await listWebhooks();
     res.json({ webhooks });
   } catch (err) {
-    log.error(`GET /api/admin/webhooks: ${err}`);
+    log.error(`GET /api/admin/webhooks: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -76,7 +76,7 @@ webhooksRouter.get('/:id', async (req, res) => {
     }
     res.json(webhook);
   } catch (err) {
-    log.error(`GET /api/admin/webhooks/:id: ${err}`);
+    log.error(`GET /api/admin/webhooks/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -100,7 +100,7 @@ webhooksRouter.post('/', async (req, res) => {
     });
     res.status(201).json({ ...subscription, id });
   } catch (err) {
-    log.error(`POST /api/admin/webhooks: ${err}`);
+    log.error(`POST /api/admin/webhooks: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -128,7 +128,7 @@ webhooksRouter.patch('/:id', async (req, res) => {
     }
     res.json(updated);
   } catch (err) {
-    log.error(`PATCH /api/admin/webhooks/:id: ${err}`);
+    log.error(`PATCH /api/admin/webhooks/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -144,7 +144,7 @@ webhooksRouter.delete('/:id', async (req, res) => {
     }
     res.status(204).end();
   } catch (err) {
-    log.error(`DELETE /api/admin/webhooks/:id: ${err}`);
+    log.error(`DELETE /api/admin/webhooks/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -171,12 +171,12 @@ webhooksRouter.post('/:id/test', async (req, res) => {
 
     // Deliver directly to THIS webhook only — not broadcast via emitWebhookEvent
     deliverToWebhook(full, JSON.stringify(payload), 'test.ping', '_test').catch(err => {
-      log.warn(`Test webhook delivery error for ${full.id}: ${err}`);
+      log.warn(`Test webhook delivery error for ${peerText(full.id)}: ${peerText(err)}`);
     });
 
     res.json({ ok: true, message: 'Test event queued for delivery' });
   } catch (err) {
-    log.error(`POST /api/admin/webhooks/:id/test: ${err}`);
+    log.error(`POST /api/admin/webhooks/:id/test: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -195,7 +195,7 @@ webhooksRouter.get('/:id/deliveries', async (req, res) => {
     const deliveries = await listDeliveries(req.params['id'] as string, limit);
     res.json({ deliveries });
   } catch (err) {
-    log.error(`GET /api/admin/webhooks/:id/deliveries: ${err}`);
+    log.error(`GET /api/admin/webhooks/:id/deliveries: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

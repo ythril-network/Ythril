@@ -25,7 +25,8 @@ import type { Extraction } from './conversation/assemble.js';
 import type { SchemaEntry } from './validate-extraction.js';
 import type { WriteOutcome } from './conversation/write-extraction.js';
 import { ingestRuns, type IngestRun } from './ingest-runs.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { storedFailureText } from '../brain/store-failure.js';
 import { unknownBodyFields } from '../brain/query.js';
 
 export const INGEST_KINDS = ['conversation'] as const;
@@ -195,8 +196,9 @@ export async function runIngest(
     run.phase = 'done';
   } catch (err) {
     run.phase = 'failed';
-    run.error = err instanceof Error ? err.message : String(err);
-    log.warn(`ingest ${run.runId} into ${spaceId} failed: ${run.error}`);
+    // `run.error` is served by `ingest_status`: the driver's text is the log's, not the run's.
+    run.error = storedFailureText(err, 'ingest a conversation');
+    log.warn(`ingest ${peerText(run.runId)} into ${peerText(spaceId)} failed: ${peerText(run.error)}`);
   } finally {
     run.finishedAt = new Date().toISOString();
   }

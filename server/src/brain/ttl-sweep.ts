@@ -9,7 +9,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { TTL_COLLECTIONS, ensureTtlIndex } from './ttl.js';
 import { deleteFact } from './fact.js';
@@ -62,7 +62,7 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
         try {
           if (await DELETERS[c](space.id, _id, TTL_ACTOR)) total++;
         } catch (err) {
-          log.warn(`TTL sweep: delete ${c} ${_id} in ${space.id}: ${err}`);
+          log.warn(`TTL sweep: delete ${c} ${peerText(_id)} in ${peerText(space.id)}: ${peerText(err)}`);
         }
       }
     }
@@ -72,15 +72,15 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // Per-chrono-type retention rides the same cycle: its backfill and content-redaction passes are the same
   // shape of work on the same clock, and running them here means one timer rather than two doing housekeeping
   // over the same collections. Failures are contained inside it — a retention problem must not stop deletions.
-  await sweepChronoRetention(now).catch(err => log.warn(`Chrono retention sweep: ${err}`));
+  await sweepChronoRetention(now).catch(err => log.warn(`Chrono retention sweep: ${peerText(err)}`));
 
   // Read spills older versions wrote into spaces (Q-92), on the same clock and every cycle: older peers keep
   // sending them until they upgrade. Contained like the pass above.
-  await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${err}`));
+  await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${peerText(err)}`));
 
   // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219). Contained like the passes above; a failed
   // drain keeps its collection and is retried next cycle.
-  await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${err}`));
+  await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${peerText(err)}`));
 
   return total;
 }
@@ -97,7 +97,7 @@ async function ensureSweepIndexes(): Promise<void> {
   try { cfg = getConfig(); } catch { return; } // pre-setup
   for (const space of cfg.spaces) {
     if (space.proxyFor?.length) continue;
-    await ensureTtlIndex(space.id).catch(err => log.warn(`TTL sweep: ensureTtlIndex ${space.id}: ${err}`));
+    await ensureTtlIndex(space.id).catch(err => log.warn(`TTL sweep: ensureTtlIndex ${peerText(space.id)}: ${peerText(err)}`));
   }
 }
 

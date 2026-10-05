@@ -19,7 +19,8 @@ import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { extForMimeType } from '../mime.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -73,7 +74,7 @@ async function extractKeyframes(
     '-q:v', '4',
     pattern,
   ]).catch(err => {
-    log.warn(`Video embedder: keyframe extraction warning: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Video embedder: keyframe extraction warning: ${peerText(messageOf(err))}`);
     return { stdout: Buffer.alloc(0), stderr: '' };
   });
 
@@ -144,16 +145,16 @@ export async function embedVideo(
     // and recording that as `complete` is the same silent loss the audio path had.
     const audioOutcome = { audioFailed: audioResult.failed, audioTotal: audioResult.total };
     if (audioResult.failed > 0) {
-      log.warn(`Video embedder: ${audioResult.failed}/${audioResult.total} audio chunks failed for ${fileId}`);
+      log.warn(`Video embedder: ${audioResult.failed}/${audioResult.total} audio chunks failed for ${peerText(fileId)}`);
     }
 
     if (audioChunks.length === 0) {
-      log.warn(`Video embedder: no audio chunks produced for ${fileId}`);
+      log.warn(`Video embedder: no audio chunks produced for ${peerText(fileId)}`);
     }
 
     // `audio` video level: stop after the audio pipeline — no keyframes, the vision model is not called.
     if (!doKeyframes) {
-      log.debug(`Video embedder: audio-only level for ${fileId} — skipping keyframe captioning`);
+      log.debug(`Video embedder: audio-only level for ${peerText(fileId)} — skipping keyframe captioning`);
       return audioOutcome;
     }
 
@@ -163,7 +164,7 @@ export async function embedVideo(
     const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS);
 
     if (keyframes.length === 0) {
-      log.debug(`Video embedder: no keyframes extracted for ${fileId}`);
+      log.debug(`Video embedder: no keyframes extracted for ${peerText(fileId)}`);
       return audioOutcome; // audio-only chunks are sufficient
     }
 
@@ -180,7 +181,7 @@ export async function embedVideo(
       // Checked BEFORE the call, not after: stall recovery has already handed this file to another worker, so
       // spending another vision budget on it produces a caption that the other run will overwrite anyway.
       if (opts?.shouldStop?.()) {
-        log.warn(`Video embedder: lease lost after ${i}/${keyframes.length} keyframes for ${fileId} — stopping `
+        log.warn(`Video embedder: lease lost after ${i}/${keyframes.length} keyframes for ${peerText(fileId)} — stopping `
           + 'rather than competing with the run that recovered this job');
         break;
       }
@@ -190,7 +191,7 @@ export async function embedVideo(
           captionedFrames.push({ timestampS, caption: caption.trim() });
         }
       } catch (err) {
-        log.warn(`Video embedder: keyframe caption failed at ${timestampS}s for ${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Video embedder: keyframe caption failed at ${timestampS}s for ${peerText(fileId)}: ${peerText(messageOf(err))}`);
       }
       // After the attempt, and outside the catch on purpose: a keyframe the model refused is still a keyframe
       // this run got through, and a beat that only fires on success would go silent exactly when a provider
@@ -232,7 +233,7 @@ export async function embedVideo(
           }),
         );
       } catch (err) {
-        log.warn(`Video embedder: re-embed failed for chunk ${chunk.chunkId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Video embedder: re-embed failed for chunk ${peerText(chunk.chunkId)}: ${peerText(messageOf(err))}`);
       }
     }
     return audioOutcome;

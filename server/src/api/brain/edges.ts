@@ -23,6 +23,7 @@ import {
 } from '../../spaces/proxy.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { caughtFailureText } from '../../brain/store-failure.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 
@@ -82,7 +83,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'from', edgeEndpointKind(fromKind as RefKind | undefined), [from as string]);
       await assertRefsResolve(wt.target, 'to', edgeEndpointKind(toKind as RefKind | undefined), [to as string]);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(400).json({ error: caughtFailureText(err, 'resolve the edge endpoints') });
       return;
     }
   }
@@ -289,7 +290,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
           await assertRefsResolve(wt.target, 'to', updates.toKind, [stored.to]);
         }
       } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        res.status(400).json({ error: caughtFailureText(err, 'resolve the edge endpoints') });
         return;
       }
     }

@@ -10,7 +10,8 @@ import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { authorRef } from '../../config/author.js';
 import { embed } from '../../brain/embedding.js';
 import { getMediaEmbeddingConfig } from '../../config/loader.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
 import { spaceCollection } from '../../db/space-collection.js';
@@ -73,7 +74,7 @@ export async function embedImage(
       // face unlabelled for good. Rethrown, the job retries like any other transient failure; the caption chunk
       // above is an upsert, so the retry rewrites it rather than duplicating it.
       if (err instanceof GalleryIncompleteError) throw err;
-      log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Face recogniser: embedFaces failed for ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`);
     });
   }
 

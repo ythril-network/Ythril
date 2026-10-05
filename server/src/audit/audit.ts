@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId } from '../util/log.js';
+import { log, currentRequestId, peerText } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
 import type { AuditChange } from './audit-changes.js';
 import type { Collection, Filter, Sort } from 'mongodb';
@@ -143,7 +143,7 @@ export function logAuditEntry(input: AuditEntryInput): void {
   };
 
   col().insertOne(entry as any).catch((err: unknown) => {
-    log.warn(`Audit log write failed: ${err}`);
+    log.warn(`Audit log write failed: ${peerText(err)}`);
   });
 }
 

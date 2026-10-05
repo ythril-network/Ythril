@@ -29,7 +29,7 @@ import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js
 import { getConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import {
   findSimilar,
   DEFAULT_DUPE_THRESHOLD,
@@ -44,6 +44,7 @@ import { settledSeqRange } from '../util/seq.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { readStoredById } from '../db/read-by-id.js';
 
 const DEFAULT_SCHEDULE = '0 3 * * *';   // 03:00 daily
 const DEFAULT_BATCH_SIZE = 200;
@@ -93,6 +94,44 @@ export async function pairContentHash(spaceId: string, type: DupeScanType, aId: 
   return createHash('sha1').update(`${aText}\u0000${bText}`).digest('hex');
 }
 
+/** A seq a stored pair row can be compared by: a positive number. Absent or 0 is a row that never knew it. */
+const knownSeq = (seq: unknown): seq is number => typeof seq === 'number' && seq > 0;
+
+/**
+ * Have the records of a pair changed since the pair was stored — the ONE answer for every place that compares a stored
+ * pair's seqs with the seqs of this scan: `handlePair` (open and dismissed pairs) and `decideDismissed`, which the
+ * contradiction scanner shares (`Q-361` item 15).
+ *
+ * **A stored seq that is absent or 0 is UNKNOWN, not CHANGED.** A row written by 5.6.3 holds a 0 for whichever end seeded
+ * it (the seed's seq was never read), and one written before seqs holds none. Compared literally, every such row would
+ * read as changed on the first scan after an upgrade: each pair re-fired, re-opened or re-merged in one burst. Only a seq
+ * the row knows can say the record moved; the row then converges as each pair is next scanned (`handlePair` stores the
+ * real seqs).
+ */
+function pairSeqsChanged(stored: Pick<DupeCandidateDoc, 'aSeq' | 'bSeq'>, aSeq: number, bSeq: number): boolean {
+  return (knownSeq(stored.aSeq) && stored.aSeq !== aSeq) || (knownSeq(stored.bSeq) && stored.bSeq !== bSeq);
+}
+
+/**
+ * Which record of a stored pair is the older (the lower seq), for a merge that keeps the older or the newer. The stored
+ * seqs when BOTH are known; when either is unknown (`pairSeqsChanged`: a row 5.6.3 wrote), the two records' CURRENT
+ * seqs — a stored 0 ranks its end as the older whatever it is, which made the survivor follow the ids. Falls back to the
+ * stored order only when a current seq cannot be read either (a record gone).
+ */
+export async function pairByAge(
+  spaceId: string, row: Pick<DupeCandidateDoc, 'type' | 'aId' | 'bId' | 'aSeq' | 'bSeq'>,
+): Promise<{ olderId: string; newerId: string }> {
+  let aSeq: number | undefined = row.aSeq;
+  let bSeq: number | undefined = row.bSeq;
+  if (!knownSeq(aSeq) || !knownSeq(bSeq)) {
+    const now = await readStoredById<{ seq?: number }>(`${spaceId}_${COLLECTION_SUFFIX[row.type]}`, [row.aId, row.bId], { seq: 1 });
+    aSeq = now.get(row.aId)?.seq ?? aSeq;
+    bSeq = now.get(row.bId)?.seq ?? bSeq;
+  }
+  const aOlder = (aSeq ?? 0) <= (bSeq ?? 0);
+  return aOlder ? { olderId: row.aId, newerId: row.bId } : { olderId: row.bId, newerId: row.aId };
+}
+
 /**
  * Policy for an EXISTING dismissed pair the scanner has re-encountered. Pure (no DB) so it is
  * exhaustively unit-testable — the crux of "don't resurface on noise, do resurface on real change":
@@ -106,7 +145,7 @@ export function decideDismissed(
   existing: Pick<DupeCandidateDoc, 'aSeq' | 'bSeq' | 'dismissedContentHash'>,
   aSeq: number, bSeq: number, currentHash: string,
 ): 'keep' | 'refresh' | 'reopen' {
-  if (existing.aSeq === aSeq && existing.bSeq === bSeq) return 'keep';
+  if (!pairSeqsChanged(existing, aSeq, bSeq)) return 'keep';
   if (existing.dismissedContentHash === undefined) return 'refresh';
   if (existing.dismissedContentHash === currentHash) return 'refresh';
   return 'reopen';
@@ -176,7 +215,7 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
     if (!fullyResolved) return false;   // a property value conflict — not lossless, leave for review
     const mergedProps = applyResolutions(survivor.properties ?? {}, absorbed.properties ?? {}, plan.propertyConflicts, plan.absorbedOnlyProperties);
     await executeMerge(spaceId, survivor, absorbed, mergedProps, { tokenLabel: 'dupe-scanner' });
-    log.info(`Auto-merged entity ${absorbed._id} → ${survivor._id} in '${spaceId}' (score ${(match.score ?? 0).toFixed(3)})`);
+    log.info(`Auto-merged entity ${peerText(absorbed._id)} → ${peerText(survivor._id)} in '${peerText(spaceId)}' (score ${peerText((match.score ?? 0).toFixed(3))})`);
     return true;
   } catch (err) {
     /*
@@ -190,14 +229,14 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
      */
     if (err instanceof MergeSchemaViolation) {
       log.warn(
-        `Auto-merge REFUSED in '${spaceId}': the merged survivor would violate the space's schema, so `
-        + `'${err.absorbedId}' and '${err.survivorId}' remain as separate records. `
-        + `${err.violations.map(v => `${v.field}: ${v.reason}`).join('; ')}. `
+        `Auto-merge REFUSED in '${peerText(spaceId)}': the merged survivor would violate the space's schema, so `
+        + `'${peerText(err.absorbedId)}' and '${peerText(err.survivorId)}' remain as separate records. `
+        + `${peerList(err.violations.map(v => `${v.field}: ${v.reason}`), '; ')}. `
         + 'Resolve by hand, or relax the rule the merge would have broken.',
       );
       return false;
     }
-    log.warn(`Auto-merge failed in '${spaceId}': ${err}`);
+    log.warn(`Auto-merge failed in '${peerText(spaceId)}': ${peerText(err)}`);
     return false;
   }
 }
@@ -229,7 +268,7 @@ async function fireNotify(spaceId: string, type: DupeScanType, a: RecallResult, 
       });
       resp.body?.cancel?.();
     } catch (err) {
-      log.warn(`Dupe notify (override URL) failed for '${spaceId}': ${err}`);
+      log.warn(`Dupe notify (override URL) failed for '${peerText(spaceId)}': ${peerText(err)}`);
     }
   } else {
     emitWebhookEvent({ event: 'duplicate.detected', spaceId, entry });
@@ -251,12 +290,20 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
   const existing = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).findOne(asFilter<DupeCandidateDoc>({ _id }));
   if (existing) {
     if (existing.status === 'resolved' && existing.resolution === 'merged') return; // absorbed record gone
+    if (!pairSeqsChanged(existing, aSeq, bSeq)) {
+      // Untouched — open or dismissed, no read. A seq the row never knew (`pairSeqsChanged`) is stored now, so a row
+      // 5.6.3 wrote converges as each of its pairs is next scanned.
+      if (!knownSeq(existing.aSeq) || !knownSeq(existing.bSeq)) {
+        await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
+          asFilter<DupeCandidateDoc>({ _id }), asUpdate<DupeCandidateDoc>({ $set: { aSeq, bSeq } }));
+      }
+      return;
+    }
     if (existing.status === 'dismissed') {
       // A dismissed pair no longer re-opens on a bare seq bump — seq advances on ANY re-write (edit,
       // peer re-sync, re-embed, index rebuild), which used to resurface every dismissed pair after a
       // routine re-embed. It re-opens only when the pair's CONTENT materially changed; a re-write that
       // leaves the embedded text identical keeps it dismissed. (Manual re-rate is the other way back.)
-      if (existing.aSeq === aSeq && existing.bSeq === bSeq) return;                  // untouched — no read
       const currentHash = await pairContentHash(spaceId, type, a._id, b._id);
       if (decideDismissed(existing, aSeq, bSeq, currentHash) !== 'reopen') {
         // Content unchanged (or a legacy baseline): stay dismissed, but advance the baseline + seqs so
@@ -268,8 +315,6 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
         return;
       }
       // else: content changed → fall through to normal evaluation, which re-opens the pair.
-    } else if (existing.aSeq === aSeq && existing.bSeq === bSeq) {
-      return;                                                                       // open + unchanged
     }
   }
 
@@ -397,9 +442,9 @@ export async function runDupeScanAllSpaces(): Promise<void> {
     if (s.proxyFor) continue;
     try {
       const r = await scanSpace(s.id);
-      if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);
+      if (r.scanned > 0) log.info(`Dupe scan '${peerText(s.id)}': scanned ${r.scanned}, pairs ${r.pairs}`);
     } catch (err) {
-      log.warn(`Dupe scan '${s.id}' failed: ${err}`);
+      log.warn(`Dupe scan '${peerText(s.id)}' failed: ${peerText(err)}`);
     }
   }
 }
@@ -418,14 +463,14 @@ export function startDupeScanner(): void {
   stopDupeScanner();
   if (cron === null) return;
   if (!validate(cron)) {
-    log.warn(`Invalid dupeScanner.schedule '${cron}' — duplicate scanner not started`);
+    log.warn(`Invalid dupeScanner.schedule '${peerText(cron)}' — duplicate scanner not started`);
     return;
   }
   _task = schedule(cron, () => {
     void runExclusive('Dupe scan', () => runDupeScanAllSpaces());
   });
   _armed.note(ARMED, cron);
-  log.info(`Duplicate scanner scheduled (${cron})`);
+  log.info(`Duplicate scanner scheduled (${peerText(cron)})`);
 }
 
 export function stopDupeScanner(): void {

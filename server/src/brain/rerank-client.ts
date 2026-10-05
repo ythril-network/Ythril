@@ -21,7 +21,7 @@ import { getMediaEmbeddingConfig, getModelSlots } from '../config/loader.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { modelFetch } from '../util/model-fetch.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { endpointCooldown, endpointUnavailable } from '../util/endpoint-cooldown.js';
 
 /**
@@ -317,7 +317,7 @@ async function runPass(
   } catch (err) {
     // Deliberately logs neither the query nor the passages: both are user content and this line goes to
     // the log. The same rule the NLI client follows.
-    log.warn(`Rerank failed — keeping the vector order: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Rerank failed — keeping the vector order: ${peerText(err)}`);
     // Unreachable is unavailable; a timeout is judged by the caller, which knows whose deadline it was.
     const timedOut = signal.aborted;
     return { scores: null, unavailable: !timedOut, timedOut };

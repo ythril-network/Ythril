@@ -34,7 +34,8 @@
 import { col, asFilter } from '../db/mongo.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import type { DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
 
@@ -140,7 +141,7 @@ export async function pruneSpaceCandidates(spaceId: string): Promise<PruneResult
         await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: toDelete } }));
       }
     } catch (err) {
-      log.warn(`Candidate prune (${spaceId}/${suffix}): ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Candidate prune (${peerText(spaceId)}/${suffix}): ${peerText(messageOf(err))}`);
     }
   }
   return result;

@@ -14,7 +14,7 @@ import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 export const notifyRouter = Router();
 
@@ -138,15 +138,15 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
 
   notifyRing.push(entry);
 
-  log.info(`Notify: [${event}] from ${instanceId} in network ${networkId}`);
+  log.info(`Notify: [${event}] from ${peerText(instanceId)} in network ${peerText(networkId)}`);
 
   // For sync_available events, we trigger an async sync run
   if (event === 'sync_available') {
     import('../sync/engine.js').then(({ runSyncForNetwork }) => {
       runSyncForNetwork(networkId).catch(err =>
-        log.error(`Triggered sync for network ${networkId} failed: ${err}`),
+        log.error(`Triggered sync for network ${peerText(networkId)} failed: ${peerText(err)}`),
       );
-    }).catch(err => log.error(`Failed to import sync engine: ${err}`));
+    }).catch(err => log.error(`Failed to import sync engine: ${peerText(err)}`));
   }
 
   // For a pending space_deletion or space_wipe, trigger a sync so we pull the vote round immediately.
@@ -155,9 +155,9 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
   if (event === 'space_deletion_pending' || event === 'space_wipe_pending') {
     import('../sync/engine.js').then(({ runSyncForNetwork }) => {
       runSyncForNetwork(networkId).catch(err =>
-        log.error(`Triggered sync (${event}) for network ${networkId} failed: ${err}`),
+        log.error(`Triggered sync (${event}) for network ${peerText(networkId)} failed: ${peerText(err)}`),
       );
-    }).catch(err => log.error(`Failed to import sync engine (${event}): ${err}`));
+    }).catch(err => log.error(`Failed to import sync engine (${event}): ${peerText(err)}`));
   }
 
   // N-7: when a member departs, auto-adopt its children as direct children of this instance
@@ -176,8 +176,8 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
             if (!me.children.includes(orphan.instanceId)) me.children.push(orphan.instanceId);
           }
           log.info(
-            `N-7 auto-adopt: re-parented '${orphan.label}' (${orphan.instanceId}) ` +
-            `from departed ${instanceId} in network '${netW.label}'`,
+            `N-7 auto-adopt: re-parented '${peerText(orphan.label)}' (${peerText(orphan.instanceId)}) ` +
+            `from departed ${peerText(instanceId)} in network '${peerText(netW.label)}'`,
           );
           changed = true;
         }
@@ -195,13 +195,13 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
       if (depIdx >= 0) {
         netDep.members.splice(depIdx, 1);
         saveConfig(cfgDep);
-        log.info(`Departed member ${instanceId} removed from network ${networkId}`);
+        log.info(`Departed member ${peerText(instanceId)} removed from network ${peerText(networkId)}`);
       }
     }
     // The departing peer's PAT stays valid only while it is still a member of
     // some other shared network; otherwise revoke it (and our outbound token).
     revokePeerCredentialsIfOrphaned(instanceId)
-      .catch(err => log.error(`peer credential revocation for ${instanceId}: ${err}`));
+      .catch(err => log.error(`peer credential revocation for ${peerText(instanceId)}: ${peerText(err)}`));
   }
 
   // We have been ejected from this network — mark as ejected and remove it locally
@@ -217,14 +217,14 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
       cfgEject.networks.splice(netIdx, 1);
     }
     saveConfig(cfgEject);
-    log.warn(`Ejected from network ${networkId} — network removed and marked as ejected`);
+    log.warn(`Ejected from network ${peerText(networkId)} — network removed and marked as ejected`);
     // Ex-peers of the deleted network keep their PATs only if they still share
     // another network with us; otherwise their credentials are revoked so they
     // cannot keep hitting our data endpoints after the ejection.
     for (const memberId of formerMembers) {
       if (memberId === cfgEject.instanceId) continue;
       revokePeerCredentialsIfOrphaned(memberId)
-        .catch(err => log.error(`peer credential revocation for ${memberId}: ${err}`));
+        .catch(err => log.error(`peer credential revocation for ${peerText(memberId)}: ${peerText(err)}`));
     }
   }
 

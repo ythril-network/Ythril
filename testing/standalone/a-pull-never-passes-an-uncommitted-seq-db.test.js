@@ -57,6 +57,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { readTrackedSources } from './_sources.mjs';
+import { fakeResponse } from './_fake-response.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom, bodyOf } from './_structural-window.mjs';
 
@@ -148,9 +149,9 @@ async function pull(route, query = {}) {
   const layer = router.stack.find(l => l.route?.path === route.path && l.route.methods.get);
   assert.ok(layer, `${route.router} has no GET ${route.path}`);
   const handler = layer.route.stack.at(-1).handle;
-  const res = { code: 200, body: undefined, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  const res = fakeResponse();
   await handler({ query: { spaceId: SPACE, sinceSeq: '0', full: 'true', ...query }, params: {}, authToken: AUTH, get: () => undefined }, res);
-  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   return res.body;
 }
 

@@ -27,10 +27,11 @@ import { checkQuota, QuotaError } from '../quota/quota.js';
 import { storeFile, recordStoredFile, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
 import { callerPeerAuthor } from './sync/_shared.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 /**
  * Attach the upload route to the file-store router.
@@ -143,11 +144,11 @@ export function registerUploadRoute(router: Router): void {
           }
         } catch (err) {
           if (err instanceof RangeError) {
-            res.status(400).json({ error: (err as Error).message });
+            res.status(400).json({ error: caughtFailureText(err, 'upload a file chunk') });
             return;
           }
-          log.warn(`Chunked upload error for space ${targetSpace}, path ${filePath}: ${err}`);
-          res.status(500).json({ error: 'Chunked upload failed' });
+          log.warn(`Chunked upload error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
+res.status(500).json({ error: 'Chunked upload failed' });
         }
         return;
       }
@@ -171,7 +172,7 @@ export function registerUploadRoute(router: Router): void {
           try {
             decoded = decodeContent(req.body.content as string, req.body.encoding);
           } catch (err) {
-            res.status(400).json({ error: (err as Error).message });
+            res.status(400).json({ error: caughtFailureText(err, 'decode an uploaded file') });
             return;
           }
         } else {
@@ -229,10 +230,10 @@ export function registerUploadRoute(router: Router): void {
         res.status(statusCode).json(response);
       } catch (err) {
         if (err instanceof RangeError) {
-          res.status(400).json({ error: err.message });
+          res.status(400).json({ error: caughtFailureText(err, 'upload a file') });
           return;
         }
-        log.warn(`writeFile error for space ${targetSpace}, path ${filePath}: ${err}`);
+        log.warn(`writeFile error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
         res.status(500).json({ error: 'Failed to write file' });
       }
     },

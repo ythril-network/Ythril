@@ -467,6 +467,9 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       minScore,
       crossSpaceIds,
     );
+    // The seed's `seq` is the duplicate scanner's (`findSimilar` hands it the source it compares pairs by); the answer
+    // never carries it, whatever a caller asks — as the source never did before the scanner needed it.
+    const source = withoutDiagnostics([result.source], false)[0]!;
     if (safeTraverse === 0) {
       const plainItems = projectResults(withoutDiagnostics(
         stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics), safeProjection)
@@ -484,6 +487,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       });
       res.json({
         ...result,
+        source,
         results: plainItemsBudgeted.results,
         ...plainItemsBudgeted.fields,
       });
@@ -518,7 +522,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       }),
     });
     res.json({
-      source: result.source,
+      source,
       results: itemsBudgeted.results,
       ...itemsBudgeted.fields,
       traverseDepth: safeTraverse,
@@ -527,7 +531,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     if (err instanceof NotFoundError) {
       res.status(404).json({ error: err.message });
     } else {
-      sendReadFailure(res, err);
+      sendReadFailure(res, 'find similar records', err);
     }
   }
 });

@@ -20,7 +20,7 @@
  */
 import { col } from '../db/mongo.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { RecallKnowledgeType } from './recall.js';
 import { byIdAsc } from './recall-shape.js';
 
@@ -98,7 +98,7 @@ export async function lexicalSearch(
     // Logged at debug volume, not per query, because it is a degradation and not an error.
     const msg = err instanceof Error ? err.message : String(err);
     if (!/text index required/i.test(msg)) {
-      log.warn(`Lexical search on ${collName} failed — keeping the vector order: ${msg}`);
+      log.warn(`Lexical search on ${peerText(collName)} failed — keeping the vector order: ${peerText(msg)}`);
     }
     return [];
   }

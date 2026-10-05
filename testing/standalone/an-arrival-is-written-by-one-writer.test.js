@@ -39,6 +39,10 @@
  * Red on 797dbb2e: `sync/arrivals.ts` does not exist; `ingestBrainDoc`, `batchUpsertBySeq` and the inline
  * `$setOnInsert` in `POST /entities` write record collections directly.
  *
+ * The unset-only block (what the two `suppression-sweep.ts` exemptions claim they write) is red by hand, restored by hand:
+ * a content `$set` added to the `updateMany` of `dropFileVectors`, of `sweepPaged`, and a `deleteMany` added to
+ * `forEachPage`, which `sweepPaged` reaches.
+ *
  * Run: node --test testing/standalone/an-arrival-is-written-by-one-writer.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -46,9 +50,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, routeHandlerRoots, walkFrom, pathTo } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { recordWrites } from './_record-writes.mjs';
+import { recordWrites, WRITE_METHODS } from './_record-writes.mjs';
+import { argumentsOf } from './_structural-window.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
+const { UNSET_VECTOR, DERIVED_LOCAL_FIELDS } = await import('../../server/dist/sync/local-only-fields.js');
 
 const ARRIVALS = 'server/src/sync/arrivals.ts';
 const WRITER = `${ARRIVALS}:writeArrivals`;
@@ -83,7 +90,28 @@ const EXEMPT = {
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '
     + 'no arriving document',
+  'server/src/brain/suppression-sweep.ts:dropFileVectors':
+    'removes the RECEIVER\'s own vector fields (derived, never replicated) from the file ids it is handed and every row '
+    + 'derived from them. On an arrival (ingestFileMeta, Q-230) the ids are the arriving file\'s: the STORED copy of the '
+    + 'arriving parent row and its chunk and passage rows lose their vectors here, before ingestFileMeta writes the '
+    + 'arrival\'s own row. The suppression sweep\'s record tier calls it too. It writes only an $unset of those fields '
+    + '(asserted below) and stores nothing the arriving document carries',
+  'server/src/brain/suppression-sweep.ts:sweepPaged':
+    'the suppression sweep\'s one updater: it removes the receiver\'s own vector fields where its meta now suppresses '
+    + 'them. A door reaches it only through updateSpace, which asks for the sweep after EVERY write of the effective '
+    + 'meta — an operator\'s edit, a schema route\'s, a concluded vote\'s (the vote route, and the pull\'s vote '
+    + 'propagation), a network layer arriving or recomputed — so the vote is one path of several, not the reason. It '
+    + 'writes only an $unset of those fields (asserted below) and stores no arriving document',
 };
+
+/**
+ * The exempt functions whose reason is "removes the receiver's own derived vector fields and nothing else". Each must be
+ * an EXEMPT key; the last describe block holds them to it, so a content `$set` added to one fails there, not in review.
+ */
+const UNSET_ONLY = [
+  'server/src/brain/suppression-sweep.ts:dropFileVectors',
+  'server/src/brain/suppression-sweep.ts:sweepPaged',
+];
 
 const INDEX = moduleIndex('server/src');
 const ROUTES = mountedRoutes();
@@ -144,6 +172,61 @@ describe('the derivation works', () => {
     const reached = reachedRecordWrites();
     assert.ok(reached.length >= 5, `the doors reach only ${reached.length} record-collection write(s) — the walk is broken`);
   });
+});
+
+/**
+ * What an exemption's reason SAYS the function writes is held to what it writes. "Removes the receiver's own vector
+ * fields and nothing else" is the claim that makes `dropFileVectors` and `sweepPaged` not arrivals; it was a sentence,
+ * and a content `$set` added to either would have passed the gate above, which only asks whether a write is excused.
+ *
+ * Every record-collection write reachable FROM the exempt function counts, not only its own body: a helper it calls
+ * that gains a write is the same defect one call away. Each such write must be `updateOne`/`updateMany` of exactly two
+ * arguments (a third is the options object, where `upsert: true` would create a row) whose update is
+ * `{ $unset: UNSET_VECTOR }`, and `UNSET_VECTOR` must be the local-only module's own, naming only derived local fields.
+ */
+describe('an exemption that only removes derived vector fields writes nothing else', () => {
+  const UPDATES = new Set(['updateOne', 'updateMany']);
+  const WRITE_CALL = new RegExp(`\\.\\s*(${WRITE_METHODS.join('|')})\\s*(?:<[^>(]*>)?\\s*\\(`, 'g');
+  const LOCAL_ONLY = 'server/src/sync/local-only-fields.ts';
+  const SWEEP = 'server/src/brain/suppression-sweep.ts';
+
+  /** Every write call in the functions `key` reaches that write a record collection: `{ at, op, args }`. */
+  function writeCallsFrom(key) {
+    const calls = [];
+    for (const reached of reaches([key]).seen) {
+      if (!RECORDS.byKey.has(reached)) continue;
+      const body = stripComments(INDEX.bodies.get(reached).body);
+      for (const m of body.matchAll(WRITE_CALL)) {
+        calls.push({ at: reached, op: m[1], args: argumentsOf(body, m.index + m[0].length - 1, `${reached} ${m[1]}`) });
+      }
+    }
+    return calls;
+  }
+
+  it('the claim is made only of exemptions that exist, and the vector fields are the receiver\'s own', () => {
+    assert.ok(UNSET_ONLY.length >= 1, 'no exemption is held to the unset-only rule');
+    assert.deepEqual(UNSET_ONLY.filter(k => !(k in EXEMPT)), [], 'named as unset-only but not exempt — delete or add the exemption');
+    const fields = Object.keys(UNSET_VECTOR);
+    assert.ok(fields.length >= 1, 'UNSET_VECTOR names no field — the $unset below would remove nothing');
+    assert.deepEqual(fields.filter(f => !DERIVED_LOCAL_FIELDS.has(f)), [],
+      'UNSET_VECTOR removes a field that is not a derived local one — that is content, which a peer\'s copy would carry');
+    assert.match(stripComments(INDEX.sources.get(SWEEP)),
+      new RegExp(`import\\s*\\{[^}]*\\bUNSET_VECTOR\\b[^}]*\\}\\s*from\\s*'\\.\\./sync/local-only-fields\\.js'`),
+      `${SWEEP} must import UNSET_VECTOR from ${LOCAL_ONLY}, not spell the field set itself`);
+  });
+
+  for (const key of UNSET_ONLY) {
+    it(`${key.split(':')[1]} stores nothing but an $unset of UNSET_VECTOR`, () => {
+      assert.ok(INDEX.bodies.has(key), `${key} no longer exists — re-anchor, or delete its exemption`);
+      const calls = writeCallsFrom(key);
+      assert.ok(calls.length >= 1, `${key} (with what it reaches) makes no record write the gate can see — it would pass by finding none`);
+      const wrong = calls.filter(c => !UPDATES.has(c.op) || c.args.length !== 2 || c.args[1].replace(/\s+/g, ' ') !== '{ $unset: UNSET_VECTOR }')
+        .map(c => `${c.at} .${c.op}(${c.args.map(a => a.replace(/\s+/g, ' ')).join(', ')})`);
+      assert.deepEqual(wrong, [],
+        'its exemption says it only removes the receiver\'s own derived vector fields; this writes something else, which '
+        + 'is an arrival or an edit and belongs in the writer — or the reason is wrong and must be rewritten');
+    });
+  }
 });
 
 describe('an arriving record is written by one writer', () => {

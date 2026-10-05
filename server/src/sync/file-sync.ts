@@ -243,7 +243,7 @@ export async function syncFiles(
     }
     } // end doPush
   } catch (err) {
-    log.warn(`syncFiles for ${logSafe(member.label)} space ${spaceId}: ${logSafe(String(err))}`);
+    log.warn(`syncFiles for ${logSafe(member.label)} space ${logSafe(spaceId)}: ${logSafe(String(err))}`);
   }
   return { pulledFiles, pushedFiles, pulledPaths };
 }

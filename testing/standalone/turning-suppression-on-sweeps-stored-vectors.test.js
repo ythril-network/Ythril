@@ -25,10 +25,11 @@
  *
  * ## Why this is local and needs no seq bump
  *
- * The vector does not replicate. `api/sync/docs.ts` strips `embedding` before sending in all five places, with
- * the reason stated there: it is derived, and a peer may run a different embedding model. So stripping one is
- * a local operation — no tombstone, no seq, nothing for a peer to converge on. Each peer runs its own sweep
- * when the meta reaches it, which is what makes that correct rather than merely convenient.
+ * The vector does not replicate: it is derived, and a peer may run a different embedding model.
+ * `sync/local-only-fields.ts` is the list of fields that stay local and `brain/suppression-sweep.ts` names the
+ * mechanisms that keep them so. So stripping one is a local operation — no tombstone, no seq, nothing for a peer
+ * to converge on. Each peer runs its own sweep when the meta reaches it, which is what makes that correct rather
+ * than merely convenient.
  *
  * ## The tier rule this depends on
  *
@@ -45,6 +46,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
 
 let SWEEP = null;
 try { SWEEP = await import('../../server/dist/brain/suppression-sweep.js'); } catch { /* not built yet */ }
@@ -160,26 +162,83 @@ describe('an edge keys on LABEL, not on type', () => {
 });
 
 describe('the sweep runs where the flag is written', () => {
-  it('meta-update calls it', () => {
-    const body = src('server/src/spaces/meta-update.ts');
-    assert.match(body, /sweepSuppressedVectors\(/,
-      'nothing sweeps after a meta write, so the docs\' present tense is still a promise rather than behaviour');
+  const SWEEP_MODULE = 'server/src/brain/suppression-sweep.ts';
+
+  /** Every top-level function of the sweep module with its body: the units the rules below are asserted over. */
+  const functionsOf = (code) => [...code.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm)]
+    .map(m => ({ name: m[1], body: bodyOf(code, m[1], SWEEP_MODULE) }));
+
+  /** The module's functions reachable from `from` through calls to one another (itself included). */
+  const reachableFrom = (fns, from) => {
+    const seen = new Set([from]);
+    for (const queue = [from]; queue.length > 0;) {
+      const current = queue.pop();
+      const { body } = fns.find(f => f.name === current);
+      for (const { name } of fns) {
+        if (!seen.has(name) && new RegExp(`\\b${name}\\(`).test(body)) { seen.add(name); queue.push(name); }
+      }
+    }
+    return seen;
+  };
+
+  // The one function `updateSpace` asks. Named here because a pin that follows "whatever spaces.ts imports" passes for a
+  // call to any export of the module (`dropFileVectors(...)` would do); the rest is derived from the module itself.
+  const ENTRY = 'sweepAfterMetaWrite';
+
+  it('updateSpace — the one writer of space.meta — calls the sweep entry, and the entry reaches the sweep', () => {
+    // Q-361 item 11. The trigger lives in `updateSpace`, so EVERY effective-meta write asks for it: an operator's edit,
+    // a schema route's (including a space no network carries), a passed vote's, and every recompute of the effective
+    // meta (a network layer arriving). The callers used to ask for themselves — meta-update twice, the recompute not
+    // at all — so a vote swept twice and a layer swept not at all.
+    const spaces = src('server/src/spaces/spaces.ts');
+    const imported = [...spaces.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*suppression-sweep\.js'/g)]
+      .flatMap(m => m[1].split(',').map(x => x.trim().split(/\s+as\s+/)[0]).filter(Boolean));
+    assert.ok(imported.includes(ENTRY), `spaces.ts does not import ${ENTRY} from the sweep module, so updateSpace cannot ask for a sweep`);
+    assert.match(bodyOf(spaces, 'updateSpace'), new RegExp(`\\b${ENTRY}\\(`),
+      `updateSpace does not CALL ${ENTRY}: nothing sweeps after a meta write, so the docs' present tense is still a promise rather than behaviour`);
+
+    const sweep = src(SWEEP_MODULE);
+    assert.match(sweep, new RegExp(`export\\s+function\\s+${ENTRY}\\b`), `${SWEEP_MODULE} no longer exports ${ENTRY}`);
+    const reached = reachableFrom(functionsOf(sweep), ENTRY);
+    assert.ok(reached.has('sweepSuppressedVectors'),
+      `${ENTRY} reaches ${[...reached].join(', ')} — never sweepSuppressedVectors, so asking for a sweep removes no vector`);
   });
 
-  it('it does not bump seq, because the vector is not replicated', () => {
-    // `api/sync/docs.ts` strips `embedding` before sending — it is derived and the peer may run a different
-    // model. Bumping seq for a local, underived change would replicate a no-op to every peer and re-send the
-    // whole document for a field they never receive.
-    const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.doesNotMatch(bodyOf(sweep, 'sweepSuppressedVectors'), /bumpSeq|nextSeq/,
+  it('nothing else that writes a space\'s meta asks for it: one change is swept once, wherever it lands', () => {
+    // Derived, not listed: every file that calls updateSpace with a `meta` (a floor on the set), bar the one writer
+    // itself. A caller that sweeps after its own meta write is the double sweep again. The import is matched by the
+    // module's file name, wherever it is written from: `./suppression-sweep.js` inside brain/ is the same import as
+    // `../brain/suppression-sweep.js` elsewhere.
+    const writers = trackedSources('server/src', { floor: 100 })
+      .filter(f => f !== 'server/src/spaces/spaces.ts')
+      .filter(f => /\bupdateSpace\(\s*[^,()]+,\s*\{[^}]*\bmeta\b/.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.ok(writers.length >= 2, `only ${writers.length} meta writer(s) found — the scan is looking in the wrong place: ${writers}`);
+    const askers = writers.filter(f => /\bsuppression-sweep\.js/.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.deepEqual(askers, [], 'these write meta AND sweep after it; updateSpace already asks for it, so the change is swept twice');
+  });
+
+  it('it does not bump seq anywhere, because the vector is not replicated', () => {
+    // The vector is derived and a peer may run a different model (`sync/local-only-fields.ts` is the list). Bumping seq
+    // for a local, underived change would replicate a no-op to every peer and re-send the whole document for a field they
+    // never receive. Asserted over the whole module, so every function that writes — the pager, the file walk and the
+    // arrival writer's `dropFileVectors` as much as the entry — is covered, and over what a seq write looks like in any
+    // spelling: the module's own import of the seq module, a call to a seq function, or a `seq` field in an update.
+    const sweep = src(SWEEP_MODULE);
+    const writers = functionsOf(sweep).filter(f => /\$unset\s*:/.test(f.body));
+    assert.ok(writers.length >= 2, `only ${writers.length} function(s) of the sweep module write an $unset — the reader is looking at the wrong thing`);
+    assert.doesNotMatch(sweep, /util\/seq\.js|\b\w*[sS]eq\w*\s*\(|\bseq\b/,
       'the sweep must be local — stripping a vector is not a replicated change');
   });
 
-  it('it clears BOTH the field and any queued job to recompute it', () => {
+  it('every function that removes a vector also cancels the jobs queued to put it back', () => {
     // Leaving a queued embed job behind would have the worker write the vector straight back, which is the
-    // whole defect returning by a different route within seconds.
-    const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.match(sweep, /'embedJobs'|cancelEmbedJobs|dequeue/i,
-      'a pending embed job would restore the vector the sweep just removed');
+    // whole defect returning by a different route within seconds. A CALL is asserted, not the import: the import is
+    // there for the one function that cancels, and says nothing of the other.
+    const writers = functionsOf(src(SWEEP_MODULE)).filter(f => /\$unset\s*:\s*UNSET_VECTOR\b/.test(f.body));
+    assert.ok(writers.length >= 2, `only ${writers.length} function(s) remove a vector — the reader is looking at the wrong thing`);
+    for (const { name, body } of writers) {
+      assert.match(body, /\bcancelEmbedJobs\(/,
+        `${name} removes vectors and never calls cancelEmbedJobs: a pending embed job would restore the vector it just removed`);
+    }
   });
 });

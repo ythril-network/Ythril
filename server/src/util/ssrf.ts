@@ -33,7 +33,7 @@ import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
 import { fetch as undiciFetch, Agent } from 'undici';
-import { log, redactSecrets } from './log.js';
+import { log, peerText } from './log.js';
 
 /** Thrown by the async SSRF guards when a target resolves to a blocked address. */
 export class SsrfBlockedError extends Error {
@@ -71,7 +71,8 @@ const CROWN_JEWEL_REMEDY =
  * because the unsafe-URL branch quotes the raw URL and a model endpoint's query string can carry a key.
  */
 function refuse(message: string, remedy: string): SsrfBlockedError {
-  log.warn(redactSecrets(`${message} — ${remedy}`));
+  // peerText redacts each value as fmt redacts the line: the unsafe-URL branch quotes the raw URL.
+  log.warn(`${peerText(message)} — ${peerText(remedy)}`);
   return new SsrfBlockedError(message);
 }
 

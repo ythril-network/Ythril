@@ -10,7 +10,8 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
@@ -280,7 +281,7 @@ export async function enqueueTextJob(
     asFilter<FileMetaDoc>({ _id: id }),
     { $set: { embeddingStatus: 'pending', updatedAt: now } },
   ).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${spaceId}/${id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
   });
 }
 
@@ -450,7 +451,7 @@ export async function failJob(
     // Pending again (behind a backoff). Announce it: the probe it triggers is cheap, and it
     // keeps the invariant simple — everything that makes a job pending marks the space.
     markSpaceMayHaveWork(spaceId);
-    log.warn(`Media job ${spaceId}/${fileId} failed (attempt ${attempts}/${maxAttempts}), retry after ${claimableAfter}: ${errorMessage}`);
+    log.warn(`Media job ${peerText(spaceId)}/${peerText(fileId)} failed (attempt ${attempts}/${maxAttempts}), retry after ${peerText(claimableAfter)}: ${peerText(errorMessage)}`);
   } else {
     // Exhausted retries
     await jobCollection(spaceId).updateOne(
@@ -468,7 +469,7 @@ export async function failJob(
       asFilter<FileMetaDoc>({ _id: fileId }),
       { $set: { embeddingStatus: 'failed', mediaJobError: safeError || undefined, updatedAt: now } },
     );
-    log.warn(`Media job ${spaceId}/${fileId} exhausted retries: ${errorMessage}`);
+    log.warn(`Media job ${peerText(spaceId)}/${peerText(fileId)} exhausted retries: ${peerText(errorMessage)}`);
   }
 }
 
@@ -607,7 +608,7 @@ export async function releaseClaimedJob(spaceId: string, jobId: string, claimTok
   } catch (err) {
     // Best-effort by design: this runs during shutdown, where the database connection may already be going.
     // Failing to release is exactly the old behaviour — stall recovery still catches it.
-    log.debug(`Could not release claim on ${spaceId}/${jobId}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Could not release claim on ${peerText(spaceId)}/${peerText(jobId)}: ${peerText(messageOf(err))}`);
     return false;
   }
 }
@@ -848,6 +849,7 @@ function sanitiseError(raw: string): string {
   let s = raw.replace(/https?:\/\/[^\s,;)]+/g, '[url]');
   // Remove Unix-style absolute paths
   s = s.replace(/\/[a-z][a-z0-9_/-]+/gi, '[path]');
-  // Truncate to 200 chars to keep the field reasonable
+  // A fixed cut, with no tail that varies: `failedByReason` groups on this text, and a tail saying how much was cut would
+  // split two errors that share their first 200 characters into separate groups.
   return s.slice(0, 200);
 }

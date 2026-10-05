@@ -23,7 +23,19 @@ export function privateHostAddress() {
   return null;
 }
 
-/** Skip reason for a suite that needs a reachable non-loopback address, or false when one exists. */
+/**
+ * Skip reason for a suite that needs a reachable non-loopback address, or false when one exists.
+ *
+ * Under CI (`CI` set) the absence THROWS instead, like `mongoSkipReason`: a suite skipped for want of an address
+ * reports green having proven nothing, and the runner that lost its network interface is the one to say so.
+ */
 export function privateAddressSkipReason() {
-  return privateHostAddress() ? false : 'no non-loopback IPv4 on this host';
+  if (privateHostAddress()) return false;
+  if (process.env['CI']) {
+    throw new Error(
+      'This suite needs a non-loopback IPv4 address on the host (the SSRF guards block loopback), but CI is set and ' +
+      'none exists — refusing to skip and report green.',
+    );
+  }
+  return 'no non-loopback IPv4 on this host';
 }

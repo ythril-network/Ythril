@@ -13,6 +13,7 @@ import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
+import { peerList, peerText, NAME_QUOTED } from '../util/log.js';
 
 /*
  * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
@@ -166,9 +167,13 @@ export function unknownBodyFields(
   const aliases = unknown.filter(k => k in UNSUPPORTED_PAGE_PARAMS)
     .map(k => `'${k}' is not a parameter of this endpoint — use '${UNSUPPORTED_PAGE_PARAMS[k]}'`);
   return {
-    error: [...aliases, `Unknown field(s): ${unknown.join(', ')}. Allowed: ${[...allowed].join(', ')}`]
-      .join('; '),
-    unrecognized_keys: unknown,
+    // The caller's keys through the one renderer (`peerList`, each cut at `NAME_QUOTED`) — the MCP validator quotes
+    // an unknown property by the same bound (bundle-30 I6, C18); a key echoed whole could be any size the body was.
+    // The ARRAY keeps every key: cutting it to a few is a change to a REST body a caller may read, so only each
+    // element is bounded.
+    error: [...aliases, `Unknown field(s): ${peerList(unknown, ', ', { each: NAME_QUOTED })}. `
+      + `Allowed: ${[...allowed].join(', ')}`].join('; '),
+    unrecognized_keys: unknown.map(k => peerText(k, { max: NAME_QUOTED })),
   };
 }
 

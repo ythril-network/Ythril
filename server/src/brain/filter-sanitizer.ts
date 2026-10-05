@@ -38,6 +38,7 @@
  * instead of to their own caller.
  */
 import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
+import { caughtFailureText } from './store-failure.js';
 
 /**
  * The operators a filter may NOT use — a denylist, which is the opposite of how this started and needs its
@@ -252,7 +253,7 @@ export function checkCallerFilter(
   try {
     return { predicate: sanitizeFilter(raw) as CallerCheckedFilter };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
+    return { error: caughtFailureText(e, 'check a caller filter') };
   }
 }
 

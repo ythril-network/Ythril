@@ -19,7 +19,7 @@ import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
 
@@ -122,7 +122,7 @@ export async function buildFileManifest(
              * reaches anyone who reads the file itself.
              */
             if (err instanceof StoredFileUnreadable) {
-              if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${relPath}' in ${spaceId}: ${err.message}`);
+              if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${peerText(relPath)}' in ${peerText(spaceId)}: ${peerText(err)}`);
               continue;
             }
             throw err;

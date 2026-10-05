@@ -18,7 +18,7 @@ import {
   isEnvelope, decryptWithKey, deriveKeyForSalt, resolveMasterSecret,
   type MasterSecret, type DerivedKey,
 } from '../config/secretbox.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 
 /**
@@ -98,7 +98,7 @@ export async function restoreDatabase(uri: string, srcDir: string): Promise<void
     for (const { name, count: expectedCount } of collections) {
       const srcFile = path.join(srcDir, `${name}.ndjson`);
       if (!fs.existsSync(srcFile)) {
-        log.warn(`restore: ${name}.ndjson not found — skipping`);
+        log.warn(`restore: ${peerText(name)}.ndjson not found — skipping`);
         continue;
       }
 
@@ -112,7 +112,7 @@ export async function restoreDatabase(uri: string, srcDir: string): Promise<void
         await db.createCollection(name).catch(() => {
           // Already there (a restore over a live database) — nothing to do.
         });
-        log.debug(`restore: ${name} ← 0 docs (collection created)`);
+        log.debug(`restore: ${peerText(name)} ← 0 docs (collection created)`);
         continue;
       }
 
@@ -162,10 +162,10 @@ export async function restoreDatabase(uri: string, srcDir: string): Promise<void
         insertedCount += batch.length;
       }
 
-      log.debug(`restore: ${name} → ${insertedCount} docs (expected ${expectedCount})`);
+      log.debug(`restore: ${peerText(name)} → ${insertedCount} docs (expected ${expectedCount})`);
     }
 
-    log.info(`restore: complete — ${collections.length} collections restored from ${srcDir}`);
+    log.info(`restore: complete — ${collections.length} collections restored from ${peerText(srcDir)}`);
   } finally {
     await client.close().catch(() => {});
   }

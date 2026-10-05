@@ -5,11 +5,13 @@ import { configureConnections } from './http-connections.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { createApp } from './app.js';
 import { startConfiguredInstanceServices } from './bootstrap.js';
+import { markListening } from './util/after-listening.js';
 import { stopSyncScheduler } from './sync/scheduler.js';
 import { stopBackupScheduler } from './db/backup-scheduler.js';
 import { stopDupeScanner } from './brain/dupe-scanner.js';
 import { cleanupStaleChunks } from './files/chunks.js';
-import { log, redactSecrets } from './util/log.js';
+import { log, peerText, redactSecrets } from './util/log.js';
+import { messageOf } from './util/errors.js';
 import { envInt, assertNumericEnvOrExit } from './config/env-num.js';
 import { assertNoRemovedEnvVarsOrExit } from './config/env-removed.js';
 
@@ -167,7 +169,7 @@ async function main(): Promise<void> {
   {
     const uri = getMongoUri();
     const safeUri = uri.replace(/\/\/.*@/, '//[credentials]@');
-    log.debug(`Checking $vectorSearch support on ${safeUri}`);
+    log.debug(`Checking $vectorSearch support on ${peerText(safeUri)}`);
     const vsCheck = await checkVectorSearchAvailability();
     if (vsCheck.available) {
       console.log(`  ${GREEN}✓${RESET} $vectorSearch available (${vsCheck.details})`);
@@ -231,12 +233,13 @@ async function main(): Promise<void> {
 
   // Periodic stale-chunk cleanup (every hour)
   const chunkCleanupInterval = setInterval(
-    () => cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`)),
+    () => cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${peerText(err)}`)),
     60 * 60 * 1000,
   );
   chunkCleanupInterval.unref(); // don't block shutdown
 
   server.listen(PORT, () => {
+    markListening();
     const url = `http://localhost:${PORT}`;
     console.log('');
     if (isFirstRun) {
@@ -290,7 +293,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;      // a second SIGTERM must not race the first through this
     shuttingDown = true;
-    log.debug(`${signal} received — shutting down`);
+    log.debug(`${peerText(signal)} received — shutting down`);
 
     // Step one, before anything is torn down: stop advertising readiness, then give the orchestrator a
     // moment to notice and route elsewhere. Without this the drain below is only half the job — it
@@ -335,11 +338,11 @@ async function main(): Promise<void> {
     // what happened; stall recovery exists for when nobody can.
     const { releaseHeldJobs } = await import('./files/media/worker.js');
     await releaseHeldJobs().catch(err =>
-      log.debug(`Shutdown: releasing held jobs failed: ${err instanceof Error ? err.message : String(err)}`));
+      log.debug(`Shutdown: releasing held jobs failed: ${peerText(messageOf(err))}`));
 
     const { stopSpaceActivityFlush } = await import('./metrics/space-activity-store.js');
     await stopSpaceActivityFlush().catch(err =>
-      log.debug(`Shutdown: space activity flush failed: ${err instanceof Error ? err.message : String(err)}`));
+      log.debug(`Shutdown: space activity flush failed: ${peerText(messageOf(err))}`));
     await closeMongo();
     process.exit(0);
   };
@@ -353,11 +356,11 @@ async function main(): Promise<void> {
   // its buffer read. Both go through redactSecrets first — an unhandled fetch rejection quotes the
   // endpoint it failed on, and that endpoint may carry a credential in its userinfo or query string.
   process.on('unhandledRejection', (reason, promise) => {
-    log.error(`Unhandled rejection at: ${promise}, reason: ${reason}`);
+    log.error(`Unhandled rejection at: ${peerText(promise)}, reason: ${peerText(reason)}`);
     console.error(redactSecrets(`UNHANDLED REJECTION: ${String(reason)}`));
   });
   process.on('uncaughtException', (err) => {
-    log.error(`Uncaught exception: ${err.stack ?? err}`);
+    log.error(`Uncaught exception: ${peerText(err.stack ?? err)}`);
     console.error(redactSecrets(`UNCAUGHT EXCEPTION: ${err.stack ?? String(err)}`));
     process.exit(1);
   });

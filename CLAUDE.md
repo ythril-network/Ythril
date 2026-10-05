@@ -207,7 +207,9 @@ Found while shipping M-1 and finished by W-10, 2026-09-01. A rule rather than an
 are invisible from both ends.
 
 **Stripping.** `api/sync/_shared.ts` validates every PUSHED document with a bare `z.object({...})`, and **zod
-strips keys the schema does not declare.** The pull path validates nothing. So a field missing from its
+strips keys the schema does not declare.** The pull path parses each document too but stores it AS RECEIVED —
+it refuses only a shape that would corrupt the receiver (a non-string `parentFileId`, a wrong-typed `_id` or `seq`)
+and reports one that fails its schema, because a pull cannot tell its sender. So a field missing from its
 `Incoming*` twin is **kept when the record arrives by pull and deleted when the same record arrives by push** —
 same version of the code, same document, one direction, no error, no statistic, and a 200 on the way back.
 
@@ -270,9 +272,10 @@ space has supressembeddings dont embed at all. if it should embed use the receiv
 
 **A vector never crosses the wire, and "no ingest schema declares it" is only HALF the reason — the half
 that covers one of the two ingest paths.** That sentence stood here alone and was believed; it is true of
-PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull validates nothing.** It
-fetched `full=true` and `replaceOne`d what came back, so a pulled record carried the sender's vector and
-was stored with it, for as long as the sentence had been read as covering both.
+PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull stores what it is served** (it
+parses a document, and refuses only a shape that corrupts the receiver). It fetched `full=true` and
+`replaceOne`d what came back, so a pulled record carried the sender's vector and was stored with it, for as
+long as the sentence had been read as covering both.
 
 **And the vector was not the expensive half.** The same five fields are excluded from the space hash, and
 two of them are the retention stamps — `_expireAt` and `_contentExpireAt`. `brain/ttl-sweep.ts` deletes
@@ -325,8 +328,9 @@ that no door writes a record collection anywhere else.
   Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving link is
   correct, not a bug.** A caller that embeds nothing has to say so out loud, at the call, where a reviewer sees it.
 - **File metadata from a peer is merged, not replaced**: the writer hands it to `ingestFileMeta`, which `$set`s
-  the authored keys and never `$unset`s, or the receiver would publish the sender's `sizeBytes` and `sha256` for
-  bytes it does not have. A peer's file is queued **only when this instance holds the blob**. A restore replaces
+  the authored keys and never `$unset`s an authored one, or the receiver would publish the sender's `sizeBytes` and
+  `sha256` for bytes it does not have. What it does `$unset` is the derived local fields (vector, model, matched
+  text) of a file this instance suppresses, which are not the sender's to give. A peer's file is queued **only when this instance holds the blob**. A restore replaces
   the file row whole and restores its derived records as they were (cut `C6`), and queues every file.
 - **The counter is the door's to vouch for.** A push door moves it itself, once, after the write and before it
   answers (`counterMovedByCaller`, and it hands over the stored copy its accept read as `stored`). The pull and

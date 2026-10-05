@@ -15,6 +15,7 @@ import { Ajv, type ValidateFunction } from 'ajv';
 import type { ToolHandler, ToolSchemas } from './tools/types.js';
 import { materialisedSchema } from './tool-schema.js';
 import { retiredWriteFieldHint } from '../brain/retired-write-fields.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 
 export interface ArgsValidator {
   /** Returns a human-readable error message if `args` violate the tool's schema, else `null`. */
@@ -44,7 +45,10 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
       }
       if (validate(args)) return null;
       const detail = (validate.errors ?? []).slice(0, 6).map(e => {
-        const at = e.instancePath || '(arguments)';
+        // The path and an unknown property's name are the CALLER's keys: quoted through the one renderer, each cut at
+        // `NAME_QUOTED` — the bound REST's `unknownBodyFields` names them by (bundle-30 I6, C18). The count was
+        // bounded and the element was not, so one megabyte key came back whole.
+        const at = e.instancePath ? peerText(e.instancePath, { max: NAME_QUOTED }) : '(arguments)';
         const p = e.params as Record<string, unknown>;
         switch (e.keyword) {
           case 'additionalProperties': {
@@ -53,7 +57,7 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
             // on the other, and which one a caller meets depends on the client they picked.
             const prop = String(p['additionalProperty']);
             const retired = retiredWriteFieldHint(prop);
-            return retired ?? `${at}: unexpected property '${prop}'`;
+            return retired ?? `${at}: unexpected property '${peerText(prop, { max: NAME_QUOTED })}'`;
           }
           case 'required':             return `(arguments): missing required property '${String(p['missingProperty'])}'`;
           case 'enum':                 return `${at}: ${e.message} (${(p['allowedValues'] as unknown[] ?? []).join(', ')})`;

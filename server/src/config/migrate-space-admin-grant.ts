@@ -35,7 +35,7 @@
  */
 import type { TokenRecord } from './types.js';
 import { SPACE_ADMIN_AREAS } from './rights-shape.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 
 export interface SpaceAdminGrantOutcome {
   /** `token label → spaces it gained`, for a log line an operator can act on. */
@@ -81,7 +81,7 @@ export function migrateSpaceAdminGrant(tokens: TokenRecord[] | undefined): Space
     const pairs = out.granted.reduce((n, g) => n + g.spaces.length, 0);
     log.info(`Space admin is its own grant at 5.0. Wrote it for ${pairs} (token, space) pair(s) across `
       + `${out.granted.length} token(s) that held admin on all four areas: `
-      + `${out.granted.map(g => `${g.token} [${g.spaces.join(', ')}]`).join('; ')}. Under the previous rule `
+      + `${peerList(out.granted.map(g => `${g.token} [${g.spaces.join(', ')}]`), '; ')}. Under the previous rule `
       + 'those tokens administered those spaces, and the upgrade must not take that away silently.');
   }
   return out;

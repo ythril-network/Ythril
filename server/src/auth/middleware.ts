@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { tokenRateLimit } from '../rate-limit/middleware.js';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { consumeSseTicket } from './sse-ticket.js';
@@ -419,7 +419,7 @@ function enforceAreaRung(
   // four routes guaranteed could never be reached. See the note on NOT_AREA_SCOPED for the whole account.
   if (verdict.kind === 'not-area-scoped') return true;
   if (verdict.kind === 'unclassified') {
-    log.warn(`Space rights: no inventory entry for '${req.method} ${routePath}' — reach enforced, area not. `
+    log.warn(`Space rights: no inventory entry for '${peerText(req.method)} ${peerText(routePath)}' — reach enforced, area not. `
       + 'Add it to ROUTE_RIGHTS with its area and lowest rung, or to NOT_AREA_SCOPED with the reason it is not '
       + 'a view of the space\'s data; misses become refusals once the log is clean.');
     return true;
@@ -908,7 +908,7 @@ export async function requireAdminOrSpaceAdminMfa(req: Request, res: Response, n
  * `POST /api/conflicts/seed` -- take NO space. They walk every space the token can reach, and their
  * `ROUTE_RIGHTS` rows are `scope: 'iterates'`: the enforcement point is the ITERATION SET, not the call.
  *
- * That half was already right. Each handler narrows its loop with `accessibleSpaces(req, 'write')`, so a
+ * That half was already right. Each handler narrows its loop with `spacesWhereTokenMay(…, 'dataQuality', 'write')`, so a
  * token only ever scans spaces where it holds the rung. What made the rows unreachable was the guard in
  * front: `requireAdminMfa` refused everyone but an instance administrator before the loop was reached, so
  * the `dataQuality` column in the rights panel could never open these doors either.

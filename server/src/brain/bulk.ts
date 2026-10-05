@@ -43,6 +43,7 @@ import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import { unknownBodyFields } from './query.js';
+import { caughtFailureText } from './store-failure.js';
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
 // three copies of one product fact, and the third had two of them wrong.
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
@@ -296,7 +297,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       }
 
       inserted.facts++;
-    } catch (err) { errors.push({ type: 'fact', index: i, reason: err instanceof Error ? err.message : String(err) }); }
+    } catch (err) { errors.push({ type: 'fact', index: i, reason: caughtFailureText(err, 'save a fact in bulk') }); }
   }
 
   // ── entities ───────────────────────────────────────────────────────────────
@@ -367,7 +368,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       }
       if (existing) updated.entities++; else inserted.entities++;
       if (result.warning) errors.push({ type: 'entity', index: i, reason: result.warning });
-    } catch (err) { errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) }); }
+    } catch (err) { errors.push({ type: 'entity', index: i, reason: caughtFailureText(err, 'save an entity in bulk') }); }
   }
 
   // ── chrono ─────────────────────────────────────────────────────────────────
@@ -442,7 +443,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         if (dupe) errors.push({ type: 'chrono', index: i, reason: dupe });
       }
       inserted.chrono++;
-    } catch (err) { errors.push({ type: 'chrono', index: i, reason: err instanceof Error ? err.message : String(err) }); }
+    } catch (err) { errors.push({ type: 'chrono', index: i, reason: caughtFailureText(err, 'save a chrono entry in bulk') }); }
   }
 
   /*
@@ -566,7 +567,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
           fromKind, toKind,
         });
       if (existing) updated.edges++; else inserted.edges++;
-    } catch (err) { errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) }); }
+    } catch (err) { errors.push({ type: 'edge', index: i, reason: caughtFailureText(err, 'save an edge in bulk') }); }
   }
 
   return { inserted, updated, connections, errors, refs: refs.toJSON() };
@@ -601,7 +602,9 @@ async function firstMissingEnd(
     try {
       await assertRefsResolve(spaceId, field, kind, [value]);
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      // The reason is the bulk answer's, read by the caller: our own refusal says what to fix, a store failure in the
+      // lookup is the store's sentence and not the driver's text.
+      return caughtFailureText(err, 'resolve a bulk edge end');
     }
   }
   return null;

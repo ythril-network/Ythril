@@ -20,7 +20,7 @@ import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { readFile } from '../../files/files.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
@@ -160,7 +160,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
       // The record exists and the bytes do not. Worth reporting as its own state rather than as an
       // empty document: it means the sidecar was removed out from under the record, which is exactly
       // the kind of drift this view exists to make visible.
-      log.warn(`extract: could not read ${member}/${convertedRecord.path}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`extract: could not read ${peerText(member)}/${peerText(convertedRecord.path)}: ${peerText(err)}`);
       // PRESENT but undecodable (a foreign key, altered bytes, no secret for an encrypted file) is a different
       // drift from "removed", and the view says which — `unreadable` carries the reason (F-43).
       converted = { path: convertedRecord.path, markdown: '', truncated: false, sizeBytes: convertedRecord.sizeBytes,

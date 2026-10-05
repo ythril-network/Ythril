@@ -1,7 +1,7 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
 import type { Request } from 'express';
-import { log } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import { resolveLimitFor, WINDOW_MS } from './per-token.js';
 
 /**
@@ -75,9 +75,9 @@ export function warnRateLimitBypass(): void {
     .filter(f => process.env[f] === 'true');
   if (set.length === 0) return;
   if (process.env['NODE_ENV'] === 'production') {
-    log.warn(`SECURITY: rate-limit kill-switch(es) set but IGNORED in production: ${set.join(', ')}. Remove them from the environment.`);
+    log.warn(`SECURITY: rate-limit kill-switch(es) set but IGNORED in production: ${peerList(set)}. Remove them from the environment.`);
   } else {
-    log.warn(`Rate limiting DISABLED via ${set.join(', ')} (non-production only).`);
+    log.warn(`Rate limiting DISABLED via ${peerList(set)} (non-production only).`);
   }
 }
 
@@ -89,7 +89,7 @@ export const authRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
   handler: (req, res, _next, options) => {
-    log.warn(`authRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
+    log.warn(`authRateLimit hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
     res.status(options.statusCode).json(options.message);
   },
   // Allow test infrastructure to disable this limit on A/B instances so
@@ -107,7 +107,7 @@ export const notifyRateLimit = rateLimit({
   keyGenerator: clientRateLimitKey,
   message: { error: 'Too many requests, please try again later.' },
   handler: (req, res, _next, options) => {
-    log.warn(`notifyRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
+    log.warn(`notifyRateLimit hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
     res.status(options.statusCode).json(options.message);
   },
   // This limiter guards the peer notification channel. It also guarded the sync trigger that used to sit
@@ -137,7 +137,7 @@ export const ipFloodBackstop = rateLimit({
   legacyHeaders: false,
   message: { error: 'Rate limit exceeded, please slow down.' },
   handler: (req, res, _next, options) => {
-    log.warn(`ipFloodBackstop hit: ${req.ip} on ${req.method} ${req.path}`);
+    log.warn(`ipFloodBackstop hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
     res.status(options.statusCode).json(options.message);
   },
   skip: () => skipRateLimit('SKIP_GLOBAL_RATE_LIMIT'),
@@ -172,7 +172,7 @@ export const globalRateLimit = rateLimit({
   keyGenerator: clientRateLimitKey,
   message: { error: 'Rate limit exceeded, please slow down.' },
   handler: (req, res, _next, options) => {
-    log.warn(`globalRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
+    log.warn(`globalRateLimit hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
     res.status(options.statusCode).json(options.message);
   },
   // A credentialed request is governed by `tokenRateLimit` instead — see the note above.
@@ -194,7 +194,7 @@ export const syncRateLimit = rateLimit({
   keyGenerator: clientRateLimitKey,
   message: { error: 'Sync rate limit exceeded, please slow down.' },
   handler: (req, res, _next, options) => {
-    log.warn(`syncRateLimit hit: ${req.ip} on ${req.method} ${req.path}`);
+    log.warn(`syncRateLimit hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
     res.status(options.statusCode).json(options.message);
   },
   skip: () => skipRateLimit('SKIP_SYNC_RATE_LIMIT'),
@@ -252,8 +252,8 @@ export const tokenRateLimit = rateLimit({
     const token = req.authToken as { id?: string; name?: string } | undefined;
     // The token is named because the operator's next question is always WHICH one, and a quota they set
     // themselves is the one thing they can act on.
-    log.warn(`tokenRateLimit hit: token '${token?.name ?? 'unknown'}' (${token?.id ?? 'no id'}) `
-      + `on ${req.method} ${req.path} — limit ${resolveLimitFor(token as { rateLimitPerMinute?: number })}/min`);
+    log.warn(`tokenRateLimit hit: token '${peerText(token?.name ?? 'unknown')}' (${peerText(token?.id ?? 'no id')}) `
+      + `on ${peerText(req.method)} ${peerText(req.path)} — limit ${resolveLimitFor(token as { rateLimitPerMinute?: number })}/min`);
     res.status(options.statusCode).json(options.message);
   },
   // The same kill-switch the global limiter honours, and for the same reason: parallel test suites on one host

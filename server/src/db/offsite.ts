@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import { mkdirPrivateSync } from '../util/fs-modes.js';
 import path from 'node:path';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * Every directory under `root` that cannot be opened, as relative paths.
@@ -154,7 +154,7 @@ export function pruneBackups(dir: string, keepCount: number): number {
         fs.rmSync(filesCopy, { recursive: true, force: true });
       }
     } catch (err) {
-      log.warn(`pruneBackups: failed to delete ${name}: ${err}`);
+      log.warn(`pruneBackups: failed to delete ${peerText(name)}: ${peerText(err)}`);
     }
   }
 

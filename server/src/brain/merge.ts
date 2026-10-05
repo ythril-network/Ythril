@@ -17,7 +17,7 @@ import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { linkIdFor } from './links.js';
@@ -408,7 +408,7 @@ export function applyResolutions(
   // Apply absorbed-only properties
   for (const p of absorbedOnly) {
     if (!isSafeKey(p.key)) {
-      log.warn(`merge: skipping prototype-polluting property key '${p.key}'`);
+      log.warn(`merge: skipping prototype-polluting property key '${peerText(p.key)}'`);
       continue;
     }
     result[p.key] = p.value as string | number | boolean;
@@ -417,7 +417,7 @@ export function applyResolutions(
   // Apply conflict resolutions
   for (const c of conflicts) {
     if (!isSafeKey(c.key)) {
-      log.warn(`merge: skipping prototype-polluting property key '${c.key}'`);
+      log.warn(`merge: skipping prototype-polluting property key '${peerText(c.key)}'`);
       continue;
     }
     const resolution = c.resolution!;
@@ -438,7 +438,7 @@ export function applyResolutions(
         result[c.key] = BOOLEAN_FNS[fnName](c.survivorValue as boolean, c.absorbedValue as boolean);
       } else {
         // Validation should prevent reaching this branch — log a warning so mismatches are diagnosable.
-        log.warn(`merge: fn '${fnName}' not applicable for type '${c.type}' on property '${c.key}' — keeping survivor value`);
+        log.warn(`merge: fn '${peerText(fnName)}' not applicable for type '${peerText(c.type)}' on property '${peerText(c.key)}' — keeping survivor value`);
       }
     }
   }
@@ -536,7 +536,7 @@ export async function executeMerge(
         if (survivorKeys.has(postKey)) {
           // This absorbed edge would collide — delete it as a duplicate.
           await edgeColl.deleteOne(asFilter<EdgeDoc>({ _id: edge._id }), { session });
-          await writeTombstone(spaceId, { _id: edge._id, type: 'edge', deletedAt: now }, session);
+          await writeTombstone(spaceId, { _id: edge._id, type: 'edge', originalSeq: edge.seq, deletedAt: now }, session);
           deletedDuplicateEdgeIds.push(edge._id);
         } else {
           edgesToRelink.push(edge);
@@ -690,7 +690,7 @@ export async function executeMerge(
         ));
         if (newId !== link._id) {
           await linkColl.deleteOne(asFilter<LinkDoc>({ _id: link._id, spaceId }), { session });
-          await writeTombstone(spaceId, { _id: link._id, type: 'link', deletedAt: now }, session);
+          await writeTombstone(spaceId, { _id: link._id, type: 'link', originalSeq: link.seq, deletedAt: now }, session);
         }
       }
 
@@ -761,10 +761,10 @@ export async function executeMerge(
       }
       if (verdict.warnings.length > 0) {
         log.warn(
-          `merge: the survivor '${survivor._id}' in space '${spaceId}' violates its own schema after merging `
-          + `'${absorbed._id}' — the merged properties are a value neither input had. The space is in 'warn' `
+          `merge: the survivor '${peerText(survivor._id)}' in space '${peerText(spaceId)}' violates its own schema after merging `
+          + `'${peerText(absorbed._id)}' — the merged properties are a value neither input had. The space is in 'warn' `
           + `mode so the merge PROCEEDED; these would have been refused on a direct write: `
-          + verdict.warnings.map(v => `${v.field}: ${v.reason}`).join('; '),
+          + peerList(verdict.warnings.map(v => `${v.field}: ${v.reason}`), '; '),
         );
       }
 
@@ -779,7 +779,7 @@ export async function executeMerge(
 
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
       await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
-      await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', deletedAt: now }, session);
+      await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', originalSeq: absorbed.seq, deletedAt: now }, session);
 
       // Store result on survivor for return
       Object.assign(survivor, {

@@ -44,6 +44,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { inChunks } from '../util/chunks.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */
 export const MAX_EMBED_ATTEMPTS = 5;
@@ -261,6 +262,28 @@ export async function retireEmbedJob(
   await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
 }
 
+/** Job ids named by one delete of `cancelEmbedJobs`: a hub's thousands of ids are never one `$in`. */
+export const SWEEP_BATCH = 500;
+
+/**
+ * Cancel the jobs of many records of one kind that STILL EXIST — what the suppression sweep does for a page of records
+ * whose vector it has just removed (`retireEmbedJob` is the same delete for a record that is GONE). A queued job would
+ * have the worker write the vector straight back within seconds: the defect returning by a different route.
+ *
+ * By `embedJobId`, never a hand-spelled `${kind}:${id}` (a second spelling of the id is how a cancel comes to match
+ * nothing), and chunked (`SWEEP_BATCH`): one delete over every id of a big space exceeds the command size limit and
+ * fails the whole cancellation, leaving each job to write its vector straight back.
+ */
+export async function cancelEmbedJobs(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  recordIds: readonly string[],
+): Promise<void> {
+  for (const batch of inChunks(recordIds, SWEEP_BATCH)) {
+    await jobs(spaceId).deleteMany(asFilter<BrainEmbedJobDoc>({ _id: { $in: batch.map(id => embedJobId(recordType, id)) } as never }));
+  }
+}
+
 /**
  * Is this failure the RECORD's fault, or the embedder's?
  *
@@ -319,12 +342,18 @@ export async function failEmbedJob(
   errorMessage: string,
   transientFailures = 0,
   claimToken?: string | null,
+  /**
+   * Whether this failure is transient. Defaults to what `isTransientEmbedError` says of `errorMessage`; a caller that
+   * stores a SANITISED text (the worker: `storedFailureText`, `Q-361`) decides from the error's own message first,
+   * because the sentence stored in place of a driver's text names none of the words that classifier reads.
+   */
+  transient: boolean = isTransientEmbedError(errorMessage),
 ): Promise<void> {
   const now = new Date().toISOString();
   const filter = claimedBy(recordType, recordId, claimToken);
   const lastError = errorMessage.slice(0, 500);
 
-  if (isTransientEmbedError(errorMessage)) {
+  if (transient) {
     const failures = transientFailures + 1;
     await jobs(spaceId).updateOne(
       asFilter<BrainEmbedJobDoc>(filter),
@@ -665,8 +694,8 @@ export async function enqueueIngestedRecords(
     }))), { ordered: false });
     _signal.markSpaceMayHaveWork(spaceId);
   } catch (err) {
-    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${spaceId}': `
+    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${logSafe(spaceId)}': `
       + `${logSafe(err instanceof Error ? err.message : String(err))}. They are stored without a vector; `
-      + `POST /api/spaces/${spaceId}/reembed queues them again.`);
+      + `POST /api/spaces/${logSafe(spaceId)}/reembed queues them again.`);
   }
 }

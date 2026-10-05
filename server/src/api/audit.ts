@@ -10,7 +10,8 @@ import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { queryAuditLog, streamAuditEntries, type AuditQueryParams } from '../audit/audit.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 export const auditRouter = Router();
 
@@ -46,8 +47,7 @@ auditRouter.get('/', globalRateLimit, requireAdmin, async (req, res) => {
     const retentionDays = getConfig().audit?.retentionDays ?? 90;
     res.json({ ...result, retentionDays });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: caughtFailureText(err, 'query the audit log') });
   }
 });
 
@@ -102,13 +102,13 @@ auditRouter.get('/export', globalRateLimit, requireAdminMfa, async (req, res) =>
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!res.headersSent) {
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: caughtFailureText(err, 'export the audit log') });
       return;
     }
     // 200 and a partial body are already sent, so the status cannot be changed. Destroying the socket makes the
     // client see a TRUNCATED response rather than a well-formed file that is silently missing entries — which for
     // an audit record is the worst possible failure, because it looks complete.
-    log.error(`Audit log export failed after ${count} entries: ${msg}`);
+    log.error(`Audit log export failed after ${count} entries: ${peerText(msg)}`);
     res.destroy(err instanceof Error ? err : new Error(msg));
   }
 });

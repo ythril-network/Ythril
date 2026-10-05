@@ -34,7 +34,9 @@ import { getConfig, getMediaEmbeddingConfig , getDocumentProcessingConfig } from
 import { toSafeRelPath } from '../../util/paths.js';
 import { isProxySpace } from '../../spaces/proxy.js';
 import type { MediaJobDoc } from '../../config/types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
+import { storedFailureText } from '../../brain/store-failure.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { claimNextJob, completeJob, failJob, resetStalledJobs, cancelMediaJob, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob } from './job-queue.js';
@@ -290,7 +292,7 @@ async function workerLoop(): Promise<void> {
   const spaceIds = getLocalSpaceIds();
   if (spaceIds.length > 0) {
     await resetStalledJobs(spaceIds, startupStalledTimeoutMs).catch(err =>
-      log.warn(`Media worker: stalled job reset error: ${err instanceof Error ? err.message : String(err)}`),
+      log.warn(`Media worker: stalled job reset error: ${peerText(messageOf(err))}`),
     );
   }
 
@@ -311,7 +313,7 @@ async function workerLoop(): Promise<void> {
       hopBudgets(),
     );
     void resetStalledJobs(ids, stalledTimeoutMs).catch(err =>
-      log.warn(`Media worker: periodic stalled reset error: ${err instanceof Error ? err.message : String(err)}`),
+      log.warn(`Media worker: periodic stalled reset error: ${peerText(messageOf(err))}`),
     );
   }, sweepIntervalMs);
   // Don't keep the event loop alive solely for the sweep timer
@@ -365,7 +367,7 @@ async function workerLoop(): Promise<void> {
     const claimed: MediaJobDoc[] = [];
     for (let i = 0; i < workerConcurrency; i++) {
       const job = await claimNextJob(activeSpaceIds).catch(err => {
-        log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Media worker: claim error: ${peerText(messageOf(err))}`);
         return null;
       });
       if (!job) break;
@@ -450,7 +452,7 @@ async function processJob(
         // dropping the job and any orphaned metadata/artifacts, and stop (no retry, no
         // "exhausted retries" churn — that infinite loop is exactly what this avoids).
         await reconcileDeletedSource(spaceId, claim);
-        log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — removed job and orphaned metadata (no retry)`);
+        log.info(`Media worker: source file ${peerText(spaceId)}/${peerText(fileId)} no longer exists — removed job and orphaned metadata (no retry)`);
         return;
       }
       throw new Error(`Could not read file for embedding: ${err instanceof Error ? err.message : String(err)}`);
@@ -490,7 +492,7 @@ async function processJob(
           { onProgress: heartbeat, shouldStop: () => leaseLost, steps: AUDIO_STEPS });
         if (a.failed > 0) {
           fileEmbeddingStatus = 'partial';
-          log.warn(`Media worker: ${a.failed}/${a.total} audio chunks failed for ${spaceId}/${fileId} — recording partial`);
+          log.warn(`Media worker: ${a.failed}/${a.total} audio chunks failed for ${peerText(spaceId)}/${peerText(fileId)} — recording partial`);
         }
         break;
       }
@@ -504,7 +506,7 @@ async function processJob(
           undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, steps: VIDEO_STEPS });
         if (v.audioFailed > 0) {
           fileEmbeddingStatus = 'partial';
-          log.warn(`Media worker: ${v.audioFailed}/${v.audioTotal} audio chunks failed for ${spaceId}/${fileId} — recording partial`);
+          log.warn(`Media worker: ${v.audioFailed}/${v.audioTotal} audio chunks failed for ${peerText(spaceId)}/${peerText(fileId)} — recording partial`);
         }
         break;
       }
@@ -575,8 +577,8 @@ async function processJob(
             asFilter<FileMetaDoc>({ _id: fileId }),
             { $set: metaUpdate },
           ).catch((err: unknown) => {
-            log.warn(`Media worker: ${spaceId}/${fileId} described but the metadata write failed — the `
-              + `description, excerpt and source from this run are lost and will not be recomputed: ${err}`);
+            log.warn(`Media worker: ${peerText(spaceId)}/${peerText(fileId)} described but the metadata write failed — the `
+              + `description, excerpt and source from this run are lost and will not be recomputed: ${peerText(err)}`);
           });
 
           // Embedding outcome drives the job result (B3): a total failure throws so
@@ -588,7 +590,7 @@ async function processJob(
           }
           if (embedFailures > 0) {
             fileEmbeddingStatus = 'partial';
-            log.warn(`Media worker: ${spaceId}/${fileId} embedded with ${embedFailures}/${chunkCount} chunk failure(s) — marked partial`);
+            log.warn(`Media worker: ${peerText(spaceId)}/${peerText(fileId)} embedded with ${embedFailures}/${chunkCount} chunk failure(s) — marked partial`);
           }
         }
         break;
@@ -603,7 +605,7 @@ async function processJob(
     // reconciles, or it comes after and the delete's own metadata cleanup follows it.
     if (!(await fs.stat(absolutePath).then(() => true, () => false))) {
       await reconcileDeletedSource(spaceId, claim);
-      log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
+      log.info(`Media worker: source file ${peerText(spaceId)}/${peerText(fileId)} was deleted during its job — removed what the job wrote`);
       return;
     }
 
@@ -615,7 +617,7 @@ async function processJob(
       // description itself is theirs to keep.
       if (derivedExcerpt) {
         await updateFileMeta(spaceId, filePath, { excerpt: derivedExcerpt }).catch(err =>
-          log.warn(`Media worker: failed to write excerpt to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+          log.warn(`Media worker: failed to write excerpt to file meta ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
         );
       }
       // The description is a CONDITIONAL write, decided by the database in one operation.
@@ -627,16 +629,16 @@ async function processJob(
       // the 2.5.1 defect that computed a vector from the record as the write had read it.
       if (derivedDescription) {
         await setDerivedDescriptionIfUnset(spaceId, filePath, derivedDescription, derivedSource).catch(err =>
-          log.warn(`Media worker: failed to write description to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+          log.warn(`Media worker: failed to write description to file meta ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
         );
       }
     }
 
     await completeJob(spaceId, fileId, fileEmbeddingStatus);
     mediaJobsCompletedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
-    log.info(`Media worker: completed ${mediaType} job ${spaceId}/${fileId} (${fileEmbeddingStatus})`);
+    log.info(`Media worker: completed ${mediaType} job ${peerText(spaceId)}/${peerText(fileId)} (${fileEmbeddingStatus})`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = peerText(messageOf(err));
     // A lost lease is not a failed job. Stall recovery has already put this file back in the queue with an
     // attempt spent, and another claimant is on it: calling failJob here would spend a SECOND attempt and
     // write a `lastError` describing nothing that went wrong, and calling completeJob would report a
@@ -649,18 +651,18 @@ async function processJob(
     // A space being deleted or renamed away is the same outcome, and says so: its file door refused the write
     // (`spaces/space-write-gate.ts`), so the run stops before it adds anything under a tree being removed.
     if (isAbandonment(err) && !isLeaseLost(err)) {
-      log.info(`Media worker: abandoning ${spaceId}/${fileId} — ${message}. Nothing more is written for it.`);
+      log.info(`Media worker: abandoning ${peerText(spaceId)}/${peerText(fileId)} — ${message}. Nothing more is written for it.`);
       return;
     }
     if (isAbandonment(err)) {
-      log.warn(`Media worker: abandoning ${spaceId}/${fileId} — its claim was taken while it was still running,`
+      log.warn(`Media worker: abandoning ${peerText(spaceId)}/${peerText(fileId)} — its claim was taken while it was still running,`
         + ` and nothing it produced was written. Either the file was moved, deleted or re-uploaded (the job, if`
         + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
         + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
       return;
     }
-    log.warn(`Media worker: job ${spaceId}/${fileId} failed: ${message}`);
+    log.warn(`Media worker: job ${peerText(spaceId)}/${peerText(fileId)} failed: ${message}`);
     // An oversized document will never shrink — fail permanently instead of
     // burning the retry budget re-reading a file the pipeline refuses to convert.
     // A stored file that cannot be decoded is the same: retrying reads the same bytes under the same key (F-43).
@@ -679,8 +681,8 @@ async function processJob(
         // `failed` for an unreadable file, not `skipped`: nothing was declined, the bytes could not be read.
         { $set: { embeddingStatus: unreadable ? 'failed' : 'skipped' } },
       ).catch((err: unknown) => {
-        log.warn(`Media worker: ${spaceId}/${fileId} failed permanently but its status could not be written `
-          + `— the record will read 'processing' while the failure counter has already moved: ${err}`);
+        log.warn(`Media worker: ${peerText(spaceId)}/${peerText(fileId)} failed permanently but its status could not be written `
+          + `— the record will read 'processing' while the failure counter has already moved: ${peerText(err)}`);
       });
     }
     if (permanent || attempts >= maxAttempts) {
@@ -688,8 +690,10 @@ async function processJob(
     } else {
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
     }
-    await failJob(spaceId, fileId, permanent ? maxAttempts : attempts, maxAttempts, message).catch(innerErr =>
-      log.warn(`Media worker: failJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`),
+    // What is stored is served later (`mediaJobError`, `lastError`): a driver's message names a host and a port, so a
+    // failure on the store's side is stored as our sentence and the error's class (`Q-361`).
+    await failJob(spaceId, fileId, permanent ? maxAttempts : attempts, maxAttempts, storedFailureText(err, 'run a media job')).catch(innerErr =>
+      log.warn(`Media worker: failJob error: ${peerText(messageOf(innerErr))}`),
     );
   } finally {
     endTimer();
@@ -712,19 +716,19 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
   if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
   const fileId = claim.jobId;
   await cancelMediaJob(spaceId, fileId).catch(err =>
-    log.warn(`reconcileDeletedSource: cancelMediaJob ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`reconcileDeletedSource: cancelMediaJob ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
   );
   await deleteConversionArtifacts(spaceId, fileId).catch(err =>
-    log.warn(`reconcileDeletedSource: deleteConversionArtifacts ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`reconcileDeletedSource: deleteConversionArtifacts ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
   );
   // Honour softDeleteFileMeta: flag the orphaned record for audit, or hard-remove it.
   if (getConfig().softDeleteFileMeta === true) {
     await markFileMetaDeleted(spaceId, fileId).catch(err =>
-      log.warn(`reconcileDeletedSource: flag file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+      log.warn(`reconcileDeletedSource: flag file meta ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
     );
   } else {
     await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: fileId })).catch(err =>
-      log.warn(`reconcileDeletedSource: delete file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
+      log.warn(`reconcileDeletedSource: delete file meta ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`),
     );
   }
 }

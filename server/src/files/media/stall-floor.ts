@@ -35,7 +35,7 @@
  * uses whichever is larger, and says so once. Nothing an operator set is contradicted — the detector simply
  * stops firing inside a step it authorised.
  */
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 
 /**
  * Head-room over the longest hop. A stall timeout equal to the hop budget would fire in the same instant the
@@ -86,7 +86,7 @@ export function stallTimeoutWithWarning(
     if (key !== _lastWarned) {
       _lastWarned = key;
       log.warn(`Stall detection: using ${ms} ms instead of the configured ${raised.from} ms, because `
-        + `${raised.hop} allows a single step of ${raised.hopMs} ms. A step longer than the stall timeout `
+        + `${peerText(raised.hop)} allows a single step of ${raised.hopMs} ms. A step longer than the stall timeout `
         + `reports no progress while it runs, so the job would be re-queued mid-step, abandon its work, and `
         + `reach the same step again — a loop that never finishes. Raise stalledJobTimeoutMs above `
         + `${Math.ceil(raised.hopMs * STALL_FLOOR_FACTOR)} ms to silence this.`);

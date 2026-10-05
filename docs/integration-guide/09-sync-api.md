@@ -57,7 +57,9 @@ Authorization: Bearer <instance-admin token>
 
 Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
 `?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
-and `status` the detail.
+and `status` the detail. A `500 error` carries our own error text, and for a failure on the database's side one of
+the fixed sentences of [03-auth-and-limits](03-auth-and-limits.md) — never the driver's message, which is in the
+server log.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
@@ -359,6 +361,14 @@ because a record already stored is skipped and a fork already made is found agai
 divergent fact whose fork is stored is counted `forked` (the single `POST /api/sync/facts` answers
 `{ "status": "forked", "forkId": … }` with that id), writes nothing, and is never refused by a fork cap.
 
+**Two pushes of different text for one fact at one seq both keep their text (5.6.4).** The receiver compares text at
+the write as well as at the accept: a copy that finds another at its own seq with different text — stored between its
+accept and its write — is answered `forked` by the same rules as a planned fork (the fork already made, the caps),
+never `inserted`. A fork keeps the divergent copy's `createdAt` and `updatedAt`; one stored before 5.6.4 keeps the
+stamps it was written with, so on a network of mixed versions the same fork differs in its timestamps until every
+member runs 5.6.4. File metadata is written under the seq condition too: an older copy never replaces a newer one
+that landed between the receiver's read and its write.
+
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
 
@@ -419,10 +429,12 @@ models — or different versions of one — hold legitimately different vectors 
 ranking one against the other produces plausible-looking nonsense rather than an error. Facts were the
 last type that carried theirs; now none do.
 
-**The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
-push path; a pull fetches whole documents and validates nothing, so a pulled record kept the sender's vector
-— and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then
-acted on. Both directions now drop the fields `sync/local-only-fields.ts` lists (the vector, its model, the
+**The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above refuse a document
+on the push path. A pull fetches whole documents and stores them as received, so until 4.0 a pulled record kept the
+sender's vector — and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep
+then acted on. A pull still stores what it is served, and since 5.6.4 it parses each document against the same
+schema, refuses only a shape that would corrupt the receiver (a non-string `parentFileId`, a wrong-typed `_id` or
+`seq`) and names the stored documents that fail its schema (up to a bounded list, then how many more), once per page, in the receiver's log. Both directions now drop the fields `sync/local-only-fields.ts` lists (the vector, its model, the
 matched text, the two retention stamps and a file's sync base), and the serving side leaves them out of the page
 altogether, so a sync page is materially smaller than it was.
 
@@ -432,7 +444,9 @@ replaced the whole document, so the record stopped expiring here and was re-embe
 changed. The vector, its model and the matched text are kept only while this instance still embeds the record: an
 update this instance suppresses — by the record's own `suppressEmbeddings`, its type's schema, or the space —
 lands with none of them, as before 5.6.2, because the embed queue skips a suppressed record and nothing would ever
-remove a vector carried onto it.
+remove a vector carried onto it. A file's metadata is merged, so until 5.6.4 this held for the other families
+and not for files: a file this instance suppresses (its own flag, the stored one, or the space) now lands with none
+either, and its chunk and passage rows lose theirs.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written, whether it arrived by push (batch or

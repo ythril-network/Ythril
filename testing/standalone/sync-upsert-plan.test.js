@@ -219,3 +219,24 @@ describe('a fork id is derived (`FK`)', () => {
     assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });
+
+describe('divergesFrom and seqGuard — the fork rule and the write guard are each ONE function (Q-361 items 7, 9)', () => {
+  it('divergesFrom: the same seq with other text, and nothing else, is a divergence', async () => {
+    const { divergesFrom } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'b' }), true);
+    assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'a' }), false, 'the same text is one version, not a divergence');
+    assert.equal(divergesFrom({ seq: 5, fact: 'a' }, { seq: 6, fact: 'b' }), false, 'a newer seq is newer, not a fork');
+    assert.equal(divergesFrom({ seq: 6, fact: 'a' }, { seq: 5, fact: 'b' }), false, 'an older seq is older, not a fork');
+    assert.equal(divergesFrom(null, { seq: 5, fact: 'b' }), false, 'nothing stored: nothing to diverge from');
+    assert.equal(divergesFrom(undefined, { seq: 5, fact: 'b' }), false);
+    assert.equal(divergesFrom({ seq: 5 }, { seq: 5 }), false, 'a record with no text (an entity) never diverges');
+  });
+
+  it('seqGuard: a stored copy below the seq, or with none, or none at all — and by id alone for a copy with no seq', async () => {
+    const { seqGuard } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.deepEqual(seqGuard('x', 7), { _id: 'x', $or: [{ seq: { $lt: 7 } }, { seq: { $exists: false } }] });
+    assert.deepEqual(seqGuard('x', 0), { _id: 'x', $or: [{ seq: { $lt: 0 } }, { seq: { $exists: false } }] }, 'seq 0 is a seq');
+    assert.deepEqual(seqGuard('x', undefined), { _id: 'x' });
+    assert.deepEqual(seqGuard('x', 'not a number'), { _id: 'x' });
+  });
+});

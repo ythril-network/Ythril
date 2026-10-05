@@ -3,7 +3,8 @@ import { isUsableDescriptor } from './face-descriptor.js';
 import { boundedJson } from '../../util/bounded-read.js';
 import { getConfig, getSecrets } from '../../config/loader.js';
 import { allowPrivateForSlot } from '../../config/model-egress-policy.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { egressConsented } from '../../config/egress-consent.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
@@ -120,7 +121,7 @@ export async function detectFacesExternal(imageBytes: Buffer, expectedDims: numb
     }
     return faces;
   } catch (err) {
-    log.warn(`External face model unreachable (${err instanceof Error ? err.message : String(err)}) — no descriptors from this provider`);
+    log.warn(`External face model unreachable (${peerText(messageOf(err))}) — no descriptors from this provider`);
     return null;
   }
 }

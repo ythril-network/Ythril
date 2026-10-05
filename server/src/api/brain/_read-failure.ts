@@ -10,7 +10,7 @@
  * says `retryable` in a field rather than in prose.
  */
 import type express from 'express';
-import { classifyReadFailure } from '../../brain/store-failure.js';
+import { classifyAndReportFailure } from '../../brain/store-failure.js';
 
 /**
  * Answer a read failure with the truth about whose fault it is.
@@ -21,8 +21,11 @@ import { classifyReadFailure } from '../../brain/store-failure.js';
  * branch on one boolean instead of matching our prose, which is what `Retry-After` alone would have left them
  * doing on the 4xx-shaped failures.
  */
-export function sendReadFailure(res: express.Response, err: unknown): void {
-  const f = classifyReadFailure(err);
+export function sendReadFailure(res: express.Response, where: string, err: unknown): void {
+  // The answer is in OUR words when the error is the store's (`Q-361`); the driver's own text is logged by this call
+  // under `where` — the operation, as the operator will search for it — once per window for each kind of failure,
+  // because a read route fails at the rate it is called (6 of 36 calls, for hours, after a search process restarted).
+  const f = classifyAndReportFailure(err, where, { recurring: true });
   if (f.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(f.retryAfterSeconds));
   res.status(f.status).json({
     error: f.error,

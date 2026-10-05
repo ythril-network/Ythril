@@ -127,7 +127,7 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
 
     // If a join round just passed via this vote relay, add the pending member.
     if (admitPassedJoin(net, cfg.instanceId, round)) {
-      log.info(`Join round ${logSafe(round.roundId)} passed via vote relay — added ${logSafe(round.subjectLabel)} to network ${net.id}`);
+      log.info(`Join round ${logSafe(round.roundId)} passed via vote relay — added ${logSafe(round.subjectLabel)} to network ${logSafe(net.id)}`);
     }
 
     saveConfig(cfg);

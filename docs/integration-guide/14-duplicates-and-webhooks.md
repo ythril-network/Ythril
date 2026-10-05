@@ -50,10 +50,10 @@ Rules are evaluated **highest `minScore` first**; the first match decides the ac
 | Action | Effect |
 |--------|--------|
 | `flag` | Record a reviewable candidate (default; non-destructive). |
-| `automerge` | **Entities only.** Merge losslessly using the existing entity merge (unions edges, tags, and non-conflicting properties). If the two records set the same property to *different* values, the merge is not lossless — it is **not** performed and the pair falls back to `flag`. The survivor is the older record by default (`dupeMergeSurvivor`). |
+| `automerge` | **Entities only.** Merge losslessly using the existing entity merge (unions edges, tags, and non-conflicting properties). If the two records set the same property to *different* values, the merge is not lossless — it is **not** performed and the pair falls back to `flag`. The survivor is the older record by default (`dupeMergeSurvivor`) — the one with the lower `seq`, whichever of the two the scan or the insert-time check started from. |
 | `notify` | Emit a `duplicate.detected` webhook with both full records + the score. By default this goes to your webhook **subscriptions** (subscribe your automation, e.g. an n8n workflow, to `duplicate.detected` for the space); set a rule-level `webhookUrl` to POST directly to a specific (SSRF-validated) endpoint instead. Your automation can then apply custom logic and call back the API (`graph_merge`, delete, etc.). |
 
-An action runs once per pair; it re-runs only after one of the records changes. **A dismissed pair is content-gated:** it stays dismissed when a record is merely re-written with the *same* content — a re-embed, a peer re-sync, an index rebuild (all of which advance `seq`) — but it **re-opens automatically when the pair's content materially changes** (a real edit to the embedded text). This is why a routine re-embed no longer resurfaces every pair you already dismissed, while a genuine edit still comes back for review. You can also bring a dismissed pair back manually at any time by re-rating it (`POST /api/duplicates/:id/reopen`, or the **Re-rate** button in the UI). Mechanically, dismissal records a fingerprint of both records' embedded text; the scanner re-opens the pair only when that fingerprint no longer matches.
+An action runs once per pair; it re-runs only after one of the records changes — a pair whose stored `aSeq` or `bSeq` is absent or `0` (written before 5.6.4) is not read as changed, and its real seqs are stored the next time it is scanned. A merge the space's schema refuses is attempted once per change, not once from each end of the pair. **A dismissed pair is content-gated:** it stays dismissed when a record is merely re-written with the *same* content — a re-embed, a peer re-sync, an index rebuild (all of which advance `seq`) — but it **re-opens automatically when the pair's content materially changes** (a real edit to the embedded text). This is why a routine re-embed no longer resurfaces every pair you already dismissed, while a genuine edit still comes back for review. You can also bring a dismissed pair back manually at any time by re-rating it (`POST /api/duplicates/:id/reopen`, or the **Re-rate** button in the UI). Mechanically, dismissal records a fingerprint of both records' embedded text; the scanner re-opens the pair only when that fingerprint no longer matches.
 
 ### Candidate review API
 
@@ -62,10 +62,13 @@ Base path: `/api/duplicates`.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/duplicates?status=open&space=<id>` | any token (space-scoped) | List candidates. `status` = `open` (default), `dismissed`, or `all`. |
-| `POST` | `/api/duplicates/:id/dismiss` | non-read-only | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
-| `POST` | `/api/duplicates/:id/reopen` | non-read-only | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
-| `POST` | `/api/duplicates/:id/merge` | non-read-only | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. |
+| `POST` | `/api/duplicates/:id/dismiss` | `dataQuality` write | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
+| `POST` | `/api/duplicates/:id/reopen` | `dataQuality` write | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
+| `POST` | `/api/duplicates/:id/merge` | `dataQuality` write **and** `knowledge` write, in the pair's space | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. A merge deletes the absorbed entity, so it needs the same `knowledge` write as the entity merge and `graph_merge`. A candidate in a space where the token lacks either answers `404`, so the refusal does not reveal that the candidate exists. |
 | `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
+
+These routes name no space: each one looks the candidate up only in the spaces where the token holds the rung in
+the Auth column, so a candidate in any other space is `404`, never `403`.
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, score, status, resolution?, contradiction, negationAsymmetry?, detectedAt, updatedAt }`. The web UI (a space's **Brain → Review** tab) lists that space's candidates with dismiss / merge / re-rate actions, a **search box** (handy for a large dismissed pile), and a "Scan now" button.
 
@@ -305,7 +308,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `edge.created` | A new edge is created |
 | `edge.updated` | An existing edge is updated |
 | `edge.deleted` | An edge is deleted |
-| `link_violation.created` | A strict-linkage reference violation is recorded |
+| `link_violation.created` | A strict-linkage reference violation is recorded — once per dangling end (the document, the field and the target), not once per delivery of the document |
 | `chrono.created` | A new chrono entry is created |
 | `chrono.updated` | A chrono entry is updated |
 | `chrono.deleted` | A chrono entry is deleted |

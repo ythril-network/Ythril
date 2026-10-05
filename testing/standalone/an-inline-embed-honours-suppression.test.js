@@ -32,6 +32,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf, statementAround } from './_structural-window.mjs';
+import { suppressionBranchOf, UNSETS_THE_VECTOR } from './_suppression-branch.mjs';
 
 const { embeddingSuppressed } = await import('../../server/dist/brain/suppress-embeddings.js');
 
@@ -200,12 +201,13 @@ describe('every inline embed honours suppression', () => {
     // Removing the check there because the creators now have one would leave sync ingest and every re-embed
     // unguarded, and would break the cleanup of a suppression toggled ON after records already exist.
     const rec = stripComments(readFileSync('server/src/brain/embed-record.ts', 'utf8'));
-    const body = bodyOf(rec, 'embedStoredRecord');
-    assert.match(body, /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
+    assert.match(bodyOf(rec, 'embedStoredRecord'), /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
+    // The SUPPRESSION branch's own block: the failure path below it spells the same unset, so a window wider than
+    // the branch is satisfied by the wrong statement.
     assert.match(
-      body, /\$unset:\s*\{\s*embedding/,
-      'and must UNSET a stale vector rather than only skipping — that is what cleans up a record embedded '
-      + 'before the flag was set',
+      suppressionBranchOf(rec), UNSETS_THE_VECTOR,
+      'and the suppression branch must UNSET a stale vector rather than only skipping — that is what cleans up a '
+      + 'record embedded before the flag was set',
     );
   });
 });

@@ -5,10 +5,11 @@
  * `lifecycle.ts` (init/create/remove/wipe/recovery), `rename.ts`, and `_shared.ts`.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
 import { buildSpaceVectorIndexes } from './vector-index.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
+import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
  * A space's MCP-facing directive, under the one name that still has a store behind it.
@@ -132,13 +133,22 @@ export function updateSpace(
     const schemaChanged = JSON.stringify(prev?.typeSchemas ?? null) !== JSON.stringify(updates.meta.typeSchemas ?? null);
     if (schemaChanged) {
       buildSpaceVectorIndexes(spaceId, false).catch(err =>
-        log.warn(`P6: vector filter-field rebuild after schema change on '${spaceId}': ${err}`));
+        log.warn(`P6: vector filter-field rebuild after schema change on '${peerText(spaceId)}': ${peerText(err)}`));
     }
   }
 
   saveConfig(cfg);
+  /*
+   * The stored vectors follow the flag, which is what the userguide has always said happens — after EVERY write of the
+   * meta, and asked for HERE because this is the one writer of `space.meta` (`Q-361` item 11). The callers used to ask
+   * for themselves: the PATCH route did, a vote-applied change swept twice, and a network layer arriving, a schema
+   * route on a space no network carries and every recompute of the effective meta swept nothing. Not awaited and
+   * coalesced per space (`sweepAfterMetaWrite`): the sweep is idempotent and local, so a failure costs nothing beyond the
+   * next meta write repeating it.
+   */
+  if (updates.meta !== undefined) sweepAfterMetaWrite(spaceId, space.meta);
   // Fire-and-forget schema file sync
-  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${err}`));
+  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${peerText(err)}`));
   return space;
 }
 

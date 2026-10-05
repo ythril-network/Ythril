@@ -789,6 +789,11 @@ builds one index per space on its tombstones (`type`, `seq`), and the first pull
 deletions per cycle than before: up to 5000 per kind per request and 200 requests per cycle, until they have caught
 up. A peer still on 5.6.2 or earlier pulls at most 1000 per kind from you until it upgrades.
 
+**Upgrading to 5.6.4 or later sweeps the stored vectors of everything a space suppresses, at every start.** Once the server
+listens, one space at a time, it removes the vector and model of each record, file and file chunk its own flag, type schema
+or space says not to embed and cancels their queued embed jobs — one scan per record kind per space, no marker; each kind
+that lost any logs `Suppression sweep: removed N <kind> vector(s) in <space>` (a file counts its rows).
+
 ### Rolling Back
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search

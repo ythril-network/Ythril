@@ -133,7 +133,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // already answers for anyone who tried the delete, and a preview needing write rights would be visible
   // only to somebody who could already delete.
   { route: '/api/brain/spaces/:spaceId/entities/:id/cascade-preview', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
-  // A merge DESTROYS one of the two records, so it is admin even though each half looks like an edit.
+  // A merge DESTROYS one of the two records, but the rung is `write`, as the row says: a merge is knowledge `write`
+  // on every door that runs it (this route, MCP `graph_merge`, and the duplicates merge, which asks for it in the
+  // pair's space — `Q-304`). It is not `admin`; an earlier version of this comment said it was.
   { route: '/api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/edges/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -248,6 +250,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/networks/join-by-key', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/duplicates/scan', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
+  // The merge row names `dataQuality` write, the rung its candidate lookup walks at. A merge also DELETES a knowledge
+  // record, so the handler further requires `knowledge` write in the pair's space (the rung the entity merge and
+  // `graph_merge` need) and answers 404 without it (`Q-304`). A row names one area, so that half is the handler's.
   { route: '/api/duplicates/:id/merge', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/dismiss', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/reopen', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },

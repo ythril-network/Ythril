@@ -36,7 +36,8 @@ import path from 'node:path';
 import { getDataRoot, getStorageConfig } from '../config/loader.js';
 import { getDb } from '../db/mongo.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 const GiB = 1024 ** 3;
 
@@ -116,6 +117,15 @@ export interface QuotaCheckResult {
 // ── Usage measurement ──────────────────────────────────────────────────────
 
 /**
+ * Why a directory or file could not be read, as the walk below records it: the errno `code` an fs refusal carries
+ * (`EACCES`), and for anything without one the failure's text through `caughtFailureText` — the walk's list is served
+ * in the quota's incomplete reason, so no error's own words go into it.
+ */
+function unreadableCause(err: unknown): string {
+  return (err as { code?: string } | null)?.code ?? caughtFailureText(err, 'measure a directory\'s size');
+}
+
+/**
  * Recursively sum file sizes under a directory, reporting what it could not read.
  *
  * An ABSENT root is not incompleteness — a space with no files directory yet uses no files, and reporting that
@@ -134,8 +144,8 @@ export async function measureDirSize(dirPath: string): Promise<DirSize> {
     } catch (err) {
       // ENOENT on the ROOT is "nothing stored here yet", which is a complete answer of zero. ENOENT deeper in
       // means something vanished mid-walk; any other code means we were refused.
-      const code = (err as { code?: string }).code;
-      if (!(isRoot && code === 'ENOENT')) unreadable.push(`${p}: ${code ?? String(err)}`);
+      const cause = unreadableCause(err);
+      if (!(isRoot && cause === 'ENOENT')) unreadable.push(`${p}: ${cause}`);
       return;
     }
     for (const e of entries) {
@@ -150,7 +160,7 @@ export async function measureDirSize(dirPath: string): Promise<DirSize> {
         } catch (err) {
           // A file listed and then not stattable is either a race with a delete or a permission problem, and
           // the walk cannot tell which. Either way its bytes are missing from the sum.
-          unreadable.push(`${full}: ${(err as { code?: string }).code ?? String(err)}`);
+          unreadable.push(`${full}: ${unreadableCause(err)}`);
         }
       }
     }
@@ -322,7 +332,7 @@ async function measureUsageUncached(): Promise<UsageGiB> {
         // A refused or unreachable `dbStats` used to read as 0 GiB of brain data, which is what a genuinely
         // empty instance also reads as. A restricted database user without the command, or a transient driver
         // error, then disabled the brain half of the quota for the life of the process with nothing logged.
-        return { bytes: 0, unreadable: [`dbStats: ${err instanceof Error ? err.message : String(err)}`] };
+        return { bytes: 0, unreadable: [`dbStats: ${caughtFailureText(err, 'measure the brain size')}`] };
       }
     })(),
   ]);
@@ -340,7 +350,7 @@ async function measureUsageUncached(): Promise<UsageGiB> {
   const reasons = [...incomplete.files.map(r => `files: ${r}`), ...incomplete.brain.map(r => `brain: ${r}`)];
   if (reasons.length > 0) {
     log.warn('Storage usage measurement is INCOMPLETE, so every figure below is a floor and a quota compared '
-      + `against it can only under-report: ${reasons.join('; ')}`);
+      + `against it can only under-report: ${peerList(reasons, '; ')}`);
   }
 
   const filesGiB = files.bytes / GiB;

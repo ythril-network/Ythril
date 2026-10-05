@@ -33,9 +33,9 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
-const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+const why = (err: unknown): string => peerText(err);
 
 /** Whether a space-relative path exists on disk. A path outside the sandbox does not, for this purpose. */
 async function exists(spaceId: string, relPath: string): Promise<boolean> {
@@ -100,23 +100,23 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   try {
     await moveFile(spaceId, src, dst);
   } catch (err) {
-    await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${spaceId}/${src}: ${why(e)}`));
+    await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${why(e)}`));
     throw err;
   }
 
   for (const sidecar of movedSidecars(src, dst)) {
     if (!(await exists(spaceId, sidecar.from))) continue;
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
-      log.warn(`move sidecar error for ${spaceId}, ${sidecar.from} → ${sidecar.to}: ${why(err)}`));
+      log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${why(err)}`));
   }
   await rekeyJobsForMove(spaceId, src, dst, held).catch(err =>
-    log.warn(`rekeyJobsForMove error for ${spaceId}, ${src} → ${dst}: ${why(err)}`));
+    log.warn(`rekeyJobsForMove error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${why(err)}`));
   await Promise.all([
     renameFileMeta(spaceId, src, dst),
     renameFileMetaByPrefix(spaceId, src, dst),
-  ]).catch(err => log.warn(`renameFileMeta error for ${spaceId}, ${src} → ${dst}: ${why(err)}`));
+  ]).catch(err => log.warn(`renameFileMeta error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${why(err)}`));
   await relocateDerivedFileMeta(spaceId, src, dst).catch(err =>
-    log.warn(`relocateDerivedFileMeta error for ${spaceId}, ${src} → ${dst}: ${why(err)}`));
+    log.warn(`relocateDerivedFileMeta error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${why(err)}`));
 
   await writeFileTombstones(spaceId, leaving);
   emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });

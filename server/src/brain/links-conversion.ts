@@ -34,7 +34,7 @@ import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
 import { LINK_CLASSES, legacyField } from './link-adjacency.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isProxy } from '../spaces/proxy.js';
 
@@ -241,7 +241,7 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
           // marker — a conversion that skipped a record and then claimed completeness is the failure this
           // whole design exists to avoid.
           report.failed++;
-          log.warn(`convert links ${spaceId}/${suffix}/${doc._id}: ${err}`);
+          log.warn(`convert links ${peerText(spaceId)}/${peerText(suffix)}/${peerText(doc._id)}: ${peerText(err)}`);
         }
       }
       after = docs[docs.length - 1]?._id;

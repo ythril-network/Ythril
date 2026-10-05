@@ -34,7 +34,8 @@ import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
 import { judgePair, consultedModel, type JudgeableRecord } from './contradiction-judge.js';
 import { extraClaimFields, fetchStructuredClaims, type ClaimMap } from './structured-claims.js';
@@ -370,8 +371,8 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
     }
   }
 
-  if (nliStalled) log.warn(`Contradiction scan (${spaceId}): the NLI judge was unavailable — its cursor is parked and will resume where it stopped`);
-  if (budgetExhausted) log.info(`Contradiction scan (${spaceId}): spent ${modelCalls} judge calls (${judgedPairs} pairs settled) and stopped at its per-run budget; the next run resumes from there`);
+  if (nliStalled) log.warn(`Contradiction scan (${peerText(spaceId)}): the NLI judge was unavailable — its cursor is parked and will resume where it stopped`);
+  if (budgetExhausted) log.info(`Contradiction scan (${peerText(spaceId)}): spent ${modelCalls} judge calls (${judgedPairs} pairs settled) and stopped at its per-run budget; the next run resumes from there`);
   return { scanned, found, nliStalled, judgedPairs, modelCalls, budgetExhausted };
 }
 
@@ -396,7 +397,7 @@ export async function runContradictionScanAllSpaces(): Promise<void> {
       const r = await scanSpace(s.id);
       scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
       stalled ||= r.nliStalled; budgetOut ||= r.budgetExhausted;
-    } catch (err) { log.warn(`Contradiction scan failed for ${s.id}: ${err instanceof Error ? err.message : String(err)}`); }
+    } catch (err) { log.warn(`Contradiction scan failed for ${peerText(s.id)}: ${peerText(messageOf(err))}`); }
   }
   // Both numbers, always: the judge-call count is the one that matches an endpoint's own request log, and
   // the settled-pair count is the one that describes the review queue. Logging only the second is what left
@@ -429,7 +430,7 @@ export function startContradictionScanner(): void {
   stopContradictionScanner();
   if (cron === null) return;
   if (!validate(cron)) {
-    log.warn(`Invalid contradictionScanner.schedule '${cron}' — contradiction scanner not started`);
+    log.warn(`Invalid contradictionScanner.schedule '${peerText(cron)}' — contradiction scanner not started`);
     return;
   }
   _task = schedule(cron, () => {
@@ -439,7 +440,7 @@ export function startContradictionScanner(): void {
     void runExclusive('Contradiction scan', () => runContradictionScanAllSpaces());
   });
   _armed.note(ARMED, cron);
-  log.info(`Contradiction scanner scheduled (${cron})`);
+  log.info(`Contradiction scanner scheduled (${peerText(cron)})`);
 }
 
 export function stopContradictionScanner(): void {

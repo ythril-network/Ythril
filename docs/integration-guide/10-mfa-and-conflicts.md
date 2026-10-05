@@ -203,6 +203,13 @@ GET /api/conflicts/link-violations
 
 Returns sync-ingested documents that violate strict linkage rules.
 
+**One record per dangling end, however often its document is delivered (5.6.4).** A violation's `_id` is derived from
+the document type, the document, the field and the target, so a re-sent push, an edit that leaves the same end
+dangling, or the same edge pushed again records nothing new and announces nothing (`link_violation.created` fires
+only for a record that was inserted). Two different dangling ends — another target, or the other end of one edge —
+stay two records. `reason` carries the target as the peer sent it, cut at a bounded length. A record 5.6.3 stored
+under a random id gets one derived twin on the next delivery of its document, and no more after it.
+
 `docType` is `entity`, `edge`, `fact`, `chrono` or **`file`**. A file's links are checked like any other
 record's, so `docType: "file"` is a value a caller must expect — and for that one `docId` is the file's
 **path** rather than a UUID, because that is what identifies a file in a space.

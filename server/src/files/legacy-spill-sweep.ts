@@ -30,7 +30,8 @@ import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 import { isProxy } from '../spaces/proxy.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 
 export interface LegacySpillSweep {
@@ -69,9 +70,9 @@ export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
         });
         removed.push(rel);
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+        const error = caughtFailureText(err, 'remove a legacy read spill');
         out.failed.push({ spaceId, path: rel, error });
-        log.warn(`Legacy spill sweep: could not remove ${spaceId}/${rel}: ${error}`);
+        log.warn(`Legacy spill sweep: could not remove ${peerText(spaceId)}/${peerText(rel)}: ${peerText(error)}`);
       }
     }
     if (removed.length === 0) continue;
@@ -81,7 +82,7 @@ export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
     // The disk this freed is the files quota's, and a cached figure would keep charging for it until expiry.
     invalidateUsageCache();
 
-    log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${spaceId}'`);
+    log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${peerText(spaceId)}'`);
     logInternalAudit({
       method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId, operation: LEGACY_SPILL_SWEEP_OPERATION, startedAt: started,
     });

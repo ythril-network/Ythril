@@ -22,6 +22,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { eventually } from './_write-faults.mjs';
 
 let createCoalescingRunner;
 
@@ -189,6 +190,38 @@ describe('coalescing runner — failure does not wedge a key', () => {
 
     assert.equal(starts, 2, 'the queued rerun still ran after the failure');
     assert.equal(runner.isRunning('net'), false);
+  });
+
+  it('a RERUN that rejects is logged by the runner and never an unhandled rejection (Q-361 item 11)', async () => {
+    // Nothing awaits the rerun, so a job that throws on its second pass was an unhandled rejection, which ends the
+    // process. The catch is the runner's, so every caller has it: a caller's own catch only ever sees the job it joined.
+    const { log } = await import('../../server/dist/util/log.js');
+    const runner = createCoalescingRunner();
+    let starts = 0;
+    const job = () => { starts++; return starts === 2 ? Promise.reject(new Error('the rerun failed')) : Promise.resolve('ok'); };
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    const warned = [];
+    const warn = log.warn;
+    log.warn = (...a) => { warned.push(a.join(' ')); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const first = runner.run('net', job);
+      void runner.run('net', job);                  // queues the rerun
+      await first;
+      // Wait for the event itself (the runner's own log line), then let the process drain a few ticks: an
+      // unhandled rejection is reported after the microtask queue empties, so by then it has been or never will be.
+      await eventually(() => warned.length > 0, 2000);
+      await new Promise(r => setImmediate(r));
+      await new Promise(r => setImmediate(r));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      log.warn = warn;
+    }
+    assert.equal(starts, 2, 'the rerun never ran');
+    assert.deepEqual(unhandled, [], 'a rerun that rejected escaped as an unhandled rejection');
+    assert.ok(warned.some(l => /the rerun failed/.test(l)), `the failure was not logged: ${JSON.stringify(warned)}`);
+    assert.equal(runner.isRunning('net'), false, 'a failed rerun left its key held');
   });
 });
 

@@ -60,7 +60,7 @@
  * `embeddingSuppressedFor` encodes by skipping the middle tier for files.
  */
 import { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES } from '../config/types.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import type { KnowledgeType } from '../config/types.js';
@@ -111,8 +111,8 @@ function countAs561(out: ArrivalOutcome, copies: ReadonlyMap<string, number>, re
   const n = (id: string): number => copies.get(id) ?? 1;
   for (const id of out.inserted) { result.inserted += 1; result.updated += n(id) - 1; }
   for (const id of out.updated) result.updated += n(id);
-  // A restore is unguarded, so `newerLocal` and `derived` stay empty; counted all the same, so nothing goes uncounted.
-  const unstored = new Set([...out.storeRefused.map(r => r._id), ...out.duplicates, ...out.newerLocal, ...out.derived]);
+  // A restore is unguarded, so `newerLocal`, `diverged` and `derived` stay empty; counted all the same, so nothing goes uncounted.
+  const unstored = new Set([...out.storeRefused.map(r => r._id), ...out.duplicates, ...out.newerLocal, ...out.diverged, ...out.derived]);
   for (const id of unstored) result.errors += n(id);
   // A shape refusal is one document without a usable id — counted per document, as 5.6.1 did.
   result.errors += out.refused.length;
@@ -177,7 +177,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     if (written) derivedRemoved += written.derivedReplaced;
     if (failure !== undefined) {
       const err = failure;
-      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
+      log.warn(`Import into space '${logSafe(spaceId)}': ${t} could not be written: ${logSafe(String(err))}`);
       const partial = err instanceof ArrivalWriteError ? err.partial : undefined;
       if (!partial || partial.counterBehind) {
         /*
@@ -186,7 +186,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
          * (`Q-252`): reporting those chunks as restored would hide that the next local write can sort below them.
          */
         if (partial?.counterBehind) {
-          log.warn(`Import into space '${spaceId}': ${t} stopped part-way with the seq counter behind the records it `
+          log.warn(`Import into space '${logSafe(spaceId)}': ${t} stopped part-way with the seq counter behind the records it `
             + 'had already restored, so every document is counted as an error; re-running the import repairs it '
             + '(a restore replaces).');
         }
@@ -196,7 +196,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       }
       // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and count only
       // what did not as errors — a restore that says "nothing was written" over records it did write is the worse lie.
-      const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal,
+      const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal, ...partial.diverged,
         ...partial.duplicates, ...partial.storeRefused.map(r => r._id)]);
       const unwritten = [...copies.keys()].filter(id => !settled.has(id));
       out = { ...partial, storeRefused: [...partial.storeRefused, ...unwritten.map(_id => ({ _id, reason: String(err) }))] };
@@ -206,12 +206,12 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
   }
 
   log.info(
-    `Import into space '${spaceId}': `
-    + IMPORT_TYPES.map(t => {
+    `Import into space '${logSafe(spaceId)}': `
+    + peerList(IMPORT_TYPES.map(t => {
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
       return `${t}: +${logSafe(r.inserted)} ~${logSafe(r.updated)} !${logSafe(r.errors)}${v > 0 ? ` ?${logSafe(v)}` : ''}`;
-    }).join(', ')
+    }))
     + (derivedRemoved > 0 ? `; removed ${logSafe(derivedRemoved)} derived file row(s) the backup does not hold` : ''),
   );
 

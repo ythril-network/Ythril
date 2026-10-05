@@ -46,7 +46,8 @@
  */
 import { getDb } from './mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { linkConversionConcerns } from '../brain/links-conversion.js';
 
 /** The six, written out: they no longer exist anywhere to derive them from. That is the point of this file. */
@@ -92,7 +93,7 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
         );
         if (res.modifiedCount > 0) out.cleared[name] = res.modifiedCount;
       } catch (err) {
-        log.warn(`drop-link-arrays: ${name} failed, will retry next boot: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`drop-link-arrays: ${peerText(name)} failed, will retry next boot: ${peerText(messageOf(err))}`);
       }
     }
   }
@@ -101,7 +102,7 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
   if (total > 0) log.info(`drop-link-arrays: cleared the retired link arrays off ${total} record(s)`);
   if (out.unconverted.length > 0) {
     log.warn(`drop-link-arrays: ${out.unconverted.length} space(s) still hold their links as arrays and were `
-      + `left alone — ${out.unconverted.join(', ')}. Their link reads are refused until the conversion has `
+      + `left alone — ${peerList(out.unconverted)}. Their link reads are refused until the conversion has `
       + 'walked them cleanly; that refusal names the space. Every start retries it, and the Link conversion '
       + 'ERROR line above says why it failed; from a source checkout, `npm run links:convert` walks it on demand.');
   }

@@ -30,7 +30,7 @@ import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 
 /**
  * The record collections a `type` filter reaches, with the index that filter needs.
@@ -76,7 +76,7 @@ export async function ensureQueryIndexes(): Promise<number> {
         await col(`${space.id}_${name}`).createIndex({ type: 1 });
         issued++;
       } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id}_${name} type index: ${err}`);
+        log.warn(`ensureQueryIndexes: ${peerText(space.id)}_${name} type index: ${peerText(err)}`);
       }
     }
     for (const ix of LINK_INDEXES) {
@@ -84,7 +84,7 @@ export async function ensureQueryIndexes(): Promise<number> {
         await col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {});
         issued++;
       } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
+        log.warn(`ensureQueryIndexes: ${peerText(space.id)} links ${peerList(Object.keys(ix.keys), ',')} index: ${peerText(err)}`);
       }
     }
   }

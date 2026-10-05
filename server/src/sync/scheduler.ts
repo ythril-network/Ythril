@@ -78,7 +78,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
   if (!schedule) return;
 
   if (!cronExpr) {
-    log.warn(`Unrecognised sync schedule '${schedule}' for network ${networkId} — using manual sync only`);
+    log.warn(`Unrecognised sync schedule '${logSafe(schedule)}' for network ${logSafe(networkId)} — using manual sync only`);
     return;
   }
 
@@ -86,7 +86,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
 
   _scheduledTasks.set(networkId, task);
   _armed.note(networkId, cronExpr);
-  log.info(`Sync scheduled for network ${networkId} (cron: "${cronExpr}")`);
+  log.info(`Sync scheduled for network ${logSafe(networkId)} (cron: "${logSafe(cronExpr)}")`);
 }
 
 /**
@@ -100,11 +100,11 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
 export async function runScheduledSync(networkId: string): Promise<void> {
   if (!getConfig().networks.some(n => n.id === networkId)) {
     stopScheduledSync(networkId);
-    log.info(`Sync schedule for network ${networkId} stopped: the network is no longer configured`);
+    log.info(`Sync schedule for network ${logSafe(networkId)} stopped: the network is no longer configured`);
     return;
   }
   await runSyncForNetwork(networkId).catch(err =>
-    log.error(`Scheduled sync failed for network ${networkId}: ${logSafe(String(err))}`),
+    log.error(`Scheduled sync failed for network ${logSafe(networkId)}: ${logSafe(String(err))}`),
   );
 }
 

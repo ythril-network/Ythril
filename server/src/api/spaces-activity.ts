@@ -14,7 +14,8 @@ import type { Router } from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfaScoped } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { flushSpaceActivity, purgeSpaceActivity } from '../metrics/space-activity-store.js';
 
 export function registerActivityResetRoute(spacesRouter: Router): void {
@@ -60,9 +61,8 @@ export function registerActivityResetRoute(spacesRouter: Router): void {
       req.auditSnapshots = { before: { activityBuckets: cleared }, after: { activityBuckets: 0 } };
       res.json({ ok: true, spaceId, cleared });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`POST /api/spaces/${spaceId}/activity/reset: ${err}`);
-      res.status(500).json({ error: msg });
+      log.error(`POST /api/spaces/${peerText(spaceId)}/activity/reset: ${peerText(err)}`);
+      res.status(500).json({ error: caughtFailureText(err, 'reset a space\'s activity') });
     }
   });
 }

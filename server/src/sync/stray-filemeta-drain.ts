@@ -38,7 +38,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { writeArrivals } from './arrivals.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerText } from '../util/log.js';
 
 /** How long a record whose file has no row waits for the file's bytes before it is discarded. */
 const WAIT_DAYS = 30;
@@ -103,7 +103,7 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
         { from: 'a 4.0-5.6.1 pull (stray filemeta collection)', fillOnly: true });
       n.merged += out.updated.length + out.inserted.length;
       n.complete += out.complete.length;
-      n.newer += out.newerLocal.length;
+      n.newer += out.newerLocal.length + out.diverged.length;
       n.refused += out.refused.length + out.storeRefused.length + out.derived.length + out.duplicates.length;
       if (out.counterBehind) {
         // The writer stored what it could, but the counter may be behind it: keep the page, so nothing is answered
@@ -134,7 +134,7 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
     logInternalAudit({ method: 'SWEEP', path: 'internal:stray-filemeta-drain', spaceId, operation: STRAY_FILEMETA_DRAIN_OPERATION, startedAt });
   }
   if (n.merged > 0 || n.deleted > 0 || empty) {
-    log.info(`Space '${spaceId}': merged ${logSafe(n.merged)} file metadata record(s) a 4.0-5.6.1 pull left in '${collName}' `
+    log.info(`Space '${peerText(spaceId)}': merged ${logSafe(n.merged)} file metadata record(s) a 4.0-5.6.1 pull left in '${peerText(collName)}' `
       + `(${logSafe(n.complete)} already complete here, ${logSafe(n.newer)} newer here, ${logSafe(n.deleted)} for files deleted since, `
       + `${logSafe(n.waiting)} waiting for their file, ${logSafe(n.refused)} refused)${empty ? ', and dropped the collection' : ''} (Q-219).`);
   }

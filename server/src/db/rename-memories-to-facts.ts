@@ -33,7 +33,7 @@
  * the kind of repair that loses data quietly. It is reported and left alone for a human.
  */
 import { getDb } from './mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * The suffix pair, written out. NOT derived from `COLLECTION_SUFFIX`, and deliberately so: the map holds the
@@ -69,15 +69,15 @@ export async function renameMemoriesToFacts(): Promise<RenameOutcome> {
         continue;
       }
       out.conflicts.push(from);
-      log.warn(`Rename skipped: both ${from} (${oldCount} documents) and ${to} exist. `
+      log.warn(`Rename skipped: both ${peerText(from)} (${oldCount} documents) and ${peerText(to)} exist. `
         + 'A previous migration did not finish, or one was created by hand. Merge them and remove '
-        + `${from} — this instance is serving ${to} and cannot see the other.`);
+        + `${peerText(from)} — this instance is serving ${peerText(to)} and cannot see the other.`);
       continue;
     }
 
     await db.collection(from).rename(to);
     out.renamed.push(to);
-    log.info(`Renamed ${from} to ${to} (the knowledge type \`memory\` became \`fact\` at 5.0)`);
+    log.info(`Renamed ${peerText(from)} to ${peerText(to)} (the knowledge type \`memory\` became \`fact\` at 5.0)`);
   }
 
   if (out.renamed.length > 0) {

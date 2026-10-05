@@ -25,6 +25,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import { boundedJson, boundedErrorText } from './bounded-read.js';
 import { chatUrlFor, claudeBaseFor, claudeModelsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { postWithBackoff } from '../extractor/model-post.js';
+import { peerText } from './log.js';
+
+/** How much of a model server's own error text a failure quotes. */
+const MODEL_ERROR_MAX = 200;
 
 export type ChatWire = 'ollama' | 'openai' | 'anthropic';
 
@@ -106,12 +110,13 @@ export async function chatOnce(
 
   if (endpoint.wire === 'ollama') {
     const j = await boundedJson<{ model?: string; message?: { content?: unknown }; done_reason?: string; error?: unknown }>(res, 'Model');
-    if (j.error) throw fail(`error: ${typeof j.error === 'string' ? j.error : JSON.stringify(j.error).slice(0, 200)}`);
+    // Bounded by the one renderer (`peerText`): a cut by code unit split a character, and a string error was not cut.
+    if (j.error) throw fail(`error: ${peerText(j.error, { max: MODEL_ERROR_MAX })}`);
     const text = typeof j.message?.content === 'string' ? j.message.content : '';
     return { text, truncated: j.done_reason === 'length', ...(j.model ? { model: j.model } : {}) };
   }
   const j = await boundedJson<{ model?: string; choices?: { message?: { content?: unknown }; finish_reason?: string }[]; usage?: Record<string, unknown>; error?: unknown }>(res, 'Model');
-  if (j.error) throw fail(`error: ${typeof j.error === 'string' ? j.error : JSON.stringify(j.error).slice(0, 200)}`);
+  if (j.error) throw fail(`error: ${peerText(j.error, { max: MODEL_ERROR_MAX })}`);
   const content = j.choices?.[0]?.message?.content;
   return {
     text: typeof content === 'string' ? content : '',

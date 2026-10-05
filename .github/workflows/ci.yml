@@ -153,6 +153,15 @@ jobs:
             docker compose -p ythril-test -f testing/docker-compose.test.yml logs --tail 500 "$svc" || true
             echo "::endgroup::"
           done
+          # The search process (mongot) and the atlas-local runner log to files, not stdout: a mongot death shows
+          # in the container log only as the runner's SIGTERM to mongod. docker cp reads a stopped container too.
+          for c in ythril-mongo-a ythril-mongo-b ythril-mongo-c ythril-mongo-d; do
+            for f in /tmp/mongot.log /tmp/runner.log; do
+              echo "::group::$c $f (last 200 lines)"
+              docker cp "$c:$f" - 2>/dev/null | tar -xO 2>/dev/null | tail -n 200 || true
+              echo "::endgroup::"
+            done
+          done
 
       - name: Tear down containers
         if: always()

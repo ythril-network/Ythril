@@ -11,7 +11,7 @@
  */
 import type { TokenRecord } from './types.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 
 export interface InstanceAdminFloorOutcome {
   /** Ids of the tokens that gained the floor. */
@@ -29,7 +29,7 @@ export function migrateInstanceAdminFloor(tokens: TokenRecord[] | undefined): In
   }
   if (out.granted.length > 0) {
     log.info(`Restored the space-admin floor on ${out.granted.length} instance-admin token(s) stored without it: `
-      + `${out.granted.join(', ')}.`);
+      + `${peerList(out.granted)}.`);
   }
   return out;
 }

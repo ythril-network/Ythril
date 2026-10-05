@@ -28,7 +28,7 @@
  * Every malformed value is reported in ONE message, not the first one only, so an operator with two typos learns
  * about both.
  */
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { DUAL_DOOR_BOUNDS, ENV_TO_CONFIG_PATH } from './setting-bounds.js';
 
 /** A numeric setting: its name, its bounds, and what it means, for the error message. */
@@ -171,7 +171,7 @@ export function assertNumericEnvOrExit(): void {
   const { ok, problems } = validateNumericEnv();
   if (ok) return;
   log.error(`Refusing to start: ${problems.length} environment setting${problems.length === 1 ? ' is' : 's are'} malformed.`);
-  for (const p of problems) log.error(`  • ${p}`);
+  for (const p of problems) log.error(`  • ${peerText(p)}`);
   log.error('A typo is never a preference: continuing would run this instance with settings you did not choose, '
     + 'and for the shutdown drain and the MongoDB connect retry it would silently drop a guarantee. '
     + 'Fix the value(s) above, or unset them to use the documented defaults.');

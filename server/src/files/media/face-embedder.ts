@@ -38,7 +38,8 @@ import { getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
 import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
 import { linksStartingFrom } from '../../brain/link-adjacency.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { isUsableDescriptor } from './face-descriptor.js';
 import { faceDescriptorDimsFor, liveIndexName } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
@@ -159,7 +160,7 @@ export async function labelStillResolves(spaceId: string, entityId: string): Pro
   const person = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId }), { projection: { _id: 1 } });
   if (person) return true;
-  log.debug(`Face gallery match in ${spaceId} points at deleted entity ${entityId} — ignoring`);
+  log.debug(`Face gallery match in ${peerText(spaceId)} points at deleted entity ${peerText(entityId)} — ignoring`);
   return false;
 }
 
@@ -223,7 +224,7 @@ export async function gallerySearch(
     if (isMaxTimeExpired(err)) throw new GalleryIncompleteError(spaceId, 'the search ran out of time');
     // No face index yet (the feature just enabled, the space's indexes still building): no gallery to match
     // against, which is an answer — as it always was.
-    log.debug(`Face gallery search failed for ${spaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Face gallery search failed for ${peerText(spaceId)}: ${peerText(messageOf(err))}`);
     return null;
   }
   if (out.degraded.length > 0) throw new GalleryIncompleteError(spaceId, out.degraded.join(', '));
@@ -262,7 +263,7 @@ export async function embedFaces(
   // described and no face data — which is the reason images have their own ladder at all, since the
   // face embeddings are the part of this pipeline carrying real privacy weight.
   if (!faceRecognitionAllowed(spaceId)) {
-    log.debug(`Face recogniser: skipped for space '${spaceId}' — image analysis is below 'recognition'`);
+    log.debug(`Face recogniser: skipped for space '${peerText(spaceId)}' — image analysis is below 'recognition'`);
     return;
   }
 
@@ -276,7 +277,7 @@ export async function embedFaces(
     width = result.info.width;
     height = result.info.height;
   } catch (err) {
-    log.warn(`Face recogniser: image decode failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Face recogniser: image decode failed for ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`);
     return;
   }
 
@@ -313,7 +314,7 @@ export async function embedFaces(
         + 'from a different embedder in the same gallery. Logged once per process.',
       );
     }
-    log.debug(`Face recogniser: skipped ${spaceId}/${fileId} — external provider unavailable, fallback disabled`);
+    log.debug(`Face recogniser: skipped ${peerText(spaceId)}/${peerText(fileId)} — external provider unavailable, fallback disabled`);
     return;
   }
 
@@ -326,7 +327,7 @@ export async function embedFaces(
     } catch (err) {
       log.warn(
         `Face recogniser: failed to initialise (model files missing?): ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+        `${peerText(messageOf(err))}`,
       );
       return;
     }
@@ -336,7 +337,7 @@ export async function embedFaces(
     try {
       result = await human.detect(tensor);
     } catch (err) {
-      log.warn(`Face recogniser: detect() failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Face recogniser: detect() failed for ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(messageOf(err))}`);
       return;
     } finally {
       // Always release the tensor — human does not dispose input tensors
@@ -432,12 +433,12 @@ export async function embedFaces(
         await updateFileMeta(spaceId, fileId, {
           linkEntities: [...linked, autoLabelEntityId],
         });
-        log.info(`Face recogniser: auto-labeled ${spaceId}/${fileId} → entity ${autoLabelEntityId}`);
+        log.info(`Face recogniser: auto-labeled ${peerText(spaceId)}/${peerText(fileId)} → entity ${peerText(autoLabelEntityId)}`);
       }
     } catch (err) {
       log.warn(
-        `Face recogniser: auto-label failed for ${spaceId}/${fileId}: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
+        `Face recogniser: auto-label failed for ${peerText(spaceId)}/${peerText(fileId)}: ` +
+        `${peerText(messageOf(err))}`,
       );
     }
   }
@@ -464,8 +465,8 @@ export async function propagateFaceLabel(
     );
   } catch (err) {
     log.warn(
-      `Face recogniser: propagateFaceLabel failed for ${spaceId}/${fileId}: ` +
-      `${err instanceof Error ? err.message : String(err)}`,
+      `Face recogniser: propagateFaceLabel failed for ${peerText(spaceId)}/${peerText(fileId)}: ` +
+      `${peerText(err)}`,
     );
   }
 }

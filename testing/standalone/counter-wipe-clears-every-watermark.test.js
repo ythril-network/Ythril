@@ -112,7 +112,7 @@ describe('the wipe recovery covers every one of them', () => {
      * recovery that silently does part of its job is the hardest kind to notice.
      */
     const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
-    assert.match(body, /cleared\.join\(/, 'the warning must enumerate what it reset, not describe it in prose');
+    assert.match(body, /cleared\.join\(|peerList\(cleared\b/, 'the warning must enumerate what it reset, not describe it in prose');
     assert.doesNotMatch(body, /reset all lastSeqReceived/,
       'the old message named one field as though it were the whole job');
   });

@@ -149,16 +149,16 @@ export async function addSpacesToNetwork(
     for (const e of entries) {
       if (e.localId === e.networkId || !added.includes(e.localId)) continue;
       const why = recordSpaceAlias(net, e.networkId, e.localId);
-      if (why) log.warn(`Network ${networkId}: alias '${logSafe(e.networkId)}' -> '${logSafe(e.localId)}' not recorded: ${logSafe(why)}`);
+      if (why) log.warn(`Network ${logSafe(networkId)}: alias '${logSafe(e.networkId)}' -> '${logSafe(e.localId)}' not recorded: ${logSafe(why)}`);
     }
     net.spaces.push(...added);
     clearSettledProposals(net, entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
-    log.info(`Network ${networkId}: added space(s) ${logSafe(added.join(', '))} (${logSafe(why)})`);
+    log.info(`Network ${logSafe(networkId)}: added space(s) ${logSafe(added.join(', '))} (${logSafe(why)})`);
     return added;
   } catch (err) {
-    log.warn(`Network ${networkId}: could not add space(s) (${logSafe(why)}): ${logSafe(String(err))}`);
+    log.warn(`Network ${logSafe(networkId)}: could not add space(s) (${logSafe(why)}): ${logSafe(String(err))}`);
     return [];
   }
 }
@@ -200,11 +200,11 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   }
   if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
   saveConfig(cfg);
-  log.info(`Network ${networkId}: space '${logSafe(localId)}' left the network (${logSafe(why)}); this instance keeps it as a local space`);
+  log.info(`Network ${logSafe(networkId)}: space '${logSafe(localId)}' left the network (${logSafe(why)}); this instance keeps it as a local space`);
   if (hadLayer) {
     void import('../spaces/effective-meta.js')
       .then(({ recomputeEffectiveMeta }) => recomputeEffectiveMeta(localId, true))
-      .catch((err: unknown) => log.warn(`Network ${networkId}: schema of '${logSafe(localId)}' not rebuilt after it left: ${logSafe(String(err))}`));
+      .catch((err: unknown) => log.warn(`Network ${logSafe(networkId)}: schema of '${logSafe(localId)}' not rebuilt after it left: ${logSafe(String(err))}`));
   }
   return true;
 }
@@ -267,7 +267,7 @@ function holdAsPending(
   const at = new Date().toISOString();
   net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from, at }))];
   saveConfig(cfg);
-  log.warn(`Network ${net.id}: ${what} ${logSafe(fresh.map(p => p.networkId).join(', '))}; held as pending, not adopted (${logSafe(fresh[0]!.why)})`);
+  log.warn(`Network ${logSafe(net.id)}: ${logSafe(what)} ${logSafe(fresh.map(p => p.networkId).join(', '))}; held as pending, not adopted (${logSafe(fresh[0]!.why)})`);
 }
 
 /**
@@ -352,20 +352,20 @@ export async function healAnnouncedAliases(networkId: string, fromInstanceId: st
     const heals = healSpaceAliases(net, fromInstanceId, announced, spaceNames);
     const recorded = heals.filter(h => {
       const why = recordSpaceAlias(net, h.networkId, h.localId);
-      if (why) log.warn(`Network ${networkId}: heal of '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' not recorded: ${logSafe(why)}`);
+      if (why) log.warn(`Network ${logSafe(networkId)}: heal of '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' not recorded: ${logSafe(why)}`);
       return why === null;
     });
     if (!recorded.length) return;
     clearSettledProposals(net, recorded.map(h => h.networkId));
     saveConfig(cfg);
     for (const h of recorded) {
-      log.info(`Network ${networkId}: healed the alias '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' from upstream ${logSafe(fromInstanceId)}`);
+      log.info(`Network ${logSafe(networkId)}: healed the alias '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' from upstream ${logSafe(fromInstanceId)}`);
       logInternalAudit({
         method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId, operation: SPACE_ALIAS_HEAL_OPERATION,
       });
     }
   } catch (err) {
-    log.warn(`Network ${networkId}: alias heal from ${logSafe(fromInstanceId)} failed: ${logSafe(String(err))}`);
+    log.warn(`Network ${logSafe(networkId)}: alias heal from ${logSafe(fromInstanceId)} failed: ${logSafe(String(err))}`);
   }
 }
 
@@ -405,7 +405,7 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
   const target = spaceAdditionTarget(net, round, cfg.instanceId, cfg.spaces.map(s => s.id));
   if (!target) return false;
   if ('skip' in target) {
-    log.warn(`space_addition round ${logSafe(round.roundId)} on network ${net.id} passed (${logSafe(where)}) but was not applied: ${logSafe(target.skip)}`);
+    log.warn(`space_addition round ${logSafe(round.roundId)} on network ${logSafe(net.id)} passed (${logSafe(where)}) but was not applied: ${logSafe(target.skip)}`);
     return false;
   }
   const entry = { networkId: round.spaceId!, localId: target.localId };

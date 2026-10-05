@@ -260,7 +260,9 @@ Brain A:  { _id: "abc", seq: 5, fact: "The sky is blue" }
 Brain B:  { _id: "abc", seq: 5, fact: "The sky is cerulean" }   ← concurrent edit
 ```
 
-The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with a fresh UUID, `forkOf: "abc"`, and the next available `seq`. Both versions coexist and can be reviewed by the user.
+The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with `forkOf: "abc"` and the next available `seq`. Its `_id` is derived from the parent id, the shared seq and the diverging text, so a push re-sent after its answer was lost finds the fork it already made. A fork written by 5.6.4 or later keeps the divergent copy's `createdAt` and `updatedAt` (one written earlier keeps the stamps it was given). Both versions coexist and can be reviewed by the user.
+
+The same comparison is made at the write. Two peers pushing different text for one fact at one seq at the same moment both keep their text: the push whose write lost the race finds a copy at its seq with other text and is forked by the same rules — the fork it already made, and the fork caps. A **pull** never forks: it keeps the local copy, advances past the document, and names its id once per window in one line per page (`kept the local copy; N document(s) arrived at the same seq with different text`).
 
 ### Entities and edges — last-writer-wins
 
@@ -451,9 +453,11 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 **There is no single-document route for `links` or `filemeta`.** Both arrive only through `batch-upsert`, so a peer implementation that only wires the per-type `POST` endpoints replicates neither.
 
+**File metadata is merged, not replaced, and an older copy never overwrites a newer one.** The authored keys are set on the stored row (the receiver's own size and hash are not touched, nor its vector unless this instance suppresses the file, below), and the write carries the same seq condition as every other family's: a copy stored between the receiver's read and its write at a higher seq is kept. A file this instance suppresses embedding for (its own flag, or the space's) is stored with no vector, model or matched text, and its chunk and passage rows lose theirs.
+
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
 
-All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or, in batch-upsert, left out of the write, counted in that family's `rejected` and named in the receiver's log. Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
+Every document a peer PUSHES is validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or, in batch-upsert, left out of the write, counted in that family's `rejected` and named in the receiver's log. Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped. A document a peer is PULLED for is parsed against the same schema, but a pull cannot tell its sender from what the sender's own copy was: it stores a pulled document as received and reports one that fails its schema, once per page, refusing only a shape that would corrupt the receiver (a non-string `parentFileId`, a wrong-typed `_id` or `seq`). The page's report names the stored documents that fail, up to a bounded list, and says how many more there were.
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 

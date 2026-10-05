@@ -151,7 +151,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
         };
         const belowFloor = peerFloorRefusal(updated.version, updated.versionCheckedAt);
         if (belowFloor) {
-          log.warn(`Member ${logSafe(incoming.instanceId)} on network ${net.id} is below the peer floor: ${logSafe(belowFloor)}`);
+          log.warn(`Member ${logSafe(incoming.instanceId)} on network ${logSafe(net.id)} is below the peer floor: ${logSafe(belowFloor)}`);
         }
         // Trust-on-first-use pin; a change to a different key is accepted only
         // with a valid rotation proof carried on the self-record.

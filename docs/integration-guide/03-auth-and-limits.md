@@ -87,13 +87,26 @@ of your request from a failure underneath us.** Every failure body from those th
 true or false, whether or not it bit:
 
 ```json
-{ "error": "Executor error during aggregate command on namespace: … :: caused by :: the store reported no
-           cause (this is a store-side failure, not a problem with your request — it can be retried)",
+{ "error": "A store-side failure stopped this operation; it is not a problem with your request and can be retried.",
   "retryable": true, "code": 8, "codeName": "InternalError" }
 ```
 
 A `503` also carries `Retry-After`. `code` and `codeName` are the store's own, present when it supplied them,
 and they are an operator's fastest route to the real condition.
+
+**The answer is in our words, never the driver's.** A driver's own message names the host, the port and the
+collection it failed on, so no answer carries it; the operator reads it in the server log, under the operation
+that failed. Three generic sentences are ever said about a store failure: the one above (`503`), `The store is
+not available right now.` (a pooled connection was cleared under the command; `400`, `retryable: false`) and
+`The store could not complete this request.` (any other failure on the driver's side, and the server codes
+`HostUnreachable`, `HostNotFound`, `NetworkTimeout`, `SocketException`, `NotWritablePrimary`,
+`NotPrimaryNoSecondaryOk` and `ReadConcernMajorityNotAvailableYet`, each at the status it already had). What the
+**server** refused in its own words — a malformed regular expression, a failed validation — and what this
+server refused keep their text: they are how you fix the request. An error of ours that merely mentions the
+store (a file reference such as `notes/mongot-setup.md`) is a `400` refusal, not a retryable store failure. The
+`$vectorSearch is not supported` sentence, which tells an operator to upgrade MongoDB, is a fourth, ours and not the
+driver's: it is about the store, in our words, and stays `503`. Every other route that used to answer an error's own text answers the same
+sentences, at its own status.
 
 > **Why this exists, because the cost was not the confusing message.** Until this release those routes
 > answered **400 for every failure**, including a vector-search stage that had simply stopped answering. A
@@ -103,8 +116,10 @@ and they are an operator's fastest route to the real condition.
 > defect; the message being truncated was the half an operator saw.
 
 **Read `retryable` rather than matching the prose**, and treat a `503` from these routes as transient: the
-conditions behind it (a search index re-initialising after a restart, a replica set stepping down, a search
-process that died) clear on their own, in seconds for a blip and in hours for a large reindex.
+conditions behind it (a replica set stepping down, a search process that died or stopped answering) clear on
+their own, in seconds for a blip and in hours for a large reindex. A search index that is merely absent or still
+building or re-initialising is not one of them: a search against it answers `200` with nothing from the meaning
+channel yet, and the records it has not ingested are found by the scan of fresh writes.
 
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.
