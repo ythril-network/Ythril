@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -89,13 +89,12 @@ describe('Space creation is asynchronous (B1)', () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     created.push(id);
 
-    const deadline = Date.now() + 120_000;
+    // 'failed' ends the wait too: it is an answer, and the assertion below says it is the wrong one.
     let status;
-    while (Date.now() < deadline) {
+    await waitFor(async () => {
       status = (await spaceFromList(id))?.indexStatus;
-      if (status === 'ready' || status === 'failed') break;
-      await new Promise(res => setTimeout(res, 2000));
-    }
+      return status === 'ready' || status === 'failed';
+    }, 120_000, 2000, () => `last indexStatus: ${status}`, { what: 'the space to reach an indexStatus' });
     assert.equal(status, 'ready', `space should reach indexStatus=ready, last: ${status}`);
   });
 });

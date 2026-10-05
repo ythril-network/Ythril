@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
@@ -86,11 +87,10 @@ before(async () => {
       { space: SPACE, query: QUERY, types: ['entity'], topK: 5, filter: { name } });
     return r.status === 200 && (r.body.results ?? []).some(x => (x.record?.name ?? x.name) === name);
   };
-  const deadline = Date.now() + 600_000;
-  while (Date.now() < deadline) {
-    if (await served(TARGET_NAME) && await served(lastDecoy)) { indexed = true; break; }
-    await new Promise(res => setTimeout(res, 2000));
-  }
+  // A verdict, not a throw: `ready()` below turns "never indexed" into the named failure — or into a skip when the
+  // embedding model is unavailable — in each test, where a throw here would cancel the whole file.
+  indexed = await holdsWithin(async () => await served(TARGET_NAME) && await served(lastDecoy), 600_000, 2000,
+    { what: 'the target and the last decoy to be served by the index' });
   session = await openMcpSession(token());
 });
 

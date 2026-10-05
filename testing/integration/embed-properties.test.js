@@ -22,6 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, readRecord } from '../sync/helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -58,19 +59,18 @@ let embeddingAvailable = false;
 const COLLECTION_PATH = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono' };
 
 async function embedTextOf(kind, id, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
   let last = null;
   let polls = 0;
-  while (Date.now() < deadline) {
+  const held = await holdsWithin(async () => {
     // `includeDiagnostics` is what this probe is FOR. `matchedText` is a withheld diagnostic on `filter`,
     // and the by-id route this replaces returned it unconditionally — so asking for it by name is the
     // honest version of what the old call was relying on without saying so.
     const r = await readRecord(INSTANCES.a, token, SPACE, COLLECTION_PATH[kind], id, { includeDiagnostics: true });
     polls++;
     last = r;
-    if (r.status === 200 && r.body?.matchedText != null) return r.body;
-    await new Promise(res => setTimeout(res, 250));
-  }
+    return r.status === 200 && r.body?.matchedText != null;
+  }, timeoutMs, 250, { what: `the ${kind}'s embed text to be stored` });
+  if (held) return last.body;
   // Carry the reason out with the failure. A bare `null` cannot tell "the record was never written" from
   // "the record is there and the embed job never ran" from "the read itself was failing" — and those have
   // three different causes. This timed out once on 2026-08-08 (edge only, three siblings green in ~0.5 s)

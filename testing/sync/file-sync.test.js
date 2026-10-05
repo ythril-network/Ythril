@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { INSTANCES, post, get, del, reqJson, waitFor, getInstanceId, createTestSpace } from './helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -54,14 +55,13 @@ async function triggerAndWait(networkId, tokenA, condition, timeout = 60_000) {
   // Trigger once, then poll — avoid spawning overlapping sync cycles.
   await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
   const start = Date.now();
-  while (Date.now() - start < timeout) {
-    await new Promise(r => setTimeout(r, 2000));
-    if (await condition()) return;
+  await waitFor(async () => {
+    if (await condition()) return true;
     // Re-trigger every 4th poll in case the first cycle finished before the file existed
     if (Math.floor((Date.now() - start) / 8000) % 2 === 1)
       await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
-  }
-  throw new Error(`Condition not met after ${timeout}ms`);
+    return false;
+  }, timeout, 2000, undefined, { what: 'the sync condition to hold' });
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────
@@ -250,21 +250,21 @@ describe('File sync — cross-instance', () => {
     assert.ok([201, 202].includes(upB.status), `Upload on B: ${JSON.stringify(upB.body)}`);
 
     // Trigger sync: A pulls from B, detects hash mismatch, should create conflict copy
-    let conflictFound = false;
     await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     const start = Date.now();
-    while (Date.now() - start < 60_000) {
-      await new Promise(r => setTimeout(r, 2000));
+    // A verdict, not a throw: not generating a conflict is reported below as a skip, as it always was.
+    const conflictFound = await holdsWithin(async () => {
       const conflictsR = await get(INSTANCES.a, tokenA, '/api/conflicts');
       if (conflictsR.status === 200) {
         const match = (conflictsR.body?.conflicts ?? []).find(
           c => c.originalPath === filePath || (c.conflictPath && c.conflictPath.startsWith(filePath.replace('.txt', '')))
         );
-        if (match) { conflictFound = true; break; }
+        if (match) return true;
       }
       if (Math.floor((Date.now() - start) / 8000) % 2 === 1)
         await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
-    }
+      return false;
+    }, 60_000, 2000, { what: 'the sync to generate a conflict copy' });
 
     if (!conflictFound) {
       console.log('  [SKIP] Conflict not generated — file sync peers may not be fully wired in test stack');

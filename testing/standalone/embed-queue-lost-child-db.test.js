@@ -36,6 +36,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { createScriptedHost, gate } from './_scripted-inference-host.mjs';
 import { createFakeSpawn, autopilot } from './_fake-child.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'general';
@@ -48,15 +49,7 @@ const jobs = () => mongo.col(`${SPACE}_embed_jobs`);
 const memories = () => mongo.col(`${SPACE}_facts`);
 
 /** Poll a condition with a ceiling. Used only where the thing waited for is a timer inside the code under test. */
-async function until(fn, what, ceilingMs = 10_000) {
-  const end = Date.now() + ceilingMs;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await new Promise(r => setTimeout(r, 10));
-  }
-}
+const until = (fn, what, ceilingMs = 10_000) => waitForValue(fn, ceilingMs, 10, undefined, { what });
 
 describe('the brain embed queue and a lost inference process (real MongoDB)', { skip }, () => {
   before(async () => {

@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { tuneTestMongo } from '../standalone/_mongo-harness.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS_DIR = path.join(__dirname, 'configs');
@@ -26,20 +27,10 @@ const INSTANCES = [
   { name: 'd', container: 'ythril-d', url: 'http://127.0.0.1:3203', port: 3203 },
 ];
 
-async function wait(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
+/** An instance that is still starting refuses connections, so every thrown probe is ridden out until the deadline. */
 async function waitForHealth(url, timeout = 120_000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const r = await fetch(`${url}/health`);
-      if (r.ok) return;
-    } catch { /* not ready yet */ }
-    await wait(1000);
-  }
-  throw new Error(`${url} did not become healthy in ${timeout}ms`);
+  await waitFor(async () => (await fetch(`${url}/health`)).ok, timeout, 1000, undefined,
+    { what: `${url} to become healthy`, tolerate: () => true });
 }
 
 async function setupInstance(inst) {

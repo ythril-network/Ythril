@@ -42,7 +42,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing } from './_vector-harness.mjs';
+import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
 
 const skip = await mongoSkipReason();
@@ -70,16 +70,7 @@ const rec = (spaceId, id) => {
 const names = async (coll) => (await mongo.col(coll).listSearchIndexes().toArray()).map(i => i.name).sort();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function eventually(what, fn, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    last = await fn();
-    if (last === true) return;
-    await sleep(250);
-  }
-  assert.fail(`${what} did not happen within ${timeoutMs} ms (last: ${JSON.stringify(last)})`);
-}
+const eventually = (what, fn, timeoutMs = 90_000) => waitUntilTrue(what, fn, timeoutMs, 250);
 
 /** Put the production readiness singleton into `down` over the simulated outage. */
 async function startOutage() {

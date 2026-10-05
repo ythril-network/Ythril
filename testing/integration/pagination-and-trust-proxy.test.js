@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, readCollection, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -108,14 +108,11 @@ describe('Trust proxy default (S1)', () => {
 
     // Audit writes are fire-and-forget — poll until entries for this space appear.
     let entries = [];
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
+    await waitFor(async () => {
       const a = await get(INSTANCES.a, token(), `/api/admin/audit-log?spaceId=${SPACE}&limit=100`);
       entries = a.body?.entries ?? a.body?.logs ?? [];
-      if (entries.length > 0) break;
-      await new Promise(r => setTimeout(r, 500));
-    }
-    assert.ok(entries.length > 0, 'audit entries recorded for the test space');
+      return entries.length > 0;
+    }, 15_000, 500, undefined, { what: 'audit entries to be recorded for the test space' });
     // With trustProxy=false, req.ip is the socket address — never the spoofed header.
     const spoofed = entries.filter(e => e.ip === SPOOFED_IP);
     assert.equal(spoofed.length, 0, `no audit entry should carry the spoofed X-Forwarded-For IP (found ${spoofed.length})`);

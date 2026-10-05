@@ -63,22 +63,21 @@ function patch(c, netId, fnBody) {
  * descriptive error if it never stabilises.
  */
 async function patchAndConfirm(container, baseUrl, token, netId, fnBody, verify, label, timeoutMs = 25_000) {
-  const deadline = Date.now() + timeoutMs;
   let stable = 0;
   let lastNet = null;
-  while (Date.now() < deadline) {
+  await waitFor(async () => {
     const net = readConfig(container).networks.find(n => n.id === netId);
     lastNet = net;
     if (net && verify(net)) {
-      if (++stable >= 2) return; // held across two reads → the clobber window is closed
+      if (++stable >= 2) return true; // held across two reads → the clobber window is closed
     } else {
       stable = 0;
       patch(container, netId, fnBody);
       await post(baseUrl, token, '/api/admin/reload-config', {});
     }
-    await new Promise(r => setTimeout(r, 700));
-  }
-  throw new Error(`patchAndConfirm(${label}) never stabilised within ${timeoutMs}ms — last state: ${JSON.stringify(lastNet?.members?.map(m => m.instanceId) ?? lastNet)}`);
+    return false;
+  }, timeoutMs, 700, () => `last state: ${JSON.stringify(lastNet?.members?.map(m => m.instanceId) ?? lastNet)}`,
+  { what: `patchAndConfirm(${label}) to stabilise` });
 }
 
 function voteMsg({ networkId, roundId, subjectInstanceId, instanceId, vote }) {

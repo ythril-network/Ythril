@@ -25,6 +25,7 @@ import path from 'node:path';
 import { spawn as spawnProcess } from 'node:child_process';
 import { FIXTURE_PIPELINE, DRIVER, CEILING_MS, tap, exited, alive } from './_inference-harness.mjs';
 import { vectorFor } from './_fixtures/fixture-pipeline.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 let createLocalInference, LOCAL_INFERENCE_ENV_NAMES, forkChild, PLATFORM_ENV, isLostChildError, LOST_MARKER;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-inference-life-'));
@@ -158,10 +159,9 @@ describe('a child whose owner died', () => {
       await exited(driver);
 
       // `kill(pid, 0)` is the only way to watch a process that is nobody\'s child any more. Bounded, not a pace.
-      const deadline = Date.now() + CEILING_MS;
-      while (alive(line.childPid) && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
-      assert.equal(alive(line.childPid), false,
-        'the inference child outlived its parent: after a kill -9 or an OOM kill it would sit on its memory for good');
+      await waitFor(() => !alive(line.childPid), CEILING_MS, 50,
+        'the inference child outlived its parent: after a kill -9 or an OOM kill it would sit on its memory for good',
+        { what: 'the inference child to be gone' });
     } finally {
       if (driver.exitCode === null && driver.signalCode === null) driver.kill('SIGKILL');
     }
@@ -186,9 +186,8 @@ describe('what keeps the parent process alive', () => {
     assert.equal(r.signal, null, 'the driver had to be killed: something still held the process open after the embed');
     assert.equal(r.code, 0);
     assert.deepEqual(r.lines[0].vector, Array.from(vectorFor('fixture/a', 'hello')));
-    const deadline = Date.now() + CEILING_MS;
-    while (alive(r.lines[0].childPid) && Date.now() < deadline) await new Promise(res => setTimeout(res, 50));
-    assert.equal(alive(r.lines[0].childPid), false, 'and the child went with it');
+    await waitFor(() => !alive(r.lines[0].childPid), CEILING_MS, 50, 'the child did not go with it',
+      { what: 'the child to go with the parent' });
   });
 
   it('but it does NOT end while an embed is pending', async () => {

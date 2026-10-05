@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.RENDER_SIDECAR_TEST_URL ?? 'http://127.0.0.1:8100';
@@ -51,12 +52,8 @@ function getHealth() {
 describe('doc-render sidecar (F11)', () => {
   before(async () => {
     // Wait for the sidecar to be healthy (compose starts it alongside the stack).
-    const deadline = Date.now() + 60_000;
-    for (;;) {
-      try { const h = await getHealth(); if (h.status === 200) return; } catch { /* not up yet */ }
-      if (Date.now() > deadline) throw new Error('doc-render sidecar never became healthy on :8100');
-      await new Promise(r => setTimeout(r, 1000));
-    }
+    await waitFor(async () => (await getHealth()).status === 200, 60_000, 1000, undefined,
+      { what: 'the doc-render sidecar to become healthy on :8100', tolerate: () => true }); // refused until it is up
   });
 
   it('reports health', async () => {

@@ -23,7 +23,7 @@ import { execSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
+import { INSTANCES, req, reqJson, get, del, post, readCollection, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -937,14 +937,10 @@ describe('Media embedding — retry_embedding endpoint', () => {
       const meta = r.results?.find(f => (f.path ?? f._id ?? '').includes(filePath));
       return meta?.embeddingStatus;
     };
-    const waitForStatus = async (predicate, timeoutMs) => {
-      const start = Date.now();
+    const waitForStatus = async (predicate, timeoutMs, what) => {
       let last;
-      while (Date.now() - start < timeoutMs) {
-        last = await docStatus();
-        if (predicate(last)) return last;
-        await new Promise(res => setTimeout(res, 1000));
-      }
+      await waitFor(async () => { last = await docStatus(); return predicate(last); }, timeoutMs, 1000,
+        () => `last status: ${last}`, { what });
       return last;
     };
 
@@ -953,9 +949,7 @@ describe('Media embedding — retry_embedding endpoint', () => {
         'Retry effect document with enough words to be chunked and embedded by the media worker.');
 
       // Let the initial job settle so the retry starts from a terminal state.
-      const settled = await waitForStatus(s => s === 'complete' || s === 'failed', 60_000);
-      assert.ok(settled === 'complete' || settled === 'failed',
-        `initial embedding never settled (last status: ${settled})`);
+      await waitForStatus(s => s === 'complete' || s === 'failed', 60_000, 'the initial embedding to settle');
 
       const retry = await fetch(
         `${INSTANCES.a}/api/files/${spaceId}/retry_embedding?path=${encodeURIComponent(filePath)}`,
@@ -971,9 +965,7 @@ describe('Media embedding — retry_embedding endpoint', () => {
         `embeddingStatus must flip to pending/processing after retry, got: ${flipped}`);
 
       // ...and the requeued job must actually run back to a terminal state.
-      const final = await waitForStatus(s => s === 'complete' || s === 'failed', 60_000);
-      assert.ok(final === 'complete' || final === 'failed',
-        `retried job never re-ran to a terminal state (last status: ${final})`);
+      await waitForStatus(s => s === 'complete' || s === 'failed', 60_000, 'the retried job to re-run to a terminal state');
     } finally {
       await fetch(`${INSTANCES.a}/api/spaces/${spaceId}`, {
         method: 'DELETE',

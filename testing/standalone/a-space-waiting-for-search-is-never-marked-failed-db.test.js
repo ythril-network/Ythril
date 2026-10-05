@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { unitAt, queryAxis, startStubEmbedder } from './_vector-harness.mjs';
+import { unitAt, queryAxis, startStubEmbedder, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
 
 const skip = await mongoSkipReason();
@@ -71,16 +71,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const statusOf = (id) => loader.getConfig().spaces.find(s => s.id === id)?.indexStatus;
 const spaceDef = (id) => ({ id, label: id, folders: [], completeLinkage: true });
 
-async function eventually(what, fn, timeoutMs = 150_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    last = await fn();
-    if (last === true) return;
-    await sleep(300);
-  }
-  assert.fail(`${what} did not happen within ${timeoutMs} ms (last: ${JSON.stringify(last)})`);
-}
+const eventually = (what, fn, timeoutMs = 150_000) => waitUntilTrue(what, fn, timeoutMs, 300);
 
 describe('a space waiting for search is never marked failed', { skip }, () => {
   before(async () => {

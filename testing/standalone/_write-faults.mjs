@@ -46,6 +46,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -114,14 +115,7 @@ export async function settleWithin(promise, ms) {
 }
 
 /** Poll `predicate` until it is true or `ms` passes; true when it held. For "the stall has been reached". */
-export async function eventually(predicate, ms, everyMs = 10) {
-  const until = Date.now() + ms;
-  for (;;) {
-    if (await predicate()) return true;
-    if (Date.now() >= until) return false;
-    await new Promise(r => setTimeout(r, everyMs));
-  }
-}
+export const eventually = (predicate, ms, everyMs = 10) => holdsWithin(predicate, ms, everyMs);
 
 // ── The write bound's test seam ──────────────────────────────────────────────────────────────────────────────
 

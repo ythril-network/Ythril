@@ -23,6 +23,7 @@
  * more than a few thousandths of a degree away from 0°, or float32 storage turns neighbours into ties.
  */
 import http from 'node:http';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 /** A unit vector at `deg` degrees from axis 0, in the axis-0/axis-2 plane. */
 export function unitAt(deg, dims) {
@@ -85,24 +86,29 @@ export async function insertAll(mongo, collName, docs, batch = 5000) {
  * it and report the lag as the defect — or, worse, as the fix.
  */
 export async function waitUntilServing(mongo, collName, indexName, { path = 'embedding', dims, n, timeoutMs = 120_000 }) {
-  const deadline = Date.now() + timeoutMs;
-  let last = 'nothing yet';
-  while (Date.now() < deadline) {
-    try {
-      const rows = await mongo.col(collName).aggregate([
-        { $vectorSearch: { index: indexName, path, queryVector: queryAxis(dims), exact: true, limit: n } },
-        { $count: 'n' },
-      ]).toArray();
-      const seen = rows[0]?.n ?? 0;
-      if (seen === n) return;
-      last = `${seen} of ${n}`;
-    } catch (err) {
-      last = err instanceof Error ? err.message : String(err);
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  throw new Error(`${indexName} never served all ${n} records within ${timeoutMs} ms (last: ${last}). `
-    + 'A ranking test run against a half-ingested index measures the lag, not the code.');
+  let seen = 0;
+  // Every error is ridden out (a search index that is still being built refuses queries) and the wait names the last.
+  await waitFor(async () => {
+    const rows = await mongo.col(collName).aggregate([
+      { $vectorSearch: { index: indexName, path, queryVector: queryAxis(dims), exact: true, limit: n } },
+      { $count: 'n' },
+    ]).toArray();
+    seen = rows[0]?.n ?? 0;
+    return seen === n;
+  }, timeoutMs, 500, () => `last count ${seen} of ${n}. A ranking test run against a half-ingested index measures the lag, not the code.`,
+  { what: `${indexName} to serve all ${n} records`, tolerate: () => true });
+}
+
+/**
+ * Wait until `fn` answers EXACTLY `true`; any other answer is the diagnosis of why not yet (a list of names, a count).
+ *
+ * Strictly `true`, not truthy: these callers return the thing they saw when the condition does not hold, and a
+ * non-empty list is truthy. The last such answer is carried into the failure, so a red run says where it stopped.
+ */
+export async function waitUntilTrue(what, fn, timeoutMs, intervalMs) {
+  let last;
+  await waitFor(async () => { last = await fn(); return last === true; }, timeoutMs, intervalMs,
+    () => `last: ${JSON.stringify(last)}`, { what });
 }
 
 /** The filter paths the index's LIVE definition declares — what the server holds, not what we asked for. */

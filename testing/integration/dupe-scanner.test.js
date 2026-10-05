@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForSimilarityIndex, readRecord, waitForEmbedQueueEmpty, ensureReindexed } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitFor, waitForSimilarityIndex, readRecord, waitForEmbedQueueEmpty, ensureReindexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -277,14 +277,12 @@ describe('Duplicate scanner — real-time (on insert)', () => {
     assert.ok(i2, 'second entity created');
 
     // Poll (the hook is async/fire-and-forget) — but crucially we never call /scan.
-    const deadline = Date.now() + 20_000;
     let found = null;
-    while (Date.now() < deadline && !found) {
+    await waitFor(async () => {
       const open = await listDupes(SPACE_INSERT, 'open');
       found = open.find(c => [c.aId, c.bId].sort().join() === [i1, i2].sort().join());
-      if (!found) await new Promise(r => setTimeout(r, 500));
-    }
-    assert.ok(found, 'insert-time evaluation recorded the candidate without a scan');
+      return Boolean(found);
+    }, 20_000, 500, undefined, { what: 'insert-time evaluation to record the candidate without a scan' });
     assert.equal(found.status, 'open');
   });
 });

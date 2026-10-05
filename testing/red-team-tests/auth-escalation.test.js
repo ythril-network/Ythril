@@ -22,7 +22,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, waitFor } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
@@ -153,15 +153,8 @@ describe('H2 — MFA cannot be rotated/disabled with just an admin PAT once enab
     // still syncing against A, so a fresh A is flooded on boot and readiness lags — in
     // isolation this restart is ~2s, but under that background load it has been observed to
     // take ~175s, so the deadline needs comfortable headroom above that.
-    const deadline = Date.now() + 240_000;
-    while (Date.now() < deadline) {
-      try {
-        const r = await fetch(`${INSTANCES.a}/ready`);
-        if (r.ok) return;
-      } catch { /* container mid-restart / stale socket */ }
-      await new Promise(res => setTimeout(res, 500));
-    }
-    throw new Error('instance A did not come back after MFA-disable restart');
+    await waitFor(async () => (await fetch(`${INSTANCES.a}/ready`)).ok, 240_000, 500, undefined,
+      { what: 'instance A to come back after the MFA-disable restart', tolerate: () => true }); // mid-restart / stale socket
   }
 
   before(async () => {

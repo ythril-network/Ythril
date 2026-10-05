@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get } from '../sync/helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -36,24 +37,18 @@ const RUN = Date.now();
 
 let tokenA;
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
 /**
  * Poll recall until the fact comes back. Vector indexing is asynchronous, so a single immediate
  * check proves nothing — that assumption is what made the original probe unable to ever succeed.
  */
 async function recallEventually(query, { timeoutMs = 120_000, intervalMs = 3_000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
+  const start = Date.now();
   let last = null;
-  while (Date.now() < deadline) {
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/recall', { space: 'general', query, topK: 3 });
-    last = r;
-    if (r.status === 200 && (r.body?.count ?? r.body?.results?.length ?? 0) > 0) {
-      return { ok: true, elapsedMs: timeoutMs - (deadline - Date.now()), body: r.body };
-    }
-    await sleep(intervalMs);
-  }
-  return { ok: false, last };
+  const ok = await holdsWithin(async () => {
+    last = await post(INSTANCES.a, tokenA, '/api/brain/recall', { space: 'general', query, topK: 3 });
+    return last.status === 200 && (last.body?.count ?? last.body?.results?.length ?? 0) > 0;
+  }, timeoutMs, intervalMs, { what: 'recall to bring the stored fact back' });
+  return ok ? { ok: true, elapsedMs: Date.now() - start, body: last.body } : { ok: false, last };
 }
 
 describe('restore preserves semantic recall', () => {

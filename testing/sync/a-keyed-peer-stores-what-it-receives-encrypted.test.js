@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { INSTANCES, post, del, reqJson, getInstanceId, createTestSpace, dockerExec } from './helpers.js';
+import { INSTANCES, post, del, reqJson, getInstanceId, createTestSpace, dockerExec, waitFor } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -44,14 +44,12 @@ async function download(base, token, filePath) {
 /** Trigger a sync from A and poll until `ok()` holds. */
 async function syncUntil(ok, timeout = 60_000) {
   await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
-  const start = Date.now();
   let n = 0;
-  while (Date.now() - start < timeout) {
-    await new Promise(r => setTimeout(r, 2000));
-    if (await ok()) return;
+  await waitFor(async () => {
+    if (await ok()) return true;
     if (++n % 4 === 0) await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
-  }
-  throw new Error(`condition not met after ${timeout}ms`);
+    return false;
+  }, timeout, 2000, undefined, { what: 'the synced state to arrive on the keyed and keyless peers' });
 }
 
 /** The raw bytes a container keeps on disk for a stored file, base64 so binary survives the shell. */

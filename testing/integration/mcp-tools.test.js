@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollection, ensureReindexed } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollection, ensureReindexed, waitFor } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
@@ -468,16 +468,14 @@ describe('MCP file tools — write_file / read_file / list_dir / create_dir / mo
 
     // Poll the REST files listing for chunk records whose parent is our document.
     let chunks = 0;
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
+    await waitFor(async () => {
       const r = await readCollection(INSTANCES.a, tokenA, testSpaceId, 'files', { limit: 200 });
       const all = r.results ?? [];
       const parent = all.find(f => f.path === docPath && !f.parentFileId);
       chunks = parent ? all.filter(f => f.parentFileId === parent._id).length : 0;
-      if (chunks >= 1) break;
-      await new Promise(res => setTimeout(res, 1000));
-    }
-    assert.ok(chunks >= 1, `MCP write_file document must produce chunk records via the worker, found ${chunks}`);
+      return chunks >= 1;
+    }, 60_000, 1000, () => `MCP write_file document must produce chunk records via the worker, found ${chunks}`,
+    { what: 'the MCP write_file document to produce chunk records' });
   });
 
   it('read_file returns the written content', async () => {

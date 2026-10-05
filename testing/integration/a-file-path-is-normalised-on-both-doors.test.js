@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, delWithBody, waitFor } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -103,14 +103,12 @@ before(async () => {
    * predicate used for the seed is deliberately the one that already works, so this waits for the RECORD
    * rather than for the capability under test.
    */
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline && !fileId) {
+  await waitFor(async () => {
     const seed = await viaRest({ space: SPACE, collection: 'files', filter: { path: STORED }, limit: 5 });
     assert.equal(seed.status, 200, JSON.stringify(seed.body));
     fileId = seed.body.results?.[0]?._id;
-    if (!fileId) await new Promise(r => setTimeout(r, 250));
-  }
-  assert.ok(fileId, 'the fixture file metadata never appeared');
+    return Boolean(fileId);
+  }, 30_000, 250, undefined, { what: 'the fixture file metadata to appear' });
 });
 
 after(async () => {
