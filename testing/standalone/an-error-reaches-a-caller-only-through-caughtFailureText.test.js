@@ -11,7 +11,9 @@
  * reading, which is how the forty-first gets missed. So this derives them (`_error-text-exits.mjs`): every catch scope in
  * every tracked server source, every use of the caught binding or of anything computed from it, and where the use GOES —
  * a response, an act's answer, a list of failures (ANY `.push(...)`, whatever the list is called: it was recognised by
- * the name `errors` until a bulk answer's `failed` went unseen), a function that writes a `lastError`.
+ * the name `errors` until a bulk answer's `failed` went unseen), any array element or object property VALUE that reads the
+ * text, wherever the literal goes (the quota's `unreadable: [\`dbStats: ${err.message}\`]` went unseen as it was neither a
+ * response nor a push), a function that writes a `lastError`.
  *
  * A use passes when it goes through a SANITIZER (`caughtFailureText`, the classifier `classifyReadFailure`, and every sender
  * derived from them: a function that takes `res` and calls one), or when it sits inside `err instanceof OwnClass` for a
@@ -68,6 +70,22 @@ const EXEMPT = {
   'server/src/brain/suppression-sweep.ts: failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`)':
     'the sweep collects each failed kind\'s text and throws it once; its only callers (sweepLatestMeta and the boot walk) '
     + 'log it through peerText and never answer or store it, and a log is where the driver\'s text is supposed to go',
+  // A number, never a message: the HTTP status an embedding endpoint answered, read off the error as a metric label.
+  'server/src/brain/embedding.ts: status: String((err as EmbeddingHttpError).status)':
+    'the value is the HTTP status NUMBER of an embedding endpoint\'s refusal, used as a metric label; it is read off the '
+    + 'error but is not a message and carries no host, port or namespace',
+  // The same, as a value that is checked to be a number before it is kept.
+  'server/src/config/assist-backend.ts: status':
+    'the value is the HTTP status of the failed assist call, kept only when `typeof raw === \'number\'` and handed to the '
+    + 'outcome recorder as a number; it is read off the error but is not its message',
+  // Matched against a regexp and never leaves the function.
+  'server/src/files/media/audio-embedder.ts: stderr: String(err)':
+    'the text is ffmpeg\'s own stderr, returned to the one line that matches it against a Duration regexp inside this '
+    + 'function; it is never answered, stored or logged, and ffmpeg is a local binary that never touches the store',
+  // Read by the probe's own caller, which only logs it.
+  'server/src/spaces/vector-index.ts: error':
+    'the probe outcome\'s text is read by the index-readiness wait, which only joins it into log lines through peerText and '
+    + 'into its `lastSeen` log text; it is never answered or stored, and a log is where the driver\'s text is supposed to go',
   // A separate process with no store: it never opens a database, so no error it catches can be a driver's.
   'server/src/local-agent-connector/index.ts: res.status(500).json({ error: msg })':
     'the local agent connector is a separate process that never connects to MongoDB (it drives cloudflared on the '
@@ -141,6 +159,11 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     'a failure pushed onto a list with any name, as an object (a bulk answer\'s `failed`)': 'async function bulk(ids) { const failed = []; for (const id of ids) { try { await f(id); } catch (err) { failed.push({ id, error: err instanceof Error ? err.message : "Unknown error" }); } } return failed; }',
     'a failure pushed onto a list named for something else': 'async function walk() { const unreadable = []; try { await f(); } catch (err) { unreadable.push(`${err}`); } return unreadable; }',
     'a failure pushed after String(err) held in an alias': 'async function walk() { const out = []; try { await f(); } catch (err) { const why = String(err); out.push({ why }); } return out; }',
+    'an array literal holding the text (the quota shape)': 'async function measure() { try { await f(); } catch (err) { return { bytes: 0, unreadable: [`dbStats: ${err.message}`] }; } }',
+    'an object literal assigned and returned later': 'async function probe() { try { await f(); } catch (err) { const out = { ok: false, detail: err instanceof Error ? err.message : String(err) }; return out; } }',
+    'a literal handed to a function that is not a logger': 'async function probe() { try { await f(); } catch (err) { record({ detail: String(err) }); } }',
+    'the shorthand of an alias': 'async function probe() { try { await f(); } catch (err) { const detail = err.message; return { detail }; } }',
+    'a literal in a .catch callback': 'function probe() { return f().catch(err => ({ ok: false, detail: err.message })); }',
     'a failure pushed onto errorMessages': 'async function cycle() { const errorMessages = []; try { await f(); } catch (err) { const errMsg = `failed: ${err}`; errorMessages.push(errMsg); } }',
     'a stored lastError, through the function that writes it':
       'async function failJob(id, errorMessage) { await jobs.updateOne({ _id: id }, { $set: { lastError: errorMessage } }); }\nasync function run() { try { await f(); } catch (err) { await failJob(1, err instanceof Error ? err.message : String(err)); } }',
@@ -163,6 +186,13 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     'one of our own errors, in a conditional':
       'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { res.status(400).json({ error: err instanceof Refusal ? err.message : "Internal error" }); } }',
     'a failure pushed onto any list after caughtFailureText': 'async function bulk(ids) { const failed = []; for (const id of ids) { try { await f(id); } catch (err) { failed.push({ id, error: caughtFailureText(err, "resolve") }); } } return failed; }',
+    'a log.warn with the error text in a literal': 'async function probe() { try { await f(); } catch (err) { log.warn("probe failed", { detail: err.message, parts: [String(err)] }); } }',
+    'reportDriverFailure with the text': 'async function probe() { try { await f(); } catch (err) { reportDriverFailure("probe", { detail: err.message }); } }',
+    'caughtFailureText inside an array literal': 'async function measure() { try { await f(); } catch (err) { return { unreadable: [`dbStats: ${caughtFailureText(err, "measure")}`] }; } }',
+    'caughtFailureText inside an object literal': 'async function probe() { try { await f(); } catch (err) { return { detail: caughtFailureText(err, "probe") }; } }',
+    'a boolean made of the error (instanceof)': 'async function probe() { try { await f(); } catch (err) { const unreadable = err instanceof Foo; return { status: unreadable ? "failed" : "skipped" }; } }',
+    'a boolean made of the error (regexp test)': 'async function probe() { try { await f(); } catch (err) { const m = String(err.message); return { permanent: RE.test(m) }; } }',
+    'one of our own errors, after a guard that throws for any other': 'class Refusal extends Error { check = 1 }\nasync function h() { try { await f(); } catch (err) { if (!(err instanceof Refusal)) throw err; const c = err.check; return { message: c.message, text: `Error: ${c.message}` }; } }',
     'a push that does not read the error': 'async function walk() { const seen = []; try { await f(); } catch (err) { seen.push("f failed"); } return seen; }',
     'the error only logged': 'async function h(req, res) { try { await f(); } catch (err) { log.warn(`failed: ${err}`); res.status(500).json({ error: "Internal error" }); } }',
   };

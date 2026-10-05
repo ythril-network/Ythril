@@ -27,6 +27,12 @@
  *    for what it holds. This used to be recognised by the list's NAME (`errors`, `error`, `errorMessages`), which is how
  *    a bulk-resolve's `failed.push({ id, error: err.message })` went unseen; a push that only collects text for a log
  *    line is flagged too and needs its reason in `EXEMPT`, the price of not trusting a name;
+ *  - **a literal**: the rule is about the VALUE, not the call it goes through. Inside a catch, any array-literal element or
+ *    object-literal property value (`{ detail: err.message }`, `[\`dbStats: ${err.message}\`]`, the shorthand `{ detail }`
+ *    of an alias) that reads the binding's text is an exit wherever the literal goes — returned, assigned, spread into a
+ *    response, handed to a function. The push form above is one case of it. A literal that is an argument of a LOGGER
+ *    (`log.*`, `logger.*`, `console.*`, `reportServerFailure`, `reportDriverFailure`) is not an exit: that is where the
+ *    text is supposed to go. A nested literal is judged at its leaf value, once;
  *  - **a stored failure**: an argument of a call to a function that WRITES a `lastError` — derived, not named: any
  *    function whose body has a `lastError` property gets its error-ish parameter (`errorMessage`, `msg`, `err`) read as
  *    the stored text.
@@ -38,7 +44,10 @@
  *    sanitizer is a sanitizer too (a `sendCaughtFailure(res, err)` needs no entry here).
  *  - **Our own error class.** A use inside `if (err instanceof OwnClass) { ... }` (or the true arm of `err instanceof
  *    OwnClass ? ... : ...`), where `OwnClass` is declared under `server/src`. Our own refusal's words are ours to say;
- *    the narrowing is what proves the error is one of ours, and `err instanceof Error` (the builtin) proves nothing.
+ *    the narrowing is what proves the error is one of ours, and `err instanceof Error` (the builtin) proves nothing. A guard
+ *    that leaves for any other class (`if (!(err instanceof OwnClass)) throw err;`) narrows the statements after it.
+ *  - **A boolean made of the error.** `err instanceof C` and `re.test(text)` let none of the text out, so a value computed
+ *    only from them (`const unreadable = err instanceof StoredFileUnreadable`) is not tainted.
  *
  * Read with the TypeScript AST: a comment explaining the rule can neither satisfy nor trip it, and the shapes above are
  * parsed rather than pattern-matched. No checker is built (it would read every file's types): everything here is
@@ -55,6 +64,16 @@ const ERROR_PARAM = /^(?:err|error|errorMessage|errMsg|msg|message)$/i;
 
 const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
 const snippet = node => node.getText().replace(/\s+/g, ' ').slice(0, 120);
+
+/** Reporters whose whole job is to write a failure to the log: the text goes where a driver's text is supposed to go. */
+const LOG_REPORTERS = new Set(['reportServerFailure', 'reportDriverFailure']);
+
+/** Is this callee a logger — `log.warn`, `logger.error`, `console.log`, or one of `LOG_REPORTERS`? */
+function isLogger(callee) {
+  if (ts.isIdentifier(callee)) return LOG_REPORTERS.has(callee.text);
+  const root = rootOf(callee);
+  return !!root && /^(?:log|logger|console)$/.test(root.text);
+}
 
 /** The root identifier of `a.b(c).d(e)` — `a`. */
 function rootOf(expr) {
@@ -161,11 +180,33 @@ function instanceOfOwnClass(cond, tainted, env) {
     && ts.isIdentifier(n.left) && tainted.has(n.left.text) && ts.isIdentifier(n.right) && env.ownClasses.has(n.right.text));
 }
 
+/** `!(err instanceof Own)`, exactly: the guard whose true arm is "this is not one of ours". */
+function negatedOwnTest(cond, tainted, env) {
+  let c = cond;
+  if (!(ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken)) return false;
+  c = c.operand;
+  while (ts.isParenthesizedExpression(c)) c = c.expression;
+  return instanceOfOwnClass(c, tainted, env);
+}
+
+/** Does this statement end its block by leaving it — a `throw` or `return`, bare or as the last statement of a block? */
+function leaves(st) {
+  if (ts.isThrowStatement(st) || ts.isReturnStatement(st)) return true;
+  return ts.isBlock(st) && st.statements.length > 0 && leaves(st.statements[st.statements.length - 1]);
+}
+
 /** Is `node` inside the true arm of an `instanceof OwnClass` test, between it and `stop`? */
 function ownNarrowed(node, stop, tainted, env) {
   for (let p = node; p && p !== stop; p = p.parent) {
     const q = p.parent;
     if (!q) break;
+    // A guard that leaves for any other class (`if (!(err instanceof Own)) throw err;`) narrows every statement after it.
+    if (ts.isBlock(q) && ts.isStatement(p)) {
+      for (const s of q.statements) {
+        if (s === p) break;
+        if (ts.isIfStatement(s) && !s.elseStatement && leaves(s.thenStatement) && negatedOwnTest(s.expression, tainted, env)) return true;
+      }
+    }
     if (ts.isIfStatement(q) && q.thenStatement === p && instanceOfOwnClass(q.expression, tainted, env)) return true;
     if (ts.isConditionalExpression(q) && q.whenTrue === p && instanceOfOwnClass(q.condition, tainted, env)) return true;
   }
@@ -192,6 +233,12 @@ function readsIn(node, tainted, env) {
     if (ts.isConditionalExpression(n) && instanceOfOwn(n.condition)) {
       walk(n.whenTrue, { ...state, own: true });
       walk(n.whenFalse, state);
+      return;
+    }
+    // Two uses that make a BOOLEAN of the error and let none of its text out: `err instanceof C`, and `re.test(text)`.
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword) { walk(n.right, state); return; }
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'test') {
+      walk(n.expression.expression, state);
       return;
     }
     if (ts.isIdentifier(n) && tainted.has(n.text)) {
@@ -239,7 +286,15 @@ export function exitsIn(file, env) {
       }
       return false;
     };
-    const ev = n => {
+    const underRecorded = n => { for (let p = n.parent; p && p !== scope.body; p = p.parent) if (seen.has(p)) return true; return false; };
+    /** A value inside a literal that reads the error's text unfiltered, wherever the literal goes (unless to a logger). */
+    const literalValue = (n, value) => {
+      if (ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value)) return;
+      if (seen.has(n) || underRecorded(n)) return;
+      record(n, 'literal', value);
+    };
+    const ev = (n, inLog = false) => {
+      if (ts.isCallExpression(n) && isLogger(n.expression)) inLog = true;
       if (ts.isCallExpression(n)) {
         const callee = n.expression;
         // a response
@@ -272,7 +327,13 @@ export function exitsIn(file, env) {
           && RESPONSE_METHODS.has(o.parent.expression.name.text);
         if (returned(o) && !inResponse) record(n, 'act answer', n.initializer);
       }
-      ts.forEachChild(n, ev);
+      // a literal: the rule about the value, after the forms above have had their say about the same node
+      if (!inLog) {
+        if (ts.isArrayLiteralExpression(n)) for (const el of n.elements) literalValue(el, ts.isSpreadElement(el) ? el.expression : el);
+        if (ts.isPropertyAssignment(n)) literalValue(n, n.initializer);
+        if (ts.isShorthandPropertyAssignment(n)) literalValue(n, n.name);
+      }
+      ts.forEachChild(n, c => ev(c, inLog));
     };
     ev(scope.body);
   }
