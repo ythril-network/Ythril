@@ -28,10 +28,8 @@
  * reads {@link configSpaceIterations}. They share this module so the two cannot disagree about what a proxy
  * test looks like.
  */
-import { createRequire } from 'node:module';
 import { readTrackedSources } from '../standalone/_sources.mjs';
-
-const ts = createRequire(import.meta.url)('typescript');
+import { ts, parseSource, lineOf } from './syntax-tree.mjs';
 
 /**
  * The functions that ARE the answers. Everything else asks them.
@@ -56,15 +54,13 @@ const WALKERS = new Set(['filter', 'map', 'forEach', 'some', 'every', 'flatMap',
 export function serverSources() {
   return readTrackedSources(['server/src'], { floor: 300, specs: false })
     .filter(s => !s.file.endsWith('.test.ts'))
-    .map(s => ({ ...s, sf: ts.createSourceFile(s.file, s.text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS) }));
+    .map(s => ({ ...s, sf: parseSource(s.file, s.text) }));
 }
 
 /** Parse one snippet — for the self-tests that keep this instrument honest. */
 export function parseSnippet(text, file = 'snippet.ts') {
-  return { file, text, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS) };
+  return { file, text, sf: parseSource(file, text) };
 }
-
-function lineOf(sf, node) { return sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1; }
 
 function enclosingFunctionName(node) {
   for (let n = node.parent; n; n = n.parent) {

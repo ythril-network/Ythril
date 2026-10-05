@@ -23,7 +23,7 @@
  * more than a few thousandths of a degree away from 0°, or float32 storage turns neighbours into ties.
  */
 import http from 'node:http';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { waitFor, waitForReading } from '../_shared/wait-for.mjs';
 
 /** A unit vector at `deg` degrees from axis 0, in the axis-0/axis-2 plane. */
 export function unitAt(deg, dims) {
@@ -106,9 +106,7 @@ export async function waitUntilServing(mongo, collName, indexName, { path = 'emb
  * non-empty list is truthy. The last such answer is carried into the failure, so a red run says where it stopped.
  */
 export async function waitUntilTrue(what, fn, timeoutMs, intervalMs) {
-  let last;
-  await waitFor(async () => { last = await fn(); return last === true; }, timeoutMs, intervalMs,
-    () => `last: ${JSON.stringify(last)}`, { what });
+  await waitForReading(fn, (answer) => answer === true, timeoutMs, intervalMs, { what });
 }
 
 /** The filter paths the index's LIVE definition declares — what the server holds, not what we asked for. */

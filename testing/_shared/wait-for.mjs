@@ -17,9 +17,10 @@
  * This module is the one place those four are decided. `a-poll-is-written-once` is how a copy does not come back: a
  * loop with a deadline, a sleep and a condition that is not in this file says why it waits differently or fails.
  * `settleWithin` (`standalone/_write-faults.mjs`) is the other question — nothing may arrive during a window — and
- * stays its own function, not a flag here. {@link holdsWithin} (a verdict instead of a throw) and {@link waitForValue}
- * (the value it held with) are the same wait answering in the shape a caller needs, so they are built on it and
- * cannot decide the four things above again.
+ * stays its own function, not a flag here. {@link holdsWithin} (a verdict instead of a throw), {@link waitForValue}
+ * (the value it held with) and {@link waitForReading} (the reading of a state it accepted, the last one named when it
+ * never did) are the same wait answering in the shape a caller needs, so they are built on it and cannot decide the
+ * four things above again.
  *
  * ## The signature
  *
@@ -96,6 +97,15 @@ function warnIfTight(elapsed, timeout) {
 }
 
 const show = (value) => (typeof value === 'string' ? JSON.stringify(value) : String(value));
+
+/** A reading as JSON where it has one (`String(object)` names nothing), else as `show` says it. */
+function showReading(value) {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return show(value);
+  }
+}
 
 /**
  * What a wait throws when its deadline passed with the condition unmet — as opposed to an error a probe threw, which
@@ -200,4 +210,30 @@ export async function waitForValue(condition, timeout, interval, diagnose, optio
   let held;
   await waitFor(async () => { held = await condition(); return held; }, timeout, interval, diagnose, options);
   return held;
+}
+
+/**
+ * Wait until a READING of something satisfies `accept`, and resolve with the reading that did.
+ *
+ * ## What it prevents
+ *
+ * A wait on a state the test cannot see inside — a file's `embeddingStatus`, a job's phase — gets the same wait written
+ * twice: `waitFor(async () => { last = await read(); return accept(last); }, …, () => `last status: ${last}`)`, with the
+ * variable beside the wait. A copy that forgets the diagnostic times out saying `last value: false` (the PREDICATE's
+ * answer), which names nothing; a copy that forgets to return `last` makes the caller read the state a second time, after
+ * the wait, and assert on a reading the wait did not accept. Both are decided here: the reading is the thing returned and
+ * the thing the timeout names.
+ *
+ * It throws at the deadline like {@link waitFor}. A caller whose question is "must this NOT happen within the window"
+ * asks {@link holdsWithin} and asserts the verdict is `false`.
+ *
+ * @param {() => unknown} read  the probe: the current state, as a value the caller can name
+ * @param {(reading: any) => unknown} accept  truthy when the reading is the one waited for
+ * @returns {Promise<any>} the reading `accept` took
+ */
+export async function waitForReading(read, accept, timeout, interval, options = {}) {
+  let last;
+  await waitFor(async () => { last = await read(); return accept(last); }, timeout, interval,
+    () => `last reading: ${showReading(last)}`, options);
+  return last;
 }

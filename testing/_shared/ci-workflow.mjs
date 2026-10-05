@@ -157,7 +157,14 @@ export function transitiveNeeds(doc, id, seen = new Set()) {
   return seen;
 }
 
-const isTrue = (v) => v === true || v === 'true';
+/**
+ * Is a workflow flag ON — the YAML boolean `true`, or the string `'true'` an expression or a quoted value gives.
+ *
+ * The one reading of "true" for a workflow's flags (`continue-on-error`, `merge-multiple`): a rule that tested only
+ * `=== true` would call `continue-on-error: 'true'` a step that can fail the gate, which is the flag turned off by
+ * its spelling, and the gate would then pass over exactly the step it exists to refuse.
+ */
+export const isTrue = (v) => v === true || v === 'true';
 
 /**
  * A job that may fail without failing the run — `continue-on-error` on the job, or on every one of its steps (the same

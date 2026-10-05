@@ -15,7 +15,7 @@
  * no case here. Fixtures are literal on purpose: the derivation decides a case is owed, not this table.
  */
 import { build } from './_push-door.mjs';
-import { holdDocumentLock } from './_write-faults.mjs';
+import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 export const T0 = '2026-09-01T00:00:00.000Z';
@@ -26,7 +26,6 @@ export const ED = 'cccccccc-0000-4000-8000-0000000000ed';
 export const C = 'dddddddd-0000-4000-8000-0000000000c1';
 export const HELD_FILE = 'held.md';
 export const LEGACY_FILE = 'legacy.md';
-export const DIVERGENT = 'the same fact, said differently by the peer';
 
 /** The server modules a case calls, loaded once. */
 export async function loadHolderModules() {
@@ -80,8 +79,7 @@ export function holderCases(ctx, S) {
     'server/src/sync/accept-page.ts:acceptArrivingPage': [{
       label: 'a pushed fact that forks: the fork write, inside its block hold',
       collection: `${S}_facts`,
-      lock: async () => holdDocumentLock(ctx.door.mongo, `${S}_facts`,
-        { insert: { _id: ctx.mods.plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } }),
+      lock: async () => holdForkLock(ctx.door.mongo, ctx.mods.plan, S, F),
       run: () => ctx.door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S }),
     }],
     'server/src/brain/chrono.ts:updateChrono': [{

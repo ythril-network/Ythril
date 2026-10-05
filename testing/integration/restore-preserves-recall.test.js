@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get } from '../sync/helpers.js';
-import { holdsWithin } from '../_shared/wait-for.mjs';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -41,14 +41,12 @@ let tokenA;
  * Poll recall until the fact comes back. Vector indexing is asynchronous, so a single immediate
  * check proves nothing — that assumption is what made the original probe unable to ever succeed.
  */
-async function recallEventually(query, { timeoutMs = 120_000, intervalMs = 3_000 } = {}) {
-  const start = Date.now();
-  let last = null;
-  const ok = await holdsWithin(async () => {
-    last = await post(INSTANCES.a, tokenA, '/api/brain/recall', { space: 'general', query, topK: 3 });
-    return last.status === 200 && (last.body?.count ?? last.body?.results?.length ?? 0) > 0;
-  }, timeoutMs, intervalMs, { what: 'recall to bring the stored fact back' });
-  return ok ? { ok: true, elapsedMs: Date.now() - start, body: last.body } : { ok: false, last };
+async function recallEventually(query, { timeoutMs = 120_000, intervalMs = 3_000, what } = {}) {
+  // THROWS at the deadline, naming `what` and the last answer recall gave (its status and body).
+  return waitForReading(
+    () => post(INSTANCES.a, tokenA, '/api/brain/recall', { space: 'general', query, topK: 3 }),
+    (r) => r.status === 200 && (r.body?.count ?? r.body?.results?.length ?? 0) > 0,
+    timeoutMs, intervalMs, { what });
 }
 
 describe('restore preserves semantic recall', () => {
@@ -64,8 +62,7 @@ describe('restore preserves semantic recall', () => {
     const stored = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact, tags: ['restore-test'] });
     assert.equal(stored.status, 201, `store failed: ${JSON.stringify(stored.body)}`);
 
-    const before = await recallEventually(fact);
-    assert.ok(before.ok, `precondition failed — the fact was never recallable even before restoring: ${JSON.stringify(before.last?.body)}`);
+    await recallEventually(fact, { what: 'PRECONDITION: the fact to be recallable even before restoring' });
 
     // 2. Take a backup that contains it.
     const backup = await post(INSTANCES.a, tokenA, '/api/admin/data/backup', {});
@@ -90,11 +87,10 @@ describe('restore preserves semantic recall', () => {
 
     // 4. The invariant: recall works again. Generous budget — a rebuild plus indexing is slow, and
     //    the point is that it RECOVERS, not that it is instant.
-    const after = await recallEventually(fact, { timeoutMs: 180_000 });
-    assert.ok(
-      after.ok,
-      'recall returned nothing after a restore — the vector index was destroyed and not rebuilt, ' +
-      `which is silent data-feature loss: ${JSON.stringify(after.last?.body)}`,
-    );
+    await recallEventually(fact, {
+      timeoutMs: 180_000,
+      what: 'recall to bring the fact back after a restore (it returned nothing: the vector index was destroyed and not rebuilt, '
+        + 'which is silent data-feature loss)',
+    });
   });
 });

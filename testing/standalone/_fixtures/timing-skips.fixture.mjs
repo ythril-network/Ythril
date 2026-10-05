@@ -7,8 +7,7 @@
  * reported at all.
  */
 import { test, describe } from 'node:test';
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+import { sleep } from '../../_shared/sleep.mjs';
 
 test('skip via option true', { skip: true }, () => {});
 test('skip via option reason', { skip: 'because option reason' }, () => {});

@@ -33,6 +33,23 @@ export const DOOR_FACT_ID = 'bbbbbbbb-0000-4000-8000-0000000000f3';
 export const DIVERGENT = 'the same fact, as the peer tells it';
 
 /**
+ * Hold the lock a pushed FORK of `factId` (at seq 3, carrying {@link DIVERGENT}) stalls behind: a document sitting on the
+ * fork's derived id, so the fork's insert waits for it. THE one place the stall is built — the push doors here, the holder
+ * table (`_seq-hold-cases.mjs`) and the wipe's own test all stall the same write.
+ *
+ * What it prevents: a copy that spells the derived id with another text or seq locks a document the fork never writes, the
+ * push is not stalled, and the test passes over a write that was never held. The id comes from the server's own
+ * `forkIdFor`, so it follows the server and not this table.
+ *
+ * @param {object} mongo  the server's `db/mongo.js` module (`door.mongo`)
+ * @param {{ forkIdFor: (id: string, seq: number, text: string) => string }} plan  `server/dist/sync/upsert-plan.js`
+ * @param {string} space
+ * @param {string} factId  the fact the push forks; the seed's fact (`seedDoorSpace`, `_seq-hold-cases.mjs` `F`)
+ */
+export const holdForkLock = (mongo, plan, space, factId) => holdDocumentLock(mongo, `${space}_facts`,
+  { insert: { _id: plan.forkIdFor(factId, 3, DIVERGENT), spaceId: space, fact: 'lock', seq: 0 } });
+
+/**
  * Open a push door with `spaces` registered, plus the app (REST) and the MCP dispatch on it — everything the doors
  * need. `env` is what `stalledWriteDoors` reads, filled here and read lazily by each door's closures.
  *
@@ -91,8 +108,7 @@ export async function seedDoorSpace(door, space) {
  */
 export function stalledWriteDoors(env, space) {
   const F = DOOR_FACT_ID;
-  const forkLock = () => holdDocumentLock(env.door.mongo, `${space}_facts`,
-    { insert: { _id: env.plan.forkIdFor(F, 3, DIVERGENT), spaceId: space, fact: 'lock', seq: 0 } });
+  const forkLock = () => holdForkLock(env.door.mongo, env.plan, space, F);
   const factLock = () => holdDocumentLock(env.door.mongo, `${space}_facts`, { filter: { _id: F } });
   return [
     {

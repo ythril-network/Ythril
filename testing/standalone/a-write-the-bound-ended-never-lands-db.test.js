@@ -61,7 +61,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { RECORD_PARTS, snapshotSpaceInOneRead, changedDocuments } from './_space-snapshot.mjs';
 import { holdCounterLock, settleWithin, setWriteBoundForTest } from './_write-faults.mjs';
-import { activeOperations } from './_active-operations.mjs';
+import { sawLiveWrite } from './_active-operations.mjs';
 import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
 import { holderCases, loadHolderModules, seedHolderSpace } from './_seq-hold-cases.mjs';
@@ -121,19 +121,6 @@ for (const [holder, cases] of HOLDERS) {
 const readLane = (space) => snapshotSpaceInOneRead(env.door.mongo, space, RECORD_PARTS);
 
 /**
- * Whether a write was ALIVE on `collection` in the server while the call waited — the proof that the lock stalled
- * something. Polled until `done()`; the stall lasts the whole bound, far longer than the poll.
- */
-async function sawLiveWrite(collection, done) {
-  let saw = false;
-  while (!done()) {
-    if (!saw && (await activeOperations(env.door.mongo, collection)).length > 0) saw = true;
-    await new Promise(r => setTimeout(r, 50));
-  }
-  return saw;
-}
-
-/**
  * Stall one lane, call it, and the moment it answers read its documents AND release the stall — in that order, in one
  * tick, so the read is on the wire before the abort and nothing is waited for between them.
  */
@@ -146,7 +133,7 @@ async function stallAndRelease(lane) {
   let watching = Promise.resolve(false);
   try {
     const started = Date.now();
-    watching = sawLiveWrite(lane.collection, () => answered);
+    watching = sawLiveWrite(env.door.mongo, lane.collection, () => answered);
     res = await settleWithin(Promise.resolve().then(lane.call), CAP_MS);
     answered = true;
     res.elapsedMs = Date.now() - started;

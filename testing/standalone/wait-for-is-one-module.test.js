@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const MODULE_PATH = join(REPO_ROOT, 'testing', '_shared', 'wait-for.mjs');
 
@@ -65,7 +66,6 @@ const waitFor = async (...args) => {
 };
 
 const never = async () => false;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** Capture console.warn for one call. */
 async function warnsDuring(fn) {
@@ -148,6 +148,37 @@ describe('a timeout says what never held', () => {
     await assert.rejects(
       () => waitFor(() => new Promise(() => {}), 80, 10, undefined, { what: 'an answer that never comes' }),
       /waiting for an answer that never comes \(last probe still pending\)$/);
+  });
+});
+
+describe('a wait on a STATE answers with the reading it accepted, and names the last one it did not', () => {
+  const waitForReading = async (...args) => {
+    assert.ok(impl, `the module did not load: ${loadError?.message}`);
+    return impl.waitForReading(...args);
+  };
+
+  it('resolves with the reading that was accepted — the state itself, not a boolean', async () => {
+    const readings = ['pending', 'processing', 'complete'];
+    let i = 0;
+    assert.equal(await waitForReading(async () => readings[i++], (s) => s === 'complete', 1_000, 10), 'complete');
+    assert.equal(i, 3, 'it read once per poll and stopped at the reading it accepted');
+  });
+
+  it('THROWS at the deadline, naming what was waited for and the last reading (the state, not the predicate\'s false)', async () => {
+    await assert.rejects(
+      () => waitForReading(async () => 'pending', (s) => s === 'complete', 40, 10, { what: 'the file to be embedded' }),
+      /^Error: waitFor timed out after 40ms waiting for the file to be embedded \(last value: false\) — last reading: "pending"$/);
+  });
+
+  it('names an object reading as JSON — a state that is an answer with a status and a body is not `[object Object]`', async () => {
+    await assert.rejects(
+      () => waitForReading(async () => ({ status: 503, body: { error: 'warming up' } }), (r) => r.status === 200, 40, 10, { what: 'recall to answer' }),
+      /last reading: \{"status":503,"body":\{"error":"warming up"\}\}$/);
+  });
+
+  it('a reading that is undefined is named as such rather than as nothing', async () => {
+    await assert.rejects(() => waitForReading(async () => undefined, (s) => s === 'complete', 40, 10, { what: 'the status' }),
+      /last reading: undefined$/);
   });
 });
 

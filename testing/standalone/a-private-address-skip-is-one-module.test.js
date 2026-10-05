@@ -25,7 +25,8 @@ import os from 'node:os';
 import ts from 'typescript';
 import { privateAddressSkipReason, privateHostAddress } from './_private-address.mjs';
 import { CI_ENV_NAMES } from '../_shared/running-under-ci.mjs';
-import { testAndHelperFiles, parseSource, calleeName, inSkipPosition, lineOf } from './_test-bodies.mjs';
+import { testAndHelperFiles, calleeName, inSkipPosition } from './_test-bodies.mjs';
+import { parseSource, lineOf } from '../_shared/syntax-tree.mjs';
 
 const MODULE = 'testing/standalone/_private-address.mjs';
 

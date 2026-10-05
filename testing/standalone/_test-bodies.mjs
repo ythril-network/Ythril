@@ -8,14 +8,15 @@
  * `a-private-address-skip-is-one-module`). A regular expression over the text answers them wrongly in both
  * directions: it reads a quoted fixture as code (the gate that polices `expected-in-ci:` would refuse its own
  * fixtures), and it cannot tell a `return` that ends a TEST from one that ends a helper inside it. The syntax
- * tree can, so the parse is written once and every one of them reads through it.
+ * tree can, so the parse is written once and every one of them reads through it. How to parse, locate and walk a tree
+ * is `_shared/syntax-tree.mjs` (`parseSource`, `lineOf`, `walkOwnCode`) — this module is only what a TEST is.
  *
  * ## The floor is inside
  *
  * An empty listing, or a parse that finds no tests, passes every loop written over it and reports success
  * about nothing. `testSources` and `testBodies` throw on an implausibly small answer rather than returning it.
  */
-import ts from 'typescript';
+import { ts } from '../_shared/syntax-tree.mjs';
 import { readTrackedSources, TEST_FILE_SUFFIXES } from './_sources.mjs';
 
 /**
@@ -35,11 +36,6 @@ export function testAndHelperFiles() {
   return readTrackedSources(TEST_FOLDERS, { ext: [...TEST_FILE_SUFFIXES, '.mjs'], floor: BODY_FLOOR });
 }
 
-export function parseSource(file, text) {
-  const kind = /\.tsx?$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
-}
-
 /** The text of a call's callee: `t.skip`, `assert.equal`, `it`. */
 export const calleeText = (call) => call.expression.getText();
 
@@ -49,20 +45,6 @@ export function calleeName(call) {
   if (ts.isPropertyAccessExpression(e)) return e.name.text;
   if (ts.isIdentifier(e)) return e.text;
   return e.getText();
-}
-
-/**
- * Visit `node` and what it holds, NOT entering a nested function: a `return` inside a callback ends the
- * callback, never the test that contains it. `visit` returns `true` to stop and say "found".
- */
-export function walkOwnCode(node, visit) {
-  if (visit(node) === true) return true;
-  let found = false;
-  ts.forEachChild(node, (child) => {
-    if (found || ts.isFunctionLike(child)) return;
-    if (walkOwnCode(child, visit)) found = true;
-  });
-  return found;
 }
 
 /**
@@ -116,6 +98,3 @@ export function inSkipPosition(node) {
   }
   return false;
 }
-
-/** The 1-based line a node starts on. */
-export const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;

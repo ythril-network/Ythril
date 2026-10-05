@@ -47,6 +47,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { bodyOf } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
@@ -86,12 +87,7 @@ describe('the vector-index wait is shared, and its deadline is the measured one'
      */
     const src = readFileSync(join(ROOT, HELPERS), 'utf8');
     assert.match(src, /from '\.\.\/_shared\/wait-for\.mjs'/, `${HELPERS} must import the one wait`);
-    const bodies = ['waitForIndexed', 'waitForSimilarityIndex'].map(name => {
-      const at = src.indexOf(`export async function ${name}(`);
-      assert.ok(at >= 0, `${name} is not exported from ${HELPERS}`);
-      const next = src.indexOf('\nexport ', at + 10);
-      return { name, body: src.slice(at, next < 0 ? undefined : next) };
-    });
+    const bodies = ['waitForIndexed', 'waitForSimilarityIndex'].map(name => ({ name, body: bodyOf(src, name, `${HELPERS} ${name}`) }));
     for (const { name, body } of bodies) {
       assert.match(body, /\bwaitFor\(/, `${name} does not wait through waitFor`);
       assert.doesNotMatch(body, /\b(while|for)\s*\([^)]*Date\.now\(\)/,

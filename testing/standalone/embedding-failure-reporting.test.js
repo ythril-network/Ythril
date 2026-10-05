@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody, readCollection, waitFor } from '../sync/helpers.js';
-import { holdsWithin } from '../_shared/wait-for.mjs';
+import { holdsWithin, waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_CONFIGS = [
@@ -104,13 +104,8 @@ async function docStatus() {
   return meta?.embeddingStatus;
 }
 
-/** The status the file was in when `predicate` held, or — at the deadline — the last one seen: the caller asserts on it. */
-async function waitForStatus(predicate, timeoutMs) {
-  let last;
-  await holdsWithin(async () => { last = await docStatus(); return predicate(last); }, timeoutMs, 1000,
-    { what: 'the file embedding status to reach the expected state' });
-  return last;
-}
+/** The status the file was in when `accept` took it; THROWS at the deadline, naming the last status read. */
+const waitForStatus = (accept, timeoutMs, what) => waitForReading(docStatus, accept, timeoutMs, 1000, { what });
 
 describe('B3: embedding failure is reported, not silently completed', () => {
   before(async () => {
@@ -139,14 +134,11 @@ describe('B3: embedding failure is reported, not silently completed', () => {
     // The worker will claim it ('processing'), fail every chunk embed, and route into
     // the retry path — so it must reach 'processing' and NEVER flip to 'complete'.
     // Allow > the idle-backoff poll cap (default 30s) for the worker to pick the job up.
-    const reached = await waitForStatus(s => s === 'processing' || s === 'failed', 45_000);
-    assert.ok(
-      reached === 'processing' || reached === 'failed',
-      `worker should have engaged the failing job, last status: ${reached}`,
-    );
-    // Give it more room and assert it still never claims success.
-    const settled = await waitForStatus(s => s === 'complete', 8_000);
-    assert.notEqual(settled, 'complete',
+    await waitForStatus(s => s === 'processing' || s === 'failed', 45_000, 'the worker to engage the failing job');
+    // Give it more room and assert it still never claims success: the wait is expected to run out its window.
+    const completed = await holdsWithin(async () => (await docStatus()) === 'complete', 8_000, 1000,
+      { what: 'a file whose every chunk failed to embed to be reported complete' });
+    assert.equal(completed, false,
       'a file whose every chunk failed to embed must NOT be reported complete (B3 regression)');
   });
 
@@ -158,7 +150,7 @@ describe('B3: embedding failure is reported, not silently completed', () => {
     assert.equal(retry.status, 202, `retry should queue (202): ${JSON.stringify(retry.body)}`);
 
     // Allow > the idle-backoff poll cap for the worker to re-claim the reset job.
-    const status = await waitForStatus(s => s === 'complete', 50_000);
+    const status = await waitForStatus(s => s === 'complete', 50_000, 'the retried file to embed to complete');
     assert.equal(status, 'complete', `file should embed to complete after retry, got: ${status}`);
   });
 });

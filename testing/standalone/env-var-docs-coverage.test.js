@@ -39,6 +39,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isAmbient } from '../_shared/env-var-reads.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 
@@ -53,35 +54,13 @@ function walk(dir, out = []) {
   return out;
 }
 
-/**
- * Which variables are ours to document: everything the scan finds, minus an explicit ambient list.
- *
- * It used to be an allowlist of four namespaces — `YTHRIL_`/`MONGO_`/`MCP_`/`OIDC_` — which is the wrong
- * polarity for a completeness gate. **No model-endpoint variable was ever in scope**: not `EMBEDDING_URL`,
- * not `DOC_VLM_URL`, not one of the ten slots. That blind spot let three names that do not exist
- * (`EMBEDDING_BASE_URL`, `RERANK_BASE_URL`, `NLI_BASE_URL` — the real ones drop the `BASE_`) ship in the
- * integration guide's egress matrix, where a reader would set them and watch nothing happen.
- *
- * A denylist fails the right way round. A new variable in a namespace nobody anticipated is now *in* scope
- * and has to be documented or explicitly excused; under the allowlist it was silently exempt. Widening it
- * brought 40 more variables into scope and cost 9 doc entries, which is the ratio that makes a gate worth
- * having rather than worth suppressing.
- */
-const AMBIENT = new Set([
-  // The runtime's and the shell's, not ours.
-  'NODE_ENV', 'NODE_OPTIONS', 'PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'HOSTNAME', 'TZ', 'LANG', 'SHELL',
-  'PWD', 'COMSPEC', 'SYSTEMROOT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA',
-  // CI-provided.
-  'CI', 'GITHUB_TOKEN', 'GITHUB_ACTIONS', 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24',
-]);
-
 const TOOLING_REASON = 'read by the test and maintenance tooling (scripts/, testing/, the test compose file), never by the server; '
   + 'named in docs/testing-guide.md, where scripts-and-test-runners-document-their-env-vars requires the ones scripts/ and '
   + 'testing/_init/ read, and this gate (which scans the server) cannot see them';
 /** Variables the testing guide names that this gate's scan does not read. Each is a row below, with the reason above. */
 const TOOLING_VARS = [
   'YTHRIL_TEST_MONGO_HOST', 'YTHRIL_TEST_MONGO_PORT', 'YTHRIL_TEST_WAIT_TIMING_FILE',
-  'YTHRIL_TEST_RUNS_URL', 'YTHRIL_TEST_RUNS_TOKEN', 'GH_TOKEN', 'GITHUB_API_URL', 'GITHUB_STEP_SUMMARY',
+  'YTHRIL_TEST_RUNS_URL', 'YTHRIL_TEST_RUNS_TOKEN', 'GH_TOKEN',
   'YTHRIL_TEST_APP_CPUS', 'YTHRIL_TEST_APP_MEM', 'YTHRIL_TEST_APP_A_MEM',
   'YTHRIL_TEST_MONGO_CPUS', 'YTHRIL_TEST_MONGO_MEM', 'YTHRIL_TEST_MONGO_A_MEM', 'YTHRIL_TEST_MONGOT_A_HEAP',
   'YTHRIL_TEST_DOCRENDER_CPUS', 'YTHRIL_TEST_DOCRENDER_MEM', 'YTHRIL_TEST_DOCRENDER_PIDS',
@@ -137,7 +116,24 @@ const NOT_A_SETTING = new Map([
   ['MEDIA_EMBEDDING_ENABLED', 'removed in 2.0.0; documented as a breaking change'],
 ]);
 
-const OURS = (name) => !AMBIENT.has(name);
+/**
+ * Which variables are ours to document: everything the scan finds, minus an explicit ambient list.
+ *
+ * It used to be an allowlist of four namespaces — `YTHRIL_`/`MONGO_`/`MCP_`/`OIDC_` — which is the wrong
+ * polarity for a completeness gate. **No model-endpoint variable was ever in scope**: not `EMBEDDING_URL`,
+ * not `DOC_VLM_URL`, not one of the ten slots. That blind spot let three names that do not exist
+ * (`EMBEDDING_BASE_URL`, `RERANK_BASE_URL`, `NLI_BASE_URL` — the real ones drop the `BASE_`) ship in the
+ * integration guide's egress matrix, where a reader would set them and watch nothing happen.
+ *
+ * A denylist fails the right way round. A new variable in a namespace nobody anticipated is now *in* scope
+ * and has to be documented or explicitly excused; under the allowlist it was silently exempt. Widening it
+ * brought 40 more variables into scope and cost 9 doc entries, which is the ratio that makes a gate worth
+ * having rather than worth suppressing.
+ *
+ * The ambient list is `testing/_shared/env-var-reads.mjs`'s — the one list, also read by the gate that holds the tooling's
+ * variables — so a name one gate calls the machine's is the machine's for the other.
+ */
+const OURS = (name) => !isAmbient(name);
 
 const NAME = '([A-Z][A-Z0-9_]{2,})';
 const READ_PATTERNS = [

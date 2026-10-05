@@ -37,8 +37,8 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason, openTestMongo, closeTestMongo } from './_mongo-harness.mjs';
-import { holdDocumentLock, holdCounterLock, settleWithin, eventually } from './_write-faults.mjs';
-import { activeOperations, describeOperations } from './_active-operations.mjs';
+import { holdDocumentLock, holdCounterLock, settleWithin } from './_write-faults.mjs';
+import { activeOperations, describeOperations, waitForLiveWrite } from './_active-operations.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -103,7 +103,7 @@ describe('a released lock leaves no live write', { skip }, () => {
         const lock = await shape.lock();
         const waiting = shape.write().then(() => null, err => err);
         try {
-          const stalled = await eventually(async () => (await activeOperations(mongo, shape.coll)).length > 0, 5000);
+          const stalled = await waitForLiveWrite(mongo, shape.coll);
           assert.ok(stalled, `fixture: the write behind the lock was never active on ${shape.coll} — the stall is not real, or currentOp does not see it`);
           await new Promise(r => setTimeout(r, STALLED_FOR_MS));
         } finally {
@@ -135,7 +135,7 @@ describe('a released lock leaves no live write', { skip }, () => {
     // A write that waits behind lock B and stays alive while A is released: the collection never goes quiet.
     const stuck = items.insertOne({ _id: 'lock-b', v: 'stuck' }).then(() => null, err => err);
     try {
-      assert.ok(await eventually(async () => (await activeOperations(mongo, COLL)).length > 0, 5000), 'fixture: the write behind lock B was never active');
+      assert.ok(await waitForLiveWrite(mongo, COLL), 'fixture: the write behind lock B was never active');
       await assert.rejects(() => a.release({ drainMs: SHORT_DRAIN_MS }),
         err => err instanceof Error && err.message.includes(COLL),
         'release() returned while a write was still alive on the collection, instead of throwing — a caller cannot tell the stall ended');

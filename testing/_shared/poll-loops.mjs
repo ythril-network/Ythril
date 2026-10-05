@@ -35,11 +35,10 @@
  * directly above it. The reason has to say something: a bare marker or a one-word one does not exempt the loop,
  * because a marker that carries no reason is the loop without one.
  *
- * Syntax only — no type checker.
+ * Syntax only — no type checker. Parsing, locating a node and walking a body without entering a nested function are
+ * `syntax-tree.mjs`'s; what a POLL is stays here.
  */
-import { createRequire } from 'node:module';
-
-const ts = createRequire(import.meta.url)('typescript');
+import { ts, parseSource, lineOf, walkOwnCode } from './syntax-tree.mjs';
 
 /** Names that are a sleep wherever they are imported from. A same-file function calling `setTimeout` is derived. */
 const SLEEP_NAMES = /^(sleep|sleepMs|delay|pause|nap|snooze|wait|setTimeout)$/i;
@@ -49,26 +48,10 @@ const MARKER = /waits-differently:[ \t]*(\S+[ \t]+\S.*)/;
 
 const LOOP_KINDS = new Set([ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.ForStatement]);
 
-function parse(text, file) {
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, /\.[cm]?ts$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
-}
-
-const isFunctionLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n)
-  || ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) || ts.isGetAccessor(n) || ts.isSetAccessor(n);
-
-/** Visit the descendants of `node` (not `node` itself), never entering a nested function (its body is another function's loop). */
-function walk(node, visit) {
-  const go = (n) => {
-    visit(n);
-    ts.forEachChild(n, (c) => { if (!isFunctionLike(c)) go(c); });
-  };
-  ts.forEachChild(node, (c) => { if (!isFunctionLike(c)) go(c); });
-}
-
 /** Does this expression read the clock anywhere in it (not through a nested function)? */
 function readsClock(node) {
-  let found = readsClockHere(node);
-  walk(node, (n) => { if (readsClockHere(n)) found = true; });
+  let found = false;
+  walkOwnCode(node, (n) => { if (readsClockHere(n)) found = true; });
   return found;
 }
 
@@ -167,8 +150,7 @@ function awaitsSleep(loop, sleepers) {
     if (ts.isAwaitExpression(n) && operandSleeps(n.expression)) found = true;
   };
   const body = ts.isForStatement(loop) || ts.isWhileStatement(loop) || ts.isDoStatement(loop) ? loop.statement : loop;
-  visit(body);
-  walk(body, visit);
+  walkOwnCode(body, visit);
   return found;
 }
 
@@ -197,8 +179,7 @@ function leaves_(stmt) {
   const v = (n) => {
     if (ts.isBreakStatement(n) || ts.isReturnStatement(n) || ts.isThrowStatement(n) || isAssertFail(n)) hit = true;
   };
-  v(stmt);
-  walk(stmt, v);
+  walkOwnCode(stmt, v);
   return hit;
 }
 
@@ -232,16 +213,14 @@ function classify(loop, clocked) {
     // retry-until-it-stops-throwing: the probe is the condition
     if (ts.isTryStatement(n) && leaves_(n.tryBlock)) condition = true;
   };
-  visit(body);
-  walk(body, visit);
+  walkOwnCode(body, visit);
   return { deadline, condition };
 }
 
 function usesName(expr, names) {
   let hit = false;
   const v = (n) => { if (ts.isIdentifier(n) && names.has(n.text)) hit = true; };
-  v(expr);
-  walk(expr, v);
+  walkOwnCode(expr, v);
   return hit;
 }
 
@@ -272,7 +251,7 @@ function markerAbove(sf, text, loop) {
  *   `reason` is the marker's reason when the loop carries one, else null — the caller decides what an exempt loop is.
  */
 export function pollLoops(text, file = 'snippet.js') {
-  const sf = parse(text, file);
+  const sf = parseSource(file, text);
   const clocked = clockNames(sf);
   const sleepers = localSleepers(sf);
   const out = [];
@@ -282,7 +261,7 @@ export function pollLoops(text, file = 'snippet.js') {
       if (deadline && condition) {
         out.push({
           file,
-          line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
+          line: lineOf(sf, n),
           kind: ts.SyntaxKind[n.kind],
           reason: markerAbove(sf, text, n),
           text: n.getText(sf).split(/\r?\n/)[0].slice(0, 100),

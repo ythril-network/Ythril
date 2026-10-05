@@ -32,15 +32,14 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
-import { holdDocumentLock, settleWithin, eventually } from './_write-faults.mjs';
-import { activeOperations } from './_active-operations.mjs';
+import { settleWithin } from './_write-faults.mjs';
+import { waitForLiveWrite } from './_active-operations.mjs';
+import { holdForkLock, seedDoorSpace, DOOR_FACT_ID as F, DIVERGENT } from './_stalled-write-doors.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'wipelive';
-const F = 'bbbbbbbb-0000-4000-8000-0000000000f4';
-const DIVERGENT = 'the same fact, as the peer tells it';
 /** How long `wipe` is given to (wrongly) return while the write is alive. */
 const WAITS_FOR_MS = 1500;
 
@@ -48,10 +47,9 @@ let door, plan;
 
 /** Stall a pushed fork behind a lock on its derived id; returns once the fork's write is alive in the server. */
 async function stallAFork() {
-  const lock = await holdDocumentLock(door.mongo, `${S}_facts`,
-    { insert: { _id: plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } });
+  const lock = await holdForkLock(door.mongo, plan, S, F);
   const push = door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S }).then(r => r, err => err);
-  const alive = await eventually(async () => (await activeOperations(door.mongo, `${S}_facts`)).length > 0, 5000);
+  const alive = await waitForLiveWrite(door.mongo, `${S}_facts`);
   return { lock, push, alive };
 }
 
@@ -61,11 +59,7 @@ describe('wipe leaves no live write', { skip }, () => {
     plan = await import('../../server/dist/sync/upsert-plan.js');
   });
   after(async () => { await door?.close(); });
-  beforeEach(async () => {
-    await door.wipe(S);
-    await door.coll(S, 'facts').insertOne(build.fact(S, F, 3));
-    await door.setCounter(S, 3);
-  });
+  beforeEach(async () => { await seedDoorSpace(door, S); });
 
   it('wipe waits while a write on the space is alive, and what that write lands is gone when wipe returns', { timeout: 60_000 }, async () => {
     const { lock, push, alive } = await stallAFork();

@@ -32,13 +32,10 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { buildZip } from '../_shared/zip-builder.mjs';
-import { jsonlFor, makeWorkdir, runTimes, everything } from '../_shared/test-times-harness.mjs';
+import { jsonlFor, makeWorkdir, runTimes, everything, T, githubRun, resultsArtifact } from '../_shared/test-times-harness.mjs';
 
-const REPO = 'ythril-network/Ythril';
 const LISTED = 'testing/standalone/the-extractor-finds-its-mentions.test.js';
 const A = 'testing/standalone/a.test.js';
-const T = (name, ms, over = {}) => ({ name, ms, ...over });
 
 const STANDALONE = {
   suite: 'standalone', batch: 'pure-1',
@@ -174,13 +171,9 @@ describe('--summary: the results', () => {
 
 // ── the baseline: the last ten trusted runs of main ──
 
-const SHA = (c) => c.repeat(40);
-const run = (id, over = {}) => ({
-  id, run_attempt: 1, name: 'CI', event: 'push', head_branch: 'main', head_sha: SHA('a'), path: '.github/workflows/ci.yml',
-  status: 'completed', conclusion: 'success', head_repository: { full_name: REPO }, repository: { full_name: REPO },
-  run_started_at: new Date(Date.UTC(2026, 9, 1, 0, id - 2000)).toISOString(), updated_at: '2026-10-05T10:20:00Z', ...over,
-});
-const artifact = (id, ...specs) => ({ id, name: 'test-results-standalone-pure-1', zip: buildZip(specs.map((s) => ({ name: `${s.suite}-${s.batch}.jsonl`, data: jsonlFor(s) }))) });
+/** The baseline's runs differ in when they started (a run's id says how many minutes after the first), so "the last ten" is decidable. */
+const run = (id, over = {}) => githubRun(id, { run_started_at: new Date(Date.UTC(2026, 9, 1, 0, id - 2000)).toISOString(), ...over });
+const artifact = (id, ...specs) => resultsArtifact(id, 'test-results-standalone-pure-1', ...specs.map((s) => [`${s.suite}-${s.batch}.jsonl`, s]));
 /** The usual standalone run of main: the file takes 5 s. */
 const usual = { suite: 'standalone', batch: 'pure-1', files: [{ file: A, ms: 5000, tests: [T('fast one', 10)] }] };
 

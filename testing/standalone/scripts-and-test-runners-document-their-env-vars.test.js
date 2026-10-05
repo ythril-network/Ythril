@@ -93,6 +93,10 @@ describe('what the scanner reads, and what it leaves alone', () => {
 
   it('a name in a comment is documentation, not a read', () => {
     assert.deepEqual(js('// process.env.IOTA_9 is read below\n/* process.env.KAPPA_10 */'), []);
+    // A TRAILING comment is prose too (the suite's one stripper removes it; the full-line-only variant this module
+    // had kept it and reported a read that is not one), and a `://` in a string must not be taken for one.
+    assert.deepEqual(js('const a = 1; // reads process.env.LAMBDA_11 here'), []);
+    assert.deepEqual(js('const u = "http://host"; const b = process.env.PI_14;'), ['PI_14']);
     assert.deepEqual(js('/**\n * Reads process.env.MU_12 and process.env[\'NU_13\'].\n */\nconst x = 1;'), []);
   });
 

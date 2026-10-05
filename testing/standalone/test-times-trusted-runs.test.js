@@ -39,26 +39,14 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { buildZip } from '../_shared/zip-builder.mjs';
+import { REPO, githubRun } from '../_shared/test-times-harness.mjs';
 
 const MODULE = pathToFileURL(resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs')).href;
 let loaded;
 const load = () => (loaded ??= import(MODULE));
 
-const REPO = 'ythril-network/Ythril';
-const base = () => ({
-  id: 36767121911,
-  run_attempt: 1,
-  name: 'CI',
-  event: 'push',
-  head_branch: 'main',
-  head_sha: 'a'.repeat(40),
-  path: '.github/workflows/ci.yml',
-  status: 'completed',
-  conclusion: 'success',
-  head_repository: { full_name: REPO },
-  repository: { full_name: REPO },
-  run_started_at: '2026-10-05T10:00:00Z',
-});
+/** One admitted run: the shape the fake Actions API serves (`githubRun`), under a real run's id. */
+const base = () => githubRun(36767121911);
 
 /** One admitted run with ONE field broken, per row. The label says what was broken. */
 const REFUSED = [

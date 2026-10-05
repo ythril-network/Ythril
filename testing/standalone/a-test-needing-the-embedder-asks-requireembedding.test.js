@@ -26,7 +26,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
-import { testAndHelperFiles, parseSource, calleeName, staticText, walkOwnCode, lineOf } from './_test-bodies.mjs';
+import { testAndHelperFiles, calleeName, staticText } from './_test-bodies.mjs';
+import { parseSource, lineOf, walkOwnCode } from '../_shared/syntax-tree.mjs';
 
 const MODULE = 'testing/_shared/embedding-required.mjs';
 

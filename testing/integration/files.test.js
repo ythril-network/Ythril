@@ -23,7 +23,8 @@ import { execSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, req, reqJson, get, del, post, readCollection, waitFor } from '../sync/helpers.js';
+import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -937,12 +938,7 @@ describe('Media embedding — retry_embedding endpoint', () => {
       const meta = r.results?.find(f => (f.path ?? f._id ?? '').includes(filePath));
       return meta?.embeddingStatus;
     };
-    const waitForStatus = async (predicate, timeoutMs, what) => {
-      let last;
-      await waitFor(async () => { last = await docStatus(); return predicate(last); }, timeoutMs, 1000,
-        () => `last status: ${last}`, { what });
-      return last;
-    };
+    const waitForStatus = (accept, timeoutMs, what) => waitForReading(docStatus, accept, timeoutMs, 1000, { what });
 
     try {
       await uploadFile(tokenA, spaceId, filePath,

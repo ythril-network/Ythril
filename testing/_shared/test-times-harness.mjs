@@ -25,27 +25,26 @@
  * A file without the sentinel, or one whose `events` does not match, or whose last line is cut mid-object, is an
  * INCOMPLETE file — never a passing one (a killed run leaves exactly that).
  */
-import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { testChildEnv } from './test-child-env.mjs';
 import { TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
+import { makeScratchRepo } from './scratch-git-repo.mjs';
+import { buildZip } from './zip-builder.mjs';
 
 export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs');
 
 /** A scratch git repository with one commit on `main`, `test-results/` ignored, as the real tree has it. */
 export function makeWorkdir({ dirty = false, untracked = false, branch = 'main' } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'test-times-'));
-  const git = (...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).trim();
-  git('init', '-q', '-b', branch);
+  const { dir, git, cleanup } = makeScratchRepo({ prefix: 'test-times-', branch });
   writeFileSync(join(dir, '.gitignore'), `${TIMING_RESULTS_FOLDER}/\n`);
   writeFileSync(join(dir, 'a.txt'), 'one\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'initial');
   if (dirty) writeFileSync(join(dir, 'a.txt'), 'two\n');
   if (untracked) writeFileSync(join(dir, 'b.txt'), 'new\n');
-  return { dir, commit: git('rev-parse', 'HEAD'), branch, cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
+  return { dir, commit: git('rev-parse', 'HEAD').trim(), branch, cleanup };
 }
 
 /**
@@ -167,3 +166,37 @@ export function spawnTimes(args, { cwd, env = {} } = {}) {
 
 /** Everything the child printed, in one string, for the checks that a secret appears nowhere. */
 export const everything = (r) => `${r.stdout}\n${r.stderr}`;
+
+// ── What GitHub's API says about a run, and the results it holds ─────────────────────────────────────────────
+//
+// `--record-ci` and `--summary` both read a repository's workflow RUNS and their result artifacts through the fake
+// Actions API (`fake-github-actions.mjs`). The run object is the thing whose identity the recorder trusts (event,
+// branch, workflow path, head repository), so a fixture that differs in one field from file to file tests a different
+// rule in each. One shape, here; a test overrides the field it is about.
+
+/** The repository every fixture run belongs to — the one the recorder trusts. */
+export const REPO = 'ythril-network/Ythril';
+
+/** A full commit id made of one hex digit, for a run's `head_sha`. */
+export const SHA = (c) => c.repeat(40);
+
+/** One test as a results fixture writes it (`jsonlFor` reads `{ name, ms, status, skip, reason, todo, message }`). */
+export const T = (name, ms, over = {}) => ({ name, ms, ...over });
+
+/**
+ * A workflow run as the API returns it: a trusted one (a finished, green push to `main` of {@link REPO} on the CI
+ * workflow). `over` replaces the fields a test is about — an event, a branch, a head repository, a conclusion.
+ */
+export const githubRun = (id, over = {}) => ({
+  id, run_attempt: 1, name: 'CI', event: 'push', head_branch: 'main', head_sha: SHA('a'), path: '.github/workflows/ci.yml',
+  status: 'completed', conclusion: 'success', head_repository: { full_name: REPO }, repository: { full_name: REPO },
+  run_started_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:20:00Z', ...over,
+});
+
+/**
+ * A result artifact for the fake API: `{ id, name, zip }`, the zip holding one results file per `[fileName, spec]` pair
+ * (`spec` as `jsonlFor` takes it).
+ */
+export const resultsArtifact = (id, name, ...files) => ({
+  id, name, zip: buildZip(files.map(([file, spec]) => ({ name: file, data: jsonlFor(spec) }))),
+});

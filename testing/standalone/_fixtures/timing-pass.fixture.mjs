@@ -6,8 +6,7 @@
  * its tests'.
  */
 import { describe, it } from 'node:test';
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+import { sleep } from '../../_shared/sleep.mjs';
 
 describe('pass suite', () => {
   it('passes after a wait', async () => { await sleep(60); });

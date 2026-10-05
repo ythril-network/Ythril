@@ -47,6 +47,7 @@ import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadAllWorkflows, jobEntries, stepsOf, shellOf } from '../_shared/ci-workflow.mjs';
 import { trackedSources } from './_sources.mjs';
+import { balancedFrom } from './_structural-window.mjs';
 import {
   ROOT, fixture, runTimed, runPlain, runNodeTest, normaliseConsole, readJsonl,
 } from './_timing-runs.mjs';
@@ -273,12 +274,9 @@ describe('every runner attaches the reporter through the helper', () => {
     assert.ok(callers.length >= 3, `only ${callers.length} caller(s) found — run-suite, run-standalone and preflight call the helper`);
     for (const f of callers) {
       const src = stripComments(readFileSync(resolve(ROOT, f), 'utf8'));
-      // The argument list up to its closing parenthesis (a template literal in it holds braces of its own).
-      const calls = [...src.matchAll(/\btimingReporterFlags\(/g)].map(m => {
-        let depth = 1; let i = m.index + m[0].length;
-        for (; i < src.length && depth > 0; i++) depth += src[i] === '(' ? 1 : src[i] === ')' ? -1 : 0;
-        return src.slice(m.index, i);
-      });
+      // The argument list up to its closing parenthesis, read by the structural walker: it skips strings, templates and
+      // regexes, so a bracket inside the arguments does not end the call early.
+      const calls = [...src.matchAll(/\btimingReporterFlags\(/g)].map(m => balancedFrom(src, m.index, f));
       assert.ok(calls.length >= 1, `${f}: could not read a call of the helper`);
       for (const c of calls) assert.match(c, /\bscope\b/, `${f} calls the helper and does not state its scope: ${c}`);
     }

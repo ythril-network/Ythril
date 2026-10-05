@@ -47,7 +47,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, isCommitPinned, stepsUsing,
-  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory,
+  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue,
 } from '../_shared/ci-workflow.mjs';
 import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
 
@@ -99,7 +99,7 @@ function verdictViolations(gate, needs) {
   if (!verdict) return [`the gate job has no run step that reads \`needs\` — nothing in it can fail on a failed job`];
 
   for (const s of steps) {
-    if (s['continue-on-error'] === true || s['continue-on-error'] === 'true') {
+    if (isTrue(s['continue-on-error'])) {
       v.push(`gate step "${s.name ?? s.run}" is continue-on-error: it cannot fail the gate`);
     }
   }
@@ -382,7 +382,6 @@ function stackJobViolations(doc) {
  */
 const EVIDENCE_SCRIPTS = ['executed-tests', 'unexpected-skips'];
 
-const isTrue = (v) => v === true || v === 'true';
 /** A step runs only when everything before it succeeded: no `if`, or exactly `success()`. */
 const runsOnlyOnSuccess = (s) => s.if == null || expressionOf(s.if) === 'success()';
 
@@ -799,5 +798,17 @@ describe('ci.yml — other ways of writing the same rule are accepted, so the ga
     for (const s of job(d, 'ci-advisory').steps) s['continue-on-error'] = true;
     assert.deepEqual(mergeGateViolations(d), []);
     assert.deepEqual(permissionViolations(d), []);
+  });
+
+  it('a flag is ON when it is the boolean OR the string `true` — one reading for every rule, so none calls a quoted flag off', () => {
+    assert.equal(isTrue(true), true);
+    assert.equal(isTrue('true'), true);
+    for (const off of [false, 'false', undefined, null, 1, 'True', '', 'yes']) assert.equal(isTrue(off), false, `${JSON.stringify(off)} is not on`);
+    // The gate step's `continue-on-error: 'true'` is the case the inline `=== true` could not see.
+    const d = clone(GOOD);
+    const gate = jobEntries(d).find((j) => j.name === MERGE_GATE_NAME);
+    assert.ok(gate, 'the merge gate job was not found in the conforming miniature');
+    stepsOf(gate.job)[0]['continue-on-error'] = 'true';
+    assert.ok(mergeGateViolations(d).some((m) => /continue-on-error/.test(m)), "a step with continue-on-error: 'true' still cannot be allowed on the gate");
   });
 });

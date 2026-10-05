@@ -36,19 +36,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
 import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { buildZip } from '../_shared/zip-builder.mjs';
-import { jsonlFor, makeWorkdir, runTimes, everything } from '../_shared/test-times-harness.mjs';
+import { makeWorkdir, runTimes, everything, REPO, SHA, T, githubRun as run, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
 
-const REPO = 'ythril-network/Ythril';
-const SHA = (c) => c.repeat(40);
-const run = (id, over = {}) => ({
-  id, run_attempt: 1, name: 'CI', event: 'push', head_branch: 'main', head_sha: SHA('a'), path: '.github/workflows/ci.yml',
-  status: 'completed', conclusion: 'success', head_repository: { full_name: REPO }, repository: { full_name: REPO },
-  run_started_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:20:00Z', ...over,
-});
-
-const artifact = (id, name, ...jsonl) => ({ id, name, zip: buildZip(jsonl.map(([file, spec]) => ({ name: file, data: jsonlFor(spec) }))) });
-const T = (name, ms) => ({ name, ms });
 const spec = (suite, batch, file, extra = {}) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }], ...extra });
 
 /** The lines a lying artifact adds to every line it holds: it claims another run, commit and branch. */

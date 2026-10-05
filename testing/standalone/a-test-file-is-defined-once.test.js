@@ -24,10 +24,9 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 import {
   REPO_ROOT, trackedSources, trackedTestFiles, isTestFile, TEST_FILE_SUFFIXES, TRACKED_TEST_FLOOR,
 } from './_sources.mjs';
@@ -95,18 +94,17 @@ describe('a test file is defined once', () => {
   });
 
   describe('a scratch checkout is listed through the same module (the `root` parameter), floor included', () => {
-    let root;
+    let root, cleanup;
     before(() => {
-      root = mkdtempSync(join(tmpdir(), 'ythril-test-files-'));
-      const git = (...args) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd: root, stdio: 'pipe' });
-      git('init', '-q');
+      let git;
+      ({ dir: root, git, cleanup } = makeScratchRepo({ prefix: 'ythril-test-files-' }));
       for (const f of ['a.test.js', 'sub/b.spec.ts', 'sub/helper.mjs', 'c.test.mjs', 'notes.md', 'types.d.ts']) {
         mkdirSync(dirname(join(root, f)), { recursive: true });
         writeFileSync(join(root, f), 'x\n');
       }
       git('add', '-A');
     });
-    after(() => rmSync(root, { recursive: true, force: true }));
+    after(() => cleanup?.());
 
     it('lists the scratch checkout\'s test files, sorted, and nothing of this repository', () => {
       assert.deepEqual(trackedTestFiles({ root, floor: 1 }), ['a.test.js', 'c.test.mjs', 'sub/b.spec.ts']);

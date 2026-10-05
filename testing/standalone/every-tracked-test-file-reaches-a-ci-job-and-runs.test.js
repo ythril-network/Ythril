@@ -53,6 +53,7 @@ import { REPO_ROOT, isTestFile } from './_sources.mjs';
 import { makeCiRoot } from './_ci-root-fixture.mjs';
 import { runScript } from './_run-script.mjs';
 import { timingLine, wholeJsonl } from '../_shared/test-times-harness.mjs';
+import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 
 const script = (name) => join(REPO_ROOT, 'scripts', name);
 
@@ -118,15 +119,14 @@ describe('scripts/unrun-tests.mjs — a test file no CI job selection reaches', 
   });
 
   it('a selection that cannot be derived fails — it does not read as "nothing unrun"', () => {
-    const empty = mkdtempSync(join(tmpdir(), 'ythril-empty-root-'));
+    const empty = makeScratchRepo({ prefix: 'ythril-empty-root-' });
     try {
-      spawnSync('git', ['init', '-q'], { cwd: empty });
-      writeFileSync(join(empty, 'package.json'), JSON.stringify({ name: 'x', scripts: {} }));
-      spawnSync('git', ['add', '-A'], { cwd: empty });
-      const { status, out } = run('unrun-tests.mjs', ['--root', empty]);
+      writeFileSync(join(empty.dir, 'package.json'), JSON.stringify({ name: 'x', scripts: {} }));
+      empty.git('add', '-A');
+      const { status, out } = run('unrun-tests.mjs', ['--root', empty.dir]);
       assert.notEqual(status, 0, `a repository with no selections and no tests was reported clean:\n${out.slice(0, 800)}`);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      empty.cleanup();
     }
   });
 });

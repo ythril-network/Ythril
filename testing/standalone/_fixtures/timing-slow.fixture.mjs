@@ -7,8 +7,7 @@
  */
 import { test } from 'node:test';
 import { READY } from './timing-constants.mjs';
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+import { sleep } from '../../_shared/sleep.mjs';
 
 test('finishes before the kill', () => {});
 

@@ -24,16 +24,17 @@
  * rule, not a list that would lag the platform. Anything else a script reads is documented or it is a defect —
  * the polarity is the same denylist the server gate uses, so a variable nobody anticipated is in scope.
  *
- * `env-var-docs-coverage.test.js` keeps its own copy of the ambient list and of the JavaScript read patterns:
- * this is the second site, and the next change to either should move that gate onto this module rather than make a
- * third.
+ * `env-var-docs-coverage.test.js` takes its ambient list from here ({@link AMBIENT}), so a variable one gate calls the
+ * machine's is the machine's for the other. It keeps its own JavaScript read patterns (it needs the line of each
+ * read and the `process.env` reads of server code this module's `envVarsRead` does not report by line).
  */
+import { stripComments } from '../standalone/_strip-comments.mjs';
 
 /** Variables that belong to the runtime, the shell or the OS. Upper-cased: PowerShell reads them case-insensitively. */
 export const AMBIENT = new Set([
   'NODE_ENV', 'NODE_OPTIONS', 'PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'HOSTNAME', 'TZ', 'LANG', 'SHELL', 'PWD',
   'COMSPEC', 'SYSTEMROOT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'USERNAME',
-  'USERDOMAIN', 'CI',
+  'USERDOMAIN', 'CI', 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24',
 ]);
 
 /** The platform's own namespace: `GITHUB_TOKEN`, `GITHUB_STEP_SUMMARY`, `GITHUB_RUN_ID` and whatever it adds next. */
@@ -43,12 +44,16 @@ export const isAmbient = (name) => AMBIENT.has(name.toUpperCase()) || AMBIENT_PR
 
 const NAME = '[A-Za-z_][A-Za-z0-9_]*';
 
-/** Comments out: full-line `//`, block comments, and for PowerShell `#` lines and `<# #>` blocks. */
-function stripComments(source, kind) {
+/**
+ * Comments out. JavaScript goes through the suite's one stripper (`_strip-comments.mjs`, line comments before block
+ * comments, trailing comments too — a name mentioned in `// reads FOO_BAR` is prose, not a read); the PowerShell half
+ * is this module's own, because no other gate reads `#` comments and `<# #>` blocks.
+ */
+function withoutComments(source, kind) {
   if (kind === 'powershell') {
     return source.replace(/<#[\s\S]*?#>/g, '').replace(/^[ \t]*#.*$/gm, '');
   }
-  return source.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  return stripComments(source);
 }
 
 /** The kind of source a path is, by extension; null for anything this module does not read. */
@@ -65,7 +70,7 @@ export function sourceKind(path) {
  * @param {'javascript'|'powershell'} kind
  */
 export function envVarsRead(source, kind) {
-  const text = stripComments(source, kind);
+  const text = withoutComments(source, kind);
   const found = new Set();
   const add = (n) => { if (n) found.add(n); };
 

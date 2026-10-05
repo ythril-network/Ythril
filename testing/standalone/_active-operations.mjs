@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { waitFor, holdsWithin } from '../_shared/wait-for.mjs';
 
 /** Command names a `command` operation carries when it is a write (`findAndModify` is the one that is reported as a command). */
 const WRITE_COMMANDS = new Set(['findAndModify', 'findandmodify', 'insert', 'update', 'delete']);
@@ -39,6 +39,52 @@ export async function activeOperations(mongo, collName) {
 
 /** How long a drain waits for the server to go quiet before it throws, unless the caller says otherwise. */
 export const DEFAULT_DRAIN_MS = 5000;
+
+/** How long a fixture waits for the write it stalled to become ALIVE in the server, unless the caller says otherwise. */
+export const DEFAULT_START_MS = 5000;
+
+/**
+ * Wait until a write is ALIVE on `collName` — the half of the question `drainWrites` does not ask ("has it started",
+ * where a drain asks "has it ended"). Answers `true` when one became active, `false` when none did within `startMs`.
+ *
+ * ## What it prevents
+ *
+ * A test that stalls a write behind a lock and then releases, wipes or counts while the write has not yet reached
+ * the server proves nothing: the lock was never held against anything. The caller asserts on the answer with its own
+ * message (`fixture: the write behind the lock was never active — the stall is not real`), so a stall that never took
+ * hold fails as a broken fixture rather than passing as a held bound. It answers a verdict and does not throw because
+ * what to say about an absent write is the caller's: a drain's failure is a defect, this one's is a fixture.
+ *
+ * @param {object} mongo  the server's `db/mongo.js` module
+ * @param {string} collName
+ * @param {{ startMs?: number }} [o]
+ * @returns {Promise<boolean>}
+ */
+export function waitForLiveWrite(mongo, collName, { startMs = DEFAULT_START_MS } = {}) {
+  return holdsWithin(async () => (await activeOperations(mongo, collName)).length > 0, startMs, 10,
+    { what: `a write alive on ${collName} in ${mongo.getDb().databaseName}` });
+}
+
+/**
+ * Whether a write was alive on `collName` at ANY moment before `done()` turned true — the proof that a lock stalled
+ * something, for a call that is waiting for the whole of a bound. Polled every 50 ms: the stall lasts far longer.
+ *
+ * Not {@link waitForLiveWrite}: that waits for the FIRST live write and stops; this watches a window that is closed
+ * by the caller's own call answering, and answers after it. The loop has no deadline of its own (`done` is the end).
+ *
+ * @param {object} mongo
+ * @param {string} collName
+ * @param {() => boolean} done
+ * @returns {Promise<boolean>}
+ */
+export async function sawLiveWrite(mongo, collName, done) {
+  let saw = false;
+  while (!done()) {
+    if (!saw && (await activeOperations(mongo, collName)).length > 0) saw = true;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return saw;
+}
 
 /**
  * Wait until no write is alive on ANY of `collNames`, or THROW naming the collections and what was still running.

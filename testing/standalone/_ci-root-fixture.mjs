@@ -18,10 +18,10 @@
  * whole file of cases.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, copyFileSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 
 /** Every tracked file of a checkout, floor inside: the copy is meant to hold the real layout, so a short listing proves nothing. */
 const trackedIn = (root) => trackedSources(['.'], { ext: null, floor: 500, root });
@@ -33,21 +33,18 @@ function filesToCopy() {
     || /^client\/src\/.*(\.spec\.ts|test-setup\.ts)$/.test(f));
 }
 
-const git = (cwd, ...args) => execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, stdio: 'pipe' });
-
 /**
  * @returns {{ root: string, tracked: () => string[], with: <T>(changes: { add?: Record<string,string>, replace?: Record<string,(text:string)=>string>, remove?: string[] }, fn: () => T) => T, dispose: () => void }}
  */
 export function makeCiRoot() {
-  const root = mkdtempSync(join(tmpdir(), 'ythril-ci-root-'));
   const files = filesToCopy();
   if (files.length < 500) throw new Error(`only ${files.length} files to copy — the layout filter matched too little, so the copy would prove nothing`);
+  const { dir: root, git, cleanup } = makeScratchRepo({ prefix: 'ythril-ci-root-' });
   for (const f of files) {
     mkdirSync(dirname(join(root, f)), { recursive: true });
     copyFileSync(join(REPO_ROOT, f), join(root, f));
   }
-  git(root, 'init', '-q');
-  git(root, 'add', '-A');
+  git('add', '-A');
 
   const tracked = () => trackedIn(root);
   return {
@@ -74,14 +71,14 @@ export function makeCiRoot() {
         rmSync(join(root, rel));
         undo.push(() => writeFileSync(join(root, rel), before));
       }
-      git(root, 'add', '-A');
+      git('add', '-A');
       try {
         return fn();
       } finally {
         for (const u of undo.reverse()) u();
-        git(root, 'add', '-A');
+        git('add', '-A');
       }
     },
-    dispose() { rmSync(root, { recursive: true, force: true }); },
+    dispose: cleanup,
   };
 }

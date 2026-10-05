@@ -41,9 +41,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
-import {
-  testFiles, parseSource, testBodies, calleeText, calleeName, walkOwnCode, lineOf,
-} from './_test-bodies.mjs';
+import { testFiles, testBodies, calleeText, calleeName } from './_test-bodies.mjs';
+import { parseSource, lineOf, walkOwnCode } from '../_shared/syntax-tree.mjs';
 
 /** Does this code assert, throw, or skip — i.e. does it do anything but pass? */
 const ASSERTING = /^(assert|expect|verify|check|must|require|refuse|ensure|ok|equal|notEqual|deepEqual|strictEqual|deepStrictEqual|notStrictEqual|match|doesNotMatch|throws|rejects|doesNotReject|doesNotThrow|fail|isTrue|isFalse)/i;

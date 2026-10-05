@@ -51,7 +51,7 @@ import { join } from 'node:path';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
 import { closedLoopbackPort } from '../_shared/closed-port.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
-import { makeWorkdir, writeResults, runTimes, spawnTimes, everything } from '../_shared/test-times-harness.mjs';
+import { makeWorkdir, writeResults, runTimes, spawnTimes, everything, T } from '../_shared/test-times-harness.mjs';
 
 const envFor = (server, extra = {}) => ({ YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token, ...extra });
 const PRIMITIVE = new Set(['string', 'number', 'boolean']);
@@ -63,7 +63,6 @@ async function withRun(opts, body) {
   try { return await body({ server, work, dir: work.dir }); } finally { await server.close(); work.cleanup(); }
 }
 
-const T = (name, ms, extra = {}) => ({ name, ms, ...extra });
 const A = 'testing/standalone/a.test.js';
 const B = 'testing/standalone/b.test.js';
 const C = 'testing/standalone/c.test.js';
