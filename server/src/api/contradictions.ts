@@ -1,5 +1,5 @@
 import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
-import type { TokenRights, Rung } from '../config/rights-shape.js';
+import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 /**
  * Contradiction review API (F-REVIEW slice 4) — the Review tab's Contradictions sub-view.
  *
@@ -45,19 +45,11 @@ export const SUPERSEDES_LABEL = 'supersedes';
 
 const collectionFor = (spaceId: string) => col<ContradictionCandidateDoc>(spaceCollection(spaceId, 'contradictionCandidates'));
 
-/** Space IDs the authenticated token may access (empty/absent allow-list = all spaces). */
-/**
- * The space IDs this token may act on at the given Data-quality level.
- *
- * These routes take no space in the path — they walk every space the token can reach — so this list IS the
- * enforcement point. It also removes the copy of a conflation that lived here: `tokenSpaces.length === 0`
- * used to mean "unrestricted". An ABSENT allowlist means every space; an EMPTY one means none. Anything
- * holding `spaces: []` was handed the whole instance.
+/*
+ * These routes take no space in the path: they walk every space the token can reach, so the space list each one
+ * walks IS its enforcement point (`auth/reachable-spaces.ts`). Every walk names its area and rung at the call —
+ * `spacesWhereTokenMay` for a list, `findWhereTokenMay` for a record by id — and neither has a default (`Q-304`).
  */
-function accessibleSpaces(req: { authToken?: unknown }, needs: Rung = 'read'): string[] {
-  const t = req.authToken as { rights?: TokenRights; spaces?: string[] } | undefined;
-  return spacesWhereTokenMay(t?.rights, 'dataQuality', needs);
-}
 
 function toRecord(c: ContradictionCandidateDoc) {
   return {
@@ -95,7 +87,7 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
     const status = statusRaw === 'dismissed' || statusRaw === 'resolved' || statusRaw === 'all' ? statusRaw : 'open';
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
 
-    let spaces = accessibleSpaces(req, 'read');
+    let spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'read');
     if (spaceFilter) spaces = spaces.filter(id => id === spaceFilter);
 
     const results: ContradictionCandidateDoc[] = [];
@@ -138,10 +130,10 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
 contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
-    for (const spaceId of accessibleSpaces(req, 'write')) {
+    const found = await findWhereTokenMay<ContradictionCandidateDoc>(req.authToken?.rights, 'dataQuality', 'write', 'contradictionCandidates', id);
+    if (found) {
+      const { doc, spaceId } = found;
       const coll = collectionFor(spaceId);
-      const doc = await coll.findOne(asFilter<ContradictionCandidateDoc>({ _id: id })) as ContradictionCandidateDoc | null;
-      if (!doc) continue;
       const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
       await coll.updateOne(
         asFilter<ContradictionCandidateDoc>({ _id: id }),
@@ -162,7 +154,7 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
 contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
-    for (const spaceId of accessibleSpaces(req, 'write')) {
+    for (const spaceId of spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write')) {
       const r = await collectionFor(spaceId).updateOne(
         asFilter<ContradictionCandidateDoc>({ _id: id, status: 'dismissed' }),
         asUpdate<ContradictionCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() }, $unset: { dismissedContentHash: '' } }),
@@ -212,10 +204,10 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
       return;
     }
 
-    for (const spaceId of accessibleSpaces(req, 'write')) {
+    const found = await findWhereTokenMay<ContradictionCandidateDoc>(req.authToken?.rights, 'dataQuality', 'write', 'contradictionCandidates', id);
+    if (found) {
+      const { doc, spaceId } = found;
       const coll = collectionFor(spaceId);
-      const doc = await coll.findOne(asFilter<ContradictionCandidateDoc>({ _id: id })) as ContradictionCandidateDoc | null;
-      if (!doc) continue;
 
       const set: Partial<ContradictionCandidateDoc> = {
         status: 'resolved', resolution, updatedAt: new Date().toISOString(),
@@ -314,7 +306,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
 contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, async (req, res) => {
   try {
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
-    const spaces = accessibleSpaces(req, 'write').filter(id => !spaceFilter || id === spaceFilter);
+    const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write').filter(id => !spaceFilter || id === spaceFilter);
     let scanned = 0, found = 0, nliStalled = false, judgedPairs = 0, modelCalls = 0, budgetExhausted = false;
     for (const spaceId of spaces) {
       const r = await scanSpace(spaceId);
