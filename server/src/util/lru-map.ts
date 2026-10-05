@@ -4,10 +4,9 @@
  *
  * ## Why a module
  *
- * It was written three times, each as `delete` + `set` to move an entry to the end and `keys().next()` to drop the
- * first: the tool validators per reach (`mcp/validate-args.ts`), the reported keys of `util/warn-once.ts`, and the
- * Merkle leaves per space (`brain/merkle.ts`). Two halves a hand copy drops, and each copy is one edit from
- * dropping them:
+ * It serves `util/warn-once.ts`, whose map of reported keys is keyed by what a peer or a model sent and so must be
+ * bounded. The hand spelling of this is `delete` + `set` to move an entry to the end and `keys().next()` to drop the
+ * first. Two halves a hand copy drops, and each copy is one edit from dropping them:
  *
  *  - **the touch on use** — without the re-insert, the entry evicted is the oldest INSERTED, so the one key read on
  *    every call is the one thrown away;

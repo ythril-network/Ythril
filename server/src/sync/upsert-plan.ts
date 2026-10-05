@@ -132,8 +132,10 @@ export function divergesFrom(
  * accept read and the write, then fails the write with a duplicate `_id` and is kept. A copy that itself has no seq is
  * written by `_id` alone, as `isNewerCopy` lets anything replace a seq-less copy.
  *
- * Both writers of an arriving record filter through it — the brain families' replace and the file-metadata merge
- * (`ingestFileMeta`) — so a guard cannot be present at one and absent at the other.
+ * The arrival writer filters through it in both of its write shapes — the brain families' replace (`filterFor` in
+ * `sync/arrivals.ts`) and the file-metadata merge (`ingestFileMeta`) — so a guard cannot be present at one and absent
+ * at the other. `sync/fill-file-meta.ts` is not one of them: it keeps its own `receiverMade` filter, which already
+ * matches a row that has no seq.
  */
 export function seqGuard(id: string, seq: unknown): Record<string, unknown> {
   if (typeof seq !== 'number') return { _id: id };

@@ -203,7 +203,7 @@ describe('every inline embed honours suppression', () => {
     const body = bodyOf(rec, 'embedStoredRecord');
     assert.match(body, /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
     assert.match(
-      body, /\$unset:\s*\{\s*embedding/,
+      body, /\$unset:\s*(?:UNSET_VECTOR|\{\s*embedding)/,
       'and must UNSET a stale vector rather than only skipping — that is what cleans up a record embedded '
       + 'before the flag was set',
     );

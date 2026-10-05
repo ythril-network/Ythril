@@ -22,6 +22,7 @@ import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { embeddingSuppressedFor, recordSuppression, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
 import { atReadSeq, readSeqOf } from './write-precondition.js';
+import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type {
@@ -229,7 +230,7 @@ export async function embedStoredRecord(
   // not have. `faceEmbedding` is a different index of a different model and is not touched.
   if (text === null) {
     if (('embedding' in doc || 'embeddingModel' in doc || 'matchedText' in doc)
-      && !await writeIfUnchanged({ $unset: { embedding: '', embeddingModel: '', matchedText: '' } })) return 'superseded';
+      && !await writeIfUnchanged({ $unset: UNSET_DERIVED })) return 'superseded';
     return 'textless';
   }
 
@@ -237,7 +238,7 @@ export async function embedStoredRecord(
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
   if (embeddingSuppressedFor(spaceId, recordType, doc) || (isDerived(doc) && await ancestorSuppressed(spaceId, doc))) {
-    if (!await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } })) return 'superseded';
+    if (!await writeIfUnchanged({ $set: { matchedText: text }, $unset: UNSET_VECTOR })) return 'superseded';
     return 'excluded';
   }
 
@@ -273,7 +274,7 @@ export async function embedStoredRecord(
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
     // stale vector, the next attempt would take the vector as current and never call the model again.
     // On a newer copy it writes nothing, and the failure still reaches the caller, which retries.
-    await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } });
+    await writeIfUnchanged({ $set: { matchedText: text }, $unset: UNSET_VECTOR });
     throw err;
   }
 

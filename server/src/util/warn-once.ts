@@ -3,16 +3,15 @@
  *
  * ## Why a module
  *
- * The same question was answered by hand six times, each its own way: a Set of hosts (`sync/peer-fetch.ts`), a Set
- * of labels (`brain/nli-client.ts`), the last key alone (`files/media/stall-floor.ts`), a key-to-version Map that also
- * serves a security-posture count (`files/unreadable-files.ts`), and two key-to-time Maps for "once per window"
- * (`sync/stray-filemeta-drain.ts`, `brain/fresh-writes.ts`). A seq hold that stalls (`Q-200`) needed it a seventh
- * time.
+ * It serves the warn-once needs this patch added (today the pulled page's diverged facts, `sync/pull-page.ts`). The
+ * latches that already existed (`sync/peer-fetch.ts`, `brain/nli-client.ts`, `files/media/stall-floor.ts`,
+ * `files/unreadable-files.ts`, `sync/stray-filemeta-drain.ts`, `brain/fresh-writes.ts`) are untouched: a patch carries
+ * fixes only, so moving them onto this is a decision for a release, not for this module's docblock to have made.
  *
  * ## What a hand-written copy drops
  *
- * **The bound.** Every one of those Sets and Maps grew for as long as the process lived, keyed by what a peer or a
- * model sent — a host, a label, a path — so a peer could grow them without limit. This one forgets its least
+ * **The bound.** A Set or Map of reported keys grows for as long as the process lives when it is keyed by what a peer
+ * or a model sent — a host, a label, a path — so a peer could grow it without limit. This one forgets its least
  * recently reported key past `max`; a forgotten key that comes back is reported again, which is the safe direction
  * for a warning. And **`forget`**, so a condition that cleared is reported again when it returns.
  *

@@ -67,7 +67,7 @@ for (const f of RESTORED_LOCAL_FIELDS) {
 /**
  * The VECTOR half of the derived fields: the vector and the model that made it, without `matchedText`.
  *
- * Two removals ask two different questions, and each had been spelled by hand at every site:
+ * Two removals ask two different questions, and each is spelled once, here, for the writers that make it:
  *  - **the content changed or is gone** (an arrival this instance suppresses): every derived field goes, `matchedText`
  *    too, because it is the lexical channel's copy of text the record no longer has;
  *  - **only the decision to embed changed** (suppression turned on): the vector goes and `matchedText` stays — the

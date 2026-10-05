@@ -18,7 +18,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
-import { peerList } from '../util/log.js';
+import { peerList, NAME_QUOTED } from '../util/log.js';
 
 /** Canonical UUID v4 matcher. The only copy — import it, never re-declare it. */
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -82,21 +82,18 @@ export function isWellFormedRef(kind: RefKind, value: unknown): boolean {
 
 /** How many references a refusal names before it counts the rest. */
 const REFS_NAMED = 5;
-/**
- * How much of ONE reference a refusal quotes: a UUID or any honest file path whole, and short enough that one
- * oversized reference cannot take the list's whole budget and leave the others it names unnamed.
- */
-const REF_QUOTED = 256;
 
 /**
- * The references a refusal names: the first `REFS_NAMED`, JSON-quoted, each cut at `REF_QUOTED`, then `…(+N more)` —
+ * The references a refusal names: the first `REFS_NAMED`, JSON-quoted, each cut at `NAME_QUOTED` (`util/log.ts`, whose
+ * docblock covers a reference: a UUID or any honest file path whole, short enough that one oversized reference cannot
+ * take the list's budget), then `…(+N more)` —
  * through `peerList`, so a caller's megabyte reference comes back bounded and a line-breaking one escaped
  * (bundle-30 `I5`, `Q-270`). It was `slice(0, 5)` + `(+N more)` written twice in this file, bounding the count and
  * never the element, so the 400 on the REST and MCP write doors echoed whatever the caller sent. The tail is the
  * renderer's, `…(+N more)`, as every other bounded list in the product has it.
  */
 const quotedRefs = (values: readonly string[]): string =>
-  peerList(values.map(v => JSON.stringify(v)), ', ', { count: REFS_NAMED, each: REF_QUOTED });
+  peerList(values.map(v => JSON.stringify(v)), ', ', { count: REFS_NAMED, each: NAME_QUOTED });
 
 /** The values of a reference field that are the wrong SHAPE for the kind it points at. */
 function malformedRefs(kind: RefKind, values: readonly string[]): string[] {

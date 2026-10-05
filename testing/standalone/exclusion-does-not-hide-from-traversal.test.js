@@ -64,7 +64,7 @@ describe('the exclusion is a missing vector, never a read-time filter', () => {
      * itself: only when the thing it was really matching disappears.
      */
     const store = strip(read('server/src/brain/embed-record.ts'));
-    assert.match(store, /\$unset: \{ embedding/,
+    assert.match(store, /\$unset: (?:UNSET_VECTOR|\{ embedding)/,
       'setting it must REMOVE the vector, not mark the record');
   });
 });

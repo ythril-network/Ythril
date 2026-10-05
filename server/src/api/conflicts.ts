@@ -7,6 +7,7 @@ import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { log } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { deleteStored, moveStored } from '../files/stored-bytes.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
@@ -256,7 +257,7 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
         await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
         resolved++;
       } catch (err: unknown) {
-        failed.push({ id, error: err instanceof Error ? err.message : 'Unknown error' });
+        failed.push({ id, error: caughtFailureText(err, 'resolve a conflict') });
       }
     }
 

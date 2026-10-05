@@ -81,8 +81,17 @@ describe('suppression removes a stale vector', () => {
     const branch = CODE.slice(CODE.indexOf('embeddingSuppressed({'));
     const unset = branch.slice(0, branch.indexOf("return 'excluded'"));
     assert.match(unset, /\$unset/);
-    assert.match(unset, /embedding:/);
-    assert.match(unset, /embeddingModel:/);
+    if (/\$unset:\s*UNSET_VECTOR/.test(unset)) {
+      // The one spelling of the vector half is `UNSET_VECTOR` (`sync/local-only-fields.ts`); what it unsets is read
+      // from the field set it is built from, so the vector and its model are still both asserted.
+      const fields = readFileSync(new URL('../../server/src/sync/local-only-fields.ts', import.meta.url), 'utf8');
+      const vectorFields = fields.match(/const VECTOR_FIELDS[^=]*=\s*new Set\(\[([^\]]*)\]\)/)?.[1] ?? '';
+      assert.match(vectorFields, /'embedding'/);
+      assert.match(vectorFields, /'embeddingModel'/);
+    } else {
+      assert.match(unset, /embedding:/);
+      assert.match(unset, /embeddingModel:/);
+    }
   });
 
   it('returns a distinct outcome rather than reporting success', () => {
