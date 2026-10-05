@@ -4,8 +4,8 @@
  * violation recorders.
  */
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
-import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { derivedV4Id } from '../../util/derived-id.js';
+import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
@@ -14,7 +14,11 @@ import type { KnowledgeType } from '../../config/types-knowledge.js';
 import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { log, logSafe } from '../../util/log.js';
+import { log, logSafe, peerText } from '../../util/log.js';
+import { embeddingSuppressedFor } from '../../brain/suppress-embeddings.js';
+import { dropFileVectors } from '../../brain/suppression-sweep.js';
+import { carriedFields, DERIVED_LOCAL_FIELDS } from '../../sync/local-only-fields.js';
+import { seqGuard } from '../../sync/upsert-plan.js';
 import { seqRefusal, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
@@ -30,28 +34,45 @@ export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{
 /**
  * Record a link violation detected during sync ingest.
  * Fire-and-forget: violations are informational, never block sync.
+ *
+ * **One record per dangling end, however often it is checked** (`Q-361` item 17). The single `POST /api/sync/edges`
+ * checks an arriving edge on EVERY delivery — a re-send after a lost 200, an edit, the same edge pushed again — and the
+ * record had a fresh random id, so one dangling end became one more record each time, and each announced
+ * `link_violation.created` again. The id is now DERIVED from what the violation says — the document type, the document,
+ * the field and the target — and the record is written with a set-on-insert, so a delivery that finds it records
+ * nothing and announces nothing. The `reason` is text that can change with the document and so stays out of the id;
+ * it is a peer's text (it quotes the target), so what is stored of it is bounded (`peerText`).
+ *
+ * A record written by 5.6.3 under a random id is not found by the derived one: the next delivery of its document adds
+ * ONE derived twin, and no more after it — a stored row converges as its document is delivered again, with no sweep.
  */
 export async function recordLinkViolation(
   spaceId: string,
   docId: string,
   docType: LinkViolationDoc['docType'],
   field: string,
+  target: string,
   reason: string,
   peerInstanceId: string,
 ): Promise<void> {
   try {
-    const doc: LinkViolationDoc = {
-      _id: uuidv4(),
+    const { _id, ...rest }: LinkViolationDoc = {
+      _id: derivedV4Id('ythril.link-violation', docType, docId, field, target),
       spaceId,
       docId,
       docType,
       field,
-      reason,
+      reason: peerText(reason),
       peerInstanceId,
       detectedAt: new Date().toISOString(),
     };
-    await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
-    emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
+    const result = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).updateOne(
+      asFilter<LinkViolationDoc>({ _id }), asUpdate<LinkViolationDoc>({ $setOnInsert: rest }), { upsert: true },
+    );
+    // Only a record that was INSERTED is news: the announcement of one already held would repeat it to every subscriber.
+    if (result.upsertedCount === 1) {
+      emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: { _id, ...rest } as unknown as Record<string, unknown> });
+    }
   } catch (err) {
     // `docId` is a peer's text, and so may the error be (it can quote the document): `logSafe`.
     log.error(`Failed to record link violation for ${docType} ${logSafe(docId)}: ${logSafe(String(err))}`);
@@ -76,13 +97,13 @@ export async function checkEdgeLinkViolations(
     const val = edge[field];
     const kind = edgeEndpointKind(field === 'from' ? edge.fromKind : edge.toKind);
     if (!isWellFormedRef(kind, val)) {
-      await recordLinkViolation(spaceId, edge._id, 'edge', field,
+      await recordLinkViolation(spaceId, edge._id, 'edge', field, val,
         `${field} '${val}' is not a valid ${kind} reference`, peerInstanceId);
     } else {
       const coll = `${spaceId}_${collectionForRefKind(kind)}`;
       const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: val }));
       if (!exists) {
-        await recordLinkViolation(spaceId, edge._id, 'edge', field,
+        await recordLinkViolation(spaceId, edge._id, 'edge', field, val,
           `${field} references non-existent ${kind} '${val}'`, peerInstanceId);
       }
     }
@@ -108,14 +129,14 @@ export async function checkLinkViolations(
 
   const field = `${link.fromKind}.${link.toKind}`;
   if (link.toKind !== 'file' && !UUID_V4_RE.test(link.to)) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
+    await recordLinkViolation(spaceId, link.from, link.fromKind, field, link.to,
       `${field} contains non-UUID value '${link.to}'`, peerInstanceId);
     return;
   }
   const coll = `${spaceId}_${collectionForRefKind(link.toKind as RefKind)}`;
   const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: link.to }));
   if (!exists) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
+    await recordLinkViolation(spaceId, link.from, link.fromKind, field, link.to,
       `${field} references non-existent ${link.toKind} '${link.to}'`, peerInstanceId);
   }
 }
@@ -214,6 +235,19 @@ export const IncomingFileMetaDoc = z.object({
  *
  * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the bytes,
  * pulled or pushed, enqueue it via `recordArrivedFile` when they land.
+ *
+ * **The write is guarded by seq** (`seqGuard`, `Q-361` item 9), as every brain family's replace is: the filter admits a
+ * stored copy below the arriving seq, one with none, or none at all. A copy NEWER than the one the accept planned
+ * against, written between the accept read and this write, fails the upsert with a duplicate `_id`, which the arrival
+ * writer reads back as a newer local copy. The guard is in the filter, so it costs no read.
+ *
+ * **A file this instance suppresses holds no vector afterwards** (`Q-230`, the file tier): the merge only `$set`s, so
+ * the receiver's own vector, its model and `matchedText` — derived from content this arrival has just replaced — would
+ * stay on the row and keep it in meaning-ranked search by the mechanism suppression switches off. A file has two tiers,
+ * its own flag and the space, so the question is asked of the arriving flag OR the stored one (a peer that does not
+ * carry the flag must not lift the receiver's), and then the derived fields are the ones `carriedFields` does not carry.
+ * The file's chunk and passage rows are searched on their own vectors and lose theirs BEFORE the row is written, so an
+ * arrival whose row write fails has cleared them already and its re-fetch repeats the drop.
  */
 export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<boolean> {
   // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in
@@ -225,7 +259,15 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
   }
 
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { sha256: 1, sizeBytes: 1 } });
+    .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 } });
+
+  const suppressed = embeddingSuppressedFor(spaceId, 'file', {
+    suppressEmbeddings: incoming.suppressEmbeddings === true || (existing as { suppressEmbeddings?: boolean } | null)?.suppressEmbeddings === true
+      ? true : undefined,
+  });
+  const carried = carriedFields({ restore: false, suppressed });
+  const $unset = Object.fromEntries([...DERIVED_LOCAL_FIELDS].filter(f => !carried.has(f)).map(f => [f, '']));
+  if (suppressed) await dropFileVectors(spaceId, [incoming._id]);
 
   // A row this merge CREATES takes this instance's file retention window, as `recordArrivedFile` stamps a row the bytes
   // create (`Q-250`): metadata often arrives first, and the bytes then find the row and never stamp it. Only on insert
@@ -233,8 +275,12 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
   // a space without one never stores the key.
   const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: incoming._id }),
-    asUpdate<FileMetaDoc>({ $set, ...(expireAt ? { $setOnInsert: { _expireAt: expireAt } } : {}) } as never),
+    asFilter<FileMetaDoc>(seqGuard(incoming._id, incoming.seq)),
+    asUpdate<FileMetaDoc>({
+      $set,
+      ...(Object.keys($unset).length > 0 ? { $unset } : {}),
+      ...(expireAt ? { $setOnInsert: { _expireAt: expireAt } } : {}),
+    } as never),
     { upsert: true },
   );
   // As the arrival writer's other families: a seq this process did not allocate, which the pull horizon must cover.

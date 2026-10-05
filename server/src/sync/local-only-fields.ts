@@ -65,6 +65,42 @@ for (const f of RESTORED_LOCAL_FIELDS) {
 }
 
 /**
+ * The VECTOR half of the derived fields: the vector and the model that made it, without `matchedText`.
+ *
+ * Two removals ask two different questions, and each had been spelled by hand at every site:
+ *  - **the content changed or is gone** (an arrival this instance suppresses): every derived field goes, `matchedText`
+ *    too, because it is the lexical channel's copy of text the record no longer has;
+ *  - **only the decision to embed changed** (suppression turned on): the vector goes and `matchedText` stays — the
+ *    content did not change, and removing it is a content decision.
+ */
+const VECTOR_FIELDS: ReadonlySet<string> = new Set(['embedding', 'embeddingModel']);
+for (const f of VECTOR_FIELDS) {
+  if (!DERIVED_LOCAL_FIELDS.has(f)) throw new Error(`VECTOR_FIELDS names '${f}', which is not a derived local field`);
+}
+
+/** `$unset` of every derived field — the content changed or is gone. */
+export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
+/** `$unset` of the vector half — only the decision to embed changed. */
+export const UNSET_VECTOR: Readonly<Record<string, ''>> = Object.fromEntries([...VECTOR_FIELDS].map(f => [f, '']));
+
+const NOTHING: ReadonlySet<string> = new Set();
+
+/**
+ * What crosses a write from the STORED copy, per document: a restore takes nothing from the copy it replaces; an
+ * arrival this instance SUPPRESSES, the record tier only (the derived half describes content it no longer embeds,
+ * `Q-230`); any other peer arrival, every local-only field.
+ *
+ * Both of the arrival writer's write shapes ask it — the whole-document replace of the brain families
+ * (`sync/arrivals.ts`) and the file-metadata merge (`ingestFileMeta`, which `$unset`s what is not carried) — so one of
+ * them cannot carry what the other drops. `suppressed` is the CALLER's answer to `embeddingSuppressedFor` for the
+ * record the stored copy will become, since the question is about this instance's tiers and not about a field.
+ */
+export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
+  if (restore) return NOTHING;
+  return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
+}
+
+/**
  * The same set as a Mongo projection, for the SENDING side.
  *
  * Not the guarantee — the receiver's strip is, because a peer decides what it sends and this instance

@@ -28,6 +28,7 @@
  *
  * See `testing/standalone/coalescing-runner.test.js` for the two tests that were impossible before.
  */
+import { log, peerText } from '../util/log.js';
 
 /** Optional hooks, used by the sync engine for its debug logging. */
 export interface CoalescingRunnerHooks {
@@ -73,7 +74,10 @@ export function createCoalescingRunner<T>(hooks: CoalescingRunnerHooks = {}): Co
       running.delete(key);
       if (rerunRequested.delete(key)) {
         hooks.onRerun?.(key);
-        void run(key, job);
+        // Nothing awaits the rerun, so a job that throws would be an unhandled rejection — which ends the process.
+        // Its failure is logged HERE, once, by the runner every caller shares: a caller's own catch only ever sees the
+        // job it joined, never the pass this queued after it.
+        run(key, job).catch(err => log.warn(`Coalesced rerun for '${peerText(key)}' failed: ${peerText(err)}`));
       }
     }
   }

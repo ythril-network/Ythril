@@ -163,4 +163,15 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   const { startBrainEmbeddingWorker } = await import('./brain/embed-worker.js');
   startBrainEmbeddingWorker();
+
+  // The stored vectors of every suppressed record, at EVERY start (`Q-230`): the repair for vectors stranded before a
+  // meta write swept files, removed the model name, or heard of a network's suppression. Once the server listens, so it
+  // does not compete with the boot, and one space at a time (`sweepEverySpaceAtBoot`). Unconditional here and in the
+  // callback — a start that skipped it would leave the repair to the next meta write — and handed to `afterListening`
+  // rather than started by `index.ts`, so the setup route, which runs after the listen, reaches it too.
+  const { afterListening } = await import('./util/after-listening.js');
+  afterListening(async () => {
+    const { sweepEverySpaceAtBoot } = await import('./brain/suppression-sweep.js');
+    await sweepEverySpaceAtBoot();
+  });
 }

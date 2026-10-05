@@ -50,7 +50,6 @@ import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwn
 import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
-import { sweepSuppressedVectors } from '../brain/suppression-sweep.js';
 
 /**
  * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
@@ -486,7 +485,6 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      sweepAfterMetaWrite(id, applied.meta);
       return { outcome: 'applied', space: applied, ...kept };
     }
   }
@@ -505,15 +503,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     meta: mergedMeta,
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
-  /*
-   * The stored vectors follow the flag, which is what the userguide has always said happens.
-   *
-   * Not awaited: this runs on every meta write and a space may hold many records, so blocking the PATCH on it
-   * would make an unrelated `purpose` edit feel slow. The sweep is idempotent and local — the vector does not
-   * replicate — so a failure costs nothing beyond the next meta write repeating it, which is why a rejection
-   * is logged rather than surfaced to the caller who was not asking about embeddings.
-   */
-  if (updated) sweepAfterMetaWrite(id, mergedMeta);
+  // The stored vectors follow the flag: `updateSpace` asks for the sweep after every meta write (`Q-361` item 11).
   return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
 }
 
@@ -544,18 +534,4 @@ export async function voteOnSchemaEditIfNetworked(
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
   return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
-}
-
-/**
- * Sweep the vectors a meta write newly suppresses, without blocking the write on it; a failure is logged, since the
- * sweep is idempotent and the next meta write repeats it.
- *
- * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
- * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
- * every such write with a warning that meant nothing (`Q-74`).
- */
-function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
-  if (meta === undefined) return;
-  void sweepSuppressedVectors(id, meta)
-    .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
 }
