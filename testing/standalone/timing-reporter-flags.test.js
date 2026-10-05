@@ -45,6 +45,7 @@ import { timingReporterFlags } from '../_shared/timing-reporter-flags.mjs';
 import { readTimingLog } from '../_shared/timing-reporter.mjs';
 import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { loadAllWorkflows, jobEntries, stepsOf, shellOf } from '../_shared/ci-workflow.mjs';
 import {
   ROOT, fixture, runTimed, runPlain, runNodeTest, normaliseConsole, readJsonl,
 } from './_timing-runs.mjs';
@@ -286,10 +287,12 @@ describe('every runner attaches the reporter through the helper', () => {
     assert.ok(scripts.length >= 10, 'the scripts are not being read');
     const bare = scripts.filter(([, cmd]) => /\bnode\s+(--\S+\s+)*--test\b/.test(cmd)).map(([name]) => name);
     assert.deepEqual(bare, [], 'these scripts run node --test directly: delegate them to a runner that builds its flags with the helper');
-    const workflows = tracked('.github/workflows').filter(f => /\.ya?ml$/.test(f));
+    // The commands every step runs, from the one workflow reader (comments gone, a local composite action followed).
+    const workflows = loadAllWorkflows();
     assert.ok(workflows.length >= 1);
-    for (const f of workflows) {
-      assert.ok(!/\bnode\s+(--\S+\s+)*--test\b/.test(readFileSync(resolve(ROOT, f), 'utf8')), `${f} runs node --test itself`);
+    for (const { file, doc } of workflows) {
+      const bareSteps = jobEntries(doc).flatMap(({ id, job }) => stepsOf(job).filter(s => /\bnode\s+(--\S+\s+)*--test\b/.test(shellOf(s))).map(() => id));
+      assert.deepEqual(bareSteps, [], `${file} runs node --test itself, in job(s) ${bareSteps.join(', ')}`);
     }
   });
 

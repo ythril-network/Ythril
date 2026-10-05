@@ -34,6 +34,7 @@ import { relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
+import { runningUnderCi } from '../_shared/running-under-ci.mjs';
 import { trackedSources, REPO_ROOT } from '../standalone/_sources.mjs';
 
 /**
@@ -49,8 +50,6 @@ export const SUITES = Object.freeze({
 
 /** The shortest of the platforms' command-line limits (Windows: 32 767 characters), with room for the flags. */
 const COMMAND_LINE_LIMIT = 30_000;
-
-const isCI = () => Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
 
 /** The test files directly inside `dir` (what the old `<dir>/*.test.js` glob matched). */
 function directTests(dir, opts) {
@@ -75,7 +74,7 @@ export function selectSuiteFiles(suite) {
       + 'fails instead of reporting success about nothing.');
   }
   const tracked = new Set(files);
-  const untracked = isCI() ? [] : directTests(spec.dir, { untracked: true }).filter(f => !tracked.has(f));
+  const untracked = runningUnderCi() ? [] : directTests(spec.dir, { untracked: true }).filter(f => !tracked.has(f));
   return { files, untracked };
 }
 

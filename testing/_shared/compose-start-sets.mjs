@@ -29,7 +29,7 @@
  * One question per module: which services start together. It holds no budget — each gate states its own rule over
  * the sets, so a rule and the derivation of its subjects never share a reason to change.
  */
-import { shellOf, stepsOf } from './ci-workflow.mjs';
+import { jobEntries, shellOf, stepsOf } from './ci-workflow.mjs';
 
 /** `docker compose` global options that take a value as the NEXT word (`--opt=value` carries its own). */
 const GLOBAL_OPTS_WITH_VALUE = new Set(['-p', '--project-name', '-f', '--file', '--profile', '--env-file', '--project-directory', '--ansi', '--progress', '--parallel']);
@@ -39,10 +39,12 @@ const UP_OPTS_WITH_VALUE = new Set(['--wait-timeout', '-t', '--timeout', '--scal
 const unquote = (w) => w.replace(/^(['"])(.*)\1$/, '$2');
 
 /**
- * Every `docker compose … up` in a shell script, as `{ profiles, services }`. `services` is empty when the command
- * names none (it then starts everything its profiles enable).
+ * Every `docker compose … up` in a shell script, as `{ part, profiles, after }`: the command's text, the profiles
+ * its global options switch on, and the words after `up`. The ONE reading of "is this command a compose up" —
+ * `startsComposeStack` and `upCommands` both answer from it, so a detector of "a job starts the stack" cannot be a
+ * looser regex that disagrees with the reader of what the start names (`config --images | grep up` is not a start).
  */
-export function upCommands(script) {
+function composeUps(script) {
   const out = [];
   for (const line of String(script).split('\n')) {
     for (const part of line.split(/&&|\|\||;|\||&/)) {
@@ -57,23 +59,41 @@ export function upCommands(script) {
         const value = inline ?? (takes ? words[++i] : undefined);
         if (flag === '--profile') profiles.push(value);
       }
-      if (words[i] !== 'up') continue;
-      const services = [];
-      for (i += 1; i < words.length; i++) {
-        const w = words[i];
-        if (w.startsWith('-')) {
-          const [flag, inline] = w.split(/=(.*)/s);
-          if (inline === undefined && UP_OPTS_WITH_VALUE.has(flag)) i++;
-          continue;
-        }
-        if (/[$`]/.test(w)) throw new Error(`cannot read which service \`${w}\` names in: ${part.trim()}`);
-        services.push(w);
-      }
-      out.push({ profiles, services });
+      if (words[i] === 'up') out.push({ part: part.trim(), profiles, after: words.slice(i + 1) });
     }
   }
   return out;
 }
+
+/** Does this shell script run `docker compose … up`? Answers whether a start exists without having to read what it names. */
+export const startsComposeStack = (script) => composeUps(script).length > 0;
+
+/**
+ * Every `docker compose … up` in a shell script, as `{ profiles, services }`. `services` is empty when the command
+ * names none (it then starts everything its profiles enable).
+ */
+export function upCommands(script) {
+  return composeUps(script).map(({ part, profiles, after }) => {
+    const services = [];
+    for (let i = 0; i < after.length; i++) {
+      const w = after[i];
+      if (w.startsWith('-')) {
+        const [flag, inline] = w.split(/=(.*)/s);
+        if (inline === undefined && UP_OPTS_WITH_VALUE.has(flag)) i++;
+        continue;
+      }
+      if (/[$`]/.test(w)) throw new Error(`cannot read which service \`${w}\` names in: ${part}`);
+      services.push(w);
+    }
+    return { profiles, services };
+  });
+}
+
+/**
+ * The jobs of a workflow that start a compose stack, `[{ id, name, job }]` — a local composite action's `up` counts.
+ * `opts.root` is the repository a local action is looked up in (default: this one), as for `shellOf`.
+ */
+export const stackJobs = (workflow, opts) => jobEntries(workflow).filter(({ job }) => stepsOf(job).some((s) => startsComposeStack(shellOf(s, opts))));
 
 const asList = (v) => (Array.isArray(v) ? v : v && typeof v === 'object' ? Object.keys(v) : []);
 
@@ -102,18 +122,17 @@ export function defaultServices(compose) {
 
 /**
  * Every set of services one command in this repo starts together, as `[{ label, services: string[] }]`
- * (sorted names). `compose` is the parsed test compose file, `workflow` the parsed `ci.yml`.
+ * (sorted names). `compose` is the parsed test compose file, `workflow` the parsed `ci.yml`, `opts.root` the repository
+ * its local composite actions are read from (default: this one).
  */
-export function startSets(compose, workflow) {
+export function startSets(compose, workflow, opts) {
   const all = Object.keys(compose.services ?? {});
   const inProfiles = (profiles) => all.filter((n) => profilesOf(compose.services[n]).some((p) => profiles.includes(p)));
   const sets = [{ label: 'the default set (`docker compose up`)', services: [...dependencyClosure(compose, defaultServices(compose))].sort() }];
-  for (const [id, job] of Object.entries(workflow.jobs ?? {})) {
+  for (const { id, job } of stackJobs(workflow, opts)) {
     const started = new Set();
-    let any = false;
     for (const step of stepsOf(job)) {
-      for (const up of upCommands(shellOf(step))) {
-        any = true;
+      for (const up of upCommands(shellOf(step, opts))) {
         const profiles = [...up.profiles, ...envProfiles(workflow.env, job.env, step.env)];
         // Compose starts only the named services when it is given any, so counting a profile's services as well is
         // the conservative reading: a budget that holds for it holds for the exact one.
@@ -121,7 +140,7 @@ export function startSets(compose, workflow) {
         dependencyClosure(compose, named).forEach((n) => started.add(n));
       }
     }
-    if (any) sets.push({ label: `CI job ${id}`, services: [...started].sort() });
+    sets.push({ label: `CI job ${id}`, services: [...started].sort() });
   }
   return sets;
 }

@@ -33,11 +33,9 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { load } from 'js-yaml';
 import { trackedFiles, trackedTestFiles, TEST_FILE } from './_shared/tracked-test-files.mjs';
 import { stripComments } from '../testing/standalone/_strip-comments.mjs';
-
-const CI_WORKFLOW = '.github/workflows/ci.yml';
+import { CI_WORKFLOW, loadCi, jobEntries, stepsOf, shellOf } from '../testing/_shared/ci-workflow.mjs';
 
 /** A glob as a regular expression over repo-relative paths (`*`, `**`, `?`, `{a,b}`; nothing else is special). */
 export function globToRegExp(glob) {
@@ -62,26 +60,18 @@ export function globToRegExp(glob) {
 
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 
-/** Every command line a workflow's steps run, as the shell would read them: continuations joined, `#` lines gone. */
+/**
+ * Every script a workflow's steps run, as the shell would read it (continuations joined, `#` lines gone) — from the
+ * one workflow reader, which follows a local composite action: a test command moved into `.github/actions/*` is still
+ * run by its job, and reading `step.run` alone would report its files unrun or, worse, derive nothing and say so.
+ */
 function workflowCommands(root) {
-  const file = join(root, CI_WORKFLOW);
-  if (!existsSync(file)) throw new Error(`${CI_WORKFLOW} does not exist under ${root} — there is no CI to select anything`);
-  const doc = load(readFileSync(file, 'utf8'));
-  const jobs = Object.values(doc?.jobs ?? {});
-  const commands = [];
-  for (const job of jobs) {
-    for (const step of Array.isArray(job?.steps) ? job.steps : []) {
-      if (typeof step?.run === 'string') commands.push(step.run);
-    }
-  }
-  return commands;
+  return jobEntries(loadCi(root)).flatMap(({ job }) => stepsOf(job).map((step) => shellOf(step, { root })).filter(Boolean));
 }
 
-/** One shell script as separate simple commands, each an array of words. */
+/** One shell script (already read as the shell reads it) as separate simple commands, each an array of words. */
 function simpleCommands(script) {
   return String(script)
-    .split('\n').filter(l => !/^\s*#/.test(l)).join('\n')
-    .replace(/\\\r?\n\s*/g, ' ')
     .split(/&&|\|\||;|\||\n/)
     .map(seg => seg.trim().split(/\s+/).filter(Boolean))
     .map(words => {

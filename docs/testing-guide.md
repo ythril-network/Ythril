@@ -178,8 +178,10 @@ What the recorder guarantees, and why each is there:
   as `incomplete`. A baseline is drawn only from whole-suite, passed, `main` runs, and the run being judged is left out of
   its own baseline.
 - **CI never holds the token.** Recording is refused when `GITHUB_ACTIONS` or `CI` is set, and `run-suite`,
-  `run-standalone` and preflight strip the `YTHRIL_TEST_RUNS_` variables from the environment of every test they start,
-  so a test cannot read the recorder's credentials.
+  `run-standalone` and preflight strip the `YTHRIL_TEST_RUNS_` variables (and the marker variable `node --test` sets
+  in its own children) from the environment of every test they start, so a test cannot read the recorder's
+  credentials. Both are dropped in `testing/_shared/test-child-env.mjs`, which every test child's environment is built
+  by.
 - **The connection is guarded in one place**, `scripts/_shared/ythril-api.mjs`: a URL that is not `https` or loopback is
   refused at construction, redirects are errors, a request times out, and an error never contains the token or the URL's
   credentials. `benchmarks/` uses the same module.
@@ -196,8 +198,10 @@ can fix there, and refused in CI unless it is expected.**
   input without asserting anything (`a-test-that-finds-its-input-absent-says-so`).
 - **An input that is absent locally and must be present in CI** goes through `testing/_shared/absent-input.mjs`.
   `requireInput(t, present, why)` skips off CI and **throws on CI**; `absentInputReason(why)` is the same for a `skip`
-  option evaluated up front. The CI half lives inside them so a caller cannot forget it. CI means `CI` is set and
-  non-empty, which GitHub Actions always does.
+  option evaluated up front. The CI half lives inside them so a caller cannot forget it. CI means `CI` or
+  `GITHUB_ACTIONS` is set to something other than `''`, `false` or `0`, which GitHub Actions always does; that one
+  reading is `testing/_shared/running-under-ci.mjs`, and the recorder, the suite runner and the changelog check use it
+  too.
 - **`requireEmbedding(t, available)`** is that rule for the embedder, and is how every test that needs a model asks for it.
 - **A skip that is expected in CI** carries the reason prefix `expected-in-ci:` followed by exactly one cause, for example
   `expected-in-ci: corpus not fetched`. Only the files on the list in `testing/_shared/expected-in-ci.mjs` may use it,
@@ -358,6 +362,6 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `BENCH_REPEATS` | `scripts/bench-link-readers.mjs` | How many times the link-reader benchmark repeats. |
 | `TODO_CHECK_DIR` | `scripts/todo-consistency.mjs` | Points the tracker consistency check at another folder. Its own tests use it. |
 
-`CI`, `GITHUB_ACTIONS` and `GITHUB_STEP_SUMMARY` are the runner's, not settings: `CI` makes absent inputs failures and
-stops the recorder, `GITHUB_ACTIONS` also stops it, and the step summary is where the advisory job writes. The
+`CI`, `GITHUB_ACTIONS` and `GITHUB_STEP_SUMMARY` are the runner's, not settings: either of the first two (unless set to
+`''`, `false` or `0`) makes absent inputs failures and stops the recorder, and the step summary is where the advisory job writes. The
 `YTHRIL_TIMING_` variables are set by the flag helper for the reporter it attaches and are not for you to set.

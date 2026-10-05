@@ -26,73 +26,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadCompose, environmentOf } from '../_shared/compose-file.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const composePath = join(repoRoot, 'docker-compose.yml');
-
-/**
- * Minimal reader for the subset of YAML `docker-compose.yml` uses: a `services:` map whose entries
- * hold scalar directives and simple `- item` lists. Deeper structures (environment maps, healthcheck
- * command arrays) are skipped rather than modelled — this is a lint over a handful of keys, not a
- * general parser, and hand-rolling it keeps the test free of a YAML dependency.
- */
-function parseComposeServices(text) {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
-  const services = {};
-  let inServices = false;
-  let current = null;
-  let listKey = null;
-
-  for (const raw of lines) {
-    if (!raw.trim() || raw.trim().startsWith('#')) continue;
-    const indent = raw.length - raw.trimStart().length;
-    const line = raw.trim();
-
-    if (indent === 0) {
-      inServices = line === 'services:';
-      current = null;
-      listKey = null;
-      continue;
-    }
-    if (!inServices) continue;
-
-    if (indent === 2 && line.endsWith(':')) {
-      current = line.slice(0, -1).trim();
-      services[current] = {};
-      listKey = null;
-      continue;
-    }
-    if (!current) continue;
-
-    if (indent === 4) {
-      listKey = null;
-      const idx = line.indexOf(':');
-      if (idx === -1) continue;
-      const key = line.slice(0, idx).trim();
-      const value = line.slice(idx + 1).trim();
-      if (value === '') {
-        services[current][key] = [];
-        listKey = key;
-      } else {
-        services[current][key] = value.replace(/^["']|["']$/g, '');
-      }
-      continue;
-    }
-
-    if (indent > 4 && listKey) {
-      if (line.startsWith('- ')) {
-        const item = line.slice(2).trim().replace(/^["']|["']$/g, '');
-        if (Array.isArray(services[current][listKey])) services[current][listKey].push(item);
-      } else if (line.includes(':')) {
-        // A nested scalar (e.g. `deploy:` → `replicas:`), recorded as "deploy.replicas".
-        const nk = line.slice(0, line.indexOf(':')).trim();
-        const nv = line.slice(line.indexOf(':') + 1).trim();
-        if (nv !== '') services[current][`${listKey}.${nk}`] = nv.replace(/^["']|["']$/g, '');
-      }
-    }
-  }
-  return services;
-}
 
 /** Sidecars that parse untrusted user input. Every one of them must be confined. */
 const UNTRUSTED_PARSERS = ['ollama', 'whisper', 'unstructured', 'doc-render', 'doc-office', 'doc-nlp'];
@@ -124,7 +60,7 @@ const WAIVED = {
   },
 };
 
-const services = parseComposeServices(readFileSync(composePath, 'utf8'));
+const services = loadCompose('docker-compose.yml').services;
 
 describe('docker-compose.yml — untrusted-parser sidecar hardening', () => {
   it('every compose service is either a known untrusted parser or explicitly exempt', () => {
@@ -160,7 +96,7 @@ describe('docker-compose.yml — untrusted-parser sidecar hardening', () => {
 
       it('runs with a read-only root filesystem', () => {
         if (WAIVED[name]?.read_only) return;
-        assert.equal(services[name]?.read_only, 'true', `${name} must set read_only: true`);
+        assert.equal(services[name]?.read_only, true, `${name} must set read_only: true`);
       });
 
       it('declares a memory ceiling', () => {
@@ -180,7 +116,7 @@ describe('docker-compose.yml — untrusted-parser sidecar hardening', () => {
   it('unstructured keeps its request-time caches inside the tmpfs and its models offline', () => {
     // Each of these was established by running a real hi_res extraction against the hardened
     // container; dropping any one of them breaks document conversion rather than just weakening it.
-    const env = (key) => services.unstructured?.[`environment.${key}`];
+    const env = (key) => { const v = environmentOf(services.unstructured)[key]; return v === undefined ? undefined : String(v); };
     assert.equal(env('NUMBA_CACHE_DIR'), '/tmp/numba', 'without this numba caches next to the package → fails on a read-only rootfs');
     assert.equal(env('MPLCONFIGDIR'), '/tmp/matplotlib', 'matplotlib needs a writable config dir');
     assert.equal(env('HF_HUB_OFFLINE'), '1', 'the models are baked in, but huggingface_hub calls the hub to resolve them — impossible on the internal network');
@@ -199,7 +135,7 @@ describe('docker-compose.yml — untrusted-parser sidecar hardening', () => {
     // sidecar without one is a product question rather than a drift -- the ceilings case below sweeps.
     const envExample = readFileSync(join(repoRoot, '.env.example'), 'utf8');
     for (const name of ['ollama', 'whisper', 'unstructured']) {
-      const replicas = String(services[name]?.['deploy.replicas'] ?? '');
+      const replicas = String(services[name]?.deploy?.replicas ?? '');
       const match = /\$\{([A-Z0-9_]+):-1\}/.exec(replicas);
       assert.ok(
         match,

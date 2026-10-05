@@ -38,7 +38,6 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +45,7 @@ import { REPO_ROOT } from './_sources.mjs';
 import { bareImports, importClosure } from './_import-closure.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { runTimed, fixture } from './_timing-runs.mjs';
+import { runScript } from './_run-script.mjs';
 
 const SCRIPT = join(REPO_ROOT, 'scripts', 'unexpected-skips.mjs');
 const PREFIX = 'expected-in-ci:';
@@ -55,11 +55,7 @@ const UNLISTED = 'testing/red-team-tests/some-attack.test.js';
 const REASON = 'corpus not fetched';
 
 function run(args) {
-  assert.ok(existsSync(SCRIPT), 'scripts/unexpected-skips.mjs does not exist yet — this is the script the plan names');
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60_000 });
-  return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+  return runScript(SCRIPT, args);
 }
 
 /** One data line in the timing reporter's shape (`TIMING_SCHEMA`), every key present. */

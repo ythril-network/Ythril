@@ -29,6 +29,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { testChildEnv } from './test-child-env.mjs';
 
 export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs');
 
@@ -94,13 +95,16 @@ export function writeResults(dir, spec) {
   return path;
 }
 
-/** Everything that could redirect, enable or refuse a recording, removed from the child's environment. */
-const SCRUBBED = /^(CI|GITHUB_.*|GH_TOKEN|GH_HOST|YTHRIL_TEST_RUNS_.*|YTHRIL_URL|YTHRIL_TOKEN|YTHRIL_METRICS_.*)$/;
+/**
+ * What could redirect, enable or refuse a recording, beyond what every test child already loses (the recorder's own
+ * family and the runner's wire: `testChildEnv` owns both, so they are not retyped here).
+ */
+const SCRUBBED = /^(CI|GITHUB_.*|GH_TOKEN|GH_HOST|YTHRIL_URL|YTHRIL_TOKEN|YTHRIL_METRICS_.*)$/;
 
 export function cleanEnv(extra = {}) {
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) if (!SCRUBBED.test(k)) env[k] = v;
-  return { ...env, ...extra };
+  const inherited = {};
+  for (const [k, v] of Object.entries(process.env)) if (!SCRUBBED.test(k)) inherited[k] = v;
+  return testChildEnv(extra, inherited);
 }
 
 /**

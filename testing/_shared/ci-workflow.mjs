@@ -23,12 +23,13 @@
  * of a `run:` script — a gate that matches the TEXT of a script must not be satisfied by the prose above a
  * step (the mistake `changelog-entry-is-enforced` records as its "sixth time").
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load } from 'js-yaml';
 import { REPO_ROOT, trackedSources } from '../standalone/_sources.mjs';
+import { CI_WORKFLOW } from './ci-workflow-path.mjs';
 
-export const CI_WORKFLOW = '.github/workflows/ci.yml';
+export { CI_WORKFLOW };
 
 /** The name the ruleset requires. A rename silently drops the merge gate, so it is the one string kept literal. */
 export const MERGE_GATE_NAME = 'Build & Test';
@@ -42,16 +43,25 @@ export function parseWorkflow(text, label = 'workflow') {
   return doc;
 }
 
-/** `ci.yml`, parsed. Read relative to the repository root, so the working directory does not matter. */
-export function loadCi() {
-  return parseWorkflow(readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8'), CI_WORKFLOW);
+/**
+ * One workflow, parsed: `rel` under `root`. The root defaults to this repository and does not depend on the working
+ * directory; a script that answers a question about "a repo" (`unrun-tests --root`) passes the copy it was given.
+ * A missing file throws — "no workflow" must never read as "a workflow that runs nothing".
+ */
+export function loadWorkflow(rel = CI_WORKFLOW, root = REPO_ROOT) {
+  const file = join(root, rel);
+  if (!existsSync(file)) throw new Error(`${rel} does not exist under ${root} — there is no workflow to read`);
+  return parseWorkflow(readFileSync(file, 'utf8'), rel);
 }
 
-/** Every committed workflow, `[{ file, doc }]`. The listing is git's, with a floor inside `trackedSources`. */
-export function loadAllWorkflows() {
-  return trackedSources('.github/workflows', { ext: ['.yml', '.yaml'], floor: 3 })
-    .map((file) => ({ file, doc: parseWorkflow(readFileSync(join(REPO_ROOT, file), 'utf8'), file) }));
-}
+/** `ci.yml`, parsed. */
+export const loadCi = (root = REPO_ROOT) => loadWorkflow(CI_WORKFLOW, root);
+
+/** Every committed workflow file, repo-relative. The listing is git's, with a floor inside `trackedSources`. */
+export const workflowFiles = () => trackedSources('.github/workflows', { ext: ['.yml', '.yaml'], floor: 3 });
+
+/** Every committed workflow, `[{ file, doc }]`. */
+export const loadAllWorkflows = () => workflowFiles().map((file) => ({ file, doc: loadWorkflow(file) }));
 
 /** `[{ id, name, job }]` — `name` is the display name, which is what a ruleset's required check matches. */
 export function jobEntries(doc) {
@@ -68,16 +78,50 @@ export function triggersOf(doc) {
   return new Set(Object.keys(on ?? {}));
 }
 
+/** A local action reference (`./.github/actions/x`): the only `uses:` whose commands live in this repository. */
+const isLocalAction = (step) => typeof step.uses === 'string' && step.uses.startsWith('./');
+
 /**
- * A step's shell script as the shell would read it: `#` comment lines gone and `\` continuations joined, so
- * one command is one line. An empty string for a step that runs nothing (a `uses:` step).
+ * The steps a local composite action runs, read from its `action.yml`. A local action that is not composite (a
+ * node or docker action) runs no shell, so it has none. A missing file throws.
  */
-export function shellOf(step) {
+function compositeStepsOf(uses, root) {
+  for (const name of ['action.yml', 'action.yaml']) {
+    const file = join(root, uses, name);
+    if (!existsSync(file)) continue;
+    const action = load(readFileSync(file, 'utf8'));
+    return action?.runs?.using === 'composite' && Array.isArray(action.runs.steps) ? action.runs.steps : [];
+  }
+  throw new Error(`\`uses: ${uses}\` names a local action with no action.yml under ${root}`);
+}
+
+function scriptOf(step, root, via) {
+  if (isLocalAction(step)) {
+    if (via.includes(step.uses)) throw new Error(`local action ${step.uses} uses itself: ${[...via, step.uses].join(' > ')}`);
+    return compositeStepsOf(step.uses, root).map((s) => scriptOf(s, root, [...via, step.uses])).filter(Boolean).join('\n');
+  }
   return String(step.run ?? '')
     .split('\n')
     .filter((l) => !/^\s*#/.test(l))
     .join('\n')
     .replace(/\\\r?\n\s*/g, ' ');
+}
+
+/**
+ * A step's shell script as the shell would read it: `#` comment lines gone and `\` continuations joined, so
+ * one command is one line. An empty string for a step that runs nothing.
+ *
+ * **A step that uses a LOCAL composite action is its action's script** (followed to any depth, a cycle refused).
+ * This is the half that was forgettable: a command moved out of `ci.yml` into `.github/actions/<name>` — the failure
+ * dump was the first — is still run by that job, and a reader of `step.run` alone sees a job that runs nothing.
+ * `unrun-tests` read a test command it could no longer find as "nothing selected", and a start-set read a stack it
+ * could no longer find as "no stack"; both recorded the absence instead of refusing it. Every consumer comes
+ * through here so the next move is seen by all of them, and the `a-workflow-is-read-by-one-module` gate holds it.
+ *
+ * `root` is the repository the local action is looked up in (default: this one).
+ */
+export function shellOf(step, { root = REPO_ROOT } = {}) {
+  return scriptOf(step, root, []);
 }
 
 /** `{ action, ref }` for a `uses:` step (`actions/cache/save@v4`), else null. */

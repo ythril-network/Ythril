@@ -25,32 +25,15 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import yaml from 'js-yaml';
-import { REPO_ROOT } from './_sources.mjs';
 import { loadCi } from '../_shared/ci-workflow.mjs';
+import { loadCompose, resolvedValue as ceiling, memoryMiB, isOverridable } from '../_shared/compose-file.mjs';
 import { startSets, upCommands, defaultServices } from '../_shared/compose-start-sets.mjs';
-
-const loadCompose = (rel) => yaml.load(readFileSync(join(REPO_ROOT, rel), 'utf8'));
 
 /** The Docker VM on the development machine: `.wslconfig` gives it 16 processors and 24 GB. */
 const VM_CPUS = 16;
 const VM_GIB = 24;
 
-/** A compose value, resolving `${VAR:-default}` to its default; null when absent. */
-const ceiling = (svc, key) => {
-  const raw = svc?.[key];
-  if (raw === undefined || raw === null) return null;
-  const v = String(raw).trim();
-  const d = v.match(/^\$\{[A-Z0-9_]+:-([^}]+)\}$/);
-  return d ? d[1] : v;
-};
-const gib = (s) => {
-  const m = String(s).match(/^([\d.]+)\s*([gmk])b?$/i);
-  assert.ok(m, `unreadable memory value: ${s}`);
-  return Number(m[1]) / ({ g: 1, m: 1024, k: 1024 * 1024 })[m[2].toLowerCase()];
-};
+const gib = (s) => memoryMiB(s) / 1024;
 
 /** What a set of services adds up to by default. A service with no ceiling counts as the whole VM. */
 function sumOf(compose, names) {
@@ -83,8 +66,7 @@ describe('the test stack has ceilings', () => {
   });
 
   it('each ceiling can be raised for a bigger runner without editing the file', () => {
-    const raisable = (v) => /^\$\{[A-Z0-9_]+:-[^}]+\}$/.test(String(v).trim());
-    const fixed = Object.entries(all).filter(([, s]) => !raisable(s.cpus) || !raisable(s.mem_limit)).map(([n]) => n);
+    const fixed = Object.entries(all).filter(([, s]) => !isOverridable(s.cpus) || !isOverridable(s.mem_limit)).map(([n]) => n);
     assert.deepEqual(fixed, [], 'these ceilings are hard-coded');
   });
 });

@@ -10,7 +10,7 @@
  * is a copy that can forget the CI half, so the CI half lives in `requireInput` (`absent-input.mjs`), which this
  * names for the one input it is asked about most.
  *
- * The un-skippable part: on CI (`process.env.CI` set, as GitHub Actions always sets it) an unavailable
+ * The un-skippable part: on CI (`runningUnderCi()`, as GitHub Actions always is) an unavailable
  * embedder is a failure, never a skip.
  *
  * @param {import('node:test').TestContext} t

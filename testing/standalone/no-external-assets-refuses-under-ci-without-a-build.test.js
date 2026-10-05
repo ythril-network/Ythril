@@ -32,6 +32,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
+import { CI_ENV_NAMES } from '../_shared/running-under-ci.mjs';
 
 const TARGET = join(REPO_ROOT, 'testing', 'standalone', 'no-external-assets.test.js');
 const CASE = 'a production build ships no remote asset reference either';
@@ -57,10 +59,11 @@ describe('no-external-assets: the built-output case, by whether CI is set and a 
 
   /** Run the one case; report how the runner saw it. */
   function runCase(root, ci) {
-    const env = { ...process.env };
-    delete env.CI;
-    delete env.NODE_TEST_CONTEXT;   // set by the runner that is running THIS file; left in, the child refuses to start its own run
-    if (ci) env.CI = 'true';
+    // Every variable the one CI reading looks at is dropped, not only CI: a real runner also sets GITHUB_ACTIONS, and
+    // the "no CI" case would otherwise be CI there. `testChildEnv` drops the runner's wire (NODE_TEST_CONTEXT).
+    const inherited = { ...process.env };
+    for (const name of CI_ENV_NAMES) delete inherited[name];
+    const env = testChildEnv(ci ? { CI: 'true' } : {}, inherited);
     const r = spawnSync(process.execPath,
       ['--test', '--test-reporter=tap', '--test-name-pattern', CASE, TARGET],
       { cwd: root, env, encoding: 'utf8', timeout: 60_000 });

@@ -21,13 +21,15 @@
  * - `requireInput(t, present, why)` — for a test body. True when `present`; otherwise skips (off CI) and returns
  *   false, or throws (on CI). Use as `if (!requireInput(t, present, why)) return;`.
  *
- * CI is `process.env.CI` set and non-empty, the same reading `mongoSkipReason` always gave it (GitHub Actions sets
- * it on every job; `CI=''` is not CI).
+ * CI is `runningUnderCi()` (`running-under-ci.mjs`): `CI` or `GITHUB_ACTIONS` set to something other than `''`,
+ * `false` or `0`. GitHub Actions sets both on every job.
  *
  * It is NOT a place for a skip that is EXPECTED on CI. A test that reads a corpus CI never fetches says so with
  * a skip reason prefixed `expected-in-ci:` in a file the gate lists — that is a different question (the absence
  * is by design), and routing it through here would turn a designed skip into a failure.
  */
+
+import { runningUnderCi } from './running-under-ci.mjs';
 
 /**
  * @param {string} why     what is missing, in the words an operator needs to fix it
@@ -36,7 +38,7 @@
  * @throws {Error} on CI, naming `why`
  */
 export function absentInputReason(why, ciHint = '') {
-  if (process.env['CI']) {
+  if (runningUnderCi()) {
     throw new Error(
       `${why} — but CI is set, so this is a failure rather than a skip: the test it guards would otherwise report `
       + `green having asserted nothing.${ciHint ? ` ${ciHint}` : ''}`,

@@ -46,21 +46,18 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 import { makeCiRoot } from './_ci-root-fixture.mjs';
+import { runScript } from './_run-script.mjs';
 
 const script = (name) => join(REPO_ROOT, 'scripts', name);
 
 /** Run one of the scripts; `status` null means it never produced one (a crash or a timeout). */
 function run(name, args, cwd = REPO_ROOT) {
-  assert.ok(existsSync(script(name)), `scripts/${name} does not exist yet — this is the script the plan names`);
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, [script(name), ...args], { cwd, env, encoding: 'utf8', timeout: 120_000 });
-  return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+  return runScript(script(name), args, { cwd });
 }
 
 /** A minimal node test file: it imports the runner and registers one test. */

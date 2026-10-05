@@ -30,6 +30,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { linesUnderUnshippedSections } from './_changelog-sections.mjs';
+import { runningUnderCi } from '../testing/_shared/running-under-ci.mjs';
 
 const base = process.argv[2] ?? 'origin/main';
 
@@ -68,7 +69,7 @@ try {
   // shallow clone with no merge base would otherwise turn this check into a no-op that reports success, which is
   // precisely the failure mode the check exists to prevent. Locally, skipping is fine.
   const why = err.message.split('\n')[0];
-  if (process.env['CI']) {
+  if (runningUnderCi()) {
     console.error(`check-changelog: cannot diff against ${base} (${why}).`);
     console.error('In CI this is a hard failure: a check that cannot run must not report success. Ensure the base ref');
     console.error('is fetched — actions/checkout needs `fetch-depth: 0` for a merge base to exist.');

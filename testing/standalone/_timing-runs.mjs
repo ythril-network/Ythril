@@ -7,7 +7,8 @@
  * over the files in `_fixtures/*.fixture.mjs`, with or without the timing reporter, and read what it wrote. A
  * second copy of the spawn would be a second place to forget the one line that makes a child run honest here:
  * `NODE_TEST_CONTEXT` is inherited from the runner that runs THESE tests, and a child that sees it believes it
- * is a worker of that runner and speaks the runner's wire format instead of printing a report.
+ * is a worker of that runner and speaks the runner's wire format instead of printing a report. `testChildEnv`
+ * (`_shared/test-child-env.mjs`) is where that variable is dropped.
  *
  * ## The fixtures are not `*.test.js`
  *
@@ -20,6 +21,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { timingReporterFlags } from '../_shared/timing-reporter-flags.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 export { SECRETS, LONG_FIRST_LINE, READY } from './_fixtures/timing-constants.mjs';
 
@@ -34,8 +36,8 @@ export const ORACLE = `${FIXTURE_DIR}/event-oracle.mjs`;
 
 /** What a child run sees: this process's env minus what makes a child `node --test` misbehave. */
 export function childEnv(extra = {}) {
-  const env = { ...process.env, NO_COLOR: '1', ...extra };
-  for (const k of ['NODE_TEST_CONTEXT', 'FORCE_COLOR', 'NODE_OPTIONS']) delete env[k];
+  const env = testChildEnv({ NO_COLOR: '1', ...extra });
+  for (const k of ['FORCE_COLOR', 'NODE_OPTIONS']) delete env[k];
   return env;
 }
 

@@ -58,7 +58,9 @@ import { join, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import { readTimingLog, maskSecrets } from '../testing/_shared/timing-reporter.mjs';
+import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
+import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { readClientResults } from './unexpected-skips.mjs';
 import { renderRunSummary } from './_shared/run-summary.mjs';
@@ -66,7 +68,7 @@ import { renderRunSummary } from './_shared/run-summary.mjs';
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
 
 export const REPO = 'ythril-network/Ythril';
-export const WORKFLOW_PATH = '.github/workflows/ci.yml';
+export const WORKFLOW_PATH = CI_WORKFLOW;
 export const SPACE = 'y-proj-ythril';
 export const CHRONO_TYPE = 'Test-Run';
 export const FORMAT_VERSION = 1;
@@ -502,14 +504,8 @@ async function withRecordLock(fn) {
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 /** Under CI no recording is done: CI never holds the write token, and a token found there is a leak to refuse. */
-function underCi() {
-  const set = (v) => v !== undefined && v !== '' && v !== 'false' && v !== '0';
-  const named = set(process.env.GITHUB_ACTIONS) ? 'GITHUB_ACTIONS' : set(process.env.CI) ? 'CI' : null;
-  return named;
-}
-
 function refuseUnderCi(flag) {
-  const named = underCi();
+  const named = ciSignal();
   if (!named) return null;
   console.error(`test-times: ${flag} is refused when ${named} is set: CI never holds the token that writes records, so nothing is sent`);
   return 2;

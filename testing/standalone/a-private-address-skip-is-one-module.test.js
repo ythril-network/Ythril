@@ -24,13 +24,16 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import ts from 'typescript';
 import { privateAddressSkipReason, privateHostAddress } from './_private-address.mjs';
+import { CI_ENV_NAMES } from '../_shared/running-under-ci.mjs';
 import { testAndHelperFiles, parseSource, calleeName, inSkipPosition, lineOf } from './_test-bodies.mjs';
 
 const MODULE = 'testing/standalone/_private-address.mjs';
 
 describe('privateAddressSkipReason answers the way mongoSkipReason does', () => {
   const realInterfaces = os.networkInterfaces;
-  const realCi = process.env.CI;
+  // every variable the one reading looks at, so a real CI runner's own GITHUB_ACTIONS cannot turn an "off CI" case into CI
+  const realCi = Object.fromEntries(CI_ENV_NAMES.map((n) => [n, process.env[n]]));
+  const clearCi = () => { for (const n of CI_ENV_NAMES) delete process.env[n]; };
   const loopbackOnly = () => ({ lo: [{ family: 'IPv4', internal: true, address: '127.0.0.1' }] });
   const withLan = () => ({
     lo: [{ family: 'IPv4', internal: true, address: '127.0.0.1' }],
@@ -39,11 +42,12 @@ describe('privateAddressSkipReason answers the way mongoSkipReason does', () => 
 
   afterEach(() => {
     os.networkInterfaces = realInterfaces;
-    if (realCi === undefined) delete process.env.CI; else process.env.CI = realCi;
+    for (const [n, v] of Object.entries(realCi)) { if (v === undefined) delete process.env[n]; else process.env[n] = v; }
   });
 
   it('with an address it answers false, on CI too (nothing to skip)', () => {
     os.networkInterfaces = withLan;
+    clearCi();
     process.env.CI = '1';
     assert.equal(privateHostAddress(), '192.168.1.10');
     assert.equal(privateAddressSkipReason(), false);
@@ -51,7 +55,7 @@ describe('privateAddressSkipReason answers the way mongoSkipReason does', () => 
 
   it('with none, off CI, it answers a reason the runner reports as a skip', () => {
     os.networkInterfaces = loopbackOnly;
-    delete process.env.CI;
+    clearCi();
     const reason = privateAddressSkipReason();
     assert.equal(typeof reason, 'string', 'a laptop with no LAN address skips with an actionable reason');
     assert.match(reason, /non-loopback/);
@@ -59,6 +63,7 @@ describe('privateAddressSkipReason answers the way mongoSkipReason does', () => 
 
   it('with none, on CI, it THROWS — a skip there reads as a pass', () => {
     os.networkInterfaces = loopbackOnly;
+    clearCi();
     process.env.CI = '1';
     assert.throws(() => privateAddressSkipReason(), (err) => {
       assert.match(err.message, /CI/, 'the refusal must say why it will not skip');
@@ -67,9 +72,12 @@ describe('privateAddressSkipReason answers the way mongoSkipReason does', () => 
     }, 'no non-loopback address on CI is a broken runner and must fail loudly, not skip and report green');
   });
 
-  it('an empty CI variable is not CI (the same reading mongoSkipReason gives it)', () => {
+  it('an empty or false CI variable is not CI (the one reading, running-under-ci.mjs)', () => {
     os.networkInterfaces = loopbackOnly;
+    clearCi();
     process.env.CI = '';
+    assert.equal(typeof privateAddressSkipReason(), 'string');
+    process.env.CI = 'false';
     assert.equal(typeof privateAddressSkipReason(), 'string');
   });
 });

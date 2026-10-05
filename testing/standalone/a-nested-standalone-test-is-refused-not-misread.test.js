@@ -35,6 +35,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 import { makeCiRoot } from './_ci-root-fixture.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 const SPLIT = pathToFileURL(join(REPO_ROOT, 'testing', '_shared', 'standalone-split.mjs')).href;
 const TEST_FILE = "import { it } from 'node:test';\nit('registers', () => {});\n";
@@ -49,9 +50,7 @@ function splitIn(cwd) {
       console.log(JSON.stringify({ ok: false, code: e.code ?? null, message: String(e.message) }));
     }
   });`;
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { cwd, env, encoding: 'utf8', timeout: 60_000 });
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { cwd, env: testChildEnv(), encoding: 'utf8', timeout: 60_000 });
   const line = r.stdout.trim().split('\n').pop();
   try { return JSON.parse(line); } catch { assert.fail(`the probe printed nothing parseable:\n${r.stdout}\n${r.stderr}`); }
 }

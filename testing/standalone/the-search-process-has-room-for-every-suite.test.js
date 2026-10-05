@@ -25,46 +25,23 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
-import { loadCi, jobEntries, stepsOf, shellOf, expressionOf } from '../_shared/ci-workflow.mjs';
+import { loadCi, stepsOf, shellOf, expressionOf } from '../_shared/ci-workflow.mjs';
+import { loadCompose, resolveDefaults, resolvedValue, memoryMiB, environmentOf } from '../_shared/compose-file.mjs';
+import { stackJobs } from '../_shared/compose-start-sets.mjs';
 
-const COMPOSE = readFileSync('testing/docker-compose.test.yml', 'utf8').replace(/\r\n/g, '\n');
 const CI = loadCi();
 const HARNESS = readFileSync('testing/standalone/_mongo-harness.mjs', 'utf8');
 
 /** The heap the full CI order (integration, sync, redteam, then standalone on one Mongo) was measured to need. */
 const MEASURED_HEAP_MIB = 1280;
 
-/** Each service block under `services:`, by name (the same reading the-test-stack-leaves-the-machine-room uses). */
-function services() {
-  const lines = COMPOSE.split('\n');
-  const start = lines.indexOf('services:');
-  const out = {};
-  let name = null;
-  for (const line of lines.slice(start + 1)) {
-    if (/^\S/.test(line)) break;
-    const header = line.match(/^  ([a-z0-9-]+):\s*$/);
-    if (header) { name = header[1]; out[name] = '\n'; continue; }
-    if (name) out[name] += `${line}\n`;
-  }
-  return out;
-}
+/** The two log files an atlas-local service is told to write, `[MONGOT_LOG_FILE, RUNNER_LOG_FILE]`, empty when unset. */
+const logFilesOf = (svc) => ['MONGOT_LOG_FILE', 'RUNNER_LOG_FILE'].map((k) => String(environmentOf(svc)[k] ?? '').trim());
 
-/** A size like `1280m`, `3g` or `${VAR:-3072m}` in MiB. */
-function mib(raw) {
-  const v = String(raw).trim().replace(/^["']|["']$/g, '');
-  const d = v.match(/\$\{[A-Z0-9_]+:-([^}]+)\}/);
-  const s = d ? d[1] : v;
-  const m = s.match(/^([\d.]+)\s*([gmk])b?$/i);
-  assert.ok(m, `unreadable size: ${raw}`);
-  return Number(m[1]) * ({ g: 1024, m: 1, k: 1 / 1024 })[m[2].toLowerCase()];
-}
-
-const all = services();
-const atlas = Object.entries(all).filter(([, b]) => /image:\s*mongodb\/mongodb-atlas-local/.test(b));
+const all = loadCompose('testing/docker-compose.test.yml').services;
+const atlas = Object.entries(all).filter(([, s]) => String(s.image ?? '').startsWith('mongodb/mongodb-atlas-local'));
 const harnessPort = (HARNESS.match(/127\.0\.0\.1:(\d{4,5})/) || [])[1];
-const harness = Object.entries(all).find(([, b]) => harnessPort && new RegExp(`127\\.0\\.0\\.1:${harnessPort}:27017`).test(b));
+const harness = Object.entries(all).find(([, s]) => harnessPort && (s.ports ?? []).some((p) => resolveDefaults(p).includes(`127.0.0.1:${harnessPort}:27017`)));
 
 describe('the search process has room for every suite, and says when it dies', () => {
   it('finds the atlas-local services and the harness Mongo', () => {
@@ -74,40 +51,32 @@ describe('the search process has room for every suite, and says when it dies', (
   });
 
   it('the harness Mongo sets mongot\'s heap: at least the measured need, at most half its container', () => {
-    const [name, block] = harness;
-    const opts = block.match(/JAVA_TOOL_OPTIONS:\s*(.+)/);
+    const [name, svc] = harness;
+    const opts = environmentOf(svc).JAVA_TOOL_OPTIONS;
     assert.ok(opts, `${name} sets no JAVA_TOOL_OPTIONS, so mongot's heap is a quarter of the container by default`);
-    const xmx = opts[1].match(/-Xmx(\$\{[A-Z0-9_]+:-[^}]+\}|[\d.]+[gmk])/i);
-    assert.ok(xmx, `${name}'s JAVA_TOOL_OPTIONS sets no -Xmx: ${opts[1]}`);
-    const heap = mib(xmx[1]);
-    const limit = mib((block.match(/mem_limit:\s*(.+)/) || [])[1] ?? '');
+    const xmx = resolveDefaults(opts).match(/-Xmx([\d.]+[gmk])/i);
+    assert.ok(xmx, `${name}'s JAVA_TOOL_OPTIONS sets no -Xmx: ${opts}`);
+    const heap = memoryMiB(xmx[1]);
+    const limit = memoryMiB(resolvedValue(svc, 'mem_limit') ?? '');
     assert.ok(heap >= MEASURED_HEAP_MIB, `${name}'s mongot heap is ${heap} MiB; the full CI order needs ${MEASURED_HEAP_MIB}`);
     assert.ok(heap <= limit / 2, `${name}'s mongot heap ${heap} MiB leaves mongod less than half of ${limit} MiB`);
   });
 
   it('every atlas-local service writes mongot\'s and the runner\'s logs to a file', () => {
-    const blind = atlas.filter(([, b]) => !/MONGOT_LOG_FILE:\s*\S/.test(b) || !/RUNNER_LOG_FILE:\s*\S/.test(b)).map(([n]) => n);
+    const blind = atlas.filter(([, s]) => logFilesOf(s).some((f) => !f)).map(([n]) => n);
     assert.deepEqual(blind, [], 'a mongot death in these is invisible: its log goes to /dev/null');
   });
 
   it('every stack job of ci.yml dumps those logs, for every atlas-local service, when it fails', () => {
-    const files = new Set(atlas.flatMap(([, b]) => [...b.matchAll(/(?:MONGOT|RUNNER)_LOG_FILE:\s*(\S+)/g)].map(m => m[1])));
+    const files = new Set(atlas.flatMap(([, s]) => logFilesOf(s)).filter(Boolean));
     assert.ok(files.size >= 2, 'no log file paths found in the compose file');
-    const starts = (s) => /\bdocker\s+compose\b[^\n]*?\bup\b/.test(shellOf(s));
-    const stackJobs = jobEntries(CI).filter(({ job }) => stepsOf(job).some(starts));
-    assert.ok(stackJobs.length >= 1, 'ci.yml starts no compose stack: the derivation is broken');
-    /** A step's script, or a local composite action's scripts — the dump lives in one so the jobs do not each copy it. */
-    const scriptOf = (s) => {
-      if (typeof s.uses === 'string' && s.uses.startsWith('./')) {
-        const action = readFileSync(join(REPO_ROOT, s.uses, 'action.yml'), 'utf8');
-        return action.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
-      }
-      return shellOf(s);
-    };
-    for (const { id, job } of stackJobs) {
-      const dumps = stepsOf(job).filter(s => /\bfailure\(\)/.test(expressionOf(s.if)) && /docker\s+cp\b/.test(scriptOf(s)));
+    const jobs = stackJobs(CI);
+    assert.ok(jobs.length >= 1, 'ci.yml starts no compose stack: the derivation is broken');
+    // `shellOf` follows a local composite action: the dump lives in one so the jobs do not each copy it.
+    for (const { id, job } of jobs) {
+      const dumps = stepsOf(job).filter(s => /\bfailure\(\)/.test(expressionOf(s.if)) && /docker\s+cp\b/.test(shellOf(s)));
       assert.ok(dumps.length >= 1, `ci.yml job ${id} starts the stack and has no failure-time step that reads the logs with docker cp (which works on a stopped container)`);
-      const text = dumps.map(scriptOf).join('\n');
+      const text = dumps.map(s => shellOf(s)).join('\n');
       const missing = [...files].filter(f => !text.includes(f));
       assert.deepEqual(missing, [], `job ${id}'s dump does not print these files`);
       for (const [name] of atlas) {

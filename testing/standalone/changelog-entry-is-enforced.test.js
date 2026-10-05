@@ -133,9 +133,9 @@ describe('the wiring check itself, held to a conforming workflow and to each way
 
 describe('the check cannot pass vacuously', () => {
   it('a diff that fails is a hard failure in CI', () => {
-    assert.match(CODE, /process\.env\['CI'\]/,
-      'the script must distinguish CI from a local run: skipping is fine locally, never in CI');
-    const at = CODE.indexOf("if (process.env['CI'])");
+    assert.match(CODE, /running-under-ci\.mjs/,
+      'the script must distinguish CI from a local run, through the one reading: skipping is fine locally, never in CI');
+    const at = CODE.indexOf('if (runningUnderCi())');
     assert.ok(at > 0, 'the CI branch is gone');
     // Bounded by the NEXT statement, not by the first `}` — that one closes a `${...}` inside a template literal, so
     // the slice ended before `process.exit(1)` and the assertion failed against correct code. Same convenience-slice

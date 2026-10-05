@@ -30,14 +30,10 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import yaml from 'js-yaml';
-import { REPO_ROOT } from './_sources.mjs';
+import { loadCompose, resolveDefaults } from '../_shared/compose-file.mjs';
 
-const compose = (rel) => yaml.load(readFileSync(join(REPO_ROOT, rel), 'utf8'));
-const PRODUCTION = compose('docker-compose.yml');
-const TEST = compose('testing/docker-compose.test.yml');
+const PRODUCTION = loadCompose('docker-compose.yml');
+const TEST = loadCompose('testing/docker-compose.test.yml');
 
 /** The sidecars that parse untrusted documents. Named, because "which services parse untrusted input" is a judgement. */
 const DOCUMENT_SIDECARS = ['doc-render', 'doc-office'];
@@ -80,9 +76,6 @@ function hardeningShortfalls(name, production, test) {
   }
   return v;
 }
-
-/** `${VAR:-default}` resolved to its default — a port written with a variable binds where its default says. */
-const resolveDefaults = (s) => String(s).replace(/\$\{[A-Za-z0-9_]+:-([^}]*)\}/g, '$1');
 
 /** The host address a published port binds, or null for "every interface". */
 function boundAddress(port) {
