@@ -324,7 +324,7 @@ All endpoints must be HTTPS and are SSRF-checked (private/reserved addresses are
 
 ### Event types
 
-Beyond the per-collection write events (`fact.created`, `entity.updated`, `file.deleted`, … across fact, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created`, `duplicate.detected`, and `test.ping`.
+Beyond the per-collection write events (`fact.created`, `entity.updated`, `file.deleted`, … across fact, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created` (once for each dangling reference, not once for each time its record is delivered), `duplicate.detected`, and `test.ping`.
 
 ---
 

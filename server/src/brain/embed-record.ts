@@ -21,6 +21,7 @@ import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmb
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { embeddingSuppressedFor, recordSuppression, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
+import { atReadSeq, readSeqOf } from './write-precondition.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type {
@@ -63,7 +64,7 @@ export const derivedHasText: Readonly<Record<string, unknown>> = {
 
 /** How far up `parentFileId` a derived record looks for its owner. A caption chunk of an image extracted from a
  *  document is two levels down; nothing is deeper. */
-const MAX_ANCESTRY = 3;
+export const MAX_ANCESTRY = 3;
 
 /**
  * Whether a derived record's TOP-LEVEL file says its embeddings are suppressed.
@@ -135,8 +136,12 @@ export async function buildEmbedText(
  * `gone` and `excluded` are both successes — the record was deleted, or its owner asked for it not to be
  * findable. Neither is owed a vector, so neither may be retried: a retry would keep a job alive forever for
  * work that must never happen.
+ *
+ * `superseded` is a third: a newer copy of the record arrived while this job was embedding the one it read, so its
+ * write — which lands only on that version (`atReadSeq`) — touched nothing. The newer copy's own arrival queued the
+ * embedding it is owed, so this attempt is finished, never retried, and a reindex counts it as done.
  */
-export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged' | 'textless';
+export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged' | 'textless' | 'superseded';
 
 /**
  * `rebuild`: make the vector again even when its text and model name are unchanged. A reindex is exactly that case —
@@ -161,7 +166,10 @@ export interface EmbedStoredRecordOptions {
  * correct — no counter fires, and no `If-Match` precondition would have been violated.
  *
  * `embedStoredRecord` cannot have that bug. It re-reads the document AFTER the write, so the text it embeds
- * is by construction the text of the record as it actually stands, whoever else wrote to it in between.
+ * is by construction the text of the record as it stood when it read it, whoever else wrote to it before. What
+ * can still arrive is a NEWER copy while the model is being called — the slow step — and every write the job
+ * makes therefore lands only on the version it read (`atReadSeq`): the newer copy is not touched, the outcome is
+ * `superseded`, and the newer copy's own arrival queued the embedding it is owed.
  *
  * Two things fall out of the change that are worth knowing before "simplifying" it back:
  *
@@ -188,6 +196,14 @@ export async function embedStoredRecord(
   const doc = await col(collName).findOne(asFilter({ _id: recordId })) as Record<string, unknown> | null;
   if (!doc) return 'gone';
 
+  // EVERY write below lands only on the version just read (`atReadSeq`): the model call is the slow step, and a peer's
+  // newer copy can arrive inside it. A write by `_id` alone would put the OLD text's vector and `matchedText` on the
+  // newer copy — or a vector on a copy this instance suppresses — and `matchedText` doubles as the "unchanged"
+  // fingerprint, so the stale vector could be taken as current. False: nothing matched, a newer copy is there.
+  const readSeq = readSeqOf(doc);
+  const writeIfUnchanged = async (update: Record<string, unknown>): Promise<boolean> =>
+    (await col(collName).updateOne(asFilter(atReadSeq(recordId, readSeq)), update)).matchedCount > 0;
+
   // `suppressEmbeddings` is implemented AS the absence of a vector — there is no query-time filter to honour,
   // so a stored vector IS the feature failing. This is the LAST place it can take effect, not the only one:
   // the four creators consult `embeddingSuppressedFor` before computing a vector inline, because a creator
@@ -212,12 +228,8 @@ export async function embedStoredRecord(
   // its path. Decided BEFORE suppression, whose branch writes `matchedText` and would give the record a text it does
   // not have. `faceEmbedding` is a different index of a different model and is not touched.
   if (text === null) {
-    if ('embedding' in doc || 'embeddingModel' in doc || 'matchedText' in doc) {
-      await col(collName).updateOne(
-        asFilter({ _id: recordId }),
-        { $unset: { embedding: '', embeddingModel: '', matchedText: '' } },
-      );
-    }
+    if (('embedding' in doc || 'embeddingModel' in doc || 'matchedText' in doc)
+      && !await writeIfUnchanged({ $unset: { embedding: '', embeddingModel: '', matchedText: '' } })) return 'superseded';
     return 'textless';
   }
 
@@ -225,10 +237,7 @@ export async function embedStoredRecord(
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
   if (embeddingSuppressedFor(spaceId, recordType, doc) || (isDerived(doc) && await ancestorSuppressed(spaceId, doc))) {
-    await col(collName).updateOne(
-      asFilter({ _id: recordId }),
-      { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } },
-    );
+    if (!await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } })) return 'superseded';
     return 'excluded';
   }
 
@@ -263,19 +272,14 @@ export async function embedStoredRecord(
     // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
     // stale vector, the next attempt would take the vector as current and never call the model again.
-    await col(collName).updateOne(
-      asFilter({ _id: recordId }),
-      { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } },
-    );
+    // On a newer copy it writes nothing, and the failure still reaches the caller, which retries.
+    await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } });
     throw err;
   }
 
   // `seq` is deliberately NOT advanced. An embedding is a DERIVED field — `merkle.ts` excludes it from
   // replication precisely because each peer computes its own — so bumping `seq` here would broadcast a
   // no-op change to every peer in every network the space belongs to, on every embedding, forever.
-  await col(collName).updateOne(
-    asFilter({ _id: recordId }),
-    { $set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } },
-  );
+  if (!await writeIfUnchanged({ $set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } })) return 'superseded';
   return 'embedded';
 }

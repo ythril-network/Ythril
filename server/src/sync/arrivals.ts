@@ -15,9 +15,11 @@
  * retention stamps; and a pulled file-metadata page went to a collection nothing reads. The door that skips a guard
  * is always the weaker one, so a guard that lives at a door is a guard some door does not have:
  *
- *  1. **Shape, per document** (`arrivalRefusal`): a string `_id`, and — for a peer's arrival — a seq that is a
+ *  1. **Shape, per document** (`arrivalRefusal`): a string `_id`, a `parentFileId` that is a string when a file row
+ *     has one (any other type makes a half-derived row), and — for a peer's arrival — a seq that is a
  *     non-negative integer the counter can carry (absent only for file metadata older than seqs). A refusal is
- *     that document's, never the page's. A RESTORE checks the id only (cut `C7`: 5.6.1 stored whatever seq a backup
+ *     that document's, never the page's. This is ALL a pull refuses: it stores a document that fails its schema as
+ *     received and reports it (`sync/pull-page.ts`), because a pull cannot tell its sender; a push refuses it. A RESTORE checks the id only (cut `C7`: 5.6.1 stored whatever seq a backup
  *     held, and a patch keeps that) — but an implausible restored seq never moves the counter (`F14`).
  *  2. **Retag** to the local space, unconditionally: under a `spaceMap` alias the sender's id names another space.
  *  3. **Collapse** a repeated `_id` to its highest seq (equal: the earlier, `isNewerCopy`). An unordered bulk write
@@ -30,7 +32,7 @@
  *     queue skips it, so a carried vector would stay for good (`Q-218` R1). A RESTORE keeps what the export carried
  *     as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates), drops what is derived from the export, and
  *     carries NOTHING from the copy it replaces (`Q-218` R2), its vector included: every restored record the space embeds is queued
- *     and re-embedded from the backup's text — `carriedFields`.
+ *     and re-embedded from the backup's text — `carriedFields` (`sync/local-only-fields.ts`).
  *  5. **No receiver stamping** (cut `C4`): main stamps an arrival with no stamp of its own from its `createdAt` by
  *     this instance's windows (`D-9`). 5.6.x stores it unstamped, as 5.6.1 did; a stamp the stored copy holds is
  *     carried (rule 4). The one exception is a file ROW a peer's metadata merge creates (`ingestFileMeta`): it takes
@@ -38,11 +40,14 @@
  *     whichever of the two lands first would decide whether the file ever expires (`Q-250`).
  *  6. **The write guard**: `{ _id, seq < s or absent }`, on the insert half as well — a copy newer than the one
  *     planned, written meanwhile, fails the op with a duplicate `_id` and is kept. A RESTORE replaces, unguarded.
- *     File metadata from a peer is merged per document by `ingestFileMeta` (a `$set` on `_id` alone), so only the
- *     accept read guards it. The stray-filemeta drain's recovery (`fillOnly`, `fillFileMetaFromStray`) skips the
+ *     File metadata from a peer is merged per document by `ingestFileMeta`, under the same guard (`seqGuard`) in the
+ *     merge's own filter. The stray-filemeta drain's recovery (`fillOnly`, `fillFileMetaFromStray`) skips the
  *     accept read and carries every condition in the write's own filter instead, creating nothing.
- *  7. **Failures by operation**: a duplicate is read back — a newer stored copy is "newer here", anything else is a
- *     unique-index duplicate (an edge triplet, a link's endpoints). A per-operation refusal of the document itself
+ *  7. **Failures by operation**: a duplicate is read back — a newer stored copy is "newer here"; one at the SAME seq
+ *     is this very version, landed, unless its text differs (`divergesFrom`, a fact), which is a `diverged` outcome and
+ *     never `landed` (`Q-232`: a racing push's same-seq copy counted itself landed while its text was stored
+ *     nowhere); anything else is a unique-index duplicate (an edge triplet, a link's endpoints). The accept names an
+ *     equal-seq copy with other text `diverged` too, instead of `newerLocal`. A per-operation refusal of the document itself
  *     is retried ONCE alone and then reported in `storeRefused` — NOT in `refused` (cut `C3`: main counts a store
  *     refusal as a rejected document and answers 200; on 5.6.x each door answers it as 5.6.1 answered the same
  *     fault, so the writer keeps it apart for the door to decide). A failure with no per-operation shape falls back
@@ -77,9 +82,9 @@ import { inChunks } from '../util/chunks.js';
 import { log, logSafe, peerList } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
-import { planSeqUpserts, retagToLocalSpace, isNewerCopy } from './upsert-plan.js';
+import { planSeqUpserts, retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { isDerived } from '../brain/embed-record.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
@@ -146,6 +151,13 @@ export interface ArrivalOutcome {
   updated: string[];
   /** Not written: the stored copy is at or above this seq (the accept, or the write guard). */
   newerLocal: string[];
+  /**
+   * Not written, and NOT the same version: a stored copy at this very seq holds DIFFERENT text (`divergesFrom`, a
+   * fact). Found by the accept, or — the rarer case — by the read-back of a guarded write that a copy stored meanwhile
+   * failed (`Q-232`: it was counted `landed`, with its text stored nowhere). The writer never forks: a push door forks
+   * it by the fork rules, and a pull keeps the local copy and reports the id.
+   */
+  diverged: string[];
   /** Not written: a unique index other than `_id` holds this record under another id. */
   duplicates: string[];
   /** Refused for its SHAPE: a malformed id or seq. Never stored, never offered again by an honest sender. */
@@ -200,11 +212,17 @@ export class ArrivalWriteError extends Error {
  * Why a document cannot be stored as it arrived, or `null` when it can. The one shape rule for every door. A
  * restore asks the id half only (`seq: 'any'`, cut `C7`).
  */
-function arrivalRefusal(doc: unknown, { seq }: { seq: 'required' | 'optional' | 'any' }): string | null {
+function arrivalRefusal(
+  doc: unknown, { seq, fileRow = false }: { seq: 'required' | 'optional' | 'any'; fileRow?: boolean },
+): string | null {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return 'not a document';
-  const { _id: id, seq: s } = doc as { _id?: unknown; seq?: unknown };
+  const { _id: id, seq: s, parentFileId: parent } = doc as { _id?: unknown; seq?: unknown; parentFileId?: unknown };
   if (typeof id !== 'string' || id.length === 0) return '_id is not a non-empty string';
   if (seq === 'any') return null;
+  // A file row that names a parent of any other type is neither a file nor a derived row (`isDerived` reads a STRING):
+  // stored, it is a half-derived row the derived-row queries misread. The one shape that corrupts the receiver beyond
+  // the id and the seq (`Q-225`, the part of the pull's validation a patch carries).
+  if (fileRow && parent !== undefined && typeof parent !== 'string') return 'parentFileId is present and is not a string';
   return seqRefusal(s, { optional: seq === 'optional' });
 }
 
@@ -224,15 +242,23 @@ const NAMED_IN_SUMMARY = 10;
  * peer sent, so each goes through `logSafe`.
  */
 export function warnArrivalsNotStored(
-  where: string, spaceId: string, family: string, what: string, items: ReadonlyArray<string | ArrivalRefusal>,
+  where: string, spaceId: string, family: string, what: string | ArrivalVerdict, items: ReadonlyArray<string | ArrivalRefusal>,
 ): void {
   if (items.length === 0) return;
   // Each item is rendered by `peerList`, which names the first `NAMED_IN_SUMMARY` and says how many more — never a slice
   // before it and a hand-written tail after it, which bounded the count twice and the text not at all (bundle-30 I6, C15).
   const named = items.map(i => (typeof i === 'string' ? i : `${i._id} (${i.reason})`));
-  log.warn(`${logSafe(where)}: ${items.length} ${logSafe(family)} record(s) ${logSafe(what)} in space '${logSafe(spaceId)}': `
-    + peerList(named, ', ', { count: NAMED_IN_SUMMARY }));
+  const verdict = typeof what === 'string' ? `${items.length} ${family} record(s) ${what} in space '${spaceId}'` : what(items.length);
+  log.warn(`${logSafe(where)}: ${logSafe(verdict)}: ${peerList(named, ', ', { count: NAMED_IN_SUMMARY })}`);
 }
+
+/**
+ * What a summary says happened to the ids it names, when it is not the usual "N <family> record(s) <what> in space
+ * 'x'" — the verdict as a sentence of its own, given the count. The two a PULL reports about documents it did not
+ * refuse (`sync/pull-report.ts`): it kept the local copy of one the peer sent at the same seq with other text, and it
+ * stored one that does not match its schema. Same renderer, so the ids are escaped, bounded and capped alike.
+ */
+export type ArrivalVerdict = (count: number) => string;
 
 /** A seq the counter may carry, or `undefined` — what a restore's odd seq counts as, for the counter and collapse. */
 function plausibleSeq(seq: unknown): number | undefined {
@@ -279,8 +305,7 @@ async function planArrivalWrites<T extends Doc>(
 
 /** The guard on every write but a restore's: only a stored copy below this seq, or none, may be replaced. */
 function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
-  if (restore || typeof doc.seq !== 'number') return { _id: doc._id };
-  return { _id: doc._id, $or: [{ seq: { $lt: doc.seq } }, { seq: { $exists: false } }] };
+  return restore ? { _id: doc._id } : seqGuard(doc._id, doc.seq);
 }
 
 /**
@@ -299,14 +324,13 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
  *    vector belongs to text the backup may not hold (every restored record the space embeds is queued and
  *    re-embedded instead).
  */
-function carriedFields(
+function carriedForArrival(
   spaceId: string, recordType: BrainEmbedRecordType | null, doc: Doc, restore: boolean,
 ): readonly string[] {
   // A restore is the backup's record whole, as 5.6.1's replace left it: nothing of the copy it replaces, and every
   // restored record is queued, so a vector the backup's text no longer matches never ranks it meanwhile.
-  if (restore) return [];
-  const suppressed = recordType !== null && embeddingSuppressedFor(spaceId, recordType, doc);
-  return suppressed ? [...RESTORED_LOCAL_FIELDS] : [...DERIVED_LOCAL_FIELDS, ...RESTORED_LOCAL_FIELDS];
+  const suppressed = !restore && recordType !== null && embeddingSuppressedFor(spaceId, recordType, doc);
+  return [...carriedFields({ restore, suppressed })];
 }
 
 /**
@@ -385,7 +409,7 @@ export async function writeArrivals(
   const restore = opts.restore === true;
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const out: ArrivalOutcome = {
-    inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], storeRefused: [], derived: [],
+    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], storeRefused: [], derived: [],
     collapsed: [], complete: [], unstored: [], derivedReplaced: 0, maxReceived: 0, counterBehind: false,
   };
   // A peer's file is queued by `ingestFileMeta` alone, when its blob is here; a RESTORED file row is replaced here,
@@ -395,7 +419,9 @@ export async function writeArrivals(
   // ── 1-3: shape, preparation, collapse — keyed in a Map, because an id is a peer's text ─────────────────────────
   const page = new Map<string, Doc>();
   for (const raw of docs) {
-    const why = arrivalRefusal(raw, { seq: restore ? 'any' : family === 'files' ? 'optional' : 'required' });
+    const why = arrivalRefusal(raw, {
+      seq: restore ? 'any' : family === 'files' ? 'optional' : 'required', fileRow: family === 'files' && !restore,
+    });
     if (why) { out.refused.push({ _id: arrivalId(raw), reason: why }); continue; }
     const doc = raw as Doc;
     if (family === 'files' && !restore && isDerived(doc)) { out.derived.push(doc._id); continue; }
@@ -421,7 +447,13 @@ export async function writeArrivals(
     ? { toWrite: arriving, stored: new Map<string, { seq?: unknown }>() }
     : await planArrivalWrites(collName, arriving, { restore, handed: opts.stored });
   const writing = new Set(toWrite);
-  for (const d of arriving) if (!writing.has(d)) out.newerLocal.push(d._id);
+  const kept = arriving.filter(d => !writing.has(d));
+  // A copy at the stored seq that is not the stored text is a divergence, not "newer here" (`Q-232`): a push door forks
+  // it, a pull names it. Only an equal seq can diverge, so only those are read for their text — a rare read.
+  const tied = family === 'facts' && !restore ? kept.filter(d => stored.get(d._id)?.seq === d.seq) : [];
+  const texts = tied.length > 0
+    ? await readStoredById<Doc>(collName, tied.map(d => d._id), { seq: 1, fact: 1 }) : new Map<string, Doc>();
+  for (const d of kept) (divergesFrom(texts.get(d._id), d) ? out.diverged : out.newerLocal).push(d._id);
 
   // ── the write, a chunk at a time ──────────────────────────────────────────────────────────────────────────────
   const coll = col<Doc>(collName);
@@ -451,7 +483,7 @@ export async function writeArrivals(
     }
   };
   /** What each document's replace carries from its stored copy — decided once per document. */
-  const carry = (d: Doc): readonly string[] => carriedFields(spaceId, recordType, d, restore);
+  const carry = (d: Doc): readonly string[] => carriedForArrival(spaceId, recordType, d, restore);
   /** A restore of file rows: the derived ids the backup carries, per parent file (`Q-251`). */
   const backupDerived = restore && family === 'files' ? derivedIdsByParent(arriving) : undefined;
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
@@ -532,11 +564,12 @@ export async function writeArrivals(
       if (dupes.length > 0) {
         // Read back: a stored copy AT the planned seq is this version, landed; one above it was written meanwhile
         // and is kept; anything else collided on a unique index other than `_id`.
-        const now = await readStoredById<Doc>(collName, dupes.map(d => d._id), { seq: 1 });
+        const now = await readStoredById<Doc>(collName, dupes.map(d => d._id), family === 'facts' ? { seq: 1, fact: 1 } : { seq: 1 });
         for (const d of dupes) {
           const s = now.get(d._id)?.seq;
           const sameSeq = typeof s === 'number' && s === d.seq;
-          if (!restore && sameSeq) landed.push(d);
+          if (!restore && sameSeq && divergesFrom(now.get(d._id), d)) out.diverged.push(d._id);
+          else if (!restore && sameSeq) landed.push(d);
           else if (!restore && typeof s === 'number' && isNewerCopy(s, d.seq)) out.newerLocal.push(d._id);
           else out.duplicates.push(d._id);
         }

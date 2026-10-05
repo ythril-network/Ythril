@@ -191,14 +191,14 @@ export async function reconcileLinks(
   // Only the classes this write TOUCHED. A `PATCH` that names `linkEntities` alone must not disturb the fact
   // links, so the existing set is read per class rather than per `from`.
   const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
-    .toArray() as Array<{ _id: string }>;
+    .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1, seq: 1 } })
+    .toArray() as Array<{ _id: string; seq?: number }>;
 
   const now = new Date().toISOString();
   let added = 0;
   let removed = 0;
 
-  for (const { _id } of existing) {
+  for (const { _id, seq } of existing) {
     if (wanted.has(_id)) continue;
     // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is
     // already a record has no array entry to be named by. Deleting on that basis is data loss.
@@ -206,7 +206,7 @@ export async function reconcileLinks(
     await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
     // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
     // that still holds it, so the removal would undo itself and nothing would report that it had.
-    await writeTombstone(spaceId, { _id, type: 'link', deletedAt: now });
+    await writeTombstone(spaceId, { _id, type: 'link', originalSeq: seq, deletedAt: now });
     removed++;
   }
 

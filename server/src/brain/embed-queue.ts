@@ -44,6 +44,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { inChunks } from '../util/chunks.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */
 export const MAX_EMBED_ATTEMPTS = 5;
@@ -259,6 +260,28 @@ export async function retireEmbedJob(
   recordId: string,
 ): Promise<void> {
   await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
+}
+
+/** Job ids named by one delete of `cancelEmbedJobs`: a hub's thousands of ids are never one `$in`. */
+const SWEEP_BATCH = 500;
+
+/**
+ * Cancel the jobs of many records of one kind that STILL EXIST — what the suppression sweep does for a page of records
+ * whose vector it has just removed (`retireEmbedJob` is the same delete for a record that is GONE). A queued job would
+ * have the worker write the vector straight back within seconds: the defect returning by a different route.
+ *
+ * By `embedJobId`, never a hand-spelled `${kind}:${id}` (a second spelling of the id is how a cancel comes to match
+ * nothing), and chunked (`SWEEP_BATCH`): one delete over every id of a big space exceeds the command size limit and
+ * fails the whole cancellation, leaving each job to write its vector straight back.
+ */
+export async function cancelEmbedJobs(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  recordIds: readonly string[],
+): Promise<void> {
+  for (const batch of inChunks(recordIds, SWEEP_BATCH)) {
+    await jobs(spaceId).deleteMany(asFilter<BrainEmbedJobDoc>({ _id: { $in: batch.map(id => embedJobId(recordType, id)) } as never }));
+  }
 }
 
 /**

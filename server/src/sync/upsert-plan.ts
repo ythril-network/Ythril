@@ -31,8 +31,7 @@
  * belongs to `localSpaceId` by definition.
  */
 
-import { createHash } from 'node:crypto';
-import { idPart } from '../brain/edge-id.js';
+import { derivedV4Id } from '../util/derived-id.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
 export interface Replicable {
@@ -109,11 +108,34 @@ export function isNewerCopy(incoming: number | undefined, held: number | undefin
  * `edge-id.ts`'s length-prefixed parts, so no text can forge a separator. The namespace is fixed for ever.
  */
 export function forkIdFor(parentId: string, seq: number, text: string): string {
-  const h = createHash('sha256')
-    .update(`ythril.fork-identity${idPart(parentId)}${idPart(String(seq))}${idPart(text)}`)
-    .digest();
-  h[6] = (h[6]! & 0x0f) | 0x40;
-  h[8] = (h[8]! & 0x3f) | 0x80;
-  const x = h.subarray(0, 16).toString('hex');
-  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
+  return derivedV4Id('ythril.fork-identity', parentId, String(seq), text);
+}
+
+/**
+ * Does an arriving fact DIVERGE from the stored copy of it — the same seq, different `fact` text? The one fork rule,
+ * asked by the push doors (which facts fork: `api/sync/docs.ts`) and by the arrival writer's accept and its read-back
+ * of a guarded write (`sync/arrivals.ts`), so an equal-seq copy with other text is a divergence on every door and
+ * never "this version landed". `null`/`undefined` is nothing stored: nothing to diverge from.
+ *
+ * Only a fact carries text to compare; any other record has no `fact`, so two copies of it never diverge here.
+ */
+export function divergesFrom(
+  stored: { seq?: unknown; fact?: unknown } | null | undefined,
+  incoming: { seq?: unknown; fact?: unknown },
+): boolean {
+  return stored !== null && stored !== undefined && incoming.seq === stored.seq && incoming.fact !== stored.fact;
+}
+
+/**
+ * `isNewerCopy` AT THE WRITE: the filter under which an arriving copy at `seq` may replace what is stored — a stored
+ * copy below it, or one with no seq, or none (the upsert). A copy newer than the one planned, written between the
+ * accept read and the write, then fails the write with a duplicate `_id` and is kept. A copy that itself has no seq is
+ * written by `_id` alone, as `isNewerCopy` lets anything replace a seq-less copy.
+ *
+ * Both writers of an arriving record filter through it — the brain families' replace and the file-metadata merge
+ * (`ingestFileMeta`) — so a guard cannot be present at one and absent at the other.
+ */
+export function seqGuard(id: string, seq: unknown): Record<string, unknown> {
+  if (typeof seq !== 'number') return { _id: id };
+  return { _id: id, $or: [{ seq: { $lt: seq } }, { seq: { $exists: false } }] };
 }

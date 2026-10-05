@@ -116,6 +116,31 @@ export async function deleteEntityCascade(
   }
 
   /*
+   * Anything blocking that is NOT an edge refuses the cascade — and it refuses BEFORE anything is removed (`Q-361`
+   * item 12). It used to delete every blocking edge, write their tombstones, and only then report that the entity could
+   * not be deleted: the caller was told "refused" about an operation that had removed every relationship of the entity
+   * and spread those removals to every peer. The whole removal set is known from the preview, so it is judged first.
+   *
+   * That a cascade does not remove these is deliberate rather than unfinished. `M-2` made a fact, a chrono entry or a
+   * file able to block a delete through its link arrays, and removing one of those is deleting somebody's RECORD — not
+   * the relationship between two records, which is all an edge is. The owner's ruling is about edges: *"either remove
+   * edges by hand or use A when you are sure."*
+   *
+   * The refusal answers with the preview it decided on — the same set the caller was shown, every edge still in it —
+   * not a fresh preview of a space it has not changed.
+   */
+  const stillBlocking = preview.removes.filter(b => b.type !== 'edge');
+  if (stillBlocking.length > 0) {
+    return {
+      ok: false,
+      preview,
+      error: `Cannot delete: ${stillBlocking.map(b => `${b.type} ${b._id}`).join(', ')} still reference this `
+        + 'entity, and a cascade removes EDGES only — a fact, chrono entry or file that names it is a '
+        + 'record of its own, not a relationship. Edit those to drop the reference first.',
+    };
+  }
+
+  /*
    * The EDGES first, then the entity — and each edge through `deleteEdge`, not a bulk delete.
    *
    * `deleteEdge` writes the tombstone. Without one, the next pull from any peer that still holds the edge
@@ -124,27 +149,7 @@ export async function deleteEntityCascade(
    */
   const removed: BacklinkEntry[] = [];
   for (const b of preview.removes) {
-    if (b.type !== 'edge') continue;
     if (await deleteEdge(spaceId, b._id, actor)) removed.push(b);
-  }
-
-  /*
-   * Anything blocking that is NOT an edge is left, and the delete below then refuses again.
-   *
-   * That is deliberate rather than unfinished. `M-2` made a fact, a chrono entry or a file able to block a
-   * delete through its link arrays, and removing one of those is deleting somebody's RECORD — not the
-   * relationship between two records, which is all an edge is. The owner's ruling is about edges: *"either
-   * remove edges by hand or use A when you are sure."*
-   */
-  const stillBlocking = preview.removes.filter(b => b.type !== 'edge');
-  if (stillBlocking.length > 0) {
-    return {
-      ok: false,
-      preview: await previewEntityCascade(spaceId, entityId),
-      error: `Cannot delete: ${stillBlocking.map(b => `${b.type} ${b._id}`).join(', ')} still reference this `
-        + 'entity, and a cascade removes EDGES only — a fact, chrono entry or file that names it is a '
-        + 'record of its own, not a relationship. Edit those to drop the reference first.',
-    };
   }
 
   await deleteEntity(spaceId, entityId, actor);

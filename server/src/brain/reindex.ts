@@ -152,6 +152,9 @@ export function startReindex(plan: ReindexPlan): void {
       // Reported because a reindex that says `reindexed=0` over a suppressed space would otherwise read
       // as broken, and an operator would go looking for a fault that is a setting.
       let suppressed = 0;
+      // Counted apart too, and as DONE: a newer copy arrived while the record was embedding, and its own arrival queued
+      // the embedding it is owed — not a failure, and not a record this reindex left without a vector.
+      let superseded = 0;
       let errors = 0;
       try {
         for (const mid of memberIds) {
@@ -176,6 +179,7 @@ export function startReindex(plan: ReindexPlan): void {
                   const outcome = await embedStoredRecord(mid, kind, doc._id, { rebuild: true });
                   if (outcome === 'embedded') reindexed++;
                   else if (outcome === 'excluded') suppressed++;
+                  else if (outcome === 'superseded') superseded++;
                 } catch { errors++; }
               }
               const last = batch[batch.length - 1]?._id;
@@ -186,7 +190,7 @@ export function startReindex(plan: ReindexPlan): void {
 
           clearReindexFlag(mid);
         }
-        log.info(`Reindex completed for space '${peerText(spaceId)}': reindexed=${reindexed}, suppressed=${suppressed}, errors=${errors}`);
+        log.info(`Reindex completed for space '${peerText(spaceId)}': reindexed=${reindexed}, suppressed=${suppressed}, superseded=${superseded}, errors=${errors}`);
       } catch (err) {
         log.error(`Reindex job failed for space '${peerText(spaceId)}': ${peerText(err)}`);
       } finally {

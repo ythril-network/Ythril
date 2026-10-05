@@ -41,7 +41,8 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { writeArrivals, arrivalId, type ArrivalOutcome } from './arrivals.js';
+import { writeArrivals, type ArrivalOutcome } from './arrivals.js';
+import { settlePulledPage } from './pull-page.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -875,13 +876,12 @@ async function pullFromPeer(
           + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
         break;
       }
-      const refused = new Set(written.refused.map(r => r._id));
-      for (const doc of pageDocs as FactDoc[]) {
-        if (refused.has(arrivalId(doc))) continue;
-        count++;
-        if (doc.seq > maxSeq) maxSeq = doc.seq;
-        if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
-      }
+      // What the page said about itself (`sync/pull-page.ts`): the reports an operator reads and what it adds to the
+      // transfer's totals and position — a refused document is counted in nothing, a kept-local one only moves the position.
+      const seen = settlePulledPage(spaceId, family, pageDocs, written, member);
+      count += seen.count;
+      maxSeq = Math.max(maxSeq, seen.maxSeq);
+      highSeq = Math.max(highSeq, seen.highSeq);
       // Only after the page is APPLIED. Recording it before the write would vouch for records that a throw
       // between the two would have lost.
       if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;

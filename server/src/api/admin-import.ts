@@ -111,8 +111,8 @@ function countAs561(out: ArrivalOutcome, copies: ReadonlyMap<string, number>, re
   const n = (id: string): number => copies.get(id) ?? 1;
   for (const id of out.inserted) { result.inserted += 1; result.updated += n(id) - 1; }
   for (const id of out.updated) result.updated += n(id);
-  // A restore is unguarded, so `newerLocal` and `derived` stay empty; counted all the same, so nothing goes uncounted.
-  const unstored = new Set([...out.storeRefused.map(r => r._id), ...out.duplicates, ...out.newerLocal, ...out.derived]);
+  // A restore is unguarded, so `newerLocal`, `diverged` and `derived` stay empty; counted all the same, so nothing goes uncounted.
+  const unstored = new Set([...out.storeRefused.map(r => r._id), ...out.duplicates, ...out.newerLocal, ...out.diverged, ...out.derived]);
   for (const id of unstored) result.errors += n(id);
   // A shape refusal is one document without a usable id — counted per document, as 5.6.1 did.
   result.errors += out.refused.length;
@@ -196,7 +196,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       }
       // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and count only
       // what did not as errors — a restore that says "nothing was written" over records it did write is the worse lie.
-      const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal,
+      const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal, ...partial.diverged,
         ...partial.duplicates, ...partial.storeRefused.map(r => r._id)]);
       const unwritten = [...copies.keys()].filter(id => !settled.has(id));
       out = { ...partial, storeRefused: [...partial.storeRefused, ...unwritten.map(_id => ({ _id, reason: String(err) }))] };

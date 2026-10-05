@@ -83,6 +83,12 @@ const EXEMPT = {
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '
     + 'no arriving document',
+  'server/src/brain/suppression-sweep.ts:dropFileVectors':
+    'removes the RECEIVER\'s own vector fields (a derived, never-replicated field) from a suppressed file\'s chunk and '
+    + 'passage rows before the arrival\'s row is written (Q-230); it stores no arriving document',
+  'server/src/brain/suppression-sweep.ts:sweepPaged':
+    'the suppression sweep, reached from a vote that concludes a meta change through updateSpace: it removes the '
+    + 'receiver\'s own vector fields where its meta now suppresses them; it stores no arriving document',
 };
 
 const INDEX = moduleIndex('server/src');
