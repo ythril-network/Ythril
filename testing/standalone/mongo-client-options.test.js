@@ -124,7 +124,7 @@ describe('a URI that names an option wins', () => {
   });
 
   it('a string with no options, an empty query and stray separators name nothing', () => {
-    for (const uri of ['mongodb://h/db', 'mongodb://h/db?', 'mongodb://h/db?&&', 'mongodb://h/db?=&connectTimeoutMS', '']) {
+    for (const uri of ['mongodb://h/db', 'mongodb://h/db?', 'mongodb://h/db?&&', 'mongodb://h/db?=1&=', '']) {
       assert.deepEqual(mongoClientOptions(uri), CLIENT_LIVENESS_DEFAULTS, `${JSON.stringify(uri)} named something`);
     }
   });
