@@ -16,7 +16,8 @@
  *
  *  1. space 2's work is done IN THE SAME CALL, after one bound;
  *  2. a second call does NOT wait another bound: space 1 is quarantined (a full scan included);
- *  3. after `await lock.release()` (which drains) and once the quarantine has ended (the clock moved), space 1's work is done.
+ *  3. after `await lock.release()` (which drains) and a write to space 1 (which lifts its quarantine for one probe), space 1's
+ *     work is done. The window's own end (60 s) is pinned against an injected clock in `claim-across.test.js`.
  *
  * And the store-wide case: the freezable relay stops the store answering with every socket open. A claim walk then pays ONE bound
  * and ONE ping, answers null, and says ONE `store` line - not one bound per space.
@@ -73,12 +74,13 @@ async function timed(fn) {
   return { value, ms: Date.now() - started };
 }
 
-/** Run `fn` with the clock a quarantine's window (60 s) later. */
-async function afterQuarantine(fn) {
-  const real = Date.now;
-  Date.now = () => real() + 61_000;
-  try { return await fn(); } finally { Date.now = real; }
-}
+/**
+ * A WRITE to the space, which is what lifts its quarantine for one probe (`markSpaceMayHaveWork`): the production door the
+ * quarantine has besides its 60 s window. The window's own end is pinned in `claim-across.test.js` against an injected clock,
+ * because the process-wide walk reads the real one and a minute of waiting per case is not a test.
+ */
+const nudgeEmbed = (space) => queue.enqueueEmbedJob(space, 'fact', 'nudge', { priority: queue.EMBED_PRIORITY.write });
+const nudgeMedia = (space) => mediaQueue.markSpaceMayHaveWork(space);
 
 describe('a hung space does not stop the claim walks (real MongoDB, through the freezable relay)', { skip }, () => {
   before(async () => {
@@ -116,8 +118,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
       assert.ok(second.ms < BOUND_MS, `the second claim took ${second.ms} ms: it waited on the quarantined space`);
     } finally { await lock.release(); }
 
-    queue.resetEmbedPendingHint();
-    const later = await afterQuarantine(() => timed(() => queue.claimNextEmbedJob([s1, s2])));
+    await nudgeEmbed(s1);
+    const later = await timed(() => queue.claimNextEmbedJob([s1, s2]));
     assert.equal(later.value?.recordId, 'locked', 'space 1 was never claimed again after its quarantine ended');
     assert.equal(later.value?.spaceId, s1);
   });
@@ -140,7 +142,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
     } finally { await lock.release(); }
 
     mediaQueue.resetMediaPendingHint();
-    const later = await afterQuarantine(() => timed(() => mediaQueue.claimNextJob([s1, s2])));
+    nudgeMedia(s1);
+    const later = await timed(() => mediaQueue.claimNextJob([s1, s2]));
     assert.equal(later.value?.spaceId, s1);
     assert.equal(later.value?._id, 'locked.pdf');
   });
@@ -162,7 +165,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
       assert.ok(second.ms < BOUND_MS, `the second revive took ${second.ms} ms: it waited on the quarantined space`);
     } finally { await lock.release(); }
 
-    const later = await afterQuarantine(() => timed(() => queue.reviveFailedEmbedJobs([s1, s2], '9.9.9')));
+    await nudgeEmbed(s1);
+    const later = await timed(() => queue.reviveFailedEmbedJobs([s1, s2], '9.9.9'));
     assert.deepEqual(later.value.failed, []);
     assert.equal((await embedJobs(s1).findOne({ _id: 'fact:locked' })).status, 'pending');
   });
@@ -184,7 +188,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
       assert.ok(second.ms < BOUND_MS, `the second reset took ${second.ms} ms: it waited on the quarantined space`);
     } finally { await lock.release(); }
 
-    const later = await afterQuarantine(() => timed(() => queue.resetStalledEmbedJobs([s1, s2], 60_000)));
+    await nudgeEmbed(s1);
+    const later = await timed(() => queue.resetStalledEmbedJobs([s1, s2], 60_000));
     assert.equal(later.value, 1);
     assert.equal((await embedJobs(s1).findOne({ _id: 'fact:locked' })).status, 'pending');
   });
@@ -205,7 +210,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
       assert.equal((await mediaJobs(s1).findOne({ _id: 'locked.pdf' })).status, 'processing');
     } finally { await lock.release(); }
 
-    await afterQuarantine(() => timed(() => mediaQueue.resetStalledJobs([s1, s2], 60_000)));
+    nudgeMedia(s1);
+    await timed(() => mediaQueue.resetStalledJobs([s1, s2], 60_000));
     assert.equal((await mediaJobs(s1).findOne({ _id: 'locked.pdf' })).status, 'pending');
   });
 

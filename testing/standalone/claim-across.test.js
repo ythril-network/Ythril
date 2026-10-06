@@ -51,13 +51,13 @@ const timeout = () => new StoreTimeout();
 const storeDown = () => new MongoNetworkError('connection closed');
 const boom = () => new Error('boom');
 
-/** Which of `ids` the signal would probe now: the hinted ones, or all of them when a full scan is due (this CONSUMES the slot). */
-const hinted = (signal, ids) => signal.spacesToProbe(ids);
+/** Which of `ids` the hint holds right now. Read only: `spacesToProbe` is private to `claimAcross`, which consumes the full-scan slot. */
+const hinted = (signal, ids) => ids.filter((id) => signal.isHinted(id));
 
-/** Spend the full-scan slot, so what the hint holds is what the case seeded and the next claim is NOT a full scan. */
-function spendFullScan(signal, ids) {
+/** Spend the full-scan slot (a claim that finds nothing anywhere), so the next claim is NOT a full scan. Leaves nothing hinted. */
+async function spendFullScan(signal, ids) {
   signal.reset();
-  signal.spacesToProbe(ids);
+  await signal.claimAcross(ids, ['spend'], async () => null, { step: STEP });
 }
 
 /** A tryClaim that answers per (space, pass) from `plan`, recording what it was asked in order. */
@@ -122,14 +122,17 @@ describe('claimAcross: the truth table', () => {
     const { signal } = make();
     signal.markSpaceMayHaveWork('q');
     await signal.claimAcross(['q'], PASSES, script({ q: timeout() }).tryClaim, { step: STEP });
-    const s = script();
-    assert.equal(await signal.claimAcross(['q', 'e'], PASSES, s.tryClaim, { step: STEP }), null);
-    assert.ok(!s.asked.some(x => x.startsWith('q:')), 'a quarantined space is skipped, a full scan included');
-    assert.ok(s.asked.some(x => x.startsWith('e:')));
-    spendFullScan(signal, ['q', 'e']);
-    signal.markSpaceMayHaveWork('q');
-    await signal.claimAcross(['q', 'e'], PASSES, script().tryClaim, { step: STEP });
+    // q is hinted and quarantined: a hinted probe passes it over, and passing over is not "answered empty".
+    const hintedProbe = script();
+    assert.equal(await signal.claimAcross(['q', 'e'], PASSES, hintedProbe.tryClaim, { step: STEP }), null);
+    assert.deepEqual(hintedProbe.asked, [], 'q is skipped, and e is not hinted');
     assert.ok(hinted(signal, ['q', 'e']).includes('q'), 'skipped is not "answered empty": the hint is kept');
+    // A FULL scan skips it too: the quarantine, not the hint, is what holds q back.
+    signal.reset();
+    const full = script();
+    assert.equal(await signal.claimAcross(['q', 'e'], PASSES, full.tryClaim, { step: STEP }), null);
+    assert.ok(!full.asked.some(x => x.startsWith('q:')), 'a quarantined space is skipped, a full scan included');
+    assert.ok(full.asked.some(x => x.startsWith('e:')));
   });
 
   it('every space threw -> null, and it does not throw', async () => {
@@ -194,7 +197,7 @@ describe('claimAcross: the passes belong to the caller, and the probe slot is co
 
   it('with nothing hinted and no full scan due, no space is asked at all', async () => {
     const { signal } = make();
-    spendFullScan(signal, ['a']);
+    await spendFullScan(signal, ['a']);
     const s = script();
     assert.equal(await signal.claimAcross(['a'], PASSES, s.tryClaim, { step: STEP }), null);
     assert.deepEqual(s.asked, []);
@@ -221,6 +224,7 @@ describe('claimAcross: the quarantine of a space whose claim hung', () => {
     const { signal, clock } = make();
     await signal.claimAcross(['h', 'ok'], PASSES, script({ h: timeout() }).tryClaim, { step: STEP });
     clock.t += 1_000;
+    signal.reset(); // a FULL scan is due again: the quarantine, not the hint, is what skips h
     const s = script({ 'ok:p0': { id: 'j' } });
     assert.deepEqual(await signal.claimAcross(['h', 'ok'], PASSES, s.tryClaim, { step: STEP }), { id: 'j' });
     assert.ok(!s.asked.some(x => x.startsWith('h:')));

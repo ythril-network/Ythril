@@ -20,7 +20,7 @@
  *   the queue for later).
  *
  * Provider/worker config is hot-reloaded WITHOUT a restart. A dedicated timer
- * (`providerRefreshTimer`) re-reads the config and rebuilds the provider bundle
+ * (`providerRefreshJob`, an interval job) re-reads the config and rebuilds the provider bundle
  * when the provider-relevant config actually changes. It runs on its own interval,
  * decoupled from the job loop *on purpose*: a job can block the loop for up to the
  * provider timeout (image 120 s, audio 300 s), and a config change — often made
@@ -32,7 +32,8 @@
 
 import { getConfig, getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
 import { toSafeRelPath } from '../../util/paths.js';
-import { concreteSpaces } from '../../spaces/proxy.js';
+import { concreteSpaceIds } from '../../spaces/proxy.js';
+import { intervalJob, type IntervalJob } from '../../util/interval-job.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
@@ -81,8 +82,11 @@ let running = false;
 let generation = 0;
 /** The pool's `drained`: start awaits the previous one, so a stop-then-start never runs two pools at once. */
 let poolDrained: Promise<void> = Promise.resolve();
-let stalledSweepTimer: NodeJS.Timeout | null = null;
-let providerRefreshTimer: NodeJS.Timeout | null = null;
+/** The two repeating jobs of a started worker: constant labels, because a job's label is the `job` label of its skipped-tick counter. */
+const STALL_SWEEP_JOB = 'Media stall sweep';
+const PROVIDER_REFRESH_JOB = 'Media provider refresh';
+let stalledSweepJob: IntervalJob | null = null;
+let providerRefreshJob: IntervalJob | null = null;
 
 /** How often the provider-refresh timer re-reads config to pick up a hot change. */
 const PROVIDER_REFRESH_MS = 2_000;
@@ -203,14 +207,10 @@ export async function releaseHeldJobs(): Promise<number> {
 
 export function stopMediaEmbeddingWorker(): void {
   running = false;
-  if (stalledSweepTimer) {
-    clearInterval(stalledSweepTimer);
-    stalledSweepTimer = null;
-  }
-  if (providerRefreshTimer) {
-    clearInterval(providerRefreshTimer);
-    providerRefreshTimer = null;
-  }
+  stalledSweepJob?.stop();
+  stalledSweepJob = null;
+  providerRefreshJob?.stop();
+  providerRefreshJob = null;
   // The idle wait is interruptible, so wake it: otherwise a worker parked on a 30s backoff
   // would keep the process alive for up to that long after a stop request.
   wakeWorkers();
@@ -294,7 +294,8 @@ async function workerLoop(): Promise<void> {
   );
 
   // On startup: reset any stalled jobs (crash recovery)
-  const spaceIds = getLocalSpaceIds();
+  // The walk isolates a space that fails and quarantines one that hangs (`resetStalledJobs`), so this does not throw for a space.
+  const spaceIds = concreteSpaceIds();
   if (spaceIds.length > 0) {
     await resetStalledJobs(spaceIds, startupStalledTimeoutMs).catch(err =>
       log.warn(`Media worker: stalled job reset error: ${err instanceof Error ? err.message : String(err)}`),
@@ -307,9 +308,9 @@ async function workerLoop(): Promise<void> {
   // The sweep re-reads the timeout each fire so a config change is honoured; the
   // interval itself is fixed at startup (changing it would mean re-arming the timer).
   const sweepIntervalMs = Math.max(30_000, Math.floor(startupStalledTimeoutMs / 2));
-  stalledSweepTimer = setInterval(() => {
+  stalledSweepJob = intervalJob(STALL_SWEEP_JOB, sweepIntervalMs, async () => {
     if (!running) return;
-    const ids = getLocalSpaceIds();
+    const ids = concreteSpaceIds();
     if (ids.length === 0) return;
     // Re-read AND re-floored on every fire: the hop budgets are hot-reloadable too, so a raised OCR timeout
     // must move the stall floor without a restart.
@@ -317,23 +318,20 @@ async function workerLoop(): Promise<void> {
       getMediaEmbeddingConfig().stalledJobTimeoutMs ?? 300_000,
       hopBudgets(),
     );
-    void resetStalledJobs(ids, stalledTimeoutMs).catch(err =>
-      log.warn(`Media worker: periodic stalled reset error: ${err instanceof Error ? err.message : String(err)}`),
-    );
-  }, sweepIntervalMs);
-  // Don't keep the event loop alive solely for the sweep timer
-  if (typeof stalledSweepTimer.unref === 'function') stalledSweepTimer.unref();
+    await resetStalledJobs(ids, stalledTimeoutMs);
+  });
+  stalledSweepJob.start();
 
   // Build the initial provider bundle, then keep it fresh on a dedicated timer.
   // A6: this is what makes provider config hot-reload without a restart. The timer
   // runs independently of the job loop below, so a config change is picked up even
   // while a slow job holds the loop (see the file header).
   refreshProviders();
-  providerRefreshTimer = setInterval(() => {
+  providerRefreshJob = intervalJob(PROVIDER_REFRESH_JOB, PROVIDER_REFRESH_MS, () => {
     if (!running) return;
     refreshProviders();
-  }, PROVIDER_REFRESH_MS);
-  if (typeof providerRefreshTimer.unref === 'function') providerRefreshTimer.unref();
+  });
+  providerRefreshJob.start();
 
   // A claim this process holds, recorded the instant the pool's claim resolves (`onClaimed`) and dropped when the
   // job is done or handed back. A planned shutdown hands back whatever is still here. Looked up by job object so
@@ -359,7 +357,7 @@ async function workerLoop(): Promise<void> {
     // Re-read the space list on each claim (handles dynamic space creation/removal). No spaces is an empty
     // claim, which the pool answers with its idle backoff.
     claim: (): Promise<MediaJobDoc | null> => {
-      const activeSpaceIds = getLocalSpaceIds();
+      const activeSpaceIds = concreteSpaceIds();
       return activeSpaceIds.length === 0 ? Promise.resolve(null) : claimNextJob(activeSpaceIds);
     },
     onClaimError: err => log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`),
@@ -712,10 +710,6 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
   }
 }
 
-/** Return all local (non-proxy) space IDs. */
-function getLocalSpaceIds(): string[] {
-  return concreteSpaces().map(s => s.id);
-}
 
 /** Resolve the absolute file path on disk for a given space + relative path. */
 function resolveFilePath(spaceId: string, filePath: string): string {

@@ -297,7 +297,8 @@ describe('the queue and the worker use the claim', () => {
     assert.ok(wait > 0 && claim > 0, `anchors: wait ${wait}, claim ${claim}`);
     assert.ok(wait < claim, 'the worker claims before waiting out the backoff, so the claim is spent on a refused embed');
     assert.match(body, /heartbeatEmbedJob\(/);
-    assert.match(body, /finally\s*\{[^}]*clearInterval/, 'the heartbeat is not cleared in a finally: a throw leaves a timer writing to a finished job');
+    assert.match(body, /intervalJob\(/, 'the heartbeat is not an interval job: it can overlap itself and runs unbounded');
+    assert.match(body, /finally\s*\{[^}]*\.stop\(\)/, 'the heartbeat is not stopped in a finally: a throw leaves a timer writing to a finished job');
     assert.match(body, /job\.claimToken/, 'the worker does not pass its claim to complete and fail');
   });
 });
