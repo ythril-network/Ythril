@@ -623,6 +623,68 @@ export function walkFrom(index, roots, { closures = false, edges } = {}) {
   return { seen, parent };
 }
 
+/**
+ * Every `intervalJob(label, everyMs, run)` registration in the index, with its `run` made a function the walk can enter (`TST-7`).
+ *
+ * ## Why the walk cannot do this by itself
+ *
+ * A job's `run` is HANDED to `intervalJob`, never called by the code that registers it, and `walkFrom` follows calls (and, under
+ * `closures`, closures written in a reached body) — so a run passed BY REFERENCE (`intervalJob(LABEL, MS, runEmbedStallTick)`) was
+ * reached by no walk, and a gate that roots at "every timer" read a function it could not see as clean. The inline spelling had
+ * the opposite problem: `intervalJob('x', MS, () => sweep())` at module scope is a binding with no name a call resolves to.
+ *
+ * - **A closure** is registered as a synthetic body, `file:intervalJob@<offset>`, the way `routeHandlerRoots` registers a route.
+ * - **An identifier** is followed to the declaration `index.resolve` finds for it in that file (its own, or an import).
+ * - **Anything else** (`this.run`, `make()`, a member of an object) is reported `unfollowable` with `key: null`. It is NEVER dropped:
+ *   a gate that counts jobs must see it and either name it in an exemption or fail. That is the one place this module could hand
+ *   back a smaller set quietly.
+ *
+ * @param {ReturnType<typeof moduleIndex>} index  gains the synthetic bodies (idempotent: calling twice adds nothing)
+ * @returns {{file: string, at: number, label: string, run: string, key: string|null, how: 'closure'|'reference'|'unfollowable'}[]}
+ *   `at` is the offset of the `intervalJob` token in the comment-stripped source
+ */
+export function intervalJobRuns(index) {
+  const out = [];
+  for (const [file, src] of index.sources) {
+    for (const m of src.matchAll(/(?<![.\w$])intervalJob\s*(?:<[^>(;]*>)?\s*\(/g)) {
+      // The declaration (`export function intervalJob(`) is not a registration.
+      if (/\bfunction\s*$/.test(src.slice(Math.max(0, m.index - 12), m.index))) continue;
+      const open = m.index + m[0].length - 1;
+      const args = argumentsOf(src, open, `the intervalJob registration in ${file}`);
+      const run = args[2] ?? '';
+      let key = null;
+      let how = 'unfollowable';
+      if (/=>|^(?:async\s+)?function\b/.test(run)) {
+        key = `${file}:intervalJob@${m.index}`;
+        how = 'closure';
+        if (!index.bodies.has(key)) {
+          const start = src.indexOf(run, open);
+          index.bodies.set(key, { file, name: `intervalJob@${m.index}`, body: run, start, end: start + run.length, synthetic: true });
+        }
+      } else if (/^[A-Za-z_$][\w$]*$/.test(run)) {
+        key = index.resolve(file, run);
+        how = key ? 'reference' : 'unfollowable';
+      }
+      out.push({ file, at: m.index, label: args[0] ?? '', run, key, how });
+    }
+  }
+  return out;
+}
+
+/**
+ * The `edges` option of `walkFrom` that makes a function which REGISTERS a job reach the job's run.
+ *
+ * Without it `startTtlSweep()` reaches nothing the sweep does, because the sweep is a callback it hands to `intervalJob`. A
+ * registration belongs to the function (or synthetic body) whose source span holds it.
+ *
+ * @param {ReturnType<typeof intervalJobRuns>} runs
+ */
+export function intervalJobEdges(runs) {
+  return (entry) => runs
+    .filter(r => r.key && r.file === entry.file && r.at >= entry.start && r.at < entry.end)
+    .map(r => r.key);
+}
+
 /** The chain of keys from a root to `key`, root first, read off `walkFrom`'s parent map. */
 export function pathTo(parent, key) {
   const chain = [key];
