@@ -96,7 +96,7 @@ const EXEMPT = {
   'server/src/brain/embed-record.ts:embedStoredRecord': 'the embed worker stores a vector on a record already written',
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'suppression: removes vectors from stored records',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'sync: a peer\'s tombstones delete their records',
-  'server/src/brain/candidate-prune.ts:pruneSpaceCandidates': 'prunes candidate rows; the collection name is computed',
+  'server/src/brain/candidate-prune.ts:pruneCandidateCollection': 'prunes candidate rows; the collection name is computed',
   'server/src/spaces/lifecycle.ts:wipeSpace': 'the space wipe',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',
   // sync ingest and import: the receiver stores what a peer or a restore sent, through ONE writer (`Q-107` part 1;
