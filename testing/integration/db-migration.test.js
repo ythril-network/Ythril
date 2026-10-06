@@ -31,7 +31,9 @@ const RUN_ID = Date.now();
 
 // URI the test instance already uses — should succeed
 const CURRENT_MONGO_URI = 'mongodb://ythril-mongo-a:27017/?directConnection=true';
-// URI that will never be reachable — must fail quickly
+// URI that will never be reachable — must fail quickly. Its serverSelectionTimeoutMS / connectTimeoutMS (1000) are
+// what the connection test now applies: testConnection builds its client through mongoClientOptions (b53 G6, Q-329),
+// so an option the URI names beats the 5 s default it used to impose over it.
 const BAD_MONGO_URI = 'mongodb://nonexistent-host-xyzabc123:27017/?serverSelectionTimeoutMS=1000&connectTimeoutMS=1000';
 
 let adminToken;
