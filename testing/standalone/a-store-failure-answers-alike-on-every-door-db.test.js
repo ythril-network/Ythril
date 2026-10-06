@@ -229,11 +229,6 @@ const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stre
  */
 const ANSWERS_AROUND_A_FAILED_WRITE = new Map([
   ['POST /api/update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
-  // bundle-53 G7: the rename's ANSWER is now the store's (503 / 500 with the code, in our words: `a-store-failure-is-not-read-as-a-refusal-db`).
-  // What remains is a second log line: `repairStaleSpaceIds` (`spaces/_shared.ts`, owned by no group) swallows its own store
-  // failure with a warning that carries the driver's text, and the door then logs it again when a later step rethrows.
-  ['POST /api/space_rename', 'the answer is right; the driver text is logged twice because `repairStaleSpaceIds` swallows and logs a store failure before a later rename step rethrows it (bundle-53 G7 return, item for the integrator)'],
-  ['MCP space_rename', 'the same double log, on the tool door'],
 ]);
 
 /**
