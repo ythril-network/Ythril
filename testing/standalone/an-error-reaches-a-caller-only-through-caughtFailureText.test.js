@@ -85,6 +85,11 @@ const EXEMPT = {
   'server/src/config/assist-backend.ts: status':
     'the value is the HTTP status of the failed assist call, kept only when `typeof raw === \'number\'` and handed to the '
     + 'outcome recorder as a number; it is read off the error but is not its message',
+  // The error OBJECT handed back to the one caller that asked for the outcome of a space's step.
+  'server/src/spaces/space-step.ts: error':
+    'the value is the caught error OBJECT, not its text, returned to the caller that ran the step: the init walk and the embed queue '
+    + 'read only `ok`, the legacy sweep ignores the result, and the manual scan renders it through caughtFailureText for its answer; '
+    + 'the text the step itself writes is a log line, where the driver\'s text is supposed to go',
   // Matched against a regexp and never leaves the function.
   'server/src/files/media/audio-embedder.ts: stderr: String(err)':
     'the text is ffmpeg\'s own stderr, returned to the one line that matches it against a Duration regexp inside this '
