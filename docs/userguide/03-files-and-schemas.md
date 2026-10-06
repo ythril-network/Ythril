@@ -56,6 +56,13 @@ from disk — although the **Files** count still includes it. Delete it through 
 (`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
 told to remove their copy too.
 
+**Deleting a file twice is not a second success.** Where the instance keeps a deleted file's record for audit, that
+record stays, flagged as deleted. A second delete of the same path, or a delete naming one of a file's pieces (a
+chunk of a document or a face found in a picture) rather than the file, answers **404 not found** on the API and as
+an error from the MCP `delete_file` tool: nothing is deleted again, no second removal notice goes to synced peers
+and no second `file.deleted` webhook fires. So after a delete that timed out, a **404** on the retry can mean the
+first one did complete; check the file list before deleting again.
+
 **New folder:** Click **New folder** in the toolbar.
 
 **Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view.

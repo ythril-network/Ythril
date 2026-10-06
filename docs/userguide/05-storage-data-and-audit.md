@@ -35,6 +35,20 @@ The **Database** card shows which MongoDB server this instance is connected to. 
 | **config file** | Connection string is stored in `config.json`, either saved here via migration or set manually. |
 | **env var** | Connection is managed by the infrastructure via the `MONGO_URI` environment variable. The variable always takes precedence over `config.json`. |
 
+**Timeouts you put in the connection string win.** Three settings decide how quickly Ythril notices that the database has stopped answering: `connectTimeoutMS` (how long a new connection may take, **10 seconds** unless you say otherwise), `heartbeatFrequencyMS` (how often the server is asked whether it is alive, **5 seconds**) and `serverSelectionTimeoutMS` (how long an operation waits to find a server, **10 seconds**). If the connection string names one of them, that figure is used, whichever of the three sources above supplied the string; Ythril's own figure applies only to the ones the string does not name. Earlier versions silently ignored a `serverSelectionTimeoutMS` written in the string. The connection is opened once when Ythril starts, so **a change takes effect at the next restart**. The Server Log shows what was used, in one line at start, `MongoDB client options: …`, saying for each figure whether it came from `MONGO_URI` or is the default. Do not set `socketTimeoutMS` or `timeoutMS` lower than your slowest legitimate read: they end any operation that takes longer, a search or an export included.
+
+**Starting before the database is ready is retried; a wrong password is not.** While the database is still starting, being restarted, stepping down or electing a new primary, unreachable, or has every connection in use, Ythril waits and tries again for a while. Each try says so in the Server Log with the database's own error name and code, for example `MongoDB not ready yet (MongoNetworkError, attempt 3); retrying in 1800ms.` A rejected login, a missing credential or a connection string that cannot be read stops the start at once with that error, because waiting cannot cure it. **Test Connection** under *Database migration* judges your string by the same rules: it waits **5 seconds** by default, and a string that names its own timeouts is tested under them, so a slow remote database can be given longer in the string.
+
+**A write concern the database can never meet is a settings fault, not an outage.** If the connection string asks for
+more acknowledgement than the deployment can give (`w=3` on a database with fewer members, or any `w` above 1 on a
+single, unreplicated server), every write is answered with **500** and the message *The database cannot satisfy the write
+concern this instance writes with, so the write was not confirmed*, together with the database's error `code` and
+`codeName` and the words *not retryable*. This is the opposite of a `503`, which says that waiting
+and trying again will work: here it will not. The Server Log names the cause, for each operation and code at most once
+a minute; change the write concern in `MONGO_URI` (or the deployment) and restart. The write may already have been applied on the
+database even though it was not confirmed, so look before repeating it. The same answer is given by the REST API and by
+the MCP tools, with the `code` and `codeName` in the tool's structured result.
+
 ### Maintenance mode
 
 Maintenance mode suspends all write operations across the entire instance. All write requests return `503 Service Unavailable` while active. Read operations continue normally.
@@ -341,6 +355,95 @@ checks that it is gone, for at most 0.4 s) and only then tells the caller to ret
 (a warning, nothing to do) or *could not be confirmed gone* (an error: the write may still be running in the database and
 could land after the caller was told it timed out — look at the database server and at who holds the lock).
 
+**A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
+housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
+clean-ups of old search-result files, stray file metadata, upload leftovers and expired tombstones, the duplicate and
+contradiction scans, the review-candidate clean-up, the suppression sweep, the embedding and media queues' claims
+and restarts of stalled jobs, the search-reindex watcher, the checks that a new space's indexes exist, and the link
+conversion at start. **An error or a hang in one space does not stop the others.** What you see in this log is a
+line naming the job, the space and why:
+
+```text
+<job> failed for space '<id>' (<part>): <reason> — retried <when>
+```
+
+`<part>` appears when the job works in pieces and says which piece failed (a collection, an upload, a half of the
+pass: `TTL sweep: facts delete failed for space 'notes' (facts): …`). `<when>` says when that space is tried again:
+`next cycle`, `next tick`, `next boot`, `next reload`, or, for the suppression sweep, `with the next meta write` (the next
+change to that space's settings). **A failing space is tried again every cycle, but its line is said at most once every
+ten minutes**, so one broken space does not fill the log; it is said again as soon as the space has worked once and
+fails afterwards. The count of failures keeps rising either way, in `ythril_housekeeping_space_failures_total` (by job
+and by `kind`: `failure`, `timeout`, `store_down`, `stalled`), so a failure that repeats shows as a rate, not as a line.
+
+**A hung space is ended at a time bound, and then left alone for a while.** Every database operation a background job
+makes ends after the housekeeping bound, **4 minutes** by default (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`, set by your
+infrastructure administrator and read at start). The line then says what ran out of time: `a database operation ran
+past its time bound of 240000 ms (YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS)`, and ends `retried after quarantine (60s)`. A
+space that timed out is **left alone by every background job for a minute, then for longer each time it times out
+again, up to five minutes**, so the other spaces are not made to wait one bound after another for it. It is
+tried again at the job's first turn after the quarantine ends, and sooner for a queue whenever new work is written
+into it. The
+gauge `ythril_housekeeping_quarantined_spaces` is how many spaces are in quarantine now. A write that the bound
+ended did not happen, and cannot land afterwards (see `Write bound` above).
+
+**Two things stop the whole job for that round, and each says so in one line:**
+
+```text
+<job> stopped: the store is not answering (<reason>) — retried next cycle
+<job> stopped: <n> spaces timed out in a row; the store looks stalled — retried next cycle
+```
+
+*The store is not answering* is the database being unreachable, or a timeout while a quick check shows that it does
+not answer: the job stops instead of waiting out the bound for every space in turn, and runs again at its next turn.
+*The store looks stalled* is the other case, where the database answers the check but several different spaces in a
+row ran past the bound: that is not one broken space. Both mean look at the database server (its load, a lock, a
+re-index running on the search service), not at a space. Neither stop line is a reason to restart Ythril: the job
+tries again by itself, and the line is said again only after a space has completed in between.
+
+**A retention sweep that cannot delete a record skips it and reports how many.** The retention sweep deletes up to
+**500** expired records per collection every **5 minutes**. A record it cannot delete is passed over instead of
+being asked again until the cycle ends, so one stubborn record no longer holds back the expired records behind it. The
+line carries the count and the first few ids — `TTL sweep: facts delete failed for space 'notes' (facts): … (count: 3)
+— retried next cycle` — and when a collection keeps failing so many records that the cycle gives up on it, it says so:
+`… records keep failing; the rest wait for the next cycle`. A collection that cannot even be read is named without
+`delete` (`TTL sweep: facts failed for space …`), and a failed settle of file tombstones and a failed index check are
+named `TTL sweep: settling file tombstones` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+
+Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
+
+- `Stray file-metadata drain (list|read|write|settle|drop) failed for space '<id>': … — retried next cycle`: the clean-up
+  that moves file descriptions out of the old side collection (above) names which of its five steps failed. The
+  collection is kept until the drain succeeds, so nothing is lost.
+- `Chrono retention failed for space '<id>' (backfill: <collection> | redaction: chrono): … — retried next cycle`.
+- `Candidate prune failed for space '<id>' (dupe_candidates | contradiction_candidates): …` and
+  `Tombstone prune failed for space '<id>' (record tombstones | file tombstones): …`.
+- `Stale chunk cleanup failed for space '<id>' (<upload>): …`: one upload directory that cannot be examined or removed
+  does not stop the clean-up of the others. When the folder of upload leftovers itself cannot be listed, the line is
+  `Stale chunk cleanup failed: <reason>`. A folder on a hung network mount is not ended by the bound, which is about the
+  database.
+- `Dupe scan failed for space '<id>': …` and `Contradiction scan failed for space '<id>': …`. A failure while a scan reads the
+  records it starts from in a space is said too, not skipped in silence.
+- `Suppression sweep failed for space '<id>': … — retried with the next meta write`.
+- `Embed claim`, `Embed revive`, `Embed stall reset`, `Media claim` and `Media stall reset` name the embedding and media
+  queues. A space that fails to hand out a job does not stop the next space's jobs, and a queue is not marked empty
+  while one of its spaces could not be read.
+- `Reindex resume`, `Reindex watcher` and `Reindex gauge` (`… — retried next tick`): the gauge `ythril_reindex_in_progress`
+  keeps its last value while any space could not be read, rather than showing a count that is too low.
+- `Link conversion failed for space '<id>': … — retried next boot` and `Link array drop failed for space '<id>' (…): …
+  — retried next boot`.
+- `space init failed for space '<id>': … — retried next reload`, `index confirmation` and `query indexes` after a
+  **configuration reload**. The server reloads `config.json` a couple of seconds after it changes. A space the reload
+  added whose set-up fails is audited with its real outcome, not as applied, and is set up again by the next
+  reload; the reload itself is answered as failed (`ythril_config_reload_failed_total` moves, and
+  `ythril_config_reload_pending` stays `1` until a reload succeeds).
+
+**A repeating job that runs longer than its schedule is skipped, not stacked.** Each background timer runs one pass at a
+time. A tick that finds the previous pass still running does not start a second one; it says `<job>: skipping this tick —
+the previous pass has been running for <n>s`, at most once every ten minutes, and counts it in
+`ythril_interval_tick_skipped_total` under the job's name. A pass that ends with an unexpected error says `<job> failed:
+<reason>` and the next tick runs normally. A job named in a skip line again and again is slower than its schedule:
+look at the database and at how much that job has to do.
+
 ---
 
 ---
@@ -403,7 +506,12 @@ because each one computed them from its own copy of the bytes.
 > itself. It is now a small record of its own, and 5.0 is where the old lists stop existing. Every restart
 > checks each space and converts anything still holding them; a space already converted is skipped, and a
 > space that could NOT be converted is named in an `ERROR` line in the server log rather than passed over
-> quietly.
+> quietly. One space failing, or hanging, does not stop the others: each is converted on its own, and the
+> `ERROR` line gives every space that was not converted with the reason (an error, no answer from the
+> database, or left out because the database stopped answering). A failed space is tried again at the next
+> start, or at once with `npm run links:convert` (below), which converts the others, names each failed space
+> on the error output with its reason and **exits with a failure status**, so a deploy step that runs it does
+> not report success over a partial run.
 >
 > **A space that failed to convert refuses to answer about connections**, by name, until it has been
 > converted cleanly. That is deliberate and it is the whole reason the failure is loud: the alternative is
