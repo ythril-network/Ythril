@@ -435,321 +435,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **One space that cannot be initialised no longer stops the start-up's initialisation at that space (`Q-274`).** Start-up
-  initialised the spaces in a bare loop, so the first one to throw left every space after it without its collections
-  and indexes and unconfirmed, ended the rest of the start-up's database set-up, and left only *"Instance DB
-  initialisation failed"* naming a driver error and not the space. Each space is now its own step, as in a reload: the
-  failed one is named once (`space init failed for space '<id>': … — retried next reload`), the others are initialised
-  and have their search indexes confirmed, the server starts, and the next reload initialises the failed one again.
-- **A space a reload initialises, or retries, now has its vector index readiness confirmed (`Q-274`).** It was
-  initialised and left with no `indexStatus` and no readiness line, while a space initialised at start-up or by
-  `POST /api/spaces` had both. One path now hands every successfully initialised space to the confirmation, so
-  `GET /api/spaces` shows `building` and then `ready` or `failed` for it too. A reload no longer waits for the index builds.
-- **A background job no longer logs under the request that started it (`Q-274`).** Timers inherit the request context
-  they were created in, so on a first-run instance the TTL sweep's failure line carried the `/setup` request's id, and
-  the duplicate, contradiction, backup and sync schedulers a reload or a join re-armed ran under that request's id. Every
-  interval job and every scheduled task now runs outside the request that armed it.
-- **`POST /api/admin/data/config/test` is documented as it answers (`Q-274`).** An unreachable host is `200` with
-  `{ "ok": false, "error": … }`, which the Database page reads; the integration guide said `500` and showed a `latencyMs`
-  the route never returned.
-- **Paging through a recall answer no longer repeats some matches and drops others when their text scores tie.**
-  Records written from one template score exactly alike in the keyword channel, and the database ordered that tie
-  differently on every call. That order is part of the fused ranking, and `skip`/`nextSkip` re-run the search for
-  each page, so two identical recalls could rank the same records differently. Ties now break by id, as every other
-  ranking step already did. This affects both doors, `recall` on MCP and `POST /api/brain/recall` on REST.
-
-- **An error or a hang in one space no longer stops a background job for the others (`Q-274`, `Q-358`).** The jobs that
-  visit the spaces one after another — the retention sweep, the embed and media queue claims and their stall resets,
-  the embed revive, the legacy spill and stray file-metadata drains, the candidate and tombstone prunes, the stale chunk
-  cleanup, chrono retention, the duplicate and contradiction scanners, the suppression sweep, the reindex resume and
-  watcher, link conversion at boot, the space init of a reload and the query-index step — were a loop with one catch
-  around it or none. A failing space ended the pass for every space behind it, and a space whose read hung ended it
-  after a driver wait nobody had chosen, which is how a job could stop housekeeping the whole instance for hours with
-  one line in the log. Each such job now goes through one walk: a failing or hanging space is reported and the next
-  space is processed. What an operator will notice:
-  - **Every database operation of such a job is ended by a bound** (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`, default 240 s,
-    new; minimum 1 s, maximum 1 h, read at start). A queue claim or a stall reset carries a bound of its own, 10 s,
-    since a claim that waits longer is a database that is not answering. A write the bound ends did not happen, and
-    cannot land afterwards. Where a job runs inside a seq hold, the shorter of the two bounds applies.
-  - **Two things stop a pass early, and each says so.** The database is not answering: a bare timeout is checked with a
-    short ping, so one hung space is not mistaken for a dead database, and a dead one costs one bound and not one per
-    space. The database is stalled: 3 spaces in a row timing out ends the pass for that tick.
-  - **A space whose operation timed out is passed over for a while**: 60 s, doubling to 300 s on each further timeout,
-    ending when its next attempt succeeds or at once, for one attempt, when new work is queued for it
-    (`ythril_housekeeping_quarantined_spaces` counts them).
-  - **What is not covered**, because it is not a database operation: index builds, the bulk link conversion, the metric
-    collectors (they have their own scrape budget), walks of the file system and calls to a model.
-- **A read's deadline is an option of the call, never chained (`Q-358`).** Ten reads carried `.maxTimeMS(…)` chained onto
-  the cursor. The driver silently drops a chained or optioned `maxTimeMS` once the call also carries a `timeoutMS`,
-  so a housekeeping or hold scope that lowers a read's deadline could not reach those reads. They pass `{ maxTimeMS }`
-  in the options now.
-- **A failing expired record can no longer stop the retention sweep behind it (`Q-359`).** The sweep read its next
-  page of due records from the start every time, so 500 records whose delete kept failing were read again at the head
-  of every cycle and nothing behind them was ever deleted. A record the sweep cannot delete is now skipped for the
-  cycle and the sweep carries on with the ones behind it; the cycle reports it once, with how many records failed
-  and up to five ids, in the server log and in `ythril_housekeeping_records_failed_total`, and tries it again on the
-  next cycle. The pacing is unchanged: up to 500 deletes per collection in each 5-minute cycle, and a cycle looks at no
-  more than 2000 distinct records per collection, so beyond that many records that keep failing the rest wait for the
-  next cycle and the log says so. A record the sweep read but found already gone is not a failure.
-- **A reindex run whose server could not resume it at start is picked up by a watcher, and two sweepers can no longer
-  sweep one run (`Q-274`).** A boot resume that could not read a space used to throw and leave the run waiting for
-  the next restart. The watcher retries it every few seconds; a run whose sweeper died is taken over once its lease,
-  an atomic stamp on the run document, has expired. `ythril_reindex_in_progress` has one writer and keeps its last
-  value while any space could not be read, instead of reporting a count that is too low.
-- **A failed embed revive at boot is retried (`Q-274`).** A space whose revive of failed embedding jobs failed at start
-  is asked again by the worker's stall tick; the other spaces were already revived and are not asked twice.
-- **The legacy spill sweep removes a file's hash row before its file record (`Q-274`).** A failed delete between the two
-  left a hash row with no file record to find it by; the file record is the finder now and goes last, so the next run
-  completes the work.
-  A directory that cannot be read, other than one that is not there, is reported instead of being taken for an empty
-  one.
-- **A duplicate or contradiction scan, scheduled or manual, no longer loses a failure silently (`Q-274`).** A seed
-  failure other than "not found" was swallowed and a failed existence lookup in the candidate prune was silent; both
-  are reported now, and the scan moves past a record that keeps failing instead of stopping on it.
-- **A manual scan of every space no longer fails as a whole when one space fails (`Q-381`).** `POST /api/duplicates/scan`
-  and `POST /api/contradictions/scan` answered `500` for the request, naming no space, when one space's scan threw, and
-  never reached the spaces behind it. They scan every space they can now and answer `200` with `failedSpaces`
-  (`[{ spaceId, reason }]`, present and empty when nothing failed), the reason in Ythril's words and the database's own in
-  the Server Log (`… failed for space '<id>': … — retried next scan`); `scannedSpaces` counts the spaces scanned. A store
-  that is not answering still ends the request with the retryable `503`. The Review tab's **Scan now** reports a space it
-  could not scan instead of finishing quietly.
-- **A failed space init is retried by the next reload (`Q-274`).** A space whose initialisation failed was recorded as
-  added and never tried again until the next start; every reload now initialises it again until it has succeeded.
-- **Shutdown stops every job it started (`Q-317`).** The retention sweep, the candidate and tombstone prunes, the
-  contradiction scanner, the audit change retention and the stale chunk cleanup were never stopped at shutdown, so a
-  tick could start over the closing connection; all are stopped before the drain now.
-- **A scheduled backup that outlasts its cron period is skipped, not overlapped (`Q-317`).** Its failure line reads
-  `Scheduled backup failed: …`, where it read `Scheduled backup error: …`.
-
-- **A write answered "timed out, retry" can no longer land after the answer** (Q-372). The bound on one database
-  write was the driver's own timer, which starts before the command is even sent, so the client gave up first: the
-  `503` went out and the space's seq hold was released while the operation was still alive on the server, and it
-  could land a moment later. The bound is now the server's own deadline (`maxTimeMS`), so the server ends the write
-  and answers; a client backstop 500 ms later covers the one wait the server does not interrupt (an upsert queued
-  behind another session's uncommitted insert of the same record — a sync push fork). Reads keep the driver timer.
-  A `timeoutMS` in `MONGO_URI` no longer cuts this short either: the driver would hand it to every write that sets
-  none of its own and end the write before the server's deadline, so a bounded write is now sent with its own
-  `timeoutMS` of 0 beside the server deadline. A page a peer pushes or pulls, and a page of peer tombstones, is
-  written in chunks sized so that each chunk is one command to the database (a larger batch is split by the driver
-  into several, each with a deadline of its own), and the page's size no longer decides whether a late second command
-  can land. The bulk writes whose size is the store's own, not a request's — an entity merge relinking a hub's edges,
-  files and links, a directory move, file tombstones, the file hash cache and the usage counters — are written the
-  same way, in chunks of at most 99 999 operations (one fewer than the server's write batch size of 100 000, because the
-  driver itself cuts a batch there) and 16 MiB, so a set under those limits is the one command it was before; a bulk that
-  mixes inserts, updates and deletes is sliced by type, in the order the driver sends them (inserts, updates, deletes),
-  because the driver sends one command per type, and an unordered one still attempts every chunk and reports every chunk
-  that failed in one error, whose cause is the failure that ended the write when the store or a bound did (so a duplicate
-  key followed by a timeout is answered as the retryable `503`, not as a `400`) and otherwise the first failure. The entity merge writes its relinked edges, files and links in
-  its transaction, which the server aborts at the first error, so it stops at the first failed chunk and answers with that
-  failure as the driver would. When the client backstop does end a write, the log line now says which collection and space it was, and
-  the server warns once at boot if `MONGO_URI` carries a `socketTimeoutMS` below the write bound, which the server
-  cannot neutralise (leave it unset or above `YTHRIL_WRITE_TIMEOUT_MS`).
-  For integrators: the same retryable `503`; a write blocked in that one state is answered up to 500 ms later than
-  the bound. No new database privilege is needed.
-- **A write the bound answered "timed out, retry" can no longer land afterwards, however late its command reached the
-  database (`Q-380`).** The client backstop answered 500 ms after the bound, but a command that reached the server
-  later than that could still run on and land after the `503`. Every bounded write now carries a unique comment; when
-  the backstop fires it finds the database's operation by that comment, ends it and confirms it gone (at most 400 ms)
-  before the seq hold is released and the caller answered `503`. An operation it cannot confirm gone is answered
-  anyway and logged once, as an error naming the method, collection and space. The one case this does not close, a
-  command still in flight past the confirmation, is stated in the hosting guide. The connection's user needs to be
-  able to list and end its own operations; where it may not, every backstop is logged as unconfirmed.
-- **A recall straight after a space's first write no longer answers 503 while its search index initialises**
-  (Q-325). A collection's vector index is built after its first record, and until it serves the search service
-  refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
-  "nothing from the index yet" and find the new record through the fresh-write scan, but the first wording
-  (`Index <name> not initialized`) was not recognised, so for the first moments of a space's life the same recall
-  answered 503 or 200 depending on timing. All the wordings are now recognised in one place. The write-time
-  duplicate check also keeps its fresh-write matches through that refusal instead of answering none.
-
-- **A small entity merges into a hub of any size** (bundle-30). The merge looked for edge collisions by reading every
-  edge of the survivor inside its transaction, where a read must come back in one batch, so merging an entity with
-  one edge into a survivor with about eighty thousand failed as a store error. It now looks up only the identities
-  the relink produces. A too-large merge counts each kind only up to one past the bound, so refusing a hub no
-  longer counts all of it: the refusal then says *more than* the bound, and `relinks` is a lower bound.
-
-- **A strict-linkage violation is no longer recorded for a target later in the same transfer, nor twice for one
-  dangling end** (bundle-30). Edges and links received by pull or batch push were checked right after each page
-  landed, and a pull lands its families one page at a time — edges before chrono entries, links and files — so an
-  edge to a chrono entry created in the same interval was recorded as pointing at nothing. Each record had a fresh
-  id, so every re-delivery of the edge added another. A transfer's references are now checked once it is whole (a
-  pull after every family of the space, a push after the request), with one existence read per target kind instead
-  of one or two per record, a family whose transfer stopped early is not judged, and a violation's id is derived from
-  what it says, so the same dangling end is one record and one `link_violation.created`.
-
-  A push request carries ONE family — the sender pushes them one request each — so checking "after the request" was
-  not enough on its own: the families were sent edges before chrono entries and links before file metadata, and the
-  push door still recorded those edges and links. **The families now travel targets first** (facts, entities, chrono,
-  file metadata, edges, links), and the push door leaves the families still to come in that order unjudged. A sender
-  older than this release still pushes the old order, and from it an edge to a chrono entry or a link to a file
-  created in the same interval can still be recorded; a receiver older than this release, sent the new order, records
-  none of them. The protocol reference (`docs/sync-protocol.md`, Push phase and `POST /batch-upsert`) now states
-  the order a receiver relies on, where it is read from (`REPLICATED_FAMILIES`), and what a receiver records from a
-  sender that pushes references first (bundle-30 I15).
-
-  The push door also no longer waits for the check before answering: it awaited it after the page, outside the
-  door's write bound and with no deadline on its read, so a stalled store held the push answer past the sender's
-  60 s — the timeout the bound exists to beat. The check now starts after the page lands and runs in a write bound
-  of its own. A pull whose fetch failed part-way skipped the check altogether, and the edges that had landed were
-  never checked again (re-served, they plan as already current); it now checks what landed, with the family that
-  failed and every one after it left unjudged. And grouping the targets copied the list per target, ~1.3 s of
-  blocked event loop at 20 000 targets (one 50-page pull); it is now under a millisecond.
-
-- **An error that names `maxTimeMS` because the option was misused is no longer read as a deadline the store
-  missed** (bundle-30). The deadline question matched the word `maxTimeMS` in any message, so the store's refusal of a
-  misplaced bound (`cannot set maxTimeMS on getMore …`, a `BadValue`) was answered as a retryable `503` timeout on a
-  write door and as "the search ran out of time" on recall, predicate recall, the row graphs and the face gallery.
-  A deadline is now code 50 or 262, or — only for an error that lost its code — the store's own "exceeded time limit"
-  wording.
-
-- **A restored file no longer keeps the replaced copy's vector** (`Q-234`, bundle-30). A restore carries nothing from
-  the copy it replaces, and every family did that except file metadata, which is merged rather than replaced: the
-  merge removed the replaced copy's retention stamps but kept its `embedding`, `embeddingModel` and `matchedText`.
-  The merge now asks the arrival writer's own rule for what the stored row keeps.
-
-- **A peer's file bytes landing here follow this instance's suppression** (bundle-30). The bytes writer queued the
-  file for embedding directly, so a file this instance suppresses (its own flag, or the space) was queued, claimed
-  and discarded, and kept any vector it had. It now takes the same step as arriving file metadata: a suppressed
-  file holds no vector, any other is queued.
-
-- **A store failure is answered by one function on every door** (bundle-30). The REST read helper, the REST error
-  handler, the MCP dispatcher and the sync push helper each built the `503` by hand: a REST write's body dropped the
-  store's `code` and `codeName` that a read and the tool carry, and five sync POSTs (file tombstones, members, votes,
-  change notes, both pairing steps) still answered a store failure `500`. They now all answer `503`, `Retry-After`,
-  `retryable: true` — in words of our own, with the store's `code` and `codeName`, on every door and to every
-  reader alike — and one retry sentence.
-
-  The rest of the HTTP doors now answer it the same way. `POST /api/brain/recall`, `POST /api/brain/similar`,
-  `POST /api/brain/spaces/:spaceId/traverse` and every `POST /api/<tool>` answered `503` without `Retry-After`. About
-  forty route handlers answered their own `500 Internal error` without asking whether the failure was the store's —
-  among them `POST /api/brain/spaces/:spaceId/entities`, the UI's create form, which showed an operator *"Internal
-  server error"* for a condition a retry clears, and every `/api/conflicts`, `/api/contradictions`,
-  `/api/duplicates`, webhook, network and sync read route. An edge or link write whose reference lookup failed on
-  the store answered `400` with the driver's text — and a missing reference whose own text names `mongot`, `$search`
-  or a vector search index (a file `notes/mongot-setup.md`, a space `mongotest`) is the caller's `400`, not a
-  retryable `503`, because the store's message patterns are read only from the driver's own errors; `space_rename`
-  answered it as `Error (500)` with the driver's text; a space create answered `500 Failed to create space` and
-  logged nothing. A file delete through a store failure answered `200` with no sync tombstone written, so a peer
-  re-pushed the file; it now answers `503`, and the retried delete writes the tombstone — see the next entry for why
-  the retry can. Every one now answers through one sender. A failure on those routes that is NOT the store's still
-  answers `500`, now with the body `{"error":"Internal server error"}` (it read `Internal error` on most of them),
-  logged with its stack under the route's name — and so is a store failure's log line.
-  The store message's retry sentence used to say *"Nothing was confirmed written by it"*, also on a list load or a
-  search, which wrote nothing; it now says what is true of both.
-
-- **A file's sync tombstone is written before its bytes go, so a failed delete or move is safe to retry**
-  (bundle-30 I13). The tombstone was written after the unlink, after a directory's tree was removed and after a move.
-  A store failure on it then left the file gone with no tombstone, and the retry could not repair it: the REST delete
-  found no bytes and answered `204` writing no tombstone, a directory delete answered `404`, a move found no source,
-  and the TTL sweep failed on the missing file every cycle — while a peer's manifest pushed the file back. Every path
-  that removes a file now writes the tombstone first, so a store failure on it answers `503` with the file where it
-  was. A file whose bytes are gone while its metadata remains is
-  completed on every door (REST delete, MCP `delete_file`, the TTL sweep): tombstone written, record, jobs and
-  artifacts removed. A path with neither bytes nor metadata, and a move whose source is not there, answer `404` on
-  both doors; MCP answered them with the filesystem's `ENOENT` and the absolute data path. `delete_file`'s description
-  said a missing path "succeeds quietly", which was not true; it now says what each door answers.
-
-  A store failure AFTER the bytes now fails the act too (bundle-30 I14). With the store paused, a delete unlinked
-  the bytes, failed its job, artifact and metadata steps — each caught and logged — and answered `204`; a move
-  carried the bytes, failed to re-key its records and answered `200`. Each step's own failure is still survived,
-  but the store's answers `503` on REST and MCP, and the metadata record goes last, so the same request retried
-  completes the act: a delete as an orphan, a move by finding the file at its destination and the record at the
-  old path, a directory delete (`confirm: true`) by finding records under a folder whose tree is gone. The
-  directory delete's cascade moved from the REST route into `files/delete-cascade.ts`.
-
-  **A file tombstone is published only once the file is gone (bundle-30 I15).** Written before the bytes, a
-  tombstone was served and pushed at once, and a peer that receives one deletes its copy, keeps the tombstone and
-  serves it back — so when the delete or move then failed, the next cycles deleted this instance's own copy, the
-  only one left. Withdrawing it afterwards (retried in memory) lost that race to a sync cycle, and to a restart
-  outright; a delete whose unlink failed for a reason that was not the store's (a directory, a permission) never
-  withdrew it, and the TTL sweep added another every cycle. Now the tombstone is written PENDING and confirmed once
-  the bytes are gone or moved; nothing that serves, pushes, prunes or counts file tombstones sees a pending one
-  (`GET /api/sync/file-tombstones`, the sync push, the prune, the stray-metadata drain all read them through
-  `files/tombstones.ts`). A failed act settles its own from the disk at once, and one that outlives its act is
-  settled the same way by the TTL sweep — dropped while the path still has its file, published once it has none.
-  `pending` never crosses the wire: served tombstones carry `_id`, `spaceId`, `path` and `deletedAt` only, and a
-  confirmed one is stamped with the time it was confirmed.
-
-  **Per path, not per act (bundle-30 I16).** One act's paths lose their bytes at different steps, and a tombstone is
-  now published only after its own path's: a move's and a directory delete's conversion sidecars (`_converted/…`,
-  `_extracted/…`) are published after the sidecar itself moved or went, and dropped when that step failed, where they
-  used to be published with the file — so a sidecar still here was deleted back by every peer. A directory delete
-  whose tree removal stopped part way dropped every tombstone, including those of the files it HAD removed, and the
-  retry lists only what remains, so peers pushed those back; a failed step is now settled per path from the disk. The
-  TTL sweep settles the oldest first, and one whose path it cannot look at goes to the back of the queue rather than
-  coming back first every cycle and starving the rest of the space. `<space>_file_tombstones` gains the two indexes
-  those questions need (the settle's, partial on `pending`, and the move marker's), on new and existing spaces.
-
-  **One tombstone per path per act, retries included (bundle-30 I17).** A file act a store failure stopped left its
-  pending tombstone behind, and its retry published one of its own — and then the first as well: a retried move at
-  once, because its settle took every tombstone carrying the move's mark, and a retried delete (one file, MCP
-  `delete_file`, a directory) ten minutes later, when the TTL sweep found the path's bytes gone — gone because the
-  retry had removed them. A peer deletes its copy for every tombstone it is sent, so the late one deleted a re-upload
-  of that path made in between. Now there is one way a tombstone is published, and publishing a path's removes every
-  other pending tombstone for that path; the sweep drops a leftover whose path already has a tombstone published
-  after it was written (a failed write the store applied late) rather than publish a second. File tombstones gain
-  an index on `path` for it.
-
-  **A retried move completes only a move it began (bundle-30 I15).** The completion took any source with records and
-  no bytes beside an existing destination for a move still owed — so moving an orphan `a.txt` (its file gone out of
-  band) onto an unrelated `b.txt` replaced `b.txt`'s jobs, chunks and sidecars, lost `a.txt`'s record and answered
-  `200`. A move's tombstones now carry a mark of the move, the completion requires it, and without it the move is
-  `404` and `b.txt` is untouched. "Are the bytes here" has one answer (`bytesPresent`): only a path that does not
-  exist is absent, and a failure to look (a permission) is an error rather than an absent source sent down that
-  path. The completions ask the store for one record instead of loading every record id under a folder. **A path
-  through a regular file (`a.txt/x`) is a path that does not exist (bundle-30 I16):** Linux answers it `ENOTDIR`,
-  not `ENOENT`, so MCP `move_file` and `delete_file` of one answered `400` carrying the server's absolute data path,
-  REST answered `500`, and the TTL sweep kept such a tombstone pending for ever — all now `404`, and published. Every
-  "does this path exist" test in the server reads the one predicate, `isMissingPath`, and a gate holds it there. The
-  media worker's "was the source deleted mid-job" check read ANY failure to look as "deleted" and removed what the
-  job wrote; it now asks `bytesPresent`, and the conversion's and the manifest's own swallowed stats are gone too.
-
-- **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
-  newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
-  a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of
-  forking, a field of the wrong type and a key the schema strips were stored, and a file whose `parentFileId` was a
-  number, `0`, `false` or an object became a top-level file. A pulled document now passes its family's `Incoming*`
-  schema (a refusal is that document's alone, and the rest of the page lands), is planned against held tombstones and
-  the fork caps exactly as on push, and is written by the same writer. One stated difference: a chrono `type`
-  outside this space's vocabulary is stored on pull (a push answers `unknownType`), because on pull the schema
-  comes from the same upstream and dropping the record would lose it for good. Strict-linkage violations are now
-  recorded for every landed edge and link on every door (only the single edge route and the batch's links did).
-  The stray-filemeta drain (`Q-219`) checks each record through the same schema as a FILL: the keys it carries must
-  be valid, and none it lacks is required, because it writes only what it carries. A record with a key of the wrong
-  type or a `parentFileId` of any kind is discarded and counted as refused, where it used to be partly filled; a
-  record with no `tags`, `author` or `seq` is still filled.
-- **Two peers pushing different text for one fact at one seq at the same moment keep both texts (`Q-232`).** The
-  push whose write lost the race found a copy at its own seq and counted itself landed, while its text was stored
-  nowhere. A same-seq copy with different content is now a divergence, and forks.
-- **A fork keeps the divergent copy's `createdAt` and `updatedAt`.** It was stamped with the moment this instance
-  forked it, so its retention window ignored its age and two receivers forking one divergence stored two documents
-  under one derived fork id — which the space hash reported as a divergence for ever.
-- **An arrival this instance suppresses holds no vector (`Q-230`).** The writer carried the stored copy's vector,
-  model and `matchedText` across a peer's update whatever the receiver's suppression said, so a record its author,
-  its type or its space retired from semantic search stayed findable by the content it no longer had. A suppressed
-  arrival now carries the retention stamps and `syncBase` only, on every door, and a file's derived passages lose
-  their vectors with it.
-- **An admin import never keeps the stamps or `syncBase` of the copy it replaces (`Q-234`).** A record whose export
-  carried no retention stamp kept the replaced copy's, so a record restored to "never expires" went on expiring on
-  the old date, and a file kept a `syncBase` the backup never recorded. It now stores the backup's values, a stamp
-  the backup lacks from this instance's retention (D-9), and nothing of the replaced copy's.
-- **A file-metadata arrival is held to the write guard.** It was merged by `_id` alone, so a newer copy written
-  between the accept read and the merge was overwritten by an older one, with a `200` on the way back.
-- **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
-  space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
-  network or changing its precedence — reported its records suppressed and went on ranking them by meaning until
-  each was rewritten: only an operator's own edit swept. Every change of the effective meta now sweeps — and so
-  does a type schema saved on a space no network carries (`PUT /schema`, the per-type upsert and delete, a schema
-  library apply), which swept nothing while the same edit on a networked space did. One change is swept once: a meta
-  change applied by a vote was swept two or three times, each a pass over every collection of the space. The sweep
-  also covers files and their derived passages (it covered none), removes the model name with the vector (it left
-  it behind), keeps `matchedText` (the content did not change), and runs once at every start, so vectors stored
-  before this version are cleared without waiting for the next edit. That start sweep begins once the server is
-  listening and sweeps one space at a time, so its scans never compete with each other or with the boot.
-- **An embed job no longer writes over a record that changed while it was embedding.** The job reads a record,
-  calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
-  the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
-  hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
+- **Errors:** **BREAKING:** A store failure now answers `503` with `Retry-After`, `retryable: true`, the store's `code`
+  and `codeName` and one retry sentence on every door, REST writes included. Retry on `503`.
+- **Errors:** **BREAKING:** About forty REST routes (entity create, `/api/conflicts`, `/api/contradictions`,
+  `/api/duplicates`, webhooks, networks, sync reads) answer a store failure `503`, was `500`.
+- **Errors:** **BREAKING:** `POST /api/brain/recall`, `/similar`, `/spaces/:spaceId/traverse` and `POST /api/<tool>`
+  now send `Retry-After` on their store-failure `503`.
+- **Errors:** **BREAKING:** An edge or link write whose reference lookup hit a store failure, `space_rename` and a space
+  create answer `503` (were `400`, `Error (500)`, `500`). A missing reference named like `mongot` stays `400`.
+- **Errors:** **BREAKING:** A failure that is not the store's answers `500` with the body
+  `{"error":"Internal server error"}`, was `Internal error` on most routes.
+- **Errors:** An error that only names `maxTimeMS` (the store refusing a misplaced bound) is no longer read as a missed
+  deadline: no retryable `503` on a write, no "search ran out of time" on recall.
+- **Database:** A write answered `503` "timed out, retry" can no longer land afterwards: the bound
+  (`YTHRIL_WRITE_TIMEOUT_MS`) is the server's own `maxTimeMS`, and a blocked write may answer up to 500 ms late.
+- **Database:** An unconfirmed backstop ending of a write is logged as an error. The `MONGO_URI` user must be able to
+  list and end its own operations, or every backstop logs unconfirmed.
+- **Database:** A `timeoutMS` in `MONGO_URI` no longer shortens a bounded write; the server warns once at boot when
+  `MONGO_URI` has a `socketTimeoutMS` below `YTHRIL_WRITE_TIMEOUT_MS` (leave it unset or above).
+- **Database:** Pushed and pulled pages and store-side bulks (entity-merge relinks, directory move, file tombstones)
+  write in chunks of at most 99 999 operations and 16 MiB; a duplicate key then a timeout answers `503`, not `400`.
+- **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`,
+  as the integration guide now says (it said `500` and a `latencyMs` the route never returned).
+- **Sync:** **BREAKING:** Five sync POSTs (file tombstones, members, votes, change notes, both pairing steps) answer a
+  store failure `503`, was `500`; a sender holds its watermark and re-sends on either.
+- **Sync:** **BREAKING:** A pulled page is now validated and decided as a push is: a held tombstone is not overridden,
+  an equal-seq divergent fact forks, wrong-typed or undeclared fields and a non-string `parentFileId` are refused.
+- **Sync:** A chrono `type` outside the space's vocabulary is still stored on pull (a push answers `unknownType`);
+  strict-linkage violations are now recorded for every landed edge and link on every door.
+- **Sync:** The stray file-metadata drain checks each record against the same schema: one with a wrong-typed key or any
+  `parentFileId` is discarded and counted as refused; one lacking `tags`, `author` or `seq` is still filled.
+- **Sync:** Two peers pushing different text for one fact at one seq keep both texts (a fork), and the fork keeps the
+  divergent copy's `createdAt` and `updatedAt`, so retention sees its real age and the space hash agrees.
+- **Sync:** A file-metadata arrival no longer overwrites a newer copy written between the accept read and the merge.
+- **Sync:** Strict-linkage violations are no longer recorded for a target later in the same transfer, nor twice for one
+  dangling end: references are checked once a pull or push is whole, one `link_violation.created` each.
+- **Sync:** **BREAKING:** A sender now pushes its families targets first (facts, entities, chrono, file metadata, edges,
+  links). An older sender can still trigger same-interval violations, an older receiver records none: upgrade both ends.
+- **Sync:** A push no longer waits for the link check before answering (a stalled store held it past the sender's 60 s),
+  and a pull that failed part-way still checks what landed.
+- **Sync:** `GET /api/sync/file-tombstones` and the sync push serve a file tombstone only once its file is gone or
+  moved, so a failed delete or move no longer has peers delete this instance's copy.
+- **Sync:** File tombstones are published per path and once per path, retries included: a conversion sidecar still here,
+  a file a failed directory delete kept, or a re-upload made before a retry is no longer deleted on peers.
+- **Files:** **BREAKING:** A store failure during a file delete or move answers `503` on REST and MCP, was `200`/`204`
+  or `404`, and retrying the same request completes it (a directory delete needs `confirm: true`).
+- **Files:** **BREAKING:** A path with neither bytes nor metadata, a move whose source is missing and a path through a
+  regular file (`a.txt/x`) answer `404` on REST and MCP (MCP `move_file`/`delete_file` answered `400`, REST `500`).
+- **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and
+  the TTL sweep; `delete_file` no longer claims a missing path "succeeds quietly".
+- **Files:** A retried move completes only a move it began: moving an orphan `a.txt` onto an unrelated `b.txt` answers
+  `404` and leaves `b.txt` untouched.
+- **Search:** Records that match a `recall` query equally well now come back in a stable order (ties break by id), so
+  paging with `skip` / `nextSkip` shows every match once. MCP `recall` and `POST /api/brain/recall` alike.
+- **Search:** `recall`, `similar` and the write-time duplicate check straight after a space's first write no longer
+  answer `503` while its vector index initialises; they find the new record.
+- **Records:** A small entity merges into a hub of any size (one edge into a survivor with ~80 000 failed as a store
+  error); a too-large merge's refusal says *more than* the bound and `relinks` is a lower bound.
+- **Embedding:** A record or file this instance suppresses (own flag, type or space) no longer receives or keeps a
+  vector from a peer's update or a peer's file bytes; a suppressed file's derived passages lose theirs.
+- **Embedding:** Suppression turned on by a network (meta pull, space addition, leaving, precedence) or a saved type
+  schema now removes vectors already stored, files included; `matchedText` is kept. It also runs at every start.
+- **Embedding:** An embed job no longer writes a vector over a record that changed while it embedded. A failed embed
+  revive at start is retried by the worker's next stall tick.
+- **Import/Export:** An admin import never keeps the retention stamps or `syncBase` of the copy it replaces (a record
+  restored to "never expires" no longer expires on the old date); a restored file drops the old `embedding` vector.
+- **Housekeeping:** An error or hang in one space no longer stops a background job for the others: sweeps, queue claims,
+  drains, prunes, scanners and reindex resume skip the space, report it and carry on.
+- **Housekeeping:** `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (new, default 240 s, min 1 s, max 1 h, read at start) ends every
+  database operation of those jobs; a queue claim or stall reset has its own 10 s. A write the bound ends does not land.
+- **Housekeeping:** A pass ends early when the database does not answer or 3 spaces in a row time out; a timed-out
+  space is passed over 60 s, doubling to 300 s (`ythril_housekeeping_quarantined_spaces`), retried at once on new work.
+- **Housekeeping:** A record the retention sweep cannot delete is skipped for the cycle and retried next, reported once
+  in the log and `ythril_housekeeping_records_failed_total`; pacing is unchanged (500 deletes per collection per 5 min).
+- **Housekeeping:** A reindex run the server could not resume at start is retried every few seconds; a run whose sweeper
+  died is taken over once its lease expires. `ythril_reindex_in_progress` keeps its last value if a space is unreadable.
+- **Housekeeping:** A duplicate or contradiction scan, scheduled or manual, reports a seed or candidate lookup failure
+  and moves past a record that keeps failing; the legacy spill sweep reports an unreadable directory.
+- **Housekeeping:** **BREAKING:** `POST /api/duplicates/scan` and `POST /api/contradictions/scan` answer `200` with
+  `failedSpaces` (`[{ spaceId, reason }]`) and `scannedSpaces` when one space fails, was `500`; a dead store is `503`.
+- **Spaces:** One space that cannot be initialised no longer stops start-up or a reload for the others: it is logged
+  once (`space init failed for space '<id>': … — retried next reload`) and retried on every reload.
+- **Spaces:** A space a reload initialises or retries now has its vector index readiness confirmed, so `GET /api/spaces`
+  shows `building`, then `ready` or `failed`; a reload no longer waits for the index builds.
+- **Server:** A background job or scheduled task no longer logs under the request id of the request that armed it (a
+  first-run instance showed the `/setup` request's id on the TTL sweep).
+- **Server:** Shutdown now stops the retention sweep, the candidate and tombstone prunes, the contradiction scanner,
+  audit change retention and stale chunk cleanup before the drain.
+- **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads
+  `Scheduled backup failed: …`, was `Scheduled backup error: …`.
+- **Media:** The media worker no longer reads an unreadable source as deleted and removes what the job wrote.
 - **Two members holding the same data report the same Merkle root (`Q-307`).** The root hashed each record's
   `spaceId` — which the receiver rewrites to its own id for the space, so a space held under a `spaceMap` alias
   differed in every leaf — and the files that never leave an instance (a conflict copy, a schema snapshot). A
