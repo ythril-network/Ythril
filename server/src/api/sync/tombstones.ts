@@ -23,6 +23,7 @@ import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectional
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { completeThrough } from '../../sync/watermark.js';
 import { encodeSeqCursor } from '../../util/seq-keyset.js';
 
 export const syncTombstonesRouter = Router();
@@ -69,7 +70,8 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
       const page = rows.slice(0, pageSize);
       const last = page[page.length - 1];
       const byType = Object.fromEntries(TOMBSTONE_TYPES.map(t => [TOMBSTONE_COLLECTION[t], page.filter(r => r.type === t)] as const));
-      recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, Math.max(0, since.seq - 1));
+      // Mid-run, the rest of the cursor's seq is not delivered yet, so only the seq before it counts as served.
+      recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, completeThrough(since.seq, true));
       res.json({ ...byType, nextCursor: rows.length > pageSize && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null });
       return;
     }
