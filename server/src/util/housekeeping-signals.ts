@@ -38,13 +38,17 @@ export type HousekeepingSignal =
   /** The number of spaces in quarantine right now: an absolute value, for a gauge. */
   | { type: 'quarantined-spaces'; count: number }
   /** A step named itself, so its series can start at 0. */
-  | { type: 'step-declared'; step: string };
+  | { type: 'step-declared'; step: string }
+  /** A repeating job named itself (`intervalJob` does it at construction), so its `tick-skipped` series can start at 0. */
+  | { type: 'job-declared'; job: string };
 
 export type HousekeepingListener = (event: HousekeepingSignal) => void;
 
 const listeners = new Set<HousekeepingListener>();
 const steps: string[] = [];
 const stepSet = new Set<string>();
+const jobs: string[] = [];
+const jobSet = new Set<string>();
 
 /** Subscribe. Returns the function that unsubscribes. */
 export function onHousekeepingSignal(listener: HousekeepingListener): () => void {
@@ -78,4 +82,26 @@ export function declareStep(step: string): string {
 /** Every step declared so far, in the order declared: a copy, so a caller cannot edit the list. */
 export function declaredSteps(): string[] {
   return [...steps];
+}
+
+/**
+ * Declare a repeating job's name so `ythril_interval_tick_skipped_total{job}` starts at 0 for it: a counter that appears at the
+ * first skip cannot be told from one that is not wired. `intervalJob` calls this at construction, so no site does it by hand.
+ * Idempotent: a name already declared is a no-op and emits nothing. An empty or non-string name THROWS, where it is seen.
+ *
+ * A job whose label carries an id (a per-job heartbeat) declares one series per label: keep such a label constant.
+ */
+export function declareJob(job: string): string {
+  if (typeof job !== 'string' || job.trim() === '') throw new Error(`declareJob: a job needs a name, got ${JSON.stringify(job)}`);
+  if (!jobSet.has(job)) {
+    jobSet.add(job);
+    jobs.push(job);
+    signalHousekeeping({ type: 'job-declared', job });
+  }
+  return job;
+}
+
+/** Every job declared so far, in the order declared: a copy, so a caller cannot edit the list. */
+export function declaredJobs(): string[] {
+  return [...jobs];
 }

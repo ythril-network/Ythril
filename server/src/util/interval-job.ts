@@ -54,7 +54,7 @@
  */
 import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js';
 import { withWalkBudget } from './housekeeping-walk.js';
-import { signalHousekeeping } from './housekeeping-signals.js';
+import { declareJob, signalHousekeeping } from './housekeeping-signals.js';
 import { log, peerText } from './log.js';
 import { singleFlight, SKIP_WARNING_WINDOW_MS } from './single-flight.js';
 import { warnOnce } from './warn-once.js';
@@ -102,6 +102,7 @@ export function intervalJob(
   const warn = deps.warn ?? ((message: string) => log.warn(message));
   const error = deps.error ?? ((message: string) => log.error(message));
   const name = peerText(label);
+  declareJob(label);   // so its skipped-tick series starts at 0; the label is the metric's `job`, so keep it constant
 
   const flight = singleFlight(label, { now, warn, error });
   const failedOnce = warnOnce<string>({ max: 1, every: INTERVAL_JOB_WINDOW_MS, now });
