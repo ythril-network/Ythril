@@ -1706,464 +1706,211 @@ Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-gu
 
 ## [5.6.1] — 2026-10-01
 
-**A patch release: every fix since 5.6.0 for a defect present in 5.6.0, and nothing else.** The one to take first
-is sync: two overlapping writes could leave a peer missing a record for good. It also fixes bulk writes that
-stored the wrong edge kind or a vector a record had retired, a reindex that embedded different text from the write
-that created a record, a cross-space recall ranked by the wrong signal, and a set of space, file, network and
-client defects. Breaking changes and features already on `main` are not part of it; they ship in the next minor.
+**A patch release for defects present in 5.6.0; take it first if you sync, where two overlapping writes could leave a peer missing a record for good.**
 
-| What changes on upgrade | What to do |
+| Changes on upgrade | Action |
 |---|---|
 | A recall across several spaces is ranked by one fusion over the merged results, so its order changes | Nothing; a caller that pinned an order across spaces should re-read it |
-| A network joined before 5.6.0's join default gets the default schedule at boot | Nothing; a network set to manual stays manual |
-| A peer that completes a new handshake has the older tokens it replaces revoked | Nothing; every member should run 5.6.1 so each side keeps one token |
+| A network joined before 5.6.0's join default gets the default sync schedule at boot | Nothing; a network set to manual stays manual |
+| A peer that completes a new handshake has the older tokens it replaces revoked | Nothing; run 5.6.1 on every member so each side keeps one token |
 | A space whose config was hand-edited to `"proxyFor": []` is loaded as a real space, with a warning | Nothing, unless that space was meant to be a proxy |
-| `GET /api/notify` answers `400` to a `limit` or `skip` that is not a number, where it fell back to the default | Send numbers, or leave the parameter out |
+| `GET /api/notify` answers `400` to a `limit` or `skip` that is not a number (it fell back to the default) | Send numbers, or leave the parameter out |
 | `PATCH /api/networks/:id` with `syncSchedule: ""` stores manual (`''`) instead of dropping the field | Nothing, unless you relied on `""` meaning unset |
 
 ### Fixed
 
-#### Sync and networks
-
-- **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
-  a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
-  so a later write that finished first could be handed out while an earlier one was still being stored, the peer
-  moved its watermark past it, and never came back for it. Every seq-paged route (the five record families,
-  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners now stop below any write
-  that has not finished; a write's sequence number is taken as part of the write and released when it settles,
-  including inside a transaction, which holds it until it commits. A record a peer pushed with a sequence number
-  above this instance's own counter is still served.
-
-- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
-  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle.
-  It gets the default at the next start, named
-  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
-  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
-
-- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
-  new token and left the previous one valid, though the peer keeps only the newest and could never present the
-  others, so unused tokens piled up. A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
-  when it starts. A token still in a handshake is left alone, since two joins can overlap.
-
-- **A member that learned a join vote from another member no longer admits the joiner on its own vote**
-  (`Q-154`). On a closed or democratic network only the member holding the joiner's credentials may add it, and the
-  sync pass already held to that. Casting the concluding vote did not: a member whose copy of the round came by
-  gossip, with no credential for the joiner, added it anyway — a member that could never authenticate there. A local
-  vote now follows the same rule.
-
-- **A space schema-change notice is accepted by its peers (`Q-108`).** `meta_change_pending` was sent to every
-  member and was not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read
-  the answer. Peers now accept and record it.
-
-#### Writes and embedding
-
-- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
-  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
-  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
-  key names.
-
-- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** A rewrite never queued
-  a re-embed, as a new entry does, so the entry's search vector described what it no longer said.
-
-- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
-  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
-  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
-  write states one.
-
-- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
-  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
-  and refuse the same keys with the same message.
-
-- **An edge created with a property its label's schema defaults was stored without the default**, although the
-  default was what passed validation; the stored edge now carries the value that was checked.
-
-- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
-  caption (`Q-99`, part 2).** It built a record's text its own way, not the way a write does: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
-  a converted document re-embedded without its own text.
-  Derived records were skipped outright, so after a model change every passage and media caption kept the old
-  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
-  PATH (`docs/a.pdf#chunk0`). A reindex now builds every record's text as a write does: a passage
-  or caption is rebuilt from its own text, a derived record
-  with no text is left without a vector (any path-vector a backfill gave it is removed, and a backfill no longer
-  queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
-  reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
-  vector as it was.
-
-#### Search
-
-- **A slow or failing reranker no longer holds every search (`Q-157`).** While the reranker was slow or down,
-  every recall waited out its time limit (20 s) and was then answered in fused order anyway. A reranker pass that fails, runs out its own time limit, or takes more than half of
-  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
-  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back.
-
-- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
-  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
-  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
-  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
-  0.033, never a similarity. **Who is affected:** the ORDER of a fused recall's results changes where several
-  record types matched the text.
-
-- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
-  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
-  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Both doors.
-
-- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
-  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
-  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
-  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
-  did the same. The merged pool is now fused once — one ranking by meaning over every candidate, and each space's
-  per-type text ranking as its own channel — so every result carries a `fusedScore` from the same fusion, spaces
-  interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:** a `recall`
-  naming several spaces, a proxy, or no space — the ORDER of its results and the values of `fusedScore` on them.
-  A recall over one space is unchanged.
-
-#### Spaces and files
-
-- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
-  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
-  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
-  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
-  other error is still reported at once.
-
-- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
-  (`Q-80`, `Q-98`).** The boot initialisation walked every configured space, so each boot created a proxy's
-  collections — which creating it never made and deleting it (a config-only removal) never dropped; the restore
-  index rebuild walked proxies too. And "is this a proxy" was answered in two spellings that disagreed on an empty
-  member list: such a space was served as a real space and skipped as a proxy by the embed worker, the duplicate
-  and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left behind.
-  The loader now removes an empty `proxyFor` on load and reload (with a warning), and the boot and the restore
-  rebuild walk only the spaces that own collections. **Who is affected:** an instance with a proxy space (its boot
-  stops creating collections for it; ones already created are left as they are, empty), and one whose config was
-  edited by hand to hold `"proxyFor": []` (that space starts being embedded and scanned).
-
-- **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
-  document's conversion that finished after the move wrote its chunk records under the path the file had just
-  left — a folder that no longer existed, with nothing to ever delete them. The conversion now commits its records
-  in one transaction that holds only while its job is still claimed, and a move takes that claim before any bytes
-  leave, then re-queues the job at the new path. A run that finds its moved file missing no longer "cleans up a
-  deleted file" either — which deleted the job and records the move was carrying. And a move now carries
-  everything a file owns: a renamed file's chunks used to stay at the old path, a moved folder's chunks kept naming
-  parents that no longer existed (so deleting the moved file removed none of them), and the
-  `_converted/`/`_extracted/` sidecars moved for neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now
-  run the same move. **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its
-  links under the new path, but moving a folder re-rooted the records and left every link naming a path that was
-  gone, so each file in it silently lost what it was linked to. Both now carry links through one step.
-
-- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
-  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
-  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
-  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
-  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
-  a space's directories retries what a concurrent writer causes; a space being deleted or renamed away refuses new
-  file writes, which the media worker treats as an abandonment, like a moved file's; and the next rename or delete
-  finishes a pending op before it proceeds, refusing only when that fails again — with the reason.
-
-#### Lists, notify and metrics
-
-- **Two lists that stopped at a number now say so and can be read to the end.** Each now pages the same way:
-  whole rows, `limit` and `skip` refused with a `400` rather than floored when they are not numbers, the byte budget,
-  and `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
-  - **The schema dry-run** (`POST /api/spaces/:id/validate-schema`) says, per collection, how many records it
-    checked against how many exist and whether the check was complete (`checked`, `complete`), and pages its
-    violations instead of stopping at 500 (`Q-129`).
-  - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
-    200 (`Q-130`).
-  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
-
-- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
-  before the `404`, so any caller could mint a time series per spelling.
-
-- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
-  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
-
-#### Client
-
-- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
-  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
-  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
-  and Retry — for example while an upgraded instance rebuilds its search indexes.
-
-- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
-  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
-  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate.
-
-- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
-  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
-  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
-  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
-  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
-  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
-  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of the interface does.
-
-- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
-  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
-  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
-  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
-  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
-  semantic search's rows or the reverse; now the latest request always wins on every tab,
-  and on the graph's selected-record card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
-  is one request per kind now.
+- **Sync:** A peer no longer misses a record for good when two writes overlap: every seq-paged route (record families,
+  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners stop below any unfinished write.
+- **Networks:** A network joined before 5.6.0's join default syncs on its own: it gets the default schedule (every 15
+  minutes, or the inviter's) at the next start, named in the log. Manual set on purpose (`""`) is never replaced.
+- **Networks:** A peer keeps one token, not one per join: a completed handshake revokes the tokens it replaces on both
+  sides, and unused leftovers are dropped at start. A token still in a handshake is left alone.
+- **Networks:** On a closed or democratic network a member that learned a join vote by gossip no longer admits the joiner
+  on its own concluding vote; only the member holding the joiner's credentials may add it.
+- **Networks:** Peers accept and record the `meta_change_pending` schema-change notice on `POST /api/notify` instead of
+  answering `400` to the sender.
+- **Records:** A bulk edge whose end is a `$ref` to a fact or chrono entry, with no kind stated, now stores the kind of
+  the record the key names, not an entity end that never existed.
+- **Records:** An edge created with a property its label's schema defaults now stores that default.
+- **Records:** `save_bulk` on MCP now refuses a retired or unknown key (`{"memories": […]}`) with REST's `400` and the
+  same message, instead of answering success with nothing written.
+- **Embedding:** A chrono entry rewritten through its `id` is re-embedded, so its vector matches its content.
+- **Embedding:** A rewrite without the suppression flag keeps the stored flag, so a record retired from meaning-ranked
+  search gets no vector: on every create endpoint with `waitForEmbedding` or `checkDuplicates`, batches and merges.
+- **Embedding:** A reindex embeds the same text a write does (edge ends by name, passages and captions from their own
+  text) and rebuilds vectors even when the text is unchanged; an embedder outage leaves a record's vector as it was.
+- **Embedding:** A backfill (`reembed`) no longer gives a text-less passage, face crop or converted copy a path-based
+  vector, and removes those it gave; passages of files with suppressed embeddings are not embedded.
+- **Search:** A failing, timed-out or slow reranker (over half its limit) is set aside for 30 s, doubling to 5 min, so
+  searches skip it at once and report `degraded: ["rerank_unavailable"]`; a background probe restores it.
+- **Search:** A record's text rank in a fused `recall` is its rank among its own type, so the order changes where several
+  types matched. `fusedScore` is a rank score (`1/(60 + rank by meaning) + 1/(60 + rank by text)`), never a similarity.
+- **Search:** A `recall` over several spaces, a proxy or no space is fused once over the merged pool, so spaces
+  interleave by relevance and every result carries a `fusedScore`. A one-space recall is unchanged.
+- **Search:** `filter`'s `total` with `fromName`, `toName` or `entityName` counts what the name join matches, not the
+  whole collection. REST and MCP alike.
+- **Spaces:** A new space no longer stays "building" until restart when a config read hit `ENODATA` during a concurrent
+  rewrite (Docker Desktop bind mounts); that read is retried.
+- **Spaces:** Boot and restore no longer create collections for a proxy space (existing ones stay, empty), and a
+  hand-edited `proxyFor: []` is removed on load with a warning, so that space is a real space and is embedded and scanned.
+- **Spaces:** A space delete no longer fails `ENOTEMPTY` against the media worker, and an unfinished delete no longer
+  makes every rename and delete answer `500 "… is still pending …"`: removal retries, and the next operation finishes it.
+- **Files:** Moving a file or folder leaves nothing at the old path, even mid-conversion, and carries its chunks,
+  sidecars and, for a folder, every file's links. REST `PATCH /api/files/:spaceId` and MCP `move_file` run the same move.
+- **REST:** `POST /api/spaces/:id/validate-schema` reports per collection what it checked (`checked`, `complete`) and
+  pages its violations instead of stopping at 500. `GET /api/notify` pages with `skip` and says when cut, not at 200.
+- **REST:** Both lists answer `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip`, whole rows within the byte
+  budget, and refuse a non-numeric `limit` or `skip` with `400`.
+- **Server:** An unknown tool name no longer becomes a `ythril_tool_calls_total` label, so a caller cannot mint a series
+  per spelling. The notify event store holds at most 1 MiB, oldest out first, as well as 500 events.
+- **UI:** The Graph tab says after 3 s what the space is doing (indexes building, records awaiting embedding), and after
+  30 s ends in an error state with those reasons and Retry. Entities are resolved by id past 100.
+- **UI:** The Query tab's walk headings show their counts (`({count})` and `{hops} hop(s)` were printed literally), and
+  the latest request wins on every tab, the graph's depth slider and its record card, never an older, slower answer.
+- **UI:** German and Polish labels that read the wrong sense now read correctly (Clear results, Reset, Close, Projection),
+  and a space is "Space" / "przestrzeń", not "Leerzeichen" / "spacja".
 
 ## [5.6.0] — 2026-09-29
 
-**A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
-token can be allowed to create spaces without being an instance admin.** It also closes a way for a relaying member
-to re-aim a vote, makes joined networks sync on their own, and delivers published file descriptions to subscribers
-that had already processed the file. Upgrade every member of a network; older members keep working during the
-transition.
+**A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a token can be allowed to create spaces without being an instance admin; upgrade every member of a network.**
 
-| What changes on upgrade | What to do |
+| Changes on upgrade | Action |
 |---|---|
-| The read spills older versions wrote into spaces (`_tmp/results-*.json`, `_tmp/graph-*.json`) are deleted, once | Nothing. A caller that kept a spill path reads the answer's `remainder` instead; see [Recall API](docs/integration-guide/04a-recall-api.md) |
-| Every vector index is rebuilt once in the background, with no gap in search | Nothing. Until it finishes, a filtered recall that needs completing says `filter_window`; see [Hosting](docs/integration-guide/02-hosting.md) |
-| `POST /api/spaces` needs the `createSpaces` right instead of instance admin | Grant `createSpaces` to any non-admin token that should create spaces; instance admins are unaffected |
-| Vote casts carry a second signature, and 5.6.0 voters must send it | Upgrade every member; a cast from an older member is still checked the old way |
-| A network you join syncs on the inviter's schedule, or every 15 minutes | Pass `syncSchedule` on the join to choose another |
+| Read spills older versions wrote into spaces (`_tmp/results-*.json`, `_tmp/graph-*.json`) are deleted once, with no tombstone, and it cannot be undone | Nothing; read the answer's `remainder` / `spillId` instead of a kept spill path |
+| Every vector index is rebuilt once in the background (it gains `_id` as a filter field), with no gap in search | Nothing; until it finishes, a filtered recall that needs completing answers `degraded: ["filter_window"]` |
+| `POST /api/spaces` and `save_space` need the `createSpaces` right instead of instance admin | Grant `createSpaces` to any non-admin token that should create spaces; instance admins are unaffected |
+| Vote casts carry a second signature (`bsig`), required from a voter running 5.6.0 or later | Upgrade every member; a cast from an older member is still checked the old way |
+| A network you join syncs on the inviter's schedule, or every 15 minutes | Pass `syncSchedule` on the join to choose another (`""` for manual) |
+| A traversing `recall` / `similar` returns each match with its whole graph or lists it in `incompleteRows`; `graphComplete` and `pathsTruncated` are gone | Read `incompleteRows`; narrow `edgeLabels` or `traverse` to bring a match back. `graphTruncated` is true only when `incompleteCount` is |
+| `recall` with `tags` and a `filter` naming `tags` applies both; the filter used to replace `tags` | Expect fewer records if you relied on the replacement |
+| A spill's `download` is `/api/brain/spills/:id`; `path` on `remainder` is deprecated (removed next major) and one read of it answers one window | Read by `spillId` with `read_spill`; continue from `nextSkip` |
+| Joining, renaming and adding a space can be refused with `join_mapping_collision`, `network_id_aliased`, `invalid_answer` (`400`) or `space_name_in_use` (`409`) | Handle the codes; a refused call creates and moves nothing |
+| A vote round carries `networkSpaceId`, and `GET /api/networks/:id/votes` / `network_votes` name its space by `localSpaceId` | Read `localSpaceId` for the local space |
+| A network's schema layer and membership origin kept under a renamed space's old name move to its current name | Nothing; rolling back, the space loses that network's schema layer until the network next sends it |
+| With a master secret set, uploaded files are encrypted in the background after each start | Nothing for callers; read the Encryption at Rest guide before rolling back |
 
 ### Added
 
-- **`npm run docker:compact` can run without a UAC prompt** (Q-119, development tooling). `npm run
-  docker:compact:install`, run once from an elevated shell, copies the compaction step to
-  `C:\ProgramData\Ythril\` where only Administrators and SYSTEM may write, and registers an on-demand task that runs
-  that copy with highest privileges; `docker:compact` then starts the task instead of asking UAC, and asks UAC as
-  before when it is not installed. The task runs only the protected copy, takes no arguments, and attaches the disk
-  read-only. `-Uninstall` removes both.
-- **`rerank: false` on `recall`** (Q-88), on both doors: skips the configured cross-encoder — no over-fetch for it and
-  no rerank pass, on one space and across many — and returns the fused order at once; nothing is reported in
-  `degraded`, since it is a skip the caller chose. The reranked answer stays the default. The search bars in the
-  Entities, Facts, Edges and Chrono tabs and the entity pickers now send it, because the rerank dominated their
-  latency (16-25 s on a shared GPU), and keep only the newest search, cancelling the one before; the Query tab keeps
-  reranking and gains a **Rerank** switch. See [Recall API](docs/integration-guide/04a-recall-api.md).
-- **`space_rename` renames a space over MCP** (Q-139), the door `PATCH /api/spaces/:id/rename` lacked: instance admin
-  or administering the space, the same `{ space }` answer, and the same refusals — including `409` with
-  `code: space_name_in_use`. See [MCP → tools](docs/integration-guide/16-mcp.md).
-- **`degraded` reason `filter_window`**: a filtered answer that could not be completed says so, and returns what it
-  found (Q-102). Treat an unknown reason as "degraded". **`ythril_recall_fresh_scan_capped_total`** counts fresh-write
-  scans whose window held more records than `DUPE_FRESH_SCAN_CAP`.
-- **Uploaded files are encrypted at rest when the instance has a master secret** (F-43). The same
-  `YTHRIL_MASTER_KEY` / `YTHRIL_MASTER_PASSPHRASE` that already encrypts the state files now covers every file under
-  `<data-root>/files/` and the resumable-upload staging area, in a chunked AES-256-GCM format that streams a file of
-  any size. Nothing changes for a caller: downloads, `read_file`, sync and indexing see the file as uploaded, and
-  sizes and hashes stay the plaintext's, so an encrypting peer and a plaintext one compare equal. Files stored before
-  the secret was set are encrypted in the background after each start, keeping their modification times. A file that
-  cannot be decrypted is refused by name (`500` on download, an error on `read_file`, a failed indexing job) instead of
-  being served as ciphertext, and so is an encrypted file on an instance whose secret was removed. The security
-  report gains `atRest.files`. See [Encryption at Rest](docs/integration-guide/02a-encryption-at-rest.md#uploaded-files) for what
-  stays readable on disk, rolling back, and the temporary plaintext copy `ffmpeg` needs while it indexes media.
-- **`read_spill` and `GET /api/brain/spills/:id` read what a search could not return inline** (Q-92). One act behind
-  both doors, the same parameters on each — `id`, `skip`, `maxChars`, `maxBytes`, `maxTokens` — paged like a
-  search, with whole items, `truncated` and `nextSkip`. Only the token that ran the search can read its spill, and
-  only while it holds knowledge read on every space whose records are inside; anyone else, an unknown id and an
-  expired one all get the same `404`, and a spill its owner's newer spills evicted answers `410`. See
-  [Reading a spill](docs/integration-guide/04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
-- **`remainder` carries a `spillId`**, the id `read_spill` takes.
-- **`incompleteRows`, `incompleteCount` and `truncatedBy` on a traversing `recall` or `similar`** (Q-126), on both
-  doors. `incompleteRows` names each match left out because its graph could not be read whole —
-  `{_id, spaceId, type, name, reason}`, reason `walk_ceiling`, `link_scan`, `paths` or `deadline`, at most 50
-  named — and `incompleteCount` counts them all. `truncatedBy`, beside `nextSkip`, says which bound ended the
-  answer: `budget`, `walk_budget` or `deadline`.
-- **`spillRefused`**: a `recall` or `similar` whose spill could not be kept says why — `over-share`,
-  `instance-ceiling`, `no-token`, `unattributed`, `empty` or `failed` — and still answers in full, with `truncated`
-  and `nextSkip` exactly as without it. A spill never fails the search.
-- **Three limits on read spills**, validated at boot like every numeric setting: `READ_SPILL_TOKEN_MAX_MB` (64)
-  and `READ_SPILL_TOKEN_MAX_COUNT` (50) bound one token, and past them the token's own oldest spills make room;
-  `READ_SPILL_INSTANCE_MAX_MB` (1024) bounds the instance, and refuses a new spill rather than evicting anybody
-  else's. All three count raw JSON megabytes. See
-  [Environment Variables](docs/integration-guide/02-hosting.md#environment-variables).
+- **Search:** `recall` takes `rerank: false` on both doors, skipping the cross-encoder and returning the fused order at
+  once, with nothing in `degraded`; reranking stays the default. Search bars send it; the Query tab gains a switch.
+- **Search:** A filtered answer that could not be completed says `degraded: ["filter_window"]` and returns what it found.
+  Treat an unknown `degraded` reason as "degraded".
+- **Search:** `read_spill` and `GET /api/brain/spills/:id` read what a search could not return inline, with `id`, `skip`,
+  `maxChars`, `maxBytes`, `maxTokens`, whole items, `truncated` and `nextSkip`; `remainder` carries the `spillId`.
+- **Search:** Only the token that ran the search, still holding knowledge read on every space inside, reads its spill.
+  Anyone else, an unknown id and an expired one get `404`; a spill evicted by newer ones answers `410`.
+- **Search:** A traversing `recall` or `similar` adds `incompleteRows` (`{_id, spaceId, type, name, reason}`, at most 50;
+  reasons `walk_ceiling`, `link_scan`, `paths`, `deadline`), `incompleteCount` and `truncatedBy` (`budget`, `walk_budget`, `deadline`).
+- **Search:** `spillRefused` says why a spill could not be kept (`over-share`, `instance-ceiling`, `no-token`,
+  `unattributed`, `empty`, `failed`); the search still answers in full. A spill never fails a search.
+- **Files:** Uploaded files and the upload staging area are encrypted at rest (chunked AES-256-GCM) when
+  `YTHRIL_MASTER_KEY` / `YTHRIL_MASTER_PASSPHRASE` is set; sizes and hashes stay the plaintext's; older files follow.
+- **Files:** A file that cannot be decrypted, or is encrypted on an instance whose secret was removed, is refused by
+  name (`500` on download, an error on `read_file`, a failed indexing job). The security report gains `atRest.files`.
+- **MCP:** `space_rename` renames a space, as `PATCH /api/spaces/:id/rename` does: instance admin or space administrator,
+  the same `{ space }` answer and refusals, including `409` with `code: space_name_in_use`.
+- **Server:** `READ_SPILL_TOKEN_MAX_MB` (64) and `READ_SPILL_TOKEN_MAX_COUNT` (50) bound one token's spills, evicting its own
+  oldest; `READ_SPILL_INSTANCE_MAX_MB` (1024) bounds the instance and refuses a new spill instead of evicting others'.
+- **Server:** `ythril_recall_fresh_scan_capped_total` counts fresh-write scans whose window held more records than
+  `DUPE_FRESH_SCAN_CAP`.
 
 ### Changed
 
-- **The `createSpaces` right creates a space on every door, and the creator administers it** (Q-134). `POST
-  /api/spaces` and `save_space` required an instance administrator while a network join honoured `createSpaces`;
-  all three now ask one predicate, with one `403` sentence on REST and MCP, and `save_space` is listed to a token
-  holding the right. MFA still applies to the REST create. The token that creates a space — directly, by joining a
-  network, or as the token a network was joined with when it later adds one — is added to that space's
-  administrators (`rights.spaceAdmin.spaces`) in the same write, audited as the new operation `token.creator_grant`;
-  its floor, `instanceAdmin` and other rows are untouched. An OIDC session stores no rights, so its identity mapping
-  still decides what it reaches. A join that creates a space still needs a floor of `networks: write`. See
-  [Spaces API](docs/integration-guide/06-spaces-api.md) and [Tokens API](docs/integration-guide/07-tokens-api.md).
-- **A network's `spaceMap` may name several keys for one local space** (Q-133): the first is the network's id,
-  later ones are the local names a rename left behind, kept for members that joined under them. A join or network
-  answer lists every one. Renaming a space back to its network id removes the mapping.
-- **New refusals, each with a `code`** (Q-133), identical on REST and MCP: joining a network is refused `400`
-  `join_mapping_collision` when two of its spaces would land in one local space, `network_id_aliased` when a network
-  id is already another space's alias, and `invalid_answer` for a malformed invite answer; renaming a space, and
-  adding one to a network, is refused `409` `space_name_in_use` when another space already syncs under that name.
-  Nothing is created or moved by a refused call.
-- **A space vote round carries `networkSpaceId`** beside `spaceId`, and `GET /api/networks/:id/votes` /
-  `network_votes` name each round's space by `localSpaceId`, as this instance calls it (Q-133).
-- **Accepting a pending space with `mapTo` onto a space the network already carries records the alias** instead of
-  answering `409`, when that space has no network id yet (Q-133).
-- **On upgrade, a network's schema layer and membership origin kept under a renamed space's old name move to its
-  current name** (Q-133, `migrateNetworkSpaceKeys`). Nothing is dropped. Rolling back, the space loses that
-  network's schema layer until the network next sends it — see
-  [Rolling back](docs/integration-guide/02-hosting.md#rolling-back).
-
-- **A recall with both `tags` and a filter naming `tags` applies both** (Q-102). The filter used to REPLACE the
-  `tags` parameter, so `tags: ["a"]` with `filter: {"tags": "b"}` answered records tagged `b` alone. A caller who
-  relied on that gets fewer records now: the ones carrying both.
-- **Every vector index gains `_id` as a filter field, rebuilt once on the first boot with no gap in search**
-  (Q-102). See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
-- **The shipped Kubernetes Deployment uses `strategy: Recreate`**, so an old and a new pod never write the same
-  data volume at once during a rollout.
-- **A traversing `recall` or `similar` returns each match with its WHOLE graph, or leaves it out and names it**
-  (Q-126, owner ruling 2026-09-28: *"if i get a result i want to be sure i get what i asked for"*). Each match is
-  walked on its own, to the depth asked for; a neighbourhood past the per-match node ceiling, a link scan past its
-  bound, a node reachable more ways than are recorded, or the deadline leaves that match out of `results` and in
-  `incompleteRows`, and no returned graph is ever shortened. The whole call has one walk budget and one deadline,
-  and running out of either ends the answer at the last whole match with `truncated`, `nextSkip` and
-  `truncatedBy`, exactly as the byte budget does. **Removed: `graphComplete`**, the link to a spilled whole graph
-  beside a shortened inline one, and the spill behind it — nothing is written unless `remainderDump: true` is
-  sent. **`graphTruncated` changed meaning**: it is now `true` exactly when `incompleteCount` is, and never means a
-  returned graph is short. **Removed: `pathsTruncated`** on a node, for the same reason. A caller that read
-  `graphComplete` reads `incompleteRows` and narrows `edgeLabels` or `traverse` to bring a match back. See
-  [Graph-augmented recall](docs/integration-guide/04h-graph-augmented-recall.md).
-- **A spill's `download` is `/api/brain/spills/:id`**. It was the files route on the seed's space, which a token
-  with knowledge read and no files read could not fetch.
-- **A spill lives up to one day, and may be evicted earlier** by its own token's newer spills. Every place that said
-  "expires after one day" says so now.
-- **Backups and the storage quota leave read spills out.** A backup would have kept a copy — of records since
-  deleted or redacted — for as long as backups are kept, and counting them could have tripped the brain quota on
-  writes with nothing to show why. A restore leaves the current spills alone.
-- **The read spills versions before 5.6.0 wrote into spaces are removed, and never sync again.** A root
-  `_tmp/graph-<uuid>.json` or `_tmp/results-<uuid>.json` is left out of the manifest and the space hash, its bytes
-  are never pulled and its metadata is dropped on push and pull (counted as `skipped`, so an older peer's push still
-  succeeds), and the retention sweep, every few minutes, deletes every copy on this instance — written here or pulled from a peer — with no
-  tombstone and no webhook, and one `file.legacy_spill.sweep` audit entry per space it cleaned. **The deletion
-  cannot be undone**; a `_tmp` folder of your own deeper in the tree, and other files under the root `_tmp`, are not
-  touched. See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
-- **Deprecated: `path` on `remainder`, and its resolution through `read_file` and
-  `GET /api/files/:spaceId?path=`** — removed at the next major. No such file exists since Q-92; the files doors
-  answer exactly that path from the spill store, for the token that ran the search alone, so a caller built on
-  `path` + `read_file` keeps working until then. One read of that path now answers ONE window — the first page
-  under the door's default budget, with `nextSkip` when there is more — where it used to return the whole file;
-  continue with `read_spill` or the spill route from `nextSkip`. Read by `spillId`.
+- **Search:** A traversing `recall` or `similar` returns each match with its whole graph, or leaves it out of `results`
+  and names it in `incompleteRows`: per-match node ceiling, link scan, unrecorded path counts and the deadline.
+- **Search:** One walk budget and one deadline cover the call; running out of either ends the answer at the last whole
+  match with `truncated`, `nextSkip` and `truncatedBy`. Nothing is spilled unless `remainderDump: true` is sent.
+- **Search:** `graphComplete` and `pathsTruncated` are removed, and `graphTruncated` is true exactly when `incompleteCount`
+  is. A caller that read `graphComplete` reads `incompleteRows` and narrows `edgeLabels` or `traverse`.
+- **Search:** A `recall` with both `tags` and a `filter` naming `tags` applies both; the filter used to replace `tags`, so
+  `tags: ["a"]` with `filter: {"tags": "b"}` answered records tagged `b` alone.
+- **Search:** Every vector index gains `_id` as a filter field, rebuilt once on the first boot with no gap in search.
+- **Search:** A spill's `download` is `/api/brain/spills/:id`, which a token with knowledge read and no files read can
+  fetch; a spill lives up to one day and may be evicted earlier by its own token's newer spills.
+- **Search:** `path` on `remainder`, resolved through `read_file` and `GET /api/files/:spaceId?path=`, is deprecated and
+  removed at the next major. It answers one window (first page, `nextSkip` for more) for the issuing token only.
+- **Tokens:** The `createSpaces` right creates a space on every door: `POST /api/spaces`, `save_space` and a network join
+  share one rule and one `403` sentence, and `save_space` is listed to a token holding it. MFA still applies to REST create.
+- **Tokens:** The token that creates a space, directly or by joining a network, becomes its administrator
+  (`rights.spaceAdmin.spaces`) in the same write, audited as `token.creator_grant`. A creating join needs `networks: write`.
+- **Networks:** A network's `spaceMap` may name several keys for one local space: the first is the network's id, later
+  ones are names a rename left behind. Join and network answers list every one; renaming back to the network id removes it.
+- **Networks:** Join, rename and add-space refusals carry a `code`, identical on REST and MCP: `400`
+  `join_mapping_collision`, `network_id_aliased`, `invalid_answer`; `409` `space_name_in_use`. A refused call changes nothing.
+- **Networks:** A vote round carries `networkSpaceId` beside `spaceId`, and `GET /api/networks/:id/votes` /
+  `network_votes` name each round's space by `localSpaceId`.
+- **Networks:** Accepting a pending space with `mapTo` onto a space the network already carries, which has no network id
+  yet, records the alias instead of answering `409`.
+- **Networks:** On upgrade, a network's schema layer and membership origin kept under a renamed space's old name move to
+  its current name. Nothing is dropped; rolling back loses that layer until the network next sends it.
+- **Housekeeping:** Read spills written into spaces before 5.6.0 (root `_tmp/graph-<uuid>.json`, `_tmp/results-<uuid>.json`)
+  never sync again (counted `skipped` on push) and the retention sweep deletes every copy, with no tombstone or webhook.
+- **Housekeeping:** One `file.legacy_spill.sweep` audit entry is written per space cleaned. The deletion cannot be undone;
+  your own deeper `_tmp` folders and other root `_tmp` files are untouched.
+- **Backup:** Backups and the storage quota leave read spills out, so they are not kept in backups or counted against the
+  brain quota. A restore leaves current spills alone.
+- **Server:** The shipped Kubernetes Deployment uses `strategy: Recreate`, so an old and a new pod never write the same
+  data volume during a rollout.
 
 ### Fixed
 
-- **A published file's description and tag edits reach a subscriber that has already processed the file**
-  (Q-143). Three writes on the receiving instance stamped the file as if someone there had edited it: recording
-  the downloaded bytes, writing the converted document's excerpt, and deriving a description. The receiver's copy
-  then compared newer, and the publisher's next edit was skipped on arrival — with a false Merkle divergence
-  beside it. A file write now advances the record's `seq` only when it changes a field that replicates, and a
-  description is derived only on the instance that authored the file. Records already stamped heal after a few
-  more writes on the publisher. See [Conversion pipeline](docs/integration-guide/05a-conversion-pipeline.md).
-- **A network's sync schedule stops when the network is gone** (Q-144). Leaving, deleting or being ejected from
-  a network, or a config reload that drops it, left its cron task running, and each tick logged
-  `Scheduled sync failed … not found` at ERROR. Since joins arm a schedule by default, that was every network an
-  instance had left. The tick now stops itself when its network is no longer configured, and a reload stops the
-  tasks it no longer lists.
-- **A filtered recall no longer reads as complete when the vector index is behind the collection** (Q-142). While
-  an index definition was updated in place, the index could accept the search and answer for fewer of the matching
-  records than the collection holds, and the answer carried no `degraded` reason. It now says `filter_window` when
-  a record that satisfies the filter, older than the fresh-write window, is missing from the index's answer. See
-  [Recall API](docs/integration-guide/04a-recall-api.md).
-- **On an instance whose vector index uses `euclidean`, locally computed scores match the engine's** (Q-117). The
-  engine scores euclidean as `1 / (1 + d²)` and Ythril computed `1 / (1 + d)`, up to 0.09 apart, so the fresh-write
-  duplicate threshold acted on the wrong scale and the lexical channel's agreement check never passed. Cosine and
-  `dotProduct` were already right. The mapping is now held to the engine's own score for all three metrics by a
-  database test.
-- **`includeRecordMeta` holds at every depth, and on `similar`** (Q-90). A traversed recall carried every match's and
-  every neighbour's `createdAt`/`updatedAt` whatever the flag said, and `similar` accepted no such flag although the
-  guide documented it. Both doors of both searches now drop the bookkeeping unless asked, on the match and every
-  node of its graph; the four ways a search row was built are one builder.
-- **Semantic search in the Graph picker, the entity pickers and the Facts, Edges and Chrono tabs shows its results**
-  (Q-87). A recall hit carries its record under `record`, and these read the record's fields off the hit itself, so
-  every result rendered as a blank row with no id, and a chrono entry showed `chrono` as its type and always
-  `upcoming` as its status. The client reads a hit through one accessor that refuses a hit without a record, and its
-  hit type no longer lets a flat read compile. The Query tab's traversed neighbours show the label of the edge that
-  reached them again, and "view in graph" is offered on entity and edge hits again.
-- **Text removed from a record stops matching searches, whatever became of its embedding** (Q-94). The lexical
-  channel reads the record's matched text, and only a successful embed rewrote it — so on a record with embeddings
-  suppressed, a deleted property went on matching and was shown as the matched text, and a failed embed left both the
-  old text and the old vector. Every embed outcome now writes the current text; a failed one also drops the vector,
-  which described text that is gone, so a retry re-embeds instead of taking the stale vector as current. See
-  [Brain API](docs/integration-guide/04-brain-api.md).
-- **A large `topK` is served, not a 500** (Q-103). The vector stage was handed a per-type limit that followed `topK`
-  while its candidate count stopped at 1000, and the index refuses a limit above its candidates — so a recall asking
-  for more than about 666 of a type answered a 500 labelled retryable, as did a `minPerType` floor above 1000. The
-  sizing lives in `brain/search-bounds.ts` with the per-type bound (2000), a floor is clamped to both `topK` and that
-  bound, and a `topK` past the bound on a type that fills it answers `degraded: ["candidate_cap"]` rather than
-  reading as complete. `topK` still has no ceiling.
-- **A joined network syncs on its own** (Q-137). The join registered the network with no schedule, which is manual
-  only, so a joiner never pulled and a subscriber depended on its publisher pushing everything. The join now adopts
-  the inviter's schedule, carried as `syncSchedule` in the invite apply answer, or every 15 minutes when the inviter
-  offers none it could run. `POST /api/networks/join-remote`, `/join-by-key` and both MCP join tools take an optional
-  `syncSchedule` that wins (`""` for manual), refused `400` before the handshake when it cannot run. A network joined
-  before this keeps no schedule; set one on its card. See
-  [Join Remote](docs/integration-guide/08-networks-api.md#join-remote-rsa-handshake).
-- **A renamed space reaches a new member once, under the network's name** (Q-133). An invite answered with the
-  inviter's LOCAL space ids, while every later exchange used the network's, so a member joining after the publisher
-  renamed a space held it twice — `y-twin` beside `y-project-template` — and the second copy never synced. Invite
-  answers now carry `networkSpaces`, index-aligned with `spaces`, and the joiner records each space under it. A
-  member that already has the duplicate heals from its publisher or tree parent once both run this version
-  (audited as `network.space_alias.heal`); on a club, closed or democratic network, accept the waiting space with
-  `mapTo` naming the space you carry. The idle duplicate is left for you to remove. A pre-5.6.0 joiner of an
-  upgraded publisher still gets the duplicate until it upgrades too. See
-  [Networks API](docs/integration-guide/08-networks-api.md) and
-  [A space that shows up twice](docs/userguide/04-settings.md#a-space-that-shows-up-twice).
-
-- **A filtered recall returns every matching record it has room for, whatever its vector rank** (Q-102). A filter
-  the vector index cannot apply — an undeclared property, `exists`, `ne`, most raw MongoDB — scored only the
-  nearest 1000–10000 records and filtered after, so a match outside that window was dropped with `count: 0` and
-  `truncated: false`, while the schema, `help()` and the guide promised the opposite. The window is now completed
-  from the matching records whenever it cannot prove it held the answer; a filter the index can apply costs what it
-  did, and any other costs a pass over the matching records. Both doors.
-- **Face auto-labelling finds a labelled face behind closer unlabelled ones** (Q-102). The gallery looked at the
-  nearest thousand faces only, so in a large archive a labelled match behind them was recorded as "no match", for
-  good. A gallery search that cannot be completed now makes the media job retry instead of writing the face
-  unlabelled.
-- **A filter can no longer switch off the fresh-write scan's own guards** (Q-102). A raw filter naming `updatedAt`
-  widened the "written in the last three minutes" window to every recent record, and one naming `embedding` failed
-  the scan and dropped the record written a moment ago.
-- **A restore answers in time however many spaces the instance holds.** After reloading the data, the restore
-  rebuilt every space's vector indexes one space after another before answering, so the request grew by several
-  seconds per space, and an instance with a few dozen spaces saw it time out — reporting a failed restore that had
-  in fact succeeded. The spaces are now rebuilt several at a time.
-- **A file arriving by sync is written inside its own space, whatever path the peer names.** The pull path joined
-  the peer's manifest path onto the space directory without the sandbox check every other write gets, so a path
-  climbing out of the space would have been written outside it.
-- **The Query tab's spill download works.** "Download the whole graph" was a plain link, which carries no
-  `Authorization` header, so it could never be followed. It is gone with the graph spill (Q-126); the remainder a
-  search kept with "Keep what did not fit" is offered as a button that fetches every page and saves one file, with
-  its expiry, and a spill that is gone or was not kept says so. A match left out because its graph could not be
-  read whole is named above the results, with the reason.
+- **Search:** A filtered `recall` returns every matching record it has room for, whatever its vector rank, on both doors.
+  Filters the index cannot apply (undeclared property, `exists`, `ne`, most raw MongoDB) used to answer `count: 0`.
+- **Search:** A filtered recall no longer reads as complete when the vector index is behind the collection: it answers
+  `degraded: ["filter_window"]` when a matching record older than the fresh-write window is missing from the index.
+- **Search:** A raw filter naming `updatedAt` or `embedding` can no longer widen or break the fresh-write duplicate scan.
+- **Search:** A large `topK` is served, not a retryable `500` (recall asked for over ~666 of a type, or a `minPerType`
+  above 1000). A `topK` past the per-type bound of 2000 that a type fills answers `degraded: ["candidate_cap"]`.
+- **Search:** On a `euclidean` vector index, locally computed scores now match the engine's `1 / (1 + d²)`, so the
+  fresh-write duplicate threshold and the lexical agreement check act on the right scale.
+- **Search:** `includeRecordMeta` holds at every depth of a traversed `recall` and on `similar` (REST and MCP), dropping
+  `createdAt` / `updatedAt` on the match and every graph node unless asked.
+- **Embedding:** Text removed from a record stops matching searches whatever became of its embedding: every embed outcome
+  writes the current text, and a failed one drops the stale vector so a retry re-embeds.
+- **Media:** Face auto-labelling finds a labelled face behind closer unlabelled ones; a gallery search that cannot be
+  completed makes the media job retry instead of writing the face unlabelled.
+- **Sync:** A published file's description and tag edits reach a subscriber that already processed the file: a file write
+  advances `seq` only when a replicated field changes, and a description is derived only where the file was authored.
+- **Networks:** A joined network syncs on its own: the join adopts the inviter's `syncSchedule` (from the invite answer),
+  or every 15 minutes. `POST /api/networks/join-remote`, `/join-by-key` and both MCP join tools take `syncSchedule`.
+- **Networks:** A bad `syncSchedule` on a join is refused `400` before the handshake; `""` means manual. A network joined
+  before 5.6.0 keeps no schedule until you set one on its card.
+- **Networks:** A renamed space reaches a new member once, under the network's name: invite answers carry `networkSpaces`
+  beside `spaces`. A member holding the duplicate heals once its publisher or parent runs 5.6.0 (`network.space_alias.heal`).
+- **Networks:** On a club, closed or democratic network, accept a waiting duplicate with `mapTo` naming the space you
+  carry, then remove the idle copy. A pre-5.6.0 joiner of an upgraded publisher still gets the duplicate until it upgrades.
+- **Networks:** A network's sync schedule stops when the network is gone (left, deleted, ejected or dropped by a config
+  reload) instead of logging `Scheduled sync failed … not found` at ERROR on every tick.
+- **Backup:** A restore answers in time however many spaces the instance holds: vector indexes are rebuilt several
+  spaces at a time, so a large instance no longer times out on a restore that had succeeded.
+- **UI:** Semantic search in the Graph picker, entity pickers and the Facts, Edges and Chrono tabs shows its results
+  (they rendered blank rows, `chrono` as type and `upcoming` as status); traversed neighbours show their edge label again.
+- **UI:** The Query tab's "Download the whole graph" link, which could not send `Authorization`, is gone with the graph
+  spill; a kept remainder downloads as one file with its expiry, and a match left out is named above the results.
 
 ### Security
 
-- **Every regex a filter can run passes the catastrophic-pattern guard** (Q-118). The guard read only `$regex`,
-  while `$expr` is accepted, so `$regexMatch`, `$regexFind` and `$regexFindAll` ran any pattern — `(a+)+$` pinned
-  MongoDB's CPU for the whole `maxTimeMS`, per member space on a proxy, on the filter tool, recall's `filter` and
-  `/query` alike. They are now guarded like `$regex`, and their pattern must be a literal: one read from a field is
-  refused, since no guard can inspect it. The filter tool's description no longer promises an allowlist nothing
-  enforced; it names what is refused, from the sets that refuse it.
-- **A relaying member cannot re-aim a vote round** (Q-138). A vote cast's signature covered the round's id but not
-  what it does, so a member relaying a `space_deletion` or `space_wipe` round could rewrite its target space or wiped
-  types and every honest cast still verified on the instance that learned the round from it. A cast now also carries
-  `bsig`, signed over the round's type, `spaceId`, `networkSpaceId` and `wipeTypes` and checked against the round it
-  is applied to. A cast without it is refused from a voter known to run 5.6.0 or later; from an older member the old
-  check stands until it upgrades. See [Signed vote casts](docs/sync-protocol.md#signed-vote-casts).
-- **`POST /api/sync/warm` warms only a network the calling peer belongs to, and only the spaces that network
-  carries** (Q-133). It opened collection handles for any space id in the body.
+- **Search:** `$regexMatch`, `$regexFind` and `$regexFindAll` in a filter pass the catastrophic-pattern guard like `$regex`
+  and need a literal pattern, so `(a+)+$` can no longer pin MongoDB's CPU through `filter`, `recall` or `/query`.
+- **Search:** A search never writes into a space: a `recall` or `similar` that outgrew its inline cap, or asked for
+  `remainderDump`, saved a file in the seed's space that synced to every peer. Spills now live outside every space.
+- **Search:** Only the token that ran a search can read what it kept. Any token with files read could list `_tmp` and read
+  other callers' results; the spill route and `read_spill` now check the issuing token and knowledge read on each space.
+- **Sync:** Spills no longer reach peers and the copies that did are removed: spills are instance-local, sync drops the
+  old path shape in both directions, and the retention sweep deletes what is left.
+- **Sync:** A file arriving by pull is written inside its own space; a manifest path climbing out of the space is no longer
+  written outside it.
+- **Sync:** `POST /api/sync/warm` warms only a network the calling peer belongs to, and only the spaces it carries, not
+  any space id in the body.
+- **Networks:** A relaying member can no longer re-aim a `space_deletion` or `space_wipe` vote round: a cast also carries
+  `bsig`, signed over its type, `spaceId`, `networkSpaceId` and `wipeTypes`, and is refused without it from 5.6.0+ voters.
+- **UI:** The web app sends its session token to this instance only; a protocol-relative URL (`//other.example/…`,
+  `/\other.example/…`) or a host merely starting with the origin no longer receives the bearer, nor do downloads.
 
-- **A search never writes into a space** (Q-92). A `recall` or `similar` whose traversal outgrew its inline cap, or
-  that asked for `remainderDump`, saved the rest as a file in the seed's space: a blob under `_tmp/`, a file record,
-  a change that synced it to every peer, and an embedding job for the search's own output — so a token holding only
-  knowledge read changed a space by searching it. Spills now live in a store outside every space, for the token
-  that caused them.
-- **Only the token that ran a search can read what it kept.** A spill was an ordinary file on the space, so any
-  token with files read there could list `_tmp` and read every other caller's search results. The spill route and
-  `read_spill` check the issuing token and knowledge read on every space in the spill, today rather than when it
-  was made, and answer anyone else as if the spill did not exist. The deprecated `path` resolves under the same
-  rule.
-- **Spills no longer reach peers, and the copies that did are removed.** A spill replicated like content, and the
-  copy a peer pulled never expired there, so one caller's results accumulated on every instance in a network. Spills
-  are instance-local now, sync drops the old path shape in both directions, and the retention sweep deletes what is
-  left.
-- **The web app sends its session token to this instance only.** The request interceptor tested "same origin" as
-  "starts with `/` or with the origin", so a protocol-relative URL (`//other.example/…`, and `/\other.example/…`,
-  which a browser reads the same way) or a host that merely begins with the origin (`<origin>.other.net`) received
-  the bearer too. One rule now decides it for the interceptor and for authenticated downloads alike.
+### Internal
+
+- **Server:** `npm run docker:compact:install`, run once from an elevated Windows shell, registers a protected on-demand
+  task so `npm run docker:compact` runs without a UAC prompt; `-Uninstall` removes it.
 
 ## [5.5.2] — 2026-09-27
 
