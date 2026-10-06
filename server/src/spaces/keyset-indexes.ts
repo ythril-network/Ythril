@@ -21,17 +21,8 @@
  */
 import { col } from '../db/mongo.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { indexNamesOf } from '../db/index-names.js';
 import { SEQ_KEYSET_INDEXES, bareKeysOf, indexNameOf, noteKeysetIndexes, type SeqKeysetIndex } from '../util/seq-keyset.js';
-
-/** The names of a collection's indexes; none for a collection that does not exist yet. */
-async function indexNames(collName: string): Promise<string[]> {
-  try {
-    return (await col(collName).listIndexes().toArray()).map(ix => String(ix['name']));
-  } catch (err) {
-    if ((err as { codeName?: string }).codeName === 'NamespaceNotFound' || (err as { code?: number }).code === 26) return [];
-    throw err;
-  }
-}
 
 /**
  * Create every keyset index of the collections a space has JUST created. Called by `initSpace` with the parts whose
@@ -48,7 +39,7 @@ export async function createKeysetIndexesFor(spaceId: string, isNew: (part: Spac
   // A reader waits for the compound, and these collections have it: say so, rather than let their first read look.
   for (const part of touched) {
     const collName = spaceCollection(spaceId, part);
-    noteKeysetIndexes(collName, await indexNames(collName));
+    noteKeysetIndexes(collName, await indexNamesOf(collName));
   }
 }
 
@@ -66,12 +57,12 @@ export async function buildKeysetIndex(
   const collName = spaceCollection(spaceId, index.part);
   const name = indexNameOf(index.keys);
   const bare = indexNameOf(bareKeysOf(index));
-  let names = await indexNames(collName);
+  let names = await indexNamesOf(collName);
   const built = !names.includes(name);
   if (built) {
     onBuild?.();   // before the build, so a log line says it STARTED rather than only that it ended
     await col(collName).createIndex({ ...index.keys });
-    names = await indexNames(collName);
+    names = await indexNamesOf(collName);
     if (!names.includes(name)) throw new Error(`index ${name} on ${collName} is not in its index list after its build; the bare ${bare} is kept`);
   }
   const droppedBare = names.includes(bare);

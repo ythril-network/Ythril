@@ -37,6 +37,7 @@ import { pushSeqRuns } from './push-seq-runs.js';
 import { LOCAL_ONLY_EXCLUSION } from './local-only-fields.js';
 import { truncationWarn, type TransferOutcome } from './watermark.js';
 import { readAfterSeq } from '../util/seq-keyset.js';
+import { andPredicates } from '../db/and-predicates.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
 import { log, peerText } from '../util/log.js';
 import type { ReplicatedFamily } from './replicated-families.js';
@@ -65,8 +66,7 @@ export async function pushFamily(o: {
   const key = family.payloadKey;
   const peerLabel = member.label ?? member.instanceId;
   const endpoint = `${member.url}/api/sync/batch-upsert?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`;
-  const filters = [o.owned, family.pushFilter ?? {}].filter(f => Object.keys(f).length > 0);
-  const extra = filters.length > 0 ? { $and: filters } : undefined;
+  const extra = andPredicates(o.owned, family.pushFilter);
   const outcome: TransferOutcome = { deliveredThrough: o.lastSeqPushed, truncated: false };
   let pushed = 0, refused = 0;
   let localMaxSeq = o.lastSeqPushed;

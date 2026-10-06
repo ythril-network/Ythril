@@ -45,7 +45,7 @@ import { statementFrom } from './_structural-window.mjs';
 // the way every other gate that needs a server value does — preflight builds it first for exactly this.
 import { BRAIN_COLLECTIONS } from '../../server/dist/config/types.js';
 
-const { safeWatermark, truncatedTransfers } = await import('../../server/dist/sync/watermark.js');
+const { safeWatermark, truncatedTransfers, completeThrough } = await import('../../server/dist/sync/watermark.js');
 
 /** A transfer that finished everything above the old watermark. */
 const done = () => ({ deliveredThrough: 0, truncated: false });
@@ -240,19 +240,30 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
 
   it('the page cap counts as a truncation', () => {
     // Easy to miss, because nothing failed. The loop reaches its bound with the peer still having more to give.
-    assert.match(pager, /if \(pages >= maxPages\) \{ stop\(/,
+    // Both loops stop at the bound through the ONE helper (`stopAtPageBound`), which stops through the ONE stop
+    // (`stopTransfer`), which is where `truncated` is set — each link is held, so the chain cannot be cut unseen.
+    assert.match(pager, /if \(stopAtPageBound\(outcome, o\.stopped, pages, maxPages\)\) return;/,
       'a pager at its page bound must stop (and so set truncated), or the watermark passes what was not fetched');
-    assert.match(pushLoop, /pages >= o\.maxPages\) \{\s*\n\s*outcome\.truncated = true;/,
-      'a push at its page bound must set truncated');
-    assert.match(pager, /const stop = \(why: string\): void => \{ outcome\.truncated = true;/, 'a stop must set truncated');
+    assert.match(pushLoop, /if \(stopAtPageBound\(outcome, o\.stopped, pages, o\.maxPages\)\) return;/,
+      'a push at its page bound must stop (and so set truncated)');
+    assert.match(pager, /const stop = \(why: string\): void => stopTransfer\(outcome, o\.stopped, why\);/, 'a stop must go through stopTransfer');
+    const wm = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
+    assert.match(wm, /function stopTransfer\([^)]*\): void \{\s*outcome\.truncated = true;/, 'stopTransfer no longer marks the transfer truncated');
+    assert.match(wm, /function stopAtPageBound\([\s\S]*?stopTransfer\(outcome, stopped,/, 'stopAtPageBound no longer stops through stopTransfer');
   });
 
   it('a stop inside a run reports the seq before it, in both directions', () => {
-    // The rule, as one sentence each. Pull: a pair cursor sitting inside the highest admitted seq's run holds that seq minus one.
-    assert.match(pager, /pageHighest >= pair\.seq \? pageHighest - 1 : pageHighest/,
+    // The rule, as one sentence each, spelled once in `completeThrough`. Pull: a pair cursor sitting inside the highest
+    // admitted seq's run holds that seq minus one. Push: a FULL page may continue at its last seq, a short one cannot.
+    assert.match(pager, /completeThrough\(pageHighest, pageHighest >= pair\.seq\)/,
       'the pull no longer reports a seq it is still inside as incomplete');
-    // Push: a FULL page may continue at its last seq, a short one cannot.
-    assert.match(pushLoop, /full \? last\.seq - 1 : last\.seq/, 'the push no longer reports a seq it is still inside as incomplete');
+    assert.match(pushLoop, /completeThrough\(last\.seq, full\)/, 'the push no longer reports a seq it is still inside as incomplete');
+    assert.equal(completeThrough(7, true), 6, 'a run that may continue is complete through the seq before it');
+    assert.equal(completeThrough(7, false), 7, 'a run that cannot continue is complete through its own seq');
+    assert.equal(completeThrough(0, true), 0, 'there is nothing before seq 0 to be complete through');
+    for (const [name, src] of [['pull', pager], ['push', pushLoop], ['pull-family', pullFamily], ['push-family', pushFamily]]) {
+      assert.doesNotMatch(src, /\b(?:[a-z]*[sS]eq|fullLast|pageHighest|highestAdmitted)\s*-\s*1\b/, `${name} subtracts one from a seq by hand again: that is \`completeThrough\``);
+    }
   });
 
   it('the push caps with the ACCEPTED position, not the author-guarded one', () => {

@@ -186,9 +186,12 @@ describe('the sender still treats a non-ok push as a stall', () => {
   it('the loop marks the transfer truncated and does not advance past the batch the peer refused', () => {
     const at = loop.indexOf('o.send(rows)');
     assert.notEqual(at, -1, 'the loop no longer sends through `send` — re-point this gate');
-    const block = enclosingBlockMatching(loop, loop.indexOf('o.stopped(refusal', at), /if \(refusal !== null\) \{/, 'the refusal branch');
+    const block = enclosingBlockMatching(loop, loop.indexOf('stopTransfer(outcome, o.stopped, refusal', at), /if \(refusal !== null\) \{/, 'the refusal branch');
     assert.ok(block, 'the stop is no longer inside a refusal guard — re-point this gate');
-    assert.match(block, /outcome\.truncated = true/, 'a failed push must mark the transfer truncated');
+    // The stop is `stopTransfer` (`sync/watermark.ts`), which is where the transfer is marked truncated.
+    assert.match(block, /stopTransfer\(outcome, o\.stopped, refusal\)/, 'a failed push must stop through stopTransfer');
+    const watermark = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
+    assert.match(watermark, /function stopTransfer\([^)]*\): void \{\s*outcome\.truncated = true;/, 'a failed push must mark the transfer truncated');
     assert.match(block, /return;/, 'a failed push must stop the loop');
     assert.doesNotMatch(block, /deliveredThrough\s*=|after\s*=/,
       'the position must NOT advance past a batch the peer refused — that would turn a visible stall into silent loss');
