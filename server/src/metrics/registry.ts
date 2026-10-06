@@ -26,7 +26,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
-import { declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
+import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -427,18 +427,22 @@ export const housekeepingQuarantinedSpaces = new Gauge({
 
 /**
  * Start every series a step can move at 0: a counter that appears at its first event shows nothing for the whole healthy
- * period, and "absent" and "0" mean opposite things on a graph. A job's label is the step's name where a job is declared as a
- * step; a job with its own name appears at its first skipped tick.
+ * period, and "absent" and "0" mean opposite things on a graph.
  */
 function predeclareStep(step: string): void {
   for (const kind of HOUSEKEEPING_FAILURE_KINDS) housekeepingSpaceFailuresTotal.labels({ step, kind }).inc(0);
   housekeepingRecordsFailedTotal.labels({ step }).inc(0);
-  intervalTickSkippedTotal.labels({ job: step }).inc(0);
+}
+
+/** The same for a repeating job, which names itself at construction (`intervalJob` calls `declareJob`). A step is not a job. */
+function predeclareJob(job: string): void {
+  intervalTickSkippedTotal.labels({ job }).inc(0);
 }
 
 housekeepingQuarantinedSpaces.set(0);
-// The steps declared before this module was built are read; the ones declared after arrive as a `step-declared` signal.
+// What was declared before this module was built is read; what is declared after arrives as a `*-declared` signal.
 for (const step of declaredSteps()) predeclareStep(step);
+for (const job of declaredJobs()) predeclareJob(job);
 
 /** A count that may be added to a counter: a positive finite number. prom-client throws on anything else. */
 const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
@@ -447,6 +451,9 @@ onHousekeepingSignal((event) => {
   switch (event.type) {
     case 'step-declared':
       predeclareStep(event.step);
+      break;
+    case 'job-declared':
+      predeclareJob(event.job);
       break;
     case 'space-failure':
       housekeepingSpaceFailuresTotal.labels({ step: event.step, kind: event.kind }).inc();
