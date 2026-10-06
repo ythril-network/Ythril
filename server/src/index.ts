@@ -232,8 +232,10 @@ async function main(): Promise<void> {
   configureConnections(server);
 
   // Periodic stale-chunk cleanup (every hour). An interval job: one tick at a time, a throw contained and said once per
-  // window as "Stale chunk cleanup failed: …", an unref'd timer so shutdown does not wait for it.
-  intervalJob('Stale chunk cleanup', 60 * 60 * 1000, () => cleanupStaleChunks()).start();
+  // window as "Stale chunk cleanup failed: …", an unref'd timer so shutdown does not wait for it. Held, so the shutdown handler
+  // below stops it with the other jobs: a tick that starts during the drain walks the upload directories of a closing instance.
+  const chunkCleanup = intervalJob('Stale chunk cleanup', 60 * 60 * 1000, () => cleanupStaleChunks());
+  chunkCleanup.start();
 
   server.listen(PORT, () => {
     // Work the bootstrap held for the listen (`util/after-listening.ts`) starts now.
@@ -321,6 +323,20 @@ async function main(): Promise<void> {
     // The reindex watcher resumes a run whose lease is stale, which starts a sweep: not while the process drains.
     const { stopReindexWatcher } = await import('./brain/reindex.js');
     stopReindexWatcher();
+    // Every other scheduled job (`every-started-job-is-stopped-at-shutdown` derives the set): a tick that starts while the HTTP
+    // drain runs reaches into a database the shutdown is about to close, and a tick that lands late is a write racing `closeMongo`.
+    // The TTL sweep, the candidate and tombstone prunes and the contradiction scanner exported a stop that nothing called.
+    chunkCleanup.stop();
+    const { stopTtlSweep } = await import('./brain/ttl-sweep.js');
+    stopTtlSweep();
+    const { stopCandidatePrune } = await import('./brain/candidate-prune.js');
+    stopCandidatePrune();
+    const { stopTombstonePrune } = await import('./brain/tombstone-prune.js');
+    stopTombstonePrune();
+    const { stopContradictionScanner } = await import('./brain/contradiction-scanner.js');
+    stopContradictionScanner();
+    const { stopAuditChangeRetention } = await import('./audit/change-retention.js');
+    stopAuditChangeRetention();
 
     await new Promise<void>(resolve => {
       const forced = setTimeout(() => {

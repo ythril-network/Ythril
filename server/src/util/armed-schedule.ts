@@ -22,7 +22,9 @@
  * fire. This holds one string per key and answers one question.
  *
  * The INTERVAL-driven sweeps have no business here: they read their config on every run, so nothing needs
- * re-arming and restarting them would reset the phase of a six-hour timer for no gain.
+ * re-arming and restarting them would reset the phase of a six-hour timer for no gain. A repeating timer is
+ * `util/interval-job.ts`'s question (overlap, a throw, a database bound, a hung tick, `unref`); a cron expression is this
+ * module's, and the two docblocks say where the other begins.
  */
 
 /** One scheduler's fact of what it armed. Keyed, so a per-network scheduler uses one instance for all of them. */
