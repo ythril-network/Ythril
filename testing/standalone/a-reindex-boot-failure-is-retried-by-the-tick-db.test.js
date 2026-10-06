@@ -62,7 +62,7 @@ const STALL_MS = STALL_STEP_MS * STALL_STEPS;
 // A space that is FAULTY sits BEFORE the healthy one in the config: a walk that stops at the first failure leaves exactly the
 // spaces after it unprocessed. Each hung space is armed by exactly one case (a hung space is quarantined for a minute).
 const SPACES = ['boot-fail', 'skip-fail', 'skip-ok', 'tick-fail', 'tick-ok', 'gauge-bad', 'gauge-ok', 'lease-base', 'lease-held',
-  'lease-stale', 'lease-tick', 'lease-conc', 'lease-err', 'lease-new', 'lease-renew', 'hung-tick-1', 'hung-tick-2', 'hung-boot-1',
+  'lease-stale', 'lease-tick', 'lease-retarget', 'lease-conc', 'lease-err', 'lease-new', 'lease-renew', 'hung-tick-1', 'hung-tick-2', 'hung-boot-1',
   'hung-boot-2', 'ref'];
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-reindex-tick-'));
@@ -342,6 +342,24 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
           'a tick that never resumes is a failed boot resume that waits for the next restart');
       });
 
+      it('a tick that finds a finished run built for another model restarts it, and does not finish it from the copy it read', async () => {
+        const ids = await seedFacts('lease-retarget', 4);
+        shared.setReindexNeeded('lease-retarget', true);
+        // Complete, nothing queued, so by the OLD rule a tick would end it on the spot; but its vectors are for a model
+        // the instance no longer runs.
+        await seedRun('lease-retarget', {
+          flagged: true, sweepComplete: true, sweepLeaseAt: STALE(),
+          target: { ...targetOfThisConfig, model: `${targetOfThisConfig.model}-previous` },
+        });
+        await reindex.reindexRunTick();
+        const doc = await runCol('lease-retarget').findOne({ _id: 'run' });
+        assert.ok(doc, 'the tick ended a run it had just restarted');
+        assert.equal(shared.needsReindex('lease-retarget'), true, 'and cleared the flag recall is refused behind');
+        await sweepDone('lease-retarget');
+        assert.deepEqual([...await rebuildQueued('lease-retarget')].sort(), ids, 'every record is queued again');
+        assert.deepEqual((await runCol('lease-retarget').findOne({ _id: 'run' })).target, targetOfThisConfig);
+      });
+
       it('an errored run is resumed by neither', async () => {
         await seedFacts('lease-err', 4);
         const lease = STALE();
@@ -379,7 +397,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
 
       it('the lease is taken when the run is CREATED, and the creating process\'s own tick does not sweep it again', async () => {
         const before = Date.now();
-        await seedFacts('lease-new', 6);
+        await seedFacts('lease-new', 1_100); // a sweep of three batches: still going when the ticks below read the run
         const decision = await reindex.planReindex({ spaceId: 'lease-new', space: spaceConfig('lease-new'), memberIds: ['lease-new'] });
         const counts = await aggregatesDuring(async () => {
           await reindex.startReindex(decision.plan);

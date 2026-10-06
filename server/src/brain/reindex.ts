@@ -27,6 +27,14 @@
  * the sweep from the cursor, and restarts it when the target changed underneath. Being one of the SPACE's
  * collections, it moves with a rename and goes with a delete or a full wipe.
  *
+ * ## Who sweeps: the lease (`Q-274`, bundle-53 G15)
+ *
+ * Two things resume a run whose sweep is not complete: the boot (`resumeReindexRuns`) and the watcher's tick, which is what
+ * retries a boot that could not (a space that failed or hung, a store that was down). They must not both sweep it, and in two
+ * processes (a rolling restart, a second instance on the same database) a variable in memory cannot say. The run document says:
+ * `sweepLeaseAt`, taken with one atomic `findOneAndUpdate` by whoever resumes the run (`takeSweepLease`), by `startReindex` at
+ * creation, and renewed in the same write as every saved cursor. A lease older than a minute is a sweep that died.
+ *
  * A run ends when its sweep is complete and no rebuild job of the space is pending or processing. It then clears
  * needsReindex, logs what it did, and deletes its document. A sweep that keeps failing records `error`, keeps the
  * document and the flag, and does not block a new reindex, which replaces it.
@@ -46,7 +54,7 @@
  * that refusal protected nothing and cost every operator a whole drain between spaces. A space with an active run
  * refuses a second one; any other space starts.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex, clearReindexFlag, setReindexNeeded } from '../spaces/_shared.js';
 import { isProxy, concreteSpaces } from '../spaces/proxy.js';
@@ -57,7 +65,9 @@ import { queueEmbedSweep, countUnswept, type SweepCursor } from './queue-embed-s
 import { EMBED_PRIORITY, getEmbedJobCounts } from './embed-queue.js';
 import { resolvePrefixScheme } from './embedding.js';
 import { backoffDelayMs } from '../util/backoff.js';
-import { runExclusive } from '../util/single-flight.js';
+import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { intervalJob } from '../util/interval-job.js';
 import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
 
 /** A refusal, carrying the status the contract suite pins. */
@@ -83,7 +93,11 @@ interface ReindexTarget {
   prefixScheme: string | null;
 }
 
-/** The run document. Local to this instance: it never syncs, and it is not hashed. */
+/**
+ * The run document. Local to this instance: it never syncs, and it is not hashed (`reindexRun` is in no list of the replicated
+ * collections: `BRAIN_COLLECTIONS` holds the record kinds only, and a test holds that), so a field added here needs no
+ * `Incoming*` schema and no entry in `merkle.ts`.
+ */
 interface ReindexRunDoc {
   _id: 'run';
   spaceId: string;
@@ -98,6 +112,13 @@ interface ReindexRunDoc {
   warnedStalled?: boolean;
   cursor: (SweepCursor & { member?: string }) | null;
   sweepComplete: boolean;
+  /**
+   * Whose sweep this is, as a fact on the document: the moment (epoch ms) the sweeper last proved it is alive. Taken atomically
+   * (`takeSweepLease`) by whoever resumes the run, at CREATION by the process that starts it, and renewed with every cursor
+   * save. A run whose lease is younger than {@link SWEEP_LEASE_STALE_MS} is being swept and is left alone; absent (a run written
+   * before the lease existed) reads as stale. Cross-process safe because the document is the only thing both sides read.
+   */
+  sweepLeaseAt?: number;
   queued?: number;
   skippedSuppressed?: number;
   error?: string;
@@ -110,6 +131,20 @@ const WATCH_MS = 5_000;
 const STALLED_MS = 10 * 60_000;
 /** Attempts at a sweep before the run records its error. */
 const SWEEP_ATTEMPTS = 3;
+/**
+ * How long a sweep may go without renewing its lease before another may take the run. A sweeper renews with every saved cursor (a
+ * batch of 500 records), so a live one is far inside this. It is also how long a run waits after a CRASH: the dead process's lease
+ * looks fresh to the boot that follows, and the watcher's tick takes the run once it is stale. Not larger, for that reason; not
+ * smaller, because a duplicate sweeper is wasted work (a rebuild job is coalesced per record) and never wrong.
+ */
+const SWEEP_LEASE_STALE_MS = 60_000;
+
+/** The names a failure of each walk is counted and said under (`declareStep`: the series start at 0). */
+const WATCH_STEP = declareStep('Reindex watcher');
+const RESUME_STEP = declareStep('Reindex resume');
+const GAUGE_STEP = declareStep('Reindex gauge');
+/** All three are retried by the next tick of the watcher. */
+const WHEN = 'next tick';
 
 const runs = (spaceId: string) => col<ReindexRunDoc>(spaceCollection(spaceId, 'reindexRun'));
 
@@ -203,6 +238,9 @@ export async function startReindex(plan: ReindexPlan): Promise<void> {
       progressAt: now,
       cursor: null,
       sweepComplete: false,
+      // Born leased: the process that starts the run sweeps it, and no tick may find it unowned in the moment between the
+      // document and the sweep's first batch.
+      sweepLeaseAt: Date.now(),
     };
     // Replaces an errored run, which is the operator's way out of one.
     await runs(mid).replaceOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), doc, { upsert: true });
@@ -212,9 +250,54 @@ export async function startReindex(plan: ReindexPlan): Promise<void> {
   armWatcher();
 }
 
-/** Start (or resume) a run's sweep on the next turn, so the caller's response is not held behind it. */
+/**
+ * Start (or resume) a run's sweep on the next turn, so the caller's response is not held behind it. The caller HOLDS the run's
+ * lease (it created the run, or `takeSweepLease` returned it): the sweep renews it and never asks for it.
+ */
 function sweepInBackground(spaceId: string): void {
   setImmediate(() => { void sweepRun(spaceId); });
+}
+
+/**
+ * Take the sweep of a run: the one atomic step that decides who sweeps. Matches only a run that has not ended in error and whose
+ * lease is stale or absent (`$not` / `$gte`, so a missing field matches: a run written before the lease existed is resumable), and
+ * answers the run AS IT IS NOW, so a caller that lost a race to a sweep that has since finished reads `sweepComplete` from the
+ * document and not from the copy it read earlier. `null` is "someone else has it, or it is not a run to resume".
+ */
+async function takeSweepLease(spaceId: string): Promise<ReindexRunDoc | null> {
+  const now = Date.now();
+  return await runs(spaceId).findOneAndUpdate(
+    asFilter<ReindexRunDoc>({
+      _id: RUN_ID,
+      error: { $exists: false },
+      sweepLeaseAt: { $not: { $gte: now - SWEEP_LEASE_STALE_MS } },
+    }),
+    asUpdate<ReindexRunDoc>({ $set: { sweepLeaseAt: now } }),
+    { returnDocument: 'after' },
+  ) as ReindexRunDoc | null;
+}
+
+/**
+ * Resume a run whose sweep is not being made — the ONE function the boot and the tick both ask, so the target-changed reset has a
+ * single copy. Does nothing for a run with nothing to sweep (its sweep is complete under the configuration it is running now) and
+ * for one another sweeper holds. A run built for a model the instance no longer runs starts its sweep again from the beginning.
+ *
+ * Returns whether it started a sweep (or reset the run to start one): the caller's copy of the document is then out of date.
+ */
+async function resumeRun(run: ReindexRunDoc, target: ReindexTarget): Promise<boolean> {
+  const retargeted = !sameTarget(run.target, target);
+  if (run.sweepComplete && !retargeted) return false;
+  const held = await takeSweepLease(run.spaceId);
+  if (!held) return false;
+  if (!sameTarget(held.target, target)) {
+    log.info(`Reindex of '${peerText(run.spaceId)}' resumes against a different embedding configuration: its sweep starts again`);
+    await runs(run.spaceId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }),
+      { $set: { target, cursor: null, sweepComplete: false } });
+  } else if (held.sweepComplete) {
+    return false;
+  }
+  sweepInBackground(run.spaceId);
+  return true;
 }
 
 /** Walk the space and queue every record as a rebuild, saving the cursor as it goes; retry, then record the error. */
@@ -224,13 +307,16 @@ async function sweepRun(spaceId: string): Promise<void> {
     try {
       const run = await activeRun(spaceId);
       if (!run || run.sweepComplete) return;
+      // A retry waited out its backoff: say the sweep is alive before it goes on.
+      if (attempt > 1) await runs(spaceId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { sweepLeaseAt: Date.now() } });
       const swept = await queueEmbedSweep(spaceId, {
         match: 'all',
         priority: EMBED_PRIORITY.rebuild,
         rebuild: true,
         ...(run.cursor ? { after: { kind: run.cursor.kind as BrainEmbedRecordType, lastId: run.cursor.lastId } } : {}),
         onBatch: async (cursor) => {
-          await runs(spaceId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { cursor } });
+          // The lease is renewed in the SAME write as the cursor: a sweep that is making progress is never one a tick may take.
+          await runs(spaceId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { cursor, sweepLeaseAt: Date.now() } });
         },
       });
       await runs(spaceId).updateOne(
@@ -294,64 +380,90 @@ export async function reindexStateFor(memberIds: string[]): Promise<{
   return { needsReindex: memberIds.some(mid => needsReindex(mid)), reindexRun: { running, remaining, failed } };
 }
 
-/** The gauge is the number of active runs, recomputed from the documents so two runs can never leave it wrong. */
+/**
+ * Did the walk ANSWER for every space it was given? Only then is a count made from it the whole truth: a space that failed, was
+ * passed over in quarantine, or was never reached because the store stopped answering may hold a run the count never saw.
+ */
+function walkAnswered(walk: WalkResult<unknown>, spaces: number): boolean {
+  return !walk.storeDown && !walk.stalled && walk.outcomes.length === spaces && walk.outcomes.every(o => o.status === 'ok');
+}
+
+/**
+ * THE writer of `ythril_reindex_in_progress` (a test holds that no other statement in `server/src` sets it): the number of active
+ * runs, and only when every space was read. A count that skipped a space says fewer runs than there are, which is the direction
+ * an operator trusts ("nothing is running"); so while any space could not be read the gauge keeps its last value (`OB-1`).
+ */
+function publishGauge(active: number, answered: boolean): void {
+  if (answered) reindexInProgress.set(active);
+}
+
+/**
+ * The gauge, recomputed from the documents so two runs can never leave it wrong. For the callers that read no run document
+ * themselves (a start, a sweep that gave up); the tick and the boot count while they walk and call {@link publishGauge}.
+ */
 async function refreshGauge(): Promise<void> {
+  const spaces = concreteSpaces();
   let n = 0;
-  for (const s of concreteSpaces()) if (await activeRun(s.id)) n++;
-  reindexInProgress.set(n);
+  const walk = await eachSpace(GAUGE_STEP, spaces, async (space) => { if (await activeRun(space.id)) n++; }, { when: WHEN });
+  publishGauge(n, walkAnswered(walk, spaces.length));
 }
 
 /**
  * One tick of the watcher, for every run on the instance. Exported so a test drives it instead of waiting on a timer.
  *
- * A run is finished when its sweep is complete and no rebuild job is left pending or processing. A run whose sweep
- * is not complete is never finished here, whoever is or is not sweeping it: an incomplete sweep is a promise of
- * records not yet queued.
+ * Every space is its own unit of the walk (`eachSpace`): one whose run cannot be read, or whose read hangs, is reported once and
+ * the spaces behind it are still looked at. There is no per-step catch inside a space: a space's tick is one step, and what fails
+ * in it fails the space, which is what lets the walk SEE it.
+ *
+ * - **A run whose sweep is not complete is resumed** when nobody holds its lease (`resumeRun`): a boot that could not resume it
+ *   (a failing space, a store that was down) is retried here, every tick, until it succeeds.
+ * - **A run is finished** when its sweep is complete and no rebuild job is left pending or processing. A run whose sweep is not
+ *   complete is never finished here, whoever is or is not sweeping it: an incomplete sweep is a promise of records not yet queued.
  */
 export async function reindexRunTick(): Promise<void> {
+  const spaces = concreteSpaces();
+  const target = currentTarget();
   let active = 0;
-  for (const s of concreteSpaces()) {
-    try {
-      const run = await activeRun(s.id);
-      if (!run) continue;
-      active++;
-      const { remaining, failed } = await rebuildCounts(s.id);
-      const now = Date.now();
-      if (!run.sweepComplete || remaining > 0) {
-        if (run.lastRemaining === undefined || remaining < run.lastRemaining) {
-          await runs(s.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }),
-            { $set: { lastRemaining: remaining, progressAt: new Date(now).toISOString(), warnedStalled: false } });
-        } else if (!run.warnedStalled && now - Date.parse(run.progressAt ?? run.startedAt) > STALLED_MS) {
-          log.warn(`Reindex of '${peerText(s.id)}' has made no progress for ${Math.round(STALLED_MS / 60_000)} minutes: `
-            + `${remaining} record(s) still to rebuild${run.sweepComplete ? '' : ', and the sweep has not finished'}`);
-          await runs(s.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { warnedStalled: true } });
-        }
-        continue;
+  const walk = await eachSpace(WATCH_STEP, spaces, async (space) => {
+    const run = await activeRun(space.id);
+    if (!run) return;
+    active++;
+    // Started or reset: the document read above is out of date, and finishing from it would end a run that was just restarted.
+    if (await resumeRun(run, target)) return;
+    const { remaining, failed } = await rebuildCounts(space.id);
+    const now = Date.now();
+    if (!run.sweepComplete || remaining > 0) {
+      if (run.lastRemaining === undefined || remaining < run.lastRemaining) {
+        await runs(space.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }),
+          { $set: { lastRemaining: remaining, progressAt: new Date(now).toISOString(), warnedStalled: false } });
+      } else if (!run.warnedStalled && now - Date.parse(run.progressAt ?? run.startedAt) > STALLED_MS) {
+        log.warn(`Reindex of '${peerText(space.id)}' has made no progress for ${Math.round(STALLED_MS / 60_000)} minutes: `
+          + `${remaining} record(s) still to rebuild${run.sweepComplete ? '' : ', and the sweep has not finished'}`);
+        await runs(space.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { warnedStalled: true } });
       }
-      for (const mid of run.members) clearReindexFlag(mid);
-      log.info(`Reindex completed for space '${peerText(s.id)}': queued=${run.queued ?? 0}, `
-        + `suppressed=${run.skippedSuppressed ?? 0}, failed=${failed}`);
-      await runs(s.id).deleteOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }));
-      active--;
-    } catch (err) {
-      log.warn(`Reindex watcher: '${peerText(s.id)}': ${peerText(err)}`);
+      return;
     }
-  }
+    for (const mid of run.members) clearReindexFlag(mid);
+    log.info(`Reindex completed for space '${peerText(space.id)}': queued=${run.queued ?? 0}, `
+      + `suppressed=${run.skippedSuppressed ?? 0}, failed=${failed}`);
+    await runs(space.id).deleteOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }));
+    active--;
+  }, { when: WHEN });
   // Counted on the same pass rather than by reading every run document again.
-  reindexInProgress.set(active);
+  publishGauge(active, walkAnswered(walk, spaces.length));
 }
-
-let watcher: NodeJS.Timeout | null = null;
 
 /**
- * One interval for every run, armed by the first run. Each tick runs under `runExclusive`, so a tick slower than the
- * interval — a large instance, a slow database — is skipped and said, never stacked behind the one still running.
+ * One interval for every run, armed by the first run — or by a boot that could not tell whether there is one. An interval job:
+ * one tick at a time (a tick slower than the interval is skipped and counted, never stacked behind the one still running), its
+ * database work bounded, one walk budget for the tick, a throw contained (`util/interval-job.ts`).
  */
-function armWatcher(): void {
-  if (watcher) return;
-  watcher = setInterval(() => { void runExclusive('Reindex watcher', reindexRunTick); }, WATCH_MS);
-  watcher.unref();
-}
+const watcher = intervalJob('Reindex watcher', WATCH_MS, reindexRunTick);
+
+function armWatcher(): void { watcher.start(); }
+
+/** End the watcher's timer. For a shutdown and for a test that drives the tick itself. A tick already running is left to finish. */
+export function stopReindexWatcher(): void { watcher.stop(); }
 
 /**
  * Pick up every run this instance had when it stopped. Called once services start, on first run and on every boot.
@@ -359,26 +471,25 @@ function armWatcher(): void {
  * A run whose target no longer matches the configuration starts its sweep again from the beginning: the vectors it
  * already rebuilt are for a model the instance no longer runs. An errored run stays as it is — it needs an operator,
  * and its flag is already re-asserted by `initSpace`.
+ *
+ * Every space is its own unit of the walk, so one that cannot be read does not stop the spaces behind it, and the boot never
+ * throws for it. **A space that could not be read is not a space with no run:** the watcher is armed whenever any space was found
+ * to hold a run OR any space could not be asked, and its tick resumes what this boot could not.
  */
 export async function resumeReindexRuns(): Promise<void> {
-  let any = false;
+  const spaces = concreteSpaces();
   const target = currentTarget();
-  for (const s of concreteSpaces()) {
-    const run = await activeRun(s.id);
-    if (!run) continue;
-    any = true;
-    if (run.flagged) setReindexNeeded(s.id, true);
-    if (!sameTarget(run.target, target)) {
-      log.info(`Reindex of '${s.id}' resumes against a different embedding configuration: its sweep starts again`);
-      await runs(s.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }),
-        { $set: { target, cursor: null, sweepComplete: false } });
-      sweepInBackground(s.id);
-    } else if (!run.sweepComplete) {
-      sweepInBackground(s.id);
-    }
-  }
-  if (any) armWatcher();
-  await refreshGauge();
+  let active = 0;
+  const walk = await eachSpace(RESUME_STEP, spaces, async (space) => {
+    const run = await activeRun(space.id);
+    if (!run) return;
+    active++;
+    if (run.flagged) setReindexNeeded(space.id, true);
+    await resumeRun(run, target);
+  }, { when: WHEN });
+  const answered = walkAnswered(walk, spaces.length);
+  if (active > 0 || !answered) armWatcher();
+  publishGauge(active, answered);
 }
 
 /** Whether a run document asks for this space's needsReindex to stay asserted. Read by `initSpace`. */
