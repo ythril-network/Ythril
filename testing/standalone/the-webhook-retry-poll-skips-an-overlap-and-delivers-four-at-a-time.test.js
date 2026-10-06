@@ -151,7 +151,7 @@ describe('what the poll did before is kept', () => {
   });
 
   it('a failed delivery is re-queued with the next attempt; the last attempt marks the webhook failing', async () => {
-    const last = dispatcher.MAX_RETRY_ATTEMPTS;
+    const last = dispatcher.MAX_ATTEMPTS;
     const r = rig({ due: [job(1, { attempt: 2 }), job(2, { attempt: last })], deliver: async () => failed });
     r.worker.job.start();
     await r.fire();

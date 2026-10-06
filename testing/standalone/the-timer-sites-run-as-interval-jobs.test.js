@@ -39,6 +39,7 @@ before(async () => {
   retention = await import('../../server/dist/audit/change-retention.js');
   seq = await import('../../server/dist/util/seq.js');
   activity = await import('../../server/dist/metrics/space-activity-store.js');
+  await import('../../server/dist/api/invite-sessions.js');   // armed at import: every site's module is loaded before a label is asked for
 });
 after(() => wb?.setWriteBoundForTest(null));
 
@@ -71,7 +72,6 @@ describe('every timer site declares its job at construction', () => {
 
 describe('the invite session purge (armed at import)', () => {
   it('arms one 60 s timer when the module is evaluated, and it does not hold the process', async () => {
-    await import('../../server/dist/api/invite-sessions.js');   // dependencies loaded, so the fresh evaluation below arms and nothing else does
     const { made } = await recording(() => import(`../../server/dist/api/invite-sessions.js?fresh=${Date.now()}`));
     assert.equal(made.length, 1, `the module armed ${made.length} timers at import`);
     assert.equal(made[0].ms, 60_000);
