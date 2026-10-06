@@ -280,317 +280,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads
   `Scheduled backup failed: …`, was `Scheduled backup error: …`.
 - **Media:** The media worker no longer reads an unreadable source as deleted and removes what the job wrote.
-- **Two members holding the same data report the same Merkle root (`Q-307`).** The root hashed each record's
-  `spaceId` — which the receiver rewrites to its own id for the space, so a space held under a `spaceMap` alias
-  differed in every leaf — and the files that never leave an instance (a conflict copy, a schema snapshot). A
-  network with `merkle: true` logged `MERKLE_DIVERGENCE` for such a space on every cycle over identical content.
-  **Mixed versions:** a root from an earlier version never equals one from this version, so a `merkle: true`
-  network running both reports `MERKLE_DIVERGENCE` for every space until all its members have upgraded. The
-  check is advisory and blocks nothing.
-- **A refused entity cascade removes nothing.** A cascade a fact, chrono entry or file still blocked deleted every
-  blocking edge, wrote their tombstones (so peers deleted them too), and only then answered "cannot delete". The
-  whole set is now decided first, and a cascade that cannot finish removes no edge.
-- **An edge a cascade removes is never gone without its tombstone.** The tombstone was written after the edge
-  was deleted, so a failed tombstone write left the edge gone here and alive on every peer, which brought it back
-  on the next pull pointing at the entity being deleted. Each chunk's delete and tombstones now commit together.
-- **`delete_entity` no longer says "There is no cascade."** It has one (`cascadeToken`, from
-  `delete_entity_preview`), and the description now says so where a caller reads first.
-- **A merge reported as failed after its commit landed is answered as merged, and still queues its edges and
-  sends its webhooks.** A commit whose reply was lost used to throw past both, leaving re-keyed edges without a
-  vector and subscribers never told the absorbed entity was deleted. The merge reads back, while still holding
-  the sequence horizon, whether it landed.
-- **A merge's first-time model load no longer fails the merge.** The survivor's embedding is computed before the
-  merge takes its hold, so a slow model load can no longer outlast the hold's deadline and answer `503`.
-- **The tombstone of an edge a merge drops as a duplicate, and of a link it re-keys or a write unlinks, carries
-  the seq of the record it deletes** (`originalSeq`). Without it a peer whose watermark never reached the record
-  was sent its deletion.
-- **An automerge a space refuses is reported once per pair, not twice on every scan.** The scanner recorded a
-  pair at a seq it never read for the record it started from, so a refused pair never matched itself and was
-  merged again — a whole transaction, rolled back — and warned about from both ends on every scan. The survivor
-  of an automerge is now also the older record as configured, rather than whichever the scan reached first.
-- **A write the store could not finish in time answers `503` on the create and converge doors too.** A planned
-  write whose bulk write the write bound ended was answered per item as "did not complete" through a read-back
-  that ran after the deadline; while nothing of the request has landed it is now the store timeout every door
-  answers `503 retryable`.
-- **A transaction under the sequence hold can read more than one batch of rows.** The driver sends a time limit
-  on such a cursor's `getMore`, which the server refuses, so any read of more than 101 rows inside a held
-  transaction failed it. A cursor there now asks for every row in its first batch.
-- **A write that stalled could stop a space's replication indefinitely (`Q-213`).** While a write holds its
-  sequence number, every peer pulling the space is served nothing past it, and nothing bounded the write: a
-  document lock held elsewhere, a stalled socket or a transaction retrying a conflict for two minutes held every
-  pull of the space with it, while each cycle reported success. The write now ends within the bound above, its
-  hold is released when it ends, and the pull continues.
-- **A stalled write is visible while it stalls (`Q-200`).** New gauge `ythril_seq_horizon_oldest_hold_seconds`
-  per space (0 when nothing is held), and a `seq horizon held <age>s space=… seq=… holder=… ended=…` warning for
-  every hold that lasted past half the deadline — once while still open, and when it ends.
-- **A record that landed was never queued for embedding when the counter could not move after it (`Q-224`).** The
-  arrival writer moved the counter, then booked and queued what landed, in one `finally`; a counter that could not
-  move threw out of it first, so the records were stored, never queued, and a re-sent page read them as current and
-  never queued them either — and the counter's error replaced the write's own, so an import called every document
-  refused over records it had written. Each step now runs whatever the one before did, the write's own error wins,
-  and a counter left behind fails the page after what landed is booked and queued: a push answers `500`, a pull
-  holds its position, and an import reports what it restored with the new per-family `counterBehind: true` (run the
-  import again). The push door's own counter move follows the same rule.
-- **A driver argument error drops a peer's document only when the error is that document's own.** Every
-  `MongoInvalidArgumentError` was read as the refusal of the document being written, so one that the write bound or
-  the call itself raised dropped a peer's document from its sync page for good. A document whose own write the
-  driver refuses as an invalid argument is still refused alone, counted in `rejected` with a reason (a single route
-  answers `400`); an argument error the write bound caused, or one every document of a page raised, fails the page,
-  so it is sent again.
-- **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a
-  transaction hung its own listener on the session until it ended, so a merge relinking thousands of edges hung
-  thousands of them. A session now carries one, and every write is still reported once after the commit.
-- **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags (`Q-239`, as
-  in 5.6.2).** The pushed bytes reached the subscriber's upload door, which stored them as the subscriber's own
-  upload: its own next seq, itself as the author of a new file, and a description it derived itself. That copy then
-  tied or outranked the publisher's next description or tag edit, which was skipped on arrival for good. Bytes a
-  peer pushes are now recorded as an arrival, as a download already was (`Q-143`). Arriving bytes, pushed or
-  pulled, also make a soft-deleted path live again, and a file new on this instance is given its file retention
-  window: a pushed file had that before, a pulled one did not.
-- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now actually recovered (`Q-219`).** 5.6.2's drain
-  merged it by seq, but a receiver before 5.6.0 had stamped its OWN seq on the file rows of peers' files it pulled,
-  so most stray descriptions counted as older than the stored copy and were dropped with the collection. The drain
-  now FILLS a row this instance made itself with the keys it lacks — never over a description or tags it has (an
-  automatic caption gives way to the sender's wording), never changing its seq, author or update time — and gives a
-  row another instance wrote the usual newer-wins rule. It never creates a row: a record whose file is missing waits
-  up to 30 days for the file's bytes, or is discarded when a file tombstone says the file was deleted. It works a
-  bounded amount per cycle and resumes, a failing space no longer stops the others and is named in the log, and the
-  drop of an emptied collection writes an audit entry, `file.stray_filemeta.drain`. The server's own audit entries
-  (sweeps, alias heals, creator grants) now carry a request id of their own instead of reading as older than the field.
-- **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
-  tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
-  was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that
-  straddled a page (equal seqs are normal for deletions relayed from several instances). Both now page by a
-  cursor that re-reads a full page's last seq, and a transfer that cannot finish — a refused request, a page of one
-  seq it cannot page past, its per-cycle bound — holds the watermark where it stopped and says so, naming the
-  space, the peer and the seq. A peer still on 5.6.x pulls at most 1000 per kind until it upgrades.
-- **A tombstone with an impossible seq no longer reaches the counter by pull (`Q-221`).** The push refused it; the
-  pull checked nothing, so a peer could drag this instance's seq counter into its ceiling reserve with one
-  tombstone. Both doors now refuse it on its own, log it, and do not move the counter to it — and a refused
-  tombstone no longer moves the pull's cursor past the real deletions after it.
-- **A record pulled from a peer was never queued for embedding (`Q-203`).** It was stored and absent from every
-  meaning-ranked search on this instance until somebody ran a reindex. Pulled records are now queued by this
-  instance's suppression rules, like pushed ones. **Records pulled before this release** stay without a vector until
-  queued: run `POST /api/spaces/:id/reembed` (Settings → Spaces → Danger Zone → Backfill embeddings) once per
-  synced space.
-- **A new entity pushed through the single `POST /api/sync/entities` route was never embedded.** It was inserted
-  by a write that never reached the embed queue.
-- **A push could leave this instance's seq counter below what it had received (`Q-198`).** The single push routes
-  never moved it, `batch-upsert` left out links and file metadata and moved it only after answering, and
-  `POST /api/sync/tombstones` did not wait for it. Every push door now moves the counter past every seq it received
-  before it answers, so the next local write never takes a seq below a record a peer already holds. A fork is then
-  written with a seq above the arrival that caused it.
-- **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
-  whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
-  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
-  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
-  schema or the space) keeps no vector, model or matched text (`Q-230`, above).
-- **A record pushed under a `spaceMap` alias kept the sender's space id**, so every list and lookup on this
-  instance missed it. It is now stored under the local space id, as a pulled record always was.
-- **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
-  lost both. It is deleted only once the record has landed.
-- **A page holding the same id twice could store the older copy**, on pull and on import. The highest seq now wins,
-  and two copies at the same seq keep the first — the same reading the push door has always applied.
-- **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's ceiling
-  reserve is now refused on its own (and logged); it used to refuse every later copy of its record and drag the
-  counter towards the ceiling.
-- **A duplicate link in a push answered `500`**, so the sender re-sent that page for ever. It is now `skipped`.
-- **A database fault while writing a pulled page was reported as an unreachable peer.** It counted toward
-  `PEER UNREACHABLE` and named only the driver error. It now holds that family's position, logs a record-write
-  failure naming the space and family, and the page is fetched again next cycle.
-- **A refused document in a push or pull no longer goes unnamed:** one warning per page names the ids and the
-  reason, where duplicate-key warnings used to list `(unknown)`.
-- **A peer could forge a line in this instance's log.** A document id or a peer label containing a line break was
-  written into the log as it arrived, so a peer could add a line that read exactly like this server's own. Every
-  value a peer sends that reaches a log line on the push, pull or import path is now written with its control
-  characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
-- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
-  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
-  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
-  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
-  other error is still reported at once.
-- **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
-  a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
-  so a later write that finished first could be handed out while an earlier one was still being stored, the peer
-  moved its watermark past it, and never came back for it. Every seq-paged route (the five record families,
-  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners now stop below any write
-  that has not finished; a write's sequence number is taken as part of the write and released when it settles,
-  including inside a transaction, which holds it until it commits.
-- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
-  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
-  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
-  key names.
-- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** The converge branch
-  never queued the re-embed the insert branch queues, so the entry's search vector described what it no longer said.
-- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
-  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
-  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
-  write states one.
-- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
-  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
-  and refuse the same keys with the same message.
-- **An edge created with a property its label's schema defaults was stored without the default**, although the
-  default was what passed validation; the stored edge now carries the value that was checked.
-
-- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
-  caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had
-  drifted: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
-  a converted document re-embedded without its own text, because the loop never read the `excerpt` it passed on.
-  Derived records were skipped outright, so after a model change every passage and media caption kept the old
-  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
-  PATH (`docs/a.pdf#chunk0`). One builder now serves all of them: a passage or caption is rebuilt from its own text
-  (`chunkEmbedText`, shared with the conversion pipeline), a derived record with no text is left without a vector
-  (any path-vector a backfill gave it is removed), and a passage of a file whose owner suppressed its embeddings, at
-  any depth, is not embedded.
-
-- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
-  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
-  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
-  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
-  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
-  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
-  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
-  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
-  is one request per kind now. The schema library asked `…/usages` once per entry to show its link counts;
-  `GET /api/schema-library` now answers `usageCounts` beside the entries, counted by the function the per-entry
-  route uses. The Brain page's chunk was 292 kB against a 260 kB budget and the space settings dialog's 179 kB
-  against 175 kB; deferring the tabs that are not where each opens brings them to 194 kB and 42 kB, and the budgets
-  are tightened to hold that. The nine unused standalone imports the build warned about are gone, and an unused
-  one now fails the build.
-- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
-  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
-  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
-  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
-  interpolates different parameters from the English one.
-- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
-  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
-  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
-  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
-  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
-  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
-  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
-  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
-  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
-  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
-- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
-  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
-  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
-  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
-  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
-  a space's directories retries what a concurrent writer causes (one helper, `files/remove-tree.ts`); a space being
-  deleted or renamed away refuses new file writes at the file door, which the media worker treats as an abandonment,
-  like a moved file's; and the next rename or delete finishes a pending op before it proceeds, refusing only when
-  that fails again — with the reason. Found by a Docker integration run, where it cascaded into sixteen failures.
-- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
-  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
-  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
-  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
-  did the same. `recallGlobal` now fuses the merged pool once — one ranking by meaning over every candidate, and
-  each space's per-type text ranking as its own channel — so every result carries a `fusedScore` from the same
-  fusion, spaces interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:**
-  a `recall` naming several spaces, a proxy, or no space — the ORDER of its results, and the values of `fusedScore`
-  and `vectorRank` on them (now computed over the merged candidates). A recall over one space is unchanged.
-- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
-  (`Q-80`, `Q-98`).** `initAllSpaces` walked every configured space, so each boot created a proxy's collections —
-  which creating it never made and deleting it (a config-only removal) never dropped; the restore index rebuild
-  walked proxies too. And "is this a proxy" was answered about forty times in two spellings that disagreed on an
-  empty member list: such a space was served as a real space and skipped as a proxy by the embed worker, the
-  duplicate and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left
-  behind. The loader now removes an empty `proxyFor` on load and reload (with a warning), `isProxy` is the only
-  test, and every walk over the spaces that own collections iterates one `concreteSpaces()`, which also answers the
-  pre-setup case once. **Who is affected:** an instance with a proxy space (its boot stops creating collections for
-  it; ones already created are left as they are, empty), and one whose config was edited by hand to hold
-  `"proxyFor": []` (that space starts being embedded and scanned).
-- **A space schema-change round reached no peer (`Q-108`).** `meta_change_pending` was sent to every member and was
-  not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read the answer.
-- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
-  before the `404`, so any caller could mint a time series per spelling.
-- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
-  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
-- **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
-  document's conversion that finished after the move wrote its chunk records under the path the file had just
-  left — a folder that no longer existed, with nothing to ever delete them (caught on CI by `files.test.js`,
-  two records left under a moved folder). The conversion now commits its records in one transaction that holds
-  only while its job is still claimed, and a move takes that claim before any bytes leave, then re-queues the job
-  at the new path. A run that finds its moved file missing no longer "cleans up a deleted file" either — which
-  deleted the job and records the move was carrying. And a move now carries everything a file owns: a renamed
-  file's chunks used to stay at the old path, a moved folder's chunks kept naming parents that no longer existed
-  (so deleting the moved file removed none of them), and the `_converted/`/`_extracted/` sidecars moved for
-  neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now run the same move (`files/move-cascade.ts`).
-  **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its links under the new
-  path, but moving a folder re-rooted the records and left every link naming a path that was gone, so each file in
-  it silently lost what it was linked to. Both now carry links through one step.
-- **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
-  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
-  whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and
-  `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
-  - **`graph_traverse` and `POST /api/brain/spaces/:id/traverse`** answer whole nodes in hop order under the byte
-    budget, each page carrying the edges back to nodes already delivered, with `skip`/`nextSkip` and `remainderDump`;
-    `limit` still caps the walk and a walk that hit it says `limitReached` (`Q-132`).
-  - **The duplicate and contradiction review lists** page instead of stopping at 500; the Review tab reads every
-    page (`Q-127`).
-  - **A file's extract** returns its converted Markdown whole, or in whole paragraphs that page to the end with
-    **Show more** — it was cut mid-sentence at 256K characters — and its image list says when it is cut (`Q-128`).
-  - **The schema dry-run** says, per collection, how many records it checked against how many exist and whether the
-    check was complete, and pages its violations (`Q-129`).
-  - **The notify event list** pages and says when it is cut (`Q-130`).
-  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
-- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
-  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
-  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
-  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
-  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
-
-- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
-  new token and left the previous one valid, though the peer keeps only the newest and could never present the
-  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
-  A completed handshake now revokes the tokens it replaces, on both sides and for club pairings too, and an instance
-  drops the unused leftovers when it starts. A token still in a handshake is left alone, since two joins can overlap.
-
-- **A closed or democratic network connects every member too, on its own votes (`Q-154`).** Only the member that
-  held a newcomer's credentials used to admit it; every other member concluded the join vote and connected to
-  nobody. Now a passed join round introduces the newcomer on every member and the two pair as club members do, and
-  a newcomer trusts the list of the member that admitted it. A roster entry anyone else proposes — on a network
-  whose members joined before this, with their votes long pruned — waits under **Connecting** for the operator's
-  **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`,
-  instance-admin), because a member of a voted network votes and one member's word must not let it in. A refused
-  pairing is retried after half a minute, doubling to five: members learn of a passed vote at about the same moment,
-  so a first call that arrives before the other side has concluded it is a race, not a refusal.
-- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
-  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
-  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
-  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
-  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
-  model's fallback rule and this one are now one module.
-- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
-  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
-  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
-  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
-  0.033, never a similarity. Every fused result also carries the two ranks it came from, `vectorRank` and
-  `lexicalRank` (absent when the text search missed it), on both doors, and the Query tab shows them beside the
-  figure — so the score can be checked rather than taken on trust.
-- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
-  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
-  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Reported by the platform
-  operator; both doors.
-- **The Query tab's structured mode is called Filter (`Q-156`)**, the name it has as the `filter` tool and
-  `POST /api/filter`; it was *Advanced Query*.
-- **The Query tab folds its search to one line once results arrive, says how long the search took, and expands or
-  collapses every result at once (`Q-158`).**
-- **A club is a mesh: every member connects to every other member, not only to whoever admitted it (`Q-135`).**
-  An admission landed on the admitting instance alone, so two members admitted by the organiser never learned of
-  each other and the club stopped when the organiser did. Now each member learns the others from its peers'
-  rosters during the gossip every sync cycle already runs, and the two pair directly with a new two-call exchange
-  on the peer protocol (`POST /api/sync/networks/:id/pair` and `/pair/confirm`), so an existing club heals on its
-  next cycle without re-joining. A club removal travels to every member the same way. `GET /api/networks/:id` and
-  MCP `network_get` answer `introductions` — members still being connected to, with why an attempt failed — and the
-  network card lists them under **Connecting**. Club only: pub/sub and trees are star and tree by design, and voted
-  networks follow in `Q-154`, because a peer's roster must not stand in for a vote.
-
-- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
-  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
-  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
-  and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+- **Sync:** **BREAKING:** The Merkle root no longer hashes `spaceId` or instance-local files, so equal data matches
+  (also under a `spaceMap` alias). Mixed-version `merkle: true` networks log `MERKLE_DIVERGENCE` until all upgrade.
+- **Sync:** A stalled write can no longer stop a space's replication: it ends within the write bound. New gauge
+  `ythril_seq_horizon_oldest_hold_seconds`, and a `seq horizon held <age>s space=… seq=… holder=… ended=…` warning.
+- **Sync:** A peer no longer misses a record for good when two writes overlap: every seq-paged route, the push loop and
+  the duplicate and contradiction scanners stop below any write that has not finished.
+- **Sync:** A peer with more than 1000 deletions of one kind now passes on all of them, by pull and push; a transfer
+  that cannot finish holds the watermark and logs space, peer and seq. A peer on 5.6.x pulls at most 1000 per kind.
+- **Sync:** **BREAKING:** `POST /api/sync/tombstones` and the pull now refuse (and log) a tombstone whose seq is inside
+  the protocol's ceiling reserve; it can no longer drag the seq counter or move the pull cursor past real deletions.
+- **Sync:** A page holding the same id twice stores the highest seq (equal seqs keep the first), on pull and import,
+  and a stale tombstone is deleted only once the record superseding it has landed.
+- **Sync:** Pulled records and entities pushed via `POST /api/sync/entities` are now queued for embedding. Records
+  pulled earlier lack a vector: run `POST /api/spaces/:id/reembed` once per synced space (Settings → Spaces).
+- **Sync:** A landed record is always queued for embedding, even when the seq counter cannot move after it. A counter
+  left behind answers a push `500`, holds a pull's position, and sets `counterBehind: true` on an import (re-run it).
+- **Sync:** Every push door moves the seq counter past every seq it received before answering, so a local write never
+  takes a seq below a record a peer holds, and a fork gets a seq above the arrival that caused it.
+- **Sync:** A peer's edit no longer erases this instance's vector and retention stamps; the vector is kept only while
+  this instance still embeds the record (not for an arrival it suppresses).
+- **Sync:** A record pushed under a `spaceMap` alias is stored under the local space id, as a pulled one always was; it
+  kept the sender's id and every list missed it.
+- **Sync:** A duplicate link in a push is `skipped` (it answered `500`, so the sender re-sent for ever), and a refused
+  document gets one warning per page naming ids and reason instead of `(unknown)`.
+- **Sync:** A database fault writing a pulled page no longer counts as `PEER UNREACHABLE`: it holds that family's
+  position, logs a record-write failure naming space and family, and refetches next cycle.
+- **Sync:** A driver argument error drops a peer's document only when it is that document's own (counted in
+  `rejected`; a single route answers `400`); one from the write bound or every document of a page fails the page.
+- **Sync:** Peer-supplied values that reach a log line on push, pull or import (document ids, peer labels) are written
+  with control characters escaped (`\r`, `\n`, `\u001b`), so a peer can no longer forge a log line.
+- **Sync:** The tombstone of an edge a merge drops as a duplicate, or of a link a write re-keys or unlinks, carries the
+  deleted record's seq (`originalSeq`), so a peer that never held it is not sent the deletion.
+- **Networks:** A network joined before 5.6.0's join default gets its sync schedule (every 15 minutes, or the inviter's)
+  at the next start, named in the log. Clearing a schedule stores manual as `""`, so manual set on purpose stays.
+- **Networks:** A closed or democratic network now connects every member to a newcomer; roster entries others propose
+  wait for **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`).
+- **Networks:** A club is now a mesh: members pair directly via `POST /api/sync/networks/:id/pair` and `/pair/confirm`;
+  `GET /api/networks/:id` and MCP `network_get` answer `introductions`.
+- **Files:** A file a publisher pushes is recorded as an arrival, so later description and tag edits are no longer
+  skipped; arriving bytes revive a soft-deleted path and get this instance's file retention window.
+- **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now recovered, never over a row's own
+  description or tags, waiting up to 30 days for a missing file; audit entry `file.stray_filemeta.drain`.
+- **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, the
+  `_converted/` and `_extracted/` sidecars and links. REST `PATCH /api/files/:spaceId` and MCP `move_file` run one move.
+- **Files:** A file's extract returns its converted Markdown whole or in whole paragraphs that page to the end with
+  **Show more** (it was cut mid-sentence at 256K characters), and its image list says when it is cut.
+- **Search:** **BREAKING:** A `recall` over several spaces, a proxy or no space now ranks by relevance across the merged
+  pool, so spaces interleave; result order and `fusedScore` / `vectorRank` values change. One-space recall is unchanged.
+- **Search:** A reranker that fails, times out or uses over half its time limit is set aside for 30 s, doubling to 5
+  min: searches skip it at once and still report `degraded: ["rerank_unavailable"]`, instead of waiting 20 s each.
+- **Search:** Text rank is now per record type, so a fact no longer outranks an entity for being longer. Fused results
+  carry `vectorRank` and `lexicalRank` beside `fusedScore`, a rank score (about 0.016-0.033), on both doors.
+- **Search:** `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, not the whole
+  collection, on REST and MCP alike.
+- **Records:** A refused entity cascade removes nothing, and an edge a cascade removes is never gone without its
+  tombstone (each chunk's delete and tombstones commit together), so peers cannot bring it back.
+- **Records:** A merge whose reply was lost after its commit landed is answered as merged and still queues its edges and
+  sends its webhooks; a slow first model load no longer fails it with `503`.
+- **Records:** `graph_traverse` and `POST /api/brain/spaces/:id/traverse` answer whole nodes in hop order with
+  `skip`/`nextSkip` and `remainderDump`; a walk that hit `limit` says `limitReached`.
+- **Records:** A bulk edge whose end is a `$ref` to a fact or chrono entry now stores the kind of the record the key
+  names (it was stored as an entity end when the item gave no kind).
+- **Records:** A chrono entry rewritten through its `id` now re-embeds its new content, and an edge created with a
+  property its label's schema defaults now stores that default.
+- **Embedding:** A record retired from meaning-ranked search no longer gets a vector when rewritten without restating
+  the flag (create endpoints with `waitForEmbedding` or `checkDuplicates`, batches, merge survivors).
+- **Embedding:** A reindex embeds the same text as the original write and rebuilds passage and caption vectors;
+  `reembed` no longer gives a vectorless passage, face crop or converted copy a vector of its path.
+- **Schemas:** `POST /api/notify` accepts `meta_change_pending`, so a schema-change round reaches peers (was `400`).
+  `GET /api/schema-library` answers `usageCounts`; the dry-run reports checked-of-total per collection and pages.
+- **Spaces:** Deleting a space no longer loses a race with the media worker (`ENOTEMPTY`), and one unfinished delete no
+  longer makes every later rename and delete answer `500 "… is still pending"`: the next one finishes it first.
+- **Spaces:** **BREAKING:** A proxy space no longer gets collections at boot, and a hand-edited `"proxyFor": []` is
+  removed on load (warning), so that space is a real one: it starts being embedded and scanned.
+- **Spaces:** A new space no longer stays "building" until restart when a `config.json` read fails with `ENODATA`
+  (Docker Desktop bind mount); a read spoiled by a concurrent writer is retried.
+- **Tokens:** A completed network handshake revokes the peer tokens it replaces, on both sides and for club pairings,
+  and start-up drops unused leftovers; a peer no longer accumulates one `peer:` token per join.
+- **Housekeeping:** The duplicate and contradiction review lists page instead of stopping at 500, and the Review tab
+  reads every page. An automerge a space refuses is reported once per pair, and its survivor is the older record.
+- **MCP:** **BREAKING:** `save_bulk` now refuses a retired or unknown key (such as `{"memories": […]}`) with the same
+  `400` message as REST, naming `facts`; it answered success and wrote nothing.
+- **MCP:** `delete_entity`'s description now names its cascade (`cascadeToken`, from `delete_entity_preview`).
+- **REST:** **BREAKING:** Every list that stopped at a number now says so and pages whole rows to the end, on REST and
+  MCP alike: `count`, `total`, `limit`, `skip`, `truncated`, `nextSkip`; a non-numeric `limit` or `skip` is refused.
+- **Server:** An unknown tool name answers `404` without becoming a `ythril_tool_calls_total` label, and the notify
+  event store holds at most 1 MiB (oldest out first); the notify event list pages and says when it is cut.
+- **Server:** The server's own audit entries (sweeps, alias heals, creator grants) carry a request id of their own.
+- **Database:** A transaction under the sequence hold can read more than 101 rows, and a merge of a large entity no
+  longer prints `MaxListenersExceededWarning`.
+- **Errors:** A write the store could not finish in time answers `503 retryable` on the create and converge doors too,
+  while nothing of the request has landed.
+- **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected
+  record card); opening a record sends one request per linked kind.
+- **UI:** The Query tab's structured mode is called Filter, as in `POST /api/filter` (was Advanced Query); walk headings
+  show counts, not `({count})`; the search folds to one line on results, shows its duration, and expands all at once.
+- **UI:** German and Polish labels say the action ("Ergebnisse löschen", "Wyczyść wyniki", "Zresetuj", "Zamknij") and a
+  space is "Space" / "przestrzeń", not "Leerzeichen" / "spacja". Resolving entities by id asks for every id.
+- **UI:** The Graph tab says why it is slow after three seconds (search indexes building, records awaiting embedding),
+  and after thirty seconds ends in the error state with those reasons and Retry.
 
 ### Security
 
