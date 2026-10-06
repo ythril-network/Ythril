@@ -81,7 +81,12 @@ export async function lexicalSearch(
   try {
     const rows = await col(collName)
       .find({ ...eligibility, $text: { $search: q } }, { projection: { _id: 1, lexicalScore: { $meta: 'textScore' } } })
-      .sort({ lexicalScore: { $meta: 'textScore' } })
+      // `_id` ends the sort, like every other ranking sort in recall (`byIdAsc`). A text score depends only on the
+      // matched terms and the field length, so records written from one template tie EXACTLY, and the database
+      // orders a tie differently on every call. This order is the lexical RANK, a term of the fused score, so
+      // without a tie-break two identical recalls ranked the same records differently and `skip` paging repeated
+      // some matches and dropped others (b56).
+      .sort({ lexicalScore: { $meta: 'textScore' }, _id: 1 })
       .limit(limit)
       .toArray() as unknown as Array<{ _id: string; lexicalScore?: number }>;
 

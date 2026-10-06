@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.5] — 2026-10-06
+
+**A patch release: two fixes from `main` for defects present in 5.6.4, and nothing else.** A recall that ranks its
+matches by keyword as well as by meaning ranked records with equal keyword scores in a different order on every call,
+so a caller paging through an answer with `skip` saw some matches twice and missed others. The other fix is in the Help
+view of the app: a link inside a guide to another page of the guide opened a dead browser tab or did nothing, and a
+heading's link target was sometimes wrong or missing.
+
+| What changes on upgrade | What to do |
+|---|---|
+| Records that tie on keyword score are ranked by `_id`, ascending, so two identical recalls over an unchanged space return the same order | Nothing; a caller that paged with `skip` or `nextSkip` over tied matches now gets each match once |
+| A link from one page of a guide to another opens that page in the Help view and moves the reader to it | Nothing |
+
+Documents changed in this release: `docs/dependencies.md` and `docs/contribution-guide.md`, whose links to files in the
+repository root and in `server/`, `client/` and `sidecars/` are written as code spans, because the Help view serves the
+guides' own pages only.
+
+### Fixed
+
+- **Recall paging repeated some matches and dropped others when keyword scores tied.** A keyword score depends only on
+  the matched terms and the length of the field, so records written from one template score exactly alike, and the
+  database ordered such a tie differently on every call. That order is the keyword rank, a term of the fused score the
+  answer is ranked by, so two identical recalls ranked the same records differently, and `skip` / `nextSkip` run the
+  search again on every page. The keyword search now ends its sort on `_id`, as every other ranking step in recall
+  does. It holds on both doors: the MCP `recall` tool and `POST /api/brain/recall`.
+- **Links inside a guide in the Help view.** A link to another page of the guide it sat in (`](02-hosting.md)`) was
+  read as written and matched no page, so it opened a dead tab, and the 42 links of the integration guide and the user
+  guide that did this now open the page. Following one moves the reader to the start of the page and gives it keyboard
+  focus, keeps the place in the URL fragment so a reload and Back return to it, and shows a focus ring for a keyboard
+  user. A link into another guide with no fragment takes focus to that guide's first heading once it has rendered. A
+  fragment that changes while the view is open (Back, a pasted link) is followed. A heading's anchor is now made from
+  the heading as the reader sees it, so `## A & B` is `#a--b`, as on GitHub and in every link of the guides, and not
+  `#a-amp-b`; and a heading whose anchor names a property of the page itself (`## Links`) keeps an anchor, in
+  DOMPurify's `user-content-` form, and `#links` still finds it.
+
 ## [5.6.4] — 2026-10-05
 
 **A patch release: every fix PR #1483 made on `main` for a defect present in 5.6.3, and nothing else.** It follows
