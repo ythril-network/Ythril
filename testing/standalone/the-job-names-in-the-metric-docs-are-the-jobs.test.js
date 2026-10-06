@@ -11,7 +11,7 @@
  * ## What it holds, and where the set comes from
  *
  * Every `intervalJob(<label>, …)` call in `server/src` — the label is a string literal or a module constant holding one — is
- * read out of the source, and the metric's row in `11-setup-api.md` must name each in backticks. The set is DERIVED and has a
+ * read out of `_scheduled-jobs.mjs` (the one derivation of the repo's scheduled jobs; this gate does not scan for them itself), and the metric's row in `11-setup-api.md` must name each in backticks. The set is DERIVED and has a
  * floor, because an empty set passes every loop written over it; a call whose label this reader cannot resolve THROWS, so a
  * job spelled in a way the reader does not know is never silently left out. A name documented that no job carries is refused
  * too, so a rename cannot leave the old name in the table.
@@ -21,26 +21,31 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
-import { stripComments } from './_strip-comments.mjs';
+import { moduleIndex } from './_call-graph.mjs';
+import { scheduledJobs } from './_scheduled-jobs.mjs';
 
 const METRIC = 'ythril_interval_tick_skipped_total';
 const FLOOR = 10;
 
-/** Every job label the server declares: `intervalJob(` first arguments, resolved to their strings. */
+/**
+ * Every job label the server declares: the first argument of every `intervalJob(` registration, resolved to its string.
+ *
+ * The registrations are `_scheduled-jobs.mjs`'s — the one derivation of "every job this process runs on a timer", which the isolation,
+ * wiring, single-flight and shutdown gates read too — so the set this gate documents cannot differ from the set those hold. What stays
+ * here is the one question it alone asks: what string is the label.
+ */
 function declaredJobLabels() {
+  const index = moduleIndex('server/src');
   const labels = new Map();
-  for (const file of trackedSources('server/src', { exclude: ['server/src/util/interval-job.ts'] })) {
-    const text = stripComments(readFileSync(file, 'utf8'));
-    for (const m of text.matchAll(/\bintervalJob\(\s*([^,]+?)\s*,/g)) {
-      const arg = m[1];
-      let label = arg.match(/^'([^']+)'$/)?.[1];
-      if (label === undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(arg)) {
-        label = text.match(new RegExp(`\\bconst ${arg}\\s*=\\s*'([^']+)'`))?.[1];
-      }
-      assert.ok(label, `${file}: cannot read the label of \`intervalJob(${arg}, …)\` — spell it as a string literal or a module constant holding one, or teach this gate the new spelling`);
-      labels.set(label, file);
+  for (const job of scheduledJobs(index).jobs.filter(j => j.kind === 'interval')) {
+    const text = index.sources.get(job.file);
+    const arg = job.label.trim();
+    let label = arg.match(/^'([^']+)'$/)?.[1];
+    if (label === undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(arg)) {
+      label = text.match(new RegExp(`\\bconst ${arg}\\s*=\\s*'([^']+)'`))?.[1];
     }
+    assert.ok(label, `${job.file}: cannot read the label of \`intervalJob(${arg}, …)\` — spell it as a string literal or a module constant holding one, or teach this gate the new spelling`);
+    labels.set(label, job.file);
   }
   return labels;
 }

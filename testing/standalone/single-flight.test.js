@@ -22,6 +22,8 @@
 import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { balancedFrom } from './_structural-window.mjs';
+import { moduleIndex } from './_call-graph.mjs';
+import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,25 +103,63 @@ describe('runExclusive', () => {
   });
 });
 
-describe('every scheduled sweep is guarded', () => {
-  // Enumerated from source: a fifth sweep added without the guard is the regression this catches, and it would
-  // otherwise be invisible until two passes overlapped in production.
-  const SWEEPS = [
-    ['brain/dupe-scanner.ts', 'Dupe scan'],
-    ['brain/contradiction-scanner.ts', 'Contradiction scan'],
-    ['brain/candidate-prune.ts', 'Candidate prune'],
-    ['brain/ttl-sweep.ts', 'TTL sweep'],
+describe('every scheduled pass runs one at a time', () => {
+  /*
+   * DERIVED from the registrations (`_scheduled-jobs.mjs`), where this was a list of four modules. A list of modules is a list of
+   * last year's modules: when the four sweeps moved to `intervalJob` every row went red for a reason nobody had written, and a job
+   * added since had no row at all. The two kinds of registration are guarded differently, so each is asked its own question:
+   *
+   * - an `intervalJob(…)` is guarded BY CONSTRUCTION, so what is held is the construction (its tick runs inside a `singleFlight`
+   *   instance), not each call site: there is no call site that can leave it out;
+   * - a cron registration (`node-cron` has no overlap guard of its own) must run its pass through `runExclusive` / `singleFlight`
+   *   in the registration itself, or be a named row below with its reason.
+   */
+  const index = moduleIndex('server/src');
+  const { jobs } = scheduledJobs(index);
+  const GUARD = /\b(?:runExclusive|singleFlight)\s*[(<]/;
+
+  /** Cron jobs whose guard is not in the registration, by file: why, and the check that keeps the reason true. */
+  const CRON_EXEMPTIONS = [
+    {
+      file: 'server/src/sync/scheduler.ts',
+      why: 'The tick calls `runScheduledSync`, which calls `runSyncForNetwork`, and every sync cycle (scheduled, manual, on a join) goes through '
+        + 'the engine\'s per-network coalescing runner: a trigger that arrives while a cycle runs joins it and schedules one follow-up.',
+      holds: () => /createCoalescingRunner\b/.test(index.sources.get('server/src/sync/engine.ts'))
+        && /_syncRunner\.run\(/.test(index.sources.get('server/src/sync/engine.ts')),
+    },
+    {
+      file: 'server/src/db/backup-scheduler.ts',
+      why: 'NOT guarded today, recorded rather than hidden (bundle-53 G26 report): the scheduled tick is `runBackupNow()` with no overlap guard, '
+        + 'so a dump that outlasts its cron period overlaps the next. Two dumps write separate timestamped directories, so it wastes work and '
+        + 'does not corrupt. The row is true while the tick really is unguarded; guarding it removes the row.',
+      holds: () => !GUARD.test(index.sources.get('server/src/db/backup-scheduler.ts')),
+    },
   ];
 
-  for (const [file, label] of SWEEPS) {
-    it(`${file} schedules through runExclusive`, () => {
-      const src = readFileSync(join(SERVER_SRC, file), 'utf8');
-      assert.match(src, new RegExp(`runExclusive\\('${label}'`), `${file} must guard its scheduled pass`);
-      // And nothing schedules the bare call beside it.
-      assert.doesNotMatch(src, /(?:schedule\(cron|setInterval)\([^)]*\)\s*=>\s*\{?\s*(?:void\s+)?\w+\(\)\.catch/,
-        `${file} still schedules an unguarded pass`);
-    });
-  }
+  it('finds the registrations it asks about (a floor)', () => {
+    // `scheduledJobs` throws below `JOB_FLOORS` itself; this says the same thing where a reader looks for it.
+    for (const [kind, floor] of Object.entries(JOB_FLOORS)) {
+      assert.ok(jobs.filter(j => j.kind === kind).length >= floor, `fewer than ${floor} '${kind}' registrations: this gate would pass about nothing`);
+    }
+  });
+
+  it('an interval job runs its tick inside a singleFlight, so no call site can leave the guard out', () => {
+    const owner = index.sources.get('server/src/util/interval-job.ts');
+    assert.match(owner, /\bsingleFlight\(\s*label\b/, 'intervalJob must own a singleFlight instance of its own');
+    assert.match(owner, /\bflight\.run\(\s*body\s*\)/, 'and the tick must run the pass through it');
+    assert.match(owner, /\bsignalHousekeeping\(\{\s*type:\s*'tick-skipped'/, 'and a skipped tick must be counted');
+  });
+
+  it('a cron registration runs its pass through runExclusive / singleFlight, or is a named row', () => {
+    const cron = jobs.filter(j => j.kind === 'cron');
+    const unguarded = cron.filter(j => !GUARD.test(j.run) && !CRON_EXEMPTIONS.some(r => r.file === j.file));
+    assert.deepEqual(unguarded.map(j => `${j.file}: the cron tick is not guarded`), [],
+      'node-cron fires its callback on schedule whether or not the last one finished, so a pass that outlives its period overlaps the next');
+    for (const row of CRON_EXEMPTIONS) {
+      assert.ok(cron.some(j => j.file === row.file), `${row.file} no longer registers a cron job: drop its row`);
+      assert.ok(row.holds(), `the reason for ${row.file} is no longer true: ${row.why.slice(0, 80)}…`);
+    }
+  });
 });
 
 describe('outbound calls carry a deadline', () => {
