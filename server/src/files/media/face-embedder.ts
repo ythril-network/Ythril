@@ -39,6 +39,7 @@ import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
 import { linksStartingFrom } from '../../brain/link-adjacency.js';
 import { log, peerText } from '../../util/log.js';
+import { warnOnce } from '../../util/warn-once.js';
 import { isUsableDescriptor } from './face-descriptor.js';
 import { faceDescriptorDimsFor, liveIndexName } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
@@ -61,12 +62,33 @@ let _human: HumanInstance | null = null;
 let _humanLoading: Promise<HumanInstance> | null = null;
 
 /**
- * Once-per-process latch for the "fallback is disabled, so this image was skipped" warning.
+ * The "fallback is disabled, so this image was skipped" warning: said once per OUTAGE of the external provider.
  *
  * A provider that is down is down for every image in the backlog, so a per-image log would emit
- * thousands of identical lines and bury the one an operator needs to read.
+ * thousands of identical lines and bury the one an operator needs to read. It is a `warnOnce` and not a
+ * process-lifetime boolean because the condition can clear: {@link noteExternalFaceProviderAnswered} forgets it
+ * when the provider answers, so a second outage hours later is said again rather than read as the first one's
+ * silence. The key is a constant — one provider, one condition.
  */
-let warnedFallbackDisabled = false;
+const FALLBACK_DISABLED = 'fallback-disabled';
+const fallbackDisabledSaid = warnOnce<string>({ max: 1 });
+
+/** Say that an image was skipped because the provider did not answer and the fallback is off. Returns whether the line was written. */
+export function sayFallbackDisabledOnce(): boolean {
+  return fallbackDisabledSaid(FALLBACK_DISABLED, () => {
+    log.warn(
+      'Face recogniser: the external provider did not answer and the in-process fallback is disabled, '
+      + 'so this image was skipped rather than embedded with the bundled model. The media job will retry. '
+      + 'Set mediaEmbedding.faceRecognition.externalModel.allowInProcessFallback=true to accept vectors '
+      + 'from a different embedder in the same gallery. Logged once until the provider answers again.',
+    );
+  });
+}
+
+/** The external provider answered: the outage, if there was one, is over, so the next one is reported. Also the test reset. */
+export function noteExternalFaceProviderAnswered(): void {
+  fallbackDisabledSaid.forget(FALLBACK_DISABLED);
+}
 
 async function getHuman(): Promise<HumanInstance> {
   if (_human) return _human;
@@ -293,6 +315,8 @@ export async function embedFaces(
 
   let faces: Array<{ embedding?: number[]; boxRaw?: number[] }> | undefined =
     (await detectFacesExternal(imageBytes, expectedDims)) ?? undefined;
+  // An answer ends an outage: the next failure is news, not a continuation of one already said.
+  if (faces) noteExternalFaceProviderAnswered();
 
   // A configured provider that failed does NOT hand off to the bundled model unless the operator asked
   // for that. The two embedders emit the same width, so mixing them corrupts the gallery in a way no
@@ -304,15 +328,7 @@ export async function embedFaces(
   // not falling back — in-process is its only path — and gating on `!faces` alone would silently switch
   // face recognition off for every single-model install.
   if (!faces && externalFaceReady() && !inProcessFallbackAllowed()) {
-    if (!warnedFallbackDisabled) {
-      warnedFallbackDisabled = true;
-      log.warn(
-        'Face recogniser: the external provider did not answer and the in-process fallback is disabled, '
-        + 'so this image was skipped rather than embedded with the bundled model. The media job will retry. '
-        + 'Set mediaEmbedding.faceRecognition.externalModel.allowInProcessFallback=true to accept vectors '
-        + 'from a different embedder in the same gallery. Logged once per process.',
-      );
-    }
+    sayFallbackDisabledOnce();
     log.debug(`Face recogniser: skipped ${spaceId}/${fileId} — external provider unavailable, fallback disabled`);
     return;
   }

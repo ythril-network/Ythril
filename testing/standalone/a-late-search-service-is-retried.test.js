@@ -29,13 +29,15 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createVirtualTime, captureLog, settle } from './_virtual-time.mjs';
 
 const HOUR = 3_600_000;
 const MIN = 60_000;
 
 let createSearchReadiness;
-before(async () => { ({ createSearchReadiness } = await import('../../server/dist/spaces/search-readiness.js')); });
+let MAX_WAITERS;
+before(async () => { ({ createSearchReadiness, MAX_WAITERS } = await import('../../server/dist/spaces/search-readiness.js')); });
 
 /** The refusal a mongod WITHOUT mongot gives `listSearchIndexes` (code 31082, SearchNotEnabled). */
 const noMongotError = () => Object.assign(
@@ -486,6 +488,51 @@ describe('what the log and the snapshot say — the class and the code, never th
         `snapshot.${k} is ${typeof v} ${JSON.stringify(v)?.slice(0, 60)} — only an enum and numbers may appear`);
     }
     for (const s of SECRETS) assert.ok(!JSON.stringify(snap).includes(s));
+  });
+});
+
+describe('a once-only line is a warnOnce, and a lock is an instance (G24)', () => {
+  const overflowLines = (b) => b.cap.lines.warn.filter(l => /items are already waiting for database search/.test(l));
+
+  it('the waiting list overflowing is said once however many keys are refused, and again after a reset', async () => {
+    const b = build(failing());
+    await intoDown(b);
+    const fill = () => { for (let i = 0; i < MAX_WAITERS + 50; i++) b.r.afterSearchUp(`k${i}`, () => {}); };
+    fill();
+    assert.equal(overflowLines(b).length, 1, '50 refused keys must say it once, not 50 times');
+    assert.equal(b.r.snapshot().waiting, MAX_WAITERS, 'the cap held');
+    b.r.reset();
+    fill();
+    assert.equal(overflowLines(b).length, 2, 'a reset is a new condition: the same overflow is news again');
+  });
+
+  it('the overflow of one instance does not silence another', async () => {
+    const one = build(failing());
+    const two = build(failing());
+    await intoDown(one); await intoDown(two);
+    for (const b of [one, two]) for (let i = 0; i < MAX_WAITERS + 1; i++) b.r.afterSearchUp(`k${i}`, () => {});
+    assert.equal(overflowLines(one).length, 1);
+    assert.equal(overflowLines(two).length, 1, 'the latch belongs to the instance, not the module');
+  });
+
+  it('two instances do not share a watcher lock: a hung probe in one does not skip the other\'s tick', async () => {
+    const one = build((n) => { if (n <= 6) throw refusedError(); return hang(); });
+    const two = build(failing());
+    await intoDown(one); await intoDown(two);
+    await one.vt.advance(6_000);   // one's watcher probes, and its probe hangs: its lock is held
+    await two.vt.advance(6_000);
+    assert.equal(one.state.calls, 7);
+    assert.equal(two.state.calls, 7, 'the second instance\'s watcher was blocked by the first instance\'s lock');
+  });
+
+  it('the source holds no hand-written boolean latch and no invented label for a lock', () => {
+    const src = readFileSync(new URL('../../server/src/spaces/search-readiness.ts', import.meta.url), 'utf8');
+    const code = src.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(code, /overflowWarned/, 'the overflow line is a warnOnce again written as a boolean');
+    assert.doesNotMatch(code, /\binstances\b/, 'the label hack (a counter spelled into a lock name) is back');
+    assert.doesNotMatch(code, /runExclusive/, 'the watcher lock is the instance\'s own singleFlight, not a global label');
+    assert.match(code, /singleFlight\(/, 'the watcher lock is a singleFlight instance');
+    assert.match(code, /warnOnce</, 'the overflow latch is a warnOnce');
   });
 });
 

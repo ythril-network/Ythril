@@ -172,4 +172,27 @@ describe('a validator is built once per reach', () => {
     // a NUL-joined pair must not alias the two-id set it would spell
     assert.notEqual(va.validatorFor(['a\0b']), va.validatorFor(['a', 'b']));
   });
+
+  it('the unkeyable-id warning is said once however many calls reach it, and again after the cache is reset', async () => {
+    const { log } = await import('../../server/dist/util/log.js');
+    const was = log.warn;
+    const lines = [];
+    log.warn = (...a) => { lines.push(a.map(String).join(' ')); };
+    try {
+      const said = () => lines.filter(l => /a space id outside/.test(l)).length;
+      for (let i = 0; i < 20; i++) va.validatorFor(['Upper' + i]);
+      assert.equal(said(), 1, 'twenty unkeyable calls must say it once');
+      va._resetValidatorCache();
+      va.validatorFor(['Upper']);
+      assert.equal(said(), 2, 'a reset is a new start: the condition is news again');
+    } finally { log.warn = was; }
+  });
+
+  it('the latch is a warnOnce, not a hand-written boolean', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../server/src/mcp/validate-args.ts', import.meta.url), 'utf8');
+    const code = src.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(code, /warnedUnkeyable/, 'a boolean latch is back');
+    assert.match(code, /warnOnce</, 'the unkeyable warning is not a warnOnce');
+  });
 });

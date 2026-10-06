@@ -22,10 +22,11 @@
  * ## What this does instead
  *
  * The skip still happens — one odd descriptor must not fail a whole media job — but the first one to arrive
- * says so, loudly, naming the width it actually got. Once per process, because a changed library means EVERY
- * face is wrong and a per-face log would bury the message it exists to deliver.
+ * says so, loudly, naming the width it actually got. Once per (source, expected width, width received), because a
+ * changed library means EVERY face is wrong and a per-face log would bury the message it exists to deliver.
  */
 import { log } from '../../util/log.js';
+import { warnOnce } from '../../util/warn-once.js';
 
 /**
  * The dimension the face gallery's Atlas vector index is built with (`{spaceId}_files_faceEmbedding`).
@@ -36,7 +37,20 @@ import { log } from '../../util/log.js';
  */
 export const FACE_DESCRIPTOR_DIMS = 128;
 
-let warned = false;
+/**
+ * Has this disagreement been said? One key per (source, expected width, width received): the first face at a NEW wrong width is news
+ * and the thousandth at the same one is not, including when two wrong widths alternate, which a "last one said" memory would report
+ * on every face. A usable descriptor does NOT clear it: a mixed stream would re-announce on every transition, which is the per-face
+ * log this module exists to avoid. A `warnOnce` rather than a boolean for its bound (a misbehaving provider chooses the width it
+ * sends, so the keys are not a fixed set) and for the reset a test needs.
+ */
+const newDisagreementLatch = () => warnOnce<string>({ max: 64 });
+let widthDisagreementSaid = newDisagreementLatch();
+
+/** Forget everything said, so the next disagreement is reported again. For tests, and for anything that replaces the embedder. */
+export function _resetDescriptorWidthWarnings(): void {
+  widthDisagreementSaid = newDisagreementLatch();
+}
 
 /**
  * Check a descriptor's width, and report the first disagreement.
@@ -63,8 +77,7 @@ export function isUsableDescriptor(
   if (!Array.isArray(embedding)) return false;
   if (embedding.length === expectedDims) return true;
 
-  if (!warned) {
-    warned = true;
+  widthDisagreementSaid(`${source}/${expectedDims}/${embedding.length}`, () => {
     log.warn(
       `Face descriptor width is ${embedding.length}, expected ${expectedDims} (${source}). `
       + 'Every face is being skipped, and this will read as "no faces detected" everywhere. '
@@ -74,7 +87,7 @@ export function isUsableDescriptor(
         : 'The external provider is returning a different width than the gallery was built for; its vectors '
           + 'cannot be compared with the ones already stored.'),
     );
-  }
+  });
   return false;
 }
 

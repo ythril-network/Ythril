@@ -20,6 +20,7 @@ import { retiredWriteFieldHint } from '../brain/retired-write-fields.js';
 import { toolValidatorCacheTotal } from '../metrics/registry.js';
 import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { LruMap } from '../util/lru-map.js';
+import { warnOnce } from '../util/warn-once.js';
 
 export interface ArgsValidator {
   /** The schemas `tools/list` advertises for this reach: the SAME objects this validator compiles from. */
@@ -93,7 +94,9 @@ export const VALIDATOR_CACHE_LIMIT = 64;
 const SAFE_ID = /^[a-z0-9-]+$/;
 // Dropping an entry is what frees its Ajv; the count of drops is what the bound costs.
 const entries = new LruMap<string, ArgsValidator>(VALIDATOR_CACHE_LIMIT, () => toolValidatorCacheTotal.inc({ result: 'evict' }));
-let warnedUnkeyable = false;
+/** Said once: the line names no id (a caller-chosen value), so one condition is one key. Forgotten by {@link _resetValidatorCache}. */
+const UNKEYABLE = 'unkeyable-space-id';
+const unkeyableSaid = warnOnce<string>({ max: 1 });
 
 /** `null` when any id is not a plain space id, so the caller takes the uncached path rather than use a key that could alias. */
 function reachKey(ids: readonly string[]): string | null {
@@ -138,10 +141,9 @@ function buildValidator(ids: readonly string[]): ArgsValidator {
 export function validatorFor(accessibleSpaceIds: readonly string[]): ArgsValidator {
   const key = reachKey(accessibleSpaceIds);
   if (key === null) {
-    if (!warnedUnkeyable) {
-      warnedUnkeyable = true;
+    unkeyableSaid(UNKEYABLE, () => {
       log.warn('tool validator: a space id outside [a-z0-9-]+ was given; its validator is built per call and not cached');
-    }
+    });
     return buildValidator(accessibleSpaceIds);
   }
   // `get` makes the entry the most recently used (`util/lru-map.ts`).
@@ -163,5 +165,5 @@ export function _validatorCacheStats(): { size: number; compiles: number } {
 export function _resetValidatorCache(): void {
   entries.clear();
   compiles = 0;
-  warnedUnkeyable = false;
+  unkeyableSaid.forget(UNKEYABLE);
 }
