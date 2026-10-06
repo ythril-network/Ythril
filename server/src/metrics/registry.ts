@@ -19,12 +19,17 @@ import {
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { POSTURE_LEVELS } from '../config/posture-levels.js';
 import { DEGRADED_REASONS } from '../brain/degraded-reasons.js';
-import { col } from '../db/mongo.js';
+import { col, getMongo } from '../db/mongo.js';
+import { isStoreUnreachable } from '../db/store-condition.js';
 import { getConfig, getStorageConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
+import { declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
+import { log, peerList, peerText } from '../util/log.js';
+import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
+import { warnOnce } from '../util/warn-once.js';
 
 export const register = new Registry();
 
@@ -301,6 +306,163 @@ function overBudget(collector: string, abandon: () => void): void {
   abandon();
 }
 
+/** Said once per collector per window, and said again once the collector has read every space (`collectEachSpace`). */
+const collectorFailureSaid = warnOnce<string>({ max: 64, every: SPACE_FAILURE_WINDOW_MS });
+
+/** Whether the store was ever connected: `getMongo()` throws before `connectMongo()` has run, which is the normal start. */
+function storeIsConnected(): boolean {
+  try { getMongo(); return true; } catch { return false; }
+}
+
+/**
+ * Read one value per space for a gauge, each space on its own: **one space that cannot be read does not stop the others.**
+ *
+ * ## What it prevents
+ *
+ * Every per-space collector walked the spaces inside one `try`. The first space whose collection could not be read threw, the
+ * budget wrapper swallowed it ("a collector that throws keeps its previous values"), and every space AFTER it kept a value
+ * from the last scrape that worked — stale, unmarked, and indistinguishable from a current one. A space that fails is that
+ * space's problem; it must not become every later space's blank.
+ *
+ * ## What it does
+ *
+ *  - a space that fails KEEPS its last value (the contract a whole collector always had: a failure is "unknown for now", and
+ *    only a TIMEOUT, in `withCollectBudget`, drops values), and the others are read;
+ *  - the failure is said ONCE per collector per window, in ONE line naming every space it could not read, at warn — the store
+ *    answered everything else, so it is news. A different set of failed spaces is news again; and a pass that read every
+ *    space forgets the condition, so a space that fails again is said again;
+ *  - **a store that cannot be reached stops the collector at once, at debug.** That is the normal start (the first scrape can
+ *    come before the store is connected) and the store being down is already everyone's alert; one line per space per scrape
+ *    for a store that is not there is noise that hides the line that matters. It is asked of the store (the driver's class,
+ *    labels or the server's code, `db/store-condition.ts`, or no connection yet) and never of the error's wording;
+ *  - it never throws: the whole point is that `read` failing is not the collector's failure.
+ *
+ * ## What it does not do
+ *
+ * It does not bound the reads. A collector is held to the SCRAPE budget (`withCollectBudget`), which abandons the WAIT: an
+ * operation still in flight runs on to the driver's own limits, and a value it writes later belongs to whichever scrape is
+ * serialising then. That is not the housekeeping bound (`db/write-bound.ts`), which a background walk carries and a scrape does
+ * not — a collector's own deadline is the budget's, so it stays outside the bound on purpose (`Q-358`).
+ *
+ * `spaces` is a parameter so a test can hand it a list; every caller leaves it at the concrete spaces.
+ */
+export async function collectEachSpace(
+  collector: string,
+  read: (spaceId: string) => Promise<void>,
+  spaces: ReadonlyArray<{ id: string }> = concreteSpaces(),
+): Promise<void> {
+  const failed: string[] = [];
+  let firstFailure: unknown;
+  for (const { id } of spaces) {
+    try {
+      await read(id);
+    } catch (err) {
+      if (isStoreUnreachable(err) || !storeIsConnected()) {
+        log.debug(`Metrics collector '${peerText(collector)}' stopped: the store is not answering`);
+        return;
+      }
+      if (failed.length === 0) firstFailure = err;
+      failed.push(id);
+    }
+  }
+  if (failed.length === 0) {
+    collectorFailureSaid.forget(collector);
+    return;
+  }
+  collectorFailureSaid(collector, () => {
+    log.warn(
+      `Metrics collector '${peerText(collector)}' could not read space ${peerList(failed.map(id => `'${peerText(id)}'`))}: `
+      + `${peerText(firstFailure)} — ${failed.length === 1 ? 'its' : 'their'} previous value is kept, the other spaces were read`,
+    );
+  }, failed.join('\0'));
+}
+
+// ── Housekeeping (what a background walk says is countable, `util/housekeeping-signals.ts`) ──────────────────────────
+
+/**
+ * The kinds a failure is counted under, as a record so a kind added to `SpaceFailureKind` that is not named here is a type
+ * error: a kind that is not pre-declared would be a series that appears only at its first event.
+ */
+const FAILURE_KIND_SERIES: Record<SpaceFailureKind, true> = { failure: true, timeout: true, store_down: true, stalled: true };
+export const HOUSEKEEPING_FAILURE_KINDS = Object.keys(FAILURE_KIND_SERIES) as SpaceFailureKind[];
+
+/**
+ * How often a housekeeping step failed for a space, or stopped. `failure` is a space's own, `timeout` a bound that ended an
+ * operation, `store_down` a step that stopped because the store is not answering, `stalled` a step that stopped because
+ * several spaces in a row timed out. Counted on every failure, whether its log line was said or throttled, so a failure that
+ * repeats is a RATE here and one line there.
+ */
+export const housekeepingSpaceFailuresTotal = new Counter({
+  name: 'ythril_housekeeping_space_failures_total',
+  help: 'Housekeeping steps that failed for a space or stopped, by step and kind (failure, timeout, store_down, stalled)',
+  labelNames: ['step', 'kind'] as const,
+  registers: [register],
+});
+
+/** Records a retention cycle could not delete (`Q-359`), by step: a count of records, not of cycles. */
+export const housekeepingRecordsFailedTotal = new Counter({
+  name: 'ythril_housekeeping_records_failed_total',
+  help: 'Records a housekeeping step could not delete or process, by step',
+  labelNames: ['step'] as const,
+  registers: [register],
+});
+
+/** A repeating job that found its previous tick still running and skipped this one, by job. */
+export const intervalTickSkippedTotal = new Counter({
+  name: 'ythril_interval_tick_skipped_total',
+  help: 'Ticks of a repeating job skipped because the previous tick was still running, by job',
+  labelNames: ['job'] as const,
+  registers: [register],
+});
+
+/**
+ * Spaces housekeeping is passing over right now because they timed out. Written by the walk's signal (an absolute count, not
+ * an increment) and never by a collector, so it needs no scrape to be current. 0 when nothing is in quarantine.
+ */
+export const housekeepingQuarantinedSpaces = new Gauge({
+  name: 'ythril_housekeeping_quarantined_spaces',
+  help: 'Spaces housekeeping is currently passing over after they timed out',
+  registers: [register],
+});
+
+/**
+ * Start every series a step can move at 0: a counter that appears at its first event shows nothing for the whole healthy
+ * period, and "absent" and "0" mean opposite things on a graph. A job's label is the step's name where a job is declared as a
+ * step; a job with its own name appears at its first skipped tick.
+ */
+function predeclareStep(step: string): void {
+  for (const kind of HOUSEKEEPING_FAILURE_KINDS) housekeepingSpaceFailuresTotal.labels({ step, kind }).inc(0);
+  housekeepingRecordsFailedTotal.labels({ step }).inc(0);
+  intervalTickSkippedTotal.labels({ job: step }).inc(0);
+}
+
+housekeepingQuarantinedSpaces.set(0);
+// The steps declared before this module was built are read; the ones declared after arrive as a `step-declared` signal.
+for (const step of declaredSteps()) predeclareStep(step);
+
+/** A count that may be added to a counter: a positive finite number. prom-client throws on anything else. */
+const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
+
+onHousekeepingSignal((event) => {
+  switch (event.type) {
+    case 'step-declared':
+      predeclareStep(event.step);
+      break;
+    case 'space-failure':
+      housekeepingSpaceFailuresTotal.labels({ step: event.step, kind: event.kind }).inc();
+      break;
+    case 'records-failed':
+      if (isCount(event.count)) housekeepingRecordsFailedTotal.labels({ step: event.step }).inc(event.count);
+      break;
+    case 'tick-skipped':
+      intervalTickSkippedTotal.labels({ job: event.job }).inc();
+      break;
+    case 'quarantined-spaces':
+      if (typeof event.count === 'number' && Number.isFinite(event.count) && event.count >= 0) housekeepingQuarantinedSpaces.set(event.count);
+      break;
+  }
+});
+
 // ── HTTP ────────────────────────────────────────────────────────────────────
 
 export const httpRequestsTotal = new Counter({
@@ -354,12 +516,9 @@ export const factsTotal = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('facts_total', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'facts')).estimatedDocumentCount();
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('facts_total', () => collectEachSpace('facts_total', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'facts')).estimatedDocumentCount());
+    }), () => this.reset());
   },
 });
 
@@ -369,12 +528,9 @@ export const entitiesTotal = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('entities_total', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'entities')).estimatedDocumentCount();
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('entities_total', () => collectEachSpace('entities_total', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'entities')).estimatedDocumentCount());
+    }), () => this.reset());
   },
 });
 
@@ -384,12 +540,9 @@ export const edgesTotal = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('edges_total', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'edges')).estimatedDocumentCount();
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('edges_total', () => collectEachSpace('edges_total', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'edges')).estimatedDocumentCount());
+    }), () => this.reset());
   },
 });
 
@@ -399,12 +552,9 @@ export const chronoEntriesTotal = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('chrono_entries_total', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'chrono')).estimatedDocumentCount();
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('chrono_entries_total', () => collectEachSpace('chrono_entries_total', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'chrono')).estimatedDocumentCount());
+    }), () => this.reset());
   },
 });
 
@@ -798,12 +948,9 @@ export const mediaJobsPending = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('media_jobs_pending', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'pending' });
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('media_jobs_pending', () => collectEachSpace('media_jobs_pending', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'mediaJobs')).countDocuments({ status: 'pending' }));
+    }), () => this.reset());
   },
 });
 
@@ -813,12 +960,9 @@ export const mediaJobsProcessing = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('media_jobs_processing', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'processing' });
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('media_jobs_processing', () => collectEachSpace('media_jobs_processing', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'mediaJobs')).countDocuments({ status: 'processing' }));
+    }), () => this.reset());
   },
 });
 
@@ -828,12 +972,9 @@ export const mediaJobsFailed = new Gauge({
   labelNames: ['space'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('media_jobs_failed', async () => {
-      for (const space of concreteSpaces()) {
-        const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'failed' });
-        this.set({ space: space.id }, count);
-      }
-    }, () => this.reset());
+    await withCollectBudget('media_jobs_failed', () => collectEachSpace('media_jobs_failed', async (id) => {
+      this.set({ space: id }, await col(spaceCollection(id, 'mediaJobs')).countDocuments({ status: 'failed' }));
+    }), () => this.reset());
   },
 });
 
@@ -879,22 +1020,20 @@ export const mediaJobPhase = new Gauge({
   labelNames: ['space', 'step'] as const,
   registers: [register],
   async collect() {
-    await withCollectBudget('media_job_phase', async () => {
-      for (const space of concreteSpaces()) {
-        const rows = await col(spaceCollection(space.id, 'mediaJobs'))
-          .find({ status: 'processing' }, { projection: { progress: 1 } })
-          .toArray() as Array<{ progress?: { step?: string } }>;
-        const counts = new Map<string, number>();
-        for (const r of rows) {
-          // A processing job with no step report is not "no jobs": it is a job whose phase predates the
-          // heartbeat, or one that has not reached its first step yet. Both are visible as `unknown`.
-          const step = r.progress?.step ?? 'unknown';
-          counts.set(step, (counts.get(step) ?? 0) + 1);
-        }
-        for (const step of counts.keys()) _seenJobSteps.add(step);
-        for (const step of _seenJobSteps) this.set({ space: space.id, step }, counts.get(step) ?? 0);
+    await withCollectBudget('media_job_phase', () => collectEachSpace('media_job_phase', async (id) => {
+      const rows = await col(spaceCollection(id, 'mediaJobs'))
+        .find({ status: 'processing' }, { projection: { progress: 1 } })
+        .toArray() as Array<{ progress?: { step?: string } }>;
+      const counts = new Map<string, number>();
+      for (const r of rows) {
+        // A processing job with no step report is not "no jobs": it is a job whose phase predates the
+        // heartbeat, or one that has not reached its first step yet. Both are visible as `unknown`.
+        const step = r.progress?.step ?? 'unknown';
+        counts.set(step, (counts.get(step) ?? 0) + 1);
       }
-    }, () => this.reset());
+      for (const step of counts.keys()) _seenJobSteps.add(step);
+      for (const step of _seenJobSteps) this.set({ space: id, step }, counts.get(step) ?? 0);
+    }), () => this.reset());
   },
 });
 

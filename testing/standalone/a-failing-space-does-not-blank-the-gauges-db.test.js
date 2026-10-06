@@ -46,6 +46,8 @@ const HEALTHY = 'bravo';
 const FAILING = ['alpha', 'charlie'];
 const SPACES = [FAILING[0], HEALTHY, FAILING[1]];
 const TEMP_CONFIG = path.join(path.dirname(fileURLToPath(import.meta.url)), 'tmp-g22-collectors-config.json');
+// The loader reads CONFIG_PATH when it is first imported, and the registry imports it: set before any import below.
+process.env['CONFIG_PATH'] = TEMP_CONFIG;
 
 /** What the healthy space holds, per collector: distinct numbers, so a value from the wrong collector is visible. */
 const EXPECTED = {
@@ -123,7 +125,6 @@ describe('a space that cannot be read does not blank the gauges of the others', 
       instanceId: 'g22-collectors', instanceName: 'G22', tokens: [], networks: [],
       spaces: SPACES.map(id => ({ id, name: id })),
     }));
-    process.env['CONFIG_PATH'] = TEMP_CONFIG;
     mongo = await openTestMongo('g22collectors');
     registry = await import('../../server/dist/metrics/registry.js');
     const { subscribeLogLines } = await import('../../server/dist/util/log.js');
