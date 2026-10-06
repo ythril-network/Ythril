@@ -59,6 +59,8 @@ const { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES, COLLECTION_SUFFIX } = await import('
 
 const DOCS = 'server/src/api/sync/docs.ts';
 const ENGINE = 'server/src/sync/engine.ts';
+/** The pull's per-family transfer, which hands each page to the accept (bundle-52: out of the engine, where it was `pullType`). */
+const PULL = 'server/src/sync/pull-family.ts';
 /**
  * The files that STORE what arrived from elsewhere, each through the one arrival writer: the page accept the push
  * routes and the pull engine share (`sync/accept-page.ts`, bundle-30 `Q-204`), and the importer. Re-anchored: the
@@ -67,7 +69,7 @@ const ENGINE = 'server/src/sync/engine.ts';
  */
 const ACCEPT = 'server/src/sync/accept-page.ts';
 const INGEST_FILES = [ACCEPT, 'server/src/api/admin-import.ts'];
-const DOOR_FILES = [DOCS, ENGINE, ...INGEST_FILES];
+const DOOR_FILES = [DOCS, ENGINE, PULL, ...INGEST_FILES];
 const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
@@ -107,7 +109,7 @@ describe('nothing writes an arriving record without offering it to the embedder'
     assert.ok(/syncDocsRouter\.post\('\/batch-upsert'/.test(s), `${DOCS} is not the sync ingest router any more — re-anchor`);
     assert.ok(s.length > 10_000, 'the ingest router is suspiciously small — re-anchor this gate');
     // The push router and the pull engine hand every page to the accept that stores it.
-    for (const f of [DOCS, ENGINE]) assert.match(src(f), /acceptArrivingPage\(/, `${f} no longer hands its pages to ${ACCEPT} — re-anchor`);
+    for (const f of [DOCS, PULL]) assert.match(src(f), /acceptArrivingPage\(/, `${f} no longer hands its pages to ${ACCEPT} — re-anchor`);
     for (const f of DOOR_FILES) assert.ok(INDEX.files.includes(f), `${f} is gone — re-anchor this gate`);
   });
 

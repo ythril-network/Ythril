@@ -10,6 +10,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
+import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 
@@ -219,39 +220,27 @@ export const IncomingChronoDoc = z.object({
 
 // ── Paginated cursor helpers ─────────────────────────────────────────────────
 
-export function encodeCursor(seq: number): string {
-  return Buffer.from(String(seq)).toString('base64url');
-}
-export function decodeCursor(token: string): number {
-  try { return parseInt(Buffer.from(token, 'base64url').toString(), 10) || 0; }
-  catch { return 0; }
-}
+// The cursor codec is `util/seq-keyset.ts` (`encodeSeqCursor`, `decodeSeqCursor`): the one place a position becomes
+// text and back. It had a second decoder here that read a pair as nothing.
 
 /** The one refusal text for a start a sync read cannot read. Fixed, so it never repeats what the caller sent. */
 export const BAD_SYNC_START = 'sinceSeq and cursor must each be a whole number of 0 or more';
 
-/** A seq written as a whole decimal number of 0 or more, within what a record may carry; `undefined` otherwise. */
-function seqFromText(text: string): number | undefined {
-  if (!/^\d{1,16}$/.test(text)) return undefined;
-  const n = Number(text);
-  return Number.isSafeInteger(n) && n <= MAX_SYNC_SEQ ? n : undefined;
-}
-
 /**
- * Where a sync read starts: the `cursor` a previous page handed back when there is one, else `sinceSeq`.
+ * Where a sync read starts: the `cursor` a previous page handed back when there is one, else `sinceSeq` — a position,
+ * which is the pair `(seq, _id)` for a cursor and the bare seq for `sinceSeq`. A cursor wins over `sinceSeq`: a 5.6
+ * client sends its `sinceSeq` CONSTANT on every request beside the cursor it echoes.
  *
  * `undefined` means the start cannot be read, and the route answers `400` with {@link BAD_SYNC_START}. It is
  * a refusal and not a default because both defaults are wrong in a way nothing reports: `sinceSeq=abc` used to
  * become `NaN`, which matches no record, so the page came back empty with `nextCursor: null` — and every client
  * reads that as "nothing left" (`Q-388`). A cursor that did not decode read as 0 and silently started over.
  */
-export function syncReadStart(sinceSeq: unknown, cursor: unknown): number | undefined {
-  if (cursor !== undefined && cursor !== '') {
-    if (typeof cursor !== 'string') return undefined;
-    return seqFromText(Buffer.from(cursor, 'base64url').toString());
-  }
-  if (sinceSeq === undefined) return 0;
-  return typeof sinceSeq === 'string' ? seqFromText(sinceSeq) : undefined;
+export function syncReadStart(sinceSeq: unknown, cursor: unknown): SeqPosition | undefined {
+  if (cursor !== undefined && cursor !== '') return decodeSeqCursor(cursor);
+  if (sinceSeq === undefined) return { seq: 0 };
+  const seq = typeof sinceSeq === 'string' ? parseSeqText(sinceSeq) : undefined;
+  return seq === undefined ? undefined : { seq };
 }
 
 // ── Space access guard ─────────────────────────────────────────────────────

@@ -2047,15 +2047,18 @@ export interface DupeCandidateDoc {
 }
 
 /**
- * Per-(space, type) scan cursor for the duplicate scanner, stored in the global
- * `ythril_dupe_scan_state` collection. `cursorSeq` is the highest `seq` already
- * swept — the next run scans records with a greater `seq` (new or edited).
+ * Per-(space, type) scan cursor for the duplicate and contradiction scanners, stored in the global
+ * `ythril_dupe_scan_state` collection. `cursorSeq` is the highest `seq` already swept (a number, which an
+ * older build reads and moves) and `cursorPos` is the last record scanned within the run at that seq: the
+ * next run reads what comes AFTER the pair (new or edited records). `cursorPos` is trusted only while
+ * `cursorPos.seq === cursorSeq` — see `brain/scan-cursor.ts`.
  */
 export interface DupeScanStateDoc {
   _id: string;            // `${spaceId}:${type}`
   spaceId: string;
   type: DupeScanType;
   cursorSeq: number;
+  cursorPos?: { seq: number; id: string };
   updatedAt: string;      // ISO8601
 }
 

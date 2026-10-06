@@ -307,8 +307,8 @@ tombstone rather than a brain one, so the metadata page carries no tombstones of
 | `spaceId` | Required on space-scoped sync routes. With `networkId`, give the NETWORK's id for the space: an instance that mapped it under another name at join translates it (Q-51) |
 | `networkId` | Optional on many pulls, used for policy checks and directional sync |
 | `sinceSeq` | Start sequence for incremental pulls: a whole number of 0 or more. Anything else answers `400` |
-| `cursor` | Continuation cursor for paged pulls: send back the `nextCursor` a page returned, unchanged. One that does not decode answers `400`; when present it wins over `sinceSeq` |
-| `limit` | Page size, from 1 up to the route's maximum (500 on the record routes, 5000 per type on tombstones). A value below 1 reads as 1, a value above the maximum as the maximum, and one that is not a number as the route's default |
+| `cursor` | Continuation cursor for paged pulls: **opaque — echo the `nextCursor` a page returned, unchanged, and never build, decode, compare or edit one.** One that does not decode answers `400`; when present it wins over `sinceSeq` (so a client may keep its `sinceSeq` constant beside the cursor it echoes) |
+| `limit` | Page size, from 1 up to the route's maximum (500 on the record routes, 5000 on tombstones — per type with `sinceSeq` alone, the page's total with `cursor`). A value below 1 reads as 1, a value above the maximum as the maximum, and one that is not a number as the route's default |
 | `full=true` | Return full docs instead of `_id`/`seq` stubs on list routes |
 
 ### Incremental Collection Pull Example
@@ -318,6 +318,8 @@ GET /api/sync/facts?spaceId=general&sinceSeq=0&limit=200&full=true
 ```
 
 Returns `{ items, nextCursor }`. Use `nextCursor` as `cursor` on the next request until `nextCursor` is `null`.
+
+**Why the cursor is a position and not a seq.** Records keep their author's `seq`, so several records can share one, and a page can end in the middle of such a run. The cursor names the last record served in `(seq, _id)` order, so the next page continues the run; a client that built its own cursor from the last `seq` it saw would skip the rest of it, silently. Pages are ordered by that pair for the same reason — treat the order within one seq as arbitrary but stable. A listing (`full=false`) is ids and seqs only and carries no tombstone stubs.
 
 ### Single-Document Pull Example
 
@@ -529,15 +531,16 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 
 ### Tombstones
 
-- `GET /api/sync/tombstones?spaceId=general&sinceSeq=0&limit=5000` returns grouped `{ entities, facts, edges, chrono, links }` tombstones, each ascending by seq and at most `limit` long (default 1000, max 5000, **per type**). The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
-  - **Page it tie-safe.** A full array may hold more at its last seq — equal seqs are legitimate, because an instance relays tombstones issued by several others. Ask next from the lowest last seq among the full arrays **minus one**, and skip what you already applied by `(type, _id)`. Moving to the last seq instead loses every tombstone of a run that straddles the page. A full array that is all one seq cannot be paged past by seq: stop, and hold your watermark below it.
+- `GET /api/sync/tombstones?spaceId=general&cursor=<cursor>&limit=5000` returns grouped `{ entities, facts, edges, chrono, links }` tombstones, each ascending by seq, **and `nextCursor`** beside them. The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
+  - **Cursor mode pages by position.** It is one read of every type: `limit` rows (default 1000, max 5000, **the page's total**) in `(seq, _id)` order after the cursor's position, grouped by type. Echo `nextCursor` as `cursor` until it is `null`; the cursor is opaque ([above](#common-query-parameters)). The first request carries the bare-seq cursor of your watermark — the base64url text of the decimal number, for example `base64url("0")` — **together with `sinceSeq` set to the same watermark**: that is the one cursor a client writes, and only for that first request. A server that predates cursor mode ignores `cursor` and reads `sinceSeq`, and answers with no `nextCursor` — which is how a client knows to page it the older way. It pages through any number of tombstones at one seq: equal seqs are legitimate, because an instance relays tombstones issued by several others, and any member's token may name any seq for what it issues.
+  - **`sinceSeq` alone is the older mode and is unchanged**: `seq > sinceSeq`, per type, at most `limit` of each (default 1000, max 5000), no `nextCursor`. Page it tie-safe: a full array may hold more at its last seq, so ask next from the lowest last seq among the full arrays **minus one**, and skip what you already applied by `(type, _id)`. Moving to the last seq instead loses every tombstone of a run that straddles the page. A full array that is all one seq cannot be paged past by seq: stop, and hold your watermark below it. Use cursor mode to page past it.
 - `POST /api/sync/tombstones` accepts `{ tombstones: [...] }`, at most 5000 per request (`400` above), and answers `200 { applied, refused }`.
   - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` is additive — an older receiver answers `{ applied }` only. A refusal is by shape, so re-sending it changes nothing; advance past it.
   - An element of a `type` the receiver does not know answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied: hold your watermark and re-send after the receiver upgrades.
   - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. It deletes a record only when your peer identity issued it and authored the record; one that fails that is refused and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is.
   - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send. A store that could not take the page in time answers a retryable `503`, as every push route does.
 
-**The `sinceSeq` you send is recorded.** The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
+**The `sinceSeq` you send is recorded.** (With `cursor`, the cursor's seq **minus one** is: everything below it was delivered, and part of the run at it may not have been.) The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
 
 - **Send your real watermark, and never a value higher than what you have applied.** Claiming a position you have not reached lets the other side drop tombstones you still need.
   - **And a watermark shared across several transfers may only reach where ALL of them are complete.** A cycle that fetches tombstones plus four collections under one `sinceSeq` must limit its next `sinceSeq` to the lowest position among the transfers that stopped early — a non-`2xx`, or a page cap. Taking the maximum instead claims a position the stopped transfer never reached, and its unserved records then sit behind your watermark permanently while every later cycle looks successful. Our own engine had this defect until 3.2.0.
@@ -547,9 +550,11 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 families, `filemeta` and `tombstones`) serves only seqs below the lowest seq this instance has allocated and
 not yet committed. A write takes its seq a moment before it stores the record, so without that horizon a page
 could hand you a later seq while an earlier one was still being written — and a watermark moved to the later
-seq would never come back for the earlier record. So it is safe to move your watermark to the highest seq a
-page returned, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
+seq would never come back for the earlier record. So a page never names a seq that a later commit could land
+below, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
 back for a cycle, not a gap. The push side applies the same horizon to what it sends.
+
+**When to move your watermark.** Move it to the highest seq you received **only when the pull finished** — `nextCursor` came back `null`. On a stop (an error, a page cap, a peer that went away) move it to the highest seq **minus one**: records share seqs, so a stop may have taken part of the run at the last seq and not the rest, and a watermark AT that seq puts the rest behind it for good. Re-reading the run next cycle is harmless; records you already hold are idempotent. The highest seq is taken among the documents the peer itself authored, never among the ones it relayed from a third instance (whose seqs are that instance's clock), and never past the point every transfer in the cycle is complete through (above). What no watermark can promise: a record that arrives at the peer later with a seq at or below the one you already moved past — the watermark is one number over clocks that are not one clock.
 
 **A write that stalls holds the horizon for a bounded time, never for good.** Every database operation issued
 while a write holds its seq is bounded (`YTHRIL_WRITE_TIMEOUT_MS` per operation, `YTHRIL_HOLD_DEADLINE_MS` for the

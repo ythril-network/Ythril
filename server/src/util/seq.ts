@@ -12,8 +12,8 @@ import { intervalJob } from './interval-job.js';
  * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
  *
  * A seq is allocated in one round trip and the record that carries it is written in another. Everything that
- * pages by seq — the pull routes, the push loop, the tombstone pages, the scanners — serves `seq > cursor` and
- * moves its cursor to the highest seq it saw. So a write that allocated 7 and has not committed yet, beside a
+ * pages by seq — the pull routes, the push loop, the tombstone pages, the scanners — serves what comes after a
+ * position (`util/seq-keyset.ts`) and moves its cursor to the last record it saw. So a write that allocated 7 and has not committed yet, beside a
  * write that allocated 8 and has, lets a reader take 8, move past 7, and never come back for it: a record lost
  * to one peer for ever, with every later cycle reporting nothing to do.
  *
@@ -118,12 +118,13 @@ async function heldWhile<T>(spaceId: string, s: SeqState, h: Hold, fn: () => Pro
  * stored in each, and `a-pull-never-passes-an-uncommitted-seq-db` derives the pull routes and fails on any
  * route whose collection this misses.
  */
-const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
+export const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
 
 /**
  * The highest seq stored in any of the space's seq-carrying collections — one read each, once per space per
- * process. Indexed on every collection but `files`, which has no `seq` index (its pull pages without one too),
- * so that one read scans the space's file metadata.
+ * process. Every one of them has a `{ seq: 1, _id: 1 }` index once its keyset index is built (`SEQ_KEYSET_INDEXES`,
+ * `util/seq-keyset.ts`), which serves a newest-first read of one record by walking it backwards; until then `files`
+ * has none, and that one read scans the space's file metadata.
  */
 async function highestStoredSeq(spaceId: string): Promise<number> {
   const tops = await Promise.all(SEQ_CARRYING.map(c => col<{ seq?: number }>(spaceCollection(spaceId, c))
@@ -266,7 +267,10 @@ export function stopSeqHoldWatchdog(): void {
 /**
  * The seq range a seq-paged reader may be handed after `since`: `{ $gt: since, $lt: horizon }`. The horizon is
  * the lowest unsettled seq, or one past the highest seq this process knows of when nothing is in flight.
- * Every seq-paged read goes through this — a reader that builds `{ $gt }` by hand is the defect.
+ *
+ * Reached ONLY through `util/seq-keyset.ts` (`readAfterSeq`), which applies it to both finds of a keyset read and builds
+ * the position around it; `every-seq-paged-reader-goes-through-the-keyset` holds that no other file calls it. A reader
+ * that builds `{ $gt }` by hand, or asks this and builds its own filter, is the defect that module ends.
  */
 export async function settledSeqRange(spaceId: string, since: number): Promise<{ $gt: number; $lt: number }> {
   const s = await seededState(spaceId);

@@ -14,12 +14,12 @@ import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log, logSafe, peerText } from '../../util/log.js';
 import { sendCaughtFailure } from '../send-failure.js';
-import { settledSeqRange } from '../../util/seq.js';
+import { readAfterSeq, encodeSeqCursor } from '../../util/seq-keyset.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, encodeCursor, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
@@ -38,16 +38,22 @@ export const syncDocsRouter = Router();
  *
  * ## The rule, now that it is in one place to read
  *
- * A page is `seq > since`, ordered by `seq`, capped at 500, with ONE extra row fetched so `nextCursor` can
- * be decided without a second query.
+ * A page is everything AFTER the start position, ordered `(seq, _id)`, capped at 500, with ONE extra row fetched so
+ * `nextCursor` can be decided without a second query. The start is the `cursor` a previous page handed back — a
+ * PAIR, `(seq, _id)`, so a page that ended inside a run of records sharing a seq (several authors' records keep their
+ * author's seq) continues that run instead of skipping it — or `sinceSeq`, a bare seq. The cursor wins: a 5.6 client
+ * sends its `sinceSeq` constant beside the cursor it echoes. It is opaque to a caller (`util/seq-keyset.ts`).
  *
- * Tombstones for the same family ride in the same page. Three filters, and each removes a specific way for a
- * deletion to be delivered twice or too early:
+ * Tombstones for the same family ride in the same page, as long as the page carries whole documents. Three filters,
+ * and each removes a specific way for a deletion to be delivered twice or too early:
  *
  *   - `seq <= pageMaxSeq` — a tombstone with a high seq would otherwise appear on this page AND the next
  *     one, because the cursor only advances to the last ITEM's seq. That was a real duplicate bug.
  *   - not already in `items` — the record is the newer fact, so the deletion is stale within the page.
  *   - `originalSeq > since` — the peer never had the record, so there is nothing to tell it to delete.
+ *
+ * The riders stay NUMERIC (`seq > since`) beside the pair cursor, and a rider at a seq the page has reached is served
+ * once, on the page that reaches it. A listing (`full=false`, ids and seqs) carries none: it pays no tombstone read.
  *
  * `full=true` returns whole documents in one pass; without it a page is ids and seqs only. The pull engine
  * always asks for `full`, because the alternative is N per-document fetches over a WAN.
@@ -76,36 +82,40 @@ function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tomb
       const pageSize = parseLimit(limit, 100, 500);
       const returnFull = fullParam === 'true';
 
-      // Settled seqs only: a page that hands out a seq above an unsettled one moves the peer past it (Q-196).
-      const found = col<T>(`${spaceId}_${collection}`)
-        .find(asFilter<T>({ seq: await settledSeqRange(spaceId, sinceVal), ...extraFilter })).sort({ seq: 1 }).limit(pageSize + 1);
       /*
+       * Settled seqs only, and ties in `_id` order (`readAfterSeq`): a page that hands out a seq above an unsettled
+       * one moves the peer past it (Q-196), and one that ends inside a run of equal seqs must be able to go on.
+       *
        * The local-only fields never leave, which is the SAVING rather than the guarantee — a vector is
        * several hundred floats per record and was the bulk of every page. The guarantee is the receiver's
        * strip in `sync/engine.ts`, because a peer decides what it sends and we decide what we store.
        */
-      const rawDocs = returnFull
-        ? await found.project(LOCAL_ONLY_EXCLUSION).toArray() as T[]
-        : await found.project({ _id: 1, seq: 1 }).toArray() as { _id: string; seq: number }[];
+      const rawDocs = await readAfterSeq<T>(spaceId, collection, sinceVal, {
+        limit: pageSize + 1,
+        extra: extraFilter,
+        projection: returnFull ? LOCAL_ONLY_EXCLUSION : { _id: 1, seq: 1 },
+      });
 
       const hasMore = rawDocs.length > pageSize;
       const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
-      const nextCursor = hasMore ? encodeCursor((items[items.length - 1] as { seq: number }).seq) : null;
+      const last = items[items.length - 1];
+      const nextCursor = hasMore && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null;
 
-      const pageMaxSeq = items.length > 0 ? (items[items.length - 1] as { seq: number }).seq : sinceVal;
-      // No brain tombstones for a collection whose deletions have their own route — see the parameter doc.
-      const tombstones = tombstoneType === null ? [] : await listTombstones(spaceId, sinceVal, pageSize);
-      const itemIds = new Set(items.map(i => (i as { _id: string })._id));
+      const pageMaxSeq = last ? last.seq : sinceVal.seq;
+      // No brain tombstones for a collection whose deletions have their own route — see the parameter doc — and none
+      // for a listing, which is ids and seqs and pays for no second read.
+      const tombstones = tombstoneType === null || !returnFull ? [] : await listTombstones(spaceId, sinceVal.seq, pageSize);
+      const itemIds = new Set(items.map(i => i._id));
       const tombs = tombstones
         .filter(t =>
           t.type === tombstoneType &&
           t.seq <= pageMaxSeq &&
           !itemIds.has(t._id) &&
-          (t.originalSeq === undefined || t.originalSeq > sinceVal),
+          (t.originalSeq === undefined || t.originalSeq > sinceVal.seq),
         )
         .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
-      res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
+      res.json({ items: [...items, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
     } catch (err) {
       sendCaughtFailure(res, `sync GET /${collection}`, err);
     }

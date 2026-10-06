@@ -4,7 +4,8 @@ import { getConfig } from '../config/loader.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { andPredicates } from '../db/and-predicates.js';
-import { settledSeqRange, withAllocatedSeqs } from '../util/seq.js';
+import { withAllocatedSeqs } from '../util/seq.js';
+import { readAfterSeq, type SeqPosition } from '../util/seq-keyset.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 
 /*
@@ -14,22 +15,22 @@ import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
  */
 
 /**
- * List tombstones with seq greater than the given watermark — settled seqs only, because every caller moves
- * a cursor to the last seq it is handed and a tombstone committed below that cursor is never offered again.
+ * List tombstones that come after `after` — settled seqs only, because every caller moves a cursor to the last
+ * tombstone it is handed and one committed below that cursor is never offered again.
+ *
+ * `after` is a position (`util/seq-keyset.ts`): a bare number is `seq > after` as it always was, and a `(seq, _id)` pair
+ * also reads the rest of the run at that seq. Several members can plant tombstones at one seq (a peer names the seq of
+ * what it issued), and a page that ended inside such a run must be able to continue it. `type` narrows to one tombstone
+ * type; without it the read is every type, in `(seq, _id)` order, which is what a cursor-mode `GET /tombstones` serves.
  */
 export async function listTombstones(
   spaceId: string,
-  sinceSeq: number,
+  after: number | SeqPosition,
   limit = 200,
   type?: TombstoneDoc['type'],
 ): Promise<TombstoneDoc[]> {
-  const filter: Record<string, unknown> = { seq: await settledSeqRange(spaceId, sinceSeq) };
-  if (type) filter['type'] = type;
-  return col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-    .find(asFilter<TombstoneDoc>(filter))
-    .sort({ seq: 1 })
-    .limit(limit)
-    .toArray() as Promise<TombstoneDoc[]>;
+  return readAfterSeq<TombstoneDoc>(spaceId, 'tombstones', typeof after === 'number' ? { seq: after } : after,
+    { limit, extra: type ? { type } : undefined });
 }
 
 /**

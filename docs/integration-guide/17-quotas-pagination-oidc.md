@@ -75,13 +75,17 @@ Sync endpoints return a `nextCursor` for efficient sequential reads:
 
 ```http
 GET /api/sync/facts?spaceId=general&sinceSeq=0&limit=200
-→ { "items": [...], "nextCursor": "eyJzZXEiOjIwMH0" }
+→ { "items": [...], "nextCursor": "<opaque cursor>" }
 
-GET /api/sync/facts?spaceId=general&cursor=eyJzZXEiOjIwMH0&limit=200
+GET /api/sync/facts?spaceId=general&cursor=<opaque cursor>&limit=200
 → { "items": [...], "nextCursor": null }
 ```
 
-When `nextCursor` is `null`, all data has been consumed.
+The cursor is **opaque**: echo the `nextCursor` a page returned as `cursor`, unchanged, and never build, decode or compare
+one. It names a position in the page order — records that share a `seq` are ordered by `_id`, and a page that ends inside such a
+run continues it — so a cursor made from the last `seq` you saw would skip the rest of that run. When both are sent, `cursor`
+wins over `sinceSeq`. When `nextCursor` is `null`, all data has been consumed. The sync routes are specified in
+[Sync API](09-sync-api.md#common-query-parameters).
 
 ---
 

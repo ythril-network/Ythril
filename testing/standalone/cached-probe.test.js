@@ -116,6 +116,77 @@ describe('a cached probe', () => {
     for (let i = 0; i < 5_000; i++) await cache.probe(`k${i}`, 1000, async () => true);
     assert.ok(cache.size <= 1_000, `holds ${cache.size} keys`);
   });
+
+  it('the bound is a parameter: a cache sized for more keys holds them', async () => {
+    const clock = { t: 0 };
+    const cache = createProbeCache({ now: () => clock.t, maxKeys: 3 });
+    for (let i = 0; i < 10; i++) await cache.probe(`k${i}`, 1000, async () => true);
+    assert.equal(cache.size, 3);
+  });
+});
+
+describe('a TTL per kind of answer', () => {
+  const ttl = { yesMs: 10_000, noMs: 100, failedMs: 0 };
+
+  it('a yes lives yesMs and a no lives noMs', async () => {
+    const { clock, cache, probe } = harness();
+    const yes = probe(true); const no = probe(false);
+    await cache.probe('y', ttl, yes.fn); await cache.probe('n', ttl, no.fn);
+    clock.t = 99;
+    await cache.probe('y', ttl, yes.fn); await cache.probe('n', ttl, no.fn);
+    assert.deepEqual([yes.calls, no.calls], [1, 1], 'both inside their TTL');
+    clock.t = 100;
+    await cache.probe('y', ttl, yes.fn); await cache.probe('n', ttl, no.fn);
+    assert.deepEqual([yes.calls, no.calls], [1, 2], 'the no is asked again at noMs, the yes is not');
+    clock.t = 10_000;
+    await cache.probe('y', ttl, yes.fn);
+    assert.equal(yes.calls, 2, 'the yes is asked again at yesMs');
+  });
+
+  it('a probe that FAILED is false and is not remembered when failedMs is 0', async () => {
+    const { cache, probe } = harness();
+    const p = probe('throws');
+    assert.equal(await cache.probe('k', ttl, p.fn), false);
+    assert.equal(await cache.probe('k', ttl, p.fn), false);
+    assert.equal(p.calls, 2, 'the store that did not answer is asked again, not believed');
+  });
+
+  it('a failure defaults to the no TTL, so a bare object behaves like a number for it', async () => {
+    const { cache, probe } = harness();
+    const p = probe('throws');
+    await cache.probe('k', { yesMs: 10_000, noMs: 5_000 }, p.fn);
+    await cache.probe('k', { yesMs: 10_000, noMs: 5_000 }, p.fn);
+    assert.equal(p.calls, 1);
+  });
+
+  it('callers that arrive while a failing probe is in flight still share it', async () => {
+    const { cache } = harness();
+    let calls = 0; let fail;
+    const fn = () => { calls++; return new Promise((_, rej) => { fail = rej; }); };
+    const all = Promise.all(Array.from({ length: 5 }, () => cache.probe('k', ttl, fn)));
+    await new Promise((r) => setImmediate(r));
+    fail(new Error('down'));
+    assert.deepEqual(await all, Array(5).fill(false));
+    assert.equal(calls, 1);
+  });
+
+  it('prime records an answer the caller already holds, with that answer\'s TTL', async () => {
+    const { clock, cache, probe } = harness();
+    const p = probe(false);
+    cache.prime('k', true);
+    assert.equal(await cache.probe('k', ttl, p.fn), true);
+    assert.equal(p.calls, 0, 'a primed answer is not probed');
+    clock.t = 10_000;
+    assert.equal(await cache.probe('k', ttl, p.fn), false);
+    assert.equal(p.calls, 1, 'and it expires like a probed one');
+    cache.prime('k', false);
+    clock.t = 10_099;
+    assert.equal(await cache.probe('k', ttl, p.fn), false);
+    assert.equal(p.calls, 1);
+    cache.forget('k');
+    await cache.probe('k', ttl, p.fn);
+    assert.equal(p.calls, 2, 'a primed key is forgotten like any other');
+  });
 });
 
 describe('the module-level cachedProbe', () => {

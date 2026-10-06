@@ -18,8 +18,9 @@
  *                 via subscriptions or a per-rule override URL.
  *
  * Cursor model: a per-(space, type) cursor in `ythril_dupe_scan_state` holds the
- * highest `seq` already swept; each run scans records with a greater `seq` in
- * bounded batches, capped at `maxPerRun` so the initial pass spreads over runs.
+ * position already swept, the pair `(seq, _id)` (`brain/scan-cursor.ts`); each run scans the records after it in
+ * bounded batches, capped at `maxPerRun` so the initial pass spreads over runs. A run that ends inside records
+ * sharing a seq resumes there rather than skipping the rest of them.
  */
 
 import { createHash } from 'node:crypto';
@@ -39,9 +40,10 @@ import {
 } from './recall.js';
 import { mergeEntities, mergeRefusal } from './merge.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
-import type { DupeCandidateDoc, DupeScanStateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
+import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
-import { settledSeqRange } from '../util/seq.js';
+import { readAfterSeq } from '../util/seq-keyset.js';
+import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -63,7 +65,6 @@ const DEFAULT_MAX_PER_RUN = 5000;
 // base grows redundant, and nothing else was looking for it. Override per instance with `dupeScanner.types`.
 export const DEFAULT_TYPES: DupeScanType[] = ['fact', 'entity', 'chrono'];
 const TOPK = 5;                          // similar records fetched per seed
-const SCAN_STATE = 'ythril_dupe_scan_state';
 
 // The record-to-collection map is imported: it was declared here and in four other modules, all five
 // byte-identical, beside a sixth in `brain/ttl.ts` whose own comment said the mapping "was open-coded in
@@ -123,20 +124,9 @@ export function decideDismissed(
   return 'reopen';
 }
 
-// ── Cursor state ─────────────────────────────────────────────────────────────
+// ── Cursor state: `brain/scan-cursor.ts` (a position is the pair `(seq, _id)`) ─────────────────────────────────
 
-async function getCursor(spaceId: string, type: DupeScanType): Promise<number> {
-  const doc = await col<DupeScanStateDoc>(SCAN_STATE).findOne(asFilter<DupeScanStateDoc>({ _id: `${spaceId}:${type}` }));
-  return doc?.cursorSeq ?? 0;
-}
-
-async function setCursor(spaceId: string, type: DupeScanType, cursorSeq: number): Promise<void> {
-  await col<DupeScanStateDoc>(SCAN_STATE).updateOne(
-    asFilter<DupeScanStateDoc>({ _id: `${spaceId}:${type}` }),
-    asUpdate<DupeScanStateDoc>({ $set: { spaceId, type, cursorSeq, updatedAt: new Date().toISOString() } }),
-    { upsert: true },
-  );
-}
+const cursorId = (spaceId: string, type: DupeScanType): string => `${spaceId}:${type}`;
 
 // ── Rule evaluation + actions ────────────────────────────────────────────────
 
@@ -386,19 +376,15 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
 
   for (const type of types) {
     if (scanned >= maxPerRun) break;
-    if (opts?.reset) await setCursor(spaceId, type, 0);
-    let cursor = opts?.reset ? 0 : await getCursor(spaceId, type);
-    const coll = `${spaceId}_${COLLECTION_SUFFIX[type]}`;
+    if (opts?.reset) await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, null);
+    let cursor = opts?.reset ? { seq: 0 } : await readScanStart(cursorId(spaceId, type));
 
     while (scanned < maxPerRun) {
       const take = Math.min(batchSize, maxPerRun - scanned);
-      const batch = await col<{ _id: string; seq?: number }>(coll)
-        // spaceId pins the leading field of the {spaceId,seq} index so this is an
-        // indexed range scan + sorted output, not a collection scan + blocking sort.
-        .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: await settledSeqRange(spaceId, cursor) }), { projection: { _id: 1, seq: 1 } })
-        .sort({ seq: 1 })
-        .limit(take)
-        .toArray();
+      // The collection is the space's own, so no `spaceId` in the filter: the keyset index leads with `seq`, and a filter on a
+      // constant field would stop it covering the read. Ties at the cursor's seq are read by `_id` (`util/seq-keyset.ts`).
+      const batch = await readAfterSeq<{ _id: string; seq?: number }>(spaceId, COLLECTION_SUFFIX[type], cursor,
+        { limit: take, projection: { _id: 1, seq: 1 } });
       if (batch.length === 0) break;
 
       await runSeeds(batch, async (rec) => {
@@ -407,11 +393,11 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
         try {
           pairs += await evalOneRecord(spaceId, type, rec._id, threshold);
         } finally {
-          if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq;
+          cursor = advanceScanPosition(cursor, rec);
           scanned++;
         }
       }, type);
-      await setCursor(spaceId, type, cursor);
+      await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, cursor);
     }
   }
 

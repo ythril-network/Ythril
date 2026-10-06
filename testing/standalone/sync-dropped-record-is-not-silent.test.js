@@ -93,7 +93,9 @@ describe('the receiver separates a drop from an already-current skip', () => {
 
 describe('the sender reads the body instead of trusting the status', () => {
   it('the engine calls the reporter on every accepted batch', () => {
-    assert.match(sender, /await reportPushRefusals\(resp, payloadKey,/,
+    // Moved with the family push (bundle-52: `pushCollection` -> `pushFamily`, `sync/push-family.ts`).
+    const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
+    assert.match(family, /await reportPushRefusals\(resp, key,/,
       'the push loop must ask what the peer actually applied, rather than trusting the status');
   });
 

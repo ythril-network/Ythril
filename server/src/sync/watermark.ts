@@ -31,9 +31,19 @@
  * ## The rule
  *
  * A transfer that RAN TO COMPLETION vouches for everything above the old watermark, so it places no ceiling. A
- * transfer that stopped early vouches only up to the last position it actually delivered. The watermark may
- * advance to the lowest such ceiling — every transfer is complete up to there, so nothing is skipped, and a
+ * transfer that stopped early vouches only up to the seq it is COMPLETE through (`TransferOutcome`): every record at or
+ * below it is delivered, and a stop inside a run of records that share a seq reports the seq BEFORE the run. The
+ * watermark may advance to the lowest such ceiling — every transfer is complete up to there, so nothing is skipped, and a
  * capped transfer still makes a full page-set of progress each cycle.
+ *
+ * ## What the rule does not claim: the author guard, and relayed records
+ *
+ * The advance is the highest seq among records AUTHORED by the sender (the pull) or by us (the push), so a record relayed
+ * from a third author never raises it — but a relayed record's seq is that author's clock, and it can arrive in a later
+ * cycle at a seq at or below a watermark a finished cycle already moved. The ceiling above is exact WITHIN a cycle: no
+ * transfer is credited with a seq whose run it has not read to its end. It is not exact ACROSS cycles for a record that
+ * arrives late at an old seq; one scalar over several clocks cannot be, and that is the owner's open decision (`D-12`,
+ * `Q-278`), not a property this module has.
  */
 import { peerList, peerText } from '../util/log.js';
 
@@ -42,12 +52,66 @@ export interface TransferOutcome {
   /**
    * The highest seq this transfer is COMPLETE through.
    *
-   * Only consulted when `truncated`. Transfers page in ascending seq order, so the last position they delivered
-   * is also the position they are complete up to.
+   * Only consulted when `truncated`. It is the last seq whose RECORDS are all delivered — which is not "the last seq
+   * delivered". Records relayed from several authors keep their author's seq, so several share one, and a transfer that
+   * stopped inside such a run (a page or batch boundary, a refused request, a throw) has delivered that seq WITHOUT
+   * finishing it: it reports the seq BEFORE it. A watermark at the run's seq would put the rest of the run behind it for
+   * good. A transfer that ran to the end reports its highest seq, and is not consulted at all.
+   *
+   * The position is computed by {@link completeThrough} and moved by two loops, once each: `pageSeqRuns`
+   * (`sync/seq-run-pager.ts`) for a pull and `pushSeqRuns` (`sync/push-seq-runs.ts`) for a push. A transfer must take it
+   * from there and never from a seq it read.
    */
   deliveredThrough: number;
   /** True when it stopped before exhausting what the peer had: a non-`ok` response, a throw, or a page cap. */
   truncated: boolean;
+}
+
+/**
+ * The seq a transfer is COMPLETE through, given the highest seq it has delivered and whether the run at that seq may go on.
+ *
+ * Records relayed from several authors keep their author's seq, so several share one: `seq` is only finished when nothing more
+ * can arrive at it. When the run may continue (a full page, a cursor inside it) the transfer is complete through the seq
+ * BEFORE; when it cannot (a short page, the last page) it is complete through `seq` itself. Never below 0, the seq every
+ * watermark starts from.
+ *
+ * It is one function because the answer was written four times (the push loop, the pull's pair branch, its legacy ask and the
+ * seq an ask rides beside a cursor) and a copy that forgets the `- 1` puts the rest of a run behind a watermark for good.
+ */
+export function completeThrough(seq: number, runMayContinue: boolean): number {
+  return runMayContinue ? Math.max(0, seq - 1) : seq;
+}
+
+/** The requests one transfer makes before it stops as capped, when its caller names no bound of its own. */
+export const MAX_TRANSFER_PAGES = 200;
+
+/** How a stop is logged: what stopped it and the seq the transfer is held at. */
+export type TransferStopped = (why: string, heldAt: number) => void;
+
+/**
+ * Stop a transfer: mark it truncated and say why, at the seq it is held at.
+ *
+ * Marking and saying are one step because the pair is what the watermark depends on: a stop that logs but leaves `truncated`
+ * false lets the watermark advance past what did not transfer, and one that marks without logging is a silent hold.
+ */
+export function stopTransfer(outcome: TransferOutcome, stopped: TransferStopped, why: string): void {
+  outcome.truncated = true;
+  stopped(why, outcome.deliveredThrough);
+}
+
+/**
+ * Stop at the page bound of one cycle, when it is reached; `true` when it stopped. `maxPages` undefined is no bound.
+ *
+ * Reaching the bound is easy to forget as a truncation because nothing failed — the peer simply still has more to give — and a
+ * loop that returns quietly there reports the transfer finished, and the watermark moves past what was never fetched. Both
+ * pagers (`sync/seq-run-pager.ts`, `sync/push-seq-runs.ts`) stop through this.
+ */
+export function stopAtPageBound(
+  outcome: TransferOutcome, stopped: TransferStopped, pages: number, maxPages: number | undefined,
+): boolean {
+  if (maxPages === undefined || pages < maxPages) return false;
+  stopTransfer(outcome, stopped, `the ${maxPages}-request bound of one cycle was reached`);
+  return true;
 }
 
 /**

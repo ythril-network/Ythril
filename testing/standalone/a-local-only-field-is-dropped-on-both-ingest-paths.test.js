@@ -41,6 +41,8 @@ import { bodyOf } from './_structural-window.mjs';
 
 const FIELDS = 'server/src/sync/local-only-fields.ts';
 const ENGINE = 'server/src/sync/engine.ts';
+const PULL = 'server/src/sync/pull-family.ts';
+const PUSH = 'server/src/sync/push-family.ts';
 const SHARED = 'server/src/api/sync/_shared.ts';
 const ARRIVALS = 'server/src/sync/arrivals.ts';
 const src = (f) => stripComments(readFileSync(f, 'utf8'));
@@ -87,7 +89,8 @@ describe('the two ingest paths agree about local-only fields', () => {
      */
     // Re-anchored for bundle-30 `Q-204`: the engine hands the page to the page accept the push uses, which validates
     // it and writes it through `writeArrivals`.
-    assert.match(src(ENGINE), /await acceptArrivingPage\(/,
+    // Re-anchored for bundle-52: the per-family pull is `pullFamily` (`sync/pull-family.ts`), out of the engine.
+    assert.match(src(PULL), /await acceptArrivingPage\(/,
       'the pull path no longer stores its page through the page accept, so nothing drops what never crosses');
     assert.match(src('server/src/sync/accept-page.ts'), /await writeArrivals\(/,
       'the page accept no longer stores through the arrival writer, so nothing drops what never crosses');
@@ -111,11 +114,19 @@ describe('the two ingest paths agree about local-only fields', () => {
       'the local-only fields are dropped after the document is written, which stores them first');
   });
 
-  it('and the list is not written out a second time in the engine', () => {
-    const s = src(ENGINE);
-    const spelled = fields.filter(f => new RegExp(`'${f}'`).test(s));
-    assert.deepEqual(spelled, [],
-      `the engine spells out ${spelled.join(', ')} instead of reading the shared list — that is the second `
-      + 'copy this gate exists to prevent');
+  it('and the list is not written out a second time in the engine or its per-family transfers', () => {
+    for (const file of [ENGINE, PULL, PUSH]) {
+      const s = src(file);
+      const spelled = fields.filter(f => new RegExp(`'${f}'`).test(s));
+      assert.deepEqual(spelled, [],
+        `${file} spells out ${spelled.join(', ')} instead of reading the shared list — that is the second `
+        + 'copy this gate exists to prevent');
+    }
+  });
+
+  it('the PUSH reads without them: the projection is the shared one, never a list spelled in the push', () => {
+    // The sender does not put what never travels on the wire (bundle-52): the read projects `LOCAL_ONLY_EXCLUSION`.
+    assert.match(src(PUSH), /projection:\s*LOCAL_ONLY_EXCLUSION\b/, 'the push read no longer projects the local-only fields away');
+    assert.match(src(FIELDS), /export const LOCAL_ONLY_EXCLUSION\b/, 'the shared projection is gone');
   });
 });

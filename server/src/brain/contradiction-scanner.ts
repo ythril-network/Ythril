@@ -31,7 +31,7 @@
  */
 import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
-import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js';
+import { isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
@@ -41,9 +41,10 @@ import { judgePair, consultedModel, type JudgeableRecord } from './contradiction
 import { extraClaimFields, fetchStructuredClaims, type ClaimMap } from './structured-claims.js';
 import { recordContradiction, contradictionPairId } from './contradiction-candidates.js';
 import { nliConfigured, nliIsLocal } from './nli-client.js';
-import type { ContradictionScannerConfig, DupeScanStateDoc, DupeScanType } from '../config/types.js';
+import type { ContradictionScannerConfig, DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
-import { settledSeqRange } from '../util/seq.js';
+import { readAfterSeq } from '../util/seq-keyset.js';
+import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { NotFoundError } from '../util/errors.js';
@@ -57,7 +58,6 @@ import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner
  */
 export const SCAN_STEP = declareStep('Contradiction scan');
 
-const SCAN_STATE = 'ythril_dupe_scan_state';
 const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_MAX_PER_RUN = 5000;
 /**
@@ -109,19 +109,7 @@ export function cursorKey(spaceId: string, type: DupeScanType, pass: Pass): stri
   return pass === 'nli' ? `${spaceId}:${type}:contradiction:nli` : `${spaceId}:${type}:contradiction`;
 }
 
-async function getCursor(spaceId: string, type: DupeScanType, pass: Pass): Promise<number> {
-  const doc = await col<DupeScanStateDoc>(SCAN_STATE).findOne(
-    asFilter<DupeScanStateDoc>({ _id: cursorKey(spaceId, type, pass) }));
-  return doc?.cursorSeq ?? 0;
-}
-
-async function setCursor(spaceId: string, type: DupeScanType, pass: Pass, cursorSeq: number): Promise<void> {
-  await col<DupeScanStateDoc>(SCAN_STATE).updateOne(
-    asFilter<DupeScanStateDoc>({ _id: cursorKey(spaceId, type, pass) }),
-    asUpdate<DupeScanStateDoc>({ $set: { spaceId, type, cursorSeq, updatedAt: new Date().toISOString() } }),
-    { upsert: true },
-  );
-}
+// The cursor itself — read, stored, advanced as a pair `(seq, _id)` — is `brain/scan-cursor.ts`, shared with the duplicate scanner.
 
 /** What one record's evaluation did — the caller needs `judgeStalled` to decide about the NLI cursor. */
 export interface RecordOutcomeSummary {
@@ -340,9 +328,9 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
     const threshold = pass === 'nli' ? tune.nliThreshold : tune.structuredThreshold;
     for (const type of DEFAULT_TYPES) {
       if (scanned >= tune.maxPerRun || budgetExhausted) break;
-      if (opts?.reset) await setCursor(spaceId, type, pass, 0);
-      let cursor = opts?.reset ? 0 : await getCursor(spaceId, type, pass);
-      const coll = `${spaceId}_${COLLECTION_SUFFIX[type]}`;
+      const stateId = cursorKey(spaceId, type, pass);
+      if (opts?.reset) await writeScanPosition(stateId, { spaceId, type }, null);
+      let cursor = opts?.reset ? { seq: 0 } : await readScanStart(stateId);
       let stopThisType = false;
       // Pair ids settled during THIS pass over THIS type, so a mutually-near pair is judged from one side
       // only. Scoped here on purpose: a pair never spans two types, and a structured skip is not an NLI
@@ -352,18 +340,17 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
 
       while (scanned < tune.maxPerRun && !stopThisType) {
         const take = Math.min(tune.batchSize, tune.maxPerRun - scanned);
-        const batch = await col<{ _id: string; seq?: number }>(coll)
-          .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: await settledSeqRange(spaceId, cursor) }), { projection: { _id: 1, seq: 1 } })
-          .sort({ seq: 1 })
-          .limit(take)
-          .toArray();
+        // No `spaceId` in the filter: the collection is the space's own, and a constant field in it would stop the keyset index
+        // covering the read. Ties at the cursor's seq are read by `_id` (`util/seq-keyset.ts`).
+        const batch = await readAfterSeq<{ _id: string; seq?: number }>(spaceId, COLLECTION_SUFFIX[type], cursor,
+          { limit: take, projection: { _id: 1, seq: 1 } });
         if (batch.length === 0) break;
 
         // The seeds of the batch are isolated from one another by `runSeeds`; an orderly or stalled stop below sets
         // `stopThisType`, and the seeds behind it in the batch are then not asked (the `break`s this loop used to have).
         await runSeeds(batch, async (rec) => {
           if (stopThisType) return;
-          const advance = (): void => { if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq; };
+          const advance = (): void => { cursor = advanceScanPosition(cursor, rec); };
           let out: RecordOutcomeSummary;
           try {
             out = await evalRecord(spaceId, type, rec._id, pass, threshold, judgedThisPass);
@@ -399,7 +386,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
             budgetExhausted = true;
           }
         }, type);
-        await setCursor(spaceId, type, pass, cursor);
+        await writeScanPosition(stateId, { spaceId, type }, cursor);
       }
     }
   }

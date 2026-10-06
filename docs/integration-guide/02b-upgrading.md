@@ -27,6 +27,29 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 - **Integrators that branch on status:** a pool checkout that timed out, or a closed pool, answers `503` retryable (it answered `500`); a write concern the deployment can never meet answers `500` with `retryable: false`, `code` and `codeName` (it answered `503`); a store failure under renaming a space, creating one or adding a link answers `503` (it answered `404`, `409` or `422` in the driver's words); and a second delete of a file record already flagged as deleted, or a delete naming a derived record, answers `404` on REST and MCP. See [Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field) and [Files](05-files-api.md).
 - **Background jobs no longer stop at the first failing space.** A failing or hanging space is reported (see [Background jobs and the spaces they walk](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and the other spaces are processed; four new metrics count it. Nothing needs configuring: `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` is optional.
 
+**Upgrading past 5.6.x builds a new index on every record collection, in the background; until a collection's build ends
+its sync reads stay tie-safe and are only slower.** Sync pages, the push and the two scanners now read in `(seq, _id)` order, so records
+that share a `seq` are never skipped at a page boundary, and that order needs `{ seq: 1, _id: 1 }` on the facts, entities,
+edges, chrono, links and files collections and on the tombstones. A collection that already exists gets it from a pass that
+starts AFTER the server is listening (the boot does not wait for it), one collection at a time; the log says when the first
+build starts and, per space, when it ends, and the `{ seq: 1 }` (tombstones: `{ type: 1, seq: 1 }`) each one replaces is
+dropped only once its replacement is confirmed. On a large collection the build takes a while and costs the database
+some write and read capacity meanwhile. Until a collection's build ends its sync reads behave as they did before — by seq
+alone — which is correct for distinct seqs and not yet safe for a run of equal ones; a collection created by the new version
+has the index from its first write. Two things an integrator can see:
+
+- **The cursor a page returns is a pair now, still opaque.** A client that echoes it is unchanged, and a cursor from an
+  older server (the bare seq) is still read. A build that predates this change reads a pair as follows: one with the sync
+  read validation (`Q-388`) answers a pair with `400`, and one before it reads the seq alone. That only matters for a cursor
+  in flight across a rollback, and nothing is lost by it — a cycle that meets the `400` stops and starts again from its
+  watermark.
+- **The tombstone route has a cursor mode** that pages through any number of tombstones at one seq ([Sync API](09-sync-api.md#tombstones)).
+  A puller that predates it keeps its older mode, and still stops at a run of more than `limit` tombstones at one seq until it
+  upgrades.
+
+The duplicate and contradiction scanners keep their cursor as `(seq, _id)`: the first run after the upgrade scans the
+records at the one `seq` its cursor named once more, and nothing below it.
+
 **Upgrading to 5.6.0 or later deletes the read spills older versions wrote into spaces, and that cannot be
 undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
 of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
@@ -66,6 +89,13 @@ first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DRO
 rollback needs nothing: the older build recreates every index at boot.
 
 ## Rolling Back
+
+**A rollback to 5.6.x rebuilds `{ seq: 1 }` before it listens, and leaves the new indexes behind.** An older build creates
+`{ seq: 1 }` (tombstones: `{ type: 1, seq: 1 }`) at every boot, before it accepts a request, on each collection that no
+longer has it — which, once the background build above has finished and dropped it, is every record collection. On a large
+instance that is a boot that takes as long as the build did. The `{ seq: 1, _id: 1 }` indexes stay: an older build neither
+reads nor drops them, and they cost a second index on every write until the upgrade is done again. A scanner cursor that
+the newer build wrote is read by the older one as its `seq` alone, and scans nothing twice.
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
 keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and
