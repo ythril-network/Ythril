@@ -296,8 +296,8 @@ export async function listFacts(
   sort?: SortSpec,
 ) {
   return col<FactDoc>(spaceCollection(spaceId, 'facts'))
-    .find(asFilter<FactDoc>(filter))
-    .maxTimeMS(filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an option of the read, not a call on its cursor (Q-358; see `listChrono`).
+    .find(asFilter<FactDoc>(filter), { maxTimeMS: filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000 })
     .project({ embedding: 0 })
     .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
     .skip(parseSkip(skip))

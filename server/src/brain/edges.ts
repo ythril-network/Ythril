@@ -177,8 +177,11 @@ export async function listEdges(
   if ('error' in merged) throw new Error(merged.error);
   const q = merged.predicate;
   return col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>(q), { projection: NEVER_RETURNED_PROJECTION })
-    .maxTimeMS(q['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an option of the read, not a call on its cursor (Q-358; see `listChrono`).
+    .find(asFilter<EdgeDoc>(q), {
+      projection: NEVER_RETURNED_PROJECTION,
+      maxTimeMS: q['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000,
+    })
     .sort(sort ? toMongoSort(sort) : { seq: -1, createdAt: -1, _id: -1 })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))

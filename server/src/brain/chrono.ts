@@ -542,8 +542,12 @@ export async function listChrono(
     spaceId, filter, now, typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));
 
   const entries = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
-    .find(asFilter<ChronoEntry>(query), { projection: NEVER_RETURNED_PROJECTION })
-    .maxTimeMS(comparesAgainstTheClock ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an OPTION of the read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it
+    // can see in the options, and the driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
+    .find(asFilter<ChronoEntry>(query), {
+      projection: NEVER_RETURNED_PROJECTION,
+      maxTimeMS: comparesAgainstTheClock ? PROPERTIES_SCAN_MAX_MS : 60_000,
+    })
     .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))

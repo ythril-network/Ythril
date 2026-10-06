@@ -173,8 +173,10 @@ describe('propertiesValueContains — filters on VALUE, not key', () => {
       + 'minimum, so the scan is wrong rather than the code');
 
     for (const f of importers) {
-      assert.match(read(f), /maxTimeMS\([^)]*PROPERTIES_SCAN_MAX_MS/,
-        `${f} imports the deadline and never passes it to maxTimeMS — the import is not the bound`);
+      // The OPTIONS form (`{ maxTimeMS: … }`), the only one the server allows: a chained call is refused by
+      // `no-chained-max-time-ms` because a scope's bound cannot see it (Q-358).
+      assert.match(read(f), /maxTimeMS:[^,}]*PROPERTIES_SCAN_MAX_MS/,
+        `${f} imports the deadline and never passes it as the maxTimeMS option — the import is not the bound`);
     }
   });
 });

@@ -372,8 +372,9 @@ export async function queryBrain(
   const safeMaxTime = Math.min(maxTimeMS, 10_000);
   const collName = `${spaceId}_${collectionName}`;
   const cursor = col(collName)
-    .find(safeFilter)
-    .maxTimeMS(safeMaxTime)
+    // The deadline is an option of the read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it can
+    // see in the options, and the driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
+    .find(safeFilter, { maxTimeMS: safeMaxTime })
     // Deterministic newest-first ordering by default, which keeps recent writes visible under the default limit even
     // when historical datasets grow large. Every order ends in `_id`, so it is total and pageable.
     .sort(sort)
