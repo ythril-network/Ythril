@@ -143,7 +143,7 @@ export async function predicateRecall(args: PredicateRecallArgs): Promise<Predic
     } },
   ], { maxTimeMS: remaining() }).toArray();
 
-  const seen =facet?.window?.[0] ?? { n: 0, min: 0 };
+  const seen = facet?.window?.[0] ?? { n: 0, min: 0 };
   const hits = facet?.hits ?? [];
   const exhausted = seen.n < window;
   const clearOfTheCut = hits.length >= topK && (hits[topK - 1]!['score'] as number) > seen.min;
@@ -213,7 +213,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
         docs: [{ $match: predicate }, ...shape],
       } },
     ], { maxTimeMS: remaining() }).toArray();
-    const docs =facet?.docs ?? [];
+    const docs = facet?.docs ?? [];
     const seen = facet?.seen ?? [];
     if (!behind && seen.length < Math.min(topK, ids.length)) {
       behind = await indexIsBehind(collName, vectorPath, ids, new Set(seen.map(d => String(d._id))), remaining());

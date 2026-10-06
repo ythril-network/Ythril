@@ -175,7 +175,8 @@ so. **The rule now is one path.** A per-space walk goes through `eachSpace` / `w
 and a queue claim through `claimAcross`; the bound on each database operation sits INSIDE them, so a caller cannot leave
 it out, and a space's sub-units (a collection, one half of a pass) go through `eachUnit`, so a hung space costs one bound
 and not one per unit. **The verdict on a failure is one function.** `walkVerdict` (store down, space timeout or space
-failure) is called by the walk helpers and by nothing else, and always awaited; code with no walk above it, such as a
+failure) is called by the walk helpers, and by one named verdict taker inside a walk (`sweepCollection`, which decides per
+record), and always awaited; code with no walk above it, such as a
 request that scans one space or a sweep a meta write starts, asks the one question `storeIsNotAnswering`, and a
 hand-spelled `isWriteTimeout(err) || isStoreUnreachable(err)` is the second implementation this section is about. A
 failure is said through the shared reporter, which keeps one line per step, space and unit per window and counts every

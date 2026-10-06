@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link answers `503`, retryable (`Q-335`).** These acts read the database driver's message before asking whether the
   store was answering, so an outage answered `404`, `409` or `422` in the driver's words (a rename also put them in its
   *"rename incomplete"* answer). They ask the store first now and answer in our words, on both doors; the retried
-  request completes the act. A refusal that really is the caller's is unchanged.
+  request completes the act. A refusal that really is the caller's is unchanged. A file-system failure in a rename's
+  directory move is answered by its code (`ENOENT`, `EACCES`) and no longer carries the server's absolute data path.
 - **BREAKING for a caller that repeats a delete: a second delete of a file record already flagged as deleted, or a delete
   naming a derived record (a chunk of a document, a face found in a picture), answers `404` on `DELETE
   /api/files/:spaceId`, `POST /api/delete_file` and the `delete_file` tool (`Q-343`).** It answered success again, wrote a

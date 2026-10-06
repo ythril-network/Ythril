@@ -40,7 +40,7 @@ import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStored, isMissingPath } from './stored-bytes.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder,markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
 import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { listFilesRecursive } from './files.js';

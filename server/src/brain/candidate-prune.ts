@@ -171,7 +171,7 @@ export async function pruneAllSpaces(): Promise<PruneResult & { walk: WalkResult
   return { ...total, walk };
 }
 
-const pruneJob = intervalJob('Candidate prune',PRUNE_INTERVAL_MS, () => pruneAllSpaces());
+const pruneJob = intervalJob('Candidate prune', PRUNE_INTERVAL_MS, () => pruneAllSpaces());
 
 /**
  * Start the background prune. Always on — unlike the scanners it has no cost worth gating and no behaviour
