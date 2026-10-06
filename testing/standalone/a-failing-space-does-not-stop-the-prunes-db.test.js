@@ -70,7 +70,11 @@ const orphan = (id) => ({ _id: id, type: 'fact', aId: `${id}-a`, bId: `${id}-b`,
 const recordTombstone = (space, seq) => ({ _id: `${space}-t${seq}`, spaceId: space, type: 'fact', deletedAt: iso(1), instanceId: 'self', seq });
 const fileTombstone = (space, day) => ({ _id: `${space}-f${day}`, spaceId: space, path: `p/report-${day}.pdf`, deletedAt: iso(day) });
 const idsIn = async (collection) => (await mongo.col(collection).find({}, { projection: { _id: 1 } }).toArray()).map(d => d._id).sort();
-const lineFor = (lines, step, space, unit) => lines.filter(l => l.startsWith(`${step} failed for space '${space}' (${unit})`));
+/**
+ * The lines that say `step` failed for `space`. A unit's failure names the unit; a TIMEOUT ends the whole space, so the walk says
+ * it for the space and no unit is named (`unit` left out).
+ */
+const lineFor = (lines, step, space, unit) => lines.filter(l => l.includes(`${step} failed for space '${space}'${unit === undefined ? ':' : ` (${unit})`}`));
 /** A source whose document cannot be turned into a number: a view over it with `$toInt` fails a read that reaches it. */
 const failingPipeline = [{ $addFields: { _x: { $toInt: '$f' } } }];
 
@@ -167,7 +171,7 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
       assert.ok(outcome.settled, `the prune was still waiting after ${outcome.elapsedMs} ms on a read that stalls for ${STALL_MS} ms: nothing ended it at the ${BOUND_MS} ms bound`);
       assert.equal(outcome.ok, true, `the prune answers for a hung space: ${outcome.error}`);
       assert.deepEqual(await idsIn(`${OK}_dupe_candidates`), [], 'the space behind the hung one was pruned');
-      const said = lineFor(lines, CANDIDATE_STEP, HUNG_CANDIDATES, 'dupe_candidates');
+      const said = lineFor(lines, CANDIDATE_STEP, HUNG_CANDIDATES);
       assert.equal(said.length, 1, `said once: ${lines.join(' | ')}`);
       assert.match(said[0], new RegExp(`time bound of ${BOUND_MS} ms`), 'in the words of the bound it ran into');
     });
@@ -236,7 +240,7 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
       assert.ok(outcome.settled, `the prune was still waiting after ${outcome.elapsedMs} ms on a delete behind a held lock: nothing ended it at the ${BOUND_MS} ms bound`);
       assert.equal(outcome.ok, true, `the prune answers for a hung space: ${outcome.error}`);
       assert.deepEqual(await idsIn(`${OK}_tombstones`), [], 'the space behind the hung one was pruned');
-      const said = lineFor(lines, TOMBSTONE_STEP, LOCKED, 'record tombstones');
+      const said = lineFor(lines, TOMBSTONE_STEP, LOCKED);
       assert.equal(said.length, 1, `said once: ${lines.join(' | ')}`);
       assert.match(said[0], new RegExp(`time bound of ${BOUND_MS} ms`));
     });
