@@ -10,6 +10,7 @@ import { stopSyncScheduler } from './sync/scheduler.js';
 import { stopBackupScheduler } from './db/backup-scheduler.js';
 import { stopDupeScanner } from './brain/dupe-scanner.js';
 import { cleanupStaleChunks } from './files/chunks.js';
+import { intervalJob } from './util/interval-job.js';
 import { log, redactSecrets, peerText } from './util/log.js';
 import { envInt, assertNumericEnvOrExit } from './config/env-num.js';
 import { assertNoRemovedEnvVarsOrExit } from './config/env-removed.js';
@@ -230,12 +231,9 @@ async function main(): Promise<void> {
   const server = createServer(app);
   configureConnections(server);
 
-  // Periodic stale-chunk cleanup (every hour)
-  const chunkCleanupInterval = setInterval(
-    () => cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`)),
-    60 * 60 * 1000,
-  );
-  chunkCleanupInterval.unref(); // don't block shutdown
+  // Periodic stale-chunk cleanup (every hour). An interval job: one tick at a time, a throw contained and said once per
+  // window as "Stale chunk cleanup failed: …", an unref'd timer so shutdown does not wait for it.
+  intervalJob('Stale chunk cleanup', 60 * 60 * 1000, () => cleanupStaleChunks()).start();
 
   server.listen(PORT, () => {
     // Work the bootstrap held for the listen (`util/after-listening.ts`) starts now.
