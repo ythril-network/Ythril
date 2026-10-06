@@ -88,7 +88,7 @@ describe('delete_file describes the cascade it really performs', () => {
     assert.doesNotMatch(DELETE, /IDEMPOTENT|succeeds\s+quietly/, 'the old, false claim is back');
   });
 
-  it('and that is still true — the cascade refuses only what has neither bytes nor metadata, after the tombstone order', () => {
+  it('and that is still true — the cascade refuses only what has neither bytes nor a live file record, after the tombstone order', () => {
     // The handler hands the path straight to the cascade, which decides; no second not-found check of its own.
     const handler = FILE_TOOLS.slice(FILE_TOOLS.indexOf("name: 'delete_file'"));
     const end = handler.indexOf('\nexport const ');
@@ -100,8 +100,13 @@ describe('delete_file describes the cascade it really performs', () => {
     assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
     assert.ok(notFound < tombstone && tombstone < unlink,
       'the cascade must refuse a path that is not there, then write the tombstone, then remove the bytes — in that order');
-    assert.match(CASCADE.slice(CASCADE.lastIndexOf('if', notFound), notFound), /!known/,
-      'the not-found refusal is no longer conditional on the metadata being absent too — an orphan would be refused');
+    assert.match(CASCADE.slice(CASCADE.lastIndexOf('if', notFound), notFound), /!\(await hasLiveFileRecordExactlyAt\(/,
+      'the not-found refusal is no longer conditional on a LIVE file record at the path being absent too — an orphan would be refused, or a flagged one completed');
+  });
+
+  it('and says a flagged or derived record is not found too (Q-343)', () => {
+    assert.match(DELETE, /flagged deleted[^]*derived record[^]*not found too/,
+      'a retried delete of a flagged or derived record answers 404 — the description must say so');
   });
 });
 

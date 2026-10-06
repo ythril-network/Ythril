@@ -521,7 +521,7 @@ export async function deleteFileMetaByPrefix(
  * remove it last.
  */
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
-  const filter = liveFileRecords(path, { self: true });
+  const filter = liveFileRecords(path, 'at-or-under');
   if (!filter) return [];
   const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(filter, { projection: { _id: 1 } }).toArray();
   return rows.map(r => String(r._id));
@@ -533,12 +533,23 @@ export async function fileRecordPaths(spaceId: string, path: string): Promise<st
  * record id under a folder to answer one bit.
  */
 export async function hasLiveFileRecordAt(spaceId: string, path: string): Promise<boolean> {
-  return anyLiveFileRecord(spaceId, liveFileRecords(path, { self: true }));
+  return anyLiveFileRecord(spaceId, liveFileRecords(path, 'at-or-under'));
+}
+
+/**
+ * Whether the live file record AT `path` itself exists — not one under it. What a delete of ONE file asks of a path
+ * whose bytes are gone: a record the delete is still owed (the bytes went, a store failure stopped the rest) answers
+ * yes; a record a soft delete flagged, a derived chunk or face record, and a folder that only has files under it
+ * answer no, so a retried delete of a file that is already gone is not found rather than done a second time (Q-343).
+ * {@link hasLiveFileRecordAt} is at-or-under and answers a move's question, not this one.
+ */
+export async function hasLiveFileRecordExactlyAt(spaceId: string, path: string): Promise<boolean> {
+  return anyLiveFileRecord(spaceId, liveFileRecords(path, 'exactly-at'));
 }
 
 /** Whether any live file record is strictly under `dir/` — what a directory delete a store failure stopped still owes. */
 export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Promise<boolean> {
-  return anyLiveFileRecord(spaceId, liveFileRecords(dir, { self: false }));
+  return anyLiveFileRecord(spaceId, liveFileRecords(dir, 'under'));
 }
 
 async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
@@ -547,15 +558,17 @@ async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | 
 }
 
 /**
- * The live FILE records under `path/` (and at `path`, with `self`): never a derived record, never a soft-deleted one.
- * `null` for an empty path, which would match everything.
+ * The live FILE records of a scope around `path`: `'under'` is under `path/`, `'exactly-at'` is `path` alone and
+ * `'at-or-under'` is both. Never a derived record, never a soft-deleted one. `null` for an empty path, which would
+ * match everything.
  */
-function liveFileRecords(path: string, { self }: { self: boolean }): Filter<FileMetaDoc> | null {
+function liveFileRecords(path: string, scope: 'under' | 'exactly-at' | 'at-or-under'): Filter<FileMetaDoc> | null {
   const norm = toDocId(path).replace(/\/?$/, '');
   if (!norm) return null;
   const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
+  const reach = scope === 'under' ? under : scope === 'exactly-at' ? { _id: norm } : { $or: [{ _id: norm }, under] };
   return asFilter<FileMetaDoc>({
-    ...(self ? { $or: [{ _id: norm }, under] } : under),
+    ...reach,
     parentFileId: { $exists: false },
     deletedAt: { $exists: false },
   });
