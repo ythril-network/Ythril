@@ -59,6 +59,6 @@ describe('the boot sweep waits for the server and runs one space at a time', () 
     const walk = body.slice(body.search(/\beachSpace\(/));
     assert.match(walk, /\bconcreteSpaces\(\)/, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
     assert.doesNotMatch(walk, /\blimit\s*:/, 'the boot sweep walks several spaces at once');
-    assert.match(walk, /\bawait\b[^]*\bqueueSweep\(/, 'the boot sweep starts a space\'s sweep without waiting for it');
+    assert.match(walk, /\bawait\s+\w*[sS]weep\w*\(/, 'the boot sweep starts a space\'s sweep without waiting for it');
   });
 });

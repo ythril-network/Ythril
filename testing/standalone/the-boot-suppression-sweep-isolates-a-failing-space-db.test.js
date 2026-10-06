@@ -9,9 +9,12 @@
  * name the registry could pre-declare, and nothing bounding a space whose read hangs — the sweep is an unindexed scan per record
  * kind, so a hung space held the whole boot sweep for as long as the driver waited.
  *
- * Now the boot sweep is `eachSpace` (one at a time, inside the housekeeping bound), and `sweepLatestMeta` — still the one catch,
- * because `sweepAfterMetaWrite` has no walk above it and the coalescing runner re-runs its job without a caller to throw to —
- * reports through `reportSpaceFailure`, which is synchronous and never throws.
+ * Now the boot sweep is `eachSpace` (one at a time, inside the housekeeping bound) and a space's failure REACHES the walk, so it
+ * is said in the walk's words and the walk's rules apply: a hung space is worded as running past its bound and quarantined, a
+ * store that does not answer stops the walk after the first space. A sweep with no walk above it (`sweepAfterMetaWrite`, and the
+ * coalescing runner's un-awaited rerun) says its own failure through `reportSpaceFailure`, which is synchronous and never
+ * throws. One report per failure either way: a boot walk that JOINS a running sweep is handed that run's failure, and the rerun
+ * the join queued says its own.
  *
  * ## How the failure is made, and why it is real
  *
