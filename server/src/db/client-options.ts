@@ -32,6 +32,8 @@
  * string still wins over those.
  */
 
+import { peerList } from '../util/log.js';
+
 /** The three options this module owns. */
 export interface ClientLivenessOptions {
   serverSelectionTimeoutMS: number;
@@ -162,5 +164,7 @@ export function inFlightBoundMs(effective: ClientLivenessOptions & { loadBalance
  */
 export function describeClientOptions(effective: EffectiveClientOptions): string {
   const figures = LIVENESS_KEYS.map(key => `${key}=${effective[key]} (${effective.fromUri.includes(key) ? 'MONGO_URI' : 'default'})`);
-  return `MongoDB client options: ${figures.join(', ')}${effective.loadBalanced ? ', loadBalanced (no monitor: only the selection wait bounds an operation)' : ''}.`;
+  // The figures are numbers the operator's own string may have supplied (steerable), so the joined list is bounded by
+  // `peerList` like any such value in a log line (`a-steerable-value-reaches-a-log-line-only-bounded`).
+  return `MongoDB client options: ${peerList(figures)}${effective.loadBalanced ? ', loadBalanced (no monitor: only the selection wait bounds an operation)' : ''}.`;
 }
