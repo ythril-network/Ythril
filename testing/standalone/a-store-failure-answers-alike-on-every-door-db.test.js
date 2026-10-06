@@ -40,6 +40,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { driverTextIn } from './_driver-text.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 
@@ -56,8 +57,6 @@ const UUID = 'cccccccc-0000-4000-8000-0000000000d1';
 const UUID2 = 'cccccccc-0000-4000-8000-0000000000d2';
 const HOST = 'mongo-a.internal:27017';
 const ADDRESS = '172.16.0.9';
-/** The driver's text, as the drive saw it: an internal host, a private address and a port. */
-const LEAK = /mongo-a\.internal|172\.16\.0\.9|27017|Connection pool for|MongoPoolClearedError/;
 /** How many doors must reach the failing store for the run to conclude anything. Raise it; never lower it. */
 const REACHED_FLOOR = 60;
 const PER_DOOR_MS = 20_000;
@@ -417,7 +416,9 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const messages = new Map();
     for (const { d, a } of results) {
       if (SERVES_THE_LOG.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
-      if (LEAK.test(a.raw)) wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(0, 200)}`);
+      const leak = driverTextIn(a.raw);
+      // The text AROUND the match: a long body (a scrape) leaks somewhere past its first 200 characters.
+      if (leak) wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(Math.max(0, leak.index - 200), leak.index + 200)}`);
       // A stream that opened (a status line, then events) is a stream, not an answer that never came.
       if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
     }

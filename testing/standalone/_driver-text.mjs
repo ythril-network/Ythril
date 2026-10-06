@@ -10,8 +10,8 @@
  * Returns the first match as `{ text, index }`, or `null`. Callers show the text AROUND the index, because a long body
  * leaks somewhere past its first characters.
  */
-const NOT_INSIDE_A_NUMBER_BEFORE = '';
-const NOT_INSIDE_A_NUMBER_AFTER = '';
+const NOT_INSIDE_A_NUMBER_BEFORE = '(?<![\\d.])';
+const NOT_INSIDE_A_NUMBER_AFTER = '(?!\\d|\\.\\d)';
 const NUMERIC_TOKENS = ['172\\.16\\.0\\.9', '27017']
   .map(t => `${NOT_INSIDE_A_NUMBER_BEFORE}${t}${NOT_INSIDE_A_NUMBER_AFTER}`);
 const WORDS = ['mongo-a\\.internal', 'Connection pool for', 'MongoPoolClearedError'];
