@@ -17,7 +17,8 @@ import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
+import { scanSpace, pairContentHash, SCAN_STEP } from '../brain/dupe-scanner.js';
+import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { mergeEntities, mergeRefusal } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
@@ -324,14 +325,12 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
       .map(s => s.id);
     if (spaceFilter && targets.length === 0) { res.status(404).json({ error: `Space '${spaceFilter}' not found or not accessible` }); return; }
 
-    let scanned = 0;
-    let pairs = 0;
-    for (const spaceId of targets) {
-      const r = await scanSpace(spaceId, { reset: true });
-      scanned += r.scanned;
-      pairs += r.pairs;
-    }
-    res.json({ scannedSpaces: targets.length, scanned, pairs });
+    // A space that fails is named in `failedSpaces` and the rest are still scanned; a store that is not answering ends the request
+    // (the `catch` below answers it 503). `scannedSpaces` counts the spaces that were scanned, so it equals `targets.length` on success.
+    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, targets, (spaceId) => scanSpace(spaceId, { reset: true }));
+    const scanned = results.reduce((n, r) => n + r.scanned, 0);
+    const pairs = results.reduce((n, r) => n + r.pairs, 0);
+    res.json({ scannedSpaces: results.length, scanned, pairs, failedSpaces });
   } catch (err) {
     sendCaughtFailure(res, `POST /api/duplicates/scan`, err);
   }

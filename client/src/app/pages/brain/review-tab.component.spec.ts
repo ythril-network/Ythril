@@ -136,6 +136,16 @@ describe('ReviewTabComponent', () => {
     expect(other.toastErrors).toContain('duplicates.scanError');
   });
 
+  it('scan says so when the space could not be scanned: a 200 that names it is not a finished scan (Q-381)', () => {
+    const failed = setup({ scanDuplicates: () => of({ scannedSpaces: 0, scanned: 0, pairs: 0, failedSpaces: [{ spaceId: 'work', reason: 'x' }] }) });
+    failed.c.scan();
+    expect(failed.toastErrors).toContain('duplicates.scanError');
+
+    const clean = setup({ scanDuplicates: () => of({ scannedSpaces: 1, scanned: 3, pairs: 0, failedSpaces: [] }) });
+    clean.c.scan();
+    expect(clean.toastErrors).toEqual([]);
+  });
+
   it('re-rate on the "dismissed" filter removes the row (it is no longer dismissed)', () => {
     const reopen = vi.fn(() => of({ status: 'open' }));
     const { c } = setup({
@@ -544,6 +554,17 @@ describe('ReviewTabComponent', () => {
         f.detectChanges();
         c.scanContradictions();
         expect(toastErrors.length).toBeGreaterThan(0);
+      });
+
+      it('says so when the space could not be scanned: a 200 that names it is not a finished scan (Q-381)', () => {
+        const { f, c, toastErrors } = setup({}, true, {
+          listContradictions: () => of({ contradictions: [], nliConfigured: true }),
+          scanContradictions: () => of({ scannedSpaces: 0, scanned: 0, found: 0, nliStalled: false, failedSpaces: [{ spaceId: 'work', reason: 'x' }] }),
+        });
+        c.sub.set('contradictions');
+        f.detectChanges();
+        c.scanContradictions();
+        expect(toastErrors).toContain('duplicates.scanError');
       });
 
       it('searches the disagreeing field values, not only the two summaries', () => {

@@ -76,8 +76,9 @@ export class ContradictionsApi {
       { resolution: 'superseded', winner });
   }
 
-  scanContradictions(space?: string): Observable<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean }> {
-    return this.http.post<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean }>(
+  /** `failedSpaces`: the spaces the scan could not scan, each with a reason in the server's words (Q-381); optional only because an older server omits it. */
+  scanContradictions(space?: string): Observable<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; failedSpaces?: { spaceId: string; reason: string }[] }> {
+    return this.http.post<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; failedSpaces?: { spaceId: string; reason: string }[] }>(
       `/api/contradictions/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
   }
 }
