@@ -553,9 +553,9 @@ describe('one verdict, awaited', () => {
   it('every call of walkVerdict in the walk is awaited: an unawaited verdict is a Promise, which is truthy', () => {
     const calls = [...src.matchAll(/walkVerdict\(/g)];
     assert.ok(calls.length >= 1, 'the walk asks the one verdict');
-    for (const m of calls) {
-      assert.match(src.slice(Math.max(0, m.index - 6), m.index), /await $/, `an unawaited walkVerdict( at offset ${m.index}`);
-    }
+    // Structural: a call that is NOT the operand of an `await` is a match of the lookbehind form, whatever precedes it.
+    const unawaited = [...src.matchAll(/(?<!\bawait\s+)\bwalkVerdict\(/g)];
+    assert.deepEqual(unawaited.map(m => m.index), [], 'a walkVerdict( call is not the operand of an await');
   });
 
   it('the walk does not re-derive the verdict: it never asks isWriteTimeout, isStoreCondition or isStoreUnreachable itself', () => {
