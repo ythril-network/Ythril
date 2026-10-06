@@ -125,7 +125,7 @@ describe('a store that stops answering ends an in-flight operation in its bound'
     await boot(relay.uri);
     try {
       const db = mongo.getDb();
-      const read = await withStalledReads(db, 'g6_stalled_view', 'g6_stall_source', { ms: 4_000 }, async () => {
+      const read = await withStalledReads(db, 'g6_stalled_view', 'g6_stall_source', { ms: 4_000, readerFilter: {} }, async () => {
         const started = Date.now();
         const docs = await db.collection('g6_stalled_view').find({}).toArray();
         return { docs, tookMs: Date.now() - started };

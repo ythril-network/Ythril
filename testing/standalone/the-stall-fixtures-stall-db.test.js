@@ -84,7 +84,7 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
     it('stalls a read for at least ms, lets the server end it at maxTimeMS (code 50), and puts everything back', async () => {
       assert.equal(typeof faults.withStalledReads, 'function', 'withStalledReads is not exported');
       const started = Date.now();
-      const out = await faults.withStalledReads(db, 'stall_view', 'stall_src', { ms: 600 }, async () => {
+      const out = await faults.withStalledReads(db, 'stall_view', 'stall_src', { ms: 600, readerFilter: {} }, async () => {
         // The guard reads the view (a stall of 600 ms) before the callback is let in: a callback that arrives sooner ran
         // without it, over a stall nothing had checked.
         assert.ok(Date.now() - started >= 600, `the callback was entered after ${Date.now() - started} ms: the stall guard did not run first`);
@@ -102,7 +102,7 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
     });
 
     it('scales with ms: a longer stall is a longer read', async () => {
-      await faults.withStalledReads(db, 'stall_view_long', 'stall_src_long', { ms: 1200 }, async () => {
+      await faults.withStalledReads(db, 'stall_view_long', 'stall_src_long', { ms: 1200, readerFilter: {} }, async () => {
         const slow = await timedRead('stall_view_long');
         assert.ok(slow.ms >= 1200, `the read took ${slow.ms} ms, less than the 1200 ms asked for`);
       });
@@ -112,7 +112,7 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
       for (const ms of [0, -5, Number.NaN, undefined]) {
         let ran = false;
         await assert.rejects(
-          () => faults.withStalledReads(db, 'stall_none', 'stall_src_none', { ms }, async () => { ran = true; }),
+          () => faults.withStalledReads(db, 'stall_none', 'stall_src_none', { ms, readerFilter: {} }, async () => { ran = true; }),
           /ms/, `ms ${ms} was accepted`);
         assert.equal(ran, false, `the callback ran under ms ${ms}, a stall that stalls nothing`);
       }

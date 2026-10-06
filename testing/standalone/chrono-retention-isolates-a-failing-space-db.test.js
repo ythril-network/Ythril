@@ -18,10 +18,10 @@
  * - **A failing half** is a VIEW named like the space's collection, over a source document its pipeline cannot convert. The
  *   source document MATCHES the reader's filter, because a view's stage only runs on documents that reach it: a document the filter
  *   excludes would leave the read clean and the fault unarmed.
- * - **A hung half** is `withStalledReads`. Its own seed documents are `{ _id }` only and do NOT match the backfill's filter, so the
- *   stall would be skipped by a read that can short-circuit on the filter; this file seeds documents that match the filter too, none
- *   with a valid `createdAt`, so the backfill reads them, sleeps once per document and has nothing to write (a write to a view
- *   fails, and that failure is not the one this case is about).
+ * - **A hung half** is `withStalledReads`. Its own default seed documents are `{ _id }` only and do NOT match the backfill's filter, so
+ *   the stall would be skipped by a read that can short-circuit on the filter; this file passes `readerFilter` (the backfill's own read,
+ *   `backfillReaderFilter`) and `seed` documents that match it, none with a valid `createdAt`, so the backfill reads them, sleeps once per
+ *   document and has nothing to write (a write to a view fails, and that failure is not the one this case is about).
  *
  * Run: `npm run test:up` first, then  node --test testing/standalone/chrono-retention-isolates-a-failing-space-db.test.js
  */
@@ -81,6 +81,19 @@ const failingView = (name, viewOn) =>
   mongo.getDb().createCollection(name, { viewOn, pipeline: [{ $addFields: { _x: { $toInt: '$a' } } }] });
 
 const sweepLines = (space, from = lines) => from.filter(l => l.includes('Chrono retention') && l.includes(`'${space}'`) && /WARN|ERROR/.test(l));
+
+/**
+ * What the sweep's first read of `space`'s chrono asks for: the backfill's (`backfillTypedExpiry`, `brain/chrono-redaction.ts`) - the
+ * policed types of THIS space's config, and no stamp of either kind yet. The types come from the module's own `policedTypes` over the
+ * config the sweep reads, so the filter the stall is checked against moves with the sweep and not with this file's seeds.
+ */
+async function backfillReaderFilter(space) {
+  const { policedTypes } = await import('../../server/dist/brain/chrono-redaction.js');
+  const { TYPE_FIELD } = await import('../../server/dist/brain/ttl.js');
+  const { getConfig } = await import('../../server/dist/config/loader.js');
+  const config = getConfig().spaces.find((s) => s.id === space);
+  return { [TYPE_FIELD['chrono']]: { $in: policedTypes(config, 'chrono') }, _expireAt: { $exists: false }, _contentExpireAt: { $exists: false } };
+}
 
 async function sweepWithin() {
   const started = Date.now();
@@ -196,14 +209,15 @@ describe('the chrono retention sweep isolates a failing space and each half of i
     it('ends at the housekeeping figure, reports the space once, and the next space is swept', async () => {
       // The stalled view is the backfill's chrono read; its matching documents are the ones that cost the sleep.
       const db = mongo.getDb();
-      await db.collection(SOURCE).deleteMany({});
-      await db.collection(SOURCE).insertMany(Array.from({ length: 15 }, (_, i) => ({ _id: `m${i}`, type: 'event' })));
+      await db.collection(SOURCE).deleteMany({});   // the failing-half case's own source documents
+      const seed = Array.from({ length: 15 }, (_, i) => ({ _id: `m${i}`, type: 'event' }));
       await db.collection('g13hungcut_chrono').insertOne({ _id: 'x' });
       await db.collection('g13nextcut_entities').insertOne(entity('g13nextcut', 'n-e'));
       configure([{ id: 'g13hungcut', kinds: ['chrono'] }, { id: 'g13nextcut', kinds: ['entity'] }]);
+      const readerFilter = await backfillReaderFilter('g13hungcut');
       restoreBound = await setWriteBoundForTest({ writeTimeoutMs: 30_000, housekeepingOpMs: 1_000 });
       try {
-        await withStalledReads(db, 'g13hungcut_chrono', SOURCE, { ms: 3_000 }, async () => {
+        await withStalledReads(db, 'g13hungcut_chrono', SOURCE, { ms: 3_000, readerFilter, seed }, async () => {
           lines.length = 0;
           const { ms } = await sweepWithin();
           assert.ok(ms < 2_400, `the sweep took ${ms}ms: a read that stalls 3000ms was not ended at the 1000ms housekeeping figure`);
@@ -219,12 +233,13 @@ describe('the chrono retention sweep isolates a failing space and each half of i
     it('a scan slower than the write figure but under the housekeeping figure is NOT cut', async () => {
       const db = mongo.getDb();
       await db.collection(SOURCE).deleteMany({});
-      await db.collection(SOURCE).insertMany(Array.from({ length: 10 }, (_, i) => ({ _id: `m${i}`, type: 'event' })));
+      const seed = Array.from({ length: 10 }, (_, i) => ({ _id: `m${i}`, type: 'event' }));
       await db.collection('g13slow_chrono').insertOne({ _id: 'x' });
       configure([{ id: 'g13slow', kinds: ['chrono'] }]);
+      const readerFilter = await backfillReaderFilter('g13slow');
       restoreBound = await setWriteBoundForTest({ writeTimeoutMs: 1_000, housekeepingOpMs: 8_000 });
       try {
-        await withStalledReads(db, 'g13slow_chrono', SOURCE, { ms: 2_000 }, async () => {
+        await withStalledReads(db, 'g13slow_chrono', SOURCE, { ms: 2_000, readerFilter, seed }, async () => {
           lines.length = 0;
           const { ms } = await sweepWithin();
           assert.ok(ms >= 1_500, `the sweep took ${ms}ms: the read was cut at the 1000ms write figure, or it never stalled past it (then this case proves nothing)`);

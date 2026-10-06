@@ -13,6 +13,9 @@
  *
  * - the guard reads with the READER's filter (`readerFilter`), so a filter that matches nothing the fixture stalls throws, naming it, and
  *   the callback never runs;
+ * - `readerFilter` is REQUIRED (bundle-53 G25b): it used to default to `{}`, so a caller that left it out was checked as a reader that asks
+ *   for everything, and the guard that exists for this defect was the part a caller could forget. A call without it throws, naming the
+ *   view, before anything is seeded; a reader that really asks for everything states `readerFilter: {}`;
  * - `seed` stalls over documents the reader's filter DOES match, and `collapseTo` stalls a reader that names one document;
  * - what the fixture put in the source is removed afterwards, and the view is put back as an ordinary collection, whether it threw or not.
  *

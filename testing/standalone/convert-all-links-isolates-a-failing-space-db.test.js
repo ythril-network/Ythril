@@ -203,7 +203,9 @@ describe('the link conversion isolates a failing space and names it (real MongoD
       configure([HUNG, NEXT]);
       restoreBound = await setWriteBoundForTest({ writeTimeoutMs: 30_000, housekeepingOpMs: 1_000 });
       try {
-        await withStalledReads(db, `${HUNG}_facts`, SOURCE, { ms: 3_000 }, async () => {
+        // The conversion's first read of a collection is `find({})` (`convertSpaceInWalk`, `brain/links-conversion.ts`): every source
+        // document reaches the stall, and the default seeds are enough.
+        await withStalledReads(db, `${HUNG}_facts`, SOURCE, { ms: 3_000, readerFilter: {} }, async () => {
           lines.length = 0;
           const started = Date.now();
           const outcome = await conversion.convertAllLinks();

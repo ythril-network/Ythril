@@ -30,8 +30,9 @@
  * ## What a stall costs
  *
  * `withStalledReads` makes a source document cost a read one sleep, but only for a document that matches the READER's filter; the
- * scanner's batch read is `{ spaceId, seq in the settled range }`, so the hung space's source is topped up with documents that
- * match it (the fixture's own seeds carry no `spaceId` and cost the scan nothing).
+ * scanner's batch read is `{ spaceId, seq in the settled range }`, so the hung space is stalled over `seed` documents that match it
+ * and the guard reads with that filter (`readerFilter`), built by `settledSeqRange` as the scanners build it. The fixture's own default
+ * seeds carry no `spaceId` and would cost the scan nothing.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-failing-space-does-not-stop-the-scanners-db.test.js
@@ -151,18 +152,17 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
       it('a space whose read HANGS ends at the housekeeping bound, is reported once, and the space behind it is scanned', { timeout: 60_000 }, async () => {
         const space = HANG(scanner);
         const db = door.mongo.getDb();
-        const source = `${space}_facts_src`;
-        // Documents the scanner's own batch filter lets through, so each one pays the sleep.
-        await db.collection(source).insertMany(Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => fact(space, i + 1)));
+        // The scanner's own batch read, built by the function the scanners build it with (`settledSeqRange`, `brain/dupe-scanner.ts` and
+        // `brain/contradiction-scanner.ts`), from the cursor a fresh space starts at: not a copy of what the seeds happen to match.
+        const { settledSeqRange } = await import('../../server/dist/util/seq.js');
+        const readerFilter = { spaceId: space, seq: await settledSeqRange(space, 0) };
+        // Documents that filter lets through, so each one pays the sleep (the fixture's own default seeds carry no `spaceId`).
+        const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => fact(space, i + 1));
         let outcome; let lines;
-        try {
-          await withStalledReads(db, `${space}_facts`, source, { ms: STALL_MS }, async () => {
-            ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(run(), STALL_MS - 500)));
-            if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
-          });
-        } finally {
-          await db.collection(source).drop().catch(() => {});
-        }
+        await withStalledReads(db, `${space}_facts`, `${space}_facts_src`, { ms: STALL_MS, readerFilter, seed }, async () => {
+          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(run(), STALL_MS - 500)));
+          if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
+        });
         assert.ok(outcome.settled, `the pass was still waiting after ${outcome.elapsedMs} ms on a read that stalls for ${STALL_MS} ms: nothing ended it at the ${BOUND_MS} ms bound`);
         assert.equal(outcome.ok, true, `the pass returns for a hung space: ${outcome.error}`);
         assert.equal(await cursorOf(scanner, OK), 3, 'the space behind the hung one was not scanned');

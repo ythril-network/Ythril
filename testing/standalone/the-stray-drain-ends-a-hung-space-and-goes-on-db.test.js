@@ -218,8 +218,9 @@ describe('the stray file-metadata drain walks each space on its own, bounded, na
   it('a space whose READ hangs ends at the housekeeping bound, is reported once, and the next space is drained', async () => {
     const db = door.mongo.getDb();
     let outcome, lines;
-    // The stall costs a sleep per source document the reader's filter lets through (the fixture seeds documents with no `keptSince`).
-    await withStalledReads(db, `${HUNG}_filemeta`, `${HUNG}_filemeta_src`, { ms: 3_000 }, async () => {
+    // The stall costs a sleep per source document the reader's filter lets through. The drain's first read is the fresh records, those
+    // with no `keptSince` (`drainSpace`, `sync/stray-filemeta-drain.ts`), which the fixture's default seeds (`{ _id }` only) are.
+    await withStalledReads(db, `${HUNG}_filemeta`, `${HUNG}_filemeta_src`, { ms: 3_000, readerFilter: { keptSince: { $exists: false } } }, async () => {
       ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(drainStrayFileMeta(), 2_800)));
       // Left unsettled, the stall's own end is waited for before the view is put back.
       if (!outcome.settled) await outcome.rest;
