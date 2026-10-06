@@ -1064,219 +1064,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **No door answers a store failure with the database driver's text.** A dropped connection, a failed server
-  selection or a step-down arrives with a driver message that names internal hosts, addresses and ports
-  (`connection 5 to 172.16.0.9:27017 closed`). The REST brain read routes and the MCP tools put that message in their
-  `503` body, and the REST error handler did the same for every route that lets a store failure reach it, including
-  routes a peer or an unauthenticated caller reaches. Every door — REST reads and writes, `POST /api/<tool>`, MCP
-  tools and sync push — now answers one message of ours, in one spelling, *"A store-side failure stopped this
-  operation. It did not complete as far as this server can confirm; retry the request (store-side failure;
-  retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
-  `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
-  `Store-side failure answered 503` warning naming the operation that failed — the route, the method and path when
-  the app's error handler answered it, or `tool <name>` from MCP (bundle-30 I15: only a route's own catch named it,
-  so a store failure under an edge or link reference check, one reaching the error handler, and every MCP tool's
-  logged a line naming nothing; the operation is now a required argument of the one function that writes it). A client that
-  matched the old prose should read `retryable` and `code` instead. That includes
-  `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`, which answered a
-  cycle's failure as `500 { error }` with the exception's own message.
-
-  A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
-  not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its
-  connection pool (`MongoPoolClearedError`, a network error by class) answered `400` with the driver's text, naming
-  the internal host, address and port, to whichever request was in flight when a store went away. A driver error
-  that is recognised as nothing in particular now answers `500` with *"An internal database fault stopped this
-  operation; its cause is in the server log."* rather than a `400` carrying its message. What the database server
-  itself refused — a malformed query, a validation failure — still answers `400` in its own words.
-
-  A failure under a bulk write (`insertMany`, `bulkWrite`) is classified by the error the driver wrapped (bundle-30
-  I14). The driver rethrows whatever is thrown under one as a `MongoBulkWriteError`: a server error by class, with no
-  code, and — for a server it could not select, which is how a paused store arrives — no label. So a paused store
-  answered `400` with the store's address on any door a bulk write reached, and the file delete it reached took it
-  for "not the store's" and went on without its tombstone. A write concern failure, bulk or single, is the store's
-  too (`503`): no caller chooses one here. A bulk write's refused documents — a duplicate key — are still the
-  caller's `400`.
-
-- **A model server's error text is bounded and escaped where it is quoted** (bundle-30). When a chat model server
-  answered with an `error`, its text was quoted whole into the error the call raised — and from there into a log
-  line and an answer. It now goes through the one renderer every peer-supplied text uses, cut at 200 characters
-  (saying how much it cut) and escaped.
-
-- **Every log line is one line, and every value in it is bounded (`Q-231`, `Q-214`, `Q-270`).** The escaping above
-  covered the push, pull and import paths; a member label arriving by gossip, a vote round id, a caller's parameter
-  on a REST brain or MCP door, a driver's error text and the meta argument of any log call still reached a line raw,
-  so a peer could still forge a governance line, and a megabyte `seq` or `_id` made a megabyte line in the ring,
-  the container log and every aggregator after it. One renderer (`peerText`, `peerList` for a list) now redacts,
-  cuts at 4096 characters per value (100 per list) saying how much it cut, and escapes; every door's log lines go
-  through it (a gate holds them to it), the meta argument goes through it where every line is built, and the line
-  as a whole is escaped. The same bound applies where such a value is named back in an answer: a sync refusal's
-  reason, the fork-limit `400`, and an admin import's `refused`, `schemaViolations` and `restoredOverTombstone`.
-  A reference refusal on the REST and MCP write doors (a link, an edge end or a file reference that is malformed
-  or names nothing) names its first five references each cut at 256 characters and escaped, where it echoed a
-  caller's megabyte reference whole — and the count of the rest is now written `…(+N more)`, where it read
-  ` (+N more)`. A key a door does not take is quoted by the same bound on both doors: a REST body's
-  `Unknown field(s)` and `unrecognized_keys` name the first 10 unknown keys, and an MCP call's `unexpected property`
-  its key and path, each cut at 256 characters and escaped — both echoed a caller's key whole. A sync refusal that
-  quotes a schema's issues or the driver's message (200 characters) now says where it was cut and never splits a
-  character in two.
-  An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
-  Error text that is STORED and read back goes through the same renderer: an embed job's `lastError`, a reindex
-  run's `error`, a media job's error and a webhook delivery's `error`, and a supervised worker's child error, where
-  each was cut by code unit (and the webhook's not at all). The `500` bodies of the admin wipe, export, config
-  reload and signing-key routes bound the message they quote, and the uncaught-exception, unhandled-rejection,
-  readiness and unhandled-error lines pass the error itself, so the stack is kept and the message bounded.
-- **Redacting a log line no longer takes time that grows with the square of a value (`R9`).** The userinfo pattern
-  (`scheme://user:pass@`) could start a match at every character of a run of letters and scan the rest of the run
-  from each: 40 000 letters took 0.7 s, so a peer's megabyte `_id` of letters held the event loop for minutes on
-  the line that logged it. The pattern now starts a scheme only where no scheme character precedes it, which is
-  linear, and a value is redacted over a bounded window before it is cut. The 5.6.x line carries the same pattern.
-
-- **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
-  (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
-  written inside it. So a peer admitted to one space could delete records it authored in any other space this
-  instance holds, and store tombstones there or in a space this instance does not have. And under a `spaceMap`
-  (a space joined under another name) every deletion an honest peer sent was stored under the network's name and
-  **never reached the local space**: those deletions were silently lost. Every tombstone is now applied to the
-  local space the door admitted.
-- **A tombstone is authorised before it is stored.** One whose issuer is not the peer delivering it, or whose
-  record here another instance wrote, is refused and no longer stored — stored, it refused every later copy of that
-  record from its real author.
-- **A tombstone no longer blocks another author's record.** A record its author pushes with its own peer token is
-  no longer refused as `tombstoned` by a tombstone another instance issued for the id, so a tombstone one peer
-  planted cannot keep another instance's record out. A claimed author is not enough: pushed by anyone else, a
-  record with a deleted id is still refused, so a forged author cannot bring a deleted record back.
-- **What stays as it was, named:** a record with no author (data older than authorship) stays deletable by an
-  admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
-  are, because they cannot be told apart from legitimate ones; a 5.5 peer serves tombstones without the settled
-  horizon, as before.
-- **`POST /api/duplicates/:id/merge` merges only where the token may merge (`Q-304`).** It looked its candidate up
-  in every space where the token held `dataQuality` **read**, and the guard in front of it asked only whether the
-  token could write anywhere. So a token that could only read a space's duplicate candidates, and could write in
-  any other space, merged a pair in the first one, deleting an entity there. The candidate is now looked up only
-  where the token holds `dataQuality` **write**, the rung the route's rights row always named, and the merge also
-  needs `knowledge` **write** in the pair's space, the rung the REST entity merge and MCP `graph_merge` require.
-  A candidate the token may not merge answers `404`, as dismiss and reopen do. The duplicates, contradictions and
-  conflicts routes now look a record up by id through one function whose rung has no default.
+- **Errors:** **BREAKING:** Every door answers a store failure with one fixed `503` message, `retryable: true`,
+  `Retry-After` and the store's `code` / `codeName`, no longer the driver's text naming internal hosts and ports.
+- **Errors:** `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true` answer a
+  cycle's store failure with that `503`, was `500 { error }` with the exception's own text.
+- **Errors:** **BREAKING:** An unrecognised driver error answers `500` ("An internal database fault stopped this
+  operation"), was `400` carrying its message; the database's own refusals (bad query, validation) still answer `400`.
+- **Errors:** A paused store, a cleared connection pool or a failed bulk write now answers `503`, was `400` with the
+  store's address; write-concern failures are `503` too, refused documents (duplicate key) stay `400`.
+- **Errors:** The driver's message is logged once per request as a `Store-side failure answered 503` warning naming
+  the route, or `tool <name>` from MCP.
+- **Server:** Every log line is one line and each value in it is cut (4096 characters, 100 per list) and escaped, so a
+  peer's member label, round id or megabyte `seq` can no longer forge a line or flood the log.
+- **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five
+  references (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
+- **Server:** Sync refusal reasons, the fork-limit `400`, an admin import's `refused`, `schemaViolations` and
+  `restoredOverTombstone`, and the `500` bodies of admin wipe, export, config reload and signing-key are bounded alike.
+- **Server:** Stored error text (an embed job's `lastError`, a reindex run's `error`, a media job's and a webhook
+  delivery's `error`) and a chat model server's error text (cut at 200 characters) are bounded and escaped.
+- **Server:** Redacting a log line no longer takes time growing with the square of a value, which let a peer's megabyte
+  `_id` hold the event loop for minutes; 5.6.x releases are affected too.
+- **Sync:** A peer's tombstone applies only to the space its sync admitted, not the one it names: a peer could delete
+  its authored records in any other space, and under a `spaceMap` an honest peer's deletions never reached the space.
+- **Sync:** A tombstone is authorised before it is stored: one whose issuer is not the delivering peer, or for a record
+  another instance wrote, is refused and no longer blocks that record's real author.
+- **Sync:** A record pushed with its author's own peer token is no longer refused as `tombstoned` by a tombstone
+  another instance planted; pushed by anyone else, a record with a deleted id is still refused.
+- **Sync:** Unchanged: author-less (older) records stay deletable by an admitted peer's tombstone, and tombstones
+  already planted in a space the peer was not admitted to stay in place.
+- **Records:** **BREAKING:** `POST /api/duplicates/:id/merge` needs `dataQuality` **write** and `knowledge` **write**
+  in the pair's space, so a token with read there can no longer delete an entity; a refused candidate answers `404`.
 
 ### Internal
 
-- **A per-space walk, a repeating timer and a once-only warning are each one module, and gates hold them (bundle-53:
-  `Q-274`, `Q-358`, `Q-359`, `Q-317`, `Q-329`, `Q-330`, `Q-335`, `Q-343`).** What a contributor will notice:
-  - **One walk.** `util/housekeeping-walk.ts` (`eachSpace`, `walkSpaces`, `eachUnit`; `claimAcross` for queue claims)
-    runs per-space work with a failure or a hang contained, owns the bound, the stop on a store that is down or
-    stalled and the quarantine, and reports through `util/space-failure.ts`. `walkVerdict` is the one verdict inside a
-    walk and `storeIsNotAnswering` (`db/store-condition.ts`) the one question outside one, so no site spells
-    `isWriteTimeout || isStoreUnreachable` itself. `db/store-condition.ts` owns "the store cannot answer" (it moved
-    out of `write-timeout.ts`, which keeps "our own bound ended"), `db/client-options.ts` the client's liveness
-    options, `db/store-answers.ts` the memoised ping, and `refusalText` is the one word a door may take from a driver
-    error before asking the store.
-  - **One interval job.** `intervalJob` wraps a repeating timer in its single flight, the housekeeping bound, the
-    per-tick budget, the skipped-tick count and the failure line; a `singleFlight(label)` instance replaces a
-    hand-kept latch. A once-only warning is a `warnOnce`, not a boolean latch; the face fallback warning is said
-    again after a provider outage ends.
-  - **Gates, each derived and floored.** `every-housekeeping-space-walk-is-isolated`,
-    `one-verdict-for-a-walks-failure`, `no-housekeeping-catch-logs-a-space-failure-except-through-the-reporter`,
-    `every-repeating-timer-is-an-interval-job`, `a-once-only-warning-is-a-warn-once`,
-    `every-started-job-is-stopped-at-shutdown`, `no-chained-max-time-ms`, `a-store-failure-is-asked-before-the-wording`
-    and `every-mongo-client-goes-through-mongo-client-options`. `single-flight` and `scheduler-wiring` read their jobs
-    from `_scheduled-jobs.mjs` instead of a hand list.
-  - **Fixtures.** A read stalled on one space, a store that freezes with its sockets open (one TCP relay shell, with
-    a reply hook), and write-concern faults that assert the code they claim. `withStalledReads` refuses a call that
-    names no reader filter, because a filter that matches nothing it stalls stalls nothing.
-
-- **CI runs as parallel jobs behind one gate, every run measures itself, a skip is refused unless it was expected, every
-  test file is reached, and there is one way to wait (bundle-56: `Q-370`, `Q-272`, `Q-283`, `Q-319`).** Nothing in the
-  product changes; this is how the tests that guard it are run and trusted. What a contributor will notice:
-  - **Parallel CI.** `Build & Test` is a gate-only job that waits for the rest and fails unless each succeeded; the
-    client tests, the pure and the database-backed standalone files start at once, and the jobs that drive a running
-    instance wait for one `prepare` job that builds the test image, each starting only the services its suite needs.
-    Only a push to `main` writes a cache. Release lines keep their single-job workflow. The new `docs/testing-guide.md`
-    (also offered in the in-app Help) describes the job graph, the caches and the stack's per-job budget.
-  - **Timing records.** A `node:test` reporter writes one line per test, suite and file to `test-results/` for every
-    standalone, stack and preflight run, and each CI job uploads its folder; a file without its closing line is
-    incomplete, never passed. `scripts/test-times.mjs` can record the runs to a Ythril instance you point it at and
-    read the trend back (optional, for maintainers).
-  - **Skips are refused unless expected.** An input a test needs goes through one module that skips on a laptop and
-    throws on CI; a skip CI expects carries `expected-in-ci:` and one cause, from a listed file; print-and-return
-    skips and silent exits became real skips or assertions, and the embedder skips go through `requireEmbedding`.
-  - **Every test file is reached.** `scripts/unrun-tests.mjs` subtracts what CI selects from the tracked test files,
-    `scripts/executed-tests.mjs` subtracts what produced a test event, and a nested standalone test file is refused.
-  - **One wait helper.** `testing/_shared/wait-for.mjs` decides what a timeout says, whether a thrown probe ends the
-    wait, whether a hung probe can outlast the deadline and that no timer is left armed; hand-written polls moved onto
-    it and a gate refuses a new one unless it says `// waits-differently:` and why.
-  - **The test Mongo's search heap is explicit** (`YTHRIL_TEST_MONGOT_A_HEAP`, with a larger limit for the first
-    database), and the test stack's budget is held per set of services one `compose up` starts. The document sidecars
-    in the test stack are hardened like production and bound to loopback, and `doc-office` joins the integration job.
-  - **The recorder's declaration and the published reports.** `node scripts/test-times.mjs --type-schema` prints the
-    `schema_update` call that declares the `Test-Run` type with its one-year retention, so the retention is something a
-    maintainer can send rather than something that depends on someone having once typed it. The client's test report
-    is masked (first line, token shapes, home paths, 300 characters) before the CI job uploads it, as the node
-    suites' lines already were; a report the step cannot read is removed rather than uploaded. The masker handles a
-    long line in time proportional to its length. `--record-ci` stops at the first run already recorded without
-    downloading its artifacts, does not write an empty row for a recorded run whose artifacts have expired, and does
-    not fail every pass over one artifact that can never be read.
-  - The test stack's four app instances now publish their ports on `127.0.0.1` only, like the database and the sidecars.
-  - The in-app Help no longer shows links that go nowhere: the dependencies, contribution and testing guides named
-    repository files (`LICENSE`, `NOTICE`, package manifests) as links, and now name them as code, with a gate over every page
-    Help lists. A link from one part of a split guide to a sibling part (`](02-hosting.md)`, 42 of them in the integration
-    and user guides) opened a dead tab; Help now resolves a link against the directory of the guide it is read in, so it
-    opens in Help and the guides stay correct on GitHub. Inside one guide such a link takes the reader to the start of the
-    page it names (every part of a split guide has an anchor at its start; a link to the guide itself goes to its top) and
-    moves keyboard focus to the heading there, as a link to a heading does. A heading whose id is a property of `document`
-    (`## Links`) lost its id to the sanitizer's DOM-clobbering protection and could not be linked to; it now has the
-    `user-content-` form of the id, and a link to `#links` finds it. A heading with an `&` in it (`## Duplicate Scanner & Action Rules`)
-    got the id `…-amp-…` instead of the GitHub one every link and help control uses, so linking to it scrolled nowhere;
-    the id is now slugged from the heading's text. The gate now replays both rules over every link and `#anchor`.
-    A link inside a guide also writes its place to the URL (so a reload and Back keep it); keyboard focus lands on the
-    part's own anchor, named with the part's title, rather than on the first heading after it; a link into another guide
-    with no place in it takes focus to that guide's first heading; and a change of the URL's `#fragment` while Help is
-    open scrolls and focuses like a link click.
-  - The suite READMEs and the contribution guide no longer carry hand-written file lists or container counts.
-- **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
-  dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after
-  the integration suite alone, `ythril-mongo-a` held 9 766 dropped collections and 25 714 open storage handles over
-  147 live collections, at 2.06 GiB of its 2.5 GiB cap, with the standalone suite still to run on it. The test
-  stack now sets that window to five seconds (`tuneTestMongo`, called by `testing/sync/setup.js` and by every
-  database-backed test file), which freed the 9 000 within 40 seconds; nothing in the server reads an old snapshot.
-  The database-backed standalone files also run in their own batches, four at a time, in `test:standalone` and
-  `preflight` alike: at the full width some timed out on the one-CPU test database, and four finished in half the
-  time.
-- **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
-  connection open when a setup step threw after connecting, and node's test runner waits for every file's process
-  to exit, so one such file held `test:standalone` with no output for as long as the CI job lived. The harness now
-  closes what it opened on a failed setup, and the CI job has a 90-minute ceiling, so a hang nobody has found yet
-  fails the run instead of holding it.
-- **A gate proves no read-rung door can reach a write into a space (`Q-97`).** `a-read-never-writes-a-space`
-  derives every door a `read` token may call — `TOOL_RIGHTS` and `ROUTE_RIGHTS` rows at `read`, every mounted GET
-  without a row or on a `NOT_AREA_SCOPED` path — walks what each call causes, and fails on any path to a space
-  write, printing it door to writer. The writers are derived alias-aware (`_space-writers.mjs`): a mutator through
-  `col()`, `.collection()`, a local binding of either or a helper that returns one, on a per-space collection or
-  the sequence counter, plus filesystem writes on the space file tree. `_call-graph.mjs` can now root an MCP tool
-  handler and a REST handler closure, and resolves method calls through namespace imports and exported objects. The
-  one exception is the `/api/sync/*` GETs rebuilding the file-hash cache, scoped to that collection. Its first run
-  found no read door writing a space; its first red run found that REST `recall`, `similar` and `traverse` answer
-  through a runtime tool lookup the walk could not see, now resolved.
-- **A gate compares each tool's bounds with its route's (`Q-109`).** `a-tool-and-its-route-agree-on-bounds` pairs
-  every tool with its route through the capability map, reads the route's bounds from the zod schemas its handler
-  reaches (walking the call graph, so a schema parsed inside an act counts), and compares `min`/`max`/`minLength`/
-  `maxLength`/`minItems`/`maxItems`/`enum` and requiredness per shared parameter. A route that hands its body to
-  `callTool` agrees by construction and is detected, not listed; fields `BOUND_BY_FIELD` names are left to the
-  Q-108 gate, whose validator derivation both now share (`_validator-schemas.mjs`). Its first run found
-  `network_join_remote`'s schema silent on `inviteCode`'s 8 192-character limit, which the route and the act already
-  refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
-  get fewer.
-- **Every read of stored records by a list of ids goes through one reader (`Q-211`).** `readStoredById` (a Map) and
-  `readRowsById` (rows in the caller's id order) read in chunks of 500 with a few chunks in flight, project to the
-  fields the caller names or to everything but the never-returned fields, AND a caller's predicate with the ids
-  instead of spreading it beside them, and give every chunk its share of the caller's deadline. The graph walk's
-  second reader, recall's fresh-hit hydration and duplicate check, the reference and delete guards, traverse
-  bodies and the rest moved onto it; several of them read every id in one query before. One fix came with it: the
-  walk's reader spread its narrowing beside `_id`, so a narrowing that named `_id` replaced the id list. A gate
-  (`a-record-is-read-by-id-through-one-reader`) fails on a by-id read anywhere else unless its function is
-  allowlisted with the reason it asks a different question.
-- **The call graph the source gates walk sees a call written as an argument of another call, and follows a
-  closure built at module scope (`Q-309`).** Its call scans consumed the character before a name, so in `f(g(x))`
-  the call to `g` was invisible to every gate built on it.
+- **CI:** `Build & Test` is now a gate job over parallel client, standalone and stack jobs, every run writes per-test
+  timing records to `test-results/`, and a CI job has a 90-minute ceiling; release lines keep their single-job workflow.
+- **Help:** Links in the in-app Help no longer open dead tabs: between parts of a split guide, to headings such as
+  `#links`, and to repository files; they keep their place in the URL and move focus to the target.
+- **Docs:** New `docs/testing-guide.md`, also offered in the in-app Help, describes the CI job graph and caches.
+- **MCP:** The `network_join_remote` schema now states the 8 192-character limit on `inviteCode` that the route
+  already enforced.
 
 ## [5.6.5] — 2026-10-06
 
