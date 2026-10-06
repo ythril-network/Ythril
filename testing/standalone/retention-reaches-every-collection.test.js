@@ -176,7 +176,7 @@ describe('the schema retention tier reaches every typed collection', () => {
     // A window configured months ago through the API starts deleting records the first time this pass reaches
     // it. That is the documented behaviour and still worth one info line per space+type.
     const src = read('server/src/brain/chrono-redaction.ts');
-    assert.match(src, /announced\.has\(key\)/, 'the first stamp for a space+type must be reported once');
+    assert.match(src, /retentionAnnounced\(retentionAnnouncementKey\(spaceId, collection, type\)/, 'the first stamp for a space+type must be reported once');
     assert.match(src, /log\.info\(`Retention:/, 'that report must be at info, not debug');
   });
 

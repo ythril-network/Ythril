@@ -80,7 +80,7 @@ const lapsedChrono = (space, id) => ({
 const failingView = (name, viewOn) =>
   mongo.getDb().createCollection(name, { viewOn, pipeline: [{ $addFields: { _x: { $toInt: '$a' } } }] });
 
-const sweepLines = (space) => lines.filter(l => l.includes('Chrono retention') && l.includes(`'${space}'`) && /WARN|ERROR/.test(l));
+const sweepLines = (space, from = lines) => from.filter(l => l.includes('Chrono retention') && l.includes(`'${space}'`) && /WARN|ERROR/.test(l));
 
 async function sweepWithin() {
   const started = Date.now();
@@ -117,6 +117,7 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       { id: 'g13healthy', kinds: ['entity'] },
     ];
     let first;
+    let firstLines;
 
     before(async () => {
       const db = mongo.getDb();
@@ -137,6 +138,7 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       configure(SPACES);
       lines.length = 0;
       first = await sweepChronoRetention(new Date());
+      firstLines = [...lines];
     });
 
     it('the redaction of a space whose backfill failed still ran', async () => {
@@ -159,13 +161,13 @@ describe('the chrono retention sweep isolates a failing space and each half of i
     });
 
     it('each failure is said ONCE, in the walk\'s words, naming the half; the healthy space is not named', () => {
-      const back = sweepLines('g13backfailing');
-      const redact = sweepLines('g13redactfailing');
+      const back = sweepLines('g13backfailing', firstLines);
+      const redact = sweepLines('g13redactfailing', firstLines);
       assert.equal(back.length, 1, `expected one line for the failed backfill, got:\n${back.join('\n')}`);
       assert.equal(redact.length, 1, `expected one line for the failed redaction, got:\n${redact.join('\n')}`);
       assert.match(back[0], /Chrono retention failed for space 'g13backfailing' \(backfill\): .* — retried next cycle/);
       assert.match(redact[0], /Chrono retention failed for space 'g13redactfailing' \(redaction\): .* — retried next cycle/);
-      assert.deepEqual(sweepLines('g13healthy'), []);
+      assert.deepEqual(sweepLines('g13healthy', firstLines), []);
     });
 
     it('the next sweep, the same failures, says nothing again', async () => {
@@ -211,7 +213,7 @@ describe('the chrono retention sweep isolates a failing space and each half of i
         await withStalledReads(db, 'g13slow_chrono', SOURCE, { ms: 2_000 }, async () => {
           lines.length = 0;
           const { ms } = await sweepWithin();
-          assert.ok(ms >= 1_500, `the sweep took ${ms}ms: the read did not stall past the 1000ms write figure, so this case proves nothing`);
+          assert.ok(ms >= 1_500, `the sweep took ${ms}ms: the read was cut at the 1000ms write figure, or it never stalled past it (then this case proves nothing)`);
           assert.deepEqual(sweepLines('g13slow'), [],
             'a slow healthy backfill scan was cut at the write figure (or failed): the bound for "hung" is the housekeeping one');
         });
