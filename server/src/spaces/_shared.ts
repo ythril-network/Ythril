@@ -114,7 +114,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
   const swallowed = (err: unknown): string => {
     const f = classifyReadFailure(err);
     if (f.status < 500) return peerText(err);
-    return `a store failure${f.code !== undefined ? ` (code ${f.code}${f.codeName ? ` ${f.codeName}` : ''})` : ''}; the repair is idempotent and runs again on the next boot or rename`;
+    return `a store failure${f.code !== undefined ? ` (code ${f.code}${f.codeName ? ` ${peerText(f.codeName)}` : ''})` : ''}; the repair is idempotent and runs again on the next boot or rename`;
   };
   const prefix = `${spaceId}_`;
 
