@@ -166,6 +166,7 @@ describe('4. there is one door onto the database', () => {
     'server/src/db/restore.ts': 'WRITES, and is the one door the lifecycle cannot see — held below to a forced reconcile of every space after it.',
     'server/src/ready.ts': 'A readiness probe: admin ping and listSearchIndexes, both reads.',
     'server/src/api/about.ts': 'serverInfo for the About page — a read of the admin database.',
+    'server/src/db/store-answers.ts': 'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',
   };
 
   const doors = sources.filter(s => /new\s+MongoClient\s*\(|\.db\s*\(/.test(s.code)).map(s => s.file);
