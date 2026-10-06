@@ -154,7 +154,7 @@ describe('legacy read spills are swept from the space', { skip }, () => {
         await db.collection(`${FAILING}_src`).deleteMany({});
       }
 
-      assert.equal(first.removed, 3, `the failing space is first in the config and general is after it, yet all three of its spills went: ${JSON.stringify(first)}`);
+      assert.equal(first.removed, 4, `the failing space is first in the config, yet general's three spills and the second space's one all went: ${JSON.stringify(first)}`);
       assert.equal(await idsIn(`${SPACE}_files`).then(ids => ids.includes(BOTH) || ids.includes(META_ONLY)), false, 'general\'s spill records are gone');
       assert.equal(await idsIn(`${SECOND}_files`).then(ids => ids.length), 0, 'and so are the SECOND healthy space\'s: the walk did not stop at the first failure');
       assert.ok(first.failed.some(f => f.spaceId === FAILING), `the failing space is in the result the sweep returns: ${JSON.stringify(first.failed)}`);
