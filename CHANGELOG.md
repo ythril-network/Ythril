@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | MCP `save_bulk` refuses a retired or unknown key (such as `{"memories": […]}`) with REST's `400`, naming `facts`; it answered success and wrote nothing | Send `facts`, not `memories` |
 | `POST /api/duplicates/scan` and `POST /api/contradictions/scan` answer `200` with `failedSpaces` (`[{ spaceId, reason }]`) and `scannedSpaces` when one space fails, was `500`; a dead store is `503` | Read `failedSpaces` |
 | Sync reads: a `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400` (was an empty page); `limit` below 1 reads 1 | Send back the `nextCursor` a page returned |
+| A sync page's `nextCursor` names a seq and a record; a client that builds or parses one breaks | Treat the cursor as opaque: send it back unchanged |
+| Records an earlier version skipped at a page boundary stay missing on a peer until edited; nothing re-sends them | None, or edit a record to send it again |
 
 ### Changed
 
@@ -90,6 +92,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   eleventh. Documents past the 500-per-family cap and records the receiver's store refuses count in `rejected` (the latter named in the log).
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed, so
   `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; the file manifest is still walked. `computedAt` is when the root was computed.
+- **Sync:** A page's `nextCursor` now names a position (seq and record), still opaque: send it back unchanged. `GET /api/sync/tombstones`
+  takes the same `cursor`; without one it answers as before. The push no longer sends a record's vector or retention stamps.
+- **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on the first start; paging is as before
+  until a collection's build ends. Rolling back to 5.6.x rebuilds the old `seq` index before the server listens.
 - **Embedding:** The bundled model runs in a supervised child process, so embedding no longer blocks the server (`/health` stays fast
   in bulk imports) and a native fault no longer takes it down; it exits after ten idle minutes (next embed pays a 1-2 s load).
 - **Embedding:** `mem_limit` or a pod memory limit now counts both processes. The child gets a minimal environment (never the Mongo
@@ -158,6 +164,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason. A database fault writing a pulled page no longer counts as `PEER UNREACHABLE`: it holds that family's position and refetches.
 - **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or
   re-keyed link's tombstone carries `originalSeq`, so a peer that never held it is not sent the deletion.
+- **Sync:** Records that share a sequence number are no longer skipped at a page or batch boundary, on pull, push and the duplicate and
+  contradiction scans. Records an earlier version skipped stay missing on a peer until they are next edited.
+- **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
+  refused element's seq can no longer move the position; against an older server it holds, as before.
 - **Files:** A file a publisher pushes is recorded as an arrival, so later description and tag edits are no longer skipped; arriving
   bytes revive a soft-deleted path and get this instance's file retention window. A file-metadata arrival no longer overwrites a newer copy.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered (audit `file.stray_filemeta.drain`), never over a
@@ -240,6 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   planted; pushed by anyone else, a record with a deleted id is still refused.
 - **Sync:** A negative `limit` on a sync read no longer returns the whole collection, and a read by id (`/api/sync/<family>/:id`)
   no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
+- **Sync:** A peer can no longer stop other members' deletions by planting more than 5000 tombstones at one seq, for pullers on
+  this release; a puller on an older release stays stuck there until it upgrades.
 
 ## [5.6.7] — 2026-10-06
 
