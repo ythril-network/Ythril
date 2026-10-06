@@ -251,7 +251,6 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     }
     const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
     const db = mongo.getDb();
-    let ms;
     // The sweep reads with a filter, and the server may test the filter before the stalling stage: documents the sweep's filter
     // MATCHES are what must reach the stage, so `seed` is as many of them as the fixture would seed stalling ones, and `readerFilter` is
     // the filter the sweep reads that collection with: `suppressedWithVectorFilter` for a record kind (the sweep's own function, over the
@@ -268,25 +267,41 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     const stalled = (rest, fn) => rest.length === 0 ? fn()
       : withStalledReads(db, `echo_${rest[0].suffix}`, `g18_stall_src_${rest[0].suffix}`, { ms: STALL_MS, readerFilter: rest[0].readerFilter, seed },
         () => stalled(rest.slice(1), fn));
+    // The cost of a hung space is the number of reads it was made to wait out, one bound each. COUNTED, not timed: the boot sweep
+    // walks every space of the file and a slow store (a shared CI host) stretches the wall clock of the healthy ones, so a time
+    // figure here was a statement about the host (seen at 0.1 CPU on the store: 1399 ms against 3 bounds with ONE bound paid).
+    let echoReads = 0;
+    const proto = Object.getPrototypeOf(mongo.col('probe'));
+    const originalFind = proto.find;
     try {
       await stalled(parts, async () => {
-        const started = Date.now();
+        proto.find = function counted(...args) {
+          if (String(this.collectionName).startsWith('echo_')) echoReads++;
+          return originalFind.apply(this, args);
+        };
         await sweep.sweepEverySpaceAtBoot();
-        ms = Date.now() - started;
       });
     } finally {
+      proto.find = originalFind;
       restore();
     }
 
-    // ONE bound plus margin, not one per kind: the stop at the first timeout is what keeps a hung space from costing
-    // (kinds x bound) — 24 minutes at the production figure — before it is quarantined.
-    assert.ok(ms < 3 * BOUND_MS, `the boot sweep took ${ms} ms over ${parts.length} hung collections: more than one bound (${BOUND_MS} ms) was paid`);
+    // ONE bound, not one per kind: the stop at the first timeout is what keeps a hung space from costing (kinds x bound) — 24
+    // minutes at the production figure — before it is quarantined.
+    assert.equal(echoReads, 1, `the hung space was read ${echoReads} times over ${parts.length} hung collections: more than one bound (${BOUND_MS} ms) was paid`);
     const hung = warnsFor('echo');
     assert.equal(hung.length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
     // The walk read the failure: the bound's own words, and the space is in quarantine (a hung space is not retried at once).
     assert.match(hung[0], new RegExp(`ran past its time bound of ${BOUND_MS} ms .*retried after quarantine \\(\\d+s\\)`), `not the walk's wording for a timeout: ${hung[0]}`);
     assert.ok(walk.quarantinedSpaces().includes('echo'), 'the hung space was not quarantined');
     for (const space of HEALTHY) assert.equal(await hasVector(space), false, `'${space}' was not swept after the hung space`);
-    assert.equal(failures.length, 1, 'the hung space was not counted exactly once');
+    // One count per failing SPACE. The rule is not "one failure in this file": the boot sweep walks every space, and on a slow store
+    // a healthy one can run past a 400 ms bound too (the CI run that showed it: 'hotel' timed out beside 'echo', each its own failure,
+    // each its own line). So the counts are matched to the spaces that SAID a failure — a space counted twice has one line and two
+    // counts, and a failure counted but never said has a count and no line.
+    const said = new Set(lines.map(l => new RegExp(`${STEP} failed for space '([^']+)'`).exec(l)?.[1]).filter(Boolean));
+    const counted = failures.filter(f => f.kind === 'failure' || f.kind === 'timeout');
+    assert.ok(said.has('echo'), 'the hung space said nothing');
+    assert.equal(counted.length, said.size, `${counted.length} failures counted for ${said.size} failing space(s) (${[...said].join(', ')}): a failure was counted twice or not said`);
   });
 });
