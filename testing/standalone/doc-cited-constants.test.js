@@ -179,6 +179,15 @@ const CITED = [
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`default is therefore left at ${v}`),
   },
+  {
+    // A constant, not a setting, so the guide states the figure and not the name (`env-var-docs-coverage` reads every
+    // upper-case name in the guide as an environment variable). It is added to how long a hold can last (`Q-380`).
+    what: 'how long the write bound\'s backstop spends ending the server operation before it answers',
+    source: 'server/src/db/write-bound.ts',
+    code: /export const KILL_WAIT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`within at most ${v} ms\\. Only then is the hold released`),
+  },
 ];
 
 /**
