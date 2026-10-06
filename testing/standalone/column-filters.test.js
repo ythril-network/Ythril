@@ -14,6 +14,7 @@
  */
 import { describe, it, before } from 'node:test';
 import { trackedSources } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -107,10 +108,11 @@ describe('every record type filters its own description column', () => {
 });
 
 describe('propertiesValueContains — filters on VALUE, not key', () => {
-  let propertiesValueContains, PROPERTIES_SCAN_MAX_MS;
+  let propertiesValueContains, PROPERTIES_SCAN_MAX_MS, LIST_READ_MAX_MS, listReadMaxMs;
 
   before(async () => {
-    ({ propertiesValueContains, PROPERTIES_SCAN_MAX_MS } = await import('../../server/dist/brain/tag-filter.js'));
+    ({ propertiesValueContains, PROPERTIES_SCAN_MAX_MS, LIST_READ_MAX_MS, listReadMaxMs }
+      = await import('../../server/dist/brain/tag-filter.js'));
   });
 
   it('walks the bag rather than naming a field', () => {
@@ -154,6 +156,12 @@ describe('propertiesValueContains — filters on VALUE, not key', () => {
     assert.ok(typeof PROPERTIES_SCAN_MAX_MS === 'number' && PROPERTIES_SCAN_MAX_MS > 0);
   });
 
+  it('listReadMaxMs gives a scan the short deadline and an indexed read the long one', () => {
+    assert.equal(listReadMaxMs(true), PROPERTIES_SCAN_MAX_MS);
+    assert.equal(listReadMaxMs(false), LIST_READ_MAX_MS);
+    assert.ok(PROPERTIES_SCAN_MAX_MS < LIST_READ_MAX_MS, 'a scan must never get the longer of the two');
+  });
+
   it('every list function APPLIES the deadline, not merely imports it', () => {
     /*
      * An unbounded collection scan on a large space is the failure mode here — not a wrong result.
@@ -165,19 +173,29 @@ describe('propertiesValueContains — filters on VALUE, not key', () => {
      * function written next year is outside everything this gate reads while the title goes on covering it
      * (`Q-6`, 2026-09-07).
      */
-    const importers = serverSources()
-      .filter(f => f !== 'server/src/brain/tag-filter.ts')   // where the constant is DECLARED
-      .filter(f => /PROPERTIES_SCAN_MAX_MS/.test(read(f)));
-    assert.ok(importers.length >= 4,
-      `only ${importers.length} module(s) reference the deadline; the four known list functions are the `
+    /*
+     * The choice (scan deadline or list deadline) is made ONCE, by `listReadMaxMs` in tag-filter.ts, and a list function
+     * calls it in the OPTIONS of its read (`{ maxTimeMS: listReadMaxMs(…) }`; a chained call is refused by
+     * `no-chained-max-time-ms` because a scope's bound cannot see it, Q-358). So the gate reads two things off the
+     * source: who calls it, and that nobody ELSE names either figure — a hand-written copy of the choice has to spell
+     * one of them, and a copy is the way a list read ends up on the wrong deadline with every answer still right.
+     */
+    const others = serverSources().filter(f => f !== 'server/src/brain/tag-filter.ts');   // where the figures are DECLARED
+    const callers = others.filter(f => /\blistReadMaxMs\b/.test(stripComments(read(f))));
+    assert.ok(callers.length >= 4,
+      `only ${callers.length} module(s) call listReadMaxMs; the four known list functions are the `
       + 'minimum, so the scan is wrong rather than the code');
 
-    for (const f of importers) {
-      // The OPTIONS form (`{ maxTimeMS: … }`), the only one the server allows: a chained call is refused by
-      // `no-chained-max-time-ms` because a scope's bound cannot see it (Q-358).
-      assert.match(read(f), /maxTimeMS:[^,}]*PROPERTIES_SCAN_MAX_MS/,
-        `${f} imports the deadline and never passes it as the maxTimeMS option — the import is not the bound`);
+    for (const f of callers) {
+      assert.match(stripComments(read(f)), /maxTimeMS:\s*listReadMaxMs\(/,
+        `${f} imports listReadMaxMs and never passes it as the maxTimeMS option — the import is not the bound`);
     }
+
+    const copies = others.filter(f => /\b(PROPERTIES_SCAN_MAX_MS|LIST_READ_MAX_MS)\b/.test(stripComments(read(f)))
+      || /maxTimeMS:[^,}]*\?[^,}]*:\s*60_?000/.test(stripComments(read(f))));
+    assert.deepEqual(copies, [],
+      `${copies.join(', ')} choose a list read's deadline by hand. Call listReadMaxMs(scansEveryRecord) from tag-filter.ts: `
+      + 'a second copy of the choice drifts, and what it drifts into is a scan on the long deadline with every answer still right.');
   });
 });
 

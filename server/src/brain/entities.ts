@@ -22,7 +22,7 @@ import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
-import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
+import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
@@ -335,7 +335,7 @@ export async function listEntities(
     // driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
     .find(asFilter<EntityDoc>({ ...filter, spaceId }), {
       projection: NEVER_RETURNED_PROJECTION,
-      maxTimeMS: filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000,
+      maxTimeMS: listReadMaxMs(Boolean(filter['$expr'])),
     });
   // Default is natural (insertion) order — unchanged for every existing caller. A sort is only
   // applied when one is explicitly requested.
