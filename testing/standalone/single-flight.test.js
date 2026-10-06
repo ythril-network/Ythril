@@ -127,13 +127,6 @@ describe('every scheduled pass runs one at a time', () => {
       holds: () => /createCoalescingRunner\b/.test(index.sources.get('server/src/sync/engine.ts'))
         && /_syncRunner\.run\(/.test(index.sources.get('server/src/sync/engine.ts')),
     },
-    {
-      file: 'server/src/db/backup-scheduler.ts',
-      why: 'NOT guarded today, recorded rather than hidden (bundle-53 G26 report): the scheduled tick is `runBackupNow()` with no overlap guard, '
-        + 'so a dump that outlasts its cron period overlaps the next. Two dumps write separate timestamped directories, so it wastes work and '
-        + 'does not corrupt. The row is true while the tick really is unguarded; guarding it removes the row.',
-      holds: () => !GUARD.test(index.sources.get('server/src/db/backup-scheduler.ts')),
-    },
   ];
 
   it('finds the registrations it asks about (a floor)', () => {
