@@ -31,7 +31,8 @@
  *
  * - **A wrapped thrown error is what it wrapped**: the store gone is the store's (`503`, retryable); a driver-side
  *   refusal is a driver fault (`500` in our words). Never a `400`, and never the driver's text.
- * - **A write concern failure is the store's**, bulk or single: the caller chose no write concern and cannot fix it.
+ * - **A write concern TIMEOUT is the store's**, bulk or single: the caller chose no write concern and cannot fix it, and
+ *   it clears. **One that can never be met (code 100 / 79) is not**: a `500`, not retryable, carrying its code (bundle-53 G1).
  * - **A document's refusal stays the caller's**: a duplicate key is a `400` (null from `storeFailureAnswer`).
  *
  * Every error here is produced by the installed driver against the real store (`driverWriteFailures`) — never built
@@ -95,10 +96,50 @@ describe('a failed bulk write is classified by what the driver says happened', {
     }
   });
 
-  it('a write concern failure is the store\'s, bulk or single', () => {
+  // bundle-53 G1 (Q-343): the w:5 fixtures are a write concern the deployment can NEVER meet — code 100, and for a bulk
+  // write on the RESULT, not the wrapper. That is a misconfiguration, not an outage: answered 503 it was retried for ever.
+  it('an unsatisfiable write concern (w: 5 on one node) is code 100 — and is not the store\'s outage, bulk or single', async () => {
+    const codes = {};
     for (const [shape, err] of Object.entries(F.writeConcern)) {
+      codes[shape] = shape === 'bulk' ? err.result.getWriteConcernError()?.code : err.code;
+      assert.equal(codes[shape], 100, `the ${shape} w:5 fixture no longer fails with 100 (UnsatisfiableWriteConcern): ${codes[shape]}`);
       const f = sf.classifyReadFailure(err);
-      assert.equal(f.status, 503, `a write concern failure (${shape}, ${err.name}) answered ${f.status}: the caller chose no write concern`);
+      assert.equal(f.status, 500, `a ${shape} write concern failure the deployment cannot meet answered ${f.status}`);
+      assert.equal(f.retryable, false);
+      assert.equal(f.code, 100);
+      assert.equal(f.codeName, 'UnsatisfiableWriteConcern');
+      assert.equal(f.error, sf.UNSATISFIABLE_WRITE_CONCERN_MESSAGE);
+      const answer = await answerFor(err);
+      assert.equal(answer.status, 500);
+      assert.equal(answer.retryAfterSeconds, undefined);
+      assert.equal(answer.body.retryable, false);
+      assert.equal(answer.body.code, 100);
+      assert.doesNotMatch(JSON.stringify(answer.body), new RegExp(`${F.address.replace('.', '\\.')}|w: ?5|data-bearing`), 'the driver\'s text reached the answer');
+      assert.throws(() => sf.throwIfStoreSide(err), `throwIfStoreSide let a ${shape} unsatisfiable write concern through`);
+    }
+    assert.deepEqual(Object.keys(codes).sort(), ['bulk', 'single'], 'both shapes are held to it');
+  });
+
+  it('through a SLICED bulk write: the stopping error is read through the wrapper, not the wrapper\'s class', async () => {
+    const { SlicedBulkWriteError } = await import('../../server/dist/db/one-command.js');
+    const sliced = new SlicedBulkWriteError([{ slice: 0, error: F.writeConcern.bulk }], [], 1, F.writeConcern.bulk);
+    const f = sf.classifyReadFailure(sliced);
+    assert.equal(f.status, 500, `a sliced write that stopped on w:5 answered ${f.status} ${f.error}`);
+    assert.equal(f.retryable, false);
+    assert.equal(f.code, 100);
+  });
+
+  it('a write concern TIMEOUT (code 64) stays the store\'s, bulk or single: it is a condition that clears', async () => {
+    const { MongoWriteConcernError, MongoBulkWriteError } = await import('mongodb');
+    const built = {
+      single: new MongoWriteConcernError({ writeConcernError: { code: 64, codeName: 'WriteConcernTimeout', errmsg: 'waiting for replication timed out' } }),
+      bulk: new MongoBulkWriteError({ message: 'waiting for replication timed out', writeErrors: [] },
+        { getWriteConcernError: () => ({ code: 64, errmsg: 'waiting for replication timed out' }) }),
+    };
+    for (const [shape, err] of Object.entries(built)) {
+      const f = sf.classifyReadFailure(err);
+      assert.equal(f.status, 503, `a ${shape} write concern timeout answered ${f.status}: the caller chose no write concern`);
+      assert.equal(f.retryable, true);
     }
   });
 

@@ -81,6 +81,7 @@ import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
 import { PageStoppedError } from './page-stopped.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
+import { isUnsatisfiableWriteConcern } from '../db/store-condition.js';
 import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
@@ -387,6 +388,9 @@ export async function writeArrivals(
      * step-down — is not the document's, and fails the page so it is offered again.
      */
     const classify = (d: Doc, err: unknown): void => {
+      // FIRST: code 2 is in `DOCUMENT_REFUSAL_CODES`, and a standalone mongod answers an unmeetable `w > 1` with it. Read as
+      // the document's, the document is refused by id and dropped from its page for good, over a configuration fault.
+      if (isUnsatisfiableWriteConcern(err)) throw stopped(err);
       if (writeErrorCode(err) === DUPLICATE_KEY) dupes.push(d);
       else if (isDocumentRefusal(err)) out.refused.push({ _id: d._id, reason: storeRefusal(err) });
       else throw stopped(err);
@@ -435,8 +439,11 @@ export async function writeArrivals(
           landed.push(...chunk);
         } catch (err) {
           // A bound ended the write: nothing says which documents landed, and asking each one again would only
-          // spend the hold's time on more of the same stall. The page fails whole, to be offered again.
-          if (isWriteTimeout(err)) throw stopped(err);
+          // spend the hold's time on more of the same stall. The page fails whole, to be offered again. So does a write
+          // concern the deployment can never meet (Q-343), and BEFORE the document-refusal reading below: it is the
+          // deployment's, so asking each document would only repeat it, and a code the refusal list shares (2, on a
+          // standalone) would refuse documents that are fine.
+          if (isWriteTimeout(err) || isUnsatisfiableWriteConcern(err)) throw stopped(err);
           for (const id of upsertedIdsOf(err)) inserted.add(String(id));
           const failures = bulkWriteFailures(err);
           if (!failures || failures.some(f => chunk[f.index] === undefined)) {
