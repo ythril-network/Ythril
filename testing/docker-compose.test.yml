@@ -25,6 +25,24 @@
 ## `--no-build --pull never`; `ythril-a` below is the only service that carries a build, for a local `up`.
 ##
 
+# The healthcheck of every test Mongo — ONE definition, because the four said the same thing and each was wrong the same way.
+#
+# `mongodb/mongodb-atlas-local` boots in three phases: a bare mongod initialises the replica set, a second mongod starts
+# beside mongot, and once mongot is healthy mongod is restarted a last time. `replSetGetStatus.myState === 1` is true in
+# the SECOND phase, so `up --wait` returned "Healthy" up to ten seconds before that restart, and the restart closed every
+# connection open to the server: a database test that began the moment compose returned lost its command in flight
+# (`connection 2 to 127.0.0.1:27117 closed`, PR #1489's CI), and an instance's first connection was reset mid-handshake
+# (the boot retry in db/mongo.ts exists for that). The image's own `runner healthcheck` is the one probe that tells the
+# phases apart — measured on a fresh container, it failed throughout the second phase and passed after the restart — so it
+# comes first and the primary check stays behind it. `a-test-mongo-is-healthy-only-when-its-first-boot-is-over` holds
+# every atlas-local service to it.
+x-mongo-healthcheck: &mongo-healthcheck
+  test: ["CMD-SHELL", "/usr/local/bin/runner healthcheck && mongosh --quiet -u ythril -p ythril-test-pw --authenticationDatabase admin --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'"]
+  interval: 10s
+  timeout: 10s
+  retries: 18
+  start_period: 40s
+
 services:
   # ──────────────────────────────────────────
   # Instance A  (port 3200)
@@ -159,12 +177,7 @@ services:
       # runner's SIGTERM to mongod. CI's failure dump prints these files.
       MONGOT_LOG_FILE: /tmp/mongot.log
       RUNNER_LOG_FILE: /tmp/runner.log
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
-      interval: 10s
-      timeout: 10s
-      retries: 18
-      start_period: 40s
+    healthcheck: *mongo-healthcheck
     networks:
       - ythril-test
 
@@ -235,12 +248,7 @@ services:
       # mongot's and the runner's own logs to a file, so CI's failure dump can print a mongot death (see mongo-a).
       MONGOT_LOG_FILE: /tmp/mongot.log
       RUNNER_LOG_FILE: /tmp/runner.log
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
-      interval: 10s
-      timeout: 10s
-      retries: 18
-      start_period: 40s
+    healthcheck: *mongo-healthcheck
     networks:
       - ythril-test
 
@@ -293,12 +301,7 @@ services:
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
       MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
       RUNNER_LOG_FILE: /tmp/runner.log
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
-      interval: 10s
-      timeout: 10s
-      retries: 18
-      start_period: 40s
+    healthcheck: *mongo-healthcheck
     networks:
       - ythril-test
 
@@ -362,12 +365,7 @@ services:
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
       MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
       RUNNER_LOG_FILE: /tmp/runner.log
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
-      interval: 10s
-      timeout: 10s
-      retries: 18
-      start_period: 40s
+    healthcheck: *mongo-healthcheck
     networks:
       - ythril-test
 
