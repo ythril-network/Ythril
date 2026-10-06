@@ -125,8 +125,10 @@ describe('a shared fixture or helper is defined in one module', () => {
 
   it('the timing helpers and the skips reader take the repository root from _sources.mjs', () => {
     // Not a row over the whole tree: older files re-derive it from `import.meta.url` and would fail today. These two were
-    // each handed the root by the module that owns it and re-derived it anyway, which is the copy this holds out.
-    for (const file of ['scripts/unexpected-skips.mjs', 'testing/standalone/_timing-runs.mjs']) {
+    // each handed the root by the module that owns it and re-derived it anyway, which is the copy this holds out. The skips
+    // reader's client-report half (the part that needs the root) moved to `scripts/_shared/client-results.mjs`, shared with
+    // the executed-files check; the row follows it there.
+    for (const file of ['scripts/_shared/client-results.mjs', 'testing/standalone/_timing-runs.mjs']) {
       const code = sources.find(s => s.file === file)?.code;
       assert.ok(code, `${file} is not among the scanned sources`);
       assert.match(code, /\bREPO_ROOT\b[^;]*from\s+'[^']*_sources\.mjs'/, `${file} does not import REPO_ROOT from _sources.mjs`);
