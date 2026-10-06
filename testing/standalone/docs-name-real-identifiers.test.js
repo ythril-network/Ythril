@@ -75,6 +75,8 @@ const NOT_OURS = [
   { id: 'podPidsLimit', why: 'a kubelet configuration flag, set on the cluster and not in our manifests' },
   { id: 'targetOrigin', why: "the second parameter of the DOM's window.postMessage, named in the embedding "
     + 'guide because an embedder has to pass it correctly — the guide exists to stop them constructing it' },
+  { id: 'waitQueueTimeoutMS', why: "a MongoDB driver connection-string option, owned by the driver and set by an operator in MONGO_URI; "
+    + 'the hosting and auth pages name it because setting it is what makes a pool checkout time out (a retryable 503), and our code never spells it' },
 ];
 
 /** This file's own path, excluded below. */

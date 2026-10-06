@@ -42,6 +42,8 @@ The expiry surfaces as `_expireAt` (an ISO timestamp) on the record — **not `e
 instance; expiry is eventual (granularity is days), not to-the-second. A `ttlDays`-only update (no other
 fields) is a valid write — use it to set, extend, or clear an existing record's expiry.
 
+**The sweep is paced, and a record it cannot delete does not hold up the rest.** It runs every **5 minutes** and deletes up to **500** records per collection per cycle, so a backlog (a policy switched on over old history) drains over several cycles rather than in one burst. A record whose delete fails is skipped for the cycle and the sweep carries on with the ones behind it; the cycle then reports it once, with how many records failed, in the server log and in `ythril_housekeeping_records_failed_total` ([Setup API](11-setup-api.md)), and the next cycle tries it again. A cycle looks at no more than **2000** distinct records per collection, so beyond that many records that keep failing the rest wait for the next cycle, and the log says so. A space whose database operations time out ends its own sweep for the cycle and is reported; the other spaces are swept ([Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)).
+
 `ttlDays` is accepted on the **MCP** write tools as well (`save_fact`, `update_fact`, `save_entity`,
 `update_entity`, `save_edge`, `update_edge`, `save_chrono`, `update_chrono`, `write_file`) and per item in
 `save_bulk` / `POST /bulk`, with the same semantics — so agents can set an expiry directly.

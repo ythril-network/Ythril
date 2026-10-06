@@ -21,6 +21,12 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**Upgrading past 5.6.x changes what `MONGO_URI` does and four answers an integrator can branch on.**
+
+- **Options in `MONGO_URI` win, and three defaults now apply.** `connectTimeoutMS`, `heartbeatFrequencyMS` and `serverSelectionTimeoutMS` default to figures that notice a database that stopped answering (see the `MONGO_URI` row in [Hosting](02-hosting.md)); a string that names one keeps its own. A `serverSelectionTimeoutMS` your string already carried was silently overridden before and is **honoured now**, so a very long one makes an outage last that long. A changed string takes a restart. The boot retry also covers more "not up yet" failures (a node that is not yet primary, a pool with no free connection) and still fails at once on bad credentials or a malformed string.
+- **Integrators that branch on status:** a pool checkout that timed out, or a closed pool, answers `503` retryable (it answered `500`); a write concern the deployment can never meet answers `500` with `retryable: false`, `code` and `codeName` (it answered `503`); a store failure under renaming a space, creating one or adding a link answers `503` (it answered `404`, `409` or `422` in the driver's words); and a second delete of a file record already flagged as deleted, or a delete naming a derived record, answers `404` on REST and MCP. See [Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field) and [Files](05-files-api.md).
+- **Background jobs no longer stop at the first failing space.** A failing or hanging space is reported (see [Background jobs and the spaces they walk](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and the other spaces are processed; four new metrics count it. Nothing needs configuring: `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` is optional.
+
 **Upgrading to 5.6.0 or later deletes the read spills older versions wrote into spaces, and that cannot be
 undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
 of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
