@@ -224,16 +224,22 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
   it('a timeout or an unreachable store on one record kind stops the space there and carries the rest as not reached', async () => {
     const { StoreTimeout } = await import('../../server/dist/db/write-timeout.js');
     const db = mongo.getDb();
-    await db.collection('india_entities').insertOne({ _id: 'india-1', spaceId: 'india', type: 'concept', name: 'e', seq: 1, ...VECTOR });
+    // The kinds AFTER facts, in the sweep's own order (derived: the order is the sweep's, not this file's).
+    const { COLLECTION_SUFFIX } = await import('../../server/dist/config/types.js');
+    const kinds = Object.keys(COLLECTION_SUFFIX);
+    const after = kinds.slice(kinds.indexOf('fact') + 1);
+    assert.ok(after.length >= 1, 'no record kind is swept after facts: this case has nothing to show');
+    const coll = `india_${COLLECTION_SUFFIX[after[0]]}`;
+    await db.collection(coll).insertOne({ _id: 'india-1', spaceId: 'india', ...VECTOR });
     for (const makeError of [() => new StoreTimeout('a read'), () => new MongoNetworkError('connection 3 closed')]) {
-      await db.collection('india_entities').updateOne({ _id: 'india-1' }, { $set: VECTOR });
+      await db.collection(coll).updateOne({ _id: 'india-1' }, { $set: VECTOR });
       const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'india_facts', makeError);
       let thrown;
       try { await sweep.sweepSuppressedVectors('india', SUPPRESSING); } catch (err) { thrown = err; } finally { restore(); }
 
       assert.ok(thrown, 'the failure was swallowed');
-      assert.match(thrown.message, /entity \(not reached\)/, `the kinds after the failed one are not named as not reached: ${thrown.message}`);
-      assert.equal((await db.collection('india_entities').findOne({ _id: 'india-1' })).embedding !== undefined, true, 'the sweep went on past a timeout / an unreachable store');
+      for (const kind of [...after, 'file']) assert.match(thrown.message, new RegExp(`${kind} \\(not reached\\)`), `'${kind}' is not named as not reached: ${thrown.message}`);
+      assert.equal((await db.collection(coll).findOne({ _id: 'india-1' })).embedding !== undefined, true, 'the sweep went on past a timeout / an unreachable store');
     }
   });
 

@@ -62,6 +62,8 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
+import { isStoreUnreachable } from '../db/store-condition.js';
+import { isWriteTimeout } from '../db/write-timeout.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 
 /** The step a failed sweep is reported and counted under (`ythril_housekeeping_space_failures_total{step}`). */
@@ -128,6 +130,10 @@ export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType)
  * **Each kind in its own `try`**: one collection the store refuses must not leave every kind after it holding its
  * vectors. A failure is collected and thrown once at the end, naming every kind that failed, for the caller's log.
  *
+ * **Except a failure that says the space is not answering** (a bound ended the read, or the store's own condition): the kinds
+ * after it are named "not reached" and not tried, because each would wait out a whole bound against the same hung space. The
+ * next meta write, or the next boot, sweeps them.
+ *
  * Reported per kind at INFO when it did anything, silent when it did not: this runs on every meta write, and a
  * line per write for a space with nothing to sweep would train the reader to skip it.
  */
@@ -135,7 +141,11 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
   let total = 0;
   const failed: string[] = [];
   const causes: unknown[] = [];
+  // Set by a failure that says the SPACE (or the store) is not answering rather than that one kind refused: the next kind would
+  // pay another whole bound against the same hung space — `kinds x bound`, 24 minutes at the production figure.
+  let notAnswering = false;
   const isolated = async (kind: string, sweep: () => Promise<string[]>): Promise<void> => {
+    if (notAnswering) { failed.push(`${kind} (not reached)`); return; }
     try {
       const ids = await sweep();
       if (ids.length === 0) return;
@@ -144,6 +154,9 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
       causes.push(err);
+      // The existing questions, not a classifier of its own: a bound that ended the read, or the store's own condition. A plain
+      // refusal (a view, a validation failure) is one kind's and the others are still swept.
+      notAnswering = isWriteTimeout(err) || isStoreUnreachable(err);
     }
   };
   for (const kind of Object.keys(COLLECTION) as KnowledgeType[]) {
