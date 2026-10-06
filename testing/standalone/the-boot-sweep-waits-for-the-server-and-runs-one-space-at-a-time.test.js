@@ -53,8 +53,12 @@ describe('the boot sweep waits for the server and runs one space at a time', () 
   it('the sweep settles once every space is swept, one space at a time', () => {
     const body = bodyOf(src('server/src/brain/suppression-sweep.ts'), 'sweepEverySpaceAtBoot');
     assert.match(body, /async function sweepEverySpaceAtBoot\([^)]*\):\s*Promise<void>/, 'the boot sweep is not a promise of its own completion');
-    const loop = body.slice(body.search(/for \(const \w+ of concreteSpaces\(\)\)/));
-    assert.ok(loop.length < body.length, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
-    assert.match(loop, /\bawait\b/, 'the boot sweep starts every space\'s sweep without waiting for the one before');
+    // The walk is `eachSpace` (Q-274, bundle-53 G18). One space at a time is its default, so a `limit` option is how this
+    // would stop being true: each sweep is an unindexed scan per record kind.
+    assert.match(body, /\bawait eachSpace\(/, 'the boot sweep does not await a walk over the spaces through eachSpace');
+    const walk = body.slice(body.search(/\beachSpace\(/));
+    assert.match(walk, /\bconcreteSpaces\(\)/, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
+    assert.doesNotMatch(walk, /\blimit\s*:/, 'the boot sweep walks several spaces at once');
+    assert.match(walk, /\bawait\b[^]*\bqueueSweep\(/, 'the boot sweep starts a space\'s sweep without waiting for it');
   });
 });
