@@ -455,7 +455,7 @@ async function endServerOperation(ops: ServerOperations | undefined, comment: st
     }
     return { outcome: 'unconfirmed', killed, why: `still running after ${KILL_WAIT_MS} ms` };
   } catch (err) {
-    return { outcome: 'unconfirmed', killed, why: peerText(err instanceof Error ? err.message : err) };
+    return { outcome: 'unconfirmed', killed, why: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -626,7 +626,7 @@ export function callBounded(
         } else if (ended.outcome === 'unable') {
           log.warn(`${head} and answered the caller a retryable timeout; this call carried no means to end a server operation, so nothing could be killed.`);
         } else {
-          log.error(`${head}; the server operation could not be confirmed gone (${ended.why ?? 'unknown'}${ended.killed > 0 ? `, killed ${ended.killed}` : ''}) within ${KILL_WAIT_MS} ms. `
+          log.error(`${head}; the server operation could not be confirmed gone (${peerText(ended.why ?? 'unknown')}${ended.killed > 0 ? `, killed ${ended.killed}` : ''}) within ${KILL_WAIT_MS} ms. `
             + 'The caller was answered a retryable timeout anyway, so the write may still be alive in the server and may land after the answer and after the seq hold was released.');
         }
         reject(new StoreTimeout());
