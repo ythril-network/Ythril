@@ -18,10 +18,11 @@ import { withSeq, bumpSeq, seqRefusal, MAX_INGEST_SEQ, settledSeqRange } from '.
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc, BrainCollection } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { parseLimit } from '../../util/pagination.js';
+import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, encodeCursor, syncReadStart, BAD_SYNC_START, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { writeArrivals, type ArrivalOutcome, type ArrivalOptions } from '../../sync/arrivals.js';
-import { RECORD_TYPE_OF, type PayloadKey } from '../../sync/replicated-families.js';
+import { RECORD_TYPE_OF, familyOf, type PayloadKey } from '../../sync/replicated-families.js';
 import { forkIdFor, isNewerCopy, tombstoneGoverns, divergesFrom } from '../../sync/upsert-plan.js';
 import { parseIncoming } from '../../sync/arrival-shape.js';
 
@@ -57,22 +58,22 @@ export const syncDocsRouter = Router();
  *   `/api/sync/file-tombstones` carries it, which is why `TOMBSTONE_TYPES` has no `file` member. Passing a
  *   type that matches nothing would have been the quiet alternative and it is a lie: it says deletions ride
  *   here and then carries none.
- * @param extraFilter narrows what the page serves at all. Files use it to serve PARENTS only — a chunk is
- *   derived from the blob and the receiver makes its own, with its own chunker and its own model.
+ * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve PARENTS
+ * only — a chunk is derived from the blob and the receiver makes its own, with its own chunker and model.
+ * It comes from the family row rather than a parameter, so the page, the read by id and the push cannot
+ * each be handed a different one.
  */
-function pageBySeq<T extends { _id: string; seq: number }>(
-  collection: string,
-  tombstoneType: string | null,
-  extraFilter: Record<string, unknown> = {},
-) {
+function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tombstoneType: string | null) {
+  const { collection, pushFilter: extraFilter = {} } = familyOf(key);
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { spaceId, networkId, sinceSeq = '0', limit = '100', cursor, full: fullParam } = req.query as Record<string, string>;
-      if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-      if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+      const { spaceId, networkId, sinceSeq, limit, cursor, full: fullParam } = req.query as Record<string, unknown>;
+      if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+      if (!spaceAllowed(spaceId, networkId as string | undefined, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
-      const sinceVal = cursor ? decodeCursor(cursor) : parseInt(sinceSeq, 10);
-      const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
+      const sinceVal = syncReadStart(sinceSeq, cursor);
+      if (sinceVal === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
+      const pageSize = parseLimit(limit, 100, 500);
       const returnFull = fullParam === 'true';
 
       // Settled seqs only: a page that hands out a seq above an unsettled one moves the peer past it (Q-196).
@@ -126,14 +127,23 @@ function pageBySeq<T extends { _id: string; seq: number }>(
  * undefined") sends that reader back to grep source they do not have. Four copies of one rule with the
  * weakest winning is exactly the shape this extraction removes, so it is fixed rather than preserved.
  */
-function oneById<T extends { _id: string }>(collection: string) {
+function oneById<T extends { _id: string }>(key: PayloadKey) {
+  const { collection, pushFilter: extraFilter = {} } = familyOf(key);
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { spaceId, networkId } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
       if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
-      const doc = await col<T>(`${spaceId}_${collection}`).findOne(asFilter<T>({ _id: req.params['id'] as string }));
+      /*
+       * The page's own filter and projection, so a read by id serves exactly what a page would (`Q-388`): it
+       * served the stored document whole — vector, matched text and retention stamps included — and a file
+       * chunk, which the page excludes, was readable here by id.
+       */
+      const doc = await col<T>(`${spaceId}_${collection}`).findOne(
+        asFilter<T>({ ...extraFilter, _id: req.params['id'] as string }),
+        { projection: LOCAL_ONLY_EXCLUSION },
+      );
       if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
       res.json(doc);
     } catch (err) {
@@ -177,14 +187,14 @@ syncDocsRouter.get('/filemeta', syncRateLimit, requireAuth,
    * written. `npm run links:convert` stamps the ones already stored. Making the field required instead would
    * have meant a boot migration over synced data, which `_REFERENCE.md` forbids.
    */
-  pageBySeq<FileMetaDoc & { seq: number }>('files', null, { parentFileId: { $exists: false } }));
+  pageBySeq<FileMetaDoc & { seq: number }>('filemeta', null));
 
 syncDocsRouter.get('/facts/:id', syncRateLimit, requireAuth, oneById<FactDoc>('facts'));
 syncDocsRouter.get('/entities/:id', syncRateLimit, requireAuth, oneById<EntityDoc>('entities'));
 syncDocsRouter.get('/edges/:id', syncRateLimit, requireAuth, oneById<EdgeDoc>('edges'));
 syncDocsRouter.get('/chrono/:id', syncRateLimit, requireAuth, oneById<ChronoEntry>('chrono'));
 syncDocsRouter.get('/links/:id', syncRateLimit, requireAuth, oneById<LinkDoc>('links'));
-syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMetaDoc>('files'));
+syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMetaDoc>('filemeta'));
 
 
 // ═══════════════════════════════════════════════════════════════════════════
