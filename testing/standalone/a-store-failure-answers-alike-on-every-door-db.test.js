@@ -224,13 +224,11 @@ const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stre
 /**
  * Doors the WRITE-ONLY fault (`unsatisfiable-write-concern`) is not judged on, each for a reason that is the door's own.
  * The retry faults fail reads too, so every door's first store call fails and the door answers it; a write-only fault
- * reaches the writes that sit behind a door's reads, and two doors answer AROUND them. Neither is a classification
+ * reaches the writes that sit behind a door's reads, and a door may answer AROUND one. That is not a classification
  * question, which is all this fault asks.
  */
 const ANSWERS_AROUND_A_FAILED_WRITE = new Map([
   ['POST /api/update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
-  ['POST /api/space_rename', 'a rename reports its per-step failures ("rename incomplete ... Errors: ...") in a 422 that words each step\'s driver text: its own defect, not the classification\'s (reported with the bundle-53 G1 return)'],
-  ['MCP space_rename', 'the same report, on the tool door'],
 ]);
 
 /**

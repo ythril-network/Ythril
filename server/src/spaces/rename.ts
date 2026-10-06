@@ -17,8 +17,40 @@ import { repairStaleSpaceIds, beginSpaceOp, endSpaceOp } from './_shared.js';
 import { RenameSpaceBody } from './body-schemas.js';
 import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
-import { throwIfStoreSide } from '../brain/store-failure.js';
+import { refusalText } from '../brain/store-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
+
+/**
+ * Record that one step of `moveSpaceData` failed, in words that are ours.
+ *
+ * The failures are collected and reported together ("rename incomplete ... Errors: ..."), and that sentence reaches a
+ * caller. Each used to carry `${err}` — the driver's own text, naming the internal host and the collection — and
+ * the act then read that sentence for "not found" / "already exists", so a store failing mid-rename was answered as
+ * a refusal in the driver's words (bundle-53 G7, Q-335; the second leak G1 found in this file). So the step's text
+ * goes through `refusalText`: a failure on the store's side STOPS the rename here and reaches the door's one failure
+ * path (the marker is already written, so the retry resumes it), and a driver refusal is worded generically with its
+ * text in the log.
+ */
+function stepFailed(what: string, err: unknown, errors: string[]): void {
+  const msg = `${what}: ${refusalText(err)}`;
+  log.warn(peerText(msg));
+  errors.push(msg);
+}
+
+/**
+ * A rename whose steps did not all complete. Typed so `renameSpaceAct` answers it as what it is — a rename that stopped
+ * part-way — and never reads its sentence, which holds every failed step's words, for a refusal's.
+ */
+class RenameIncompleteError extends Error {
+  constructor(spaceId: string, errors: string[]) {
+    super(
+      `Space '${spaceId}' rename incomplete (${errors.length} error(s)). ` +
+      `Rename will be resumed on retry or next restart. ` +
+      `Errors: ${errors.join('; ')}`,
+    );
+    this.name = 'RenameIncompleteError';
+  }
+}
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -44,9 +76,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
       await db.collection(coll.name).rename(newName);
       log.debug(`Renamed collection ${peerText(coll.name)} → ${peerText(newName)}`);
     } catch (err) {
-      const msg = `Could not rename collection ${coll.name} → ${newName}: ${err}`;
-      log.warn(peerText(msg));
-      errors.push(msg);
+      stepFailed(`Could not rename collection ${coll.name} → ${newName}`, err, errors);
     }
   }
 
@@ -65,9 +95,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     const repaired = await repairStaleSpaceIds(newId);
     if (repaired > 0) log.debug(`Rewrote spaceId on ${repaired} document(s) for renamed space ${peerText(newId)}`);
   } catch (err) {
-    const msg = `Could not rewrite spaceId field for renamed space ${newId}: ${err}`;
-    log.warn(peerText(msg));
-    errors.push(msg);
+    stepFailed(`Could not rewrite spaceId field for renamed space ${newId}`, err, errors);
   }
 
   // 1b''. A reindex run names its space in `members`, which a resumed run walks: left at the old id it would walk
@@ -76,9 +104,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     const { renameReindexRun } = await import('../brain/reindex.js');
     await renameReindexRun(oldId, newId);
   } catch (err) {
-    const msg = `Could not move the reindex run from ${oldId} to ${newId}: ${err}`;
-    log.warn(peerText(msg));
-    errors.push(msg);
+    stepFailed(`Could not move the reindex run from ${oldId} to ${newId}`, err, errors);
   }
 
   // 1b'. Read spills name their member spaces (Q-92): the renamed one follows, or its owner's read check
@@ -87,9 +113,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     const { renameSpillsForSpace } = await import('../brain/read-spill-store.js');
     await renameSpillsForSpace(oldId, newId);
   } catch (err) {
-    const msg = `Could not move read spills from ${oldId} to ${newId}: ${err}`;
-    log.warn(peerText(msg));
-    errors.push(msg);
+    stepFailed(`Could not move read spills from ${oldId} to ${newId}`, err, errors);
   }
 
   // 1c. Migrate the GLOBAL collections that are keyed by space id.
@@ -120,9 +144,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
       log.debug(`Migrated seq counter ${peerText(oldId)} → ${peerText(newId)} (seq=${seq})`);
     }
   } catch (err) {
-    const msg = `Could not migrate the seq counter ${oldId} → ${newId}: ${err}`;
-    log.warn(peerText(msg));
-    errors.push(msg);
+    stepFailed(`Could not migrate the seq counter ${oldId} → ${newId}`, err, errors);
   }
 
   // The duplicate-scanner cursor is keyed `${spaceId}:${type}`. Losing it is harmless
@@ -154,9 +176,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   } catch (err) {
     // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
     if (!isMissingPath(err)) {
-      const msg = `Could not move files directory: ${err}`;
-      log.warn(peerText(msg));
-      errors.push(msg);
+      stepFailed('Could not move files directory', err, errors);
     }
   }
 
@@ -327,14 +347,15 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
   try {
     return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
-    if (err instanceof SpaceNameInUseError) return { status: 409, error: msg, code: err.code };
+    if (err instanceof SpaceNameInUseError) return { status: 409, error: err.message, code: err.code };
+    if (err instanceof RenameIncompleteError) return { status: 500, error: err.message };
+    // The store's failure is not a refusal: `refusalText` rethrows it, so each door answers it as every door does
+    // (bundle-30 I12), and only then are the words read (bundle-53 G7, Q-335). A driver refusal comes back in our words.
+    const msg = refusalText(err);
     if (msg.includes('not found')) return { status: 404, error: msg };
     if (msg.includes('already exists')) return { status: 409, error: msg };
     if (msg.includes('built-in')) return { status: 400, error: msg };
-    // The store's failure is not a refusal: each door answers it as every door does (bundle-30 I12).
-    throwIfStoreSide(err);
     return { status: 500, error: msg };
   }
 }
@@ -372,11 +393,7 @@ async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConf
   if (errors.length > 0) {
     // Keep the marker — the rename is incomplete but idempotent, so a retry or the
     // next boot resumes it. Config still points at the old id until it commits.
-    throw new Error(
-      `Space '${oldId}' rename incomplete (${errors.length} error(s)). ` +
-      `Rename will be resumed on retry or next restart. ` +
-      `Errors: ${errors.join('; ')}`,
-    );
+    throw new RenameIncompleteError(oldId, errors);
   }
 
   // Commit: physical move done — apply the logical config change and clear the marker in one
