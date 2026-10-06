@@ -76,6 +76,8 @@ describe('a pending space op that cannot be resumed refuses in our words', { ski
     assert.ok(thrown instanceof Error, 'a pending delete that could not drop a collection did not refuse the caller\'s op');
     assert.match(thrown.message, /still pending/, `not the pending-op refusal: ${thrown.message}`);
     assert.doesNotMatch(thrown.message, DRIVER_TEXT, `the refusal carries the driver's text: ${thrown.message}`);
+    // The generic reason ends in a full stop and the sentence it sits in adds its own.
+    assert.doesNotMatch(thrown.message, /\.\./, `the refusal has a doubled full stop: ${thrown.message}`);
     assert.equal(storeFailure.storeFailureAnswer(thrown, 'test'), null, 'a server refusal was answered as the store being down');
     clearMarker();
   });
