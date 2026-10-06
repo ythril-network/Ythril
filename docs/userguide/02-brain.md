@@ -210,7 +210,9 @@ row per connection, showing which record it hangs off and which record it names.
 
 **Making one directly** is an API capability in this release — `POST /api/brain/spaces/:spaceId/links` or the
 `save_link` tool, needing the same **write knowledge** right as an edge. There is no button for it,
-because the ordinary way to make a link is to attach the record, which the tabs already do.
+because the ordinary way to make a link is to attach the record, which the tabs already do. If the database is not
+answering when a link is made, the answer is `503`, *database unavailable, try again*, on both; it never says that
+one of the records is not found when the database simply could not be asked.
 
 ### Two things changed in 5.0, and the conversion runs itself
 
@@ -685,14 +687,22 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > that (during an upgrade, say), every queued job in every space is marked failed at once and nothing runs
 > again until somebody presses **Retry all failed**. So starting a **new version** re-queues everything
 > that failed under the old one, once, and says how many in the log. Restarting the same version re-queues
-> nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever.
+> nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever. **One space
+> that does not answer does not hold back the others**: the others are re-queued, the log line then says *in N of M
+> spaces*, and the embedding worker's stall check, which runs **once a minute**, asks the missing spaces again until
+> each has had its one retry. A space that failed for another reason is named in the Server Log as
+> `Embed revive failed for space '…'`.
 > **Reindex tells you it STARTED, not what it found.** The button schedules the work and returns at once —
 > a whole-space re-embed is far too long to hold a request open — so there is no count to report yet, and
 > the notification says the job is running in the background. The **Indexing** panel then shows
 > *Reindexing: N left to rebuild, F failed* while it runs, both Reindex buttons stay disabled, and the line goes
 > when every record has been rebuilt. Every record is rebuilt, passages of documents and captions of media
 > included, so a large space takes a while; the work waits behind anything you write meanwhile, so the rest of
-> the app stays responsive. A reindex left running when the server restarts continues where it stopped. Records
+> the app stays responsive. A reindex left running when the server restarts continues where it stopped. If a space could not be read while
+> the server was starting, its run is picked up by a watcher that looks every **5 seconds**; a run whose server
+> stopped while sweeping is taken over after **a minute**, and only one sweeper ever works on a run. The Server
+> Log names a space the watcher could not read (`Reindex resume failed for space '…' … — retried next tick`), and the
+> gauge `ythril_reindex_in_progress` keeps its last value meanwhile instead of showing too low a count. Records
 > whose rebuild fails are counted as *failed* and listed with the space's embedding jobs; if the embedding
 > service is unreachable, the reindex simply waits for it and strips nothing.
 >
