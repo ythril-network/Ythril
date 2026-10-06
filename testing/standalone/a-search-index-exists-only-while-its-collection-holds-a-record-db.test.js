@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing } from './_vector-harness.mjs';
+import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -67,16 +67,7 @@ const names = async (coll) => (await mongo.col(coll).listSearchIndexes().toArray
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** mongot's catalogue lags a drop by a moment, so absence is polled for rather than read once. */
-async function eventually(what, fn, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    last = await fn();
-    if (last === true) return;
-    await sleep(500);
-  }
-  assert.fail(`${what} did not happen within ${timeoutMs} ms (last: ${JSON.stringify(last)})`);
-}
+const eventually = (what, fn, timeoutMs = 60_000) => waitUntilTrue(what, fn, timeoutMs, 500);
 
 async function recallAll(spaceId, filter) {
   const degraded = [];

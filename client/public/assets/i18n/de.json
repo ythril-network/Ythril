@@ -88,6 +88,7 @@
   "help.doc.ui-primitives": "UI-Primitive",
   "help.doc.dependencies": "Abhängigkeiten & Lizenzen",
   "help.doc.contribution-guide": "Mitwirken",
+  "help.doc.testing-guide": "Tests und CI",
   "about.card.help": "Dokumentation",
   "about.card.helpDesc": "Die vollständigen Handbücher, mit dieser Instanz ausgeliefert und ohne sie zu verlassen lesbar.",
   "about.openHelp": "Hilfe öffnen",

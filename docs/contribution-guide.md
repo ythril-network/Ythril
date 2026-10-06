@@ -55,17 +55,18 @@ ythril/
 ├── server/          Express 5 + TypeScript API (workspace: @ythril/server)
 ├── sidecars/        First-party sidecars (doc-render: PDF → page PNGs for the F11 VLM extraction path)
 ├── testing/
-│   ├── _init/       Test bootstrap (config reset, sync-token provisioning)
+│   ├── _init/       Test runners and bootstrap (config reset, sync-token provisioning)
+│   ├── _shared/     Modules the tests and runners share (reporter, wait helper, skip rules)
 │   ├── integration/ API scenario tests
 │   ├── red-team-tests/ Security attack simulations
-│   ├── standalone/  Unit-level tests (no Docker)
-│   └── sync/        Multi-instance sync tests (4 Ythril instances; the test stack is 9 containers total — 4 Ythril + 4 Mongo + doc-render)
+│   ├── standalone/  Unit-level and source-reading tests (most need no Docker)
+│   └── sync/        Multi-instance sync tests
 ├── kubernetes/      K8s manifests (Ythril + ollama/whisper/unstructured sidecars, NetworkPolicies)
-├── scripts/         Build, setup, and maintenance scripts
+├── scripts/         Build, setup, test-time and maintenance scripts
 ├── config/          Runtime config (bind-mounted into container)
 ├── docs/            Project documentation
 ├── docker-compose.yml          Production compose
-├── testing/docker-compose.test.yml  Test compose (4 instances — a/b/c + migration-lock d)
+├── testing/docker-compose.test.yml  Test compose (the stack the Docker suites run against; `docker compose config --services` lists it)
 ├── Dockerfile       Multi-stage build (client → server → production)
 ├── package.json     Root workspace manifest
 └── tsconfig.base.json  Shared TypeScript config
@@ -149,19 +150,21 @@ The Dockerfile is a three-stage build:
 
 Server-side and integration tests use Node.js' built-in `node --test` runner — no extra framework. The **client** has its own unit suite built on **Vitest + jsdom**.
 
+This section is the short version. [`docs/testing-guide.md`](testing-guide.md) is the reference: how to run each suite and the thirds of the standalone suite, where durations are read, the rules for skips and waits, how a new test file reaches a CI job, and how CI is put together and cached. Read it before you add a test file or change a workflow.
+
 ### Before you push
 
 ```bash
 npm run preflight
 ```
 
-Runs every structural gate that does **not** need Docker — icon registry, scheduler wiring, route guards, audit-route coverage, the four documentation gates, docs lint, and the client suite (which includes i18n key coverage). Seconds, no containers.
+Runs every structural gate that does **not** need Docker — `scripts/preflight.mjs` is the list: the registry, wiring and coverage gates, the documentation gates, docs lint, the standalone files that need no instance, and the client suite (which includes i18n key coverage). No containers.
 
 These are grouped into one command because they share a property: **each catches something that produces no error, no failed build and no failed unit test.** An unregistered icon renders as a blank space. A scheduler nobody starts looks like one with nothing to do. A documented endpoint that doesn't exist returns a 404 with nothing to explain it. A translation key missing from `de`/`pl` renders the raw key.
 
 Deciding *which* of those applies to a given change is exactly the judgement people get wrong at the end of a long task — a PR shipped a blank icon that way, past a green docs lint, 685 green client tests and a green production build. Run the lot; it's cheap.
 
-Docker-dependent suites (integration, sync, red-team) still run in CI.
+Preflight is not the whole run: the suites that need Docker (integration, sync, red-team) run in CI, and the ones your change reaches should run on your machine too. The next sections say how.
 
 ### Client unit tests (no Docker required)
 
@@ -169,7 +172,7 @@ Docker-dependent suites (integration, sync, red-team) still run in CI.
 npm run test:client          # → vitest run
 ```
 
-Runs the Angular component/service specs under `client/` in a jsdom environment. This suite runs in CI as the dedicated **"Client unit tests"** step (`.github/workflows/ci.yml`).
+Runs the Angular component/service specs under `client/` in a jsdom environment. This suite runs in CI as its own job, `client-tests` in `.github/workflows/ci.yml`, beside the production client build.
 
 #### Characterization tests before a refactor
 
@@ -184,13 +187,13 @@ At the rendering boundary, pin the **model** handed to the library rather than t
 
 That leaves one thing the model cannot tell you: whether the library still implements what the model names. A renderer typically **discards an unknown property in silence**, so a style the code sets, the tests pin and the comments describe can be doing nothing at all. The graph set `shadow-*` for as long as it had existed — cytoscape 2 properties, removed in cytoscape 3 — behind an `as any` on each style block that stopped the compiler from mentioning it. Prefer the library's own typings over a cast, and where a cast is genuinely unavoidable, check the property against the shipped bundle (`graph-styles-exist-in-cytoscape` does this). A gate of that shape needs a **positive control**: one that cannot read the bundle at all reports success in exactly the same way as one that finds no problems.
 
-### Standalone tests (no Docker required)
+### Standalone tests (mostly no Docker)
 
 ```bash
-npm run test:standalone
+npm run build:server && npm run test:standalone:pure
 ```
 
-Covers: config reload, config loader normalisation, config file permissions, log redaction, metrics endpoint, OIDC contracts, OIDC silent refresh, quota logic, rate-limit bucketing, readiness probe, secrets permissions, schema validation (ReDoS protection, $options sanitisation, operator whitelist), theme API, theme postMessage tokens, vector search detection.
+`testing/standalone` holds unit tests, source-reading gates and the tests that open the test database or drive a running instance. `npm run test:standalone` runs all of it (it needs the test stack, below); `test:standalone:pure`, `test:standalone:db` and `test:standalone:instance` run one kind each, and the testing guide says which file is which kind and why. Every file in the folder is a test: a new one needs no registration, only to be tracked by git.
 
 ### Integration tests (single Docker instance)
 
@@ -206,11 +209,11 @@ docker compose up -d
 npm run test:integration
 ```
 
-Covers: setup gating, auth, files, spaces, brain CRUD (facts, entities, edges, chrono), schema validation (strict/warn/off, bulk, dry-run), networks, voting, invite handshake, MCP tools (including save_bulk), notifications, about endpoint, sync history, space rename, space deletion, space export, space wipe, conflict resolution, proxy spaces.
+Every tracked `*.test.js` directly in `testing/integration` runs; the testing guide has the test-stack route and the optional document sidecar.
 
 #### Rate-limit kill-switches
 
-A test run makes thousands of requests from one IP, so the limiters have to come off. Three env vars do
+A test run makes thousands of requests from one IP, so the limiters have to come off. These env vars do
 that, and they are honoured **only when `NODE_ENV !== 'production'`**:
 
 | Variable | Disables |
@@ -224,10 +227,10 @@ TOTP verification, so a leaked value — a copy-pasted compose file, a shared `.
 switch them off on a live instance. Setting any of them also logs a loud warning at startup, so a
 misconfigured non-production deployment says so rather than quietly running unthrottled.
 
-### Sync tests (four Docker instances)
+### Sync tests (the multi-instance test stack)
 
 ```bash
-# Start all four instances + provision tokens
+# Start the test stack and provision tokens
 npm run test:up
 
 # Run sync suite
@@ -237,9 +240,9 @@ npm run test:sync
 npm run test:down
 ```
 
-Covers: closed-network sync, braintree governance, democratic voting, pubsub topology, gossip exchange, conflict detection, file sync, entity/edge sync, fork/merge, Merkle verification, vote propagation, vote signing &amp; safe relay, signing-key rotation, vote forgery rejection, tombstone forgery rejection, direction enforcement, leave/removal.
+The sync suite drives several Ythril instances against each other: network types, governance and voting, conflict handling, file and record sync, forgery rejection. `testing/sync/README.md` has the setup details.
 
-**The test stack's database memory is a ceiling, not a recommendation.** `ythril-mongo-a` runs at 2.5 GB (its `mem_limit` in `testing/docker-compose.test.yml`, with a comment there). A space of 44 000 records ran the database out of memory there, and 5 GB held. A test that seeds tens of thousands of records into the test stack needs that limit raised; the same number in production is `YTHRIL_MONGO_MEM_LIMIT` (default 4g, not measured at that size).
+**The test stack's database memory is a ceiling, not a recommendation.** `ythril-mongo-a` has a `mem_limit` in `testing/docker-compose.test.yml`, with a comment there, and it is the ceiling a test fits under. A space of 44 000 records ran the database out of memory under the ceiling it had then, and 5 GB held. A test that seeds tens of thousands of records into the test stack needs the limit raised (`YTHRIL_TEST_MONGO_A_MEM`); the same number in production is `YTHRIL_MONGO_MEM_LIMIT` (default 4g, not measured at that size). The testing guide covers the rest of the stack's budget, including the search process's heap.
 
 **The test database frees a dropped collection within seconds, and a run that skips that runs out of memory.** MongoDB keeps a dropped collection's storage open for `minSnapshotHistoryWindowInSeconds` (default five minutes), and the suites drop thousands of collections in that window — enough to take `ythril-mongo-a` to its cap before the standalone suite starts. The image fixes mongod's command line, so the window is set at runtime by `tuneTestMongo` in `testing/standalone/_mongo-harness.mjs`, which `testing/sync/setup.js` and every database-backed test file call. A test stack brought up some other way gets it the first time a database-backed file opens the harness; one that runs the Docker suites without `setup.js` does not.
 
@@ -249,7 +252,7 @@ Covers: closed-network sync, braintree governance, democratic voting, pubsub top
 npm run test:redteam
 ```
 
-Attack simulations: auth bypass, path traversal, MongoDB injection ($options injection, operator whitelist), space boundary, oversized payload, invite replay, SSRF (IPv4/IPv6, alternate host encodings, network members), sequence injection, mass assignment, token brute-force, sync scope bypass, MCP security (token hygiene, input validation, operator injection), auth escalation (MCP proxy member-space scope, MFA setup/disable gating, token-minting scope), direction enforcement, space rename.
+Attack simulations against the running stack. Each file's header says what it attacks; `testing/red-team-tests/README.md` has the setup.
 
 ### Run everything
 
@@ -261,8 +264,9 @@ npm run test:all
 ```
 
 > **`test:all` does not start the Docker stack.** It runs `test:all:core`
-> (integration → sync → red-team → standalone) and then `test:down:clean`, but there is
-> no `test:up` inside it. On a fresh checkout the integration and sync suites fail
+> (the stack suites, then standalone; every suite runs even when an earlier one fails, and each gets a status line)
+> and then `test:down:clean`, but there is no `test:up` inside it. It does not run the client suite: run
+> `npm run test:client` beside it. On a fresh checkout the integration and sync suites fail
 > (nothing is listening on `localhost:3200`) unless you run `npm run test:up` first.
 
 `test:all` enforces cleanup automatically (`test:down:clean`) even if a suite fails. If you need containers and volumes left intact for debugging, use:
@@ -507,10 +511,10 @@ Use conventional-commit-style prefixes:
 
 ## Pull Request Checklist
 
-- [ ] All existing tests pass (`npm run test:all`)
-- [ ] Client unit tests pass (`npm run test:client`)
+- [ ] `npm run preflight` passes
+- [ ] The suites your change reaches pass ([`docs/testing-guide.md`](testing-guide.md) says how to run each; `npm run test:all:core` is the whole local run, and `npm run test:client` is not part of it)
 - [ ] If debugging failures, use `npm run test:all:keep` and clean up afterwards
-- [ ] New features have corresponding tests
+- [ ] New features have corresponding tests, tracked by git so a CI job reaches them
 - [ ] Red-team tests still pass after security-adjacent changes
 - [ ] `npm run build` succeeds cleanly (server + client)
 - [ ] Documentation updated in `docs/` if applicable
@@ -520,9 +524,9 @@ Use conventional-commit-style prefixes:
 
 ## License and contributor agreement
 
-Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See [LICENSE](../LICENSE) for the full text.
+Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text.
 
-**Contributing requires signing the [Contributor License Agreement](../CLA.md).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
+**Contributing requires signing the Contributor License Agreement (`CLA.md` in the repository root).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
 
 Signing is one click on your first pull request, via a bot, and it covers every contribution you make afterwards. There is nothing to print and nothing to repeat.
 

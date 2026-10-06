@@ -13,6 +13,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { requireInput } from '../_shared/absent-input.mjs';
 
 let Shortlister, normalizeName;
 before(async () => {
@@ -100,7 +101,7 @@ describe('recall against the committed extractions, with the real sidecar', () =
    * Measured 2026-09-24: 85.1% of 618 cases (62.1% before pronouns and recent context were dealt).
    */
   const RECENT_TURNS = 6;
-  it('deals the right entity for at least 83% of later mentions', async () => {
+  it('deals the right entity for at least 83% of later mentions', async (t) => {
     const { readFileSync, existsSync, readdirSync } = await import('node:fs');
     const { loadConversations } = await import('../../benchmarks/locomo/loader.mjs');
     const { findMentions } = await import('../../server/dist/extractor/conversation/mentions.js');
@@ -110,11 +111,11 @@ describe('recall against the committed extractions, with the real sidecar', () =
     const files = existsSync(EX) ? readdirSync(EX).filter(f => f.endsWith('.json')) : [];
     assert.ok(files.length >= 2, `only ${files.length} extractions found — the sweep would be vacuous`);
     const path = JSON.parse(readFileSync('benchmarks/locomo/pin.json', 'utf8')).datasets.locomo.cachePath;
-    if (!existsSync(path) || !(await isNlpAvailable())) {
-      console.log(`SKIPPED: ${!existsSync(path) ? `${path} is not fetched` : 'the NLP sidecar is not running'}. `
-        + 'Shortlist recall was NOT measured. Local only.');
-      return;
-    }
+    // Two causes, two answers: the corpus is never fetched in CI (a real skip CI expects); the sidecar being down
+    // where the corpus IS fetched is a broken runner, a skip locally and a failure on CI.
+    if (!existsSync(path)) return t.skip('expected-in-ci: corpus not fetched');
+    if (!requireInput(t, await isNlpAvailable(), 'the NLP sidecar is not running',
+      'The corpus is fetched here, so the recall gate needs the doc-nlp sidecar (DOC_NLP_REPLICAS, NLP_SIDECAR_URL).')) return;
     const byId = new Map(loadConversations(path).map(c => [c.id, c]));
     let cases = 0, dealt = 0;
     for (const f of files) {

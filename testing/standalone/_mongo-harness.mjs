@@ -34,6 +34,7 @@
  */
 
 import net from 'node:net';
+import { absentInputReason } from '../_shared/absent-input.mjs';
 
 /** Host/port of the published test Mongo. Override for a non-default stack. */
 export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
@@ -46,10 +47,14 @@ export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 2
  */
 const CREDS = process.env['YTHRIL_TEST_MONGO_CREDS'] ?? 'ythril:ythril-test-pw';
 
-/** Connection URI for a dedicated harness database. */
-export function testMongoUri(dbName) {
-  return `mongodb://${CREDS ? `${CREDS}@` : ''}${TEST_MONGO_HOST}:${TEST_MONGO_PORT}/${dbName}` +
-    `?directConnection=true${CREDS ? '&authSource=admin' : ''}`;
+/**
+ * Connection URI for a dedicated harness database. `port` names a relay standing in front of the test Mongo
+ * (`_delayed-write-relay.mjs`); the default is the stack's own. `query` is extra URI options, as an operator would put
+ * them in `MONGO_URI` (`'&timeoutMS=300'`): the way a test makes a client whose DEFAULTS differ from the harness's.
+ */
+export function testMongoUri(dbName, { port = TEST_MONGO_PORT, query = '' } = {}) {
+  return `mongodb://${CREDS ? `${CREDS}@` : ''}${TEST_MONGO_HOST}:${port}/${dbName}` +
+    `?directConnection=true${CREDS ? '&authSource=admin' : ''}${query}`;
 }
 
 /**
@@ -79,14 +84,11 @@ export async function isTestMongoUp(timeoutMs = 1500) {
 export async function mongoSkipReason() {
   if (await isTestMongoUp()) return false;
   const where = `${TEST_MONGO_HOST}:${TEST_MONGO_PORT}`;
-  if (process.env['CI']) {
-    throw new Error(
-      `Database-level test harness cannot reach MongoDB at ${where}, but CI is set. ` +
-      'The test stack must be up for standalone tests in CI — refusing to skip and report green. ' +
-      'Check that testing/docker-compose.test.yml still publishes the ythril-mongo-a port.',
-    );
-  }
-  return `needs the test MongoDB at ${where} — run \`npm run test:up\``;
+  return absentInputReason(
+    `needs the test MongoDB at ${where} — run \`npm run test:up\``,
+    'The test stack must be up for standalone tests in CI. Check that testing/docker-compose.test.yml still '
+    + 'publishes the ythril-mongo-a port.',
+  );
 }
 
 /**
@@ -123,10 +125,12 @@ let _mongo = null;
  * the harness needs no test-only branch inside production code.
  *
  * @param suite short slug — becomes the database name, so two suites never share state.
+ * @param port  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`).
+ * @param query extra URI options for the server's own client, `'&timeoutMS=300'` (see `testMongoUri`).
  * @returns the live `db/mongo.js` module namespace (`col`, `asFilter`, `asUpdate`, `getDb`, …).
  */
-export async function openTestMongo(suite) {
-  process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`);
+export async function openTestMongo(suite, { port, query } = {}) {
+  process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port, query });
 
   const mongo = await import('../../server/dist/db/mongo.js');
   mongo._resetDbName?.();

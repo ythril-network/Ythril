@@ -43,6 +43,8 @@ import { spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
+import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -84,6 +86,22 @@ function refuseStaleDist() {
 
 refuseStaleDist();
 
+/**
+ * `--only=pure|db|instance` runs one third of the plan: the pure offline files, the database-backed ones, or the
+ * `@needs-instance` ones. CI runs the three as separate jobs because they need different things (nothing, one
+ * MongoDB, two instances); no argument runs all three, in the order they always ran. The thirds are the plan's own
+ * (`offlineRuns` kinds, and the instance batches below), never a second list of files. An unknown value, or a
+ * selection that matches nothing, is an error: an empty run reports success about nothing.
+ */
+const THIRDS = ['pure', 'db', 'instance'];
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const only = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (only !== null && !THIRDS.includes(only)) {
+  console.error(`standalone: --only=${only} is not one of ${THIRDS.join(', ')}`);
+  process.exit(1);
+}
+const wants = (third) => only === null || only === third;
+
 const split = splitStandalone();
 const { all, offline, offlineDb, needsInstance } = split;
 const path = (f) => `testing/standalone/${f}`;
@@ -92,21 +110,41 @@ console.log(`standalone: ${all.length} files — ${offline.length} offline (para
   + `database-backed ones ${DB_TEST_CONCURRENCY} at a time), ${needsInstance.length} need a running instance (serial)`);
 
 let failed = 0;
+let ran = 0;
 const t0 = Date.now();
 
-/** The pure files at node's default width (one worker per core); the database-backed ones capped. */
-for (const run of offlineRuns(split)) {
-  const r = spawnSync('node', ['--test', ...run.args, ...run.files], { stdio: 'inherit' });
+/**
+ * One `node --test` batch, with the timing reporter attached by the shared helper: one destination per batch
+ * (`test-results/standalone-<kind>-<n>.jsonl`), the flags AFTER the plan's own args so the plan stays about the
+ * files, and the child's environment without the recorder's credentials. A batch that did not exit 0 counts as
+ * failed, a signal-killed one (no status) included.
+ */
+const nextBatch = {};
+function runBatch(kind, args, files) {
+  ran++;
+  nextBatch[kind] = (nextBatch[kind] ?? 0) + 1;
+  // Every batch of the selected third is part of a whole run of it: this runner takes no file or pattern arguments.
+  const flags = timingReporterFlags({ suite: 'standalone', batch: `${kind}-${nextBatch[kind]}`, scope: 'full' });
+  const r = spawnSync('node', ['--test', ...args, ...flags.args, ...files], { stdio: 'inherit', env: testChildEnv(flags.env) });
   if (r.status !== 0) failed++;
 }
+
+// Results of an earlier run are not this run's: a plan that shrank would leave its higher-numbered batches behind.
+// Only the thirds this run selects are cleared, so running one third leaves another's results alone.
+for (const third of THIRDS) if (wants(third)) clearTimingResults(`standalone-${third}`);
+
+/** The pure files at node's default width (one worker per core); the database-backed ones capped. */
+for (const run of offlineRuns(split)) if (wants(run.kind)) runBatch(run.kind, run.args, run.files);
 
 /*
  * ONE AT A TIME, and against the live stack. These drive :3200, so two of them at once would interleave
  * writes to one instance — the failure the concurrency flag was added for in the first place.
  */
-for (const batch of batched(needsInstance.map(path))) {
-  const r = spawnSync('node', ['--test', '--test-concurrency=1', ...batch], { stdio: 'inherit' });
-  if (r.status !== 0) failed++;
+if (wants('instance')) for (const batch of batched(needsInstance.map(path))) runBatch('instance', ['--test-concurrency=1'], batch);
+
+if (ran === 0) {
+  console.error(`standalone: --only=${only} selected no files — the split found none of that kind`);
+  process.exit(1);
 }
 
 console.log(`standalone finished in ${((Date.now() - t0) / 1000).toFixed(1)}s`);

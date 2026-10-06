@@ -33,6 +33,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, posix, extname } from 'node:path';
+import { requireInput } from '../_shared/absent-input.mjs';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -92,11 +93,14 @@ describe('the client fetches no asset from a remote host', () => {
       + bad.join('\n  '));
   });
 
-  it('a production build ships no remote asset reference either', () => {
+  it('a production build ships no remote asset reference either', (t) => {
     // The source being clean is not quite the same as the OUTPUT being clean — a build step could reintroduce one,
     // and an HTML comment survives the build (which is why the explanation for this fix lives in the SCSS).
     const dist = 'client/dist/browser/index.html';
-    if (!existsSync(join(ROOT, dist))) return;         // no build present; the source checks above still ran
+    // No build to read: a skip on a laptop (the source checks above still ran), a FAILURE on CI. It used to return
+    // quietly, so a job that never built the client passed the one check that reads what actually ships.
+    if (!requireInput(t, existsSync(join(ROOT, dist)), `there is no built ${dist} to read`,
+      'Run `npm run build:client` in the job that runs this file: the built index.html is what this case reads.')) return;
     const html = read(dist);
     for (const re of REMOTE_FETCH) {
       assert.ok(!re.test(html), `the built index.html still matches ${re}`);

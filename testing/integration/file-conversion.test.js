@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, readCollection, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -94,14 +94,12 @@ describe('File conversion pipeline — inputFormat bypass', () => {
     // CONTRAST with the bypass case above: converted → ≥1 chunk, bypass → 0.
     // (The HTML case below asserts the stronger ≥2.)
     let chunkCount = 0;
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
+    await waitFor(async () => {
       const { chunks } = await countChunks(tokenA, CONV_SPACE, filePath);
       chunkCount = chunks;
-      if (chunkCount >= 1) break;
-      await new Promise(res => setTimeout(res, 1000));
-    }
-    assert.ok(chunkCount >= 1, `markdown conversion must produce chunk records (bypass produces 0), found ${chunkCount}`);
+      return chunkCount >= 1;
+    }, 60_000, 1000, () => `markdown conversion must produce chunk records (bypass produces 0), found ${chunkCount}`,
+    { what: 'the markdown conversion to produce chunk records' });
   });
 
   it('Plain text file (.txt extension) is processed asynchronously, returns 202', async () => {
@@ -135,14 +133,12 @@ describe('File conversion pipeline — inputFormat bypass', () => {
     assert.equal(r.body?.embeddingStatus, 'pending');
 
     let chunkCount = 0;
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
+    await waitFor(async () => {
       const { chunks } = await countChunks(tokenA, CONV_SPACE, filePath);
       chunkCount = chunks;
-      if (chunkCount >= 2) break;
-      await new Promise(res => setTimeout(res, 1000));
-    }
-    assert.ok(chunkCount >= 2, `html conversion must produce ≥2 chunk records, found ${chunkCount}`);
+      return chunkCount >= 2;
+    }, 60_000, 1000, () => `html conversion must produce ≥2 chunk records, found ${chunkCount}`,
+    { what: 'the html conversion to produce at least 2 chunk records' });
   });
 
   it('PDF uploaded with inputFormat "text" (explicit bypass) does not call sidecar, returns 201', async () => {
@@ -197,19 +193,17 @@ describe('Media/text job queue — the worker actually claims work (P12)', () =>
   async function waitUntilClaimed(filePath, timeoutMs = 90_000) {
     const start = Date.now();
     let last = 'pending';
-    while (Date.now() - start < timeoutMs) {
+    await waitFor(async () => {
       const r = await readCollection(INSTANCES.a, tokenA, spaceId, 'files', { path: filePath, limit: 1 });
       const meta = (r.results ?? []).find(f => f.path === filePath);
       last = meta?.embeddingStatus ?? last;
       // Any terminal-ish state proves the worker picked the job up.
-      if (last && last !== 'pending') return { status: last, elapsedMs: Date.now() - start };
-      await new Promise(res => setTimeout(res, 2_000));
-    }
-    throw new Error(
-      `job for ${filePath} was never claimed — it sat in '${last}' for ${timeoutMs}ms. ` +
+      return Boolean(last) && last !== 'pending';
+    }, timeoutMs, 2_000, () => `job for ${filePath} was never claimed — it sat in '${last}' for ${timeoutMs}ms. ` +
       'The claim walk only probes spaces its pending-work hint knows about, so something that ' +
       'creates claimable work is not announcing it (see markSpaceMayHaveWork).',
-    );
+    { what: `the job for ${filePath} to be claimed` });
+    return { status: last, elapsedMs: Date.now() - start };
   }
 
   it('a newly uploaded file in a previously-idle space IS claimed by the worker', async () => {

@@ -259,21 +259,31 @@ describe('a body too long for GitHub is abridged, not refused', () => {
       'the opening summary is no longer at the opening');
   });
 
-  it('every breaking entry in the NEWEST real release survives being abridged hard', () => {
+  it('every breaking entry in the NEWEST real release that has any survives being abridged hard', () => {
     /*
      * Against the real file rather than a fixture, because the fixtures are the shape I already thought of.
      * Read out of the changelog for the same reason `NEWEST` exists above: a case anchored to one version
      * is only as durable as that version's residence in this file.
+     *
+     * "The newest release WITH a breaking entry", not "the newest release": a patch release has none, and this
+     * used to `return` when the newest had nothing breaking — ending the test green on exactly the release most
+     * likely to be a patch. The subject is the abridger's protection of breaking entries, so the release to
+     * measure it on is the newest one that has some.
      */
-    const section = changelogSection(changelog, NEWEST);
-    const full = releaseBody(section);
-    const breaking = entriesWithSection(full).filter(isBreaking);
-    if (breaking.length === 0) return; // A release with nothing breaking has nothing to protect here.
+    const versions = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+)\] /gm)].map(m => m[1]);
+    assert.ok(versions.length >= 1, 'no dated release in CHANGELOG.md — this gate is measuring nothing');
+    const withBreaking = versions
+      .map(version => ({ version, full: releaseBody(changelogSection(changelog, version)) }))
+      .map(r => ({ ...r, breaking: entriesWithSection(r.full).filter(isBreaking) }))
+      .find(r => r.breaking.length > 0);
+    assert.ok(withBreaking, `none of the ${versions.length} release(s) in CHANGELOG.md has a breaking entry, so there `
+      + 'is nothing real to abridge — add a fixture of the shape instead of letting this pass on nothing');
+    const { version, full, breaking } = withBreaking;
 
-    const out = abridgeForRelease(full, NEWEST, 20_000);
+    const out = abridgeForRelease(full, version, 20_000);
     const missing = breaking.filter(e => !out.includes(e.text.split('\n')[0]));
     assert.deepEqual(missing.map(e => e.text.slice(0, 60)), [],
-      `abridging ${NEWEST} to 20 000 characters dropped ${missing.length} breaking `
+      `abridging ${version} to 20 000 characters dropped ${missing.length} breaking `
       + `${missing.length === 1 ? 'entry' : 'entries'} of ${breaking.length}.`);
   });
 });

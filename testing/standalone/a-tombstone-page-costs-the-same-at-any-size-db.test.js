@@ -32,7 +32,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'tscost';
 /** The tombstone vocabulary, derived — read at load because the cases are registered per type. */
 const { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } = await import('../../server/dist/config/types.js');
-let door, searchIndexPresenceSettled;
+let door;
 let seq = 0;
 
 /** A record of the tombstone's collection, authored by `issuer`, that the tombstone deletes. */
@@ -62,8 +62,6 @@ async function cost(door_, type, n, tag) {
     } else {
       await door.sync();
     }
-    await door.settled();
-    await searchIndexPresenceSettled(S);
   });
   assert.equal(await door.coll(S, coll).countDocuments({ _id: { $in: ids } }), 0, `${type}: the page did not delete its targets`);
   return seen.filter(c => c.split(' ')[1]?.startsWith(`${S}_`));
@@ -71,9 +69,7 @@ async function cost(door_, type, n, tag) {
 
 describe('a page of peer tombstones costs the same at any size', { skip }, () => {
   before(async () => {
-    door = await openPullDoor({ suite: 'tscost', spaces: [S], monitorCommands: true });
-    ({ searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js'));
-  });
+    door = await openPullDoor({ suite: 'tscost', spaces: [S], monitorCommands: true });  });
   after(async () => { await door?.close(); });
 
   it('the type set is derived and monitoring sees commands', async () => {

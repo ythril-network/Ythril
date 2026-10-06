@@ -24,6 +24,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -937,25 +938,14 @@ describe('Media embedding — retry_embedding endpoint', () => {
       const meta = r.results?.find(f => (f.path ?? f._id ?? '').includes(filePath));
       return meta?.embeddingStatus;
     };
-    const waitForStatus = async (predicate, timeoutMs) => {
-      const start = Date.now();
-      let last;
-      while (Date.now() - start < timeoutMs) {
-        last = await docStatus();
-        if (predicate(last)) return last;
-        await new Promise(res => setTimeout(res, 1000));
-      }
-      return last;
-    };
+    const waitForStatus = (accept, timeoutMs, what) => waitForReading(docStatus, accept, timeoutMs, 1000, { what });
 
     try {
       await uploadFile(tokenA, spaceId, filePath,
         'Retry effect document with enough words to be chunked and embedded by the media worker.');
 
       // Let the initial job settle so the retry starts from a terminal state.
-      const settled = await waitForStatus(s => s === 'complete' || s === 'failed', 60_000);
-      assert.ok(settled === 'complete' || settled === 'failed',
-        `initial embedding never settled (last status: ${settled})`);
+      await waitForStatus(s => s === 'complete' || s === 'failed', 60_000, 'the initial embedding to settle');
 
       const retry = await fetch(
         `${INSTANCES.a}/api/files/${spaceId}/retry_embedding?path=${encodeURIComponent(filePath)}`,
@@ -971,9 +961,7 @@ describe('Media embedding — retry_embedding endpoint', () => {
         `embeddingStatus must flip to pending/processing after retry, got: ${flipped}`);
 
       // ...and the requeued job must actually run back to a terminal state.
-      const final = await waitForStatus(s => s === 'complete' || s === 'failed', 60_000);
-      assert.ok(final === 'complete' || final === 'failed',
-        `retried job never re-ran to a terminal state (last status: ${final})`);
+      await waitForStatus(s => s === 'complete' || s === 'failed', 60_000, 'the retried job to re-run to a terminal state');
     } finally {
       await fetch(`${INSTANCES.a}/api/spaces/${spaceId}`, {
         method: 'DELETE',
@@ -1035,17 +1023,17 @@ describe('Media embedding — GET /api/admin/media-config', () => {
     assert.equal(r.status, 400, `Expected 400 for unknown field, got ${r.status}`);
   });
 
-  it('PATCH media-config with valid body returns updated config', async () => {
+  it('PATCH media-config with valid body returns updated config', async (t) => {
     // Read current config first
     const getR = await fetch(`${INSTANCES.a}/api/admin/media-config`, {
       headers: { 'Authorization': `Bearer ${tokenA}` },
     });
     const original = await getR.json();
 
-    // Only patch if the field is not locked
+    // A field an environment variable locks cannot be patched, so the PATCH below has nothing to prove. That is a
+    // real skip, not an early return: the runner counts it, and CI refuses an unexpected one.
     if (original.lockedByInfra?.includes('workerConcurrency')) {
-      // Skip if locked by env var
-      return;
+      return t.skip('workerConcurrency is locked by an environment variable on this stack, so the PATCH cannot be exercised');
     }
 
     const newConcurrency = (original.workerConcurrency ?? 2) === 2 ? 3 : 2;

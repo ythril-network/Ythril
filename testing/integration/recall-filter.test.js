@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared, ensureReindexed } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -250,7 +251,7 @@ describe('Recall filter — input validation', () => {
   });
 
   it('allowed key properties.* passes validation (200)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'properties.status': { eq: 'nonexistent-value-xyzzy' } },
@@ -259,7 +260,7 @@ describe('Recall filter — input validation', () => {
   });
 
   it('allowed key "type" passes validation (200)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'type': { eq: 'entity' } },
@@ -268,7 +269,7 @@ describe('Recall filter — input validation', () => {
   });
 
   it('allowed key "name" passes validation (200)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'name': { eq: 'nonexistent-xyzzy' } },
@@ -277,7 +278,7 @@ describe('Recall filter — input validation', () => {
   });
 
   it('allowed key "tags" passes validation (200)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test',
       filter: { 'tags': { in: ['nonexistent-tag-xyzzy'] } },
@@ -286,7 +287,7 @@ describe('Recall filter — input validation', () => {
   });
 
   it('recall without filter returns 200 (backward compat)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'test query',
       types: ['entity'],
@@ -304,7 +305,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   let rejectedId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // Write two entities with identical description (→ identical similarity score)
     // but different properties.status — the filter must distinguish them
     const acc = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/entities`, {
@@ -331,7 +332,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('filter eq accepted — accepted entity appears, rejected does not', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
@@ -345,7 +346,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('RAW MongoDB $or reaches both — the filter the fleet integrator could not express at all', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // the fleet integrator 2026-08-13T1035Z §2: recall's grammar was one operator object per key, ANDed, so a predicate with an OR was
     // not expressible at any length and they ran `query` first and fed ids into something else.
     //
@@ -364,7 +365,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('RAW MongoDB still FILTERS — an $or naming one status excludes the other', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // The half that matters more: accepting the grammar is worthless if it is then ignored. A filtered search that
     // returns everything is the defect class this whole change came out of.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
@@ -381,7 +382,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('refuses a filter that MIXES the two grammars rather than guessing', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       filter: { $or: [{ 'properties.status': 'accepted' }], 'properties.domain': { eq: 'security' } },
@@ -400,7 +401,7 @@ describe('Recall filter — eq filter on properties.status', () => {
      * it AT DEPTH for the same reason the old rule did — a nested clause is exactly where a caller would
      * put something a top-level scan would miss.
      */
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       filter: { $or: [{ $where: 'this.x' }] },
@@ -410,7 +411,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('and accepts an ordinary field inside $or, which is what the widening was for', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       filter: { $or: [{ description: { $exists: true } }] },
@@ -419,7 +420,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('filter eq rejected — rejected entity appears, accepted does not', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
@@ -433,7 +434,7 @@ describe('Recall filter — eq filter on properties.status', () => {
   });
 
   it('filter ne rejected — accepted entity appears, rejected does not', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: sharedDesc,
       types: ['entity'],
@@ -453,7 +454,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
   let lowId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const high = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} high-count`,
       description: desc,
@@ -476,7 +477,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
   });
 
   it('filter gt:10 returns high-count record, excludes low-count', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -490,7 +491,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
   });
 
   it('filter lte:10 returns low-count record, excludes high-count', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -504,7 +505,7 @@ describe('Recall filter — numeric gt/gte/lt/lte on properties', () => {
   });
 
   it('filter gte:5 and lt:100 (range) returns only high-count and low-count', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -525,7 +526,7 @@ describe('Recall filter — tags in (any-of)', () => {
   let unrelatedId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const sec = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} security-tagged`,
       description: desc,
@@ -554,7 +555,7 @@ describe('Recall filter — tags in (any-of)', () => {
   });
 
   it('filter tags in ["security","infra"] returns both security and infra records, not unrelated', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -575,7 +576,7 @@ describe('Recall filter — exists operator', () => {
   let withoutPropId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const withProp = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `${desc} with-domain-prop`,
       description: desc,
@@ -597,7 +598,7 @@ describe('Recall filter — exists operator', () => {
   });
 
   it('filter exists:true on properties.domain returns only records that have that property', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -611,7 +612,7 @@ describe('Recall filter — exists operator', () => {
   });
 
   it('filter exists:false on properties.domain returns only records without that property', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc,
       types: ['fact'],
@@ -637,7 +638,7 @@ describe('Recall filter — tags param (must contain ALL; native fast path)', ()
   let oneId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // `tags` is a fixed declared filter field, so the `tags` recall param is pushed into the
     // $vectorSearch native filter as an $and of equalities — i.e. the record must carry EVERY tag.
     const both = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
@@ -656,7 +657,7 @@ describe('Recall filter — tags param (must contain ALL; native fast path)', ()
   });
 
   it('tags:[alpha,beta] returns only the record carrying BOTH tags', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: desc, types: ['fact'], topK: 20, tags: ['alpha-all', 'beta-all'],
     }) });
@@ -675,7 +676,7 @@ describe('Recall filter — schema-declared property (native path via typeSchema
   let southId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const cr = await post(INSTANCES.a, token(), '/api/spaces', { id: SCHEMA_SPACE, label: `Schema Filter ${RUN}` });
     assert.equal(cr.status, 201, `create schema space: ${JSON.stringify(cr.body)}`);
     await ensureReindexed(INSTANCES.a, token());
@@ -716,7 +717,7 @@ describe('Recall filter — schema-declared property (native path via typeSchema
   });
 
   it('filter properties.region eq north returns only the north site', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SCHEMA_SPACE, ...({
       query: desc, types: ['entity'], topK: 20, filter: { 'properties.region': { eq: 'north' } },
     }) });
@@ -734,7 +735,7 @@ describe('Recall filter — MCP recall tool accepts filter', () => {
   let rejectedId;
 
   before(async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     session = await openMcpSession(token());
 
     const acc = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/entities`, {
@@ -763,7 +764,7 @@ describe('Recall filter — MCP recall tool accepts filter', () => {
   after(() => session?.close());
 
   it('MCP recall with filter returns only matching records', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const result = await session.callTool('recall', {
       space: SPACE,
       query: sharedDesc,
@@ -788,7 +789,7 @@ describe('Recall filter — MCP recall tool accepts filter', () => {
   it('MCP recall accepts an arbitrary field key, and still refuses a JavaScript operator', async (t) => {
     // Both halves on the MCP door, because the widening and the guard have to agree across both — the
     // pair `CLAUDE.md`'s parity section was written from.
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const ok = await session.callTool('recall', {
       space: SPACE,
       query: 'test',

@@ -1,0 +1,39 @@
+name: Dump the test stack's logs
+description: >-
+  Print every container's log, and the search process's and the runner's own log files, of the test compose stack.
+  A step of its own so each stack job of ci.yml carries the same failure dump instead of its own copy.
+
+# A server-side failure is invisible from the test output alone. When a reconcile logs an error and returns, or a
+# sidecar never comes up, the assertion reports a bare 404 and the reason lives in the container log, which the
+# runner then throws away. Dumping the logs on failure is the difference between diagnosing a red build and
+# guessing at it across round trips.
+#
+# `--all` is load-bearing. `ps --services` lists only RUNNING containers, so a container that exited during startup,
+# the one whose logs you actually need, was the single service the old loop skipped.
+#
+# The search process (mongot) and the atlas-local runner log to FILES, not stdout (the test compose sets
+# MONGOT_LOG_FILE and RUNNER_LOG_FILE): a mongot death shows in the container log only as the runner's SIGTERM to
+# mongod. `docker cp` reads a stopped container too. Containers a job never started are not an error here.
+#
+# `--profile office` so the opt-in sidecar's log is listed when the job started it; compose lists no service of a
+# profile that is not enabled.
+runs:
+  using: composite
+  steps:
+    - name: Print the logs
+      shell: bash
+      run: |
+        compose="docker compose -p ythril-test -f testing/docker-compose.test.yml --profile office"
+        $compose ps --all
+        for svc in $($compose ps --services --all); do
+          echo "::group::$svc"
+          $compose logs --tail 500 "$svc" || true
+          echo "::endgroup::"
+        done
+        for c in ythril-mongo-a ythril-mongo-b ythril-mongo-c ythril-mongo-d; do
+          for f in /tmp/mongot.log /tmp/runner.log; do
+            echo "::group::$c $f (last 200 lines)"
+            docker cp "$c:$f" - 2>/dev/null | tar -xO 2>/dev/null | tail -n 200 || true
+            echo "::endgroup::"
+          done
+        done

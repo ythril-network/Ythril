@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 import {
   unitAt, queryAxis, cosineScoreAt, startStubEmbedder, createSpaceCollections, insertAll, waitUntilServing,
   liveFilterPaths, recordTraffic, isIdFilteredSearch, isCollectionPass,
@@ -344,32 +345,33 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
 
       const deadline = Date.now() + 120_000;
       let paths = [];
-      while (Date.now() < deadline) {
+      await waitFor(async () => {
         paths = await liveFilterPaths(mongo, `${OLDDEF}_entities`, `${OLDDEF}_entities_embedding`);
-        if (paths.includes('_id')) {
-          try {
-            // The record must come BACK, not merely the query run: CI saw the new definition accept the `_id` filter
-            // while it still held none of the records, so a probe that only did not throw ended the wait too early.
-            const probe = await mongo.col(`${OLDDEF}_entities`).aggregate([{ $vectorSearch: {
-              index: `${OLDDEF}_entities_embedding`, path: 'embedding', queryVector: queryAxis(DIMS),
-              exact: true, limit: 1, filter: { _id: { $in: ['far-target'] } } } }]).toArray();
-            if (probe.some(d => d._id === 'far-target')) break;
-          } catch { /* the new definition is not serving yet */ }
-        }
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      assert.ok(paths.includes('_id'),
-        `production's builder left ${OLDDEF}_entities_embedding at [${paths.join(', ')}] — the in-place update `
-        + 'to a definition with _id never happened');
+        if (!paths.includes('_id')) return false;
+        try {
+          // The record must come BACK, not merely the query run: CI saw the new definition accept the `_id` filter
+          // while it still held none of the records, so a probe that only did not throw ended the wait too early.
+          const probe = await mongo.col(`${OLDDEF}_entities`).aggregate([{ $vectorSearch: {
+            index: `${OLDDEF}_entities_embedding`, path: 'embedding', queryVector: queryAxis(DIMS),
+            exact: true, limit: 1, filter: { _id: { $in: ['far-target'] } } } }]).toArray();
+          return probe.some(d => d._id === 'far-target');
+        } catch { return false; /* the new definition is not serving yet */ }
+      }, 120_000, 1000,
+      () => `production's builder left ${OLDDEF}_entities_embedding at [${paths.join(', ')}]`
+        + (paths.includes('_id') ? ', which filters on _id but does not serve the record yet'
+          : ' — the in-place update to a definition with _id never happened'),
+      { what: `${OLDDEF}_entities_embedding to be updated in place to a definition with _id and to serve` });
       // Polled, not read once. CI saw a probe answered by the new definition followed by a recall answered by the old
       // one, which still refuses `_id` — so the recall said filter_window, correctly, a second after the probe. What
       // this case pins is that no verdict outlives the index's recovery, and a cached one would never clear here.
       let settled;
-      do {
+      // The budget is what is left of the first wait's deadline plus 30 s, and never less than one poll.
+      await waitFor(async () => {
         settled = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
-        if (settled.ids.includes('far-target') && !settled.degraded.includes('filter_window')) break;
-        await new Promise(r => setTimeout(r, 1000));
-      } while (Date.now() < deadline + 30_000);
+        return settled.ids.includes('far-target') && !settled.degraded.includes('filter_window');
+      }, Math.max(1, deadline + 30_000 - Date.now()), 1000,
+      () => `last answer: [${settled.ids.join(', ')}], degraded [${settled.degraded.join(', ')}]`,
+      { what: 'the recall to be complete and no longer degraded by filter_window' });
       assert.ok(settled.ids.includes('far-target'),
         `once the _id filter serves the answer must be complete: [${settled.ids.join(', ')}], degraded [${settled.degraded.join(', ')}]`);
       assert.ok(!settled.degraded.includes('filter_window'),

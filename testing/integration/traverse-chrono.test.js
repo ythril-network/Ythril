@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, reqJson, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, reqJson, readCollection, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -98,19 +98,16 @@ before(async () => {
   let meta = await patchMeta();
   assert.ok(meta.status < 300, `link file to entity: ${meta.status} ${JSON.stringify(meta.body)}`);
 
-  const deadline = Date.now() + 20_000;
-  let readBack;
-  for (;;) {
-    readBack = await readCollection(INSTANCES.a, token(), SPACE, 'files', { path: ids.file, limit: 1 });
-    const got = readBack.results?.[0]?.description;
-    if (got === wantDescription) break;
-    if (Date.now() > deadline) {
-      assert.fail(`the file-meta PATCH never stuck: description reads ${JSON.stringify(got)} rather than `
-        + `${JSON.stringify(wantDescription)} — the conversion pipeline is overwriting it`);
-    }
-    await new Promise(r => setTimeout(r, 500));
-    meta = await patchMeta();
-  }
+  let got;
+  await waitFor(async () => {
+    const readBack = await readCollection(INSTANCES.a, token(), SPACE, 'files', { path: ids.file, limit: 1 });
+    got = readBack.results?.[0]?.description;
+    if (got === wantDescription) return true;
+    meta = await patchMeta(); // not stuck yet: say it again, in case the pipeline overwrote it
+    return false;
+  }, 20_000, 500,
+  () => `description reads ${JSON.stringify(got)} rather than ${JSON.stringify(wantDescription)} — the conversion pipeline is overwriting it`,
+  { what: 'the file-meta PATCH to stick' });
 });
 
 after(async () => {

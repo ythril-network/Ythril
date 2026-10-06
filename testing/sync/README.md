@@ -1,12 +1,19 @@
 # Ythril Sync Integration Tests
 
+These tests drive several Ythril instances against each other: network types, governance and voting, conflict handling,
+file and record sync, forgery rejection. Every `*.test.js` directly in this folder is part of the suite; each file's
+header comment says what it proves. This README does not list them, because a list written by hand is wrong the day a
+file is added: `git ls-files 'testing/sync/*.test.js'` is the list, and `docs/testing-guide.md` says how a test file reaches
+CI.
+
 ## Prerequisites
 
 1. Build and start the test stack:
    ```
    docker compose -p ythril-test -f testing/docker-compose.test.yml up --build -d
    ```
-   Wait until all 6 containers are healthy (~30-45 seconds first run).
+   Wait until the containers are healthy (`docker compose -p ythril-test -f testing/docker-compose.test.yml ps` lists
+   them; the first run takes longer). `npm run test:up` does this, then step 3.
 
 2. For repeated local runs, start without rebuild to avoid unnecessary disk growth:
    ```
@@ -23,28 +30,18 @@
    - Create a `general` space on each
    - Write the peerTokens into each instance's secrets.json
 
+   Name instances to set up only those (`node testing/sync/setup.js a b`); CI does that for the instances a job starts.
+
 4. Run the sync integration tests:
-   ```
-   node --test testing/sync/closed-network.test.js
-   node --test testing/sync/braintree.test.js
-   node --test testing/sync/braintree-governance.test.js
-   node --test testing/sync/democratic.test.js
-   node --test testing/sync/conflict.test.js
-   node --test testing/sync/fork.test.js
-   node --test testing/sync/gossip.test.js
-   node --test testing/sync/governance.test.js
-   node --test testing/sync/leave-removal.test.js
-   node --test testing/sync/merkle.test.js
-   node --test testing/sync/vote-propagation.test.js
-   node --test testing/sync/vote-forgery.test.js
-   node --test testing/sync/vote-signing.test.js
-   node --test testing/sync/vote-key-rotation.test.js
-   node --test testing/sync/tombstone-forgery.test.js
-   ```
-   Or run all:
    ```
    npm run test:sync
    ```
+   or one file:
+   ```
+   node --test testing/sync/<file>.test.js
+   ```
+   `npm run test:sync` selects the tracked test files in this folder, one at a time (they share one live stack, and run
+   together they report false failures), and records their timings in `test-results/`.
 
 5. Mandatory cleanup after heavy or repeated runs:
    ```
@@ -67,132 +64,15 @@
 - `npm run test:all` now performs mandatory post-run cleanup (`test:down:clean`) even when tests fail.
 - Use `npm run test:all:keep` only when you explicitly need the environment left running for debugging.
 
-## Instance URLs
+## Instances
 
-| Instance | Port | Container name |
-|----------|------|----------------|
-| A        | 3200 | ythril-a       |
-| B        | 3201 | ythril-b       |
-| C        | 3202 | ythril-c       |
-
-## Scenarios
-
-### Closed network (a ↔ b)
-- Create network on A, add B as member
-- Write a memory on A; trigger sync; verify B has the memory
-- Write a memory on B; trigger sync; verify A has the memory
-- Delete a memory on A; verify tombstone propagates to B
-
-### Braintree (a → b → c)
-- A is root, B is A's child (direction=push), C is B's child (direction=push)
-- Write on A, trigger sync; verify B gets it; trigger sync on B; verify C gets it
-- Write on C; trigger sync; verify B does NOT get it (push only)
-- Write on B; trigger sync; verify A does NOT get it (push only)
-
-### Democratic (a + b + c)
-- Create democratic network with 3 members
-- Add B via vote: A votes yes, B votes yes -> passes
-- Add C via vote: A votes no (veto) -> fails with veto
-- Add C via vote: A yes, B yes, C (self skip) -> passes
-
-### Gossip (a ↔ b)
-- Verify that a sync trigger causes A to push its `instanceLabel` to B (self-announce piggyback)
-- Verify that B's current `instanceLabel` appears in A's member view after a sync trigger (self-record in response)
-- Verify gossip poisoning: a member cannot overwrite another member's record
-
-### Vote propagation (a ↔ b)
-- `GET /api/sync/networks/:id/votes` returns open rounds (auth required)
-- Sensitive fields (`inviteKeyHash`, `pendingMember.tokenHash`) are stripped from GET responses
-- `POST /api/sync/networks/:id/votes/:roundId` returns 400 missing fields, 404 unknown round, 401 unauthenticated; 200 on valid relay
-- After B triggers sync with A, B adopts any open round A has that B does not yet have
-- After B triggers sync with A, B merges A's vote casts into the adopted round
-- After A triggers sync with B, A merges B's vote casts into the shared round
-- A round concludes locally once all remote voters have cast yes (unanimous types) or threshold is met
-
-### Tombstone forgery (a ↔ b, red-team)
-- A authors a memory; malicious B, using its own bound peer token, POSTs a tombstone forged as instance A to delete it
-- A must refuse the deletion (issuer ≠ delivering peer), so the memory survives; a trusted admin tombstone still deletes — regression guard for the forged-tombstone-deletion fix
-
-### Vote forgery (a ↔ b, red-team)
-- A malicious peer B serves a fabricated `remove` round carrying a `yes` vote forged on behalf of A
-- After A pulls from B, A must ignore the forged cast (a peer may only report its own vote), so the round does not conclude and B is not ejected — regression guard for the gossip vote-forgery fix
-
-### Vote signing (a ↔ b)
-- A vote cast created via the API carries an Ed25519 signature, and that signature survives propagation to a peer intact
-- Peers pin each other's signing public keys via member gossip (trust-on-first-use)
-- A validly-signed cast from a third instance is accepted even when relayed by a different peer (safe multi-hop relay); a tampered relayed cast is rejected
-
-### Conflict
-- Write the same memory ID on A and B simultaneously (requires manual seq injection)
-- Sync A→B; verify fork exists on B
-- Resolve fork on B; verify resolution
-
-### Leave and removal flows (a ↔ b)
-- `DELETE /api/networks/:id` requires auth (401 without token)
-- `DELETE /api/networks/:id` removes the network locally (204 + 404 on re-GET) and broadcasts `member_departed` to peers
-- After A leaves a network with B, B receives and processes the `member_departed` event — A is removed from B's member list
-- `member_departed` is idempotent: sending it for an unknown/already-removed instanceId returns 204
-- After a remove vote passes, the ejected instance (B) adds the networkId to `ejectedFromNetworks` and removes the network locally
-- Subsequent sync (`POST /api/sync/...`) and vote requests for the ejected networkId return `401 {"error":"ejected"}`
-- `member_removed` is idempotent (204 or 404, never 5xx)
-
-### Governance (a)
-- Governed `DELETE /api/spaces/:id` on a networked space opens a vote round (202) instead of deleting immediately
-- The space remains accessible while the vote is pending
-- A yes vote on a solo-member network concludes the round and deletes the space
-- A veto concludes the round but the space survives
-- N-7 auto-adopt: when a `member_departed` event is received for a braintree member, its children are automatically re-parented to the receiving instance
-- Auto-adopt is idempotent: a second departure notify with no orphans is a no-op
-
-### Braintree governance (a + b)
-- Root adding a direct child auto-concludes (single ancestor path) → 201
-- Intermediate node adding a grandchild opens a two-voter round (`requiredVoters = [B, A]`); B auto-votes; A must vote yes to pass
-- An ancestor veto immediately fails the round regardless of other votes
-- Root removing its direct child: single ancestor path → immediate 204
-
-### Fork / off-grid (a)
-- Fork an active network → 201, new network with same spaces, no members, source unchanged
-- Fork a voluntarily-deleted network with `spaces` in body → 201
-- Fork a voluntarily-deleted network with no `spaces` → 400
-- Fork after ejection (`member_removed`) with `spaces` in body → 201; original id stays in `ejectedFromNetworks`
-- Fork after ejection with no `spaces` → 400
-- Unknown network id (not ejected) → 404
-- Body with an unknown space id → 400
-- `type` defaults to `closed`; caller may override to `club`
-
-### Merkle integrity (a ↔ b)
-- `GET /api/sync/merkle` on an empty space returns the empty-tree sentinel root
-- Root is a 64-char hex SHA-256 string
-- Adding a document changes the root
-- Two instances with the same data converge to the same root after sync
-- Two instances with diverging data have different roots
-- A network created with `merkle: true` runs a Merkle comparison on each sync cycle
-- Missing `spaceId` → 400; inaccessible space → 403
+The instances are the `ythril-<letter>` services of `testing/docker-compose.test.yml`; each publishes its own port there
+(`ports:` of the service), and `testing/sync/configs/<letter>/` holds what `setup.js` wrote for it. The topology a test
+needs (closed network, braintree, democratic) is built by the test itself through the API.
 
 ## Directory layout
 
-```
-testing/sync/
-  README.md                      — this file
-  setup.js                       — first-run setup helper (creates configs/)
-  helpers.js                     — shared fetch helpers
-  braintree.test.js
-  braintree-governance.test.js
-  closed-network.test.js
-  conflict.test.js
-  democratic.test.js
-  fork.test.js
-  gossip.test.js
-  governance.test.js
-  leave-removal.test.js
-  merkle.test.js
-  vote-propagation.test.js
-  vote-forgery.test.js
-  vote-signing.test.js
-  vote-key-rotation.test.js
-  tombstone-forgery.test.js
-  configs/
-    a/                           — populated by setup.js
-    b/
-    c/
-```
+- `setup.js` — first-run setup helper; creates `configs/`
+- `helpers.js` — shared fetch and wait helpers
+- `*.test.js` — the suite, one scenario family per file
+- `configs/<letter>/` — populated by `setup.js`, not tracked

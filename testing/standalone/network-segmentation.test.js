@@ -26,13 +26,7 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const COMPOSE = path.join(__dirname, '..', '..', 'docker-compose.yml');
+import { loadCompose } from '../_shared/compose-file.mjs';
 
 let compose;
 
@@ -49,7 +43,7 @@ const MEDIA_SIDECARS = ['ollama', 'whisper'];
 
 describe('Compose network segmentation — media sidecars vs the database', () => {
   before(() => {
-    compose = yaml.load(fs.readFileSync(COMPOSE, 'utf8'));
+    compose = loadCompose('docker-compose.yml');
   });
 
   it('mongo shares NO network with any media sidecar', () => {

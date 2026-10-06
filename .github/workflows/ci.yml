@@ -10,23 +10,224 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# Exactly this and nothing wider (held by ci-workflow-is-sound). A job that needs more says so on the job:
+# only `ci-advisory` does, and only `actions: read`.
 permissions:
   contents: read
 
-jobs:
-  test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    # A green run takes 30-50 minutes. Without a ceiling a hung test holds the job for the platform's six hours
-    # with no output (PR #1475 sat in test:standalone for an hour before it was cancelled to read the log).
-    timeout-minutes: 90
+# One run per ref. A newer push to a PULL REQUEST supersedes the older run; a push to main (or a release branch) is
+# never cancelled, because it is the run that writes the layer caches every later run reads.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# ── The job graph (bundle-56) ─────────────────────────────────────────────────────────────────────────────────────
+#
+# Everything that does not need the application image starts at t=0, in parallel:
+#
+#   client-tests        the client's unit tests and its production build (its own `npm ci`)
+#   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`)
+#   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else
+#   prepare             the changelog check, the docs lint, and the one build of the test image
+#
+# Everything that drives a running Ythril waits for `prepare`, loads the image it built and starts ONLY the services
+# its suite needs (`--no-build --pull never`, so compose can neither rebuild nor pull a different image):
+#
+#   standalone-instance the @needs-instance standalone files: A, C and their databases
+#   integration         A, B and their databases, plus the two document sidecars (doc-render, doc-office)
+#   sync                A, B, C, D and their databases
+#   redteam             A, B, D and their databases
+#
+# `Build & Test` is the only required check. It does no work: it waits for every other job and fails unless each
+# succeeded. `ci-advisory` is the one job that may fail without failing the run (timings and trends).
+#
+# What is cached, and why only that: the test image's layers and each document sidecar's layers, in the GitHub
+# Actions layer cache, WRITTEN only by `prepare` on a push to main and READ by every run (a pull request that wrote
+# the cache would evict the layers every other run needs, and could poison the one main reads); the npm download
+# cache (setup-node), keyed on the lockfile. NOT cached, by measurement: atlas-local (the pull takes as long as a
+# restore plus a load), node_modules (`npm ci` takes as long as unpacking the tree), Dockerfile cache
+# mounts (the runner is fresh each run, so a mount cache is always empty). Why each timeout is what it is: see the job.
+#
+# ONNXRUNTIME_NODE_INSTALL_CUDA=skip on every `npm ci` is not an optimisation, it is what makes the install hermetic.
+# onnxruntime-node ships its CUDA execution-provider binaries OUTSIDE npm and its postinstall downloads them from a
+# GitHub release. On a runner with no nvcc the script logs "`nvcc` not found. Assuming CUDA 12" and downloads the GPU
+# tarball anyway, so every build depended on a GitHub release fetch succeeding, for binaries no runner here can use.
+# It failed twice in 35 minutes on 2026-08-12 with ECONNRESET / socket hang up, killing the job in ~37 seconds.
+# NOT a retry: a retry around a network fetch hides the non-hermeticity and still fails when the host is down.
+# Held for every install in every workflow by `cuda-download-is-skipped-everywhere`.
+
+jobs:
+  client-tests:
+    name: Client tests
+    runs-on: ubuntu-latest
+    # Measured 130-145 s of tests plus a 30 s production build; 15 minutes is five times that, and a hung Vitest
+    # worker is the failure it bounds.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=client --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Client unit tests
+        # Vitest + jsdom (see client/vitest.config.ts). This is what makes change-detection work (OnPush / zoneless)
+        # verifiable rather than shipped on a green build: OnPush's failure mode is a silently-stale view, invisible
+        # to `ng build`.
+        # The JSON report beside the console one is what `Build & Test` reads for skips (scripts/unexpected-skips.mjs:
+        # no skip is expected in the client). `--outputFile.json` is relative to the workspace, hence `../`; the default
+        # reporter is named so the log reads as it did. Called as the workspace script, NOT `npm run test:client --`:
+        # that script is itself an `npm run`, so flags after one `--` land on the INNER npm as unknown config and
+        # vitest never sees them (no report is written, and the upload then fails on an empty folder).
+        run: npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json
+
+      - name: Mask the client report
+        # The report holds every failure message in full (stack, diff, runner paths); the folder is uploaded below as a
+        # public artifact. Masked IN PLACE, always (a failing test is when it holds a failure), and a report that
+        # cannot be read is removed rather than uploaded raw (scripts/mask-client-report.mjs).
+        if: always()
+        run: node scripts/mask-client-report.mjs test-results/client.json
+
+      - name: Build client (production)
+        # Not redundant with the unit tests. Measured by injecting a template reference to a non-existent member: in
+        # a component that HAS a render spec, Vitest catches it; in a component with NO spec, Vitest passes green and
+        # only the AOT build reports it (TS2339). Components without a spec are a standing share of the client, so the
+        # second case is not a rarity. Bundle budgets (angular.json) are likewise enforced only here. The image build repeats it inside
+        # Docker ten minutes into a buildx log; here it fails in about thirty seconds.
+        run: npm run build:client
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-client-tests-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  standalone-pure:
+    name: Standalone (no services)
+    runs-on: ubuntu-latest
+    # The offline files that need no database: measured about 145 s of tests after about 80 s of install and builds.
+    # 30 minutes is a hung file, not a slow one.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        # Required by the standalone files that import server/dist/.
+        run: npm run build:server
+
+      - name: Build client (production)
+        # `no-external-assets` reads the production build and refuses under CI when there is none: a silent pass here
+        # is a build nobody checked for remote assets.
+        run: npm run build:client
+
+      - name: Standalone tests that need no services
+        run: npm run test:standalone:pure
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-standalone-pure-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  standalone-db:
+    name: Standalone (database)
+    runs-on: ubuntu-latest
+    # Measured 253-267 s of tests at width 4 plus about 100 s of setup. 30 minutes bounds a wedged Mongo.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=server --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Pull the database image
+        # The image the compose file pins by digest, read out of the compose file so the pin has one home.
+        run: |
+          docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet
+
+      - name: Start the database
+        # Only ythril-mongo-a: it is the one the harness connects to (127.0.0.1:27117). The harness tunes it itself
+        # on every open, so no setup script runs here.
+        run: |
+          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
+            --no-build --pull never ythril-mongo-a
+
+      - name: Standalone tests that open the database
+        run: npm run test:standalone:db
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-standalone-db-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Dump container logs on failure
+        if: failure()
+        uses: ./.github/actions/dump-test-stack-logs
+
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    # Measured: about 95-115 s for the image build on a warm cache, 2-3 minutes cold plus the HuggingFace model
+    # fetch; the checks around it take under a minute. 30 minutes bounds a stalled registry or cache service.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           # Full history: the CHANGELOG check below diffs `base...HEAD`, which needs a MERGE BASE. The default
-          # shallow clone has none, and the failure mode is the bad one — the diff errors, the check skips, and a
+          # shallow clone has none, and the failure mode is the bad one: the diff errors, the check skips, and a
           # missing entry looks like a passing build.
           fetch-depth: 0
 
@@ -36,31 +237,17 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # ONNXRUNTIME_NODE_INSTALL_CUDA=skip is not an optimisation, it is what makes this step hermetic.
-      #
-      # onnxruntime-node ships its CUDA execution-provider binaries OUTSIDE npm (too large for the registry) and
-      # its postinstall downloads them from a GitHub release. On a runner with no nvcc the script logs
-      # "`nvcc` not found. Assuming CUDA 12" and downloads the GPU tarball anyway - so every build depended on a
-      # GitHub release fetch succeeding, for binaries no runner here can use.
-      #
-      # It failed twice in 35 minutes on 2026-08-12 with ECONNRESET / socket hang up, killing the job in ~37
-      # seconds. Reading it as a test failure wastes the diagnosis; a job that dies that fast died before the
-      # tests. `skip` is the flag the install script documents for exactly this.
-      #
-      # NOT a retry. A retry around a network fetch hides the non-hermeticity and still fails when the release
-      # host is down; removing the fetch removes the dependency.
       - name: Install dependencies
-        run: npm ci
+        # The ROOT project only (the docs linter). Nothing in this job runs the server or the client, and
+        # every install script that runs here runs BEFORE the cache token below is exposed to the job.
+        run: npm ci --workspaces=false
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
-      # A change to shipped code needs a CHANGELOG entry under [Unreleased].
-      #
-      # The rule was already the house rule and was being followed — 28 PRs in the batch that added this, every one
-      # with an entry. Nothing enforced it, and a rule kept alive by memory is one distracted afternoon from lapsing,
-      # invisibly: nobody notices the entry that was never written.
-      #
-      # PRs only. On a push to main there is no base to diff against, and the entry was already required of the PR.
+      # A change to shipped code needs a CHANGELOG entry under [Unreleased]. The rule was already the house rule and
+      # was being followed; nothing enforced it, and a rule kept alive by memory is one distracted afternoon from
+      # lapsing, invisibly. PRs only: on a push to main there is no base to diff against, and the entry was already
+      # required of the PR.
       - name: CHANGELOG entry for shipped changes
         if: github.event_name == 'pull_request'
         run: |
@@ -69,91 +256,459 @@ jobs:
       - name: Lint docs
         run: npm run lint:docs
 
-      - name: Build server
-        run: npm run build:server
-        # Required by testing/standalone/oidc.test.js which imports server/dist/
-
-      - name: Client unit tests
-        # Vitest + jsdom (see client/vitest.config.ts). Runs fast, before the slow Docker
-        # build, so a client regression fails the job quickly. This is what makes change-
-        # detection work (OnPush / zoneless — P5) verifiable rather than shipped on a green
-        # build: OnPush's failure mode is a silently-stale view, invisible to `ng build`.
-        run: npm run test:client
-
-      - name: Build client (production)
-        # The production build already runs in CI — the Dockerfile's client-builder stage does
-        # `npm run build:prod --workspace=client`, so the image build below would fail on it. What this
-        # step changes is WHEN and HOW LEGIBLY: there it fails ~10 minutes in, inside a buildx log
-        # interleaved with layer caching. Here it fails in about ten seconds. Same reasoning as the
-        # unit-test step above.
-        #
-        # It is not redundant with `test:client`. Measured by injecting a template reference to a
-        # non-existent member:
-        #   - in a component that HAS a render spec, Vitest catches it (the render throws);
-        #   - in a component that has NO spec, Vitest passes 680/680 green and only the AOT build
-        #     reports it (TS2339 from the angular-compiler plugin).
-        # 19 of this repo's 67 components have no spec, so that second case is the common one.
-        # Bundle budgets (`all`: warn 8mb / error 12mb in angular.json) are likewise enforced only here.
-        run: npm run build:client
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Expose GitHub Actions cache to Buildx
-        # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-to type=gha` works.
-        uses: crazy-max/ghaction-github-runtime@v3
+        # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-from/--cache-to type=gha` works from a script.
+        # Pinned to a commit (v3.1.0) because it hands a credential to the step after it, and a tag can be moved.
+        # Immediately before the one step that uses it, and after the only `npm ci`.
+        uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124
 
       - name: Build test image (shared GHA layer cache)
-        # Build the image ONCE with a persistent GitHub Actions layer cache and tag it
-        # ythril-test:latest — every compose service reuses that tag (see the compose
-        # file), so the stack is not rebuilt per instance. The cache means the embedding
-        # model (a cache-stable early layer in the Dockerfile) is restored across runs
-        # instead of re-downloaded from HuggingFace, whose anonymous per-IP rate limit
-        # was intermittently 403-ing shared CI runners at build time.
+        # Build the image ONCE and write it as an archive: every stack job loads that archive, and every compose
+        # service uses the tag (see the compose file), so the stack is never rebuilt per instance. The layer cache
+        # means the embedding model (a cache-stable early layer in the Dockerfile) is restored across runs instead of
+        # re-downloaded from HuggingFace, whose anonymous per-IP rate limit was intermittently 403-ing shared CI
+        # runners at build time. `--output type=docker,dest=` writes the archive directly: no `--load` into the local
+        # daemon and no `docker save` round trip.
+        #
+        # The cache is READ on every run and WRITTEN on a push to main only.
         run: |
           docker buildx build \
             --cache-from type=gha,scope=ythril-test \
-            --cache-to type=gha,mode=max,scope=ythril-test \
-            --load -t ythril-test:latest \
-            -f Dockerfile .
+            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--cache-to type=gha,mode=max,scope=ythril-test' || '' }} \
+            --output type=docker,dest=ythril-test-image.tar \
+            -t ythril-test:latest -f Dockerfile .
 
-      - name: Build doc-render sidecar image (F11)
-        # First-party, built in-repo (sidecars/doc-render) — not in any registry, so pre-build it with an
-        # explicit context and tag. This makes it present locally, so `docker compose up` below reuses it
-        # instead of attempting a (denied) registry pull, and avoids relying on compose's relative
-        # build-context resolution.
-        run: docker build -t ythril-doc-render:0.1.0 sidecars/doc-render
+      - name: Fill the document sidecars' layer caches (main only)
+        # The integration job builds doc-render and doc-office from their own scopes and can only READ them. This is
+        # the one place that writes them, and only on main, so a pull request's first run builds them cold and every
+        # run after the first merge reads them warm. `cacheonly`: nothing is loaded or exported here.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
+          docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
+
+      - name: Upload the test image
+        # The Ythril test image only. It carries NOTICE and LICENSE exactly as the published image does (the same
+        # Dockerfile), which is why it may be a download of a public repository. NO sidecar image and NO database
+        # image ever goes here (held by ci-workflow-is-sound). One day: it is a build output, not a record.
+        uses: actions/upload-artifact@v4
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+          path: ythril-test-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          # The model layer is half the archive and does not compress; the CPU would buy nothing.
+          compression-level: 0
+
+  standalone-instance:
+    name: Standalone (instances)
+    needs: prepare
+    runs-on: ubuntu-latest
+    # The @needs-instance files, one at a time: measured about 110 s of tests after about 150 s of setup.
+    # 30 minutes bounds a hung request to a wedged instance.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=server --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Download the test image
+        uses: actions/download-artifact@v4
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Load the test image and pull the database image
+        # The pull does not depend on the archive, so the two overlap. The tag the archive carries is checked after
+        # the load: a stack that started from some other ythril-test:latest would measure a different build.
+        run: |
+          set -euo pipefail
+          docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+          pull=$!
+          docker load -i ythril-test-image.tar
+          docker image inspect ythril-test:latest > /dev/null
+          wait "$pull"
 
       - name: Start test containers
+        # Instances A and C only (rate-limit.test.js drives C), with their databases, and nothing else.
         run: |
+          node testing/_init/reset-test-configs.mjs
           # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
           mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
           chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
-          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300
-          node testing/sync/setup.js
+          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
+            --no-build --pull never ythril-a ythril-c
+          node testing/sync/setup.js a c
 
-      - name: Run all tests
-        run: npm run test:all:core
+      - name: Standalone tests that need a running instance
+        run: npm run test:standalone:instance
 
-      # A server-side failure is invisible from the test output alone. When a reconcile
-      # logs an error and returns, or a sidecar never comes up, the assertion reports a
-      # bare 404 and the reason lives in the container log — which teardown then throws
-      # away. Dumping the logs on failure is the difference between diagnosing a red
-      # build and guessing at it across 15-minute round trips.
-      # `--all` is load-bearing. `ps --services` lists only RUNNING containers, so a container that
-      # exited during startup — the one whose logs you actually need — was the single service this loop
-      # skipped. A `ythril-b exited (1)` failure dumped healthy logs for a, c and d and nothing at all
-      # for b, twice, and was written off as environmental both times because nobody could see why.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-standalone-instance-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Dump container logs on failure
         if: failure()
-        run: |
-          docker compose -p ythril-test -f testing/docker-compose.test.yml ps --all
-          for svc in $(docker compose -p ythril-test -f testing/docker-compose.test.yml ps --services --all); do
-            echo "::group::$svc"
-            docker compose -p ythril-test -f testing/docker-compose.test.yml logs --tail 500 "$svc" || true
-            echo "::endgroup::"
-          done
+        uses: ./.github/actions/dump-test-stack-logs
 
-      - name: Tear down containers
+  integration:
+    name: Integration
+    needs: prepare
+    runs-on: ubuntu-latest
+    # Measured 510-570 s of tests after about 150 s of setup, and one job rather than shards: standalone, not
+    # integration, was the longest suite on this runner shape. A cold doc-office build (LibreOffice) is on top of it
+    # on the first run. 45 minutes bounds a wedged instance.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=server --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        # Required by the integration files that import server/dist/.
+        run: npm run build:server
+
+      - name: Download the test image
+        uses: actions/download-artifact@v4
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Load the test image and pull the database image
+        run: |
+          set -euo pipefail
+          docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+          pull=$!
+          docker load -i ythril-test-image.tar
+          docker image inspect ythril-test:latest > /dev/null
+          wait "$pull"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the doc-render sidecar (its own layer cache scope)
+        # First-party, built in-repo (sidecars/doc-render), not in any registry. Built per job from its own scope and
+        # never shipped between jobs as a download. READ-only here: `prepare` fills the scope on main.
+        uses: docker/build-push-action@v6
+        with:
+          context: sidecars/doc-render
+          load: true
+          tags: ythril-doc-render:0.1.0
+          cache-from: type=gha,scope=ythril-doc-render
+
+      - name: Build the doc-office sidecar (its own layer cache scope)
+        # The opt-in LibreOffice sidecar (compose profile `office`), on :8101. Run here so a shipped capability is
+        # tested instead of skipped. Its first CI run builds it cold; every run after the first merge reads it warm.
+        uses: docker/build-push-action@v6
+        with:
+          context: sidecars/doc-office
+          load: true
+          tags: ythril-doc-office:0.1.0
+          cache-from: type=gha,scope=ythril-doc-office
+
+      - name: Start test containers
+        # A and B with their databases and the two document sidecars, at the compose file's defaults: this set is one
+        # of those the machine-room gate sums (the-test-stack-leaves-the-machine-room), and the sidecars' defaults are
+        # a working size for a PDF renderer and LibreOffice.
+        run: |
+          node testing/_init/reset-test-configs.mjs
+          # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
+          mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          docker compose -p ythril-test -f testing/docker-compose.test.yml --profile office up -d --wait --wait-timeout 300 \
+            --no-build --pull never ythril-a ythril-b doc-render doc-office
+          node testing/sync/setup.js a b
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Upload test results
         if: always()
-        run: docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-integration-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Dump container logs on failure
+        if: failure()
+        uses: ./.github/actions/dump-test-stack-logs
+
+  sync:
+    name: Sync
+    needs: prepare
+    runs-on: ubuntu-latest
+    # Measured 383-388 s of tests after about 150 s of setup. 45 minutes bounds a network that never converges.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=server --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        # Required by the sync files that import server/dist/.
+        run: npm run build:server
+
+      - name: Download the test image
+        uses: actions/download-artifact@v4
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Load the test image and pull the database image
+        run: |
+          set -euo pipefail
+          docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+          pull=$!
+          docker load -i ythril-test-image.tar
+          docker image inspect ythril-test:latest > /dev/null
+          wait "$pull"
+
+      - name: Start test containers
+        # All four instances, each with its database: the sync topologies span A, B, C and D. No document sidecar.
+        run: |
+          node testing/_init/reset-test-configs.mjs
+          # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
+          mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
+            --no-build --pull never ythril-a ythril-b ythril-c ythril-d
+          node testing/sync/setup.js
+
+      - name: Run sync tests
+        run: npm run test:sync
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-sync-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Dump container logs on failure
+        if: failure()
+        uses: ./.github/actions/dump-test-stack-logs
+
+  redteam:
+    name: Red team
+    needs: prepare
+    runs-on: ubuntu-latest
+    # Measured 126 s of tests after about 150 s of setup. 30 minutes bounds a hung probe.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --workspace=server --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        # Required by the red-team files that import server/dist/ (the shared token-rights helper does).
+        run: npm run build:server
+
+      - name: Download the test image
+        uses: actions/download-artifact@v4
+        with:
+          name: ythril-test-image-${{ github.run_attempt }}
+
+      - name: Load the test image and pull the database image
+        run: |
+          set -euo pipefail
+          docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+          pull=$!
+          docker load -i ythril-test-image.tar
+          docker image inspect ythril-test:latest > /dev/null
+          wait "$pull"
+
+      - name: Start test containers
+        # Every instance the red-team files reach (read from them by ci-workflow-is-sound): infra-managed-migration
+        # drives D, db-migration-disabled drives B, the token brute-force cases drive C.
+        run: |
+          node testing/_init/reset-test-configs.mjs
+          # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
+          mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
+          docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
+            --no-build --pull never ythril-a ythril-b ythril-c ythril-d
+          node testing/sync/setup.js a b c d
+
+      - name: Run red-team tests
+        run: npm run test:redteam
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-redteam-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Dump container logs on failure
+        if: failure()
+        uses: ./.github/actions/dump-test-stack-logs
+
+  # Not required, and allowed to fail: durations, trends and flags. It reads the other jobs' result artifacts, so it
+  # waits for them, and it never gates a merge. `actions: read` is for the run's job and step timings (the Actions
+  # API), and it is granted to this job alone.
+  ci-advisory:
+    name: CI advisory
+    needs: [client-tests, standalone-pure, standalone-db, standalone-instance, integration, sync, redteam]
+    if: always()
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    # Downloads a handful of small artifacts and prints a table. 10 minutes is generous for that.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download this run's test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*-${{ github.run_attempt }}
+          path: test-results
+          merge-multiple: true
+
+      - name: Timings summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Per-suite totals, the slowest files and tests, every skip with its reason, the failures, and (GH_TOKEN, for
+        # the Actions API) the files and suites slower than the last ten runs of main. Written to this run's step
+        # summary and to the log. A baseline GitHub will not give is a warning here, never a failed summary.
+        run: node scripts/test-times.mjs --summary --results test-results
+
+  # THE merge gate, and nothing else. The ruleset requires the check context "Build & Test" by exactly this name
+  # (renaming it silently drops the gate), and the merge monitor (`gh pr merge` on green) waits for that context.
+  # GitHub creates it only when the jobs it needs finish, so while other jobs of this workflow are still running
+  # there is NO "Build & Test" yet: the monitor reads that as in progress, never as passing.
+  #
+  # `if: always()` because a failed needed job would otherwise SKIP this one, and a skipped required check is not a
+  # red one. Every needed job must be `success` (a skipped or cancelled job is not): a check for `failure` passes
+  # exactly those. It needs every job of the file except `ci-advisory`, which is derived and held by
+  # `ci-workflow-is-sound`, so a job added tomorrow cannot be forgotten here.
+  test:
+    name: Build & Test
+    needs: [client-tests, standalone-pure, standalone-db, prepare, standalone-instance, integration, sync, redteam]
+    if: always()
+    runs-on: ubuntu-latest
+    # A shell function over the results, then two node scripts over a few megabytes of JSONL.
+    timeout-minutes: 10
+    steps:
+      # Everything after this first step runs ONLY when it passed (a step that follows a failed one is skipped, and none
+      # below has an `if` that would change that: `ci-workflow-is-sound` holds it). So the checks below read a COMPLETE
+      # set, never the partial one a failed job leaves — a verdict about half a run would be worse than none.
+      - name: Every job succeeded
+        run: |
+          fail=0
+          check() { [ "$2" = success ] || { echo "::error::$1 finished: $2"; fail=1; }; }
+          check client-tests "${{ needs.client-tests.result }}"
+          check standalone-pure "${{ needs.standalone-pure.result }}"
+          check standalone-db "${{ needs.standalone-db.result }}"
+          check prepare "${{ needs.prepare.result }}"
+          check standalone-instance "${{ needs.standalone-instance.result }}"
+          check integration "${{ needs.integration.result }}"
+          check sync "${{ needs.sync.result }}"
+          check redteam "${{ needs.redteam.result }}"
+          exit $fail
+
+      # The run's own evidence, read once every job succeeded. Both scripts import only node built-ins, so this job
+      # installs nothing (held by `unexpected-skips-fail-the-ci-gate`); it needs the checkout for the list of tracked
+      # test files (`git ls-files`) and the scripts themselves.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download every job's test results
+        uses: actions/download-artifact@v4
+        with:
+          # This attempt's artifacts only: a re-run of one job must not read the first attempt's files beside its own.
+          pattern: test-results-*-${{ github.run_attempt }}
+          path: test-results
+          merge-multiple: true
+
+      - name: Every tracked test file produced a test event
+        # A file a job's glob matched that loaded and registered nothing is "all tests pass" about a test that never ran.
+        run: node scripts/executed-tests.mjs --results test-results
+
+      - name: No skip nobody expected
+        # Exit 1 names each skipped test (file, test, reason); only `expected-in-ci:` in a listed file
+        # (testing/_shared/expected-in-ci.mjs) may stand. Exit 2 is a results set that cannot answer.
+        run: node scripts/unexpected-skips.mjs --results test-results

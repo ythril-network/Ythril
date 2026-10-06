@@ -16,6 +16,7 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { writeInOneCommands } from '../db/one-command.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
@@ -705,7 +706,13 @@ export async function renameFileMetaByPrefix(
     path: dstPrefix + d.path.slice(srcPrefix.length),
     updatedAt: now,
   }));
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertMany(updated.map(d => asDoc<FileMetaDoc>(d)));
+  const filesColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
+  // before the write was sliced. The moved directory's metadata is deleted BEFORE this insert, so a set larger than that — several commands — can
+  // fail between two of them and leave the later rows deleted and not re-inserted: the limit of delete-then-insert, stated
+  // here rather than hidden. Making it insert-first changes what the move does with a destination that is taken, and is owed
+  // its own tests against the store.
+  await writeInOneCommands(updated.map(d => asDoc<FileMetaDoc>(d)), (slice, { ordered }) => filesColl.insertMany(slice, { ordered }), { ordered: true });
   // Each file's links follow it, exactly as a single rename carries them (Q-164).
   for (let i = 0; i < docs.length; i++) {
     await carryFileLinks(spaceId, docs[i]!._id, updated[i]!._id, docs[i]!.author ?? authorRef());

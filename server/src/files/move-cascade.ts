@@ -40,6 +40,7 @@ import { bytesPresent } from './stored-bytes.js';
 import { actUnderPendingTombstones, forgetFinishedMove, moveWasBegun, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
 import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
+import { writeInOneCommands } from '../db/one-command.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -93,7 +94,12 @@ async function relocateDerivedFileMeta(spaceId: string, src: string, dst: string
     return { ...d, _id: id, path: id, parentFileId: movedId(d.parentFileId!, src, dst) ?? d.parentFileId, updatedAt: now };
   });
   await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: [...derived.map(d => d._id), ...moved.map(d => d._id)] } }));
-  await files.insertMany(moved.map(d => asDoc<FileMetaDoc>(d)));
+  // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
+  // before the write was sliced. The file's derived rows are deleted BEFORE this insert, so a set larger than that — several commands — can
+  // fail between two of them and leave the later rows deleted and not re-inserted: the limit of delete-then-insert, stated
+  // here rather than hidden. Making it insert-first changes what the move does with a destination that is taken, and is owed
+  // its own tests against the store.
+  await writeInOneCommands(moved.map(d => asDoc<FileMetaDoc>(d)), (slice, { ordered }) => files.insertMany(slice, { ordered }), { ordered: true });
   for (let i = 0; i < derived.length; i++) {
     if (derived[i]!._id === moved[i]!._id) continue;
     await files.updateMany(

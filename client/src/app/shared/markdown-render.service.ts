@@ -12,43 +12,16 @@
 import { Injectable } from '@angular/core';
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { headingIdFor, headingSlug, headingTextOf, makeSlugger } from './heading-slug';
+
+// Where the slug rule lives, so the Help gate can run it; kept exported here for the callers that read it from the renderer.
+export { headingSlug };
+
 
 /** Escapes a string for safe interpolation into HTML. Used for the invalid-diagram fallback. */
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-/**
- * GitHub's heading-anchor slug, because that is the dialect the documents are already written in.
- *
- * The user guide's table of contents alone carries 30 anchor links, and every one of them was authored
- * against GitHub's rules: lowercase, strip anything that is not a word character, space or hyphen, spaces
- * to hyphens. That is why this is not "some slug function" — an implementation that merely produced
- * *stable* ids would still leave every one of those links pointing at nothing.
- *
- * They read `](userguide/02-brain.md#facts)` since the guide was split into chapters, which changes
- * nothing here: the Help page joins the chapters into one document and strips the file prefix, so the
- * fragment still has to resolve against a heading THIS function turned into an id.
- *
- * Note em-dashes: `## Brain — Review tab` drops the dash and keeps both spaces, giving the double hyphen
- * in `#brain--review-tab`. Matching that oddity is the point.
- */
-export function headingSlug(text: string): string {
-  return text.trim().toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s/g, '-');
-}
-
-/** Adds `-1`, `-2`, … to repeated slugs, as GitHub does, so duplicate headings stay addressable. */
-function makeSlugger(): (text: string) => string {
-  const seen = new Map<string, number>();
-  return (text: string) => {
-    const base = headingSlug(text);
-    const n = seen.get(base) ?? 0;
-    seen.set(base, n + 1);
-    return n === 0 ? base : `${base}-${n}`;
-  };
 }
 
 @Injectable({ providedIn: 'root' })
@@ -78,7 +51,7 @@ export class MarkdownRenderService {
         // section is impossible. `this.parser.parseInline` keeps inline markup inside the heading.
         heading({ tokens, depth }) {
           const inner = this.parser.parseInline(tokens);
-          return `<h${depth} id="${escapeHtml(slug(inner.replace(/<[^>]*>/g, '')))}">${inner}</h${depth}>\n`;
+          return `<h${depth} id="${escapeHtml(headingIdFor(slug(headingTextOf(inner))))}">${inner}</h${depth}>\n`;
         },
       },
     });

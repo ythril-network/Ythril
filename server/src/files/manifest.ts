@@ -17,6 +17,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
+import { writeInOneCommands } from '../db/one-command.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
 import { log, peerText } from '../util/log.js';
@@ -152,9 +153,11 @@ export async function buildFileManifest(
 
   // Persist newly-computed / changed hashes so the next round reuses them.
   if (updates.length > 0) {
-    await cacheColl.bulkWrite(asBulk<HashCacheDoc>(
+    await writeInOneCommands(
       updates.map(u => ({ replaceOne: { filter: { _id: u._id }, replacement: u, upsert: true } })),
-    ));
+      (slice, { ordered }) => cacheColl.bulkWrite(asBulk<HashCacheDoc>(slice), { ordered }),
+      { ordered: true },
+    );
   }
   // Prune cache entries for files that no longer exist (only on a full walk, where
   // `seen` is complete). Bounded by the number of deletions since the last build.

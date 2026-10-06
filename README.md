@@ -134,7 +134,7 @@ curl -X POST http://localhost:3200/api/recall \
 |---|---|
 | 👤 User / operator | [Workstation Mode](docs/workstation-mode-guide.md) · [User Guide](docs/userguide.md) · [Use-case examples](docs/usecase-examples.md) |
 | 🔌 Integrator (API / MCP) | [Integration Guide](docs/integration-guide.md) · [Network Types](docs/network-types.md) · [Sync Protocol](docs/sync-protocol.md) |
-| 🛠️ Developer | [Contribution Guide](docs/contribution-guide.md) · [UI Primitives](docs/ui-primitives.md) · [Docker Build](docs/docker-build-protocol.md) |
+| 🛠️ Developer | [Contribution Guide](docs/contribution-guide.md) · [UI Primitives](docs/ui-primitives.md) · [Testing and CI caching](docs/testing-guide.md#what-is-cached-and-what-is-not) |
 
 </div>
 

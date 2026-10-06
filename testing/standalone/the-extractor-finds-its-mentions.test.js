@@ -6,10 +6,11 @@
  * committed LoCoMo extractions with the real sidecar — the benchmark as a test input, never a shape in the
  * code — because 4.12 can only accept what was proposed.
  *
- * ## A skip has to be loud
+ * ## A skip has to be a skip, and say which cause
  *
- * The transcripts are not in CI and the sidecar is not in the CI stack, so the recall gate runs where both exist and says
- * so where they do not.
+ * The transcripts are not in CI, so the recall gate skips there with `expected-in-ci: corpus not fetched`. The
+ * sidecar is a separate cause: where the corpus has been fetched and the sidecar is not running, the gate skips
+ * locally and FAILS on CI, because that absence is a broken runner and not a design.
  *
  * Run: node --test testing/standalone/the-extractor-finds-its-mentions.test.js
  * (requires a prior `npm run build` in server/; the recall gate needs the `doc-nlp` sidecar running)
@@ -18,6 +19,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { loadConversations } from '../../benchmarks/locomo/loader.mjs';
+import { requireInput } from '../_shared/absent-input.mjs';
 
 let findMentions, spansOf, isNlpAvailable, NlpUnavailableError, splitCaptions;
 before(async () => {
@@ -87,16 +89,17 @@ describe('the sidecar client', () => {
 });
 
 describe('recall against the committed extractions, with the real sidecar', () => {
-  it('proposes at least 92% of the entities whose name the conversation actually says', async () => {
+  it('proposes at least 92% of the entities whose name the conversation actually says', async (t) => {
     const EX = 'benchmarks/locomo/extractions';
     const files = existsSync(EX) ? readdirSync(EX).filter(f => f.endsWith('.json')) : [];
     assert.ok(files.length >= 2, `only ${files.length} extractions found — the sweep would be vacuous`);
     const path = JSON.parse(readFileSync('benchmarks/locomo/pin.json', 'utf8')).datasets.locomo.cachePath;
-    if (!existsSync(path) || !(await isNlpAvailable())) {
-      console.log(`SKIPPED: ${!existsSync(path) ? `${path} is not fetched` : 'the NLP sidecar is not running'}. `
-        + `Mention recall over the ${files.length} committed extractions was NOT measured. Local only.`);
-      return;
-    }
+    // Two causes, two answers (they used to share one message and one `return`). The corpus is fetched by URL and
+    // never present in CI: a real skip CI expects. The sidecar being down is a different thing: where the corpus
+    // IS fetched, the recall gate needs the sidecar, and CI must not read its absence as a pass.
+    if (!existsSync(path)) return t.skip('expected-in-ci: corpus not fetched');
+    if (!requireInput(t, await isNlpAvailable(), 'the NLP sidecar is not running',
+      'The corpus is fetched here, so the recall gate needs the doc-nlp sidecar (DOC_NLP_REPLICAS, NLP_SIDECAR_URL).')) return;
     const byId = new Map(loadConversations(path).map(c => [c.id, c]));
     const norm = s => s.toLowerCase().replace(/’/g, "'").replace(/^(the|a|an)\s+/, '').replace(/[.,!?;:"]+$/, '').replace(/\s+/g, ' ').trim();
     let reachable = 0, found = 0;

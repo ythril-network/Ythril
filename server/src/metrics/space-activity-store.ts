@@ -25,6 +25,7 @@
  * with what it was carrying.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log } from '../util/log.js';
 import { drainSpaceActivity, hourBucket, activityDocId, type CallClass } from './space-activity.js';
@@ -117,7 +118,8 @@ export async function flushSpaceActivity(now = Date.now()): Promise<number> {
   });
 
   try {
-    await col<ActivityDoc>(ACTIVITY_COLLECTION).bulkWrite(ops as any, { ordered: false });
+    const activity = col<ActivityDoc>(ACTIVITY_COLLECTION);
+    await writeInOneCommands(ops, (slice, { ordered }) => activity.bulkWrite(slice as any, { ordered }), { ordered: false });
     return ops.length;
   } catch (err) {
     // The counts are already drained, so they are gone. Say what was lost rather than failing a timer.
@@ -181,7 +183,8 @@ export async function renameSpaceActivity(fromId: string, toId: string): Promise
     { insertOne: { document: { ...row, _id: activityDocId(toId, row.bucket), space: toId } } },
     { deleteOne: { filter: { _id: row._id } } },
   ]);
-  await c.bulkWrite(ops as any, { ordered: false });
+  // An insert and a delete per bucket: sliced by type, so each slice is one command (`bulkCommandOf`).
+  await writeInOneCommands(ops, (slice, { ordered }) => c.bulkWrite(slice as any, { ordered }), { ordered: false, commandKindOf: bulkCommandOf });
   return rows.length;
 }
 export interface SpaceActivitySummary {

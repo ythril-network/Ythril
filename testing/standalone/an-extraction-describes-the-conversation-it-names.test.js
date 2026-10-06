@@ -141,7 +141,7 @@ describe('coverage measured against the corpus, not against the file', () => {
 });
 
 describe('every committed extraction, against the real corpus', () => {
-  it('each one describes the conversation it is named for', () => {
+  it('each one describes the conversation it is named for', (t) => {
     const files = existsSync(EXTRACTIONS) ? readdirSync(EXTRACTIONS).filter(f => f.endsWith('.json')) : [];
     assert.ok(files.length >= 2, `only ${files.length} extractions found — the sweep below would be vacuous`);
 
@@ -149,12 +149,12 @@ describe('every committed extraction, against the real corpus', () => {
     const path = pin.datasets.locomo.cachePath;
     if (!existsSync(path)) {
       /*
-       * Loud, not silent. The corpus is pulled by URL and is never present in CI, so this sweep has only
-       * ever run on a developer machine — and a skip that prints nothing is indistinguishable from a pass.
+       * A REAL skip, and an EXPECTED one. The corpus is pulled by URL against a pinned hash and is never present in
+       * CI, so this sweep has only ever run on a developer machine. It used to print "SKIPPED" and return, which the
+       * runner counts as a pass — indistinguishable from a sweep that checked something. `expected-in-ci:` is the
+       * prefix CI's unexpected-skip check lets through, and only files on the gate's list (this one is) may carry it.
        */
-      console.log(`SKIPPED against the corpus: ${path} is not fetched. The ${files.length} committed `
-        + 'extractions were NOT cross-checked. This sweep runs locally only.');
-      return;
+      return t.skip('expected-in-ci: corpus not fetched');
     }
     const byId = new Map(loadConversations(path).map(c => [c.id, c]));
     for (const file of files) {

@@ -28,10 +28,33 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { loadAllWorkflows, parseWorkflow, jobEntries, stepsOf, runsNpmCi, shellOf } from '../_shared/ci-workflow.mjs';
 
 const SKIP = 'ONNXRUNTIME_NODE_INSTALL_CUDA';
 const read = (p) => readFileSync(p, 'utf8');
+
+/**
+ * Every `npm ci` step of a workflow that does not have the skip in force — read from the PARSED workflow, per step.
+ *
+ * "In force" is the step's own `env`, its job's, or the workflow's: the three places GitHub resolves it from. It is
+ * asked of EACH install because the question is per install, and per JOB because a workflow that grows from one job
+ * to several carries the trap the Dockerfile's stages do: a declaration beside the first install says nothing about
+ * the install in the job added next to it. The previous form of this gate asked whether the file's TEXT contained
+ * `ONNXRUNTIME_NODE_INSTALL_CUDA: skip` anywhere, which a comment, a different job or an `echo` satisfies.
+ */
+function npmCiWithoutSkip(doc, label) {
+  const inForce = (env) => env != null && String(env[SKIP]) === 'skip';
+  const found = { installs: 0, unguarded: [] };
+  for (const { id, job } of jobEntries(doc)) {
+    for (const step of stepsOf(job)) {
+      if (!runsNpmCi(step)) continue;
+      found.installs++;
+      if (inForce(step.env) || inForce(job.env) || inForce(doc.env)) continue;
+      found.unguarded.push(`${label} job ${id}, step "${step.name ?? shellOf(step).trim().split('\n')[0]}"`);
+    }
+  }
+  return found;
+}
 
 /** Dockerfile lines, comments dropped — a `#` line naming the variable must not satisfy the check. */
 const dockerLines = () =>
@@ -57,14 +80,48 @@ describe('the CUDA download is skipped in every build', () => {
     assert.ok(count >= 3, `parsed only ${count} npm ci steps — the scanner is wrong, not the Dockerfile`);
   });
 
-  it('both workflows still carry it', () => {
+  it('every install of every workflow has the skip in force, job by job', () => {
     // The half that was already true, re-asserted: this gate exists because the setting was applied in one
-    // place and not another, and a gate that only watches the new place would let the old one lapse.
-    const wf = execSync('git ls-files ".github/workflows/*.yml"', { encoding: 'utf8' })
-      .split('\n').map((l) => l.trim()).filter(Boolean);
-    const withCi = wf.filter((f) => read(f).includes('npm ci'));
+    // place and not another, and a gate that only watches the new place would let the old one lapse. It is
+    // asked of every `npm ci` in every job, because `ci.yml` is no longer one job.
+    const per = loadAllWorkflows().map(({ file, doc }) => ({ file, ...npmCiWithoutSkip(doc, file) }));
+    const withCi = per.filter((p) => p.installs > 0);
     assert.ok(withCi.length >= 2, `expected at least two workflows running npm ci, found ${withCi.length}`);
-    const missing = withCi.filter((f) => !read(f).includes(`${SKIP}: skip`));
-    assert.deepEqual(missing, [], `these workflows run npm ci without the skip: ${missing.join(', ')}`);
+    const unguarded = per.flatMap((p) => p.unguarded);
+    assert.deepEqual(unguarded, [], `these installs run with the CUDA download still enabled:\n  ${unguarded.join('\n  ')}`);
+  });
+});
+
+describe('the workflow scanner, against the shapes that fooled the text match', () => {
+  const wf = (jobs, top = '') => parseWorkflow(`on: push\n${top}jobs:\n${jobs}`, 'fixture');
+  const job = (id, steps) => `  ${id}:\n    runs-on: ubuntu-latest\n    steps:\n${steps}`;
+  const withSkip = `        env:\n          ${SKIP}: skip\n`;
+  const unguarded = (doc) => npmCiWithoutSkip(doc, 'f').unguarded;
+
+  it('a step-level, a job-level and a workflow-level skip each count', () => {
+    assert.deepEqual(unguarded(wf(job('a', `      - run: npm ci\n${withSkip}`))), []);
+    assert.deepEqual(unguarded(wf(`  a:\n    runs-on: x\n    env:\n      ${SKIP}: skip\n    steps:\n      - run: npm ci\n`)), []);
+    assert.deepEqual(unguarded(wf(job('a', '      - run: npm ci\n'), `env:\n  ${SKIP}: skip\n`)), []);
+  });
+
+  it('a job added beside a guarded one is flagged — the text match saw the first job and passed', () => {
+    const doc = wf(job('a', `      - run: npm ci\n${withSkip}`) + job('b', '      - run: npm ci --workspace=client\n'));
+    assert.equal(unguarded(doc).length, 1);
+    assert.match(unguarded(doc)[0], /job b/);
+  });
+
+  it('the variable named in a comment, an echo or another step satisfies nothing', () => {
+    const doc = wf(job('a', `      # ${SKIP}: skip\n      - run: 'echo "${SKIP}: skip"'\n      - run: npm ci\n`));
+    assert.equal(unguarded(doc).length, 1);
+  });
+
+  it('a different value is not the skip', () => {
+    const doc = wf(job('a', `      - run: npm ci\n        env:\n          ${SKIP}: download\n`));
+    assert.equal(unguarded(doc).length, 1);
+  });
+
+  it('npm ci in a comment line of a script is not an install, and `npm run ci-check` is not npm ci', () => {
+    const doc = wf(job('a', '      - run: |\n          # npm ci happens elsewhere\n          npm run ci-check\n'));
+    assert.deepEqual(npmCiWithoutSkip(doc, 'f'), { installs: 0, unguarded: [] });
   });
 });

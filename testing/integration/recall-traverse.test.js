@@ -287,7 +287,7 @@ describe('Recall traverse — graph expansion', () => {
   const q = 'authentication token scoping vault';
 
   it('traverse: 0 is identical to classic recall (backward compat)', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], traverse: 0 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, undefined, 'classic response must not carry traverseDepth');
@@ -299,7 +299,7 @@ describe('Recall traverse — graph expansion', () => {
   });
 
   it('traverse: 1 returns the seed plus its direct neighbours, annotated', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 1 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, 1);
@@ -327,7 +327,7 @@ describe('Recall traverse — graph expansion', () => {
   });
 
   it('traverse: 2 reaches the two-hop neighbour with a two-edge path', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 2 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const b = nested(r.body.results, entB);
@@ -343,7 +343,7 @@ describe('Recall traverse — graph expansion', () => {
   });
 
   it('a cycle does not loop or duplicate records', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // C→A closes a cycle. Depth 3 would revisit A without cycle detection.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 3 }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -363,7 +363,7 @@ describe('Recall traverse — links, which are not edges', () => {
   const q = 'authentication token scoping vault';
 
   it('with no flag, a linked memory is not reached — this is what every existing caller gets', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     /*
      * The backward-compatibility half, and the reason all three flags default off. A memory that names the
      * seed through a LINK is related to it, and an ordinary `traverse: 1` must still not return it: a change
@@ -376,7 +376,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('includeMemories reaches it, with its kind and a synthetic edge', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: { depth: 1, includeMemories: true } }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
 
@@ -398,7 +398,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('edgeLabels excludes a link like any other label', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // A filter that cannot exclude something is not a filter. Asking for `depends_on` alone must not return
     // memories just because the flag is on.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
@@ -411,7 +411,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('a memory SEED is no longer a dead end — the walk starts from what it names', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     /*
      * The reported limit, from the other side. Edge endpoints are entity ids, so a matched memory had nothing
      * to follow and came back with an empty `_graph` at any depth; both doors documented that and told the
@@ -433,7 +433,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('and the walk carries on from there — hop 2 is an ordinary edge', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // Reaching the entity and stopping would be half the fix: the point of starting from it is that
     // everything the graph relates to it is now reachable from the memory that matched.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
@@ -447,7 +447,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('a memory seed reaches ANOTHER MEMORY through the entity they share', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     /*
      * The case the other three do not make. Each of them covers one leg — an entity seed reaching a memory
      * that names it, a memory seed reaching the entity it names, a memory seed reaching another entity across
@@ -474,7 +474,7 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 
   it('the echo reports the flags, so a caller can see what the server did', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // A response echoing `traverse: 1` for a call that also asked for memories would describe a walk the
     // server did not do, which is the one thing the echo exists to prevent.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 5, traverse: { depth: 1, includeMemories: true } }) });
@@ -563,7 +563,7 @@ describe('Recall traverse — no graph spill; a remainder only on remainderDump'
 
 describe('Recall traverse — MCP tool', () => {
   it('MCP recall accepts traverse and returns annotated results', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     let session;
     try {
       session = await openMcpSession(token());

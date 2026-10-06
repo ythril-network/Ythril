@@ -300,6 +300,7 @@ function answer(m: Mounted, response: Record<string, unknown>): void {
 
 async function until(what: string, cond: () => boolean, ms = 3000): Promise<void> {
   const t0 = Date.now();
+  // waits-differently: a client spec cannot import the test workspace's wait module (an .mjs outside the client project)
   while (!cond()) {
     if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`);
     await new Promise(r => setTimeout(r, 10));

@@ -1,23 +1,28 @@
 ##
 ## Multi-instance test Docker Compose
 ##
-## Spins up three independent Ythril instances (a, b, c) each with their own
-## MongoDB.  Use this to test sync networks without any shared state.
+## Four independent Ythril instances (a, b, c, d), each with its own MongoDB, and the two document sidecars
+## (doc-render, and doc-office under the `office` profile). Nothing is shared between instances; a suite starts
+## only the services it drives (the sets are named in .github/workflows/ci.yml, one per job).
 ##
-## Node topology for tests:
+## What each instance is for (the sets each CI job starts are in ci.yml):
+##   a       the standalone @needs-instance files (with c), the integration, sync and red-team suites
+##   b       the second instance of the integration, sync and red-team suites
+##   c       the third sync member, and the second instance of the standalone @needs-instance files
+##   d       the infra-managed migration lock test (red-team) and the fourth sync member
+##
+## Node topology for the sync tests:
 ##   Closed network:     a <-> b (both directions)
 ##   Braintree:          a (root) -> b (node) -> c (leaf)
 ##   Democratic:         a, b, c  (3-way vote)
 ##
-## Usage:
-##   docker compose -f docker-compose.test.yml up --build -d
-##   docker compose -f docker-compose.test.yml down -v
+## Usage (locally; `npm run test:up` does all of it, `npm run test:down` removes it):
+##   docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait
+##   node testing/sync/setup.js [a b ...]   # completes setup and writes each instance's token under testing/sync/configs/
+##   docker compose -p ythril-test -f testing/docker-compose.test.yml down -v
 ##
-## Pre-requisites:
-##   scripts/test-setup/init-a.json  — config for instance A
-##   scripts/test-setup/init-b.json  — config for instance B
-##   scripts/test-setup/init-c.json  — config for instance C
-##   (See testing/sync/README.md for setup instructions)
+## In CI the image is built once, by the `prepare` job, and every stack job loads it and starts its services with
+## `--no-build --pull never`; `ythril-a` below is the only service that carries a build, for a local `up`.
 ##
 
 services:
@@ -25,10 +30,11 @@ services:
   # Instance A  (port 3200)
   # ──────────────────────────────────────────
   ythril-a:
-    # Sole builder of the shared test image. Instances b/c/d only reference the tag
+    # Sole builder of the shared test image for a LOCAL `up`. Instances b/c/d only reference the tag
     # below — building the same tag from four services at once races on the export
-    # and intermittently corrupts the image locally. CI skips this entirely: it
-    # pre-builds `ythril-test:latest` once with a shared layer cache (see ci.yml).
+    # and intermittently corrupts the image locally. CI never builds here: its `prepare` job builds
+    # `ythril-test:latest` once (with a shared layer cache, see ci.yml) and each stack job loads it and starts
+    # its services with `--no-build --pull never`.
     build: ..
     image: ythril-test:latest
     container_name: ythril-a
@@ -37,7 +43,7 @@ services:
     # CPU too, and the SUM is the rule (Q-57, 2026-09-25): nine memory ceilings of 3 GB added up to more than the
     # 24 GB VM, no CPU ceiling let a sync run take 602%, and the owner's editor was killed. The defaults total
     # 8.5 CPUs and 16 GB — two thirds of the VM at most — and every one is raised by its env var on a bigger
-    # runner (YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}, and _APP_A_MEM / _MONGO_A_MEM for instance A).
+    # runner (YTHRIL_TEST_{APP,MONGO,DOCRENDER,DOCOFFICE}_{CPUS,MEM}, and _APP_A_MEM / _MONGO_A_MEM for instance A).
     # Instance A gets the larger share because it carries the standalone and integration suites: measured at
     # 1.6 GB (app, embedding model loaded) and 0.8 GB (mongo) at rest, and at 2 GB / 1.5 GB both were killed
     # mid-run in CI. That 1.6 GB was measured when the model ran inside the server process; it now runs in a child
@@ -46,8 +52,11 @@ services:
     # `the-test-stack-leaves-the-machine-room.test.js`.
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_A_MEM:-2560m}"
+    # The four instances publish on loopback only, like the database and the sidecars: their tokens and the database
+    # password are in this file. The host-side suites reach them by 127.0.0.1 (`testing/sync/helpers.js`), the
+    # containers reach each other by name. Held by `the-test-stacks-document-sidecars-are-hardened-like-production`.
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
     volumes:
       - ./sync/configs/a:/config
       - ythril-data-a:/data
@@ -120,7 +129,12 @@ services:
     # A ceiling for TESTS, not a sizing guide: a space of 44 000 records ran the database out of memory at this
     # limit, and 5 GB held. Raise YTHRIL_TEST_MONGO_A_MEM for a test that seeds tens of thousands of records. The
     # production knob is YTHRIL_MONGO_MEM_LIMIT (default 4g, unmeasured at that size); see docs/contribution-guide.md.
-    mem_limit: "${YTHRIL_TEST_MONGO_A_MEM:-2560m}"
+    # 3072m with mongot's heap set to 1280m below: the harness Mongo carries every suite in CI's order, and its search
+    # process (mongot, a JVM) defaults to a quarter of the container — 640 MiB at the old 2560m — which the live
+    # vector indexes of standalone's concurrent db batches, on top of what the earlier suites left, exhausted:
+    # `OutOfMemoryError: Java heap space`, then the runner stops mongod cleanly and every later test is refused
+    # (PR #1484's CI, 2026-10-05). The +512m is taken from mongo-b/c/d's default so the stack's sum stays in budget.
+    mem_limit: "${YTHRIL_TEST_MONGO_A_MEM:-3072m}"
     # Published so standalone tests can assert database-LEVEL behaviour — that MongoDB actually agrees
     # with a query rule, not merely that a JS matcher does. Until this existed, rules like
     # `stalledJobFilter` were only ever checked against hand-built document fixtures, which cannot see
@@ -139,6 +153,12 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      # mongot's heap, explicit: see mem_limit above. Raise it with the limit on a bigger runner.
+      JAVA_TOOL_OPTIONS: "-Xmx${YTHRIL_TEST_MONGOT_A_HEAP:-1280m}"
+      # mongot's and the runner's own logs go to /dev/null by default, so a mongot death showed only as the
+      # runner's SIGTERM to mongod. CI's failure dump prints these files.
+      MONGOT_LOG_FILE: /tmp/mongot.log
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -152,12 +172,12 @@ services:
   # Instance B  (port 3201)
   # ──────────────────────────────────────────
   ythril-b:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-b
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3201:3200"
+      - "127.0.0.1:3201:3200"
     volumes:
       - ./sync/configs/b:/config
       - ythril-data-b:/data
@@ -201,7 +221,9 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-b
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    # 1344m (was 1536m): the 512m mongo-a needs for mongot's heap comes from b, c and d, whose peaks in the full CI
+    # order were measured at 1092, 733 and 715 MiB (2026-10-05), so the stack's sum stays in budget.
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"
     volumes:
       - ythril-mongo-b-data:/data/db
       - ythril-mongo-b-configdb:/data/configdb
@@ -210,6 +232,9 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      # mongot's and the runner's own logs to a file, so CI's failure dump can print a mongot death (see mongo-a).
+      MONGOT_LOG_FILE: /tmp/mongot.log
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -223,12 +248,12 @@ services:
   # Instance C  (port 3202)  — braintree leaf
   # ──────────────────────────────────────────
   ythril-c:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-c
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3202:3200"
+      - "127.0.0.1:3202:3200"
     volumes:
       - ./sync/configs/c:/config
       - ythril-data-c:/data
@@ -257,7 +282,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-c
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
     volumes:
       - ythril-mongo-c-data:/data/db
       - ythril-mongo-c-configdb:/data/configdb
@@ -266,6 +291,8 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -281,12 +308,12 @@ services:
   # Used exclusively by red-team-tests/infra-managed-migration.test.js.
   # ──────────────────────────────────────────
   ythril-d:
-    image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
+    image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-d
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3203:3200"
+      - "127.0.0.1:3203:3200"
     volumes:
       - ./sync/configs/d:/config
       - ythril-data-d:/data
@@ -324,7 +351,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-d
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
     volumes:
       - ythril-mongo-d-data:/data/db
       - ythril-mongo-d-configdb:/data/configdb
@@ -333,6 +360,8 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -343,24 +372,76 @@ services:
       - ythril-test
 
   # F11 page-render sidecar — shared by all four instances (RENDER_SIDECAR_URL=http://doc-render:8100).
-  # Light PyMuPDF service; lets the render-sidecar integration test exercise real PDF rasterization in CI.
+  # Light PDF-rendering service (pypdfium2); lets the render-sidecar integration test exercise real PDF
+  # rasterization in CI.
+  #
+  # It parses UNTRUSTED documents, so it carries the hardening production gives it (docker-compose.yml): read-only
+  # rootfs, no capabilities, no-new-privileges, a process ceiling. Held, derived from the production service, by
+  # `the-test-stacks-document-sidecars-are-hardened-like-production.test.js`.
+  #
+  # The CPU and memory DEFAULTS are a working size: half of production's, which the machine-room gate holds
+  # (`the-test-stack-leaves-the-machine-room`) as the floor under any budget. They are raisable by the variables below.
+  # sums the defaults of every set one `docker compose up` starts together against the development VM).
   doc-render:
     build: ../sidecars/doc-render
     image: ythril-doc-render:0.1.0
     container_name: ythril-doc-render-test
     cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.5}"
     mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-512m}"
+    pids_limit: "${YTHRIL_TEST_DOCRENDER_PIDS:-128}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     # Published to the host in the TEST stack only, so the render-sidecar integration test (which runs on
-    # the host, not through ythril) can hit it directly. The workstation compose keeps it internal-only.
+    # the host, not through ythril) can hit it directly. The workstation compose keeps it internal-only. Bound to
+    # LOOPBACK: a bare `8100:8100` listens on every interface of the machine that runs the suite, which put an
+    # untrusted-document parser on the network of every CI runner and developer machine.
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health',timeout=3).read() or sys.exit(1)"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - ythril-test
+
+  # F11-a office-render sidecar (LibreOffice -> PDF -> page PNGs) — OPT-IN: the `office` profile, so `up` without
+  # `--profile office` (or naming it) never starts it. Only the integration job of ci.yml enables it: that is what
+  # makes the shipped capability tested instead of skipped (`integration/doc-office-sidecar.test.js`, :8101).
+  #
+  # Same hardening as production, plus the tmpfs LibreOffice's per-request profile needs; loopback-bound like
+  # doc-render. Its defaults are a working size for LibreOffice (1 CPU, 1.5g, under production's 2 CPUs and 2g);
+  # the profile keeps it out of the default set, so the machine-room gate counts it only for the CI job that asks for
+  # it. Raise them with YTHRIL_TEST_DOCOFFICE_{CPUS,MEM} on a runner with room.
+  doc-office:
+    profiles: ["office"]
+    build: ../sidecars/doc-office
+    image: ythril-doc-office:0.1.0
+    container_name: ythril-doc-office-test
+    cpus: "${YTHRIL_TEST_DOCOFFICE_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_DOCOFFICE_MEM:-1536m}"
+    pids_limit: "${YTHRIL_TEST_DOCOFFICE_PIDS:-512}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8101:8100"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health',timeout=3).read() or sys.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - ythril-test
 

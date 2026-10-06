@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES } from '../sync/helpers.js';
+import { INSTANCES, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_C = path.join(__dirname, '..', 'sync', 'configs', 'c', 'token.txt');
@@ -132,15 +132,10 @@ async function burstStatuses(count, makeRequest, concurrency = 100) {
  * the window is already clean, which is the normal single-pass case.
  */
 async function waitForFreshWindow(makeRequest, timeoutMs = 70_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const s = (await makeRequest()).status;
-    if (s !== 429) return s;
-    if (Date.now() >= deadline) {
-      throw new Error(`rate-limit window never cleared within ${timeoutMs}ms — cannot run a clean burst`);
-    }
-    await new Promise(r => setTimeout(r, 3000));
-  }
+  let status;
+  await waitFor(async () => { status = (await makeRequest()).status; return status !== 429; }, timeoutMs, 3000,
+    'cannot run a clean burst', { what: 'the rate-limit window to clear' });
+  return status;
 }
 
 describe('the destructive-call throttle, on the tool door (5/min)', () => {

@@ -37,7 +37,7 @@ const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono
 /** The five brain families: every batch family but file metadata, which its twin file holds to the rule. */
 const BRAIN = Object.entries(FAMILIES).filter(([k]) => k !== 'filemeta').map(([key, f]) => ({ key, ...f }));
 
-let door, searchIndexPresenceSettled;
+let door;
 let seq = 0;
 const page = (fam, n, tag) => Array.from({ length: n }, (_, i) => build[KIND[fam.key]](S, `${fam.key}-${tag}-${i}`, ++seq));
 
@@ -45,15 +45,9 @@ async function cost(fam, n, tag) {
   const scope = new Set([`${S}_${fam.coll}`, `${S}_tombstones`, `${S}_embed_jobs`, 'ythril_counters']);
   let res;
   const seen = await door.commandsDuring(async () => {
+    // The presence reconcile this write schedules is counted by `commandsDuring` itself, on both edges of the window:
+    // left to timing, two pages of identical cost read as 7 and 8.
     res = await door.push('/batch-upsert', { [fam.key]: page(fam, n, tag) }, { spaceId: S });
-    await door.settled();
-    /*
-     * The search-index presence reconcile a write schedules (`spaces/search-index-presence.ts`) runs AFTER the
-     * write, asynchronously: one `findOne` per page while the collection's index belief is unsettled. Awaited
-     * inside the window, so it is counted in every page alike — left running, it landed in this window or the
-     * next by timing, and two pages of identical cost read as 7 and 8.
-     */
-    await searchIndexPresenceSettled(S);
   });
   assert.equal(res.code, 200, JSON.stringify(res.body));
   return seen.filter(c => scope.has(c.split(' ')[1]));
@@ -61,9 +55,7 @@ async function cost(fam, n, tag) {
 
 describe('a fork-free push page costs the same at any size', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: 'pushcost', monitorCommands: true, spaces: [{ id: S, label: 'Cost', folders: [], meta: {} }] });
-    ({ searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js'));
-  });
+    door = await openPushDoor({ suite: 'pushcost', monitorCommands: true, spaces: [{ id: S, label: 'Cost', folders: [], meta: {} }] });  });
   after(async () => { await door?.close(); });
 
   it('the family set is the five brain families and monitoring sees commands', async () => {

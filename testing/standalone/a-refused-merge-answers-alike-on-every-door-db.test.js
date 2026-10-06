@@ -50,6 +50,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { snapshotParts, changedParts, wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 import { seedHub, relinkProblems, vectorOf } from './_merge-hub.mjs';
 
 const skip = await mongoSkipReason();
@@ -148,13 +149,11 @@ const DRIVERS = {
   'server/src/brain/dupe-scanner.ts': async (space, hub) => {
     // The pair must be visible to $vectorSearch before the scan, or the scan finds nothing and "not merged" would
     // read as a refusal.
-    const deadline = Date.now() + 60_000;
-    for (;;) {
+    await waitFor(async () => {
       const r = await findSimilar(space, hub.survivorId, 'entity', 5, ['entity']).catch(() => ({ results: [] }));
-      if (r.results.some(x => x._id === hub.absorbedId)) break;
-      assert.ok(Date.now() < deadline, 'the vector index never saw the seeded pair, so automerge cannot be asked');
-      await new Promise(res => setTimeout(res, 250));
-    }
+      return r.results.some(x => x._id === hub.absorbedId);
+    }, 60_000, 250, 'the vector index never saw the seeded pair, so automerge cannot be asked',
+    { what: 'the vector index to see the seeded pair' });
     const lines = [];
     const orig = log.warn;
     log.warn = (...a) => { lines.push(a.join(' ')); };

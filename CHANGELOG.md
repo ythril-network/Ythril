@@ -358,6 +358,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Paging through a recall answer no longer repeats some matches and drops others when their text scores tie.**
+  Records written from one template score exactly alike in the keyword channel, and the database ordered that tie
+  differently on every call. That order is part of the fused ranking, and `skip`/`nextSkip` re-run the search for
+  each page, so two identical recalls could rank the same records differently. Ties now break by id, as every other
+  ranking step already did. This affects both doors, `recall` on MCP and `POST /api/brain/recall` on REST.
+
+- **A write answered "timed out, retry" can no longer land after the answer** (Q-372). The bound on one database
+  write was the driver's own timer, which starts before the command is even sent, so the client gave up first: the
+  `503` went out and the space's seq hold was released while the operation was still alive on the server, and it
+  could land a moment later. The bound is now the server's own deadline (`maxTimeMS`), so the server ends the write
+  and answers; a client backstop 500 ms later covers the one wait the server does not interrupt (an upsert queued
+  behind another session's uncommitted insert of the same record — a sync push fork). Reads keep the driver timer.
+  A `timeoutMS` in `MONGO_URI` no longer cuts this short either: the driver would hand it to every write that sets
+  none of its own and end the write before the server's deadline, so a bounded write is now sent with its own
+  `timeoutMS` of 0 beside the server deadline. A page a peer pushes or pulls, and a page of peer tombstones, is
+  written in chunks sized so that each chunk is one command to the database (a larger batch is split by the driver
+  into several, each with a deadline of its own), and the page's size no longer decides whether a late second command
+  can land. The bulk writes whose size is the store's own, not a request's — an entity merge relinking a hub's edges,
+  files and links, a directory move, file tombstones, the file hash cache and the usage counters — are written the
+  same way, in chunks of at most 99 999 operations (one fewer than the server's write batch size of 100 000, because the
+  driver itself cuts a batch there) and 16 MiB, so a set under those limits is the one command it was before; a bulk that
+  mixes inserts, updates and deletes is sliced by type, in the order the driver sends them (inserts, updates, deletes),
+  because the driver sends one command per type, and an unordered one still attempts every chunk and reports every chunk
+  that failed in one error, whose cause is the failure that ended the write when the store or a bound did (so a duplicate
+  key followed by a timeout is answered as the retryable `503`, not as a `400`) and otherwise the first failure. The entity merge writes its relinked edges, files and links in
+  its transaction, which the server aborts at the first error, so it stops at the first failed chunk and answers with that
+  failure as the driver would. When the client backstop does end a write, the log line now says which collection and space it was, and
+  the server warns once at boot if `MONGO_URI` carries a `socketTimeoutMS` below the write bound, which the server
+  cannot neutralise (leave it unset or above `YTHRIL_WRITE_TIMEOUT_MS`).
+  For integrators: the same retryable `503`; a write blocked in that one state is answered up to 500 ms later than
+  the bound. No new database privilege is needed.
 - **A recall straight after a space's first write no longer answers 503 while its search index initialises**
   (Q-325). A collection's vector index is built after its first record, and until it serves the search service
   refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
@@ -964,6 +995,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **CI runs as parallel jobs behind one gate, every run measures itself, a skip is refused unless it was expected, every
+  test file is reached, and there is one way to wait (bundle-56: `Q-370`, `Q-272`, `Q-283`, `Q-319`).** Nothing in the
+  product changes; this is how the tests that guard it are run and trusted. What a contributor will notice:
+  - **Parallel CI.** `Build & Test` is a gate-only job that waits for the rest and fails unless each succeeded; the
+    client tests, the pure and the database-backed standalone files start at once, and the jobs that drive a running
+    instance wait for one `prepare` job that builds the test image, each starting only the services its suite needs.
+    Only a push to `main` writes a cache. Release lines keep their single-job workflow. The new `docs/testing-guide.md`
+    (also offered in the in-app Help) describes the job graph, the caches and the stack's per-job budget.
+  - **Timing records.** A `node:test` reporter writes one line per test, suite and file to `test-results/` for every
+    standalone, stack and preflight run, and each CI job uploads its folder; a file without its closing line is
+    incomplete, never passed. `scripts/test-times.mjs` can record the runs to a Ythril instance you point it at and
+    read the trend back (optional, for maintainers).
+  - **Skips are refused unless expected.** An input a test needs goes through one module that skips on a laptop and
+    throws on CI; a skip CI expects carries `expected-in-ci:` and one cause, from a listed file; print-and-return
+    skips and silent exits became real skips or assertions, and the embedder skips go through `requireEmbedding`.
+  - **Every test file is reached.** `scripts/unrun-tests.mjs` subtracts what CI selects from the tracked test files,
+    `scripts/executed-tests.mjs` subtracts what produced a test event, and a nested standalone test file is refused.
+  - **One wait helper.** `testing/_shared/wait-for.mjs` decides what a timeout says, whether a thrown probe ends the
+    wait, whether a hung probe can outlast the deadline and that no timer is left armed; hand-written polls moved onto
+    it and a gate refuses a new one unless it says `// waits-differently:` and why.
+  - **The test Mongo's search heap is explicit** (`YTHRIL_TEST_MONGOT_A_HEAP`, with a larger limit for the first
+    database), and the test stack's budget is held per set of services one `compose up` starts. The document sidecars
+    in the test stack are hardened like production and bound to loopback, and `doc-office` joins the integration job.
+  - **The recorder's declaration and the published reports.** `node scripts/test-times.mjs --type-schema` prints the
+    `schema_update` call that declares the `Test-Run` type with its one-year retention, so the retention is something a
+    maintainer can send rather than something that depends on someone having once typed it. The client's test report
+    is masked (first line, token shapes, home paths, 300 characters) before the CI job uploads it, as the node
+    suites' lines already were; a report the step cannot read is removed rather than uploaded. The masker handles a
+    long line in time proportional to its length. `--record-ci` stops at the first run already recorded without
+    downloading its artifacts, does not write an empty row for a recorded run whose artifacts have expired, and does
+    not fail every pass over one artifact that can never be read.
+  - The test stack's four app instances now publish their ports on `127.0.0.1` only, like the database and the sidecars.
+  - The in-app Help no longer shows links that go nowhere: the dependencies, contribution and testing guides named
+    repository files (`LICENSE`, `NOTICE`, package manifests) as links, and now name them as code, with a gate over every page
+    Help lists. A link from one part of a split guide to a sibling part (`](02-hosting.md)`, 42 of them in the integration
+    and user guides) opened a dead tab; Help now resolves a link against the directory of the guide it is read in, so it
+    opens in Help and the guides stay correct on GitHub. Inside one guide such a link takes the reader to the start of the
+    page it names (every part of a split guide has an anchor at its start; a link to the guide itself goes to its top) and
+    moves keyboard focus to the heading there, as a link to a heading does. A heading whose id is a property of `document`
+    (`## Links`) lost its id to the sanitizer's DOM-clobbering protection and could not be linked to; it now has the
+    `user-content-` form of the id, and a link to `#links` finds it. A heading with an `&` in it (`## Duplicate Scanner & Action Rules`)
+    got the id `…-amp-…` instead of the GitHub one every link and help control uses, so linking to it scrolled nowhere;
+    the id is now slugged from the heading's text. The gate now replays both rules over every link and `#anchor`.
+    A link inside a guide also writes its place to the URL (so a reload and Back keep it); keyboard focus lands on the
+    part's own anchor, named with the part's title, rather than on the first heading after it; a link into another guide
+    with no place in it takes focus to that guide's first heading; and a change of the URL's `#fragment` while Help is
+    open scrolls and focuses like a link click.
+  - The suite READMEs and the contribution guide no longer carry hand-written file lists or container counts.
 - **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
   dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after
   the integration suite alone, `ythril-mongo-a` held 9 766 dropped collections and 25 714 open storage handles over

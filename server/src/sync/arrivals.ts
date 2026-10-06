@@ -81,7 +81,7 @@ import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
 import { PageStoppedError } from './page-stopped.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
-import { inChunks } from '../util/chunks.js';
+import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
@@ -344,6 +344,13 @@ export async function writeArrivals(
       ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet })
       : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }));
   };
+  // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
+  // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.
+  const updates = new Map<string, unknown>();
+  const updateFor = (d: Doc): unknown => {
+    if (!updates.has(d._id)) updates.set(d._id, updateOf(d));
+    return updates.get(d._id);
+  };
 
   // ── the write, a chunk at a time ──────────────────────────────────────────────────────────────────────────
   const coll = col<Doc>(collName);
@@ -362,7 +369,14 @@ export async function writeArrivals(
     behind = await advanceCounterPast(spaceId, top, where);
     if (!behind) bumped = top;
   };
-  for (const chunk of inChunks(toWrite, READ_CHUNK)) {
+  // A chunk is ONE wire command (`db/one-command.ts`): a bulk write the driver splits is several commands with a deadline
+  // of their own each, and the write bound ends a call by the first one's. By bytes as well as by count, because a page
+  // is a peer's and 500 documents of 32 KiB already pass the driver's 16 MiB batch limit.
+  const chunks = inOneCommandChunks(toWrite, {
+    maxItems: READ_CHUNK,
+    bytesOf: (d) => (fillOnly ? 0 : operationBytes({ filter: filterOf(d), update: updateFor(d) })),
+  });
+  for (const chunk of chunks) {
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
     const inserted = new Set<string>();
@@ -395,7 +409,7 @@ export async function writeArrivals(
       for (const { d, err } of argued) out.refused.push({ _id: d._id, reason: argumentRefusal(err) });
     };
     const writeOne = async (d: Doc): Promise<boolean> => {
-      const r = await coll.updateOne(filterOf(d), updateOf(d) as never, { upsert: true });
+      const r = await coll.updateOne(filterOf(d), updateFor(d) as never, { upsert: true });
       if (r.upsertedCount > 0) inserted.add(d._id);
       return true;
     };
@@ -415,7 +429,7 @@ export async function writeArrivals(
       } else {
         try {
           const r = await coll.bulkWrite(asBulk<Doc>(chunk.map(d => ({
-            updateOne: { filter: filterOf(d), update: updateOf(d), upsert: true },
+            updateOne: { filter: filterOf(d), update: updateFor(d), upsert: true },
           }))), { ordered: false });
           for (const id of upsertedIdsOf(r)) inserted.add(String(id));
           landed.push(...chunk);
@@ -459,6 +473,9 @@ export async function writeArrivals(
         }
       }
     } finally {
+      // The chunk is written (or the page stopped): its updates are not read again, and `updateFor` built every one of them
+      // up front to size the page — kept to the end, a page would be held twice over (round V, S6).
+      for (const d of chunk) updates.delete(d._id);
       // The counter over what this chunk RECEIVED, awaited, and only then the queue — see the module docblock.
       // Each step runs whatever the one before it did (`Q-224`): a bump that threw from here used to skip the
       // bookkeeping and the queue, so records that LANDED were never queued and the write's own error was lost.

@@ -38,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -77,7 +78,7 @@ after(async () => {
 
 describe('recall reaches past the vector index without being asked to', () => {
   it('finds a record written a moment ago', async (t) => {
-    if (!ready) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, ready)) return;
     // A phrase with no semantic neighbourhood, so only this record can match it.
     const phrase = `quokka lantern brine cassette ${RUN}`;
     const w = await P(`/api/brain/spaces/${SPACE}/facts`,
@@ -93,7 +94,7 @@ describe('recall reaches past the vector index without being asked to', () => {
   });
 
   it('a fresh hit is shaped exactly like an indexed one', async (t) => {
-    if (!ready) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, ready)) return;
     // If a caller can tell which channel found a record, the scan stops being "search harder" and becomes a
     // second result type to handle.
     const phrase = `zither pumice halyard ${RUN}`;
@@ -109,7 +110,7 @@ describe('recall reaches past the vector index without being asked to', () => {
   });
 
   it('and it honours the FILTER, which is what made the scan safe to run always', async (t) => {
-    if (!ready) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, ready)) return;
     /*
      * The defect making the scan unconditional exposed, and the reason this case exists rather than a note.
      *
@@ -138,7 +139,7 @@ describe('recall reaches past the vector index without being asked to', () => {
   });
 
   it('the old flag is REFUSED rather than ignored', async (t) => {
-    if (!ready) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, ready)) return;
     /*
      * The migration half, and the reason it is a test rather than a line in the release notes.
      *

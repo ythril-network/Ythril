@@ -22,6 +22,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, readRecord } from '../sync/helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -58,19 +60,18 @@ let embeddingAvailable = false;
 const COLLECTION_PATH = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono' };
 
 async function embedTextOf(kind, id, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
   let last = null;
   let polls = 0;
-  while (Date.now() < deadline) {
+  const held = await holdsWithin(async () => {
     // `includeDiagnostics` is what this probe is FOR. `matchedText` is a withheld diagnostic on `filter`,
     // and the by-id route this replaces returned it unconditionally — so asking for it by name is the
     // honest version of what the old call was relying on without saying so.
     const r = await readRecord(INSTANCES.a, token, SPACE, COLLECTION_PATH[kind], id, { includeDiagnostics: true });
     polls++;
     last = r;
-    if (r.status === 200 && r.body?.matchedText != null) return r.body;
-    await new Promise(res => setTimeout(res, 250));
-  }
+    return r.status === 200 && r.body?.matchedText != null;
+  }, timeoutMs, 250, { what: `the ${kind}'s embed text to be stored` });
+  if (held) return last.body;
   // Carry the reason out with the failure. A bare `null` cannot tell "the record was never written" from
   // "the record is there and the embed job never ran" from "the read itself was failing" — and those have
   // three different causes. This timed out once on 2026-08-08 (edge only, three siblings green in ~0.5 s)
@@ -105,7 +106,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('memory embedding text includes the property key (REST create, via shared saveFact())', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`,
       { fact: `MemPropKey-${RUN}`, properties: { occupation: 'pilot' } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -120,7 +121,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('entity embedding text includes the property key', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities`,
       { name: `EntPropKey-${RUN}`, type: 'concept', properties: { occupation: 'engineer' } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -131,7 +132,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('chrono embedding text includes the property key (previously omitted entirely)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono`, {
       title: `ChronoPropKey-${RUN}`, type: 'event', startsAt: new Date(RUN).toISOString(),
       properties: { venue: 'stadium' },
@@ -168,7 +169,7 @@ describe('Property keys are embedded (B4)', () => {
    * queue's throughput.
    */
   it('edge embedding text includes the property key (previously omitted entirely)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const from = `EdgeFrom-${RUN}`;
     const to = `EdgeTo-${RUN}`;
     const a = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities`, { name: from, type: 'concept' });

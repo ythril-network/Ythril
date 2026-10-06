@@ -28,6 +28,8 @@ import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Socket } from 'node:net';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
+import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
+import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -115,9 +117,19 @@ let skippedForDb = 0;
  */
 const runs = offlineRuns(standaloneSplit);
 let standaloneFailed = false;
+// Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
+// budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
+// The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
+clearTimingResults('preflight');
+const batchesOfKind = {};
 for (const [i, r] of runs.entries()) {
   if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
-  try { run(`node --test ${[...r.args, ...r.files].join(' ')}`); } catch {
+  batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
+  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: 'subset' });
+  // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
+  // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
+  // allows 32 767, which is the limit the batch budget is sized under.
+  try { execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) }); } catch {
     // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
     // information a single all-or-nothing invocation used to give.
     standaloneFailed = true;
@@ -229,6 +241,19 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
   } else {
     console.log(`  ${testFiles.length} test files parse.`);
   }
+}
+
+/*
+ * ── every test file is REACHED by a CI job's selection ──
+ *
+ * A tracked test file that no job selects is a test nobody runs, and it is green in review because it never ran: a file
+ * under `testing/bench/`, a spec outside `client/src`, a test one directory deeper than a glob reaches. CI's aggregator
+ * asks the run half of this (which file produced no test event); this is the static half, derived from the workflow, the
+ * package scripts and the vitest config, and it needs nothing a developer's machine lacks.
+ */
+console.log('\n── every tracked test file is reached by a CI job ──');
+try { run('node scripts/unrun-tests.mjs'); } catch {
+  failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
 }
 
 /*

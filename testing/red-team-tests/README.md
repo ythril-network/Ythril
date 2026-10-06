@@ -6,23 +6,22 @@ Security hardening tests that simulate common attacker techniques against a live
 
 ## Prerequisites
 
-All three Docker containers must be running (use the test compose file, not the
-default one — the test stack starts three independent instances each with its own
-MongoDB):
+The Docker containers must be running (use the test compose file, not the default one — the test stack starts independent
+instances each with its own MongoDB):
 
 ```sh
 docker compose -p ythril-test -f testing/docker-compose.test.yml up --build -d
 # or
-docker ps   # verify ythril-a, ythril-b, ythril-c are Up
+docker ps   # verify the ythril-<letter> containers are Up
 ```
 
-Token files must exist (from `testing/sync/setup.js`):
+`npm run test:up` does the same and provisions the tokens. Token files must exist (from `testing/sync/setup.js`):
 
 ```
-testing/sync/configs/a/token.txt
-testing/sync/configs/b/token.txt
-testing/sync/configs/c/token.txt
+testing/sync/configs/<letter>/token.txt
 ```
+
+for each instance the tests use; a test that needs one says so in its header.
 
 ## Running the tests
 
@@ -30,36 +29,19 @@ testing/sync/configs/c/token.txt
 # Run all red-team tests
 npm run test:redteam
 
-# Run a specific attack category
-node --test testing/red-team-tests/auth-bypass.test.js
-node --test testing/red-team-tests/path-traversal.test.js
-node --test testing/red-team-tests/space-boundary.test.js
-node --test testing/red-team-tests/mongodb-injection.test.js
-node --test testing/red-team-tests/oversized-payload.test.js
-node --test testing/red-team-tests/invite-replay.test.js
-node --test testing/red-team-tests/token-brute-force.test.js
-node --test testing/red-team-tests/ssrf-network-member.test.js
-node --test testing/red-team-tests/sync-scope-bypass.test.js
-node --test testing/red-team-tests/mass-assignment.test.js
+# Run one attack category
+node --test testing/red-team-tests/<file>.test.js
 ```
+
+`npm run test:redteam` selects the tracked test files in this folder, one at a time, and records their timings in
+`test-results/`. `docs/testing-guide.md` says how a new test file reaches CI.
 
 > **Note:** `token-brute-force.test.js` exhausts the `authRateLimit` window on instance B. Run it in isolation or after other tests complete.
 
 ## Test files
 
-| File | Attack category | What it tests |
-|------|----------------|---------------|
-| `auth-bypass.test.js` | Authentication | Missing auth, wrong scheme, invalid token, cross-instance token rejection, SQL/NoSQL in token |
-| `path-traversal.test.js` | Path traversal | `../` sequences, URL encoding, double-encoding, null bytes, Unicode normalization, absolute paths |
-| `space-boundary.test.js` | Access control | Space-scoped tokens cannot access other spaces, boundary enforced on files and brain APIs |
-| `mongodb-injection.test.js` | Injection | `$where`, `$gt`, `$ne`, `$regex` operators in JSON body fields; prototype pollution |
-| `oversized-payload.test.js` | DoS / resource exhaustion | JSON body size limits, Zod field length validation, array bombs, deep nesting |
-| `invite-replay.test.js` | Session security | Replay of consumed handshake, garbage ciphertext in finalize, non-existent IDs |
-| `token-brute-force.test.js` | Brute force | Rate limiter stops token enumeration; unauthenticated endpoint rate limiting |
-| `ssrf-network-member.test.js` | SSRF | Peer URL registration rejects private IPs (RFC-1918, loopback, link-local), cloud metadata endpoints (AWS/Azure/GCP IMDS), non-http(s) schemes, and embedded credentials |
-| `ssrf-encoding.test.js` | SSRF | Peer URL registration rejects alternate host encodings of blocked addresses (decimal/hex/octal/short-form IPv4, IPv4-mapped IPv6, trailing dot, CGNAT) while still allowing genuine public IPs |
-| `sync-scope-bypass.test.js` | Access control | Space-scoped tokens are blocked from all sync endpoints (GET, POST, batch-upsert, tombstones, manifest) for spaces outside their allowlist |
-| `mass-assignment.test.js` | Mass assignment / input validation | Server-generated fields (token id, hash) cannot be injected by the client; `builtIn` flag is not injectable on spaces; Zod strips unknown fields; duplicate JSON keys and oversized inputs are handled safely |
+Every `*.test.js` directly in this folder is an attack category, and each file's header says what it attacks and what
+must be rejected. This README does not tabulate them: `git ls-files 'testing/red-team-tests/*.test.js'` is the list.
 
 ## Expected outcomes
 

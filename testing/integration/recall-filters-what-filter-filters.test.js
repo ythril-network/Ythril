@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitFor } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -85,15 +85,15 @@ before(async () => {
    * the vectors were written, not that the index can answer — the two are different clocks and only one of
    * them is the one these assertions depend on.
    */
-  const deadline = Date.now() + 120_000;
-  for (;;) {
+  let lastBody;
+  await waitFor(async () => {
     const probe = await hit('/api/brain/recall', { space: SPACE, query: 'rollout window' });
-    if (probe.status === 200 && (probe.body.results ?? []).length > 0) break;
-    assert.ok(Date.now() < deadline,
-      `the fact never became recallable — the index never came up, so nothing below would be measuring the `
-      + `filter path: ${JSON.stringify(probe.body).slice(0, 300)}`);
-    await new Promise(r => setTimeout(r, 1000));
-  }
+    lastBody = probe.body;
+    return probe.status === 200 && (probe.body.results ?? []).length > 0;
+  }, 120_000, 1000,
+  () => 'the index never came up, so nothing below would be measuring the filter path: '
+    + `${JSON.stringify(lastBody).slice(0, 300)}`,
+  { what: 'the fact to become recallable' });
 });
 
 after(async () => {

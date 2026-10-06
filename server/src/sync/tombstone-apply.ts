@@ -49,6 +49,7 @@ import { z } from 'zod';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
+import { writeInOneCommands } from '../db/one-command.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { advanceCounterPast } from './counter-after-page.js';
@@ -196,9 +197,12 @@ export async function applyPeerTombstones(
       for (const [issuer, delIds] of byIssuer) deletes.push({ type, issuer, ids: delIds });
     }
     if (store.length > 0) {
-      await col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones')).bulkWrite(asBulk<TombstoneDoc>(store.map(t => ({
-        updateOne: { filter: { _id: t._id }, update: { $setOnInsert: t }, upsert: true },
-      }))), { ordered: false });
+      // A page is a peer's: counted (`MAX_TOMBSTONES_PER_REQUEST`), not measured, and an id is text it chose, carried twice
+      // by each operation. So the bulk is sliced to stay ONE wire command (`db/one-command.ts`): the driver would split a
+      // larger one, and a second command carries a deadline of its own after the bound has answered the sender.
+      const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
+      const ops = store.map(t => ({ updateOne: { filter: { _id: t._id }, update: { $setOnInsert: t }, upsert: true } }));
+      await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
     }
     for (const d of deletes) {
       // Bounded to the issuer's records (or author-less ones) IN the delete, so a record another author wrote

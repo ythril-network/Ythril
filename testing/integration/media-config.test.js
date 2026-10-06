@@ -19,6 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, get, patch, post, restoreOrFail, patchableDocumentProcessing } from '../sync/helpers.js';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -36,13 +37,10 @@ let originalModel;
  * worker's live state, so it cannot be raced or evicted.
  */
 async function waitForWorkerToApplyConfig(timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  return holdsWithin(async () => {
     const r = await get(INSTANCES.a, tokenA, '/api/admin/media-config');
-    if (r.status === 200 && r.body?.providerReloadPending === false) return true;
-    await new Promise(res => setTimeout(res, 1000));
-  }
-  return false;
+    return r.status === 200 && r.body?.providerReloadPending === false;
+  }, timeoutMs, 1000, { what: 'the media worker to apply the media-config change' });
 }
 
 describe('Media config hot-reload (A6)', () => {

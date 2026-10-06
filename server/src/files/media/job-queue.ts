@@ -6,6 +6,7 @@
  */
 
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { writeInOneCommands } from '../../db/one-command.js';
 import { readStoredById } from '../../db/read-by-id.js';
 import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
@@ -762,7 +763,13 @@ export async function rekeyJobsForMove(spaceId: string, src: string, dst: string
   await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: jobs.map(j => j._id) } }));
   // Replacing anything already queued at the destination: a move onto an existing path replaces that file.
   await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: moved.map(j => j._id) } }));
-  await jobCollection(spaceId).insertMany(moved.map(j => asDoc<MediaJobDoc>(j)));
+  const jobsColl = jobCollection(spaceId);
+  // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
+  // before the write was sliced. The moved path's jobs are deleted BEFORE this insert, so a set larger than that — several commands — can
+  // fail between two of them and leave the later rows deleted and not re-inserted: the limit of delete-then-insert, stated
+  // here rather than hidden. Making it insert-first changes what the move does with a destination that is taken, and is owed
+  // its own tests against the store.
+  await writeInOneCommands(moved.map(j => asDoc<MediaJobDoc>(j)), (slice, { ordered }) => jobsColl.insertMany(slice, { ordered }), { ordered: true });
   markSpaceMayHaveWork(spaceId);
 }
 

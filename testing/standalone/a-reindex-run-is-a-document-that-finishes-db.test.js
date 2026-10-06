@@ -46,6 +46,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -61,7 +62,6 @@ process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 let server, mongo, loader, reindex, queue, worker, shared, lifecycle, registry, spaceCollection;
 
 const vectorFor = (text) => Array.from({ length: DIMS }, (_, i) => ((String(text).length + i) % 10) / 10);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const runCol = (space) => mongo.col(spaceCollection(space, 'reindexRun'));
 const jobsCol = (space) => mongo.col(spaceCollection(space, 'embedJobs'));
@@ -86,15 +86,7 @@ async function rebuildQueued(space) {
 }
 
 /** Poll until `cond()` holds; the failure message is the point, so a red run says which rule it broke. */
-async function until(cond, what, timeoutMs = 20_000) {
-  const end = Date.now() + timeoutMs;
-  for (;;) {
-    const v = await cond();
-    if (v) return v;
-    if (Date.now() > end) assert.fail(`timed out after ${timeoutMs} ms waiting for: ${what}`);
-    await sleep(100);
-  }
-}
+const until = (cond, what, timeoutMs = 20_000) => waitForValue(cond, timeoutMs, 100, undefined, { what });
 
 const sweepDone = (space) => until(async () => (await runCol(space).findOne({ _id: 'run' }))?.sweepComplete === true,
   `the run document of '${space}' to report sweepComplete`);

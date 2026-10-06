@@ -49,7 +49,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, waitForEmbedQueueEmpty } from '../sync/helpers.js';
+import { INSTANCES, post, waitForEmbedQueueEmpty, waitForSimilarityIndex } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
@@ -101,9 +101,11 @@ before(async () => {
   // trails them by a few seconds, and recall answered 4 of 28. ~2 s for 28 records with the inference threads sized
   // to the container, so the 300-second worry below no longer applies to this wait.
   if (ids.length === COUNT) await waitForEmbedQueueEmpty(INSTANCES.a, token(), SPACE);
-  // NO wait for the vector index. Every recall also scans the newest records straight from the collection
-  // since 5.0, so the test does not depend on index lag. This used to pass
-  // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional.
+  // NO wait for the vector index HERE, and the cases that use these records without one do not need it: every recall also
+  // scans the newest records straight from the collection since 5.0, so they do not depend on index lag. This used to pass
+  // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional. The ONE case that
+  // does need the index — the ranking-stability walk of the pages, whose premise is that no record is still moving from
+  // the fresh-write scan to `$vectorSearch` — waits for `$vectorSearch` itself to list every record, inside that case.
   //
   // IT DOES DEPEND ON `DUPE_FRESH_WINDOW_MS`, which `testing/docker-compose.test.yml` sets to ten minutes —
   // the maximum `env-num.ts` accepts, and it refuses anything higher at boot rather than clamping.
@@ -441,40 +443,62 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
       });
       return r.status === 200 && r.body.truncated === false ? r.body.results.map(x => x.record?._id).join(',') : null;
     };
-    const before = await orderOf();
-    const total = await totalNow();
-
-    const seen = [];
-    let skip = 0;
-    let pages = 0;
-    /*
-     * Checked BEFORE EVERY PAGE, not only around the loop. CI (#1460, 2026-09-30) served 27 slots with 25 distinct
-     * records while `before` and `after` agreed: the ranking moved between two pages and moved back — a record
-     * leaving the fresh-write channel for the index mid-loop — so an order checked only at the ends certified a
-     * stretch it never looked at. A page is only comparable to the others if the ranking it was cut from is.
+    /**
+     * One full walk of the pages, with the ranking read before, after and before every page. The arithmetic
+     * assertions inside it hold whatever the ranking does, so they run on every walk.
      */
-    let movedDuringPaging = false;
-    for (;;) {
-      if (skip > 0 && (await orderOf()) !== before) movedDuringPaging = true;
-      const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
-      assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
-      assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
-      seen.push(...r.body.results.map(x => x.record?._id));
-      pages++;
-      assert.ok(pages <= COUNT, 'a page that returns nothing and still says truncated would loop forever');
-      if (!r.body.truncated) { assert.equal(r.body.nextSkip, undefined, 'and the last page offers no next'); break; }
-      assert.ok(r.body.returned > 0, 'a truncated page that returned nothing would never advance');
-      assert.equal(r.body.nextSkip, skip + r.body.returned, 'nextSkip is absolute, not relative to the page');
-      skip = r.body.nextSkip;
-    }
-    assert.ok(pages > 1, `the budget must actually bite or this proves nothing — ${pages} page(s)`);
+    const pageThrough = async () => {
+      const before = await orderOf();
+      const total = await totalNow();
 
-    const after = await orderOf();
-    if (before === null || after === null || before !== after || movedDuringPaging) {
-      t.diagnostic('the ranking moved while paging (the index was still ingesting) — the identity assertions '
-        + 'below do not apply, and the feature does not promise a snapshot. The arithmetic above still passed.');
-      return;
-    }
+      const seen = [];
+      let skip = 0;
+      let pages = 0;
+      /*
+       * Checked BEFORE EVERY PAGE, not only around the loop. CI (#1460, 2026-09-30) served 27 slots with 25 distinct
+       * records while `before` and `after` agreed: the ranking moved between two pages and moved back — a record
+       * leaving the fresh-write channel for the index mid-loop — so an order checked only at the ends certified a
+       * stretch it never looked at. A page is only comparable to the others if the ranking it was cut from is.
+       */
+      let movedDuringPaging = false;
+      for (;;) {
+        if (skip > 0 && (await orderOf()) !== before) movedDuringPaging = true;
+        const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
+        assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+        assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
+        seen.push(...r.body.results.map(x => x.record?._id));
+        pages++;
+        assert.ok(pages <= COUNT, 'a page that returns nothing and still says truncated would loop forever');
+        if (!r.body.truncated) { assert.equal(r.body.nextSkip, undefined, 'and the last page offers no next'); break; }
+        assert.ok(r.body.returned > 0, 'a truncated page that returned nothing would never advance');
+        assert.equal(r.body.nextSkip, skip + r.body.returned, 'nextSkip is absolute, not relative to the page');
+        skip = r.body.nextSkip;
+      }
+      assert.ok(pages > 1, `the budget must actually bite or this proves nothing — ${pages} page(s)`);
+
+      const after = await orderOf();
+      const held = before !== null && after !== null && before === after && !movedDuringPaging;
+      return { before, seen, pages, held };
+    };
+
+    /*
+     * THE WAIT THAT MAKES THE PREMISE TRUE, then ONE walk. The ranking moves while the vector index is still
+     * ingesting the 28 records: a record is scored by the fresh-write scan on one call and by `$vectorSearch` on the
+     * next, and the two do not score alike. The embed queue being empty (the `before` hook) says the records HAVE
+     * vectors, not that the index has them — so this waits for `$vectorSearch` itself to list every record (the
+     * question `waitForSimilarityIndex` answers: a seed's stored vector drives the search, so a match can only come
+     * from the index). This used to take the walk up to three times with a pause and then `t.skip`, which is a
+     * test that proves nothing on exactly the runs where the state was unsettled, and CI refuses such a skip. A wait
+     * for the state the test states as its premise fails, naming what never indexed, instead of skipping over it.
+     */
+    for (const id of ids.slice(1)) await waitForSimilarityIndex(INSTANCES.a, token(), SPACE, ids[0], 'entity', id);
+    const walk = await pageThrough();
+    // After the wait above the ranking has nothing left to move for. A walk that still saw it move is a finding about the
+    // ranking (two channels scoring one record differently, or an order with no tie-break), so it FAILS here: a skip would
+    // hide it, and CI refuses a skip that hides a state nobody settled.
+    assert.ok(walk.held, 'the ranking moved during one walk of the pages although every seeded record was already in the '
+      + 'vector index and the embed queue was empty — the identity assertions have nothing stable to compare against');
+    const { before, seen, pages } = walk;
 
     /*
      * THE UNION SIZE IS CHECKED HERE, NOT ABOVE, AND AGAINST THE MEASURED LENGTH — NOT AGAINST `COUNT`.

@@ -46,8 +46,31 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
+import { drainWrites } from './_active-operations.mjs';
+import { startTcpRelay } from './_tcp-relay.mjs';
 
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Make `collName` exist, so a transaction's insert into it locks an id instead of creating the collection.
+ *
+ * ## What it prevents
+ *
+ * A transaction that inserts into a collection that is not there creates the collection INSIDE the transaction, and what a
+ * transaction created is invisible to every other session until it commits: the plain insert of the same id creates the
+ * collection itself and lands at once, with the lock still held. An insert lock over an absent collection therefore stalls
+ * nothing — the "lock that locked nothing" below, reached by the one door `filter` cannot reach — and whatever a test then
+ * "proved" about the stall it saw was a race against how long that insert took (a full -db batch, a database dropped on
+ * entry: `the write behind the lock was never active`).
+ */
+async function ensureCollection(mongo, collName) {
+  try {
+    await mongo.getDb().createCollection(collName);
+  } catch (err) {
+    if (err?.codeName !== 'NamespaceExists' && err?.code !== 48) throw err;
+  }
+}
 
 /**
  * Hold a document lock with another session's open, uncommitted transaction until `release()`.
@@ -58,19 +81,35 @@ import { ASYNC_MUTATORS } from './_document-mutators.mjs';
  * @param {object} [o.filter]  lock an EXISTING document by updating it (the update adds a field nothing reads)
  * @param {object} [o.insert]  lock an id that does not exist yet, by inserting it uncommitted: an insert or an
  *   upsert of the same `_id` waits behind it
- * @returns {Promise<{ release: () => Promise<void> }>} `release` aborts the transaction; safe to call twice
+ * @returns {Promise<{ release: (o?: { drainMs?: number }) => Promise<void> }>} `release` aborts the transaction, THEN
+ *   waits until the server has no write alive on `collName` and THROWS (naming it) when it does not within `drainMs`;
+ *   safe to call twice
+ *
+ * ## `release` resolves when the SERVER has gone quiet, not when the lock has
+ *
+ * A write that waited behind the lock does not end the moment the lock goes: inside the server it retries a write
+ * conflict, sleeping between attempts, and lands up to ~100 ms later. A caller that moved on at the abort then raced
+ * that write — in main's CI run 37231507558 the late fork landed after the next case's wipe and the case after it
+ * failed with `E11000` on its own lock (`Q-372`). So `release` drains (`_active-operations.mjs`), and a drain that
+ * does not finish THROWS rather than hand back a clean-looking collection over a live write. The lock is let go
+ * first either way: a throwing drain must not leave the transaction holding.
  */
 export async function holdDocumentLock(mongo, collName, { filter, insert } = {}) {
   assert.ok(!!filter !== !!insert, 'holdDocumentLock takes exactly one of filter or insert');
+  if (insert) await ensureCollection(mongo, collName);
   const session = mongo.getMongo().startSession();
   session.startTransaction();
   const coll = mongo.getDb().collection(collName);
   let released = false;
-  const release = async () => {
+  const letGo = async () => {
     if (released) return;
     released = true;
     try { await session.abortTransaction(); } catch { /* already ended */ }
     await session.endSession();
+  };
+  const release = async ({ drainMs } = {}) => {
+    await letGo();
+    await drainWrites(mongo, [collName], { drainMs });
   };
   try {
     if (insert) {
@@ -83,7 +122,7 @@ export async function holdDocumentLock(mongo, collName, { filter, insert } = {})
       }
     }
   } catch (err) {
-    await release();
+    await letGo();
     throw err;
   }
   return { release };
@@ -114,14 +153,7 @@ export async function settleWithin(promise, ms) {
 }
 
 /** Poll `predicate` until it is true or `ms` passes; true when it held. For "the stall has been reached". */
-export async function eventually(predicate, ms, everyMs = 10) {
-  const until = Date.now() + ms;
-  for (;;) {
-    if (await predicate()) return true;
-    if (Date.now() >= until) return false;
-    await new Promise(r => setTimeout(r, everyMs));
-  }
-}
+export const eventually = (predicate, ms, everyMs = 10) => holdsWithin(predicate, ms, everyMs);
 
 // ── The write bound's test seam ──────────────────────────────────────────────────────────────────────────────
 
@@ -267,18 +299,10 @@ export function parkWrites(proto) {
  *   `host:port`, which the driver's text names and no answer may
  */
 export async function driverWriteFailures(dbName) {
-  const net = await import('node:net');
   const { MongoClient } = await import('mongodb');
   const { testMongoUri, TEST_MONGO_HOST, TEST_MONGO_PORT } = await import('./_mongo-harness.mjs');
-  const sockets = new Set();
-  const relay = net.createServer((inbound) => {
-    const outbound = net.connect(TEST_MONGO_PORT, TEST_MONGO_HOST);
-    for (const s of [inbound, outbound]) { sockets.add(s); s.on('error', () => {}); }
-    inbound.pipe(outbound);
-    outbound.pipe(inbound);
-  });
-  await new Promise(r => relay.listen(0, '127.0.0.1', r));
-  const address = `127.0.0.1:${relay.address().port}`;
+  const relay = await startTcpRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
+  const { address } = relay;
   const uri = testMongoUri(dbName).replace(`${TEST_MONGO_HOST}:${TEST_MONGO_PORT}`, address);
   // Short, so a failed selection is reached in under a second; the shapes do not depend on the durations.
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 800, heartbeatFrequencyMS: 500, connectTimeoutMS: 500 });
@@ -301,8 +325,7 @@ export async function driverWriteFailures(dbName) {
       // A driver-side refusal raised inside the bulk write's operation, so the driver wraps it like a transport one.
       expired: await failed('insertMany on an ended session', () => coll.insertMany([{ _id: 'late' }], { session: ended })),
     };
-    relay.close();
-    for (const s of sockets) s.destroy();
+    await relay.close();
     const unknown = await eventually(() => [...(client.topology?.description.servers.values() ?? [])]
       .every(s => s.type === 'Unknown'), 10_000, 50);
     if (!unknown) throw new Error('driverWriteFailures: the client never noticed the store had gone — no outage to produce errors in');
@@ -317,8 +340,7 @@ export async function driverWriteFailures(dbName) {
       driverSide: { bulk: healthy.expired },
     };
   } finally {
-    relay.close();
-    for (const s of sockets) s.destroy();
+    await relay.close();
     await client.close(true).catch(() => {});
   }
 }

@@ -11,7 +11,8 @@
  * The markdown goes through `MarkdownRenderService` — the same sanitizing pipeline as the Files preview,
  * because the sanitization rules are a security boundary and a second copy is a second place to drift.
  */
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, ElementRef, OnInit, computed, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { from, firstValueFrom } from 'rxjs';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -22,6 +23,8 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 import { MdScrollersDirective } from '../../shared/md-scrollers.directive';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { httpErrorReason } from '../../core/http-error';
+import { elementIdsFor } from '../../shared/heading-slug';
+import { guideDir, isPartAnchorId, joinHelpParts, landingOf, renderedPagesOf, resolveHelpLink } from './help-links';
 
 /**
  * The guides this page offers, in reading order.
@@ -43,7 +46,7 @@ export const HELP_DOCS = [
       'userguide/05-storage-data-and-audit.md', 'userguide/06-connecting-an-ai-assistant.md',
     ],
   },
-  // Split by topic on disk, rendered here as one document — see `joinParts`. The `file` is kept as the
+  // Split by topic on disk, rendered here as one document — see `joinHelpParts`. The `file` is kept as the
   // id-bearing name so cross-doc links written as `integration-guide.md#x` still resolve to this entry.
   {
     id: 'integration-guide', file: 'integration-guide.md',
@@ -55,7 +58,7 @@ export const HELP_DOCS = [
       // the resource families and the search comparison, and `04f` holds the write-and-read semantics that
       // apply to EVERY record type — expiry, stamp integrity, PATCH semantics, concurrency, `deleteFields`.
       // Those were on the base page until A-5, filed there because facts were documented first rather than
-      // because they belong to facts. Reading order, so `joinParts` renders them as one chapter.
+      // because they belong to facts. Reading order, so `joinHelpParts` renders them as one chapter.
       'integration-guide/04a-recall-api.md', 'integration-guide/04b-graph-api.md',
       'integration-guide/04c-chrono-api.md', 'integration-guide/04d-brain-ops-api.md',
       'integration-guide/04e-choosing-a-search.md',
@@ -119,6 +122,7 @@ export const HELP_DOCS = [
   { id: 'ui-primitives', file: 'ui-primitives.md' },
   { id: 'dependencies', file: 'dependencies.md' },
   { id: 'contribution-guide', file: 'contribution-guide.md' },
+  { id: 'testing-guide', file: 'testing-guide.md' },
 ] as const satisfies ReadonlyArray<{ id: string; file: string; parts?: readonly string[] }>;
 
 export type HelpDocId = typeof HELP_DOCS[number]['id'];
@@ -206,6 +210,10 @@ export type HelpDocId = typeof HELP_DOCS[number]['id'];
     .doc ::ng-deep pre { background: var(--bg-elevated); border: 1px solid var(--border-muted); border-radius: 8px; padding: 12px 14px; }
     .doc ::ng-deep blockquote { margin: 14px 0; padding: 2px 14px; border-left: 3px solid var(--accent); color: var(--text-secondary); }
     .doc ::ng-deep hr { border: 0; border-top: 1px solid var(--border-muted); margin: 26px 0; }
+    /* What a link moves focus to is a heading or an empty part anchor, both tabindex -1. Without an explicit rule the ring
+       depends on the browser default for a script-focused element; this one shows for a keyboard user (focus-visible) and
+       not for a mouse click. */
+    .doc ::ng-deep [tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
     .loading { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: 13px; }
   `],
@@ -251,6 +259,16 @@ export class HelpComponent implements OnInit {
   private markdown = inject(MarkdownRenderService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
+
+  /**
+   * The fragment the URL carries as far as this view knows: what it was opened with, what it wrote itself (`syncUrl`), or what the
+   * route last announced. A route announcement equal to it is the echo of our own navigation, or the fragment already acted
+   * on, and is not acted on again; a different one is a change from outside (Back, a pasted link) and is (`onUrlFragment`).
+   */
+  private urlFragment: string | undefined;
+  /** Where the guide being loaded lands once it has rendered: a fragment, or the top of it (a link into the guide), or nowhere (merely opened). */
+  private landing: { fragment: string | undefined; top: boolean } = { fragment: undefined, top: false };
 
   readonly active = signal<HelpDocId>(HELP_DOCS[0].id);
   readonly loading = signal(true);
@@ -266,19 +284,39 @@ export class HelpComponent implements OnInit {
     // help control can open the *section* that explains its screen rather than the top of a long guide.
     const requested = this.route.snapshot.queryParamMap.get('doc');
     const known = HELP_DOCS.find(d => d.id === requested);
-    this.load(known?.id ?? HELP_DOCS[0].id, this.route.snapshot.fragment ?? undefined);
+    const fragment = this.route.snapshot.fragment ?? undefined;
+    this.urlFragment = fragment;
+    this.load(known?.id ?? HELP_DOCS[0].id, fragment);
+    // The fragment is not only read once: it changes while the view is open (Back, a pasted link, another control pointing here).
+    this.route.fragment.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(f => this.onUrlFragment(f ?? undefined));
   }
 
-  open(id: HelpDocId, fragment?: string): void {
+  /** The URL's fragment changed under the view: go there like a link click does. A fragment this view wrote itself is not a change. */
+  private onUrlFragment(fragment: string | undefined): void {
+    if (fragment === this.urlFragment) return;
+    this.urlFragment = fragment;
+    if (!fragment) return;
+    // A guide still on its way lands there once it has rendered; one on screen is scrolled now.
+    if (this.loading()) this.landing = { fragment, top: false }; else this.scrollTo(fragment);
+  }
+
+  /** Reflect where the reader is in the URL, so the place survives a reload and Back; the route's echo of it is not a change (`urlFragment`). */
+  private syncUrl(id: HelpDocId, fragment: string | undefined): void {
+    this.urlFragment = fragment || undefined;
+    void this.router.navigate([], {
+      relativeTo: this.route, queryParams: { doc: id }, fragment: fragment || undefined, replaceUrl: true,
+    });
+  }
+
+  /** @param landAtTop the guide is opened by a link that names no place in it: land on its first heading once rendered (`follow`) */
+  open(id: HelpDocId, fragment?: string, landAtTop = false): void {
     if (id === this.active() && !this.error()) {
       if (fragment) this.scrollTo(fragment);
       return;
     }
     // Reflected in the URL so the guide can be linked to and survives a reload.
-    void this.router.navigate([], {
-      relativeTo: this.route, queryParams: { doc: id }, fragment: fragment || undefined, replaceUrl: true,
-    });
-    this.load(id, fragment);
+    this.syncUrl(id, fragment);
+    this.load(id, fragment, landAtTop);
   }
 
   /**
@@ -304,9 +342,7 @@ export class HelpComponent implements OnInit {
       ev.preventDefault();
       const fragment = decodeURIComponent(href.slice(1));
       this.scrollTo(fragment);
-      void this.router.navigate([], {
-        relativeTo: this.route, queryParams: { doc: this.active() }, fragment, replaceUrl: true,
-      });
+      this.syncUrl(this.active(), fragment);
       return;
     }
 
@@ -318,16 +354,18 @@ export class HelpComponent implements OnInit {
     // the harmless default it reads as: the browser resolves the relative href against `/settings/help`,
     // the router finds no route, and the wildcard lands the reader on **Brain**. A documentation link
     // that dumps you on a different page is worse than one that does nothing.
-    const crossDoc = /^(?:\.{0,2}\/)*([a-z0-9-]+(?:\/[a-z0-9-]+)*\.md)(?:#(.*))?$/i.exec(href);
-    if (crossDoc) {
+    //
+    // The link is resolved against the directory of the guide it is read in (`resolveHelpLink`): a part's
+    // `](02-hosting.md)` names the page beside it, which is how it resolves on GitHub, and the joined document
+    // has no file to be beside. Read as written it matched no page and opened a dead tab.
+    const link = resolveHelpLink(href, this.pageDir(), p => this.entryOf(p) !== undefined);
+    if (link) {
       ev.preventDefault();
-      const path = crossDoc[1]!;
-      const target = HELP_DOCS.find(d =>
-        d.file === path || ('parts' in d && (d.parts as readonly string[]).includes(path)));
-      if (target) { this.open(target.id, crossDoc[2]); return; }
+      const target = link.page === null ? undefined : this.entryOf(link.page);
+      if (target) { this.follow(target.id, landingOf(link, target).anchor); return; }
       // A markdown file this page does not offer. `help-docs-coverage` should make that impossible, but
       // if it happens the reader gets the raw document in a new tab rather than being silently moved.
-      this.openExternally(`assets/docs/${path}${crossDoc[2] ? `#${crossDoc[2]}` : ''}`);
+      this.openExternally(`assets/docs/${link.bare}${link.fragment ? `#${link.fragment}` : ''}`);
       return;
     }
 
@@ -336,6 +374,31 @@ export class HelpComponent implements OnInit {
     // *while* working.
     ev.preventDefault();
     this.openExternally(href);
+  }
+
+  /**
+   * Take the reader to where a link inside a guide lands (`landingOf`): in another guide, that guide opened at the place; in
+   * this one, a scroll to it — an `anchor` of `undefined` being the top of the guide. Following a link always MOVES the reader
+   * (round W, V2): the parts are one joined document, so the page a sibling link names is already on screen, far away, and a
+   * click that kept the reader where they were looked like a link that did nothing. The place is also written to the URL, as a
+   * `#fragment` link does, so a reload and Back keep it (round X, W3); and a guide opened by a link that names no place in it
+   * (`../integration-guide.md`) takes the reader to its first heading once rendered, as one that names a place does, because the
+   * link that had focus went with the article that held it.
+   */
+  private follow(id: HelpDocId, anchor: string | undefined): void {
+    if (id !== this.active() || this.error()) { this.open(id, anchor, anchor === undefined); return; }
+    if (anchor) this.scrollTo(anchor); else this.scrollToTop();
+    this.syncUrl(id, anchor);
+  }
+
+  /** The guide that offers the page at `path` (a guide's `file`, or one of its `parts`), or `undefined`. */
+  private entryOf(path: string): typeof HELP_DOCS[number] | undefined {
+    return HELP_DOCS.find(d => d.file === path || ('parts' in d && (d.parts as readonly string[]).includes(path)));
+  }
+
+  /** The directory the open guide's pages live in (`guideDir`): what a link in it is resolved against. */
+  private pageDir(): string {
+    return guideDir(HELP_DOCS.find(d => d.id === this.active())!);
   }
 
   /** Open in a new tab, without handing the opener over. */
@@ -350,40 +413,41 @@ export class HelpComponent implements OnInit {
     // Compared rather than selected: a slug from a document heading is arbitrary text, and building a
     // `#...` selector out of it needs escaping that is easy to get wrong (and `CSS.escape` is not
     // universally present). Matching the property sidesteps the question entirely.
+    // A heading whose id the sanitizer would remove (`## Links`) is in its own namespace (`headingIdFor`), so both spellings are looked for.
     const root = this.docRef()?.nativeElement;
-    const el = root && Array.from(root.querySelectorAll<HTMLElement>('[id]')).find(n => n.id === fragment);
-    // Scrolling is a nicety layered on top of rendering the guide; it must never be able to break it.
-    // This runs inside the async render handler, where a throw would leave the page mid-update.
-    if (typeof el?.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
+    const ids = elementIdsFor(fragment);
+    const el = root && Array.from(root.querySelectorAll<HTMLElement>('[id]')).find(n => ids.includes(n.id));
+    if (el) this.reveal(el, root);
+  }
+
+  /** Bring the top of the open guide into view, and focus its first heading. */
+  private scrollToTop(): void {
+    const root = this.docRef()?.nativeElement;
+    if (root) this.reveal(root, root);
+  }
+
+  /**
+   * Scroll `el` to the top of the view and move focus to what it stands for: itself when it is a heading or a part's anchor (a
+   * part may open with prose before its first heading, and focusing the heading after it skipped that prose; the anchor carries
+   * the part's title as its accessible name, `joinHelpParts`), else the first heading after it (and, for the article itself, the
+   * first heading of the guide). Scrolling alone leaves a keyboard or screen-reader user where they were, so the target takes focus
+   * (`tabindex="-1"`: focusable by script, not a tab stop) without scrolling again. Scrolling is a nicety layered on top of
+   * rendering the guide; it must never be able to break it. This runs inside the async render handler, where a throw would leave
+   * the page mid-update.
+   */
+  private reveal(el: HTMLElement, root: HTMLElement): void {
+    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
+    const target = /^H[1-6]$/.test(el.tagName) || isPartAnchorId(el.id) ? el : Array.from(root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+      .find(h => el === root || !!(el.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING));
+    if (!target) return;
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
   }
 
   reload(): void { this.load(this.active()); }
 
-  /**
-   * Join a split guide's parts into one document.
-   *
-   * Two fixups, both because the files on disk are written for GitHub and this view is not GitHub:
-   *
-   *  - **Part headers are dropped.** Each file opens with `# Title` and a "Part of the …" backlink so it
-   *    stands alone in a repo browser. Concatenated, seventeen H1s and seventeen backlinks would be
-   *    noise, and the backlink would point at an index this page does not render.
-   *  - **Cross-part links become plain anchors.** On disk a link reads `04-brain-api.md#schema-validation`
-   *    because that is what resolves on GitHub. Here every part is in one document, so the file prefix
-   *    has to come off or the link leaves the page.
-   */
-  private joinParts(chunks: string[], files: readonly string[]): string {
-    if (chunks.length === 1) return chunks[0]!;
-    const names = files.map(f => f.split('/').pop()!);
-    const stripPrefix = new RegExp(`\\]\\((?:${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(#[^)]+)\\)`, 'g');
-    return chunks
-      .map(c => c
-        .replace(/^#\s.*(\r?\n)+/, '')                                  // the part's own H1
-        .replace(/^>\s*Part of the \[[^\]]*\]\([^)]*\)\.\s*(\r?\n)+/m, '')) // and its backlink
-      .join('\n\n')
-      .replace(stripPrefix, ']($1)');
-  }
-
-  private load(id: HelpDocId, fragment?: string): void {
+  private load(id: HelpDocId, fragment?: string, landAtTop = false): void {
+    this.landing = { fragment, top: landAtTop };
     this.active.set(id);
     this.loading.set(true);
     this.error.set('');
@@ -393,13 +457,11 @@ export class HelpComponent implements OnInit {
     // That is what keeps every existing `#anchor` working — the guide's own cross-references, the user
     // guide's deep links, the README's. Offering seventeen nav entries instead would have broken all of
     // them and turned a nine-item sidebar into a wall.
-    // `in` rather than `?.` because the array is `as const`: the union member for a single-file guide has
-    // no `parts` property at all, so a direct access does not type-check.
-    const files: readonly string[] = 'parts' in entry ? entry.parts : [entry.file];
+    const files = renderedPagesOf(entry);
     const fetches = files.map(f =>
       firstValueFrom(this.http.get(`assets/docs/${f}`, { responseType: 'text' })));
 
-    from(Promise.all(fetches).then(chunks => this.joinParts(chunks, files))).subscribe({
+    from(Promise.all(fetches).then(chunks => joinHelpParts(chunks, files))).subscribe({
       next: async text => {
         if (this.active() !== id) return;              // a faster click won the race
         const html = await this.markdown.render(text);
@@ -407,9 +469,11 @@ export class HelpComponent implements OnInit {
         this.rendered.set(this.sanitizer.bypassSecurityTrustHtml(html));
         this.loading.set(false);
         // The heading only exists once the view has rendered the new HTML, so the scroll waits a turn.
-        if (fragment) {
+        // `landing` is read now, not at the call: a fragment the URL changed to while the guide loaded wins (`onUrlFragment`).
+        const { fragment: landingFragment, top } = this.landing;
+        if (landingFragment || top) {
           this.cdr.detectChanges();
-          this.scrollTo(fragment);
+          if (landingFragment) this.scrollTo(landingFragment); else this.scrollToTop();
         }
       },
       // Bundled assets do not normally 404 — if one does, the build dropped it, and saying so beats

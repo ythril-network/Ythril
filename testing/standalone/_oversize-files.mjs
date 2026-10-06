@@ -15,7 +15,7 @@
 import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isEntryPoint } from '../../scripts/_shared/script-cli.mjs';
 
 export const ROOT = process.cwd();
 
@@ -656,6 +656,6 @@ export function oversizeFiles(measured = measuredFiles()) {
 }
 
 // As a script: one JSON object per oversize file, which is what the ticket check reads.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isEntryPoint(import.meta.url)) {
   for (const o of oversizeFiles()) console.log(JSON.stringify(o));
 }

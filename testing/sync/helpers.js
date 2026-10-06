@@ -4,6 +4,7 @@
  */
 
 import { execSync } from 'node:child_process';
+import { waitFor as sharedWaitFor } from '../_shared/wait-for.mjs';
 
 /** Synchronous sleep (these container-config readers are called synchronously). */
 function sleepSync(ms) {
@@ -223,7 +224,9 @@ export async function createTestSpace(prefix, members) {
 }
 
 /**
- * Poll until condition() returns true or timeout (ms).
+ * Poll until condition() returns true or timeout (ms) — `testing/_shared/wait-for.mjs`, with the thin-margin
+ * warning on, because a wait against the stack is one slow runner from a timeout and says so while it is still a
+ * margin. The fifth argument is the module's options (`what`, `tolerate`, and `thinMargin` to turn the warning off).
  *
  * `diagnose` (string or fn) is appended to the timeout message. Use it to explain WHY
  * the wait failed — a bare "timed out after 90000ms" is nearly useless, and actively
@@ -231,52 +234,8 @@ export async function createTestSpace(prefix, members) {
  * is exactly how the notify rate-limit bug hid for weeks — every sync trigger was being
  * rejected with 429, the tests swallowed it, and all we ever saw was a timeout.
  */
-export async function waitFor(condition, timeout = 15_000, interval = 500, diagnose) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (await condition()) {
-      warnIfTight(Date.now() - start, timeout);
-      return true;
-    }
-    await new Promise(r => setTimeout(r, interval));
-  }
-  // AWAITED, so a diagnostic may go and LOOK at something.
-  //
-  // It used to be called synchronously, which silently limited every caller to facts already in hand. The sync
-  // stall under investigation cannot be explained by any of those: the question is whether the sender still holds
-  // the record and where its watermark sits, and both take a request. A `diagnose` returning a promise used to
-  // interpolate as `[object Promise]`.
-  const detail = typeof diagnose === 'function' ? await diagnose() : diagnose;
-  throw new Error(`waitFor timed out after ${timeout}ms${detail ? ` — ${detail}` : ''}`);
-}
-
-/** Above this share of the budget, a PASS is worth reporting: it is one slow runner from being a failure. */
-const TIGHT_MARGIN = 0.6;
-
-/**
- * Say so when a wait only just made it.
- *
- * ## Why a passing wait needs to report anything
- *
- * `Subscriber-local content survives publisher tombstone` failed in CI on a diff of client CSS, docs and a
- * changelog — nothing that can touch sync propagation — and passed on rerun with no code change. The obvious
- * move is to raise the 25 s and move on. It is also a guess: nobody knows whether a green run takes 3 s or 24 s,
- * so nobody knows whether the margin is thin or whether something occasionally STALLS and the deadline is
- * merely how we found out. Those are different problems and only one of them is fixed by a bigger number.
- *
- * The measurement was missing, so this adds it — for every wait in the suite rather than the one that went red.
- * A pass that consumed most of its budget now prints the numbers, so the next person deciding a timeout has
- * evidence instead of a hunch, and a wait that is drifting toward its ceiling says so BEFORE it starts failing.
- *
- * Deliberately not a failure. Turning a slow pass into a red build would make CI stricter than the product,
- * and the propagation time legitimately varies with what else the runner is doing.
- */
-function warnIfTight(elapsed, timeout) {
-  if (elapsed <= timeout * TIGHT_MARGIN) return;
-  const pct = Math.round((elapsed / timeout) * 100);
-  console.warn(`[waitFor] passed after ${elapsed}ms of a ${timeout}ms budget (${pct}%) — thin margin, and a `
-    + 'slower runner turns this into a timeout. Raise the budget only if this is normal rather than a stall.');
-}
+export const waitFor = (condition, timeout = 15_000, interval = 500, diagnose, options = {}) =>
+  sharedWaitFor(condition, timeout, interval, diagnose, { thinMargin: true, ...options });
 
 /**
  * Wait until every id is visible to `$vectorSearch`, then return how long it took.
@@ -326,25 +285,19 @@ export const INDEX_LAG_TIMEOUT_MS = 300_000;
 export async function waitForSimilarityIndex(
   baseUrl, token, spaceId, seedId, entryType, expectedId, timeoutMs = INDEX_LAG_TIMEOUT_MS,
 ) {
-  const started = Date.now();
-  const deadline = started + timeoutMs;
   let last = null;
   let polls = 0;
-  while (Date.now() < deadline) {
+  await waitFor(async () => {
     const r = await post(baseUrl, token, '/api/brain/similar',
       { space: spaceId, entryId: seedId, entryType, topK: 50 });
     polls++;
     last = r.status;
     const ids = (r.body?.results ?? []).map(x => x.record?._id ?? x._id);
-    if (r.status === 200 && ids.includes(expectedId)) return;
-    await new Promise(res => setTimeout(res, 500));
-  }
-  const how = last === 200
+    return r.status === 200 && ids.includes(expectedId);
+  }, timeoutMs, 500, () => (last === 200
     ? `find_similar answered 200 every time and never listed it, over ${polls} polls`
-    : `the last find_similar returned ${last} — this is not index lag, the endpoint itself is failing`;
-  throw new Error(
-    `Timed out after ${Math.round((Date.now() - started) / 1000)}s waiting for $vectorSearch to see `
-    + `${expectedId} from seed ${seedId} in space ${spaceId}: ${how}`);
+    : `the last find_similar returned ${last} — this is not index lag, the endpoint itself is failing`),
+  { what: `$vectorSearch to see ${expectedId} from seed ${seedId} in space ${spaceId}` });
 }
 
 /**
@@ -429,11 +382,14 @@ export async function waitForReindexRunEnd(baseUrl, token, spaceId, timeoutMs = 
 
 export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
   const pending = new Set(ids);
+  const wanted = pending.size;
   const started = Date.now();
-  const deadline = started + timeoutMs;
   let lastStatus = null;
   let polls = 0;
-  while (pending.size > 0 && Date.now() < deadline) {
+  // The diagnosis says which of the two failures this is. A recall that never returned 200 is a broken instance and
+  // has nothing to do with index lag, but the old message described both as "timed out waiting for indexing".
+  await waitFor(async () => {
+    if (pending.size === 0) return true;
     const r = await post(baseUrl, token, '/api/brain/recall', { space: spaceId, ...({ query: 'indexing probe query', types, topK: 100 }) });
     polls++;
     lastStatus = r.status;
@@ -444,18 +400,11 @@ export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeou
       // be silently wrong.
       for (const result of r.body.results) pending.delete(result.record?._id ?? result._id);
     }
-    if (pending.size > 0) await new Promise(res => setTimeout(res, 500));
-  }
-  if (pending.size > 0) {
-    // Say which of the two failures this is. A recall that never returned 200 is a broken instance and has
-    // nothing to do with index lag, but the old message described both as "timed out waiting for indexing".
-    const how = lastStatus === 200
-      ? `recall answered 200 every time and never listed them, over ${polls} polls`
-      : `the last recall returned ${lastStatus} — this is not index lag, recall itself is failing`;
-    throw new Error(
-      `Timed out after ${Math.round((Date.now() - started) / 1000)}s waiting for $vectorSearch to see `
-      + `${[...pending].join(', ')} in space ${spaceId} (types: ${types.join(',')}): ${how}`);
-  }
+    return pending.size === 0;
+  }, timeoutMs, 500, () => `${lastStatus === 200
+    ? `recall answered 200 every time and never listed them, over ${polls} polls`
+    : `the last recall returned ${lastStatus} — this is not index lag, recall itself is failing`}; still not indexed: ${[...pending].join(', ')}`,
+  { what: `$vectorSearch to see ${wanted} record(s) in space ${spaceId} (types: ${types.join(',')})` });
   return Date.now() - started;
 }
 
@@ -531,8 +480,8 @@ export async function syncUntil(baseUrl, token, networkId, condition, what, { ti
       if (typeof onTimeout === 'function') {
         try { extra = (await onTimeout()) ?? ''; } catch (e) { extra = `diagnostic failed: ${e.message}`; }
       }
-      return `waiting for ${what} — ${probe.diagnose()}${extra ? ` — ${extra}` : ''}`;
-    });
+      return `${probe.diagnose()}${extra ? ` — ${extra}` : ''}`;
+    }, { what });
   } finally {
     clearInterval(retrigger);
   }

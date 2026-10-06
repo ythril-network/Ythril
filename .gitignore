@@ -28,6 +28,9 @@ testing/sync/configs/*/backup.json
 testing/package.json
 testing/package-lock.json
 
+# Timing results - one JSONL per test run, written by testing/_shared/timing-reporter.mjs (bundle-56)
+test-results/
+
 # Env files
 .env
 .env.*

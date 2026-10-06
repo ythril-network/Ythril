@@ -23,7 +23,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForSimilarityIndex, readRecord, waitForEmbedQueueEmpty, ensureReindexed } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitFor, waitForSimilarityIndex, readRecord, waitForEmbedQueueEmpty, ensureReindexed } from '../sync/helpers.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -135,7 +136,7 @@ after(async () => {
 
 describe('Duplicate scanner — flag + review', () => {
   it('scan records candidate pairs with summaries and score', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const s = await scan(SPACE);
     assert.equal(s.status, 200, JSON.stringify(s.body));
     const open = await listDupes(SPACE, 'open');
@@ -150,7 +151,7 @@ describe('Duplicate scanner — flag + review', () => {
   });
 
   it('every candidate answers the same-or-opposite question, never with a bare absence', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // The reported harm: a reversal of opinion arriving labelled as redundancy, and an automated pass merging
     // it. So the payload must always say what is KNOWN about the pair disagreeing — and crucially must
     // distinguish "checked and clean" from "nobody looked", because those license opposite actions.
@@ -175,7 +176,7 @@ describe('Duplicate scanner — flag + review', () => {
   });
 
   it('dismiss removes a pair from the open list', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const open = await listDupes(SPACE, 'open');
     const v = open.find(c => [c.aId, c.bId].sort().join() === [ids.v1, ids.v2].sort().join());
     const d = await raw('POST', `/api/duplicates/${encodeURIComponent(v.id)}/dismiss`);
@@ -187,7 +188,7 @@ describe('Duplicate scanner — flag + review', () => {
   });
 
   it('manual re-rate (POST /:id/reopen) brings a dismissed pair back to the open list', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // The V pair is dismissed from the previous test.
     const dismissed = await listDupes(SPACE, 'dismissed');
     const v = dismissed.find(c => [c.aId, c.bId].sort().join() === [ids.v1, ids.v2].sort().join());
@@ -205,7 +206,7 @@ describe('Duplicate scanner — flag + review', () => {
   });
 
   it('a real content edit resurfaces a dismissed pair on the next scan', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // Dismiss the V pair afresh (it is open again after the re-rate above), capturing its content
     // fingerprint...
     let open = await listDupes(SPACE, 'open');
@@ -228,7 +229,7 @@ describe('Duplicate scanner — flag + review', () => {
   });
 
   it('merge via API merges an open entity candidate', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const open = await listDupes(SPACE, 'open');
     const tPair = open.find(c => [c.aId, c.bId].sort().join() === [ids.t1, ids.t2].sort().join());
     assert.ok(tPair, 'telemetry pair present');
@@ -247,7 +248,7 @@ describe('Duplicate scanner — flag + review', () => {
 
 describe('Duplicate scanner — real-time (on insert)', () => {
   it('evaluates rules at insert time when dupeRulesOnInsert is enabled', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // Enable real-time evaluation with a flag rule (no /scan will be called).
     const patch = await raw('PATCH', `/api/spaces/${SPACE_INSERT}`, { dupeRulesOnInsert: true, dupeRules: [{ minScore: 0.85, action: 'flag' }] });
     assert.equal(patch.status, 200, JSON.stringify(patch.body));
@@ -277,21 +278,19 @@ describe('Duplicate scanner — real-time (on insert)', () => {
     assert.ok(i2, 'second entity created');
 
     // Poll (the hook is async/fire-and-forget) — but crucially we never call /scan.
-    const deadline = Date.now() + 20_000;
     let found = null;
-    while (Date.now() < deadline && !found) {
+    await waitFor(async () => {
       const open = await listDupes(SPACE_INSERT, 'open');
       found = open.find(c => [c.aId, c.bId].sort().join() === [i1, i2].sort().join());
-      if (!found) await new Promise(r => setTimeout(r, 500));
-    }
-    assert.ok(found, 'insert-time evaluation recorded the candidate without a scan');
+      return Boolean(found);
+    }, 20_000, 500, undefined, { what: 'insert-time evaluation to record the candidate without a scan' });
     assert.equal(found.status, 'open');
   });
 });
 
 describe('Duplicate scanner — automerge rule', () => {
   it('a lossless entity pair is auto-merged by the rule', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     // Set an automerge rule on the merge space.
     const patch = await raw('PATCH', `/api/spaces/${SPACE_MERGE}`, { dupeRules: [{ minScore: 0.85, action: 'automerge' }] });
     assert.equal(patch.status, 200, JSON.stringify(patch.body));

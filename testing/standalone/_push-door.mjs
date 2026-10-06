@@ -35,6 +35,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
 import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
+import { drainWrites } from './_active-operations.mjs';
+import { refuseConflictingPushDoorOptions } from './_push-door-options.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -101,12 +103,15 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {string} o.suite  harness database slug
  * @param {object[]} o.spaces  config `spaces` entries
  * @param {object[]} [o.networks]
+ * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`)
+ * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'` (applied after the door is open; refused together with `monitorCommands`, see `_push-door-options.mjs`)
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
  * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
  *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
  *   tokens in here rather than write them afterwards
  */
-export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets }) {
+export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort, mongoQuery }) {
+  refuseConflictingPushDoorOptions({ monitorCommands, mongoQuery });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
   // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at
@@ -118,9 +123,19 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   }, null, 2), { mode: 0o600 });
   if (secrets) fs.writeFileSync(path.join(tmpDir, 'secrets.json'), JSON.stringify(secrets), { mode: 0o600 });
 
-  const mongo = await openTestMongo(suite);
+  const mongo = await openTestMongo(suite, { port: mongoPort });
   try {
-    return await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+    const door = await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+    if (mongoQuery) {
+      // The option is the SUBJECT of the test that passes it, not of the setup: the door's own setup (dropping the database,
+      // creating each space's indexes) is slow on a loaded Mongo and would be ended by a short client clock before the test
+      // began. So the server's client is reconnected with it once the door is open, as `monitorCommands` is.
+      await mongo.closeMongo();
+      process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port: mongoPort, query: mongoQuery });
+      mongo._resetDbName?.();
+      await mongo.connectMongo();
+    }
+    return door;
   } catch (err) {
     // A setup that throws after the connect must still close it: an open client keeps this test process alive,
     // and node's runner waits on the file for ever instead of reporting it failed (PR #1475's hung Build & Test).
@@ -155,6 +170,9 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   const { resolveNetworkSpaceAlias } = await import('../../server/dist/api/sync/space-alias.js');
   const { initSpace } = await import('../../server/dist/spaces/lifecycle.js');
   for (const s of spaces) await initSpace(s.id, { waitForVectorReady: false });
+  const { searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js');
+  /** Every search-index presence reconcile queued so far on the door's spaces has finished. */
+  const presenceSettled = () => Promise.all(spaces.map(s => searchIndexPresenceSettled(s.id)));
 
   // ── The counter probe: the highest value a COMPLETED counter write left, per space ─────────────────────────
   const landed = new Map();
@@ -232,18 +250,40 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   async function setCounter(space, seq) {
     await mongo.col('ythril_counters').updateOne({ _id: space }, { $set: { seq } }, { upsert: true });
   }
-  async function wipe(space) {
+  /**
+   * Empty the space and its counter row — once nothing that could write to them is still running. The tracked counter
+   * writes are awaited (client promises), and then the SERVER is asked: a write whose client gave up (a bound that
+   * fired first) or that still waits behind a lock has no promise here, and would land after the clear (`Q-372`).
+   * Throws, naming the collection, when a write does not end within `drainMs`.
+   */
+  async function wipe(space, { drainMs } = {}) {
     await settled();
+    await drainWrites(mongo, [...RECORD_PARTS.map(p => `${space}_${p}`), 'ythril_counters'], { drainMs });
     await wipeParts(mongo, space, RECORD_PARTS);
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);
   }
-  /** Commands the harness database saw while `fn` ran, minus the driver's own housekeeping. */
+  /**
+   * Commands the harness database saw while `fn` ran, minus the driver's own housekeeping.
+   *
+   * The window is closed on both edges against the one thing that runs after a write on its own: the search-index
+   * presence reconcile every record-collection write schedules (`spaces/search-index-presence.ts`), one or more commands,
+   * asynchronously. Before the window opens, what earlier writes scheduled is drained, so it cannot land inside; after
+   * `fn`, what `fn`'s own writes scheduled is awaited INSIDE the window, so it is counted every time rather than when it
+   * happens to beat the close. Four cost tests wrote that settle by hand and the fifth that did not read one hub cascade
+   * as 38 commands and an identical one as 35 (b56). It lives here so no caller can leave it out.
+   */
   async function commandsDuring(fn) {
     assert.ok(monitorCommands, 'commandsDuring needs openPushDoor({ monitorCommands: true })');
+    await settled();
+    await presenceSettled();
     commands = [];
     counting = true;
-    try { await fn(); } finally { counting = false; }
+    try {
+      await fn();
+      await settled();
+      await presenceSettled();
+    } finally { counting = false; }
     return commands.filter(c => !/^(hello|isMaster|ping|endSessions|saslContinue|saslStart) /.test(c));
   }
 
