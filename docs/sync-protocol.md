@@ -492,7 +492,7 @@ The seven **data-write endpoints accept only peer or admin tokens** — see [Dir
 
 There is no dedicated identity endpoint — a peer that needs the instance's identity calls the regular authenticated `GET /api/about` (`{ instanceId, instanceLabel, version, … }`), and identity also arrives on every cycle via the gossip `self` record.
 
-`?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. Maximum `limit` is 500. Tombstone stubs (items with `deletedAt`) are always appended to list responses regardless of `full` mode.
+`?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. `limit` runs from 1 to 500 (to 5000 per type on tombstones): below 1 reads as 1, above the maximum as the maximum, not a number as the default. A `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400`. A document read by id (`/:id`) carries the same fields a page would, and one no page serves (a file chunk) is `404`. Tombstone stubs (items with `deletedAt`) are always appended to list responses regardless of `full` mode.
 
 **A peer must serve all six families, and `tombstones` must carry `links[]`.** A peer that serves neither `links` nor `filemeta` drops both on the way in and never propagates a link deletion — and because `merkle` hashes all six collections, its root then diverges permanently on data that is not actually different. The check is advisory, so nothing contradicts the warning, and an operator learns to ignore the one signal that means data really is missing.
 
