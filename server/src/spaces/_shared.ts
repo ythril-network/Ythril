@@ -329,6 +329,6 @@ export function pendingOpConflictMessage(pending: PendingSpaceOp, attempted: str
 export function pendingOpStillFailingMessage(pending: PendingSpaceOp, attempted: string, reason: string): string {
   const target = pending.type === 'rename' ? `${pending.spaceId} → ${pending.newId}` : pending.spaceId;
   return `Cannot ${attempted}: a ${pending.type} of '${target}' (started ${pending.startedAt}) is still pending, and `
-    + `resuming it just now did not complete: ${reason}. It is tried again by the next space rename or delete, and `
+    + `resuming it just now did not complete: ${reason.replace(/\.+$/, '')}. It is tried again by the next space rename or delete, and `
     + 'on restart.';
 }

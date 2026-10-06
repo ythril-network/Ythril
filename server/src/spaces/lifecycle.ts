@@ -19,7 +19,7 @@ import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchI
 import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpsInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
-import { concreteSpaces, isProxy } from './proxy.js';
+import { concreteSpaceIds, isProxy } from './proxy.js';
 import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
@@ -32,7 +32,9 @@ import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { mapLimit } from '../util/map-limit.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
@@ -274,6 +276,106 @@ const STARTUP_INDEX_READY_TIMEOUT_MS = envInt('INDEX_READY_TIMEOUT_MS', 10 * 60_
 /** How many spaces confirm their index builds at once, once boot has already finished. */
 const FINALIZE_CONCURRENCY = 3;
 
+/** The step names the walks below report under (`util/housekeeping-walk.ts`), declared once so their counters start at 0. */
+const SPACE_INIT_STEP = declareStep('space init');
+const INDEX_CONFIRMATION_STEP = declareStep('index confirmation');
+
+/**
+ * The spaces a config reload owes an init: added by a reload and not yet initialised, or initialised and failed.
+ *
+ * ## What it prevents
+ *
+ * The reload merges an added space into the config BEFORE it initialises it, so the next reload finds the space in its
+ * "before" list and no longer sees it as added. A space whose init threw was therefore never initialised again until a restart,
+ * and nothing said so. The debt is kept here, by id, until an init of the space lands; the next reload pays it together with
+ * whatever that reload adds (Q-274). In memory only, deliberately: a restart initialises every space (`initAllSpaces`), so
+ * what a restart forgets it also repays.
+ */
+const owedInit = new Set<string>();
+
+/** The ids a reload owes an init, in the order they became owed. A copy. */
+export function spacesOwedInit(): string[] {
+  return [...owedInit];
+}
+
+/**
+ * Record that these spaces were added to the config and owe an init. Idempotent. `applyConfigFromDisk` calls it as soon as it
+ * has the diff, so a reload that throws BEFORE its init step (the built-in space, a pending-op resume) still owes them.
+ */
+export function markSpacesOwedInit(ids: readonly string[]): void {
+  for (const id of ids) owedInit.add(id);
+}
+
+/** What `initAddedSpaces` is handed that belongs to the reload and not to the lifecycle: the audit write and the scheduler re-arm. */
+export interface AddedSpacesInit {
+  /** The spaces the reload added; those owed from earlier reloads are initialised with them. */
+  added: readonly string[];
+  /** Write the per-space audit entry (`CONFIG_RELOAD_OPERATIONS.added`) with the status the init really had. */
+  audit: (spaceId: string, status: number) => void;
+  /** Re-arm the cron-captured schedulers; never throws. Runs whether or not every space initialised. */
+  rearm: () => Promise<void>;
+}
+
+/**
+ * Initialise the spaces a config reload added — and every space an earlier reload could not — and say, once, which still are not.
+ *
+ * The reload's three guarantees (bundle-53 G21), each of which the bare loop it replaced lacked:
+ *
+ *  - **isolation.** Each space is initialised inside its own walk step (`eachSpace`): one space's failure is reported and the
+ *    next is still initialised; a store that is not answering ends the walk once instead of once per space.
+ *  - **honest audit.** The `space.reload_added` entry is written AFTER the init, with its real status: 200 only for a space
+ *    whose init landed. It used to be written before, so a space that then threw was audited as applied.
+ *  - **retried.** A space whose init failed (or was not reached) stays owed, and the next reload initialises it again — the
+ *    reload that added it had already merged it into the config, so nothing else would.
+ *
+ * Then the schedulers are re-armed (they must not be left on their old schedule by one bad space) and, when any space is still
+ * owed, ONE `AggregateError` is thrown naming them. Its members are the per-space failures, so `errorChain` still sees a
+ * store-side member: a route answers `503` + `Retry-After` for it, `500` in our words otherwise, and a watcher records a failed
+ * reload. The message holds ids and our words only; the driver's text is in the log and in the members.
+ *
+ * Proxies own no collections, so an added proxy owes nothing and is audited as applied.
+ */
+export async function initAddedSpaces({ added, audit, rearm }: AddedSpacesInit): Promise<void> {
+  markSpacesOwedInit(added);
+  // A space the config no longer holds owes nothing (removed, or renamed, between the reload that added it and this one).
+  const configured = new Set(getConfig().spaces.map(s => s.id));
+  for (const id of [...owedInit]) if (!configured.has(id)) owedInit.delete(id);
+
+  const concrete = new Set(concreteSpaceIds());
+  const owed = [...owedInit];
+  for (const id of owed.filter(id => !concrete.has(id))) { owedInit.delete(id); audit(id, 200); }
+
+  const toInit = owed.filter(id => concrete.has(id));
+  const failures = new Map<string, unknown>();
+  const walk = await eachSpace(SPACE_INIT_STEP, toInit, async (spaceId) => {
+    try {
+      await initSpace(spaceId);
+    } catch (err) {
+      failures.set(spaceId, err);
+      throw err;   // the walk reports it, once per window, and decides whether the store is the reason
+    }
+  }, { when: 'next reload' });
+
+  const landed = new Set(walk.outcomes.filter(o => o.status === 'ok').map(o => o.spaceId));
+  for (const id of toInit) {
+    if (landed.has(id)) {
+      owedInit.delete(id);
+      audit(id, 200);
+    } else if (failures.has(id)) {
+      audit(id, storeFailureAnswer(failures.get(id), 'config reload')?.status ?? 500);
+    }
+    // A space the walk never reached (it stopped, or the space is in quarantine) was not tried: nothing to audit, still owed.
+  }
+
+  await rearm();
+
+  const stillOwed = [...owedInit];
+  if (stillOwed.length === 0) return;
+  const why = walk.storeDown ? ' The database is not answering.' : walk.stalled ? ' The database looks stalled.' : '';
+  throw new AggregateError([...failures.values()],
+    `Space init failed for ${peerList(stillOwed, ', ')}.${why} ${stillOwed.length === 1 ? 'It is' : 'They are'} initialised again by the next reload.`);
+}
+
 /** The key a space's deferred confirmation waits under (`afterSearchUp`): one per space, removed with the space. */
 const confirmWaiterKey = (spaceId: string): string => `confirm-space:${spaceId}`;
 
@@ -314,7 +416,7 @@ export async function initAllSpaces(): Promise<void> {
   // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
   // collections — which its creation never made and its deletion (config-only) never drops — while the
   // reload path, which initialises spaces added to the file, already skipped proxies.
-  const spaceIds = concreteSpaces().map(s => s.id);
+  const spaceIds = concreteSpaceIds();
 
   for (const spaceId of spaceIds) {
     log.debug(`Initialising space: ${spaceId}`);
@@ -351,21 +453,26 @@ export async function initAllSpaces(): Promise<void> {
 async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Promise<void> {
   const failed: string[] = [];
   const deferred: string[] = [];
-  await mapLimit(spaceIds, FINALIZE_CONCURRENCY, async (spaceId) => {
-    try {
-      const verdict = await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS });
-      if (verdict === 'deferred') deferred.push(spaceId);
-      else if (!verdict) failed.push(spaceId);
-    } catch (err) {
-      failed.push(spaceId);
-      log.warn(`Space '${peerText(spaceId)}': index readiness check failed: ${peerText(err)}`);
-    }
-  });
+  /*
+   * One walk, `FINALIZE_CONCURRENCY` spaces at a time (`eachSpace`, `limit`): a space's failure is reported in the walk's own
+   * line and the others are still confirmed, and a store that is not answering ends the pass once instead of costing one
+   * bound per space. The POLLING inside `finalizeSpaceIndexReady` keeps its own deadline (`STARTUP_INDEX_READY_TIMEOUT_MS`) —
+   * it waits on a build, which is not an operation a per-op bound can be right for — and `listSearchIndexes` / `createIndex`
+   * are the stated exemptions to the housekeeping bound (`db/write-bound.ts`).
+   */
+  const walk = await eachSpace(INDEX_CONFIRMATION_STEP, spaceIds, async (spaceId) => {
+    const verdict = await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS });
+    if (verdict === 'deferred') deferred.push(spaceId);
+    else if (!verdict) failed.push(spaceId);
+  }, { limit: FINALIZE_CONCURRENCY, when: 'next boot' });
+  // A space that threw, was in quarantine, or sat behind a stop was not confirmed: it did not reach ready.
+  const answered = new Set(walk.outcomes.filter(o => o.status === 'ok').map(o => o.spaceId));
+  for (const spaceId of spaceIds) if (!answered.has(spaceId) && !failed.includes(spaceId)) failed.push(spaceId);
 
   /*
    * A space whose confirmation was DEFERRED (database search was not answering, Q-113) is neither confirmed nor
    * failed: it stays `building` and is confirmed again when the service returns. The late run is THIS function,
-   * so it goes through the same `mapLimit(…, FINALIZE_CONCURRENCY, …)` and, as a waiter, the same three at a
+   * so it goes through the same `eachSpace(…, { limit: FINALIZE_CONCURRENCY })` walk and, as a waiter, the same three at a
    * time; it runs on the same `STARTUP_INDEX_READY_TIMEOUT_MS`, which therefore starts at the confirmation and
    * not at boot (a service back after eleven minutes must not find every waiting space already past its window).
    * It builds first — boot's `initSpace` could not, search was down — and the polling that follows would
@@ -543,7 +650,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
       await db.collection(coll.name).drop();
       log.debug(`Dropped collection ${peerText(coll.name)}`);
     } catch (err) {
-      const msg = `Could not drop collection ${coll.name}: ${err}`;
+      // In OUR words (`refusalText`): this sentence is joined into the refusal a caller reads (`pendingOpStillFailingMessage`, the
+      // delete's "cleanup incomplete"), so a driver refusal — which names the collection, the index and the values — never goes
+      // into it, and a failure on the store's side stops the drop here and reaches the door as the store's (bundle-53 G21).
+      const msg = `Could not drop collection ${coll.name}: ${refusalText(err)}`;
       log.warn(peerText(msg));
       errors.push(msg);
     }
@@ -878,13 +988,29 @@ export async function settlePendingSpaceOpBefore(attempted: string): Promise<voi
   if (!pending) return;
   const result = await resumePendingSpaceOp({ callerHoldsOp: true });
   if (result.completed) return;
+  // The store's own failure is not a reason to put in a sentence: the door answers it (503, Retry-After), as it answers every store failure.
+  if (result.cause !== undefined) throwIfStoreSide(result.cause);
   throw new Error(result.reason === 'in-flight'
     ? pendingOpConflictMessage(pending, attempted)
     : pendingOpStillFailingMessage(pending, attempted, result.reason));
 }
 
 /** What a resume did: finished (or found nothing to do), or did not, and why. */
-type ResumeResult = { completed: true } | { completed: false; reason: string };
+type ResumeResult = { completed: true } | { completed: false; reason: string; cause?: unknown };
+
+/**
+ * A resume that threw: the reason in OUR words, and the error itself as `cause`.
+ *
+ * The reason is a sentence a caller reads (`settlePendingSpaceOpBefore`), so it goes through `refusalText` and never carries
+ * the driver's text. `refusalText` rethrows a failure on the store's side, which a reason cannot be — so that failure rides
+ * along as `cause`, and the caller that can answer it (`settlePendingSpaceOpBefore`) rethrows it for the door; the one that
+ * cannot (`reconcilePendingSpaceOp`, at boot and on a reload) keeps the marker and carries on, as it always did.
+ */
+function resumeThrew(err: unknown): ResumeResult {
+  let reason: string;
+  try { reason = refusalText(err); } catch { reason = 'the database did not answer'; }
+  return { completed: false, reason, cause: err };
+}
 
 async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<ResumeResult> {
   const cfg = getConfig();
@@ -960,6 +1086,6 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
     }
   } catch (err) {
     log.error(`reconcilePendingSpaceOp for ${peerText(target)} failed; marker kept for the next space op or restart: ${peerText(err)}`);
-    return { completed: false, reason: err instanceof Error ? err.message : String(err) };
+    return resumeThrew(err);
   }
 }

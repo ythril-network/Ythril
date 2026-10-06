@@ -106,13 +106,24 @@ describe('a schedule that is captured at start time is re-armed when it changes'
   it('the reload path calls the re-arm helper', () => {
     // Position matters as much as presence: re-arming before `initSpace` could fire a scan against a space
     // that does not exist yet, so the call belongs at the END of the reload.
-    const app = read('server/src/app.ts');
-    assert.match(app, /await rearmCronSchedulers\(\)/,
+    //
+    // The init and the re-arm live in `initAddedSpaces` since bundle-53 G21 (`spaces/lifecycle.ts`): the reload hands it the
+    // re-arm helper, and it calls it after the spaces are initialised — and before it throws for a space that failed, so one
+    // bad space does not leave the schedulers on their old schedule.
+    const app = code('server/src/app.ts');
+    assert.match(app, /rearm: rearmCronSchedulers\b/,
       'applyConfigFromDisk must re-arm, or POST /api/admin/reload-config reports success without applying');
-    const rearmAt = app.indexOf('await rearmCronSchedulers()');
-    const initAt = app.lastIndexOf('await initSpace(');
+    const lifecycle = code('server/src/spaces/lifecycle.ts');
+    const fnAt = lifecycle.indexOf('export async function initAddedSpaces(');
+    assert.ok(fnAt > -1, 'initAddedSpaces is gone — re-anchor this gate');
+    const body = lifecycle.slice(fnAt);
+    const initAt = body.indexOf('await initSpace(');
+    const rearmAt = body.indexOf('await rearm()');
+    const throwAt = body.indexOf('throw new AggregateError');
     assert.ok(initAt > -1 && rearmAt > initAt,
       're-arming before initSpace can schedule work against a space that does not exist yet');
+    assert.ok(throwAt > rearmAt,
+      'a space that failed must not skip the re-arm: the throw comes after it');
   });
 
   it('the backup route re-arms its own scheduler, because its schedule is not in config.json', () => {

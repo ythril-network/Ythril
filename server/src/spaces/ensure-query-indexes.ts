@@ -32,7 +32,10 @@ import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { ensureFileTombstoneIndexes } from '../files/tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { concreteSpaces } from './proxy.js';
-import { log } from '../util/log.js';
+import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+
+const QUERY_INDEXES_STEP = declareStep('query indexes');
 
 /**
  * The record collections a `type` filter reaches, with the index that filter needs.
@@ -64,43 +67,36 @@ const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
  * Create any missing read-path index, for every space.
  *
  * Returns how many index calls were issued, so a caller can log it and a test can assert the loop ran rather
- * than trusting that it did. Best-effort per space: a failure on one must not stop the others or the boot.
+ * than trusting that it did. Best-effort per space AND per index, through the walk (`eachSpace`, `eachUnit`): a failure on one
+ * index is reported with the index named and the others are still created, a failure that is the whole space's (a store that
+ * stopped answering, a space that stalls) ends that space's pass, and one space's failure never stops the next or the boot.
+ * The `createIndex` calls themselves stay unbounded: an index build scales with the collection, so no one figure is right
+ * (`db/write-bound.ts` states the exemption).
  */
 export async function ensureQueryIndexes(): Promise<number> {
   let issued = 0;
-  for (const space of concreteSpaces()) {   // pre-setup: none, so nothing to index yet
-    for (const name of TYPE_FILTERED) {
-      try {
-        await col(`${space.id}_${name}`).createIndex({ type: 1 });
-        issued++;
-      } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id}_${name} type index: ${err}`);
-      }
-    }
-    for (const ix of LINK_INDEXES) {
-      try {
-        await col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {});
-        issued++;
-      } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
-      }
-    }
-    // The file tombstones' indexes, the same call `initSpace` makes (bundle-30 I16).
-    try {
-      await ensureFileTombstoneIndexes(space.id);
+  await eachSpace(QUERY_INDEXES_STEP, concreteSpaces(), async (space) => {   // pre-setup: none, so nothing to index yet
+    const units: Array<{ name: string; ensure: () => Promise<unknown> }> = [
+      ...TYPE_FILTERED.map(name => ({
+        name: `${name} type index`,
+        ensure: () => col(`${space.id}_${name}`).createIndex({ type: 1 }),
+      })),
+      ...LINK_INDEXES.map(ix => ({
+        name: `links ${Object.keys(ix.keys).join(',')} index`,
+        ensure: () => col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {}),
+      })),
+      // The file tombstones' indexes, the same call `initSpace` makes (bundle-30 I16).
+      { name: 'file tombstone indexes', ensure: () => ensureFileTombstoneIndexes(space.id) },
+      // The fork caps' indexes, for a space `initSpace` never revisits — the same list it creates (`FORK_INDEXES`).
+      ...FORK_INDEXES.map(ix => ({
+        name: `facts ${Object.keys(ix.keys).join(',')} index`,
+        ensure: () => col(spaceCollection(space.id, 'facts')).createIndex(ix.keys, { sparse: ix.sparse }),
+      })),
+    ];
+    await eachUnit(units, async (unit) => {
+      await unit.ensure();
       issued++;
-    } catch (err) {
-      log.warn(`ensureQueryIndexes: ${space.id} file tombstone indexes: ${err}`);
-    }
-    // The fork caps' indexes, for a space `initSpace` never revisits — the same list it creates (`FORK_INDEXES`).
-    for (const ix of FORK_INDEXES) {
-      try {
-        await col(spaceCollection(space.id, 'facts')).createIndex(ix.keys, { sparse: ix.sparse });
-        issued++;
-      } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id} facts ${Object.keys(ix.keys).join(',')} index: ${err}`);
-      }
-    }
-  }
+    }, unit => unit.name);
+  }, { when: 'next boot' });
   return issued;
 }
