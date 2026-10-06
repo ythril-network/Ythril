@@ -159,7 +159,8 @@ describe('a schedule that is captured at start time is re-armed when it changes'
     //
     // The init and the re-arm live in `initAddedSpaces` since bundle-53 G21 (`spaces/lifecycle.ts`): the reload hands it the
     // re-arm helper, and it calls it after the spaces are initialised — and before it throws for a space that failed, so one
-    // bad space does not leave the schedulers on their old schedule.
+    // bad space does not leave the schedulers on their old schedule. The init walk is `initOwedSpaces` since bundle-53 G32 (boot
+    // shares it), so what is asked is that `initAddedSpaces` runs it before the re-arm.
     const app = code('server/src/app.ts');
     assert.match(app, /rearm: rearmCronSchedulers\b/,
       'applyConfigFromDisk must re-arm, or POST /api/admin/reload-config reports success without applying');
@@ -167,7 +168,7 @@ describe('a schedule that is captured at start time is re-armed when it changes'
     const fnAt = lifecycle.indexOf('export async function initAddedSpaces(');
     assert.ok(fnAt > -1, 'initAddedSpaces is gone — re-anchor this gate');
     const body = lifecycle.slice(fnAt);
-    const initAt = body.indexOf('await initSpace(');
+    const initAt = body.indexOf('await initOwedSpaces(');
     const rearmAt = body.indexOf('await rearm()');
     const throwAt = body.indexOf('throw new AggregateError');
     assert.ok(initAt > -1 && rearmAt > initAt,

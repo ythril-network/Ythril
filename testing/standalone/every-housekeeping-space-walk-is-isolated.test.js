@@ -74,12 +74,6 @@ const UNFOLLOWABLE_RUNS = new Map();
  */
 const SUBJECT_EXEMPTIONS = [
   {
-    key: 'server/src/spaces/lifecycle.ts:initAllSpaces', head: /spaceIds/,
-    why: 'Boot initialisation. A space that cannot be initialised MUST stop the boot (nothing serves a half-built space), so the loop does not '
-      + 'isolate a failure by design; it is awaited before the server listens, so no tick can stack behind it. The background confirmation it '
-      + 'starts is a walk.',
-  },
-  {
     key: 'server/src/files/at-rest-migration.ts:runAtRestMigration', head: /spaceId of spaces/,
     why: 'A one-shot boot migration over DIRECTORIES (no collection), isolated per FILE (a failed file is counted and the pass goes on), with a '
       + 'stop of its own for a full disk. It reads the file tree, which no database bound can end, and it is not a repeating job.',

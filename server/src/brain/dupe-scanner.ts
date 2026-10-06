@@ -30,7 +30,7 @@ import { getConfig } from '../config/loader.js';
 import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, outsideRequest } from '../util/log.js';
 import {
   findSimilar,
   DEFAULT_DUPE_THRESHOLD,
@@ -450,9 +450,10 @@ export function startDupeScanner(): void {
     log.warn(`Invalid dupeScanner.schedule '${cron}' — duplicate scanner not started`);
     return;
   }
-  _task = schedule(cron, () => {
+  // `outsideRequest`: a reload request re-arms this task, and a tick must not run (and log) under that request's id.
+  _task = schedule(cron, () => outsideRequest(() => {
     void runExclusive('Dupe scan', () => runDupeScanAllSpaces());
-  });
+  }));
   _armed.note(ARMED, cron);
   log.info(`Duplicate scanner scheduled (${cron})`);
 }

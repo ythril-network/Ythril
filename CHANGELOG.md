@@ -434,6 +434,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One space that cannot be initialised no longer stops the start-up's initialisation at that space (`Q-274`).** Start-up
+  initialised the spaces in a bare loop, so the first one to throw left every space after it without its collections
+  and indexes and unconfirmed, ended the rest of the start-up's database set-up, and left only *"Instance DB
+  initialisation failed"* naming a driver error and not the space. Each space is now its own step, as in a reload: the
+  failed one is named once (`space init failed for space '<id>': … — retried next reload`), the others are initialised
+  and have their search indexes confirmed, the server starts, and the next reload initialises the failed one again.
+- **A space a reload initialises, or retries, now has its vector index readiness confirmed (`Q-274`).** It was
+  initialised and left with no `indexStatus` and no readiness line, while a space initialised at start-up or by
+  `POST /api/spaces` had both. One path now hands every successfully initialised space to the confirmation, so
+  `GET /api/spaces` shows `building` and then `ready` or `failed` for it too. A reload no longer waits for the index builds.
+- **A background job no longer logs under the request that started it (`Q-274`).** Timers inherit the request context
+  they were created in, so on a first-run instance the TTL sweep's failure line carried the `/setup` request's id, and
+  the duplicate, contradiction, backup and sync schedulers a reload or a join re-armed ran under that request's id. Every
+  interval job and every scheduled task now runs outside the request that armed it.
+- **`POST /api/admin/data/config/test` is documented as it answers (`Q-274`).** An unreachable host is `200` with
+  `{ "ok": false, "error": … }`, which the Database page reads; the integration guide said `500` and showed a `latencyMs`
+  the route never returned.
 - **Paging through a recall answer no longer repeats some matches and drops others when their text scores tie.**
   Records written from one template score exactly alike in the keyword channel, and the database ordered that tie
   differently on every call. That order is part of the fused ranking, and `skip`/`nextSkip` re-run the search for

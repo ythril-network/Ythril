@@ -192,7 +192,8 @@ Default Node.js process metrics (`nodejs_*`, `process_*`) are also included via 
 
 **Correlating a failure with its log line.** Every response carries an `X-Request-Id` header, and **every log
 line the request's own work produces carries the same id** — the 4xx it answered with, the WARN a background step
-logged mid-request, the 507 a quota refused with, not only an unhandled crash. Grep the id.
+logged mid-request, the 507 a quota refused with, not only an unhandled crash. Grep the id. A job or scheduled scan a
+request merely started (the TTL sweep from the first-run setup, a scheduler a reload re-arms) logs without it.
 
 The id is ambient for the request's call tree, so it does not reach a line logged from an event callback that
 fires after the handler returned — a connection close, a child-process error. Both of those are debug-level

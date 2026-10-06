@@ -35,7 +35,7 @@ import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
-import { log } from '../util/log.js';
+import { log, outsideRequest } from '../util/log.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
 import { judgePair, consultedModel, type JudgeableRecord } from './contradiction-judge.js';
 import { extraClaimFields, fetchStructuredClaims, type ClaimMap } from './structured-claims.js';
@@ -468,12 +468,13 @@ export function startContradictionScanner(): void {
     log.warn(`Invalid contradictionScanner.schedule '${cron}' — contradiction scanner not started`);
     return;
   }
-  _task = schedule(cron, () => {
+  _task = schedule(cron, () => outsideRequest(() => {
     // Guarded: this sweep calls an NLI model PER PAIR, so on a large space against a slow judge a pass
     // routinely outlives its schedule — and two overlapping passes double the model calls while both write
-    // the same candidates collection.
+    // the same candidates collection. `outsideRequest`: a reload request re-arms this task, and a tick must
+    // not run (and log) under that request's id.
     void runExclusive('Contradiction scan', () => runContradictionScanAllSpaces());
-  });
+  }));
   _armed.note(ARMED, cron);
   log.info(`Contradiction scanner scheduled (${cron})`);
 }

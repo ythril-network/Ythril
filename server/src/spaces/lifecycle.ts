@@ -32,7 +32,7 @@ import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { eachSpace } from '../util/housekeeping-walk.js';
+import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
@@ -316,10 +316,90 @@ export interface AddedSpacesInit {
   rearm: () => Promise<void>;
 }
 
+/** What one pass over the owed spaces did. */
+interface OwedInitPass {
+  /** Owed ids that are proxies: they own no collections, so they owe nothing and are settled without an init. */
+  proxies: string[];
+  /** The concrete spaces the pass tried to initialise, in order. */
+  toInit: string[];
+  /** The ones whose init landed: no longer owed, marked `building`, and handed to the index confirmation. */
+  landed: ReadonlySet<string>;
+  /** The init failure of each space that threw. */
+  failures: ReadonlyMap<string, unknown>;
+  walk: WalkResult<void>;
+}
+
+/**
+ * Initialise every space this process owes an init — the ONE init walk, for boot (`initAllSpaces`) and for a reload
+ * (`initAddedSpaces`) alike.
+ *
+ * ## What it prevents
+ *
+ * Boot and reload each wrote their own loop over `initSpace`, and neither had what the other had: boot was a bare `for`, so one space
+ * that threw kept every space after it from being initialised or confirmed and left `initAllSpaces` itself (the rest of the boot's
+ * init with it); the reload isolated, reported and retried, but a space it initialised was never handed to the index confirmation, so
+ * it had no `indexStatus` and no readiness line. Two loops is how each came to lack the other's half.
+ *
+ * ## What it does, for each owed space
+ *
+ *  - **its own walk step** (`eachSpace`): a failure is said once through the shared reporter (`space init failed for space '<id>': …
+ *    — retried next reload`), the others are still initialised, and a store that is not answering ends the walk once;
+ *  - **owed until it lands**: a failed space stays in {@link spacesOwedInit} and the next reload initialises it again;
+ *  - **confirmed**: every space whose init landed is marked `building` and handed to `confirmSpaceIndexesInBackground`, which settles it
+ *    to `ready`/`failed` (or defers it while search is down). Initialisation never waits for the index builds (`initAllSpaces`
+ *    explains why), so the confirmation is how a space gets a verdict, whichever of the three ways it was initialised.
+ *
+ * Never throws for a space's failure: a caller that must say so reads `failures` and `walk`. A space the config no longer holds owes nothing
+ * (removed, or renamed, between the reload that added it and this one).
+ */
+async function initOwedSpaces(): Promise<OwedInitPass> {
+  const configured = new Set(getConfig().spaces.map(s => s.id));
+  for (const id of [...owedInit]) if (!configured.has(id)) owedInit.delete(id);
+
+  const concrete = new Set(concreteSpaceIds());
+  const owed = [...owedInit];
+  const proxies = owed.filter(id => !concrete.has(id));
+  for (const id of proxies) owedInit.delete(id);
+
+  const toInit = owed.filter(id => concrete.has(id));
+  const failures = new Map<string, unknown>();
+  const walk = await eachSpace(SPACE_INIT_STEP, toInit, async (spaceId) => {
+    log.debug(`Initialising space: ${spaceId}`);
+    try {
+      // Collections, regular indexes and the vector-index create/update are awaited here; only the READY *poll* is deferred to the
+      // confirmation below — the schema work must be done before the instance serves traffic, and it is fast.
+      await initSpace(spaceId, { waitForVectorReady: false });
+    } catch (err) {
+      failures.set(spaceId, err);
+      throw err;   // the walk reports it, once per window, and decides whether the store is the reason
+    }
+  }, { when: 'next reload' });
+
+  const landed = new Set(walk.outcomes.filter(o => o.status === 'ok').map(o => o.spaceId));
+  for (const id of landed) owedInit.delete(id);
+  // A space the walk never reached (it stopped, or the space is in quarantine) was not tried: still owed.
+
+  if (landed.size > 0) {
+    // Ids, not space objects: a config reload during these awaits replaces cfg.spaces and every held object becomes an orphan —
+    // status flips would then be written to detached records and lost, leaving spaces stuck reporting 'building' forever.
+    const ids = [...landed];
+    mutateConfig(fresh => {
+      for (const spaceId of ids) {
+        const live = fresh.spaces.find(s => s.id === spaceId);
+        if (live) live.indexStatus = 'building';
+      }
+    });
+    log.info(`Initialised ${ids.length} space(s); confirming vector index readiness in the background.`);
+    void confirmSpaceIndexesInBackground(ids);
+  }
+  return { proxies, toInit, landed, failures, walk };
+}
+
 /**
  * Initialise the spaces a config reload added — and every space an earlier reload could not — and say, once, which still are not.
  *
- * The reload's three guarantees (bundle-53 G21), each of which the bare loop it replaced lacked:
+ * The reload's guarantees (bundle-53 G21; the init walk itself is `initOwedSpaces`, which boot shares), each of which the bare loop it
+ * replaced lacked:
  *
  *  - **isolation.** Each space is initialised inside its own walk step (`eachSpace`): one space's failure is reported and the
  *    next is still initialised; a store that is not answering ends the walk once instead of once per space.
@@ -337,33 +417,11 @@ export interface AddedSpacesInit {
  */
 export async function initAddedSpaces({ added, audit, rearm }: AddedSpacesInit): Promise<void> {
   markSpacesOwedInit(added);
-  // A space the config no longer holds owes nothing (removed, or renamed, between the reload that added it and this one).
-  const configured = new Set(getConfig().spaces.map(s => s.id));
-  for (const id of [...owedInit]) if (!configured.has(id)) owedInit.delete(id);
-
-  const concrete = new Set(concreteSpaceIds());
-  const owed = [...owedInit];
-  for (const id of owed.filter(id => !concrete.has(id))) { owedInit.delete(id); audit(id, 200); }
-
-  const toInit = owed.filter(id => concrete.has(id));
-  const failures = new Map<string, unknown>();
-  const walk = await eachSpace(SPACE_INIT_STEP, toInit, async (spaceId) => {
-    try {
-      await initSpace(spaceId);
-    } catch (err) {
-      failures.set(spaceId, err);
-      throw err;   // the walk reports it, once per window, and decides whether the store is the reason
-    }
-  }, { when: 'next reload' });
-
-  const landed = new Set(walk.outcomes.filter(o => o.status === 'ok').map(o => o.spaceId));
+  const { proxies, toInit, landed, failures, walk } = await initOwedSpaces();
+  for (const id of proxies) audit(id, 200);
   for (const id of toInit) {
-    if (landed.has(id)) {
-      owedInit.delete(id);
-      audit(id, 200);
-    } else if (failures.has(id)) {
-      audit(id, storeFailureAnswer(failures.get(id), 'config reload')?.status ?? 500);
-    }
+    if (landed.has(id)) audit(id, 200);
+    else if (failures.has(id)) audit(id, storeFailureAnswer(failures.get(id), 'config reload')?.status ?? 500);
     // A space the walk never reached (it stopped, or the space is in quarantine) was not tried: nothing to audit, still owed.
   }
 
@@ -407,35 +465,23 @@ const confirmWaiterKey = (spaceId: string): string => `confirm-space:${spaceId}`
  *
  * Recall on a still-building index returns empty rather than failing, which is the pre-existing
  * behaviour and is why deferring is safe: the ceiling was never protecting correctness, only tidiness.
+ *
+ * ## One space that cannot be initialised does not stop the boot (bundle-53 G32)
+ *
+ * The loop was bare, so the first space to throw left every space after it un-initialised and unconfirmed, and left this function —
+ * the boot's next init steps did not run — with only the boot's catch-all line, which names a driver error and not the space. The
+ * boot serves either way ("background services will still start"), so stopping was never what happened: it was half an init, said
+ * badly. Now each space is its own step in `initOwedSpaces`, which the reload shares: a failed space is said once and retried by the
+ * next reload, and the others are initialised and confirmed. The boot's catch is for what is not one space's failure.
  */
 export async function initAllSpaces(): Promise<void> {
-  // Collect ids, not space objects: a config reload during these awaits replaces cfg.spaces and every
-  // held object becomes an orphan — status flips would then be written to detached records and lost,
-  // leaving spaces stuck reporting 'building' forever with nothing to explain it.
-  //
   // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
   // collections — which its creation never made and its deletion (config-only) never drops — while the
   // reload path, which initialises spaces added to the file, already skipped proxies.
-  const spaceIds = concreteSpaceIds();
-
-  for (const spaceId of spaceIds) {
-    log.debug(`Initialising space: ${spaceId}`);
-    // Collections, regular indexes and the vector-index create/update all still happen here and are
-    // still awaited. Only the READY *poll* is deferred — the schema work must be done before the
-    // instance serves traffic, and it is fast.
-    await initSpace(spaceId, { waitForVectorReady: false });
-  }
-
-  // Every space is now either genuinely ready or building; say so, and let the background pass settle it.
-  mutateConfig(fresh => {
-    for (const spaceId of spaceIds) {
-      const live = fresh.spaces.find(s => s.id === spaceId);
-      if (live) live.indexStatus = 'building';
-    }
-  });
-
-  log.info(`Initialised ${spaceIds.length} space(s); confirming vector index readiness in the background.`);
-  void confirmSpaceIndexesInBackground(spaceIds);
+  markSpacesOwedInit(concreteSpaceIds());
+  // The reload's own init walk (`initOwedSpaces`): each space in its own step, so a space that cannot be initialised is said once
+  // and stays owed to the next reload while the others are initialised and confirmed. It used to stop the boot's init at that space.
+  await initOwedSpaces();
 }
 
 /**

@@ -45,8 +45,9 @@
  * ## What it does not do
  *
  * It does not choose the spaces: the caller passes `concreteSpaces()` or `concreteSpaceIds()`. It does not bound what is not a
- * database operation (a model call, a directory walk). Request routes, the sync engine and boot (`initAllSpaces`) are not walks of
- * this kind: a boot that cannot initialise a space must fail.
+ * database operation (a model call, a directory walk). Request routes and the sync engine are not walks of this kind. Space
+ * initialisation is: boot (`initAllSpaces`) and a reload (`initAddedSpaces`) both run each space as its own step
+ * (`initOwedSpaces`), because a boot that could not initialise one space went on serving anyway, with the rest half initialised.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js';
