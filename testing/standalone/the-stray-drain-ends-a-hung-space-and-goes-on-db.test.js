@@ -105,11 +105,11 @@ describe('the stray file-metadata drain walks each space on its own, bounded, na
     await door?.close();
   });
   beforeEach(async () => {
-    seen.listCollections.length = 0;
-    seen.dropCollection.length = 0;
     failing.listCollections.clear();
     failing.dropCollection.clear();
-    await seedHealthy();
+    await seedHealthy();   // its own `collection.drop()` goes through `Db.dropCollection` too, unbounded: not the drain's call
+    seen.listCollections.length = 0;
+    seen.dropCollection.length = 0;
   });
 
   it('a space whose LISTING fails keeps its collection, is named once under `list`, and the next space is drained', async () => {
