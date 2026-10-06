@@ -175,8 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bring it back. `graph_traverse` and `POST /api/brain/spaces/:id/traverse` answer whole nodes in hop order with `skip`/`nextSkip`, `remainderDump`, `limitReached`.
 - **Records:** A bulk edge whose end is a `$ref` to a fact or chrono entry stores that record's kind (it stored an entity end). A
   chrono entry rewritten through its `id` re-embeds its content, and an edge stores the property default its label's schema defines.
-- **Embedding:** A record or file this instance suppresses (own flag, type or space) no longer receives or keeps a vector from a peer's
-  update or file bytes (derived passages included); a record retired from meaning-ranked search gets none when rewritten without the flag (`waitForEmbedding`, `checkDuplicates`).
+- **Embedding:** A record or file this instance suppresses (own flag, type or space) no longer keeps a vector from a peer's
+  update or file bytes (passages too); a record retired from meaning-ranked search gets none when rewritten without the flag (`waitForEmbedding`, `checkDuplicates`).
 - **Embedding:** Suppression turned on by a network (meta pull, space addition, leaving, precedence) or a saved type schema removes
   vectors already stored, files included, at once and at every start; `matchedText` is kept.
 - **Embedding:** An embed job no longer writes a vector over a record that changed while it embedded. A reindex embeds the same text as
