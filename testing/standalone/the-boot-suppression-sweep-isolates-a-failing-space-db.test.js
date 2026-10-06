@@ -42,11 +42,11 @@ const skip = await mongoSkipReason();
 const STEP = 'Suppression sweep';
 const SUPPRESSING = { suppressEmbeddings: true };
 // One failing space per case: the report's throttle is process-wide, so a space that failed in one case would say nothing in the next.
-const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf'];
+const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india'];
 const HEALTHY = ['bravo', 'charlie'];
 const VECTOR = { embedding: [0.1, 0.2, 0.3], embeddingModel: 'test-model' };
-const STALL_MS = 3000;
-const BOUND_MS = 800;
+const STALL_MS = 1000;
+const BOUND_MS = 400;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-g18-'));
 // The loader reads CONFIG_PATH when it is first imported: set before any import below.
@@ -208,6 +208,35 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     assert.deepEqual(unhandled, [], 'a sweep rejected unhandled');
   });
 
+  it('a refusal on one record kind goes on to the others, and says what failed', async () => {
+    const db = mongo.getDb();
+    await db.collection('hotel_entities').insertOne({ _id: 'hotel-1', spaceId: 'hotel', type: 'concept', name: 'e', seq: 1, ...VECTOR });
+    let thrown;
+    await withCollectionAsView(db, 'hotel_facts', 'g18_src', async () => {
+      try { await sweep.sweepSuppressedVectors('hotel', SUPPRESSING); } catch (err) { thrown = err; }
+    }, { pipeline: [{ $addFields: { _x: { $toInt: '$a' } } }] });
+
+    assert.ok(thrown, 'a refused kind was swallowed: nothing says the sweep did not finish');
+    assert.equal((await db.collection('hotel_entities').findOne({ _id: 'hotel-1' })).embedding, undefined, 'a refusal on one kind stopped the others: the entity kept its vector');
+    assert.doesNotMatch(thrown.message, /not reached/, 'a plain refusal was taken for a reason to stop');
+  });
+
+  it('a timeout or an unreachable store on one record kind stops the space there and carries the rest as not reached', async () => {
+    const { StoreTimeout } = await import('../../server/dist/db/write-timeout.js');
+    const db = mongo.getDb();
+    await db.collection('india_entities').insertOne({ _id: 'india-1', spaceId: 'india', type: 'concept', name: 'e', seq: 1, ...VECTOR });
+    for (const makeError of [() => new StoreTimeout('a read'), () => new MongoNetworkError('connection 3 closed')]) {
+      await db.collection('india_entities').updateOne({ _id: 'india-1' }, { $set: VECTOR });
+      const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'india_facts', makeError);
+      let thrown;
+      try { await sweep.sweepSuppressedVectors('india', SUPPRESSING); } catch (err) { thrown = err; } finally { restore(); }
+
+      assert.ok(thrown, 'the failure was swallowed');
+      assert.match(thrown.message, /entity \(not reached\)/, `the kinds after the failed one are not named as not reached: ${thrown.message}`);
+      assert.equal((await db.collection('india_entities').findOne({ _id: 'india-1' })).embedding !== undefined, true, 'the sweep went on past a timeout / an unreachable store');
+    }
+  });
+
   it('a space whose read hangs is ended by the housekeeping bound, reported, and the others are swept', async () => {
     lines.length = 0;
     failures.length = 0;
@@ -219,20 +248,29 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     let ms;
     // The sweep reads with a filter, and the server may test the filter before the stalling stage: documents the sweep's filter
     // MATCHES are what must reach the stage, so the source holds as many of them as the fixture seeds stalling ones.
+    // EVERY collection of the space hangs (derived from the sweep's own kinds, with a floor), so a sweep that went on past the first
+    // timeout would pay one bound per kind: the assertion below is that cost, seen.
+    const { COLLECTION_SUFFIX } = await import('../../server/dist/config/types.js');
+    const parts = [...Object.values(COLLECTION_SUFFIX), 'files'];
+    assert.ok(parts.length >= 5, `only ${parts.length} collections derived for the sweep's kinds`);
     const matching = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
-    await db.collection('g18_stall_src').insertMany(matching);
+    for (const part of parts) await db.collection(`g18_stall_src_${part}`).insertMany(matching);
+    const stalled = (rest, fn) => rest.length === 0 ? fn()
+      : withStalledReads(db, `echo_${rest[0]}`, `g18_stall_src_${rest[0]}`, { ms: STALL_MS }, () => stalled(rest.slice(1), fn));
     try {
-      await withStalledReads(db, 'echo_facts', 'g18_stall_src', { ms: STALL_MS }, async () => {
+      await stalled(parts, async () => {
         const started = Date.now();
         await sweep.sweepEverySpaceAtBoot();
         ms = Date.now() - started;
       });
     } finally {
       restore();
-      await db.collection('g18_stall_src').deleteMany({ _id: { $in: matching.map(d => d._id) } });
+      for (const part of parts) await db.collection(`g18_stall_src_${part}`).deleteMany({ _id: { $in: matching.map(d => d._id) } });
     }
 
-    assert.ok(ms < STALL_MS - 1000, `the boot sweep took ${ms} ms: the hung read ran to its end (${STALL_MS} ms) instead of the ${BOUND_MS} ms bound`);
+    // ONE bound plus margin, not one per kind: the stop at the first timeout is what keeps a hung space from costing
+    // (kinds x bound) — 24 minutes at the production figure — before it is quarantined.
+    assert.ok(ms < 3 * BOUND_MS, `the boot sweep took ${ms} ms over ${parts.length} hung collections: more than one bound (${BOUND_MS} ms) was paid`);
     const hung = warnsFor('echo');
     assert.equal(hung.length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
     // The walk read the failure: the bound's own words, and the space is in quarantine (a hung space is not retried at once).
