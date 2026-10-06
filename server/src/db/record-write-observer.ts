@@ -43,7 +43,10 @@
  * would make every reader of a collection depend on the index lifecycle.
  */
 import type { Collection, Db } from 'mongodb';
-import { BOUNDED_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, RETURNS_CURSOR, callBounded, type BoundTarget } from './write-bound.js';
+import {
+  BOUNDED_OPTIONS_ARGUMENT, BOUNDED_DB_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, PLAIN_DB_WRITE_METHODS, RETURNS_CURSOR, callBounded,
+  type CollectionTarget, type ServerOperations,
+} from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
 export interface MethodEffect {
@@ -91,6 +94,45 @@ export const COLLECTION_METHOD_EFFECT: Readonly<Record<string, MethodEffect | 'r
 };
 
 const UNKNOWN_EFFECT: MethodEffect = { write: true, delete: true };
+
+/**
+ * Every method on the driver's `Db`, classified as it does or does not change what the database holds. The gate
+ * (`a-db-level-call-is-bounded-in-a-scope`) reads `Db.prototype` and fails on a method missing here, so a driver upgrade that
+ * adds one is refused on the day it lands — as `COLLECTION_METHOD_EFFECT` does for a collection's. This table answers a
+ * narrower question: the write bound's (`db/write-bound.ts`), not the search-index lifecycle's, so it is `'read'` or `'write'`
+ * and the listener hears nothing of a Db-level call.
+ */
+export const DB_METHOD_EFFECT: Readonly<Record<string, 'read' | 'write'>> = {
+  collection: 'read', collections: 'read', listCollections: 'read', aggregate: 'read', watch: 'read', stats: 'read',
+  profilingLevel: 'read', indexInformation: 'read', admin: 'read', runCursorCommand: 'read',
+  createCollection: 'write', command: 'write', renameCollection: 'write', dropCollection: 'write', dropDatabase: 'write',
+  createIndex: 'write', removeUser: 'write', setProfilingLevel: 'write',
+};
+
+/**
+ * The classified `Db` methods that are NOT bounded, each with the reason — "unboundable, and why" is part of the table, so a
+ * method added to the Db classification without a bound has to say what it is. A reason is a sentence; it is never "not yet".
+ * `createIndex` and `indexInformation` are the Db's side of the stated rule that index calls stay unbounded: an index build scales
+ * with the data in the collection, so no single figure is right for every collection (`write-bound.ts`).
+ */
+export const UNBOUNDED_DB_METHODS: Readonly<Record<string, string>> = {
+  collection: 'it returns a handle and sends nothing; the handle\'s own calls carry the bound, through the collection table',
+  admin: 'it returns a handle and sends nothing',
+  collections: 'it lists and opens every collection in one call and nothing in the server uses it; listCollections is the bounded form',
+  createCollection: 'a one-off metadata change (boot, space creation, restore, a store opened on first use), not repeated work of a housekeeping unit',
+  command: 'an arbitrary command: what it does is stated by the caller (collMod, collStats, dbStats), so no table row can bound it',
+  runCursorCommand: 'an arbitrary cursor command: what it does is stated by the caller, and nothing in the server issues one',
+  aggregate: 'a database-level pipeline (currentOp, session listing) that nothing in the server issues',
+  stats: 'the driver\'s dbStats wrapper, which nothing in the server issues (the quota reads dbStats through command)',
+  renameCollection: 'moves a whole collection and nothing in the server calls it (a space is moved by renaming its collections one by one)',
+  dropDatabase: 'drops the whole database: a restore or a test teardown, for which no per-operation figure is right',
+  createIndex: 'an index build scales with the data in the collection, so no one figure is right for every collection',
+  indexInformation: 'a listing of a collection\'s indexes, unbounded with the index calls for the same reason (write-bound.ts)',
+  watch: 'a change stream is long-lived by design: a per-operation bound would end it',
+  removeUser: 'a server administration call that nothing in this codebase issues',
+  setProfilingLevel: 'a server administration call that nothing in this codebase issues',
+  profilingLevel: 'a server administration call that nothing in this codebase issues',
+};
 
 export type RecordWriteListener = (collectionName: string, effect: MethodEffect) => void;
 
@@ -145,19 +187,35 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
   const unclassified = Object.keys(BOUNDED_OPTIONS_ARGUMENT).filter(m => !(m in COLLECTION_METHOD_EFFECT));
   const unbounded = Object.entries(COLLECTION_METHOD_EFFECT)
     .filter(([m, e]) => e !== 'read' && !UNBOUNDABLE.has(m) && BOUNDED_OPTIONS_ARGUMENT[m] === undefined).map(([m]) => m);
-  const cursorUnbounded = [...RETURNS_CURSOR].filter(m => BOUNDED_OPTIONS_ARGUMENT[m] === undefined);
+  const cursorUnbounded = [...RETURNS_CURSOR].filter(m => BOUNDED_OPTIONS_ARGUMENT[m] === undefined && BOUNDED_DB_OPTIONS_ARGUMENT[m] === undefined);
   // A write has TWO bound steps (the server's deadline, then the client's backstop — `write-bound.ts`), and a read has
   // one. A write missing from `PLAIN_WRITE_METHODS` would be bounded by the driver's `timeoutMS`, whose client clock
   // fires first: the write could land after the answer (`Q-372`). A read inside it would lose its cursor's deadline.
   const writesWithoutServerFirstBound = Object.entries(COLLECTION_METHOD_EFFECT)
     .filter(([m, e]) => e !== 'read' && BOUNDED_OPTIONS_ARGUMENT[m] !== undefined && !PLAIN_WRITE_METHODS.has(m)).map(([m]) => m);
   const readsBoundedAsWrites = [...PLAIN_WRITE_METHODS].filter(m => COLLECTION_METHOD_EFFECT[m] === 'read' || COLLECTION_METHOD_EFFECT[m] === undefined);
+  // The Db level, held the same way against `DB_METHOD_EFFECT`: a bounded Db method is classified, a classified one is bounded
+  // or says why it is not (never both), a bounded one that writes is server-first, and nothing server-first is a read.
+  const dbBoundedUnclassified = Object.keys(BOUNDED_DB_OPTIONS_ARGUMENT).filter(m => !(m in DB_METHOD_EFFECT));
+  const dbNeitherBoundedNorExplained = Object.keys(DB_METHOD_EFFECT)
+    .filter(m => (BOUNDED_DB_OPTIONS_ARGUMENT[m] === undefined) === (UNBOUNDED_DB_METHODS[m] === undefined));
+  const dbReasonForAnUnclassifiedMethod = Object.keys(UNBOUNDED_DB_METHODS).filter(m => !(m in DB_METHOD_EFFECT));
+  const dbWritesWithoutServerFirstBound = Object.entries(DB_METHOD_EFFECT)
+    .filter(([m, e]) => e === 'write' && BOUNDED_DB_OPTIONS_ARGUMENT[m] !== undefined && !PLAIN_DB_WRITE_METHODS.has(m)).map(([m]) => m);
+  const dbServerFirstOnAMethodThatDoesNotWrite = [...PLAIN_DB_WRITE_METHODS].filter(m => DB_METHOD_EFFECT[m] !== 'write' || BOUNDED_DB_OPTIONS_ARGUMENT[m] === undefined);
+  const inBothLevels = Object.keys(BOUNDED_DB_OPTIONS_ARGUMENT).filter(m => BOUNDED_OPTIONS_ARGUMENT[m] !== undefined);
   if (unclassified.length > 0 || unbounded.length > 0 || cursorUnbounded.length > 0
-    || writesWithoutServerFirstBound.length > 0 || readsBoundedAsWrites.length > 0) {
+    || writesWithoutServerFirstBound.length > 0 || readsBoundedAsWrites.length > 0
+    || dbBoundedUnclassified.length > 0 || dbNeitherBoundedNorExplained.length > 0 || dbReasonForAnUnclassifiedMethod.length > 0
+    || dbWritesWithoutServerFirstBound.length > 0 || dbServerFirstOnAMethodThatDoesNotWrite.length > 0 || inBothLevels.length > 0) {
     throw new Error(`the write bound's method table disagrees with COLLECTION_METHOD_EFFECT: bounded but unclassified `
       + `[${unclassified}], writing but unbounded [${unbounded}], cursor methods unbounded [${cursorUnbounded}], `
       + `writing but without the server-first bound [${writesWithoutServerFirstBound}], `
-      + `server-first bound on a method that does not write [${readsBoundedAsWrites}]`);
+      + `server-first bound on a method that does not write [${readsBoundedAsWrites}]; and with DB_METHOD_EFFECT: `
+      + `Db methods bounded but unclassified [${dbBoundedUnclassified}], bounded AND explained as unbounded or neither [${dbNeitherBoundedNorExplained}], `
+      + `explained but unclassified [${dbReasonForAnUnclassifiedMethod}], writing but without the server-first bound [${dbWritesWithoutServerFirstBound}], `
+      + `server-first on a Db method that is not a bounded write [${dbServerFirstOnAMethodThatDoesNotWrite}], `
+      + `named at both levels [${inBothLevels}]`);
   }
 }
 
@@ -175,20 +233,38 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
  * unchanged, so an unobserved collection pays a closure per method call and nothing else.
  */
 export function observeRecordWrites(db: Db, isObserved: (name: string) => boolean, listener: RecordWriteListener): Db {
+  // What a plain write's backstop ends the server's operation with (`Q-380`): the database's own `Admin`, one for every call
+  // this door bounds. A `Db` that has none (a test's fake) states `undefined`, and the backstop's line says so.
+  const serverOperations: ServerOperations | undefined = typeof db.admin === 'function' ? db.admin() : undefined;
   return new Proxy(db, {
     get(target, prop, receiver) {
+      // The Db's own bounded calls (`listCollections`, `dropCollection`): the same bound, at the same door, through the Db
+      // table. Everything else a Db has is the driver's own, unchanged.
+      if (typeof prop === 'string' && BOUNDED_DB_OPTIONS_ARGUMENT[prop] !== undefined) {
+        const method = Reflect.get(target, prop, receiver) as (...a: unknown[]) => unknown;
+        return (...given: unknown[]) => {
+          try {
+            return callBounded(prop, given, (a) => method.apply(target, a), { database: target.databaseName, inheritedTimeoutMs: target.timeoutMS, serverOperations });
+          } catch (err) {
+            // A hold whose time is spent refuses the call unsent: THROWN for the call that returns a cursor, as a collection's
+            // `find` does, and a rejection for the one that returns a promise.
+            if (RETURNS_CURSOR.has(prop)) throw err;
+            return Promise.reject(err);
+          }
+        };
+      }
       if (prop !== 'collection') return Reflect.get(target, prop, receiver);
       return (name: string, options?: object) =>
         // `target.timeoutMS` is the `timeoutMS` every operation of this database inherits (the client's, from `MONGO_URI`), which
         // a bounded plain write has to neutralise (`db/write-bound.ts`).
         observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null,
-          { collection: name, inheritedTimeoutMs: target.timeoutMS });
+          { collection: name, inheritedTimeoutMs: target.timeoutMS, serverOperations });
     },
   });
 }
 
 function observeCollection<T extends object>(
-  coll: Collection<T>, name: string, listener: RecordWriteListener | null, boundTarget: BoundTarget,
+  coll: Collection<T>, name: string, listener: RecordWriteListener | null, boundTarget: CollectionTarget,
 ): Collection<T> {
   return new Proxy(coll, {
     get(target, prop, receiver) {

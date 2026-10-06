@@ -210,7 +210,9 @@ row per connection, showing which record it hangs off and which record it names.
 
 **Making one directly** is an API capability in this release — `POST /api/brain/spaces/:spaceId/links` or the
 `save_link` tool, needing the same **write knowledge** right as an edge. There is no button for it,
-because the ordinary way to make a link is to attach the record, which the tabs already do.
+because the ordinary way to make a link is to attach the record, which the tabs already do. If the database is not
+answering when a link is made, the answer is `503`, *database unavailable, try again*, on both; it never says that
+one of the records is not found when the database simply could not be asked.
 
 ### Two things changed in 5.0, and the conversion runs itself
 
@@ -685,14 +687,22 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > that (during an upgrade, say), every queued job in every space is marked failed at once and nothing runs
 > again until somebody presses **Retry all failed**. So starting a **new version** re-queues everything
 > that failed under the old one, once, and says how many in the log. Restarting the same version re-queues
-> nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever.
+> nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever. **One space
+> that does not answer does not hold back the others**: the others are re-queued, the log line then says *in N of M
+> spaces*, and the embedding worker's stall check, which runs **once a minute**, asks the missing spaces again until
+> each has had its one retry. A space that failed for another reason is named in the Server Log as
+> `Embed revive failed for space '…'`.
 > **Reindex tells you it STARTED, not what it found.** The button schedules the work and returns at once —
 > a whole-space re-embed is far too long to hold a request open — so there is no count to report yet, and
 > the notification says the job is running in the background. The **Indexing** panel then shows
 > *Reindexing: N left to rebuild, F failed* while it runs, both Reindex buttons stay disabled, and the line goes
 > when every record has been rebuilt. Every record is rebuilt, passages of documents and captions of media
 > included, so a large space takes a while; the work waits behind anything you write meanwhile, so the rest of
-> the app stays responsive. A reindex left running when the server restarts continues where it stopped. Records
+> the app stays responsive. A reindex left running when the server restarts continues where it stopped. If a space could not be read while
+> the server was starting, its run is picked up by a watcher that looks every **5 seconds**; a run whose server
+> stopped while sweeping is taken over after **a minute**, and only one sweeper ever works on a run. The Server
+> Log names a space the watcher could not read (`Reindex resume failed for space '…' … — retried next tick`), and the
+> gauge `ythril_reindex_in_progress` keeps its last value meanwhile instead of showing too low a count. Records
 > whose rebuild fails are counted as *failed* and listed with the space's embedding jobs; if the embedding
 > service is unreachable, the reindex simply waits for it and strips nothing.
 >
@@ -745,7 +755,8 @@ values as well as the record summaries, so "the one about `port`" finds it), a *
 **Scan now** button. The status filter matters more here than on Duplicates, because there are three piles
 rather than two — **open**, **dismissed** and **resolved** — and dismissing or resolving a pair moves it out
 of the default view. Switch the filter to find it again. If a scan finishes while the entailment model is
-unreachable, it says so: nothing was judged, which is not the same answer as nothing disagreeing.
+unreachable, it says so: nothing was judged, which is not the same answer as nothing disagreeing. If the space could not be scanned at all
+it says that too, and the reason is in the **Server Log** (`Contradiction scan failed for space '<id>': … — retried next scan`).
 
 An empty list tells you *which* empty it is. With no entailment model configured it says so and names what
 still ran — the deterministic field check runs regardless, so contradiction detection is never simply off.
@@ -767,7 +778,7 @@ findings to see the rest.
 
 **Duplicates** surfaces near-duplicate records found by the background semantic-duplicate scanner, **for that space**. A duplicate pair only ever means something *inside* one space, so it lives beside that space's data. (The `/settings/duplicates` link redirects to the Brain.)
 
-A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
+A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. **Scan now** scans this space; if the space could not be scanned it says so in an error message instead of finishing quietly, and the reason is in the **Server Log** (`Dupe scan failed for space '<id>': … — retried next scan`). A script that scans every space through the API still scans all it can and is told which ones failed — see [a scan that could not scan a space](../integration-guide/14-duplicates-and-webhooks.md#a-scan-that-could-not-scan-a-space). The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
 
 **Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild does not drag them back onto the list. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
 

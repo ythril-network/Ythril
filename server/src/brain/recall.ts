@@ -958,9 +958,11 @@ async function recallByType(
    * called only through `primary`, which runs below, after it.
    */
   function run(pipeline: object[]): Promise<Record<string, unknown>[]> {
-    const cursor = col(collName).aggregate<Record<string, unknown>>(pipeline);
+    // The deadline is an OPTION of the call, not a call on its cursor: a scope's bound (a housekeeping scan reaches
+    // this) lowers only a `maxTimeMS` it can see in the options, and the driver drops a chained one when it applies
+    // an injected `timeoutMS` (Q-358).
     const ms = deadline();
-    return (ms != null ? cursor.maxTimeMS(ms) : cursor).toArray();
+    return col(collName).aggregate<Record<string, unknown>>(pipeline, ms != null ? { maxTimeMS: ms } : {}).toArray();
   }
 
   try {

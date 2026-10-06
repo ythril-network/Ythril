@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { join } from 'node:path';
-import { balancedFrom, blockAfter } from './_structural-window.mjs';
+import { balancedFrom } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
@@ -160,13 +160,13 @@ describe('the schema retention tier reaches every typed collection', () => {
       'TYPED_COLLECTIONS must BE the knowledge types, so a new kind is covered without an edit here');
     assert.match(src, /import\s*\{\s*KNOWLEDGE_TYPES\s*\}/,
       'and it has to import them, or the line above is matching a local shadow');
-    // A WINDOW, converted: the subject is the loop BODY, bounded by the brace that closes it. A cap here also
-    // could not tell "the call is inside the loop" from "the call is 200 characters after it", which is the
-    // difference between per-collection and once.
-    const loop = src.indexOf('for (const collection of TYPED_COLLECTIONS)');
-    assert.ok(loop > -1, 'the sweep loop is gone — re-anchor this gate');
-    assert.match(blockAfter(src, loop, 'the retention sweep loop'), /backfillTypedExpiry/,
-      'the sweep must call backfillTypedExpiry for each collection');
+    // A WINDOW, converted: the subject is the per-collection UNIT list (bundle-53 G13: one unit per collection, so a failing
+    // collection starves nothing after it), bounded by the parenthesis that closes the `.map(`. A cap here also could not tell
+    // "the call is inside the map" from "the call is 200 characters after it", which is the difference between per-collection and once.
+    const map = src.indexOf('TYPED_COLLECTIONS.map(');
+    assert.ok(map > -1, 'the per-collection units are gone — re-anchor this gate');
+    assert.match(balancedFrom(src, map + 'TYPED_COLLECTIONS.map'.length, 'the per-collection units'), /backfillTypedExpiry\(s\.id, space, collection\)/,
+      'the sweep must call backfillTypedExpiry for each collection, as that collection\'s own unit');
     // Files stay out: no type, so no schema window. Asserted so nobody "completes" the list.
     assert.ok(!/TYPED_COLLECTIONS[^=]*=[^\]]*'file/.test(src),
       'files have no type and therefore no schema window — they must not be in TYPED_COLLECTIONS');
@@ -176,7 +176,7 @@ describe('the schema retention tier reaches every typed collection', () => {
     // A window configured months ago through the API starts deleting records the first time this pass reaches
     // it. That is the documented behaviour and still worth one info line per space+type.
     const src = read('server/src/brain/chrono-redaction.ts');
-    assert.match(src, /announced\.has\(key\)/, 'the first stamp for a space+type must be reported once');
+    assert.match(src, /retentionAnnounced\(retentionAnnouncementKey\(spaceId, collection, type\)/, 'the first stamp for a space+type must be reported once');
     assert.match(src, /log\.info\(`Retention:/, 'that report must be at info, not debug');
   });
 

@@ -55,8 +55,7 @@ import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
-import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
-import { concreteSpaces } from './spaces/proxy.js';
+import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { col } from './db/mongo.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
@@ -526,12 +525,17 @@ export function createApp() {
 
   async function applyConfigFromDisk(actor: ReloadActor = WATCHER): Promise<void> {
     const beforeSpaces = structuredClone(getConfig().spaces);
-    const oldSpaceIds = new Set(beforeSpaces.map(s => s.id));
     reloadConfig();
+    const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
+      tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
+      method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
+    });
+    let added: string[];
     /*
      * A reload never drops a space silently (S-10). A space missing from the file is put back unless the file names
      * it in `removeSpaces` or an in-flight rename/delete takes it; `removeSpaces` is consumed here. Every space the
-     * reload adds, removes or keeps is audited by id, whoever triggered it.
+     * reload adds, removes or keeps is audited by id, whoever triggered it — an ADDED space once its init has run, with
+     * the status that init really had (`initAddedSpaces`), and the others now.
      */
     {
       const cfg = getConfig();
@@ -545,11 +549,9 @@ export function createApp() {
         delete cfg.removeSpaces;
         saveConfig(cfg);
       }
-      const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
-        tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
-        method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
-      });
-      for (const id of diff.added) audit(CONFIG_RELOAD_OPERATIONS.added, id, 200);
+      // Owed from here, so a reload that throws before its init step (the built-in space, a pending-op resume) still owes them.
+      added = diff.added;
+      markSpacesOwedInit(added);
       for (const id of diff.removed) audit(CONFIG_RELOAD_OPERATIONS.removed, id, 200);
       for (const s of diff.kept) audit(CONFIG_RELOAD_OPERATIONS.kept, s.id, 409);
     }
@@ -566,26 +568,32 @@ export function createApp() {
     // gives operators a restart-free way to finish a stuck op. Runs before the
     // new-space init below so a rename isn't shadowed by re-creating its old id.
     await reconcilePendingSpaceOp();
-    // Initialise any spaces that were added to the config file (a proxy owns no collections)
-    for (const space of concreteSpaces()) {
-      if (!oldSpaceIds.has(space.id)) {
-        await initSpace(space.id);
-      }
-    }
     /*
-     * Re-arm the schedulers whose cron expression is captured at START time — the sync engine, the duplicate
-     * scanner, the contradiction scanner.
+     * Initialise the spaces this reload added, and any an earlier reload could not (a proxy owns no collections), then re-arm
+     * the schedulers whose cron expression is captured at START time — the sync engine, the duplicate scanner, the
+     * contradiction scanner — and throw ONE error naming the spaces still not initialised. All of it is `initAddedSpaces`
+     * (`spaces/lifecycle.ts`): a space whose init throws is audited with its failure, not as applied, is retried by the next
+     * reload, and does not stop the spaces after it.
      *
-     * Without this, reloading a config that changed `dupeScanner.schedule` left the scanner on its boot-time
-     * schedule, and ENABLING a scanner that was off did nothing at all until the instance was restarted. This
-     * function is reached by the config watcher AND by `POST /api/admin/reload-config`, which answered
-     * `{ ok: true }` — an endpoint whose entire purpose is "apply what I just changed", reporting success
-     * without applying it.
-     *
-     * Last in the reload, deliberately: a scheduler re-armed before `initSpace` could fire against a space that
-     * does not exist yet. See `schedulers.ts` for why the interval-driven sweeps are NOT re-armed here.
+     * The re-arm is why this is last in the reload: without it, reloading a config that changed `dupeScanner.schedule` left
+     * the scanner on its boot-time schedule, and ENABLING a scanner that was off did nothing at all until the instance was
+     * restarted — behind a `POST /api/admin/reload-config` that answered `{ ok: true }`. It runs after the init, so a
+     * scheduler re-armed cannot fire against a space that does not exist yet, and it runs even when a space failed. See
+     * `schedulers.ts` for why the interval-driven sweeps are NOT re-armed here.
      */
-    await rearmCronSchedulers();
+    await initAddedSpaces({ added, audit: (spaceId, status) => audit(CONFIG_RELOAD_OPERATIONS.added, spaceId, status), rearm: rearmCronSchedulers });
+  }
+
+  /**
+   * What one reload's outcome does to the two reload metrics, for the watcher and the route alike (`Q-43`, bundle-53 G21).
+   * The route used to leave them alone, so a rejected manual reload — a space whose init failed above all — was visible to
+   * its caller and to no alert. The pending gauge stays set until a reload applies EVERYTHING, which a space still owed an
+   * init prevents: such a reload throws.
+   */
+  function noteReloadOutcome(applied: boolean): void {
+    if (applied) { configReloadPending.set(0); return; }
+    configReloadFailedTotal.inc();
+    configReloadPending.set(1);
   }
 
   /*
@@ -595,16 +603,14 @@ export function createApp() {
    * would close a runtime import cycle. The composition root has both in scope already, which is what a
    * composition root is for.
    */
-  startConfigWatcher(() => applyConfigFromDisk(), undefined, applied => {
-    if (applied) { configReloadPending.set(0); return; }
-    configReloadFailedTotal.inc();
-    configReloadPending.set(1);
-  });
+  startConfigWatcher(() => applyConfigFromDisk(), undefined, noteReloadOutcome);
   app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (req, res) => {
     try {
       await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
+      noteReloadOutcome(true);
       res.json({ ok: true });
     } catch (err) {
+      noteReloadOutcome(false);
       sendCaughtFailure(res, 'POST /api/admin/reload-config', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });

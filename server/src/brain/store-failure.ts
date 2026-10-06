@@ -54,6 +54,10 @@
  * (`MongoError`, not `MongoServerError`) is not the caller's to fix and its message is the driver's — so an
  * unrecognised one is a `500` in words of ours, logged with its stack, rather than a door's default `400` carrying it.
  *
+ * **The question "is it the store's?" is `db/store-condition.ts`'s**, which the boot retry and the housekeeping walk ask
+ * too; this module answers a DOOR with it. One answer it must not give is "retry" for a write concern the deployment can
+ * never meet: that is a `500`, not retryable, carrying the server's code (bundle-53 G1, Q-343).
+ *
  * ## What this does NOT do, on purpose
  *
  * It does not retry. The canary operator's third option was to retry internally with backoff as the startup
@@ -61,14 +65,12 @@
  * A retry loop would have turned that into slow successes and hidden a process death from the only two
  * parties who could see it. Say what happened, say it can be retried, and let the caller decide.
  */
-import {
-  MongoBulkWriteError, MongoClientClosedError, MongoError, MongoErrorLabel, MongoNetworkError, MongoNotConnectedError,
-  MongoServerClosedError, MongoServerError, MongoStalePrimaryError, MongoSystemError, MongoTopologyClosedError,
-  MongoWriteConcernError,
-} from 'mongodb';
+import { MongoError, MongoServerError } from 'mongodb';
 import { errorChain, wrapsAThrownError } from '../db/error-chain.js';
+import { isStoreCondition, unsatisfiableWriteConcern } from '../db/store-condition.js';
 import { isWriteTimeout, STORE_RETRY_SENTENCE } from '../db/write-timeout.js';
 import { log, logSafe } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
 
 /** What every door answers for an operation a bound ended: the store's condition, said without the store's text. */
 const STORE_TIMEOUT_MESSAGE = `The database did not complete this operation in time. ${STORE_RETRY_SENTENCE}`;
@@ -84,89 +86,24 @@ const STORE_FAILURE_MESSAGE = `A store-side failure stopped this operation. ${ST
  * transient, and never in the driver's words. The cause is in the log, under the request's id.
  */
 const DRIVER_FAULT_MESSAGE = 'An internal database fault stopped this operation; its cause is in the server log.';
-
 /**
- * Driver classes that mean "there is no store to talk to right now" — matched with `instanceof`, so every subclass
- * the driver derives from one is matched with it: `MongoNetworkError` takes in the timeout, the pool-cleared and the
- * pool-cleared-on-network errors; `MongoSystemError` takes in server selection. The rest are a client or topology
- * that is closed or not connected, and a primary that is no longer one.
+ * What every door answers for a write concern the deployment can never meet (bundle-53 G1, Q-343): not the caller's
+ * fault and not a condition that clears, so it says the opposite of every retryable answer here — and never the
+ * driver's words, which name the deployment's members. What the operator needs (the code, the driver's text) is in the
+ * log, once per operation and code per window. Named and exported so the one place the docs word this answer can be
+ * held to it: the answer's `code` / `codeName` and this sentence are an integrator's reference.
  */
-const STORE_CONDITION_CLASSES = [
-  MongoNetworkError, MongoSystemError, MongoTopologyClosedError, MongoNotConnectedError, MongoServerClosedError,
-  MongoClientClosedError, MongoStalePrimaryError,
-];
-
+export const UNSATISFIABLE_WRITE_CONCERN_MESSAGE = 'The database cannot satisfy the write concern this instance writes with, so the write was not confirmed. '
+  + 'Retrying will not help: the operator must change the write concern or the deployment; the cause is in the server log (not retryable).';
 /**
- * The labels the driver (or the server) attaches to a failure of the connection, the pool or the topology — the
- * driver's own "this is retryable" — whatever class or code carries them.
+ * What an act's refusal says in place of a driver's own words (`refusalText`): the database refused the operation for a
+ * reason that is not ours to word. Never a part of the driver's text; that is in the log.
  */
-const STORE_CONDITION_LABELS = [
-  MongoErrorLabel.ResetPool, MongoErrorLabel.PoolRequestedRetry, MongoErrorLabel.InterruptInUseConnections,
-  MongoErrorLabel.RetryableWriteError, MongoErrorLabel.TransientTransactionError,
-  MongoErrorLabel.UnknownTransactionCommitResult, MongoErrorLabel.SystemOverloadedError, MongoErrorLabel.RetryableError,
-];
+export const DRIVER_REFUSAL_MESSAGE = 'The database refused this operation; the reason is in the server log.';
 
-/**
- * `MongoServerError` codes that mean "not answerable right now", by code because the class cannot decide.
- *
- * The first five are the same set `db/mongo.ts` retries at connect time — a replica set stepping down under a
- * running query is the same condition as one stepping down during boot. The rest are the network and primary
- * conditions the driver itself retries a read on: a router or a member reporting that it could not reach another
- * reports it with the address in its message, which is exactly the text no answer may carry.
- *
- * The two deadline codes, 50 `MaxTimeMSExpired` and 262 `ExceededTimeLimit`, are NOT here, and the absence is
- * deliberate: `isWriteTimeout` (the first branch of `classifyReadFailure`, through `db/max-time.ts`) answers both, so
- * a row for them here could never be reached — and a reader who found one would believe a deadline is answered with
- * the driver's text, which it is not (bundle-30 I6, D1). `store-failure-is-not-a-400` still holds both to a 503.
- */
-const STORE_ERROR_CODES = new Set([
-  11600,  // InterruptedAtShutdown
-  91,     // ShutdownInProgress
-  11602,  // InterruptedDueToReplStateChange
-  189,    // PrimarySteppedDown
-  13436,  // NotPrimaryOrSecondary
-  6,      // HostUnreachable
-  7,      // HostNotFound
-  89,     // NetworkTimeout
-  9001,   // SocketException
-  10107,  // NotWritablePrimary
-  13435,  // NotPrimaryNoSecondaryOk
-  134,    // ReadConcernMajorityNotAvailableYet
-]);
-
-/** Is this one error — not what it wraps — the store's condition, by class, label, server code or write concern? */
-function isStoreCondition(e: object): boolean {
-  if (!(e instanceof MongoError)) return false;
-  if (STORE_CONDITION_CLASSES.some(C => e instanceof C)) return true;
-  if (STORE_CONDITION_LABELS.some(label => hasLabel(e, label))) return true;
-  if (isWriteConcernFailure(e)) return true;
-  return e instanceof MongoServerError && typeof e.code === 'number' && STORE_ERROR_CODES.has(e.code);
-}
-
-/**
- * The store applied a write and could not confirm the durability it was asked for — a single write's
- * `MongoWriteConcernError`, or a bulk write that reports a write concern failure and refused no document
- * (`bulk/common.js` raises a document's refusal first, so a bulk error with `writeErrors` is the documents').
- *
- * The store's condition, not the caller's (bundle-30 I14): no caller chooses a write concern here, so nothing the
- * caller sends differently changes it — and the sentence every door answers it with, "it did not complete as far as
- * this server can confirm", is exactly what a write concern failure is. Both shapes answered `400` before.
- */
-function isWriteConcernFailure(e: MongoError): boolean {
-  if (e instanceof MongoWriteConcernError) return true;
-  if (!(e instanceof MongoBulkWriteError)) return false;
-  const refusedDocuments = ([] as unknown[]).concat(e.writeErrors ?? []);  // typed one-or-many; an array at runtime
-  return refusedDocuments.length === 0 && !!e.result?.getWriteConcernError();
-}
-
-/**
- * `hasErrorLabel`, never throwing. It reads a set the driver's constructor makes, and an error built any other way
- * (a subclass whose constructor failed part-way, a deserialised one) has none — this runs inside every door's
- * `catch`, the one place an exception of its own would replace the answer it exists to give.
- */
-function hasLabel(e: MongoError, label: string): boolean {
-  try { return e.hasErrorLabel(label); } catch { return false; }
-}
+/** One warning per operation and code per minute for the unsatisfiable write concern, which every write meets until it is fixed. */
+const WRITE_CONCERN_WARNING_WINDOW_MS = 60_000;
+const unsatisfiableWarnings = warnOnce<string>({ every: WRITE_CONCERN_WARNING_WINDOW_MS });
 
 /**
  * The message shape of a failed aggregation stage, which is how the reported condition actually arrives.
@@ -261,6 +198,17 @@ export function classifyReadFailure(err: unknown): ReadFailure {
   if (isWriteTimeout(err)) {
     return { status: 503, retryable: true, retryAfterSeconds: 5, error: STORE_TIMEOUT_MESSAGE };
   }
+  /*
+   * A WRITE CONCERN THE DEPLOYMENT CAN NEVER MEET (bundle-53 G1, Q-343) — before the store's condition is asked, because
+   * it would otherwise be answered by it: the same driver classes (a write concern error, a bulk error carrying one) are
+   * the store's when they are a timeout, and a 503 here is a request to repeat a configuration fault for ever. Read
+   * through the chain, so a sliced bulk write (`db/one-command.ts`) whose cause is the stopping error is seen as it is.
+   * A 500 in words of ours, carrying the code and the server's name for it, never retryable.
+   */
+  const unsatisfiable = unsatisfiableWriteConcern(err);
+  if (unsatisfiable) {
+    return { status: 500, retryable: false, error: UNSATISFIABLE_WRITE_CONCERN_MESSAGE, code: unsatisfiable.code, codeName: unsatisfiable.codeName };
+  }
   const message = err instanceof Error ? err.message : String(err);
   // Looked through our wrappers and the driver's own nesting: a store failure wrapped by a writer is still the store's.
   const chain = errorChain(err);
@@ -348,12 +296,55 @@ export async function unlessTheStoreFailed(what: string, step: () => Promise<unk
  * The answer every door gives a failure on the store's side: one status, one wait, one body.
  *
  * `503` with `retryAfterSeconds` for the store's condition; `500` with neither for a driver error nothing recognises —
- * a door that sends a `Retry-After` on that would invite a retry nobody knows will help.
+ * a door that sends a `Retry-After` on that would invite a retry nobody knows will help. The same `500`, with the
+ * server's `code` and `codeName` in the body and `retryable: false`, for a write concern the deployment can never meet
+ * (Q-343): it is the operator's to change, so the body names it and says not to retry.
  */
 export interface StoreFailureAnswer {
   status: 503 | 500;
   retryAfterSeconds?: number;
   body: { error: string; retryable: boolean; code?: number; codeName?: string };
+}
+
+/**
+ * The sentence an act puts in a REFUSAL — and the driver's words are never in it (bundle-53 G1, Q-335 module half; SEC-1).
+ *
+ * For the acts that decide a refusal from what a lookup threw (`renameSpaceAct`, `applySpaceCreate`, a network join): three
+ * of them read `err.message` for "not found" / "already exists" and answered it. A `MongoServerError` the server raised for
+ * something else — whose text holds one of those words, and names the internal collection, the index and the values — was
+ * read as a refusal and put in a caller's hands, and the store failing in the middle of the act was read as the caller's
+ * mistake. So the decision is the store's FIRST, and the words are ours:
+ *
+ * - a failure on the store's side is rethrown (`throwIfStoreSide`: the door answers it as every door does);
+ * - our own error's message is returned as it is — it is the act's refusal in the act's words;
+ * - anything the DRIVER raised that is not on the store's side (a server refusal) returns ONE generic sentence, and its
+ *   text goes to the log, where an operator reads it and no caller does;
+ * - a FILE-SYSTEM error (Node's, with a `syscall`) answers our sentence with its code and nothing else: the runtime puts
+ *   the absolute data path in its message, and a space rename's directory move put that path in its 500 body (bundle-53
+ *   lens sweep). The message goes to the log the same way.
+ */
+export function refusalText(err: unknown): string {
+  throwIfStoreSide(err);
+  if (errorChain(err).some(e => e instanceof MongoError)) {
+    log.warn(`A database refusal was answered in our words: ${logSafe(storeFailureDetail(err))}`);
+    return DRIVER_REFUSAL_MESSAGE;
+  }
+  const fsError = errorChain(err).find(isFileSystemError);
+  if (fsError) {
+    log.warn(`A file-system refusal was answered in our words: ${logSafe(fsError.message)}`);
+    return fileSystemRefusalMessage(fsError.code);
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Node's file-system error: an `Error` with a string `syscall` and `code` (`ENOENT`, `EACCES`, …). */
+function isFileSystemError(e: unknown): e is Error & { code: string; syscall: string } {
+  return e instanceof Error && typeof (e as { syscall?: unknown }).syscall === 'string' && typeof (e as { code?: unknown }).code === 'string';
+}
+
+/** Our sentence for a file-system refusal: its code (it names no path), and where the detail is. */
+function fileSystemRefusalMessage(code: string): string {
+  return `The file system refused this step (${/^[A-Z0-9_]{1,32}$/.test(code) ? code : 'unknown'}); the reason is in the server log.`;
 }
 
 /**
@@ -383,6 +374,16 @@ export function storeFailureAnswer(err: unknown, where: string): StoreFailureAns
   // `a-store-failure-log-line-names-its-operation.test.js` holds every call to it.
   const at = where ? ` (${logSafe(where)})` : '';
   if (!f.retryable) {
+    if (f.code !== undefined) {
+      // A write concern the deployment cannot meet: every write meets it until an operator changes it, so ONE line per
+      // operation and code per window — with the driver's text, which names the members and is not in the answer — and
+      // not one per request. The code and its name travel in the body, where a caller tells it from a fault of ours.
+      unsatisfiableWarnings(`${where}|${f.code}`, () => {
+        log.warn(`Write concern the deployment cannot meet answered 500${at}: ${logSafe(storeFailureDetail(err))} — `
+          + 'every write fails until the write concern or the deployment is changed');
+      });
+      return { status: 500, body: { error: f.error, retryable: false, code: f.code, ...(f.codeName ? { codeName: f.codeName } : {}) } };
+    }
     // Not recognised, so the stack is what an operator needs: the meta argument keeps it (`fmt`).
     log.error(`Database driver failure answered 500${at}:`, err);
     return { status: 500, body: { error: f.error, retryable: false } };

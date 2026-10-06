@@ -72,9 +72,13 @@ export function openEventStream(req: Request, res: Response, opts: EventStreamOp
   const close = (): void => {
     if (closed) return;
     closed = true;
-    clearInterval(heartbeat);
-    open.set(opts.pool, Math.max(0, (open.get(opts.pool) ?? 1) - 1));
-    for (const fn of cleanups) { try { fn(); } catch { /* one cleanup failing must not strand the others */ } }
+    try {
+      open.set(opts.pool, Math.max(0, (open.get(opts.pool) ?? 1) - 1));
+      for (const fn of cleanups) { try { fn(); } catch { /* one cleanup failing must not strand the others */ } }
+    } finally {
+      // Whatever the way out of the body above, the keepalive does not outlive the stream.
+      clearInterval(heartbeat);
+    }
   };
 
   const send = (chunk: string): void => {
@@ -89,6 +93,10 @@ export function openEventStream(req: Request, res: Response, opts: EventStreamOp
     res.write(chunk);
   };
 
+  // A plain `setInterval`, and the ONE exemption from `util/interval-job.ts` (`Q-317`): this timer is the lifetime of ONE connection
+  // (created here, cleared in `close`'s `finally`), its tick is a synchronous write and so cannot overlap itself, and it touches no
+  // database. An interval job's single-flight, housekeeping bound, throttled lines and registry label would each answer a question
+  // nobody asked of a keepalive, once per open stream.
   const heartbeat = setInterval(() => send(':\n\n'), opts.heartbeatMs ?? 30_000);
   heartbeat.unref?.();
   req.on('close', close);

@@ -121,9 +121,32 @@ and a message of ours: the driver's text names internal collections and is never
 `POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
 the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
 the remedy. Any other store failure on a write (a step-down, a dropped connection, a connection pool the driver
-cleared) answers as a read does — the store's condition, with its `code` and `codeName` — on every REST route and
-on MCP alike; one function builds the answer and one sender puts it on the wire, so no route answers a store
-failure with a `500` of its own.
+cleared, a pool checkout that timed out, a closed connection pool) answers as a read does — the store's condition,
+with its `code` and `codeName` where the store supplied them — on every REST route and on MCP alike; one function
+builds the answer and one sender puts it on the wire, so no route answers a store failure with a `500` of its own.
+A pool checkout that timed out and a closed pool are the same retryable `503` as the rest — they answered a `500`
+*"An internal database fault…"* until this release, which told an integrator that a pool exhausted for a second
+was a fault to report — and a checkout only times out where `waitQueueTimeoutMS` is set in `MONGO_URI`. The same
+holds for the acts that decide refusals — renaming a space, creating one, adding a link: a store failure there is a
+`503`, no longer the `404`, `409` or `422` in the database driver's words that these answered when the driver's
+message was read before the store was asked.
+
+**The one store-side answer that is not retryable is a write concern the deployment can never meet** — more
+acknowledgements than the replica set has members, a named concern it does not define, or a `w` above `1` on a
+standalone server. It answers `500` with `retryable: false` and the server's `code` and `codeName` (`100`
+`UnsatisfiableWriteConcern` and `79` `UnknownReplWriteConcern` on a replica set, `2` `BadValue` on a standalone
+server). The text is ours:
+
+> The database cannot satisfy the write concern this instance writes with, so the write was not confirmed.
+> Retrying will not help: the operator must change the write concern or the deployment; the cause is in the
+> server log (not retryable).
+
+It used to answer `503`, which asks a client to repeat a configuration fault for ever, so **branch on `retryable`,
+not on the status**. On a replica set that cannot reach the acknowledgements asked for, **the write may have been
+applied**: read the record before writing it again. The server log carries the driver's own text, which names the
+deployment's members and so is not in the answer, once a minute for each operation and code, and says every write
+fails until the write concern or the deployment is changed. On MCP the answer arrives in `structuredContent` with
+`retryable: false`, `code` and `codeName`.
 
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.

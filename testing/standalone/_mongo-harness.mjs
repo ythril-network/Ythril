@@ -35,10 +35,10 @@
 
 import net from 'node:net';
 import { absentInputReason } from '../_shared/absent-input.mjs';
+import { TEST_MONGO_HOST, TEST_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
 
-/** Host/port of the published test Mongo. Override for a non-default stack. */
-export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
-export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
+/** Host/port of the published test Mongo (`_shared/test-mongo-address.mjs`, so a pure test can read it too). */
+export { TEST_MONGO_HOST, TEST_MONGO_PORT };
 
 /**
  * `user:password` for the test Mongo. Set `YTHRIL_TEST_MONGO_CREDS=` (empty) to run the DB-backed files against a
@@ -150,6 +150,35 @@ export async function openTestMongo(suite, { port, query } = {}) {
     throw err;
   }
   return mongo;
+}
+
+/**
+ * A client of the harness's own for a test's FIXTURE steps — seeding, wiping, holding a lock, reading what a case left — that
+ * is not the server's client.
+ *
+ * ## What it prevents
+ *
+ * A test that makes the server's client carry an option on purpose (`'&timeoutMS=1500'`, an operator's `MONGO_URI`) makes every
+ * fixture step that goes through `openTestMongo`'s module carry it too, and the option is the SUBJECT of the test, not of its
+ * setup: on a loaded host a seed, a lock or a read died with `Timed out during socket read (1499ms)` and the case reported "a
+ * repetition could not run" — about the machine, not the rule. This client has the driver's defaults, goes straight to the stack
+ * (not through a relay that holds writes back) and answers to the harness database the server's client uses, so what the
+ * server does and what the fixture sees are one database.
+ *
+ * It has the SURFACE the fixture helpers read (`getDb`, `getMongo`, `col`), so `holdDocumentLock`, `activeOperations` and
+ * `snapshotSpaceInOneRead` take it where they take the server's module. The server's own module is still what runs the write
+ * under test.
+ *
+ * @param suite the same slug the server's client was opened with (`openTestMongo`)
+ * @returns {Promise<{ getMongo: () => object, getDb: () => object, col: (name: string) => object, close: () => Promise<void> }>}
+ */
+export async function openFixtureMongo(suite) {
+  const { MongoClient } = await import('mongodb');
+  const dbName = `ythril_harness_${suite}`;
+  const client = new MongoClient(testMongoUri(dbName));
+  await client.connect();
+  const db = client.db(dbName);
+  return { getMongo: () => client, getDb: () => db, col: (name) => db.collection(name), close: () => client.close() };
 }
 
 /** Drop the harness database and disconnect. Call from `after()`. */

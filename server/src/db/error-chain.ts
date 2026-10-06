@@ -25,8 +25,21 @@
  * response is a plain document, so an `errorResponse` that is an `Error` is the driver saying "this is what was
  * thrown", and the walk follows it. Unfollowed, a paused store reached every classifier as a `MongoServerError` with
  * no code and no label: "the server refused the caller", answered `400` with the store's address.
+ *
+ * ## An `AggregateError` is every error it holds (bundle-53 G1)
+ *
+ * A step that runs over several units and reports them together (the config reload, over every space) throws one
+ * `AggregateError` whose `errors` are the units' failures. Read as ONE error, its class says nothing, and a store that
+ * had gone away under one unit was answered as an internal fault of ours. Its members are walked — breadth first, so
+ * the chain stays outermost first — and a question asked of the chain ("is any of these the store's?") is true when
+ * any member is.
  */
 const MAX_DEPTH = 5;
+/**
+ * The most errors one chain holds. An aggregate has one member per failed unit, so depth alone does not bound it: a
+ * reload over a thousand spaces would otherwise be a thousand-entry list inside a `catch`.
+ */
+const MAX_MEMBERS = 256;
 
 /**
  * Is this the driver's wrapper around an error that was THROWN, rather than an error the server answered with? Then
@@ -36,14 +49,30 @@ export function wrapsAThrownError(e: object): boolean {
   return (e as { errorResponse?: unknown }).errorResponse instanceof Error;
 }
 
-/** `err` and each error it wraps (`underlying`, then `cause`, then a driver wrapper's thrown error), outermost first. */
+/** What one error directly wraps: its one wrapped error (`underlying`, then `cause`, then a driver wrapper's thrown error), and an aggregate's members. */
+function wrappedBy(e: object): unknown[] {
+  const wrapped = e as { underlying?: unknown; cause?: unknown; errorResponse?: unknown };
+  const one = wrapped.underlying ?? wrapped.cause ?? (wrapsAThrownError(e) ? wrapped.errorResponse : undefined);
+  return e instanceof AggregateError && Array.isArray(e.errors) ? [one, ...e.errors] : [one];
+}
+
+/**
+ * `err` and each error it wraps (`underlying`, then `cause`, then a driver wrapper's thrown error, and every member of an
+ * `AggregateError`), outermost first.
+ */
 export function errorChain(err: unknown): object[] {
   const chain: object[] = [];
-  let e: unknown = err;
-  while (chain.length < MAX_DEPTH && e !== null && typeof e === 'object' && !chain.includes(e)) {
-    chain.push(e);
-    const wrapped = e as { underlying?: unknown; cause?: unknown; errorResponse?: unknown };
-    e = wrapped.underlying ?? wrapped.cause ?? (wrapsAThrownError(e) ? wrapped.errorResponse : undefined);
+  const seen = new Set<object>();
+  let level: unknown[] = [err];
+  for (let depth = 0; depth < MAX_DEPTH && level.length > 0; depth++) {
+    const next: unknown[] = [];
+    for (const e of level) {
+      if (e === null || typeof e !== 'object' || seen.has(e) || chain.length >= MAX_MEMBERS) continue;
+      seen.add(e);
+      chain.push(e);
+      next.push(...wrappedBy(e));
+    }
+    level = next;
   }
   return chain;
 }

@@ -32,16 +32,19 @@
  * Our own wrappers carry the driver's error as `underlying` (`ArrivalWriteError`, the counter error) and the driver
  * nests one as `cause`. A timeout wrapped by a writer is still a timeout to the door that must answer it. The walk is
  * `errorChain`'s, shared with the store-failure classifier.
+ *
+ * ## What this is NOT: "the store cannot answer"
+ *
+ * This module answers one question — did a bound OF OURS end the operation (a `timeoutMS`, a `maxTimeMS`, a hold's
+ * deadline)? A pool that cannot hand out a connection, a topology that is gone, a primary that stepped down and a
+ * write concern that failed are a different question, and `db/store-condition.ts` answers it. `classifyReadFailure`
+ * asks both, this one first; a deadline's own codes (50, 262) belong here and are kept out of `STORE_ERROR_CODES`
+ * for that reason.
  */
 import { errorChain } from './error-chain.js';
 import { isMaxTimeExpired } from './max-time.js';
 import { writeErrorCode } from './write-errors.js';
 
-/**
- * A hold's time was spent before an operation could be sent: the bound refused to send it rather than send it
- * unbounded (a `timeoutMS` of 0 means NO bound to the driver). The message is ours and says nothing about the
- * store's internals, because it is what a door answers.
- */
 /**
  * The one sentence every store failure ends with, on every door and in this error alike: what the caller may rely on
  * and what to do (retry). Three spellings of it had grown (bundle-30 I6, C1).
@@ -54,6 +57,11 @@ import { writeErrorCode } from './write-errors.js';
  */
 export const STORE_RETRY_SENTENCE = 'It did not complete as far as this server can confirm; retry the request (store-side failure; retryable).';
 
+/**
+ * A hold's time was spent before an operation could be sent: the bound refused to send it rather than send it
+ * unbounded (a `timeoutMS` of 0 means NO bound to the driver). The message is ours and says nothing about the
+ * store's internals, because it is what a door answers.
+ */
 export class StoreTimeout extends Error {
   /** `cause`: the driver's own error, when the server's deadline is what ended the write (`db/write-bound.ts`). */
   constructor(what = 'the database operation', options?: { cause?: unknown }) {

@@ -3,7 +3,7 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { withSeq } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
-import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
+import { listReadMaxMs } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
@@ -542,8 +542,12 @@ export async function listChrono(
     spaceId, filter, now, typesWhereDatePassedMeansNothing(getSpaceMeta(spaceId)));
 
   const entries = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
-    .find(asFilter<ChronoEntry>(query), { projection: NEVER_RETURNED_PROJECTION })
-    .maxTimeMS(comparesAgainstTheClock ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an OPTION of the read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it
+    // can see in the options, and the driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
+    .find(asFilter<ChronoEntry>(query), {
+      projection: NEVER_RETURNED_PROJECTION,
+      maxTimeMS: listReadMaxMs(comparesAgainstTheClock),
+    })
     .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))

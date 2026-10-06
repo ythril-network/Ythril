@@ -60,13 +60,14 @@ export const holdForkLock = (mongo, plan, space, factId) => holdDocumentLock(mon
  * @param {string[]} o.spaces  space ids to register
  * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's
  * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'`
+ * @param {boolean} [o.fixtureClient]  also open the harness's own client for the fixture steps (`env.fixture`, `openPushDoor`)
  * @returns {Promise<{ env: object, close: () => Promise<void> }>}
  */
-export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQuery }) {
+export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQuery, fixtureClient }) {
   // A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
   process.env['YTHRIL_MODELS_OFFLINE'] = '1';
   const door = await openPushDoor({
-    mongoPort, mongoQuery,
+    mongoPort, mongoQuery, fixtureClient,
     // `completeLinkage`: a space's links are converted, as every space's are after its first boot — a holder case that cascades
     // an entity reads its references through the link records, which refuse a space that was never converted.
     suite, spaces: spaces.map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })),
@@ -83,7 +84,7 @@ export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQue
     server = await listenOnLoopback(http.createServer(createApp()));
     const base = server.url;
     return {
-      env: { door, plan, callTool, ADMIN, adminKey, base },
+      env: { door, fixture: door.fixture, plan, callTool, ADMIN, adminKey, base },
       async close() {
         await server.close();
         await door.close();
@@ -110,8 +111,10 @@ export async function seedDoorSpace(door, space) {
  */
 export function stalledWriteDoors(env, space) {
   const F = DOOR_FACT_ID;
-  const forkLock = () => holdForkLock(env.door.mongo, env.plan, space, F);
-  const factLock = () => holdDocumentLock(env.door.mongo, `${space}_facts`, { filter: { _id: F } });
+  // The lock is a fixture step: over the harness's own client when the door was opened with one (`fixtureClient`), so an option the
+  // SERVER's client carries on purpose does not end the lock; the write it stalls is the server's either way.
+  const forkLock = () => holdForkLock((env.fixture ?? env.door).mongo, env.plan, space, F);
+  const factLock = () => holdDocumentLock((env.fixture ?? env.door).mongo, `${space}_facts`, { filter: { _id: F } });
   return [
     {
       name: 'sync push POST /facts (a fork)',

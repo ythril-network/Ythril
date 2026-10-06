@@ -210,10 +210,11 @@ function readsAsShipped() {
   return {
     async edgesTouching(spaceId, frontier, narrowing, limit, timeLeft) {
       const ms = timeLeft();
-      let cursor = mongo.col(`${spaceId}_edges`).find(frontierMod.frontierEdgeQuery(spaceId, [...frontier], narrowing))
-        .project(never).limit(limit);
-      if (ms !== undefined) cursor = cursor.maxTimeMS(ms);
-      return await cursor.toArray();
+      // The deadline rides in the options argument, as in the code it mirrors (Q-358): a chained `maxTimeMS` is dropped by
+      // the driver when a scope injects `timeoutMS`, so the as-shipped read carries it where the bound can see it.
+      return await mongo.col(`${spaceId}_edges`)
+        .find(frontierMod.frontierEdgeQuery(spaceId, [...frontier], narrowing), ms !== undefined ? { maxTimeMS: ms } : {})
+        .project(never).limit(limit).toArray();
     },
     async recordsById(collection, ids, extra, timeLeft) {
       timeLeft?.();

@@ -141,7 +141,7 @@ export async function predicateRecall(args: PredicateRecallArgs): Promise<Predic
       window: [{ $group: { _id: null, n: { $sum: 1 }, min: { $min: '$score' } } }],
       hits: [{ $match: predicate }, { $limit: topK }, ...shape],
     } },
-  ]).maxTimeMS(remaining()).toArray();
+  ], { maxTimeMS: remaining() }).toArray();
 
   const seen = facet?.window?.[0] ?? { n: 0, min: 0 };
   const hits = facet?.hits ?? [];
@@ -212,7 +212,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
         // AGAIN: the ids were read a moment ago, and a record that stopped matching since must not return.
         docs: [{ $match: predicate }, ...shape],
       } },
-    ]).maxTimeMS(remaining()).toArray();
+    ], { maxTimeMS: remaining() }).toArray();
     const docs = facet?.docs ?? [];
     const seen = facet?.seen ?? [];
     if (!behind && seen.length < Math.min(topK, ids.length)) {
@@ -247,9 +247,8 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
     memo?.set(key, pending);
     try {
       const cursor = col(collName)
-        .find(andPredicates(predicate, { [vectorPath]: { $type: 'array' } })!, { projection: { _id: 1 } })
-        .batchSize(ID_CHUNK)
-        .maxTimeMS(remaining());
+        .find(andPredicates(predicate, { [vectorPath]: { $type: 'array' } })!, { projection: { _id: 1 }, maxTimeMS: remaining() })
+        .batchSize(ID_CHUNK);
       let batch: string[] = [];
       let total = 0;
       try {

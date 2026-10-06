@@ -287,6 +287,8 @@ instead of removing it. Flagged records stay listed and searchable but are shown
 UI; re-uploading the same path clears the flag. Derived records (conversion chunks / `_converted` /
 `_extracted`) are always hard-removed regardless of the setting.
 
+**A second delete of a flagged record is `404`, never a second success.** A delete that names a record already flagged `deletedAt`, or a derived record (a chunk of a document, a face found in a picture) rather than the file, answers `404` on `DELETE /api/files/:spaceId`, `POST /api/delete_file` and the MCP `delete_file` tool alike (an error result in MCP): no second tombstone is written, no second `file.deleted` webhook fires, and `seq` does not move. A first delete that was interrupted (a store failure, a restart in between) still completes on retry, because its record is not flagged yet. So after a delete that timed out, a `404` on the retry can mean the first one did complete: list the files before deleting again. With `softDeleteFileMeta` off the record is gone after the first delete, and the retry answers `404` for that reason.
+
 **Deleting the file deletes its metadata.** There is no metadata-only delete and does not need to be:
 every file has a metadata record, and `DELETE /api/files/:spaceId?path=…` removes both. An **orphan** —
 a record whose bytes went missing out of band — is completed by that same call, which answers `204`

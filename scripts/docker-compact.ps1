@@ -111,14 +111,15 @@ $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($task) {
   Section 'Compacting (elevated through the installed task - no prompt)'
   $taskLog = Join-Path $env:ProgramData 'Ythril\docker-compact.log'
-  $before = if (Test-Path $taskLog) { (Get-Item $taskLog).LastWriteTimeUtc } else { [DateTime]::MinValue }
+  # Its own name: `$before` is the disk size the result line prints, and reusing it here made that line throw.
+  $logWrittenBefore = if (Test-Path $taskLog) { (Get-Item $taskLog).LastWriteTimeUtc } else { [DateTime]::MinValue }
   Start-ScheduledTask -TaskName $taskName
   # Wait for it to start writing, then for it to finish; the log's last line is the exit code.
   $deadline = (Get-Date).AddHours(2)
   do {
     Start-Sleep -Seconds 2
     $state = (Get-ScheduledTask -TaskName $taskName).State
-    $written = (Test-Path $taskLog) -and ((Get-Item $taskLog).LastWriteTimeUtc -gt $before)
+    $written = (Test-Path $taskLog) -and ((Get-Item $taskLog).LastWriteTimeUtc -gt $logWrittenBefore)
   } while (((-not $written) -or $state -eq 'Running') -and (Get-Date) -lt $deadline)
   $lines = if (Test-Path $taskLog) { @(Get-Content $taskLog) } else { @() }
   foreach ($l in $lines) { Write-Host "  $l" }

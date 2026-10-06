@@ -60,6 +60,13 @@ import { retireEmbedJobs } from './embed-queue.js';
 import { MAX_ANCESTRY } from './embed-record.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+
+/** The step a failed sweep is reported and counted under (`ythril_housekeeping_space_failures_total{step}`). */
+const STEP = declareStep('Suppression sweep');
 
 /**
  * The collection of each record kind: the shared map (`COLLECTION_SUFFIX`, derived from the knowledge map), never a
@@ -122,13 +129,22 @@ export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType)
  * **Each kind in its own `try`**: one collection the store refuses must not leave every kind after it holding its
  * vectors. A failure is collected and thrown once at the end, naming every kind that failed, for the caller's log.
  *
+ * **Except a failure that says the space is not answering** (a bound ended the read, or the store's own condition): the kinds
+ * after it are named "not reached" and not tried, because each would wait out a whole bound against the same hung space. The
+ * next meta write, or the next boot, sweeps them.
+ *
  * Reported per kind at INFO when it did anything, silent when it did not: this runs on every meta write, and a
  * line per write for a space with nothing to sweep would train the reader to skip it.
  */
 export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): Promise<number> {
   let total = 0;
   const failed: string[] = [];
+  const causes: unknown[] = [];
+  // Set by a failure that says the SPACE (or the store) is not answering rather than that one kind refused: the next kind would
+  // pay another whole bound against the same hung space — `kinds x bound`, 24 minutes at the production figure.
+  let notAnswering = false;
   const isolated = async (kind: string, sweep: () => Promise<string[]>): Promise<void> => {
+    if (notAnswering) { failed.push(`${kind} (not reached)`); return; }
     try {
       const ids = await sweep();
       if (ids.length === 0) return;
@@ -136,6 +152,10 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       log.info(`Suppression sweep: removed ${ids.length} ${peerText(kind)} vector(s) in ${peerText(spaceId)}`);
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
+      causes.push(err);
+      // The one question (`db/store-condition.ts`): a bound that ended the read, or the store's own condition. A plain
+      // refusal (a view, a validation failure) is one kind's and the others are still swept.
+      notAnswering = storeIsNotAnswering(err);
     }
   };
   for (const kind of Object.keys(COLLECTION) as KnowledgeType[]) {
@@ -150,7 +170,9 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
     });
   }
   await isolated('file', () => sweepFiles(spaceId, meta));
-  if (failed.length > 0) throw new Error(`the sweep failed for ${failed.join('; ')}`);
+  // An AggregateError, not an Error with the kinds in its text: the boot walk classifies what it is handed (a store that
+  // does not answer, a bound that ended a read) by reading the errors an error wraps, and a summary's text hides them.
+  if (failed.length > 0) throw new AggregateError(causes, `the sweep failed for ${failed.join('; ')}`);
   return total;
 }
 
@@ -220,29 +242,80 @@ export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): vo
   void queueSweep(id, meta);
 }
 
-/** Queue `id`'s coalesced sweep against `meta`, settling when it has run; nothing to sweep without a meta. */
-async function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<void> {
-  if (meta === undefined) return;
+/**
+ * Queue `id`'s coalesced sweep against `meta`; settles when the run it started or joined has, with the failure that run handed
+ * back (see {@link sweepLatestMeta}), if any. Nothing to sweep without a meta. Not `async`: the job is started, or joined, before
+ * this returns, which {@link sweepForTheWalk} relies on to mark the run it joined.
+ */
+function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<HandedFailure | undefined> {
+  if (meta === undefined) return Promise.resolve(undefined);
   nextSweep.set(id, meta);
-  await metaSweeps.run(id, () => sweepLatestMeta(id));
+  return metaSweeps.run(id, () => sweepLatestMeta(id));
 }
 
 /** Per space, the meta its next sweep runs against: the last one written and not yet swept. */
 const nextSweep = new Map<string, SpaceMeta>();
-const metaSweeps = createCoalescingRunner<void>();
 
-/** One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once. */
-async function sweepLatestMeta(id: string): Promise<void> {
-  await new Promise<void>(resolve => setImmediate(resolve));
-  const meta = nextSweep.get(id);
-  // A rerun the runner queued for a write this sweep already covered: nothing newer to sweep.
-  if (meta === undefined) return;
-  nextSweep.delete(id);
+/** What a sweep that failed hands back, when it left the saying to the walk that awaits it. */
+interface HandedFailure { readonly error: unknown }
+const metaSweeps = createCoalescingRunner<HandedFailure | undefined>();
+
+/** One run of the sweep job per space, while it is in flight: the state a joining walk marks, and the job reads when it fails. */
+interface SweepRun { walkAwaits: boolean }
+const inFlight = new Map<string, SweepRun>();
+
+/**
+ * One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once.
+ *
+ * ## Who says a failure: one report per failure, whichever way the sweep was reached
+ *
+ * The job never rejects, because the coalescing runner re-runs it for a write that landed mid-sweep with nobody awaiting the
+ * rerun, and `sweepAfterMetaWrite` has no caller to throw to: a rejection there is an unhandled one. So a failure is either
+ *
+ *  - **said here**, through `reportSpaceFailure` (synchronous, never throws: the shared words and counter of every
+ *    housekeeping step), when nothing awaits this run for a walk — a meta write, or a rerun; or
+ *  - **handed back** to the boot walk that joined this run ({@link sweepForTheWalk}), which rethrows it, so `eachSpace`
+ *    classifies it (a bound that ended it, a store that does not answer) and says it exactly once.
+ *
+ * Which of the two is decided PER RUN, by the state the joining walk marked, so a rerun (a new run, unmarked) says its own.
+ */
+async function sweepLatestMeta(id: string): Promise<HandedFailure | undefined> {
+  const run: SweepRun = { walkAwaits: false };
+  inFlight.set(id, run);
   try {
-    await sweepSuppressedVectors(id, meta);
-  } catch (err) {
-    log.warn(`Suppression sweep failed for ${peerText(id)}: ${peerText(err)}`);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const meta = nextSweep.get(id);
+    // A rerun the runner queued for a write this sweep already covered: nothing newer to sweep.
+    if (meta === undefined) return undefined;
+    nextSweep.delete(id);
+    try {
+      await sweepSuppressedVectors(id, meta);
+      return undefined;
+    } catch (error) {
+      if (run.walkAwaits) return { error };
+      // The next meta write repeats the sweep (idempotent), and so does the next boot.
+      reportSpaceFailure(STEP, id, error, { when: 'with the next meta write' });
+      return undefined;
+    }
+  } finally {
+    if (inFlight.get(id) === run) inFlight.delete(id);
   }
+}
+
+/**
+ * One space's sweep for the boot walk: the coalesced sweep, awaited, REJECTING with its failure so the walk that called it reads
+ * it. Joins a sweep already running and marks that run as awaited by a walk, so the run hands its failure over instead of saying
+ * it. Goes through the runner (not the job directly) so it still coalesces with a meta write racing the boot.
+ */
+async function sweepForTheWalk(id: string, meta: SpaceMeta | undefined): Promise<void> {
+  // Nothing to sweep: and no run is awaited, so none may be marked (its failure would be handed to nobody).
+  if (meta === undefined) return;
+  const settled = queueSweep(id, meta);
+  // `run` has started or joined the in-flight job synchronously: the run now registered is the one this call awaits.
+  const run = inFlight.get(id);
+  if (run) run.walkAwaits = true;
+  const handed = await settled;
+  if (handed) throw handed.error;
 }
 
 /**
@@ -251,11 +324,17 @@ async function sweepLatestMeta(id: string): Promise<void> {
  * fields only — no seq, nothing replicated — so it is not a migration of synced data, and it is idempotent.
  *
  * **One space at a time** (bundle-30 I8): each sweep is an unindexed scan per record kind, and starting every space's
- * at once put all of them in flight together on a large instance. Each is awaited before the next; a failure is the
- * sweep's own warning (`sweepLatestMeta`) and never stops the walk. The bootstrap starts it once the server listens.
+ * at once put all of them in flight together on a large instance. Each is awaited before the next. The bootstrap starts it
+ * once the server listens.
+ *
+ * **Walked through `eachSpace`** (`Q-274`): one space at a time (the walk's default; never a `limit`), each inside the
+ * housekeeping bound, so a space whose read hangs ends at the figure instead of holding the boot sweep for as long as the driver
+ * waits — the bound reaches the sweep through the walk's scope, which the job inherits when this call starts it. A space's
+ * failure REACHES the walk ({@link sweepForTheWalk}), so it is said in the walk's words and the walk's rules apply: a space that
+ * timed out is quarantined, a store that does not answer stops the walk, and K spaces timing out in a row stop it.
  */
 export async function sweepEverySpaceAtBoot(): Promise<void> {
-  for (const space of concreteSpaces()) {
-    await queueSweep(space.id, space.meta);
-  }
+  await eachSpace(STEP, concreteSpaces(), async (space) => {
+    await sweepForTheWalk(space.id, space.meta);
+  }, { when: 'with the next meta write' });
 }

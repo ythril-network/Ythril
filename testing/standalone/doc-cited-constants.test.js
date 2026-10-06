@@ -55,6 +55,16 @@ const read = (rel) => {
 };
 
 /**
+ * A small count as prose spells it: the numeral or the word, and `a minute` for one. For the user guide, which says
+ * "ten minutes" where the integration guide says `10`; a pattern built from it still carries the VALUE read from the source.
+ */
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const counted = (v, unit) => {
+  assert.ok(Number.isInteger(v) && v >= 1 && v < NUMBER_WORDS.length, `${v} ${unit}(s) is not a count this helper can spell`);
+  return v === 1 ? `(?:1|one|a) ${unit}` : `(?:${v}|${NUMBER_WORDS[v]}) ${unit}s`;
+};
+
+/**
  * Each row: a constant in the source, and the doc sentence that quotes its value.
  *
  * `code` must capture the number in group 1. `doc` must MATCH (the value is interpolated into it), so
@@ -178,6 +188,270 @@ const CITED = [
     code: /Default: (0\.[0-9]+)\./,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`default is therefore left at ${v}`),
+  },
+  {
+    // A constant, not a setting, so the guide states the figure and not the name (`env-var-docs-coverage` reads every
+    // upper-case name in the guide as an environment variable). It is added to how long a hold can last (`Q-380`).
+    what: 'how long the write bound\'s backstop spends ending the server operation before it answers',
+    source: 'server/src/db/write-bound.ts',
+    code: /export const KILL_WAIT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`within at most ${v} ms\\. Only then is the hold released`),
+  },
+  // ── bundle-53: the figures an operator plans around when the database slows or stops answering ─────────────────────────
+  // Every one is read from the module that owns it; the guide states them in the sentence the pattern names, so a figure
+  // that moves makes the sentence stop matching and this row names both sides.
+  {
+    what: 'the client\'s connect timeout when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const CONNECT_TIMEOUT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`connectTimeoutMS=${v}\``),
+  },
+  {
+    what: 'the client\'s heartbeat frequency when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const HEARTBEAT_FREQUENCY_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`heartbeatFrequencyMS=${v}\``),
+  },
+  {
+    what: 'the client\'s server-selection timeout when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const SERVER_SELECTION_TIMEOUT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`serverSelectionTimeoutMS=${v}\``),
+  },
+  {
+    what: 'the per-operation bound of a background housekeeping job (hosting, environment table)',
+    source: 'server/src/db/write-bound.ts',
+    code: /const DEFAULT_HOUSEKEEPING_OP_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\\| \`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS\` \\| \`${v}\` \\|`),
+  },
+  {
+    what: 'the bound of a queue claim or a stall reset (background jobs note, setup API)',
+    source: 'server/src/db/write-bound.ts',
+    code: /export const CLAIM_OP_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`claim or a stall reset[^.]*\\*\\*${v} s\\*\\*`, 'i'),
+  },
+  {
+    what: 'how many spaces in a row may time out before a housekeeping pass stops (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const STALLED_AFTER_TIMEOUTS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\\*\\*${v}\\*\\* spaces in a row`),
+  },
+  {
+    what: 'the first quarantine of a space that timed out (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_BASE_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`quarantine starts at \\*\\*${v} s\\*\\*`),
+  },
+  {
+    what: 'the longest a quarantine grows to (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_MAX_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`doubles up to \\*\\*${v} s\\*\\*`),
+  },
+  {
+    what: 'how often one failure is said in the log, per step and space (background jobs note, setup API)',
+    source: 'server/src/util/space-failure.ts',
+    code: /export const SPACE_FAILURE_WINDOW_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`once per \\*\\*${v} minutes\\*\\*`),
+  },
+  {
+    what: 'how often the retention sweep runs (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_INTERVAL_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`every \\*\\*${v} minutes\\*\\*`),
+  },
+  {
+    what: 'the most records the retention sweep deletes per collection per cycle (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_BATCH = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`up to \\*\\*${v}\\*\\* records? per collection`),
+  },
+  {
+    what: 'the most distinct records the retention sweep looks at per collection per cycle (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const ATTEMPT_CAP = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`no more than \\*\\*${v}\\*\\* distinct records`),
+  },
+
+  // ── the user guide's copies of the same figures (bundle-53 G28), in the operator's words ───────────────────────────────
+  // Prose spells a small number ("ten minutes", "a minute"), so these patterns take the numeral or the word
+  // (`counted`), and a sentence that wraps across a line is matched with `\s+`.
+  {
+    what: 'the connect timeout when MONGO_URI names none (user guide, MongoDB connection)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const CONNECT_TIMEOUT_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`connectTimeoutMS\` \\(how long a new connection may take, \\*\\*${v} seconds\\*\\*`),
+  },
+  {
+    what: 'the heartbeat frequency when MONGO_URI names none (user guide, MongoDB connection)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const HEARTBEAT_FREQUENCY_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`heartbeatFrequencyMS\` \\(how often the server is asked whether it is alive, \\*\\*${v} seconds\\*\\*`),
+  },
+  {
+    what: 'the server-selection timeout when MONGO_URI names none (user guide, MongoDB connection)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const SERVER_SELECTION_TIMEOUT_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`serverSelectionTimeoutMS\` \\(how long an operation waits to find a server, \\*\\*${v} seconds\\*\\*`),
+  },
+  {
+    what: 'how long Test Connection waits by default (user guide, MongoDB connection)',
+    source: 'server/src/db/conn-test.ts',
+    code: /const TEST_TIMEOUT_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`it waits \\*\\*${v} seconds\\*\\* by default`),
+  },
+  {
+    what: 'the housekeeping bound, in minutes (user guide, Server Log)',
+    source: 'server/src/db/write-bound.ts',
+    code: /const DEFAULT_HOUSEKEEPING_OP_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`\\*\\*${v} minutes\\*\\* by default \\(\`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS\``),
+  },
+  {
+    what: 'the housekeeping bound, in ms, in the line the log says (user guide, Server Log)',
+    source: 'server/src/db/write-bound.ts',
+    code: /const DEFAULT_HOUSEKEEPING_OP_MS = ([0-9_]+);/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`past its time bound of\\s+${v} ms \\(YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS\\)`),
+  },
+  {
+    what: 'the first quarantine, in the line the log says (user guide, Server Log)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_BASE_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`retried after quarantine \\(${v}s\\)`),
+  },
+  {
+    what: 'the first quarantine, in words (user guide, Server Log)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_BASE_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`left alone by every background job for ${counted(v, 'minute')}, then for longer`),
+  },
+  {
+    what: 'the longest quarantine, in words (user guide, Server Log)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_MAX_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`up to ${counted(v, 'minute')}\\*\\*, so the other spaces`),
+  },
+  {
+    what: 'how often one failure is said, in words (user guide, Server Log)',
+    source: 'server/src/util/space-failure.ts',
+    code: /export const SPACE_FAILURE_WINDOW_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`its line is said at most once every\\s+${counted(v, 'minute')}\\*\\*`),
+  },
+  {
+    what: 'how often a skipped tick is said, in words (user guide, Server Log)',
+    source: 'server/src/util/single-flight.ts',
+    code: /export const SKIP_WARNING_WINDOW_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`has been running for <n>s\`, at most once every ${counted(v, 'minute')}`),
+  },
+  {
+    what: 'how many records the retention sweep deletes per collection per cycle (user guide, Server Log)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_BATCH = ([0-9_]+);/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`up to\\s+\\*\\*${v}\\*\\* expired records per collection every`),
+  },
+  {
+    what: 'how often the retention sweep runs (user guide, Server Log)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_INTERVAL_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`per collection every \\*\\*${v} minutes\\*\\*`),
+  },
+  {
+    what: 'how often the retention sweep runs (user guide, Settings)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_INTERVAL_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/userguide/04-settings.md',
+    text: (v) => new RegExp(`a sweep that runs every ${v} minutes`),
+  },
+  {
+    what: 'how many records the retention sweep deletes per collection per cycle (user guide, Settings)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_BATCH = ([0-9_]+);/,
+    doc: 'docs/userguide/04-settings.md',
+    text: (v) => new RegExp(`deletes up to\\s+\\*\\*${v}\\*\\* expired records per collection`),
+  },
+  {
+    what: 'how often the unsatisfiable write concern is said in the log (user guide, MongoDB connection)',
+    source: 'server/src/brain/store-failure.ts',
+    code: /const WRITE_CONCERN_WARNING_WINDOW_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/05-storage-data-and-audit.md',
+    text: (v) => new RegExp(`at most once\\s+${counted(v, 'minute')}; change the write concern`),
+  },
+  {
+    what: 'how often the embedding worker\'s stall check runs (user guide, Brain)',
+    source: 'server/src/brain/embed-worker.ts',
+    code: /const STALL_SWEEP_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/02-brain.md',
+    text: (v) => new RegExp(`stall check, which runs \\*\\*once ${v === 1 ? 'a minute' : `every ${counted(v, 'minute')}`}\\*\\*`),
+  },
+  {
+    what: 'how often the reindex watcher looks (user guide, Brain)',
+    source: 'server/src/brain/reindex.ts',
+    code: /const WATCH_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/userguide/02-brain.md',
+    text: (v) => new RegExp(`a watcher that looks every \\*\\*${v} seconds\\*\\*`),
+  },
+  {
+    what: 'how often the reindex watcher looks (integration guide, reindex)',
+    source: 'server/src/brain/reindex.ts',
+    code: /const WATCH_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide/04d-brain-ops-api.md',
+    text: (v) => new RegExp(`a watcher that looks every \\*\\*${v} seconds\\*\\*`),
+  },
+  {
+    what: 'how long before a reindex run whose sweeper died is taken over (integration guide, reindex)',
+    source: 'server/src/brain/reindex.ts',
+    code: /const SWEEP_LEASE_STALE_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/integration-guide/04d-brain-ops-api.md',
+    text: (v) => new RegExp(`taken over after \\*\\*${v === 1 ? 'a minute' : counted(v, 'minute')}\\*\\*`),
+  },
+  {
+    what: 'how long before a reindex run whose sweeper died is taken over (user guide, Brain)',
+    source: 'server/src/brain/reindex.ts',
+    code: /const SWEEP_LEASE_STALE_MS = ([0-9_]+);/,
+    scale: 60_000,
+    doc: 'docs/userguide/02-brain.md',
+    text: (v) => new RegExp(`taken over after \\*\\*${v === 1 ? 'a minute' : counted(v, 'minute')}\\*\\*`),
   },
 ];
 

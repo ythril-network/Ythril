@@ -25,7 +25,9 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { intervalJob } from '../util/interval-job.js';
+import { warnOnce } from '../util/warn-once.js';
 
 /**
  * IMPORTED, not spelled again.
@@ -128,46 +130,55 @@ export async function redactExpiredChanges(now: number = Date.now()): Promise<nu
     // not exist returns `modifiedCount: 0`, which is also what a healthy instance with nothing aged out
     // returns. Once per process is the whole cost — this runs every six hours, and a per-sweep info line
     // would be noise nobody reads, which is its own way of hiding.
-    if (!_announced) {
-      _announced = true;
-      const seen = await col(COLLECTION).countDocuments(
-        asFilter({ operation: { $in: RECORD_CHANGE_OPERATIONS } }),
-        { limit: 1_000 },
-      ).catch(() => -1);
-      log.info(`Audit change-retention: sweeping '${COLLECTION}', ${recordChangeRetentionDays()}d window, `
-        + `${seen < 0 ? 'count unavailable' : `${seen} record-edit entr${seen === 1 ? 'y' : 'ies'} present`}, `
-        + `${n} redacted this pass`);
-    }
+    let announcing: Promise<void> | undefined;
+    announced(FIRST_SWEEP, () => { announcing = announceFirstSweep(n); });
+    await announcing;
     return n;
   } catch (err) {
-    log.warn(`Audit change-retention sweep: ${err}`);
+    log.warn(`Audit change-retention sweep: ${peerText(err)}`);
     return 0;
   }
 }
 
+/** The first-sweep line: the collection swept, the window, how many candidate entries it can see, and what this pass redacted. */
+async function announceFirstSweep(redacted: number): Promise<void> {
+  const seen = await col(COLLECTION).countDocuments(
+    asFilter({ operation: { $in: RECORD_CHANGE_OPERATIONS } }),
+    { limit: 1_000 },
+  ).catch(() => -1);
+  log.info(`Audit change-retention: sweeping '${COLLECTION}', ${recordChangeRetentionDays()}d window, `
+    + `${seen < 0 ? 'count unavailable' : `${seen} record-edit entr${seen === 1 ? 'y' : 'ies'} present`}, `
+    + `${redacted} redacted this pass`);
+}
 
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6h — the same cadence as the other housekeeping sweeps
-let _timer: NodeJS.Timeout | null = null;
 
-/** Whether this process has already reported one sweep. Reset by `stopAuditChangeRetention` for tests. */
-let _announced = false;
+/**
+ * Has this process reported one sweep? A `warnOnce` of one key and not a boolean: it is the repo's one answer to "say it once", and
+ * `forget` is what `stopAuditChangeRetention` uses so a test that starts the sweep twice sees the line twice. A latch that outlives
+ * its owner is a test seam that lies about the second run.
+ */
+const announced = warnOnce<string>({ max: 1 });
+const FIRST_SWEEP = 'first sweep';
+
+/**
+ * The sweep is an interval job (`Q-317`): one pass at a time, a database that ends at the housekeeping figure, a timer that does not
+ * hold the process open. `redactExpiredChanges` answers its own failures (it never throws), so the job's `failed:` line is the
+ * backstop for what happens outside it.
+ */
+const sweepJob = intervalJob('Audit change retention', SWEEP_INTERVAL_MS, () => redactExpiredChanges());
 
 /**
  * Start the sweep. Always on: it only removes content that policy says should already be gone, and an
  * instance that never records record changes simply matches nothing.
  */
 export function startAuditChangeRetention(): void {
-  if (_timer) return;
-  _timer = setInterval(() => {
-    void redactExpiredChanges();
-  }, SWEEP_INTERVAL_MS);
-  _timer.unref();   // housekeeping must never hold the process open
+  if (sweepJob.armed) return;
+  sweepJob.start();
   log.debug('Audit change-retention sweep started');
 }
 
 export function stopAuditChangeRetention(): void {
-  if (_timer) { clearInterval(_timer); _timer = null; }
-  // Also clear the once-per-process announcement, so a test that starts the sweep twice sees it twice.
-  // A latch that outlives its owner is a test seam that lies about the second run.
-  _announced = false;
+  sweepJob.stop();
+  announced.forget(FIRST_SWEEP);
 }

@@ -552,8 +552,8 @@ back for a cycle, not a gap. The push side applies the same horizon to what it s
 
 **A write that stalls holds the horizon for a bounded time, never for good.** Every database operation issued
 while a write holds its seq is bounded (`YTHRIL_WRITE_TIMEOUT_MS` per operation, `YTHRIL_HOLD_DEADLINE_MS` for the
-whole hold — see [Hosting](02-hosting.md)), and the bound ends the write on the server FIRST (its own deadline, with a client backstop 500 ms after it), so the horizon is
-released only once the server's deadline has passed, and the page serves what committed above it. What you see while one stalls: pages
+whole hold — see [Hosting](02-hosting.md)), and the bound ends the write on the server FIRST (its own deadline, with a client backstop 500 ms after it that kills the server operation and sees it gone before answering), so the horizon is
+released only once the server operation is gone (its own deadline has passed, or the backstop has ended it), and the page serves what committed above it. What you see while one stalls: pages
 from that space stop short of the stalled seq for at most the hold deadline, then continue. The promise above
 still holds throughout, because a hold is released only once its write can no longer land — a transaction whose commit
 answer is lost is read back while the hold is still held. On the serving instance the stall shows as the gauge

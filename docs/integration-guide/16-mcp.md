@@ -43,22 +43,22 @@ On connect, the server sends global instructions listing all available space IDs
 >   "code": 8, "codeName": "InternalError" }
 > ```
 >
-> The message is ours, never the database driver's, which names internal hosts and ports: the driver's text goes
-> to the server log. `code` and `codeName` are the store's own, when it supplied them. The text in `content` is the
-> same sentence as `error`, word for word — the REST doors answer it in the same spelling. A driver error the
-> server does not recognise as a store condition arrives the same way with `retryable: false` and *"An internal
-> database fault stopped this operation; its cause is in the server log."*: not yours to fix, and not known to
-> clear on a retry.
+> The message is ours, never the driver's (which names internal hosts and ports and goes to the server log). `code` and
+> `codeName` are the store's own, when it supplied them. The text in `content` is the same sentence as `error`, word
+> for word, as on the REST doors. A pool checkout that timed out and a closed connection pool are this same retryable
+> answer. A driver error the server does not recognise as a store condition arrives with `retryable: false` and
+> *"An internal database fault stopped this operation; its cause is in the server log."*: not yours to fix, and not
+> known to clear on a retry. **A write concern the deployment can never meet** is the other answer that is not
+> retryable (with `code` and `codeName`): *"The database cannot satisfy the write concern this instance writes with, so the write was not confirmed.
+> Retrying will not help: the operator must change the write concern or the deployment; the cause is in the server
+> log (not retryable)."* On a replica set the write may have been applied: read before writing again.
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
-> `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —
-> the same information in the envelope this transport has.
+> `isError: true` and no status, so the classification lives in `structuredContent` instead.
 >
-> Why it matters more than a clearer message: until this release these failed as an ordinary tool error with a
-> message that ended mid-sentence at `caused by ::`. An agent fleet built correctly around "continue on
-> error" therefore ran with no context and produced plausible, uninformed output — measured by an integrator
-> at **one call in six across fourteen agents, silently.** If you carry an `onError: continue` policy, this
-> field is what lets you retry or report instead.
+> Why it matters more than a clearer message: these used to fail as a tool error ending mid-sentence at `caused by ::`,
+> so a fleet built around "continue on error" ran on with no context — **one call in six across fourteen agents,
+> silently.** With an `onError: continue` policy, this field is what lets you retry or report instead.
 >> `preExisting` is still in every response, so a client that wants to insist on full compliance can refuse on it
 > itself. `content` carries the same information as a sentence, so a client that reads only text loses nothing.
 >

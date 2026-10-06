@@ -46,8 +46,14 @@
  */
 import { getDb } from './mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 import { linkConversionConcerns } from '../brain/links-conversion.js';
+import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { outsideWriteBound } from './write-bound.js';
+
+/** The step a failed clear is counted and said under. */
+const LINK_ARRAY_DROP_STEP = declareStep('Link array drop');
 
 /** The six, written out: they no longer exist anywhere to derive them from. That is the point of this file. */
 const ARRAYS_BY_SUFFIX: Record<string, readonly string[]> = {
@@ -61,6 +67,11 @@ export interface LinkArrayDropOutcome {
   cleared: Record<string, number>;
   /** Spaces skipped because their links were never converted — their arrays are the only copy. */
   unconverted: string[];
+  /**
+   * What could not be cleared, with the reason: a collection (`collection` set) or, when the space itself failed, the space.
+   * Left as it was, so the next boot retries it; a leftover array is a wrong hash, not wrong data.
+   */
+  failed: { spaceId: string; collection?: string; reason: string }[];
 }
 
 /**
@@ -71,8 +82,9 @@ export interface LinkArrayDropOutcome {
  * leftover array is a wrong hash, not wrong data.
  */
 export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
-  const out: LinkArrayDropOutcome = { cleared: {}, unconverted: [] };
+  const out: LinkArrayDropOutcome = { cleared: {}, unconverted: [], failed: [] };
   const db = getDb();
+  const converted: { id: string }[] = [];
 
   for (const space of getConfig().spaces) {
     // A proxy holds no records and is never marked, so asking only "is it marked?" would report it
@@ -83,25 +95,39 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
       out.unconverted.push(space.id);
       continue;
     }
-    for (const [suffix, fields] of Object.entries(ARRAYS_BY_SUFFIX)) {
-      const name = `${space.id}_${suffix}`;
-      try {
-        const res = await db.collection(name).updateMany(
-          { $or: fields.map(f => ({ [f]: { $exists: true } })) },
-          { $unset: Object.fromEntries(fields.map(f => [f, ''])) },
-        );
-        if (res.modifiedCount > 0) out.cleared[name] = res.modifiedCount;
-      } catch (err) {
-        log.warn(`drop-link-arrays: ${name} failed, will retry next boot: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    converted.push(space);
   }
+
+  /*
+   * Each converted space is a walk step and each of its collections a unit (`eachUnit`): a collection that cannot be cleared is
+   * reported by name, once per window, and the space's other collections and the next space still run; a timeout or a store
+   * that stopped answering ends the space (or the walk) instead of paying a bound per collection.
+   */
+  const walk = await eachSpace(LINK_ARRAY_DROP_STEP, converted, async (space) => {
+    await eachUnit(Object.entries(ARRAYS_BY_SUFFIX), async ([suffix, fields]) => {
+      const name = `${space.id}_${suffix}`;
+      /*
+       * Outside the housekeeping bound, on purpose: this is a whole-collection `updateMany`, once per instance, whose time
+       * scales with the data. The bound is for "hung", a per-operation figure of minutes, and a collection large enough to
+       * pass it would end the migration at the same point on every boot and never finish. A hung store is still ended by the
+       * driver's own server selection, and the next boot retries (idempotent).
+       */
+      const res = await outsideWriteBound(() => db.collection(name).updateMany(
+        { $or: fields.map(f => ({ [f]: { $exists: true } })) },
+        { $unset: Object.fromEntries(fields.map(f => [f, ''])) },
+      ));
+      if (res.modifiedCount > 0) out.cleared[name] = res.modifiedCount;
+    }, ([suffix]) => suffix);
+  }, { when: 'next boot' });
+  out.failed = walk.failed.map(f => ({
+    spaceId: f.spaceId, ...(f.unit === undefined ? {} : { collection: `${f.spaceId}_${f.unit}` }), reason: f.reason,
+  }));
 
   const total = Object.values(out.cleared).reduce((a, b) => a + b, 0);
   if (total > 0) log.info(`drop-link-arrays: cleared the retired link arrays off ${total} record(s)`);
   if (out.unconverted.length > 0) {
     log.warn(`drop-link-arrays: ${out.unconverted.length} space(s) still hold their links as arrays and were `
-      + `left alone — ${out.unconverted.join(', ')}. Their link reads are refused until the conversion has `
+      + `left alone — ${peerList(out.unconverted)}. Their link reads are refused until the conversion has `
       + 'walked them cleanly; that refusal names the space. Every start retries it, and the Link conversion '
       + 'ERROR line above says why it failed; from a source checkout, `npm run links:convert` walks it on demand.');
   }

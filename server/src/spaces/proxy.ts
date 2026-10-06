@@ -50,6 +50,17 @@ export function concreteSpaces(): SpaceConfig[] {
   return getConfig().spaces.filter(s => !isProxy(s));
 }
 
+/**
+ * The ids of {@link concreteSpaces}, in its order, as a fresh array — for a walk that needs only the ids.
+ *
+ * "The ids of the spaces that own collections" was spelled four ways (`spaceIds()` in `embed-worker.ts`,
+ * `getLocalSpaceIds()` in `media/worker.ts`, and `.map(s => s.id)` inline), and the one thing a copy must not change is
+ * the proxy rule, so this derives from `concreteSpaces()` and decides nothing itself (`Q-274`, bundle-53).
+ */
+export function concreteSpaceIds(): string[] {
+  return concreteSpaces().map(s => s.id);
+}
+
 /** Returns true if the space is a proxy space (has proxyFor member list). */
 export function isProxySpace(spaceId: string): boolean {
   return isProxy(getConfig().spaces.find(s => s.id === spaceId));

@@ -113,11 +113,22 @@ describe('what it does to a space, and what it refuses to do', () => {
      * refusing writes for links that were never created — the one way this migration could lose data
      * rather than merely not finish.
      */
-    assert.match(mod, /report\.failed > 0/,
+    /*
+     * The rule has ONE home since bundle-53 G19: `convertAndMarkSpace` in `links-conversion.ts`, which the boot conversion and
+     * the operator's script both run through. It was written twice (here, and in `convertAllLinks`), and the copy that
+     * stopped the walk at the first space that threw was the one the script used. So the boot module must hand its spaces to
+     * it, and must not keep a marker write of its own that a later edit could loosen.
+     */
+    assert.match(mod, /convertAndMarkSpaces\(/, 'the boot conversion does not go through the shared walk, so it has its own marking rule');
+    assert.doesNotMatch(mod, /completeLinkage: true/, 'the boot module marks a space itself, a second copy of the rule');
+    const conversion = src('server/src/brain/links-conversion.ts');
+    const unit = conversion.slice(conversion.indexOf('async function convertAndMarkSpace('));
+    const body = unit.slice(0, unit.indexOf('\n}'));
+    assert.match(body, /report\.failed > 0/,
       'it does not check the failure count, so a partial walk can mark the space complete');
-    const markAt = mod.indexOf('completeLinkage: true');
-    const checkAt = mod.indexOf('report.failed > 0');
-    assert.ok(checkAt > 0 && checkAt < markAt, 'the failure check must come before the mark');
+    const markAt = body.indexOf('completeLinkage: true');
+    const checkAt = body.indexOf('report.failed > 0');
+    assert.ok(checkAt > 0 && markAt > 0 && checkAt < markAt, 'the failure check must come before the mark');
   });
 
   it('cannot take the boot down', () => {

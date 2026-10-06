@@ -33,7 +33,11 @@ export class DuplicatesApi {
     return this.http.post<{ status: string; survivorId?: string }>(`/api/duplicates/${encodeURIComponent(id)}/merge`, {});
   }
 
-  scanDuplicates(space?: string): Observable<{ scannedSpaces: number; scanned: number; pairs: number }> {
-    return this.http.post<{ scannedSpaces: number; scanned: number; pairs: number }>(`/api/duplicates/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
+  /**
+   * `failedSpaces` names the spaces the scan could not scan, each with a reason in the server's words (Q-381): a scan of one space
+   * whose scan failed is a `200` that says so, and the caller reads it from here. Optional only because an older server omits it.
+   */
+  scanDuplicates(space?: string): Observable<{ scannedSpaces: number; scanned: number; pairs: number; failedSpaces?: { spaceId: string; reason: string }[] }> {
+    return this.http.post<{ scannedSpaces: number; scanned: number; pairs: number; failedSpaces?: { spaceId: string; reason: string }[] }>(`/api/duplicates/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
   }
 }

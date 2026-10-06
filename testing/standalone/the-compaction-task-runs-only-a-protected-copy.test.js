@@ -58,4 +58,14 @@ describe('the normal script prefers the task and falls back to UAC', () => {
     assert.match(compact, /Start-ScheduledTask -TaskName \$taskName/);
     assert.match(compact, /-Verb RunAs/, 'the UAC fallback is gone, so a machine without the task cannot compact');
   });
+
+  // The task branch once stored the task log's time in `$before`, the disk size the result line prints: the size
+  // became a DateTime, `GiB $before` threw "op_Division", the script died after compacting and before starting Docker
+  // again, and `machine:free` left the owner's instance down (2026-10-06).
+  it('the disk sizes the result reports are each assigned once, so no branch overwrites them', () => {
+    for (const name of ['before', 'after']) {
+      const writes = [...compact.matchAll(new RegExp(`\\$${name}\\s*=(?!=)`, 'g'))];
+      assert.equal(writes.length, 1, `$${name} is assigned ${writes.length} times; the result line reads it as the disk size`);
+    }
+  });
 });

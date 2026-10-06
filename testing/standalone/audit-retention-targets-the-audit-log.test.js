@@ -90,14 +90,15 @@ describe('the sweep is wired up and cannot go silent', () => {
     // not see the caller one scroll below the definition. It is called; this pins that.
     assert.match(code(BOOTSTRAP), /startAuditChangeRetention\s*\(\s*\)/,
       'bootstrap must start the change-retention sweep');
-    assert.match(code(PRUNER), /setInterval\(/, 'the sweep must be scheduled, not one-shot');
+    // Scheduled through the interval job (`Q-317`): a bare `setInterval` here is refused by `every-repeating-timer-is-an-interval-job`.
+    assert.match(code(PRUNER), /intervalJob\(\s*'Audit change retention'/, 'the sweep must be scheduled, not one-shot');
   });
 
   it('reports its first pass even when it redacts nothing', () => {
     // The whole reason this bug survived fourteen releases: a housekeeping sweep that speaks only on
     // success is indistinguishable from one pointed at an empty collection.
     const pruner = code(PRUNER);
-    assert.match(pruner, /_announced/, 'a once-per-process announcement must exist');
+    assert.match(pruner, /announced\s*=\s*warnOnce</, 'a once-per-process announcement (a warnOnce, not a boolean) must exist');
     assert.match(pruner, /log\.info\([^)]*COLLECTION/,
       'the announcement must NAME the collection it is sweeping — that is the line that would have shown '
       + "'_audit_log' on day one");
@@ -107,7 +108,7 @@ describe('the sweep is wired up and cannot go silent', () => {
     // Otherwise a second start in the same process is silent, and a test of the second run would be
     // asserting on a latch rather than on behaviour.
     const stop = code(PRUNER).slice(code(PRUNER).indexOf('export function stopAuditChangeRetention'));
-    assert.match(stop.slice(0, 300), /_announced\s*=\s*false/,
-      'stopAuditChangeRetention must reset the announcement latch');
+    assert.match(stop.slice(0, 300), /announced\.forget\(/,
+      'stopAuditChangeRetention must forget the announcement');
   });
 });

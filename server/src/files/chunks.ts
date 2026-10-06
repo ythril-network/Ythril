@@ -13,7 +13,9 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { mkdirPrivate } from '../util/fs-modes.js';
-import { writeStored, readStored, statStored, pipeToStored } from './stored-bytes.js';
+import { writeStored, readStored, statStored, pipeToStored, isMissingPath } from './stored-bytes.js';
+import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 import { log } from '../util/log.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
@@ -206,43 +208,68 @@ export async function getUploadReceived(
   }
 }
 
+/** The name a failure of the stale-chunk cleanup is reported, counted and walked under. */
+const CLEANUP_STEP = declareStep('Stale chunk cleanup');
+
+/** A directory that is not there is an answer; any other failure to look at it is the caller's to be told. */
+const orMissing = async <T>(read: Promise<T>, whenMissing: T): Promise<T> => {
+  try { return await read; } catch (err) {
+    if (isMissingPath(err)) return whenMissing;
+    throw err;
+  }
+};
+
 /**
  * Clean up stale chunk directories older than maxAge (ms).
- * Intended to run on startup + periodic (hourly).
+ * Intended to run on startup + periodic (hourly, `intervalJob` in `index.ts`).
+ *
+ * ## One bad directory is that directory's (`Q-274`)
+ *
+ * Every space DIRECTORY under `.chunks` is walked through `eachSpace` (`util/housekeeping-walk.ts`), and every upload
+ * directory inside it is a unit of its space (`eachUnit`). A space whose listing fails is reported once, by name,
+ * and the next is still cleaned; an upload that cannot be examined or removed is reported by its id, retried next
+ * cycle, and the others of its space still go. This used to be one `try` whose `catch {}` read every failure as
+ * "the `.chunks` directory may not exist yet", so the first failure ended the pass in silence for everything after
+ * it, every hour.
+ *
+ * "Not there" is `isMissingPath` and nothing else: a missing `.chunks` root is a clean pass, an upload that vanished
+ * between the listing and the `stat` is already cleaned, and a root that fails to list for any other reason THROWS
+ * to the caller (the boot call and the interval job both say it) rather than answering "nothing to clean".
+ *
+ * **What this does not bound:** the walk's housekeeping bound is for database operations, and this is the file
+ * system. A directory on a hung network mount holds the pass (and its hourly job's lock, which the job names as a
+ * long-running tick); it is not a database operation and no figure of the walk ends it (risk R5 of bundle-53).
  */
 export async function cleanupStaleChunks(maxAgeMs = 24 * 60 * 60 * 1000): Promise<number> {
   const root = chunksRoot();
   let cleaned = 0;
   const now = Date.now();
 
-  try {
-    const spaceIds = await fs.readdir(root);
-    for (const spaceId of spaceIds) {
-      const spaceDir = path.join(root, spaceId);
-      const stat = await fs.stat(spaceDir);
-      if (!stat.isDirectory()) continue;
+  const spaceDirs = await orMissing(fs.readdir(root), [] as string[]);
+  await eachSpace(CLEANUP_STEP, spaceDirs, async (spaceDirName) => {
+    const spaceDir = path.join(root, spaceDirName);
+    const stat = await orMissing(fs.stat(spaceDir), null);
+    if (!stat?.isDirectory()) return;
 
-      const uploads = await fs.readdir(spaceDir);
-      for (const uploadId of uploads) {
-        const uploadDir = path.join(spaceDir, uploadId);
-        const uStat = await fs.stat(uploadDir);
-        if (!uStat.isDirectory()) continue;
-
-        if (now - uStat.mtimeMs > maxAgeMs) {
-          await removeTree(uploadDir);
-          cleaned++;
-        }
+    const uploads = await orMissing(fs.readdir(spaceDir), [] as string[]);
+    await eachUnit(uploads, async (upload) => {
+      const uploadPath = path.join(spaceDir, upload);
+      const uStat = await orMissing(fs.stat(uploadPath), null);   // gone since the listing: nothing left to clean
+      if (!uStat?.isDirectory()) return;
+      if (now - uStat.mtimeMs > maxAgeMs) {
+        await removeTree(uploadPath);
+        cleaned++;
       }
+    });
 
-      // Remove empty space dirs
-      const remaining = await fs.readdir(spaceDir);
-      if (remaining.length === 0) {
-        await fs.rmdir(spaceDir).catch(() => {});
-      }
+    // Remove an empty space dir; one that gained an upload since the listing is not empty, and one already gone is done.
+    const remaining = await orMissing(fs.readdir(spaceDir), null);
+    if (remaining?.length === 0) {
+      await fs.rmdir(spaceDir).catch((err: unknown) => {
+        if (!isMissingPath(err) && (err as NodeJS.ErrnoException | null)?.code !== 'ENOTEMPTY') throw err;
+      });
     }
-  } catch {
-    // .chunks dir may not exist yet — that's fine
-  }
+  });
 
   if (cleaned > 0) {
     log.info(`Cleaned up ${cleaned} stale chunk upload(s)`);

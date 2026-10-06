@@ -35,7 +35,7 @@ import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
-import { log } from '../util/log.js';
+import { log, outsideRequest } from '../util/log.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
 import { judgePair, consultedModel, type JudgeableRecord } from './contradiction-judge.js';
 import { extraClaimFields, fetchStructuredClaims, type ClaimMap } from './structured-claims.js';
@@ -46,6 +46,16 @@ import { runExclusive } from '../util/single-flight.js';
 import { settledSeqRange } from '../util/seq.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
+import { NotFoundError } from '../util/errors.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
+
+/**
+ * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
+ * the route's manual scan reports under it too (`scanSpacesInRequest`).
+ */
+export const SCAN_STEP = declareStep('Contradiction scan');
 
 const SCAN_STATE = 'ythril_dupe_scan_state';
 const DEFAULT_BATCH_SIZE = 200;
@@ -241,8 +251,11 @@ export async function evalRecord(
         verdict);
       if (outcome === 'created' || outcome === 'reopened') found++;
     }
-  } catch {
-    /* no stored vector, record merged away, or search failed — skip the seed, not the sweep */
+  } catch (err) {
+    // A record with no stored vector yet, or merged away, is `findSimilar`'s NotFoundError: the expected skip. Anything else
+    // (a read or write that fails, a TIMEOUT) is the caller's — `scan-seed-runner.ts` isolates a seed from its neighbours and ends
+    // the space on a timeout. This was an empty catch, which paid a database bound for every record of a hung space.
+    if (!(err instanceof NotFoundError)) throw err;
   }
   return { found, judgeStalled, judged, modelCalls };
 }
@@ -295,8 +308,16 @@ export function scanTuning(cfg: ContradictionScannerConfig | undefined, judgeIsL
   };
 }
 
-/** Sweep one space. Incremental per pass; `reset` re-runs both from zero. */
-export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Promise<ContradictionScanResult> {
+/**
+ * Sweep one space, for a REQUEST (`POST /api/contradictions/scan`). Incremental per pass; `reset` re-runs both from zero. No walk
+ * is above a request, so a seed's failure is reported here and the scan goes on; the scheduled sweep runs {@link scanOneSpace}
+ * inside a walk instead.
+ */
+export function scanSpace(spaceId: string, opts?: { reset?: boolean }): Promise<ContradictionScanResult> {
+  return scanOneSpace(spaceId, opts, seedsInRequest(SCAN_STEP, spaceId));
+}
+
+async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefined, runSeeds: SeedRunner): Promise<ContradictionScanResult> {
   const cfg = getConfig();
   const empty: ContradictionScanResult = { scanned: 0, found: 0, nliStalled: false, judgedPairs: 0, modelCalls: 0, budgetExhausted: false };
   const space = cfg.spaces.find(s => s.id === spaceId);
@@ -338,8 +359,21 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
           .toArray();
         if (batch.length === 0) break;
 
-        for (const rec of batch) {
-          const out = await evalRecord(spaceId, type, rec._id, pass, threshold, judgedThisPass);
+        // The seeds of the batch are isolated from one another by `runSeeds`; an orderly or stalled stop below sets
+        // `stopThisType`, and the seeds behind it in the batch are then not asked (the `break`s this loop used to have).
+        await runSeeds(batch, async (rec) => {
+          if (stopThisType) return;
+          const advance = (): void => { if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq; };
+          let out: RecordOutcomeSummary;
+          try {
+            out = await evalRecord(spaceId, type, rec._id, pass, threshold, judgedThisPass);
+          } catch (err) {
+            // A seed that FAILED is skipped, as it always was: one record that fails every night must not hold the cursor. (A
+            // timeout that ends the space skips the `setCursor` below, so nothing past it is claimed as settled.)
+            advance();
+            scanned++;
+            throw err;
+          }
           found += out.found;
           judgedPairs += out.judged;
           modelCalls += out.modelCalls;
@@ -349,10 +383,10 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
             // cursor must not claim it is — that is the whole point of the second cursor.
             stopThisType = true;
             nliStalled = true;
-            break;
+            return;
           }
           // The record itself IS settled, so the cursor advances before any budget check below.
-          if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq;
+          advance();
           // Budget spent: an ORDERLY stop. Everything judged so far is settled and the cursor has moved
           // past it, so the next run resumes here rather than re-judging (and re-paying for) the same
           // pairs. This is exactly why it is checked AFTER the cursor advance, unlike a stall.
@@ -363,9 +397,8 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
           if (pass === 'nli' && tune.maxJudgedPairs > 0 && modelCalls >= tune.maxJudgedPairs) {
             stopThisType = true;
             budgetExhausted = true;
-            break;
           }
-        }
+        }, type);
         await setCursor(spaceId, type, pass, cursor);
       }
     }
@@ -383,6 +416,11 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
  * has NOT cleared anything, and that has to be distinguishable in the logs from a sweep that found nothing.
  * The whole two-cursor design exists to stop an outage looking like a clean queue; swallowing it here would
  * put the blind spot straight back.
+ *
+ * A walk (`eachSpace`, `util/housekeeping-walk.ts`): a space whose read fails is reported once and the next is still scanned, and
+ * every DATABASE operation inside a space ends at the housekeeping bound, so a hung space costs one bound and not the night. **The
+ * judge's calls are not bounded by it**: an NLI request is not a database operation and keeps the model client's own timeout (named
+ * exemption, `Q-358`).
  */
 export async function runContradictionScanAllSpaces(): Promise<void> {
   let scanned = 0;
@@ -391,13 +429,11 @@ export async function runContradictionScanAllSpaces(): Promise<void> {
   let modelCalls = 0;
   let stalled = false;
   let budgetOut = false;
-  for (const s of concreteSpaces()) {
-    try {
-      const r = await scanSpace(s.id);
-      scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
-      stalled ||= r.nliStalled; budgetOut ||= r.budgetExhausted;
-    } catch (err) { log.warn(`Contradiction scan failed for ${s.id}: ${err instanceof Error ? err.message : String(err)}`); }
-  }
+  await eachSpace(SCAN_STEP, concreteSpaces(), async (s) => {
+    const r = await scanOneSpace(s.id, undefined, seedsInWalk);
+    scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
+    stalled ||= r.nliStalled; budgetOut ||= r.budgetExhausted;
+  });
   // Both numbers, always: the judge-call count is the one that matches an endpoint's own request log, and
   // the settled-pair count is the one that describes the review queue. Logging only the second is what left
   // an operator unable to reconcile our report with their bill.
@@ -432,12 +468,13 @@ export function startContradictionScanner(): void {
     log.warn(`Invalid contradictionScanner.schedule '${cron}' — contradiction scanner not started`);
     return;
   }
-  _task = schedule(cron, () => {
+  _task = schedule(cron, () => outsideRequest(() => {
     // Guarded: this sweep calls an NLI model PER PAIR, so on a large space against a slow judge a pass
     // routinely outlives its schedule — and two overlapping passes double the model calls while both write
-    // the same candidates collection.
+    // the same candidates collection. `outsideRequest`: a reload request re-arms this task, and a tick must
+    // not run (and log) under that request's id.
     void runExclusive('Contradiction scan', () => runContradictionScanAllSpaces());
-  });
+  }));
   _armed.note(ARMED, cron);
   log.info(`Contradiction scanner scheduled (${cron})`);
 }

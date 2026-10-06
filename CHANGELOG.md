@@ -9,6 +9,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING for integrators that branch on status: a write concern the deployment can never meet answers `500`, not
+  `503` (`Q-343`).** Asking for more acknowledgements than the replica set has members, for a named concern it does not
+  define, or for a `w` above `1` on a standalone server answered `503`, retryable, which tells a client to repeat a
+  configuration fault for ever. It now answers `500` with `retryable: false`, the server's `code` and `codeName` and
+  words of ours, on the REST routes, `POST /api/<tool>` and MCP alike (the tool's `structuredContent` carries the same
+  fields). Every other write-concern failure stays a retryable `503`, so **branch on `retryable`, not on the status**.
+  On a replica set the write may have been applied: read the record before writing it again. A sync receiver stops the
+  page on it instead of counting a document as refused, so nothing is dropped for a setting the operator can change.
+  The server log carries the driver's own text, once a minute for each operation and code.
+- **BREAKING for integrators that branch on status: a pool checkout that timed out, or a closed connection pool, answers
+  `503`, retryable, with `Retry-After` (`Q-330`).** Both answered `500` *"An internal database fault…"*, which told an
+  integrator that a pool exhausted for a second was a fault to report. A checkout only times out where
+  `waitQueueTimeoutMS` is set in `MONGO_URI`. They are the same `503` on REST, `POST /api/<tool>` and MCP.
+- **BREAKING for integrators that branch on status: a store failure while renaming a space, creating one or adding a
+  link answers `503`, retryable (`Q-335`).** These acts read the database driver's message before asking whether the
+  store was answering, so an outage answered `404`, `409` or `422` in the driver's words (a rename also put them in its
+  *"rename incomplete"* answer). They ask the store first now and answer in our words, on both doors; the retried
+  request completes the act. A refusal that really is the caller's is unchanged. A file-system failure in a rename's
+  directory move is answered by its code (`ENOENT`, `EACCES`) and no longer carries the server's absolute data path.
+- **BREAKING for a caller that repeats a delete: a second delete of a file record already flagged as deleted, or a delete
+  naming a derived record (a chunk of a document, a face found in a picture), answers `404` on `DELETE
+  /api/files/:spaceId`, `POST /api/delete_file` and the `delete_file` tool (`Q-343`).** It answered success again, wrote a
+  second tombstone and fired a second `file.deleted` webhook. Now no tombstone, no webhook, and `seq` does not move. A
+  first delete that was interrupted still completes on retry, because its record is not flagged yet; so after a delete
+  that timed out, a `404` on the retry can mean the first one did complete.
+- **Options in `MONGO_URI` win, and the client now notices a database that stopped answering (`Q-329`).**
+  `connectTimeoutMS` and `serverSelectionTimeoutMS` default to 10 s and `heartbeatFrequencyMS` to 5 s unless the
+  string names them. An operation in flight when the database stops answering used to wait out the driver's own, much
+  longer, defaults and now ends with the retryable `503`. **A `serverSelectionTimeoutMS` your string already carried
+  was silently overridden before and is honoured now**, so a long one makes an outage last that long; `0` means no
+  bound, and a `loadBalanced` string has no monitor, so only the selection bound applies. The connection test of the
+  setup and data pages honours a string that names its own timeouts too. A changed string takes a restart. Boot
+  writes one INFO line, `MongoDB client options: …`, naming the figures the client runs with and which of them came
+  from the string (never the string itself).
+- **The first MongoDB connection is retried for more kinds of "not up yet" (`Q-329`, `Q-330`).** Retried now: a node
+  that is not yet primary or cannot yet serve reads (a restart, a step-down, an election), a pool with no free
+  connection or one that is closed, a client or topology that is closed or not yet connected, and any error the driver
+  labels retryable, as well as network errors and timeouts. Still failing at once: bad or missing credentials, a
+  malformed string, and an error that merely carries a store-looking name. The retry line now carries the error's code
+  and `codeName`.
+- **BREAKING for a caller of `POST /api/admin/reload-config`: a space whose initialisation fails is no longer reported
+  as applied (`Q-274`).** The reload initialises every space it can, then answers `500` naming the spaces still not
+  initialised, or `503` with `Retry-After` when the failure was the database not answering, where it used to answer
+  success. The next reload retries those spaces whatever the file changed. `space.reload_added` is now written after
+  the initialisation, with its real status, so an audit entry no longer says a space was added that was not usable. A
+  refused manual reload moves `ythril_config_reload_failed_total` and holds `ythril_config_reload_pending`, as a
+  refused watched one does; any reload that succeeds clears the gauge.
+- **BREAKING for a script that runs `npm run links:convert`: it exits non-zero when a space could not be converted
+  (`Q-274`).** A space that fails prints `<id>: FAILED (<reason>) | not converted, not marked | file seqs NOT stamped` on
+  stderr and the others are still converted; it used to end on a stack trace with the later spaces unconverted. The
+  boot summary *"Link conversion FAILED for N space(s)…"* now names hung,
+  not-reached and skipped spaces with a reason.
+- **BREAKING for a log matcher: a background job's failure is said in one shape, and several old lines are gone
+  (`Q-274`).** Every job that visits the spaces says `<job> failed for space '<id>' (<part>): <reason> — retried <when>`,
+  or `<job> stopped: the store is not answering (<reason>) — retried next cycle`, or `<job> stopped: <n> spaces timed out
+  in a row; the store looks stalled — retried next cycle`. A line is said once for a step, a space and a part in a window
+  and again once the step has succeeded in between; the counters below count every failure. Gone: *"Candidate prune
+  (<space>/<collection>)"*, *"Tombstone prune (<space>)"*, *"File tombstone prune (<space>)"*, *"drop-link-arrays:
+  <collection> failed, will retry next boot"*, the per-document *"convert links …"* warning, the stray-file-metadata
+  drain's *"kept for the next cycle"* and the per-space lines of the duplicate and contradiction scans; the pruners no
+  longer log a failed collection on every pass. The embed boot line says *"in N of M spaces"* when a space was not
+  reached. A failed heartbeat beat is said at warn, once per job, where it was debug.
+- **New metrics for background jobs.** `ythril_housekeeping_space_failures_total{step,kind}` (kind `failure`, `timeout`,
+  `store_down` or `stalled`), `ythril_housekeeping_records_failed_total{step}`, `ythril_interval_tick_skipped_total{job}`
+  and the gauge `ythril_housekeeping_quarantined_spaces`, each at `0` from process start. Alert on the gauge staying
+  above `0`: that space's housekeeping is not running. The per-space gauges (facts, entities, edges, chrono and media
+  jobs) read each space on its own, so one failing space keeps its last value and is named in one log line instead of
+  blanking the rest.
+- **A repeating background job whose previous run is still going skips its next tick (`Q-317`).** The space activity
+  flush used to stack a second run on the first, and each job kept its own guard, or none. The repeating jobs — the
+  retention and prune sweeps, the stale chunk cleanup, the embed and media stall sweeps and provider refresh, the
+  seq hold watchdog, the audit change retention, the invite session purge, the reindex watcher and the webhook retry
+  poll — are interval jobs now: a skipped tick is counted in `ythril_interval_tick_skipped_total{job}` and said at most
+  once in a while, an error that escapes a tick is logged as `<job> failed:` and the job keeps its schedule, and a
+  tick that overruns its own bound is said once. The webhook retry poll delivers its due retries four at a time, so
+  one slow receiver no longer holds every other receiver's retries behind it.
 - **A space's Merkle root is not re-read when nothing changed (`Q-107`, part 4).** Every sync cycle of a
   `merkle: true` network and every peer's `GET /api/sync/merkle` streamed all six record collections of the
   space. Each collection's leaves are now kept while nothing writes to it, and only a written collection is read
@@ -79,8 +155,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this instance holds (`restoredOverTombstone`).
 - **Arriving records take this instance's retention (`D-9`).** A record that arrives by push, pull or import
   without an expiry here is given this space's window (type schema over space), counted from its own creation
-  time. A record older than the window is therefore removed by the next retention sweep, and that deletion is
-  passed on to peers. An expiry this instance already holds for a record is kept when a peer updates it.
+  time. A record older than the window is therefore due at once, and the retention sweep removes it as it reaches
+  it — up to 500 records per collection in each 5-minute cycle, so a large backlog takes several cycles — and that
+  deletion is passed on to peers. An expiry this instance already holds for a record is kept when a peer updates it.
 - **A bulk write costs a handful of database round trips, not several per item (`Q-99`, part 3 of 3).** A batch
   is now read once — every record, edge end and triplet it names in one query per kind — decided item by item by
   the same code each single-record endpoint uses, and written in one block per kind. Measured on the standalone
@@ -358,11 +435,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One space that cannot be initialised no longer stops the start-up's initialisation at that space (`Q-274`).** Start-up
+  initialised the spaces in a bare loop, so the first one to throw left every space after it without its collections
+  and indexes and unconfirmed, ended the rest of the start-up's database set-up, and left only *"Instance DB
+  initialisation failed"* naming a driver error and not the space. Each space is now its own step, as in a reload: the
+  failed one is named once (`space init failed for space '<id>': … — retried next reload`), the others are initialised
+  and have their search indexes confirmed, the server starts, and the next reload initialises the failed one again.
+- **A space a reload initialises, or retries, now has its vector index readiness confirmed (`Q-274`).** It was
+  initialised and left with no `indexStatus` and no readiness line, while a space initialised at start-up or by
+  `POST /api/spaces` had both. One path now hands every successfully initialised space to the confirmation, so
+  `GET /api/spaces` shows `building` and then `ready` or `failed` for it too. A reload no longer waits for the index builds.
+- **A background job no longer logs under the request that started it (`Q-274`).** Timers inherit the request context
+  they were created in, so on a first-run instance the TTL sweep's failure line carried the `/setup` request's id, and
+  the duplicate, contradiction, backup and sync schedulers a reload or a join re-armed ran under that request's id. Every
+  interval job and every scheduled task now runs outside the request that armed it.
+- **`POST /api/admin/data/config/test` is documented as it answers (`Q-274`).** An unreachable host is `200` with
+  `{ "ok": false, "error": … }`, which the Database page reads; the integration guide said `500` and showed a `latencyMs`
+  the route never returned.
 - **Paging through a recall answer no longer repeats some matches and drops others when their text scores tie.**
   Records written from one template score exactly alike in the keyword channel, and the database ordered that tie
   differently on every call. That order is part of the fused ranking, and `skip`/`nextSkip` re-run the search for
   each page, so two identical recalls could rank the same records differently. Ties now break by id, as every other
   ranking step already did. This affects both doors, `recall` on MCP and `POST /api/brain/recall` on REST.
+
+- **An error or a hang in one space no longer stops a background job for the others (`Q-274`, `Q-358`).** The jobs that
+  visit the spaces one after another — the retention sweep, the embed and media queue claims and their stall resets,
+  the embed revive, the legacy spill and stray file-metadata drains, the candidate and tombstone prunes, the stale chunk
+  cleanup, chrono retention, the duplicate and contradiction scanners, the suppression sweep, the reindex resume and
+  watcher, link conversion at boot, the space init of a reload and the query-index step — were a loop with one catch
+  around it or none. A failing space ended the pass for every space behind it, and a space whose read hung ended it
+  after a driver wait nobody had chosen, which is how a job could stop housekeeping the whole instance for hours with
+  one line in the log. Each such job now goes through one walk: a failing or hanging space is reported and the next
+  space is processed. What an operator will notice:
+  - **Every database operation of such a job is ended by a bound** (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`, default 240 s,
+    new; minimum 1 s, maximum 1 h, read at start). A queue claim or a stall reset carries a bound of its own, 10 s,
+    since a claim that waits longer is a database that is not answering. A write the bound ends did not happen, and
+    cannot land afterwards. Where a job runs inside a seq hold, the shorter of the two bounds applies.
+  - **Two things stop a pass early, and each says so.** The database is not answering: a bare timeout is checked with a
+    short ping, so one hung space is not mistaken for a dead database, and a dead one costs one bound and not one per
+    space. The database is stalled: 3 spaces in a row timing out ends the pass for that tick.
+  - **A space whose operation timed out is passed over for a while**: 60 s, doubling to 300 s on each further timeout,
+    ending when its next attempt succeeds or at once, for one attempt, when new work is queued for it
+    (`ythril_housekeeping_quarantined_spaces` counts them).
+  - **What is not covered**, because it is not a database operation: index builds, the bulk link conversion, the metric
+    collectors (they have their own scrape budget), walks of the file system and calls to a model.
+- **A read's deadline is an option of the call, never chained (`Q-358`).** Ten reads carried `.maxTimeMS(…)` chained onto
+  the cursor. The driver silently drops a chained or optioned `maxTimeMS` once the call also carries a `timeoutMS`,
+  so a housekeeping or hold scope that lowers a read's deadline could not reach those reads. They pass `{ maxTimeMS }`
+  in the options now.
+- **A failing expired record can no longer stop the retention sweep behind it (`Q-359`).** The sweep read its next
+  page of due records from the start every time, so 500 records whose delete kept failing were read again at the head
+  of every cycle and nothing behind them was ever deleted. A record the sweep cannot delete is now skipped for the
+  cycle and the sweep carries on with the ones behind it; the cycle reports it once, with how many records failed
+  and up to five ids, in the server log and in `ythril_housekeeping_records_failed_total`, and tries it again on the
+  next cycle. The pacing is unchanged: up to 500 deletes per collection in each 5-minute cycle, and a cycle looks at no
+  more than 2000 distinct records per collection, so beyond that many records that keep failing the rest wait for the
+  next cycle and the log says so. A record the sweep read but found already gone is not a failure.
+- **A reindex run whose server could not resume it at start is picked up by a watcher, and two sweepers can no longer
+  sweep one run (`Q-274`).** A boot resume that could not read a space used to throw and leave the run waiting for
+  the next restart. The watcher retries it every few seconds; a run whose sweeper died is taken over once its lease,
+  an atomic stamp on the run document, has expired. `ythril_reindex_in_progress` has one writer and keeps its last
+  value while any space could not be read, instead of reporting a count that is too low.
+- **A failed embed revive at boot is retried (`Q-274`).** A space whose revive of failed embedding jobs failed at start
+  is asked again by the worker's stall tick; the other spaces were already revived and are not asked twice.
+- **The legacy spill sweep removes a file's hash row before its file record (`Q-274`).** A failed delete between the two
+  left a hash row with no file record to find it by; the file record is the finder now and goes last, so the next run
+  completes the work.
+  A directory that cannot be read, other than one that is not there, is reported instead of being taken for an empty
+  one.
+- **A duplicate or contradiction scan, scheduled or manual, no longer loses a failure silently (`Q-274`).** A seed
+  failure other than "not found" was swallowed and a failed existence lookup in the candidate prune was silent; both
+  are reported now, and the scan moves past a record that keeps failing instead of stopping on it.
+- **A manual scan of every space no longer fails as a whole when one space fails (`Q-381`).** `POST /api/duplicates/scan`
+  and `POST /api/contradictions/scan` answered `500` for the request, naming no space, when one space's scan threw, and
+  never reached the spaces behind it. They scan every space they can now and answer `200` with `failedSpaces`
+  (`[{ spaceId, reason }]`, present and empty when nothing failed), the reason in Ythril's words and the database's own in
+  the Server Log (`… failed for space '<id>': … — retried next scan`); `scannedSpaces` counts the spaces scanned. A store
+  that is not answering still ends the request with the retryable `503`. The Review tab's **Scan now** reports a space it
+  could not scan instead of finishing quietly.
+- **A failed space init is retried by the next reload (`Q-274`).** A space whose initialisation failed was recorded as
+  added and never tried again until the next start; every reload now initialises it again until it has succeeded.
+- **Shutdown stops every job it started (`Q-317`).** The retention sweep, the candidate and tombstone prunes, the
+  contradiction scanner, the audit change retention and the stale chunk cleanup were never stopped at shutdown, so a
+  tick could start over the closing connection; all are stopped before the drain now.
+- **A scheduled backup that outlasts its cron period is skipped, not overlapped (`Q-317`).** Its failure line reads
+  `Scheduled backup failed: …`, where it read `Scheduled backup error: …`.
 
 - **A write answered "timed out, retry" can no longer land after the answer** (Q-372). The bound on one database
   write was the driver's own timer, which starts before the command is even sent, so the client gave up first: the
@@ -389,6 +546,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot neutralise (leave it unset or above `YTHRIL_WRITE_TIMEOUT_MS`).
   For integrators: the same retryable `503`; a write blocked in that one state is answered up to 500 ms later than
   the bound. No new database privilege is needed.
+- **A write the bound answered "timed out, retry" can no longer land afterwards, however late its command reached the
+  database (`Q-380`).** The client backstop answered 500 ms after the bound, but a command that reached the server
+  later than that could still run on and land after the `503`. Every bounded write now carries a unique comment; when
+  the backstop fires it finds the database's operation by that comment, ends it and confirms it gone (at most 400 ms)
+  before the seq hold is released and the caller answered `503`. An operation it cannot confirm gone is answered
+  anyway and logged once, as an error naming the method, collection and space. The one case this does not close, a
+  command still in flight past the confirmation, is stated in the hosting guide. The connection's user needs to be
+  able to list and end its own operations; where it may not, every backstop is logged as unconfirmed.
 - **A recall straight after a space's first write no longer answers 503 while its search index initialises**
   (Q-325). A collection's vector index is built after its first record, and until it serves the search service
   refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
@@ -994,6 +1159,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conflicts routes now look a record up by id through one function whose rung has no default.
 
 ### Internal
+
+- **A per-space walk, a repeating timer and a once-only warning are each one module, and gates hold them (bundle-53:
+  `Q-274`, `Q-358`, `Q-359`, `Q-317`, `Q-329`, `Q-330`, `Q-335`, `Q-343`).** What a contributor will notice:
+  - **One walk.** `util/housekeeping-walk.ts` (`eachSpace`, `walkSpaces`, `eachUnit`; `claimAcross` for queue claims)
+    runs per-space work with a failure or a hang contained, owns the bound, the stop on a store that is down or
+    stalled and the quarantine, and reports through `util/space-failure.ts`. `walkVerdict` is the one verdict inside a
+    walk and `storeIsNotAnswering` (`db/store-condition.ts`) the one question outside one, so no site spells
+    `isWriteTimeout || isStoreUnreachable` itself. `db/store-condition.ts` owns "the store cannot answer" (it moved
+    out of `write-timeout.ts`, which keeps "our own bound ended"), `db/client-options.ts` the client's liveness
+    options, `db/store-answers.ts` the memoised ping, and `refusalText` is the one word a door may take from a driver
+    error before asking the store.
+  - **One interval job.** `intervalJob` wraps a repeating timer in its single flight, the housekeeping bound, the
+    per-tick budget, the skipped-tick count and the failure line; a `singleFlight(label)` instance replaces a
+    hand-kept latch. A once-only warning is a `warnOnce`, not a boolean latch; the face fallback warning is said
+    again after a provider outage ends.
+  - **Gates, each derived and floored.** `every-housekeeping-space-walk-is-isolated`,
+    `one-verdict-for-a-walks-failure`, `no-housekeeping-catch-logs-a-space-failure-except-through-the-reporter`,
+    `every-repeating-timer-is-an-interval-job`, `a-once-only-warning-is-a-warn-once`,
+    `every-started-job-is-stopped-at-shutdown`, `no-chained-max-time-ms`, `a-store-failure-is-asked-before-the-wording`
+    and `every-mongo-client-goes-through-mongo-client-options`. `single-flight` and `scheduler-wiring` read their jobs
+    from `_scheduled-jobs.mjs` instead of a hand list.
+  - **Fixtures.** A read stalled on one space, a store that freezes with its sockets open (one TCP relay shell, with
+    a reply hook), and write-concern faults that assert the code they claim. `withStalledReads` refuses a call that
+    names no reader filter, because a filter that matches nothing it stalls stalls nothing.
 
 - **CI runs as parallel jobs behind one gate, every run measures itself, a skip is refused unless it was expected, every
   test file is reached, and there is one way to wait (bundle-56: `Q-370`, `Q-272`, `Q-283`, `Q-319`).** Nothing in the

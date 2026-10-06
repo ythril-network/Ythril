@@ -47,6 +47,9 @@ let mongo, queue;
 
 const jobs = (space) => mongo.col(`${space}_embed_jobs`);
 
+/** How many jobs the revive re-queued. It answers `{ revived, failed }` since G14 (the spaces it did not finish), and these cases ask the count. */
+const revive = async (spaceIds, version) => (await queue.reviveFailedEmbedJobs(spaceIds, version)).revived;
+
 /** A job row as `failEmbedJob` leaves one when the attempt budget is spent. */
 const failedJob = (space, id, over = {}) => ({
   _id: `fact:${id}`,
@@ -92,7 +95,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     // The field is ABSENT on every job that failed before this existed — which is all of them on the
     // instance that reported this. If `$ne` did not match an absent field, the fix would help nobody.
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 1);
+    assert.equal(await revive([SPACE], '3.1.0'), 1);
 
     const row = await jobs(SPACE).findOne({ _id: 'fact:a' });
     assert.equal(row.status, 'pending', 'a terminal job is never claimed again — it has to go back to pending');
@@ -103,7 +106,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
 
   it('KEEPS lastError, so an operator can still see what it died of', async () => {
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
-    await queue.reviveFailedEmbedJobs([SPACE], '3.1.0');
+    await revive([SPACE], '3.1.0');
     assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).lastError, 'embedder unreachable');
   });
 
@@ -111,15 +114,15 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     // The whole safety argument. A restart on the same version must be a no-op, or a genuinely-bad record
     // is re-run on every boot for ever — which is the churn a plain boot sweep would have caused.
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 1);
+    assert.equal(await revive([SPACE], '3.1.0'), 1);
     await jobs(SPACE).updateOne({ _id: 'fact:a' }, { $set: { status: 'failed', attempts: 5 } });
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 0, 'the same version revived it again');
+    assert.equal(await revive([SPACE], '3.1.0'), 0, 'the same version revived it again');
     assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).status, 'failed');
   });
 
   it('a NEW version revives it again — that is the owner\'s case', async () => {
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a', { revivedForVersion: '3.1.0' }));
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.2.0'), 1);
+    assert.equal(await revive([SPACE], '3.2.0'), 1);
     assert.equal((await jobs(SPACE).findOne({ _id: 'fact:a' })).status, 'pending');
   });
 
@@ -130,7 +133,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
       failedJob(SPACE, 'p', { status: 'pending', attempts: 2, claimableAfter: '2999-01-01T00:00:00.000Z' }),
       failedJob(SPACE, 'w', { status: 'processing', claimedAt: '2026-08-15T00:00:00.000Z' }),
     ]);
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE], '3.1.0'), 0);
+    assert.equal(await revive([SPACE], '3.1.0'), 0);
 
     const pending = await jobs(SPACE).findOne({ _id: 'fact:p' });
     assert.equal(pending.attempts, 2, 'a pending job kept its attempt count');
@@ -143,12 +146,12 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     // and report success — the exact shape of "all space indexing failed".
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
     await jobs(OTHER).insertMany([failedJob(OTHER, 'b'), failedJob(OTHER, 'c')]);
-    assert.equal(await queue.reviveFailedEmbedJobs([SPACE, OTHER], '3.1.0'), 3);
+    assert.equal(await revive([SPACE, OTHER], '3.1.0'), 3);
     assert.equal(await jobs(OTHER).countDocuments({ status: 'pending' }), 2);
   });
 
   it('is safe on a space that has no job collection at all', async () => {
-    assert.equal(await queue.reviveFailedEmbedJobs(['never-used'], '3.1.0'), 0);
+    assert.equal(await revive(['never-used'], '3.1.0'), 0);
   });
 
   it('wakes the workers, or the revived jobs sit until the idle poll', async () => {
@@ -157,7 +160,7 @@ describe('failed embed jobs revive once per version (real MongoDB)', { skip }, (
     // which reads as "it still is not indexing".
     const before = queue.currentEmbedWorkEpoch();
     await jobs(SPACE).insertOne(failedJob(SPACE, 'a'));
-    await queue.reviveFailedEmbedJobs([SPACE], '3.1.0');
+    await revive([SPACE], '3.1.0');
     assert.notEqual(queue.currentEmbedWorkEpoch(), before, 'the revive did not announce the work');
   });
 });

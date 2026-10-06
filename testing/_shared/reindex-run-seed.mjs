@@ -11,6 +11,11 @@
  * `sweepComplete: false` is deliberate: the watcher deletes a run only once its sweep is complete and no rebuild
  * job remains, so a seeded incomplete run is not finished out from under the test.
  *
+ * `sweepLeaseAt` is an hour ahead for the same reason, from the other side: the watcher's tick RESUMES an incomplete run
+ * whose lease is stale or absent (bundle-53 G15), and instance A would then sweep and finish the very run the test is
+ * holding. A lease nobody lets go of is a run another process is sweeping. A case that wants a resumable run passes
+ * `sweepLeaseAt` in `extra`.
+ *
  * ## Where it writes
  *
  * The published test Mongo (`ythril-mongo-a`, 127.0.0.1:27117, the harness URI) and the database name instance A
@@ -49,7 +54,7 @@ export async function seedActiveReindexRun(spaceId, extra = {}) {
   await coll.replaceOne({ _id: 'run' }, {
     _id: 'run', spaceId, members: [spaceId], flagged: false,
     target: { model: 'seeded-by-test', dimensions: 0, prefixScheme: 'none' },
-    startedAt: new Date().toISOString(), cursor: null, sweepComplete: false, ...extra,
+    startedAt: new Date().toISOString(), cursor: null, sweepComplete: false, sweepLeaseAt: Date.now() + 60 * 60_000, ...extra,
   }, { upsert: true });
 }
 

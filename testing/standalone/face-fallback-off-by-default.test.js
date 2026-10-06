@@ -25,6 +25,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { statementFrom } from './_structural-window.mjs';
 
 const src = readFileSync(new URL('../../server/src/files/media/face-embedder.ts', import.meta.url), 'utf8');
 const ext = readFileSync(new URL('../../server/src/files/media/face-external.ts', import.meta.url), 'utf8');
@@ -101,7 +102,58 @@ describe('the skip is gated on an external provider being configured', () => {
 
   it('warns once rather than per image', () => {
     // A provider that is down is down for the whole backlog; a per-image log buries the one line that matters.
-    assert.match(code, /warnedFallbackDisabled/, 'the warning must be latched');
-    assert.match(src, /Logged once per process/, 'the message must tell the operator it is deduplicated');
+    assert.match(code, /sayFallbackDisabledOnce\(\)/, 'the skip path must go through the one latch');
+    assert.match(src, /Logged once/, 'the message must tell the operator it is deduplicated');
+  });
+});
+
+describe('the fallback-disabled warning is a warnOnce that a recovered provider resets (G24)', () => {
+  const code = withoutComments(src);
+
+  /** Run `fn` with the process log's warn level captured. */
+  async function capturing(fn) {
+    const { log } = await import('../../server/dist/util/log.js');
+    const was = log.warn;
+    const lines = [];
+    log.warn = (...a) => { lines.push(a.map(String).join(' ')); };
+    try { await fn(lines); } finally { log.warn = was; }
+  }
+
+  it('says it once for a whole backlog of skipped images', async () => {
+    const e = await import('../../server/dist/files/media/face-embedder.js');
+    e.noteExternalFaceProviderAnswered();
+    await capturing((lines) => {
+      const ran = Array.from({ length: 40 }, () => e.sayFallbackDisabledOnce());
+      assert.equal(ran.filter(Boolean).length, 1, 'forty skipped images must say it once');
+      assert.equal(lines.length, 1);
+      assert.match(lines[0], /external provider did not answer/);
+    });
+  });
+
+  it('says it again after the provider has answered, which is the condition clearing', async () => {
+    const e = await import('../../server/dist/files/media/face-embedder.js');
+    e.noteExternalFaceProviderAnswered();
+    await capturing((lines) => {
+      e.sayFallbackDisabledOnce();
+      e.sayFallbackDisabledOnce();
+      e.noteExternalFaceProviderAnswered();
+      e.sayFallbackDisabledOnce();
+      assert.equal(lines.length, 2, 'a second outage is news');
+    });
+  });
+
+  it('an answer from the provider is reported to the latch on the path that receives it', () => {
+    // The call's own statement and the statement that follows it, each bounded by its `;` — not a count of lines that happens
+    // to reach the next one today.
+    const at = code.indexOf('detectFacesExternal(');
+    assert.ok(at > 0);
+    const call = statementFrom(code, at, 'the detectFacesExternal call');
+    const next = statementFrom(code, at + call.length, 'the statement after the detectFacesExternal call');
+    assert.match(next, /noteExternalFaceProviderAnswered\(\)/, 'a provider that recovers never re-arms the warning');
+  });
+
+  it('the latch is a warnOnce, not a hand-written boolean', () => {
+    assert.doesNotMatch(code, /warnedFallbackDisabled/, 'a boolean latch is back');
+    assert.match(code, /warnOnce</, 'the fallback warning is not a warnOnce');
   });
 });

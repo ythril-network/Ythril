@@ -49,6 +49,18 @@
  * whose text predates this module and names the rebuild route that operators search the logs for. The snapshot
  * is an enum and numbers for the same reason: it is served by the admin pipeline-status route.
  *
+ * ## Once-only lines, and the two that are NOT `warnOnce` (Q-317)
+ *
+ * The waiting list overflowing is said through a per-instance `warnOnce`, forgotten when the list drains
+ * ({@link emit}) and on {@link createSearchReadiness}'s `reset`. The watcher's lock is a `singleFlight` instance, so a second
+ * instance (a test's) owns a lock of its own with no name to invent.
+ *
+ * **`lastWarnAt` and the cold / absent / down state machine stay as they are, and are a different question.** "Has this been said?"
+ * is what `warnOnce` answers; `lastWarnAt` answers "is an hour of outage due another reminder, measured from the moment the
+ * state last changed and from the previous reminder?" — it is read and moved by state transitions (a move from `absent` back to
+ * `down` re-stamps it, a cold-start failure stamps it so the first hourly reminder is an hour after the first line, not at once).
+ * Expressed as a window it would drop those stamps and re-announce on every transition.
+ *
  * Everything the module touches from outside — the probe, the sleep, the clock, the timers, the log — is an
  * argument of {@link createSearchReadiness}, so hours of backoff are tested in milliseconds; the production
  * singleton is the functions exported at the bottom.
@@ -57,7 +69,8 @@ import { getDb } from '../db/mongo.js';
 import { log as appLog } from '../util/log.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { mapLimit } from '../util/map-limit.js';
-import { runExclusive } from '../util/single-flight.js';
+import { singleFlight } from '../util/single-flight.js';
+import { warnOnce } from '../util/warn-once.js';
 
 export type SearchState = 'unknown' | 'up' | 'down' | 'absent';
 
@@ -148,13 +161,14 @@ export interface SearchReadinessDeps {
   log: LogLike;
 }
 
-let instances = 0;
+/** The overflow line's key: one condition per instance. */
+const OVERFLOW = 'waiting-list-full';
 
 export function createSearchReadiness(deps: SearchReadinessDeps) {
   const { probe, sleep, now, scheduler, log } = deps;
-  // `runExclusive` keys on a label for the whole process, so a second instance (a test's) must not share the
-  // production watcher's lock.
-  const label = instances++ === 0 ? 'Search readiness' : `Search readiness #${instances}`;
+  // The watcher's lock belongs to this instance: a second one (a test's) shares nothing with the production watcher.
+  const watcherFlight = singleFlight('Search readiness', { now });
+  const overflowSaid = warnOnce<string>({ max: 1 });
 
   let state: SearchState = 'unknown';
   let stateSince: number | null = null;
@@ -166,7 +180,6 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
   let watchAttempts = 0;
   let noSearchStreak = 0;
   let lastWarnAt = 0;
-  let overflowWarned = false;
   const waiters = new Map<string, () => unknown>();
 
   /**
@@ -206,7 +219,7 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
   async function emit(): Promise<void> {
     const entries = [...waiters.entries()];
     waiters.clear();
-    overflowWarned = false;
+    overflowSaid.forget(OVERFLOW);
     await mapLimit(entries, EMIT_CONCURRENCY, ([key, fn]) => runWaiter(key, fn));
   }
 
@@ -274,8 +287,8 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
 
   /** The timer's body. The re-arm is in the `finally`, outside everything above that can throw. */
   async function watchOnce(mine: number): Promise<void> {
-    try { await runExclusive(label, () => watchStep(mine)); }
-    catch { /* runExclusive does not throw; this keeps the re-arm below unconditional */ }
+    try { await watcherFlight.run(() => watchStep(mine)); }
+    catch { /* run() does not throw; this keeps the re-arm below unconditional */ }
     finally {
       if (mine === epoch && (state === 'down' || state === 'absent')) armWatcher();
     }
@@ -329,10 +342,9 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
   function afterSearchUp(key: string, callback: () => unknown): void {
     if (state === 'up') { void runWaiter(key, callback); return; }
     if (!waiters.has(key) && waiters.size >= MAX_WAITERS) {
-      if (!overflowWarned) {
-        overflowWarned = true;
+      overflowSaid(OVERFLOW, () => {
         log.warn(`Search readiness: ${MAX_WAITERS} items are already waiting for database search; further ones are not kept. A rebuild after it returns covers them.`);
-      }
+      });
       return;
     }
     waiters.set(key, callback);
@@ -358,7 +370,7 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
     watchAttempts = 0;
     noSearchStreak = 0;
     lastWarnAt = 0;
-    overflowWarned = false;
+    overflowSaid.forget(OVERFLOW);
     waiters.clear();
   }
 

@@ -156,3 +156,65 @@ describe('the external face endpoint honours the egress policy', () => {
     assert.ok(!/await fetch\(/.test(src));
   });
 });
+
+describe('the width mismatch is reported once, as a warnOnce (G24)', () => {
+  /** Run `fn` with the process log's warn level captured. */
+  async function capturing(fn) {
+    const { log } = await import('../../server/dist/util/log.js');
+    const was = log.warn;
+    const lines = [];
+    log.warn = (...a) => { lines.push(a.map(String).join(' ')); };
+    try { await fn(lines); } finally { log.warn = was; }
+  }
+  const wide = (n) => new Array(n).fill(0.1);
+
+  it('says it once however many faces arrive at the wrong width, and refuses every one', async () => {
+    const d = await import('../../server/dist/files/media/face-descriptor.js');
+    d._resetDescriptorWidthWarnings();
+    await capturing((lines) => {
+      for (let i = 0; i < 50; i++) assert.equal(d.isUsableDescriptor(wide(64), 'in-process', 128), false);
+      assert.equal(lines.length, 1, 'fifty skipped faces must be one line, not fifty');
+      assert.match(lines[0], /width is 64, expected 128 \(in-process\)/);
+    });
+  });
+
+  it('a different width, source or expected width is news; a usable descriptor says nothing', async () => {
+    const d = await import('../../server/dist/files/media/face-descriptor.js');
+    d._resetDescriptorWidthWarnings();
+    await capturing((lines) => {
+      d.isUsableDescriptor(wide(64), 'in-process', 128);
+      d.isUsableDescriptor(wide(65), 'in-process', 128);   // another width: the library moved again
+      d.isUsableDescriptor(wide(64), 'external', 128);     // another source: another cause and fix
+      assert.equal(d.isUsableDescriptor(wide(128), 'in-process', 128), true);
+      assert.equal(lines.length, 3);
+    });
+  });
+
+  it('is said again once the module is reset', async () => {
+    const d = await import('../../server/dist/files/media/face-descriptor.js');
+    d._resetDescriptorWidthWarnings();
+    await capturing((lines) => {
+      d.isUsableDescriptor(wide(64), 'external', 128);
+      d.isUsableDescriptor(wide(64), 'external', 128);
+      d._resetDescriptorWidthWarnings();
+      d.isUsableDescriptor(wide(64), 'external', 128);
+      assert.equal(lines.length, 2);
+    });
+  });
+
+  it('a descriptor that is not an array is refused without a word', async () => {
+    const d = await import('../../server/dist/files/media/face-descriptor.js');
+    d._resetDescriptorWidthWarnings();
+    await capturing((lines) => {
+      assert.equal(d.isUsableDescriptor(undefined, 'external', 128), false);
+      assert.equal(lines.length, 0);
+    });
+  });
+
+  it('the latch is a warnOnce, not a hand-written boolean', () => {
+    const code = readFileSync(new URL('../../server/src/files/media/face-descriptor.ts', import.meta.url), 'utf8')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(code, /let warned\b|warned = true/, 'a boolean latch is back');
+    assert.match(code, /warnOnce</, 'the width warning is not a warnOnce');
+  });
+});

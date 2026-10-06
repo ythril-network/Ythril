@@ -846,6 +846,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
         // parked. Silence here would leave "0 found" reading as "nothing disagrees" — the same conflation
         // the empty state used to make, one layer up.
         if (r.nliStalled) this.toast.error(this.transloco.translate('review.contradictions.scanStalled'));
+        // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
+        if (r.failedSpaces?.length) this.toast.error(this.transloco.translate('duplicates.scanError'));
         this.loadContradictions();
       },
       error: (e) => {
@@ -901,7 +903,12 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scan(): void {
     this.scanning.set(true);
     this.duplicatesApi.scanDuplicates(this.spaceId).subscribe({
-      next: () => { this.scanning.set(false); this.load(); },
+      next: (r) => {
+        this.scanning.set(false);
+        // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
+        if (r.failedSpaces?.length) this.toast.error(this.transloco.translate('duplicates.scanError'));
+        this.load();
+      },
       error: (e) => {
         this.scanning.set(false);
         this.toast.error(this.transloco.translate(e?.status === 403 ? 'duplicates.scanForbidden' : 'duplicates.scanError'));

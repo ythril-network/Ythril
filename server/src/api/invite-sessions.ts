@@ -21,6 +21,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
+import { intervalJob } from '../util/interval-job.js';
 
 const BCRYPT_ROUNDS = 12;
 export const HANDSHAKE_TTL_MS = 60 * 60 * 1000;
@@ -62,7 +63,12 @@ const digest = (id: string): string => crypto.createHash('sha256').update(id).di
 function purgeExpired(now = Date.now()): void {
   for (const [key, s] of sessions) if (s.expiresAt < now) sessions.delete(key);
 }
-setInterval(purgeExpired, 60 * 1000).unref();
+/**
+ * The purge is an interval job armed when this module is evaluated, and it is never stopped: the store is process-lifetime state
+ * (an ephemeral key that must never reach disk), so there is no owner to stop it, and the job's timer is unref'd, so it never
+ * holds the process open. Its tick touches no database, so the housekeeping bound it runs inside has nothing to end.
+ */
+intervalJob('Invite session purge', 60 * 1000, () => purgeExpired()).start();
 
 /** Open a session for a fresh handshake id. Returns the internal key and the expiry. */
 export async function openSession(

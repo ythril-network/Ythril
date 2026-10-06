@@ -30,7 +30,7 @@ import { getConfig } from '../config/loader.js';
 import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, outsideRequest } from '../util/log.js';
 import {
   findSimilar,
   DEFAULT_DUPE_THRESHOLD,
@@ -45,6 +45,16 @@ import { settledSeqRange } from '../util/seq.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NotFoundError } from '../util/errors.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
+
+/**
+ * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
+ * the route's manual scan reports under it too (`scanSpacesInRequest`).
+ */
+export const SCAN_STEP = declareStep('Dupe scan');
 
 const DEFAULT_SCHEDULE = '0 3 * * *';   // 03:00 daily
 const DEFAULT_BATCH_SIZE = 200;
@@ -295,7 +305,14 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
   await upsertCandidate(spaceId, type, a, b, aSeq, bSeq, score, 'open');
 }
 
-/** Find and rule-process the near-duplicates of one record. Returns the pair count. */
+/**
+ * Find and rule-process the near-duplicates of one record. Returns the pair count.
+ *
+ * THROWS for anything but the expected skip: a record with no stored vector yet, or merged away, is `findSimilar`'s
+ * `NotFoundError` and is not a failure. Everything else (a read that fails, a write that fails, a TIMEOUT) belongs to the caller,
+ * which isolates a seed from its neighbours and ends the space on a timeout (`scan-seed-runner.ts`). This used to be an empty
+ * `catch`, which read a hung space's timeout as one record's trouble and paid a bound for every record in it.
+ */
 async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: string, threshold: number): Promise<number> {
   let n = 0;
   try {
@@ -305,7 +322,9 @@ async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: stri
       await handlePair(spaceId, type, source, match);
       n++;
     }
-  } catch { /* record lacks a stored vector, was merged away, or search failed — skip */ }
+  } catch (err) {
+    if (!(err instanceof NotFoundError)) throw err;
+  }
   return n;
 }
 
@@ -342,10 +361,15 @@ export interface DupeScanResult {
 }
 
 /**
- * Sweep one space for duplicate pairs. Incremental by default (resumes from the
- * per-type cursor); pass `reset: true` for an on-demand full re-scan.
+ * Sweep one space for duplicate pairs, for a REQUEST (`POST /api/duplicates/scan`): incremental by default (resumes from the
+ * per-type cursor); pass `reset: true` for an on-demand full re-scan. No walk is above a request, so a seed's failure is reported
+ * here and the scan goes on. The scheduled sweep runs {@link scanOneSpace} inside a walk instead.
  */
-export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Promise<DupeScanResult> {
+export function scanSpace(spaceId: string, opts?: { reset?: boolean }): Promise<DupeScanResult> {
+  return scanOneSpace(spaceId, opts, seedsInRequest(SCAN_STEP, spaceId));
+}
+
+async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefined, runSeeds: SeedRunner): Promise<DupeScanResult> {
   const cfg = getConfig();
   const dc = cfg.dupeScanner ?? {};
   const space = cfg.spaces.find(s => s.id === spaceId);
@@ -377,11 +401,16 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
         .toArray();
       if (batch.length === 0) break;
 
-      for (const rec of batch) {
-        pairs += await evalOneRecord(spaceId, type, rec._id, threshold);
-        if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq;
-        scanned++;
-      }
+      await runSeeds(batch, async (rec) => {
+        // The cursor moves past a seed that FAILED too: one record that fails every night would otherwise hold it for ever.
+        // (A timeout that ends the space skips the `setCursor` below, so nothing past it is claimed as scanned.)
+        try {
+          pairs += await evalOneRecord(spaceId, type, rec._id, threshold);
+        } finally {
+          if (typeof rec.seq === 'number' && rec.seq > cursor) cursor = rec.seq;
+          scanned++;
+        }
+      }, type);
       await setCursor(spaceId, type, cursor);
     }
   }
@@ -389,16 +418,19 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
   return { scanned, pairs };
 }
 
-/** Scan every real (non-proxy) space once, incrementally. Used by the scheduled sweep. */
+/**
+ * Scan every real (non-proxy) space once, incrementally. Used by the scheduled sweep.
+ *
+ * A walk (`eachSpace`, `util/housekeeping-walk.ts`): a space whose read fails is reported once and the next is still scanned, and
+ * every DATABASE operation inside a space ends at the housekeeping bound, so a hung space costs one bound and not the night. The
+ * bound is on the database only: a notify POST is not a database operation and has its own timeout (`NOTIFY_TIMEOUT_MS`). (This
+ * scanner asks no model: it ranks by the stored vectors. The contradiction scanner's judge calls are the named exemption.)
+ */
 export async function runDupeScanAllSpaces(): Promise<void> {
-  for (const s of concreteSpaces()) {
-    try {
-      const r = await scanSpace(s.id);
-      if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);
-    } catch (err) {
-      log.warn(`Dupe scan '${s.id}' failed: ${err}`);
-    }
-  }
+  await eachSpace(SCAN_STEP, concreteSpaces(), async (s) => {
+    const r = await scanOneSpace(s.id, undefined, seedsInWalk);
+    if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);
+  });
 }
 
 // ── Scheduler (node-cron, mirrors backup-scheduler) ──────────────────────────
@@ -418,9 +450,10 @@ export function startDupeScanner(): void {
     log.warn(`Invalid dupeScanner.schedule '${cron}' — duplicate scanner not started`);
     return;
   }
-  _task = schedule(cron, () => {
+  // `outsideRequest`: a reload request re-arms this task, and a tick must not run (and log) under that request's id.
+  _task = schedule(cron, () => outsideRequest(() => {
     void runExclusive('Dupe scan', () => runDupeScanAllSpaces());
-  });
+  }));
   _armed.note(ARMED, cron);
   log.info(`Duplicate scanner scheduled (${cron})`);
 }

@@ -146,6 +146,9 @@ most current open models emit 512.
 > a search: an empty collection answers empty with no `degraded` reason, and a first record is returned at once — the
 > fresh-write channel scores the newest records from the collection itself while their index builds.
 
+**A database that cannot answer while a space is created is a `503`**, retryable and with `Retry-After`, in our words
+and never the `409` or `404` of the driver's message that the same failure was once read as ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)).
+
 ---
 
 ### Create a Proxy Space
@@ -234,6 +237,7 @@ The rename atomically:
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
+| `503`  | The database could not answer, in a step of the rename or while finishing a pending one. Retryable, with `Retry-After`, in our words and not the driver's; it is never reported as one of the refusals above ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 
 **A rename or delete that did not finish does not block the next one.** Each records its intent before it moves
 anything, and an interrupted one is finished forward (a delete is never undone). That used to happen only at
@@ -271,7 +275,7 @@ than failing the write, which leaves exactly this state.
 > | touches | only records with **no** vector | **every** record, rebuilt even when its text is unchanged |
 > | for | the way back from `suppressEmbeddings` | recovery after changing embedder, model, dimensions or prefix scheme |
 > | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindexRun` on `space_meta` / `reindex-status` |
-> | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart |
+> | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart (a run its server could not resume at start is picked up by a watcher; see [Reindex](04d-brain-ops-api.md)) |
 >
 > Both QUEUE their records for the embedding worker, and both yield to local writes: the worker takes a write
 > somebody is waiting to search for ahead of a backfill, and a backfill ahead of a reindex, while giving each lower

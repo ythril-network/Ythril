@@ -36,6 +36,7 @@ import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { webhookToken } from './_shared.js';
 import { sendReadFailure } from './_read-failure.js';
+import { refusalText } from '../../brain/store-failure.js';
 
 export const linksRouter = Router();
 
@@ -104,7 +105,9 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
   } catch (err) {
     // The only failure `addLink` raises that is the caller's fault: the record the link would hang off is
     // not there. A missing `from` is a 404 about the record, not a 400 about the body.
-    const msg = err instanceof Error ? err.message : String(err);
+    // The store's failure is not this route's to word: `refusalText` rethrows it before the wording is read, so a
+    // driver text that ends in "not found" is a 503 and not a 404 (bundle-53 G7, Q-335).
+    const msg = refusalText(err);
     if (/not found$/.test(msg)) { res.status(404).json({ error: msg }); return; }
     throw err;
   }

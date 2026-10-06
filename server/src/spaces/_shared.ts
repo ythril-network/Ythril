@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import { log, peerText } from '../util/log.js';
+import { classifyReadFailure } from '../brain/store-failure.js';
 import type { SpaceMeta, KnowledgeType, PendingSpaceOp } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 
@@ -104,6 +105,17 @@ export function setReindexNeeded(spaceId: string, needed: boolean): void {
  */
 export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
   const db = getDb();
+  /**
+   * What the log says of a failure the repair swallows. A failure on the STORE's side is said as that and nothing of the
+   * driver's text (hosts, addresses, the store's own sentence): the repair carries on, so it is not the failure's last
+   * word — a rename whose later step rethrows the same failure had it logged twice, once here and once by the door that
+   * answers it, and the door's line is the one place the text belongs (bundle-53 G7). Anything else keeps its text.
+   */
+  const swallowed = (err: unknown): string => {
+    const f = classifyReadFailure(err);
+    if (f.status < 500) return peerText(err);
+    return `a store failure${f.code !== undefined ? ` (code ${f.code}${f.codeName ? ` ${peerText(f.codeName)}` : ''})` : ''}; the repair is idempotent and runs again on the next boot or rename`;
+  };
   const prefix = `${spaceId}_`;
 
   // Discover the space's collections rather than iterating a hardcoded list.
@@ -123,7 +135,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       .map(c => c.name)
       .filter(n => n.startsWith(prefix));
   } catch (err) {
-    log.warn(`Stale-spaceId repair: could not list collections for '${peerText(spaceId)}': ${peerText(err)}`);
+    log.warn(`Stale-spaceId repair: could not list collections for '${peerText(spaceId)}': ${swallowed(err)}`);
     return 0;
   }
 
@@ -143,7 +155,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       repaired += res.modifiedCount ?? 0;
     } catch (err) {
       // Never let a repair failure block startup — the space is still usable.
-      log.warn(`Stale-spaceId repair failed for ${peerText(name)}: ${peerText(err)}`);
+      log.warn(`Stale-spaceId repair failed for ${peerText(name)}: ${swallowed(err)}`);
     }
   }
 
@@ -317,6 +329,6 @@ export function pendingOpConflictMessage(pending: PendingSpaceOp, attempted: str
 export function pendingOpStillFailingMessage(pending: PendingSpaceOp, attempted: string, reason: string): string {
   const target = pending.type === 'rename' ? `${pending.spaceId} → ${pending.newId}` : pending.spaceId;
   return `Cannot ${attempted}: a ${pending.type} of '${target}' (started ${pending.startedAt}) is still pending, and `
-    + `resuming it just now did not complete: ${reason}. It is tried again by the next space rename or delete, and `
+    + `resuming it just now did not complete: ${reason.replace(/\.+$/, '')}. It is tried again by the next space rename or delete, and `
     + 'on restart.';
 }

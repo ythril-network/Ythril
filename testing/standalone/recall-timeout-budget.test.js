@@ -111,9 +111,12 @@ describe('the deadline is threaded through the pipeline', () => {
     assert.match(phase2, /recallByType\([^)]*\bbudget\)/,
       'the per-type searches must receive the budget, or a per-call maxTimeMS bounds nothing that matters');
 
-    assert.match(recall, /cursor\.maxTimeMS\(ms\)/,
+    // In the OPTIONS argument and not chained (Q-358): the driver drops a chained maxTimeMS when a scope injects
+    // `timeoutMS`, and the bound lowers only a figure it can see in the options. `no-chained-max-time-ms` holds the
+    // rule for the whole server; these two keep the proof that the deadline reaches Mongo at all.
+    assert.match(recall, /aggregate<[^(]*\(pipeline, ms != null \? \{ maxTimeMS: ms \} : \{\}\)/,
       'the deadline must reach the Mongo aggregation, not merely be computed');
-    assert.match(readFileSync('server/src/brain/predicate-recall.ts', 'utf8'), /\.maxTimeMS\(remaining\(\)\)/,
+    assert.match(readFileSync('server/src/brain/predicate-recall.ts', 'utf8'), /\{ maxTimeMS: remaining\(\) \}/,
       'and every round trip of a filtered search must carry what is left of it');
     assert.match(recall, /settleSearches/,
       'a timed-out collection must not discard the collections that answered');

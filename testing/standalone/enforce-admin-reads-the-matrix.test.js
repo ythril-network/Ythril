@@ -154,9 +154,15 @@ describe('every decision site asks the one predicate', () => {
      * by name would have blinded the gate to a real token read appearing in either of them later.
      *
      * `.admin(` is out too — `db.admin()` is the Mongo driver — and `admin:` is an object KEY, not a read.
+     *
+     * So is the driver's method TESTED FOR before it is called: `typeof db.admin === 'function'`
+     * (`db/record-write-observer.ts`, a fake `Db` in a test has none). A token's `admin` is a boolean and is never compared
+     * to the string 'function', so that is the use the exclusion means; stripping the PROBE rather than exempting the file
+     * keeps a real token read in that file red.
      */
     const READS_IT = /(?<!tool)\.admin\s*(?![(:])/;
-    const readers = files.filter(f => READS_IT.test(src(f)));
+    const DRIVER_ADMIN_PROBE = /typeof\s+[\w.]+\.admin\s*===\s*['"]function['"]/g;
+    const readers = files.filter(f => READS_IT.test(src(f).replace(DRIVER_ADMIN_PROBE, '')));
 
     // A stale exemption fails. If a file stopped reading the flag, its row is a claim about code that no
     // longer exists, and the next person to add a read there inherits a pass nobody granted.

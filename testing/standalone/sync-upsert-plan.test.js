@@ -204,8 +204,18 @@ describe('the fork caps\' index is declared once', () => {
     const { readFileSync } = await import('node:fs');
     const { stripComments } = await import('./_strip-comments.mjs');
     const { readTrackedSources } = await import('./_sources.mjs');
+    // The RULE is "every FORK_INDEXES entry is created from the one list", not one loop shape: a `for (const ix of FORK_INDEXES)`
+    // and a `...FORK_INDEXES.map(ix => ...)` / `.forEach` both iterate the list (bundle-53 G21 moved the second site into the
+    // walk's unit list). What must hold either way: the list is iterated, and the index created is read from the entry's
+    // `keys` — a site that iterates the list and then spells its own keys would still be a second declaration.
+    const iterates = /\bfor \(const (\w+) of FORK_INDEXES\)|\bFORK_INDEXES\.(?:map|forEach)\(\s*\(?(\w+)\)?\s*=>/;
     for (const f of ['server/src/spaces/lifecycle.ts', 'server/src/spaces/ensure-query-indexes.ts']) {
-      assert.match(stripComments(readFileSync(f, 'utf8')), /for \(const ix of FORK_INDEXES\)/, `${f} no longer creates FORK_INDEXES`);
+      const src = stripComments(readFileSync(f, 'utf8'));
+      const m = iterates.exec(src);
+      assert.ok(m, `${f} no longer creates FORK_INDEXES`);
+      const entry = m[1] ?? m[2];
+      assert.match(src.slice(m.index), new RegExp(`createIndex\\(\\s*${entry}\\.keys\\b`),
+        `${f} iterates FORK_INDEXES but does not create the index from the entry's keys`);
     }
     const spelled = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
       .filter(s => /createIndex\(\s*\{\s*forkOf\b/.test(stripComments(s.text))).map(s => s.file);

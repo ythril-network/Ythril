@@ -28,7 +28,7 @@ import { createSpace, type SpaceCreator } from './lifecycle.js';
 import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
 import { isProxy, isWildcardProxy } from './proxy.js';
-import { throwIfStoreSide } from '../brain/store-failure.js';
+import { refusalText } from '../brain/store-failure.js';
 import { reportServerFailure } from '../util/report-failure.js';
 
 /** A refusal, carrying the status the contract suite pins. */
@@ -149,10 +149,11 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
     const space = await createSpace(plan.args, creator);
     return { outcome: 'created', space };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    // The store's failure is not this function's to word: `refusalText` rethrows it, so each door answers it as every
+    // door does (bundle-30 I12), and only then is the wording read (bundle-53 G7, Q-335) — a driver text that holds
+    // "already exists" was a 409 in the driver's own words while the store was failing.
+    const msg = refusalText(err);
     if (msg.includes('already exists')) return { outcome: 'conflict', error: msg };
-    // The store's failure is not this function's to word: each door answers it as every door does (bundle-30 I12).
-    throwIfStoreSide(err);
     // Anything else keeps its generic sentence — and is logged, where it used to be discarded with nothing left behind.
     reportServerFailure(`space create '${plan.args.id}'`, err);
     return { outcome: 'failed', error: 'Failed to create space' };

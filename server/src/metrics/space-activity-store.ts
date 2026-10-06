@@ -27,7 +27,8 @@
 import { col, asFilter } from '../db/mongo.js';
 import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { intervalJob } from '../util/interval-job.js';
 import { drainSpaceActivity, hourBucket, activityDocId, type CallClass } from './space-activity.js';
 
 /** The collection is instance-wide, not per space: comparing spaces means reading them together. */
@@ -125,26 +126,27 @@ export async function flushSpaceActivity(now = Date.now()): Promise<number> {
     // The counts are already drained, so they are gone. Say what was lost rather than failing a timer.
     const calls = rows.reduce((sum, r) => sum + r.totals.n, 0);
     log.warn(`Space activity: dropped a flush of ${calls} call(s) across ${ops.length} space(s): `
-      + `${err instanceof Error ? err.message : String(err)}`);
+      + `${peerText(err)}`);
     return 0;
   }
 }
 
-let _timer: NodeJS.Timeout | null = null;
-
 /**
- * Start the periodic flush. Unref'd, so it never holds the process open — a pending activity write must not
- * be the reason a container takes longer to exit.
+ * The periodic flush is an interval job (`Q-317`): one flush at a time (a flush slower than a minute is skipped, and counted,
+ * where it used to stack a second `bulkWrite` behind the first), its writes end at the housekeeping figure, and the timer is
+ * unref'd, so a pending activity write is never the reason a container takes longer to exit. `flushSpaceActivity` says its own
+ * failures (it drops the batch and names what it carried), so the job's `failed:` line is the backstop.
  */
-export function startSpaceActivityFlush(intervalMs = ACTIVITY_FLUSH_INTERVAL_MS): void {
-  if (_timer) return;
-  _timer = setInterval(() => { void flushSpaceActivity(); }, intervalMs);
-  _timer.unref();
+const flushJob = intervalJob('Space activity flush', ACTIVITY_FLUSH_INTERVAL_MS, () => flushSpaceActivity());
+
+/** Start the periodic flush. */
+export function startSpaceActivityFlush(): void {
+  flushJob.start();
 }
 
 /** Stop the timer and write what is pending — call from the shutdown path so the last minute is not lost. */
 export async function stopSpaceActivityFlush(): Promise<void> {
-  if (_timer) { clearInterval(_timer); _timer = null; }
+  flushJob.stop();
   await flushSpaceActivity();
 }
 

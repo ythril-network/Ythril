@@ -12,15 +12,16 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import os from 'node:os';
 
 // ── Module import helpers ─────────────────────────────────────────────────────
 // loader.ts imports CONFIG_PATH from env at module-evaluation time.
 // We point it at a temp file before loading the module.
+//
+// In the OS temp directory, never beside this file: a gate that walks the tree's untracked files (preflight runs them
+// in parallel) stat'ed this file between its listing and its read while this test deleted it, and failed with ENOENT.
 
-const TEMP_CONFIG = path.join(__dirname, 'tmp-media-config-test.json');
+const TEMP_CONFIG = path.join(os.tmpdir(), `ythril-media-config-test-${process.pid}.json`);
 
 const BASE_CONFIG = {
   instanceId: 'test-instance',

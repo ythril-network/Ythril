@@ -110,6 +110,7 @@ describe('the retired link arrays leave the disk', { skip }, () => {
     assert.equal(out.cleared[`${DONE}_facts`], 1);
     assert.equal(out.cleared[`${DONE}_chrono`], 1);
     assert.equal(out.cleared[`${DONE}_files`], 1);
+    assert.deepEqual(out.failed, [], 'a clean clear names a failure');
   });
 
   it('and leaves the record otherwise untouched — this clears a field, it does not rewrite a row', async () => {
@@ -156,5 +157,41 @@ describe('the retired link arrays leave the disk', { skip }, () => {
     const second = await drop.dropLinkArrays();
     assert.equal(second.cleared[`${DONE}_facts`], undefined,
       'the second run reported work, so the first did not finish or the query matches a cleared record');
+  });
+
+  it('a collection that cannot be cleared is named and said once, and the rest of its space and the next space are still cleared (Q-274)', async () => {
+    /*
+     * The per-collection catch was hand-written, said as a bare warning, and kept no record of what failed. The collection
+     * here is a VIEW: it reads, and every write to it fails at the command level, which is the shape of a collection the
+     * store cannot update. Its space's other collections, and the space after it, must still be cleared.
+     */
+    const FAILING = 'g19dropfail';
+    const AFTER = 'g19dropafter';
+    const db = mongo.getDb();
+    await db.createCollection('g19drop_empty');
+    await db.createCollection(`${FAILING}_chrono`, { viewOn: 'g19drop_empty' });
+    for (const space of [FAILING, AFTER]) {
+      await db.collection(`${space}_facts`).insertOne({ _id: 'f-1', spaceId: space, fact: 'a fact', entityIds: [ENT], seq: 1 });
+      await db.collection(`${space}_files`).insertOne({ _id: 'notes/a.md', spaceId: space, path: 'notes/a.md', entityIds: [ENT], seq: 3 });
+    }
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+      instanceId: 'drop-arrays-test', instanceLabel: 'test', tokens: [], networks: [],
+      spaces: [FAILING, AFTER].map(id => ({ id, label: id, folders: [], completeLinkage: true })),
+    }, null, 2), { mode: 0o600 });
+    loader.loadConfig();
+    const { subscribeLogLines } = await import('../../server/dist/util/log.js');
+    const lines = [];
+    const unsubscribe = subscribeLogLines(l => lines.push(l));
+    try {
+      const out = await drop.dropLinkArrays();
+      assert.deepEqual(out.failed.map(f => [f.spaceId, f.collection]), [[FAILING, `${FAILING}_chrono`]]);
+      assert.ok(out.failed[0].reason.length > 0, 'the failure has no reason');
+      assert.equal(out.cleared[`${FAILING}_facts`], 1, 'the collection before the failing one was not cleared');
+      assert.equal(out.cleared[`${FAILING}_files`], 1, 'the collection AFTER the failing one was never reached: the units share one try');
+      assert.equal(out.cleared[`${AFTER}_facts`], 1, 'the space after the failing one was not cleared');
+      const said = lines.filter(l => l.includes('Link array drop') && l.includes(`'${FAILING}'`));
+      assert.equal(said.length, 1, `expected one line for the failing collection, got:\n${said.join('\n')}`);
+      assert.match(said[0], /\(chrono\).* — retried next boot/);
+    } finally { unsubscribe(); }
   });
 });

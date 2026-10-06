@@ -183,7 +183,9 @@ export async function readFrontierEdges(
   // it, so the extra clause is redundant rather than wrong — see the note in the walk on why filtering the
   // ENTITY read on a redundant spaceId was actively harmful.
   const cursor = col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>(frontierEdgeQuery(spaceId, [...frontier], narrowing)))
+    // The deadline is an option of the read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it can
+    // see in the options, and the driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
+    .find(asFilter<EdgeDoc>(frontierEdgeQuery(spaceId, [...frontier], narrowing)), maxTimeMS !== undefined ? { maxTimeMS } : {})
     .project(NEVER_RETURNED_PROJECTION)
     .showRecordId(true);
   // Bounded for the same reason as the standalone walk's, and with the same `+ 1` truncation probe (W-11):
@@ -191,7 +193,6 @@ export async function readFrontierEdges(
   // documents. The rule belongs on BOTH paths — these two have drifted before, twenty lines apart, which is
   // why `frontierEdgeQuery` exists at all. The CALLER passes the probe; a shared read passes its window's sum.
   if (limit !== undefined) cursor.limit(limit);
-  if (maxTimeMS !== undefined) cursor.maxTimeMS(maxTimeMS);
   return await cursor.toArray() as RankedEdge[];
 }
 

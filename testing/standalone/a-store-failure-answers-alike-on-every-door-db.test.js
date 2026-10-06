@@ -40,19 +40,23 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { driverTextIn } from './_driver-text.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
+// Five faults run over every door in ONE process: ~376 requests each, from one credential. The instance's limiter
+// answers 429 to a door past its quota, before the store is reached, and the later faults were judged on the doors the
+// earlier ones had left quota for (bundle-53 G1: 58, then 6 of ~100 reached). A limiter is not what this gate asks about.
+for (const k of ['SKIP_GLOBAL_RATE_LIMIT', 'SKIP_AUTH_RATE_LIMIT', 'SKIP_SYNC_RATE_LIMIT']) process.env[k] = 'true';
+process.env['YTHRIL_RATE_LIMIT_PER_MINUTE'] ??= '1000000';
 
 const S = 'storedown';
 const UUID = 'cccccccc-0000-4000-8000-0000000000d1';
 const UUID2 = 'cccccccc-0000-4000-8000-0000000000d2';
 const HOST = 'mongo-a.internal:27017';
 const ADDRESS = '172.16.0.9';
-/** The driver's text, as the drive saw it: an internal host, a private address and a port. */
-const LEAK = /mongo-a\.internal|172\.16\.0\.9|27017|Connection pool for|MongoPoolClearedError/;
 /** How many doors must reach the failing store for the run to conclude anything. Raise it; never lower it. */
 const REACHED_FLOOR = 60;
 const PER_DOOR_MS = 20_000;
@@ -63,8 +67,8 @@ const driverLib = path.dirname(requireFromServer.resolve('mongodb'));
 const { Server } = requireFromServer(path.join(driverLib, 'sdam', 'server.js'));
 const { Topology } = requireFromServer(path.join(driverLib, 'sdam', 'topology.js'));
 const { BulkOperationBase } = requireFromServer(path.join(driverLib, 'bulk', 'common.js'));
-const { PoolClearedError } = requireFromServer(path.join(driverLib, 'cmap', 'errors.js'));
-const { MongoNetworkTimeoutError, MongoServerSelectionError } = requireFromServer('mongodb');
+const { PoolClearedError, PoolClosedError, WaitQueueTimeoutError } = requireFromServer(path.join(driverLib, 'cmap', 'errors.js'));
+const { MongoNetworkTimeoutError, MongoServerSelectionError, MongoWriteConcernError } = requireFromServer('mongodb');
 
 /**
  * The two ways the store is gone, each raised where the driver raises it, and each run over every door.
@@ -78,9 +82,37 @@ const { MongoNetworkTimeoutError, MongoServerSelectionError } = requireFromServe
  * below) for its run to say anything about one.
  */
 const FAULTS = [
-  { id: 'pool-cleared', what: 'a pooled connection cleared under a command' },
-  { id: 'no-server', what: 'no server can be selected — the paused store, which a bulk write wraps without a label' },
+  { id: 'pool-cleared', what: 'a pooled connection cleared under a command', answers: 'retry' },
+  { id: 'no-server', what: 'no server can be selected — the paused store, which a bulk write wraps without a label', answers: 'retry' },
+  // bundle-53 G1 (Q-330): the pool's own two errors are `MongoDriverError`s, not network errors — answered 500, "an
+  // internal fault", for an exhausted or a closed pool, which is the store not answering.
+  { id: 'wait-queue-timeout', what: 'a connection could not be checked out of the pool in time', answers: 'retry' },
+  { id: 'pool-closed', what: 'a connection was asked of a closed pool', answers: 'retry' },
+  // bundle-53 G1 (Q-343): a write concern that can never be met is a misconfiguration, so it is a 500 that says so and
+  // says not to retry — answered 503 it was retried for ever. Raised on WRITES only (a read cannot raise one), so
+  // fewer doors reach it; the floor is its own.
+  { id: 'unsatisfiable-write-concern', what: 'a write whose write concern the deployment can never meet', answers: 'misconfigured', floor: 15 },
 ];
+/** The commands a write sends: the unsatisfiable-write-concern fault is raised on these and on no read. */
+const WRITE_COMMANDS = new Set(['insert', 'update', 'delete', 'findAndModify']);
+/** The driver's text, as each fault's error carries it: the one string the log must hold once and no answer may. */
+const MARKER = `${ADDRESS}:27017 timed out`;
+/** What each command fault throws, built by the driver's own constructors; the marker is in the message the way an address is. */
+const COMMAND_FAULTS = {
+  'pool-cleared': () => new PoolClearedError({
+    address: HOST,
+    serverError: new MongoNetworkTimeoutError(`connection <monitor> to ${MARKER}`),
+  }),
+  'wait-queue-timeout': () => new WaitQueueTimeoutError(`Timed out while checking out a connection from connection pool (${MARKER}; ${HOST})`, HOST),
+  'pool-closed': () => {
+    const e = new PoolClosedError({ address: HOST });
+    e.message = `Attempted to check out a connection from closed connection pool (${MARKER}; ${HOST})`;
+    return e;
+  },
+  'unsatisfiable-write-concern': () => new MongoWriteConcernError({
+    writeConcernError: { code: 100, codeName: 'UnsatisfiableWriteConcern', errmsg: `Not enough data-bearing nodes (${MARKER}; ${HOST})` },
+  }),
+};
 /**
  * How many doors must meet a failed BULK write under the selection fault, or that run proves nothing about one. Most
  * doors read before they write, and a failed read is not wrapped; the file deletes reach the tombstone `insertMany`
@@ -189,6 +221,16 @@ const countFailure = () => {
 const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stream']);
 
 /**
+ * Doors the WRITE-ONLY fault (`unsatisfiable-write-concern`) is not judged on, each for a reason that is the door's own.
+ * The retry faults fail reads too, so every door's first store call fails and the door answers it; a write-only fault
+ * reaches the writes that sit behind a door's reads, and a door may answer AROUND one. That is not a classification
+ * question, which is all this fault asks.
+ */
+const ANSWERS_AROUND_A_FAILED_WRITE = new Map([
+  ['POST /api/update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
+]);
+
+/**
  * Doors whose answer REPORTS the store's state rather than failing on it — held to the leak check, not to the 503.
  * Each reason is the door's own contract; a door added here without one is the defect this gate exists to find.
  */
@@ -234,12 +276,12 @@ describe('a store failure answers alike on every door', { skip }, () => {
       return realWriteHead.apply(this, args);
     };
     Server.prototype.command = async function storeDown(...args) {
-      if (!failing || fault !== 'pool-cleared') return realCommand.apply(this, args);
+      const make = COMMAND_FAULTS[fault];
+      if (!failing || !make) return realCommand.apply(this, args);
+      // A write concern can only fail a write: a read is never answered with one, so it goes through.
+      if (fault === 'unsatisfiable-write-concern' && !WRITE_COMMANDS.has(args[0]?.commandName)) return realCommand.apply(this, args);
       countFailure();
-      throw new PoolClearedError({
-        address: HOST,
-        serverError: new MongoNetworkTimeoutError(`connection <monitor> to ${ADDRESS}:27017 timed out`),
-      });
+      throw make();
     };
     // Raised where the driver raises it, with the topology's own description as its reason, as `selectServer` does.
     Topology.prototype.selectServer = async function noServer(...args) {
@@ -316,8 +358,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
       markAnswered(requestId);
       const text = (out.result.content ?? []).map(c => c.text ?? '').join('\n');
       const sc = out.result.structuredContent ?? {};
-      return { requestId, status: out.result.isError ? (sc.storeSideFailure ? 503 : out.status) : 200, retryAfter: null,
-        retryable: sc.retryable, error: text, raw: `${text}\n${JSON.stringify(sc)}` };
+      return { requestId, status: out.result.isError ? out.status : 200, retryAfter: null,
+        retryable: sc.retryable, code: sc.code, codeName: sc.codeName, error: text, raw: `${text}\n${JSON.stringify(sc)}` };
     }
     const sep = d.url.includes('?') ? '&' : '?';
     const url = `${base}${d.url}${d.url.startsWith('/api/sync') ? `${sep}spaceId=${S}` : ''}`;
@@ -336,11 +378,13 @@ describe('a store failure answers alike on every door', { skip }, () => {
     let body; try { body = JSON.parse(raw); } catch { body = null; }
     const retryable = body?.retryable ?? body?.data?.retryable;
     return { requestId: r.headers.get('x-request-id'), status: r.status, retryAfter: r.headers.get('retry-after'),
-      retryable, error: typeof body?.error === 'string' ? body.error : null, raw };
+      retryable, code: body?.code ?? body?.data?.code, codeName: body?.codeName ?? body?.data?.codeName,
+      error: typeof body?.error === 'string' ? body.error : null, raw };
   }
 
-  for (const { id: faultId, what } of FAULTS) it(`every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text — ${what}`, { timeout: 30 * 60_000 }, async (t) => {
+  for (const { id: faultId, what, answers, floor = REACHED_FLOOR } of FAULTS) it(`every door that reached the failing store answers ${answers === 'retry' ? '503, Retry-After, retryable' : '500, not retryable, with the code'}, one message, no driver text — ${what}`, { timeout: 30 * 60_000 }, async (t) => {
     fault = faultId;
+    const { UNSATISFIABLE_WRITE_CONCERN_MESSAGE } = await import('../../server/dist/brain/store-failure.js');
     await freshSpace();
     const all = doors();
     // The derivation's floor: the sync trigger's `wait` is the flag this case was written from.
@@ -371,23 +415,40 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const wrong = [];
     const messages = new Map();
     for (const { d, a } of results) {
-      if (SERVES_THE_LOG.has(d.name)) continue;
-      if (LEAK.test(a.raw)) wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(0, 200)}`);
+      if (SERVES_THE_LOG.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
+      const leak = driverTextIn(a.raw);
+      // The LINE holding the match: a long body (a scrape) leaks somewhere past its first 200 characters.
+      if (leak) {
+        const start = a.raw.lastIndexOf('\n', leak.index) + 1;
+        const end = a.raw.indexOf('\n', leak.index);
+        wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(start, end < 0 ? undefined : end)}`);
+      }
       // A stream that opened (a status line, then events) is a stream, not an answer that never came.
       if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
     }
     for (const { d, a } of reached) {
-      if (a.streaming || REPORTS_THE_STORE.has(d.name)) continue;
+      if (a.streaming || REPORTS_THE_STORE.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
       const why = [];
-      if (a.status !== 503) why.push(`status ${a.status}`);
-      if (d.kind === 'rest' && !(Number(a.retryAfter) > 0)) why.push('no Retry-After');
-      if (a.retryable !== true) why.push(`retryable ${a.retryable}`);
+      if (answers === 'retry') {
+        if (a.status !== 503) why.push(`status ${a.status}`);
+        if (d.kind === 'rest' && !(Number(a.retryAfter) > 0)) why.push('no Retry-After');
+        if (a.retryable !== true) why.push(`retryable ${a.retryable}`);
+      } else {
+        // A misconfiguration says so: 500, never retryable, no Retry-After, the code and its name, and the named message.
+        if (a.status !== 500) why.push(`status ${a.status}`);
+        if (d.kind === 'rest' && a.retryAfter) why.push(`Retry-After ${a.retryAfter} on an answer nobody should retry`);
+        if (a.retryable !== false) why.push(`retryable ${a.retryable}`);
+        if (a.code !== 100) why.push(`code ${a.code}`);
+        if (a.codeName !== 'UnsatisfiableWriteConcern') why.push(`codeName ${a.codeName}`);
+        if (a.error !== UNSATISFIABLE_WRITE_CONCERN_MESSAGE) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
+      }
       if (typeof a.error !== 'string' || a.error.startsWith('Error:')) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
       else messages.set(a.error, [...(messages.get(a.error) ?? []), d.name]);
       // The operator's log: the driver's text once for this request's answer, not once per layer that saw it. Lines
       // after the answer belong to other operations (the audit row a finished request writes logs its own failure).
+      // A misconfiguration is logged once per operation and code per window, so the same text is not repeated per door.
       const logged = lines.slice(0, linesAtAnswer.get(a.requestId) ?? lines.length)
-        .filter(l => l.includes(a.requestId) && l.includes(`${ADDRESS}:27017 timed out`));
+        .filter(l => l.includes(a.requestId) && l.includes(MARKER));
       if (logged.length > 1) why.push(`driver text logged ${logged.length} times: ${logged.map(l => l.slice(0, 140)).join(' | ')}`);
       if (why.length) wrong.push(`${d.name}: ${why.join(', ')} — ${a.raw.slice(0, 160)}`);
     }
@@ -395,9 +456,12 @@ describe('a store failure answers alike on every door', { skip }, () => {
       wrong.push(`one failure, ${messages.size} spellings: ${[...messages].map(([m, ds]) => `${JSON.stringify(m)} (${ds.length} doors, e.g. ${ds[0]})`).join(' | ')}`);
     }
 
+    const unreached = new Map();
+    for (const { a } of results.filter(r => !reached.includes(r))) unreached.set(a.status, (unreached.get(a.status) ?? 0) + 1);
+    t.diagnostic(`doors that did not reach the store, by status: ${JSON.stringify([...unreached])}`);
     const viaBulk = reached.filter(({ a }) => bulkWrapped.has(a.requestId));
     t.diagnostic(`${all.length} doors from the mounts and the tool registry; ${reached.length} reached the failing store before answering, ${viaBulk.length} through a failed bulk write (${viaBulk.map(({ d, a }) => `${d.name} ${a.status}`).join(', ')})`);
-    assert.ok(reached.length >= REACHED_FLOOR,
+    assert.ok(reached.length >= floor,
       `only ${reached.length} of ${all.length} doors reached the failing store — the fault or the probe bodies stopped `
       + 'working, and a short list concludes nothing');
     if (faultId === 'no-server') {

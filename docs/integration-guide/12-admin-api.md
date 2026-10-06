@@ -42,7 +42,7 @@ Authorization: Bearer <admin-token>
 X-TOTP-Code: <code>   # required when MFA is enabled
 ```
 
-**Requires admin token** (and TOTP code when MFA is enabled). Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created). The built-in `general` space is ensured to exist.
+**Requires admin token** (and TOTP code when MFA is enabled). Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created; the vector index is then confirmed in the background as at start-up, so the space's `indexStatus` on `GET /api/spaces` is `building` and then `ready` or `failed`, for a retried space too). The built-in `general` space is ensured to exist. **A space whose initialisation fails does not stop the others from being initialised, and is not reported as applied**: the reload initialises every space it can, then answers `500` naming the spaces that are still not initialised (`503` with `Retry-After` when the failure was the database not answering), and the next reload tries those spaces again, whatever the file changed. Start-up does the same: a space that cannot be initialised is named once (`space init failed for space '<id>': … — retried next reload`), the others are initialised and confirmed, the server starts, and the next reload retries it. A reload refused this way moves `ythril_config_reload_failed_total` and holds `ythril_config_reload_pending` at `1` ([Setup API](11-setup-api.md)), exactly as a refused watched reload does; any reload that applies everything clears the gauge.
 
 **A reload never drops a space silently.** A space the running instance has and the file no longer lists is
 KEPT, and the log says so. To remove a space by editing the file, list its id in a top-level `"removeSpaces": ["id"]`;
@@ -64,10 +64,10 @@ scanner and the contradiction scanner. It did not always: changing `dupeScanner.
 config and left the scanner running on the schedule it had at boot, and **enabling a scanner that was off did
 nothing at all** until the instance was restarted — while this endpoint answered `{ "ok": true }`.
 
-The interval-driven sweeps (auto-delete/TTL, candidate prune, tombstone prune, audit-change retention) are
-deliberately **not** restarted: they re-read the config on every run, so a change reaches them on the next tick.
-Restarting them would only reset the phase of a six-hour timer, pushing the next run up to six hours away each
-time a setting is saved.
+The jobs that repeat on a fixed interval — every job named under `ythril_interval_tick_skipped_total` in the
+[Setup API](11-setup-api.md) — are deliberately **not** restarted: they re-read the config on every run, so a
+change reaches them on the next tick. Restarting them would only reset the phase of a six-hour timer, pushing
+the next run up to six hours away each time a setting is saved.
 
 **Response** `200`:
 
@@ -381,13 +381,9 @@ Content-Type: application/json
 { "uri": "mongodb://user:pass@new-host:27017/ythril" }
 ```
 
-**Response `200`:**
+**Response `200`:** `{ "ok": true }` when the host answers, `{ "ok": false, "error": "<the driver's message>" }` when it cannot be reached (an unreachable host is the answer asked for, not an error status; the Test Connection button reads `ok`).
 
-```json
-{ "ok": true, "latencyMs": 12 }
-```
-
-Returns `400` for an invalid URI, `400` for URIs targeting private/loopback/cloud-metadata addresses (SSRF protection), and `500` if the connection attempt fails.
+Returns `400` for an invalid URI and for URIs targeting private/loopback/cloud-metadata addresses (SSRF protection); `500` only for a failure of the route itself.
 
 ---
 

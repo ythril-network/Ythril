@@ -11,24 +11,49 @@
  * empty queue is indistinguishable from a clean one — which is the same failure shape as the sweep that
  * wrote every finding to `"undefined:undefined"` and the file listing that silently joined no metadata.
  *
- * So the check is structural: for each module that owns a scheduler, assert its `start*` export is named in
- * `bootstrap.ts`. Source-scanning rather than behavioural on purpose — the bug is *absence of a call*, and
- * no amount of testing the function itself can detect that the function is never reached.
+ * So the check is structural: for every job the tree registers (`_scheduled-jobs.mjs`, derived, not listed), assert that a function the
+ * boot path REACHES (`bootstrap.ts` and `index.ts`'s `main`, followed through what each call causes) starts it. Source-scanning rather
+ * than behavioural on purpose — the bug is *absence of a call*, and no amount of testing the function itself can detect that the
+ * function is never reached.
  *
  * Run: node --test testing/standalone/scheduler-wiring.test.js
  */
-import { describe, it, before } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { moduleIndex, walkFrom } from './_call-graph.mjs';
+import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
 
-/** Modules that own a background scheduler, and the export bootstrap must call. */
-const SCHEDULERS = [
-  { module: 'server/src/brain/dupe-scanner.ts', start: 'startDupeScanner' },
-  { module: 'server/src/brain/contradiction-scanner.ts', start: 'startContradictionScanner' },
-  { module: 'server/src/brain/ttl-sweep.ts', start: 'startTtlSweep' },
-  { module: 'server/src/brain/candidate-prune.ts', start: 'startCandidatePrune' },
-  { module: 'server/src/db/backup-scheduler.ts', start: 'startBackupScheduler' },
-];
+/*
+ * The schedulers are DERIVED from the registrations (`_scheduled-jobs.mjs`: every `intervalJob(` and every cron `schedule(`), where
+ * this was a list of five modules. The list had two failures at once: the TTL sweep and the candidate prune moved to `intervalJob` and
+ * the rest of the file did not notice, and the tombstone prune, the audit change-retention sweep, the seq watchdog, the workers and the
+ * activity flush were never on it, so for each of them "nobody starts it" was not a thing this could say. A scheduler is whatever
+ * REGISTERS a timer, and the file says so.
+ */
+const index = moduleIndex('server/src');
+const { jobs } = scheduledJobs(index);
+
+/** Where the process begins: the file `main()` lives in, and the one function it hands the instance's services to. */
+const BOOT_ROOTS = ['server/src/bootstrap.ts:startConfiguredInstanceServices', 'server/src/index.ts:main'];
+
+const escapeRe = text => text.replace(/[.?$()[\]*+^|\\{}]/g, '\\$&');
+
+/** Every file that imports `file` (a static or a dynamic import: `relativeImports` reads both). */
+const importersOf = file => [...index.imports].filter(([from, map]) => from !== file && [...map.values()].some(i => i.file === file)).map(([from]) => from);
+
+/**
+ * The functions that START a job: those whose body calls `<handle>.start(`; for a job with no handle or a cron registration, the function
+ * the registration sits in. `null` means the registration is at module scope and started in place (`intervalJob(…).start();`).
+ */
+function startersOf(job) {
+  if (job.kind === 'cron' || !job.handle) return job.container ? [job.container] : null;
+  const calls = new RegExp(String.raw`\b${escapeRe(job.handle)}\s*\??\.\s*start\s*\(`);
+  return [...index.bodies].filter(([, entry]) => entry.file === job.file && !entry.synthetic && calls.test(entry.body)).map(([key]) => key);
+}
+
+/** The `start…` / `stop…` functions a module exports. */
+const exportedNamed = (src, prefix) => [...src.matchAll(new RegExp(String.raw`\bexport\s+(?:async\s+)?function\s+(${prefix}[A-Za-z0-9_$]*)\s*\(`, 'g'))].map(m => m[1]);
 
 const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
 
@@ -42,30 +67,55 @@ const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), 'ut
 const code = (rel) => read(rel).replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, ' ');
 
 describe('scheduler wiring — a scheduler nobody starts is dead code that looks alive', () => {
-  let bootstrap;
-  before(() => { bootstrap = code('server/src/bootstrap.ts'); });
+  it('reads a tree worth reading (the floors, and the entry points still exist)', () => {
+    for (const [kind, floor] of Object.entries(JOB_FLOORS)) {
+      assert.ok(jobs.filter(j => j.kind === kind).length >= floor, `fewer than ${floor} '${kind}' registrations: this gate would pass about nothing`);
+    }
+    for (const root of BOOT_ROOTS) assert.ok(index.bodies.has(root), `${root} is gone: re-anchor where the process begins`);
+  });
 
-  for (const { module, start } of SCHEDULERS) {
-    it(`${start} is exported by its module`, () => {
-      assert.match(read(module), new RegExp(`export function ${start}\\b`),
-        `${module} should export ${start}`);
-    });
-
-    it(`${start} is CALLED in bootstrap`, () => {
-      // The import alone is not enough — an unused import is exactly as dead as no import.
-      assert.match(bootstrap, new RegExp(`${start}\\s*\\(`),
-        `bootstrap.ts imports-but-never-calls or omits ${start}; the sweep would never run`);
-    });
-  }
+  it('every registered job is started from the boot path', () => {
+    // What a boot CALLS, to exhaustion (the dynamic `await import(…)` of a module and the call after it included), so a `start*` that is
+    // exported, tested and called only from a function nothing calls is as dead as one never called. CALLS, not `closures: true`: that
+    // follows a function handed on by REFERENCE too, and an imported-but-never-called `startTtlSweep` is exactly such a reference — the
+    // import alone is as dead as no import, which is the whole defect this file exists for.
+    const { seen } = walkFrom(index, BOOT_ROOTS);
+    const findings = [];
+    let started = 0;
+    for (const job of jobs) {
+      const where = `${job.file} (${job.kind} job ${job.label.slice(0, 40)})`;
+      const starters = startersOf(job);
+      if (starters === null) {
+        // Registered at module scope and started in place: evaluating the module starts it, so the module has to be imported by something.
+        if (importersOf(job.file).length === 0) findings.push(`${where}: starts when its module is evaluated, and no file imports the module`);
+        else started++;
+        continue;
+      }
+      if (starters.length === 0) findings.push(`${where}: nothing calls \`${job.handle}.start()\`: the job is registered and never armed`);
+      else if (!starters.some(key => seen.has(key))) {
+        findings.push(`${where}: started only by ${starters.map(k => k.split(':')[1]).join(', ')}, which the boot path never reaches`);
+      } else started++;
+    }
+    assert.deepEqual(findings, [],
+      `a scheduler nobody starts: the code compiles, its tests pass, the endpoint works when called, and the work simply never happens:\n  ${findings.join('\n  ')}`);
+    assert.ok(started >= 12, `only ${started} job(s) were found started: the derivation has stopped reading the starters`);
+  });
 
   it('pairs every start with a stop, so a config reload can restart it cleanly', () => {
     // Each scheduler holds a module-level task handle. Without a stop, a reload leaks the old cron task and
     // the sweep quietly runs twice per tick.
-    for (const { module, start } of SCHEDULERS) {
-      const stop = start.replace(/^start/, 'stop');
-      assert.match(read(module), new RegExp(`export function ${stop}\\b`),
-        `${module} should export ${stop} alongside ${start}`);
+    const modules = [...new Set(jobs.map(j => j.file))];
+    const findings = [];
+    let paired = 0;
+    for (const file of modules) {
+      const src = index.sources.get(file);
+      const starts = exportedNamed(src, 'start');
+      if (starts.length === 0) continue;
+      if (exportedNamed(src, 'stop').length === 0) findings.push(`${file} exports ${starts.join(', ')} and no stop…`);
+      else paired++;
     }
+    assert.deepEqual(findings, []);
+    assert.ok(paired >= 10, `only ${paired} module(s) with a start were found paired with a stop`);
   });
 });
 
@@ -106,13 +156,25 @@ describe('a schedule that is captured at start time is re-armed when it changes'
   it('the reload path calls the re-arm helper', () => {
     // Position matters as much as presence: re-arming before `initSpace` could fire a scan against a space
     // that does not exist yet, so the call belongs at the END of the reload.
-    const app = read('server/src/app.ts');
-    assert.match(app, /await rearmCronSchedulers\(\)/,
+    //
+    // The init and the re-arm live in `initAddedSpaces` since bundle-53 G21 (`spaces/lifecycle.ts`): the reload hands it the
+    // re-arm helper, and it calls it after the spaces are initialised — and before it throws for a space that failed, so one
+    // bad space does not leave the schedulers on their old schedule. The init walk is `initOwedSpaces` since bundle-53 G32 (boot
+    // shares it), so what is asked is that `initAddedSpaces` runs it before the re-arm.
+    const app = code('server/src/app.ts');
+    assert.match(app, /rearm: rearmCronSchedulers\b/,
       'applyConfigFromDisk must re-arm, or POST /api/admin/reload-config reports success without applying');
-    const rearmAt = app.indexOf('await rearmCronSchedulers()');
-    const initAt = app.lastIndexOf('await initSpace(');
+    const lifecycle = code('server/src/spaces/lifecycle.ts');
+    const fnAt = lifecycle.indexOf('export async function initAddedSpaces(');
+    assert.ok(fnAt > -1, 'initAddedSpaces is gone — re-anchor this gate');
+    const body = lifecycle.slice(fnAt);
+    const initAt = body.indexOf('await initOwedSpaces(');
+    const rearmAt = body.indexOf('await rearm()');
+    const throwAt = body.indexOf('throw new AggregateError');
     assert.ok(initAt > -1 && rearmAt > initAt,
       're-arming before initSpace can schedule work against a space that does not exist yet');
+    assert.ok(throwAt > rearmAt,
+      'a space that failed must not skip the re-arm: the throw comes after it');
   });
 
   it('the backup route re-arms its own scheduler, because its schedule is not in config.json', () => {

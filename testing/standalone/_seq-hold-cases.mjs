@@ -115,7 +115,7 @@ export async function seedHolderSpace(door, space) {
 /**
  * Every holder's stalled-write cases for `S`, keyed by holder: `{ label, lock, run }` with `lock` either `'counter'` (the
  * space's counter row) or a function returning the lock — and then `collection`, the one it holds. `ctx` is
- * `{ door, mods }`, read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
+ * `{ door, mods }` (and `fixture`, the door's fixture steps over the harness's own client, when its test has one), read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
  */
 export function holderCases(ctx, S) {
   return {
@@ -124,7 +124,9 @@ export function holderCases(ctx, S) {
     'server/src/sync/accept-page.ts:acceptArrivingPage': [{
       label: 'a pushed fact that forks: the fork write, inside its block hold',
       collection: `${S}_facts`,
-      lock: async () => holdForkLock(ctx.door.mongo, ctx.mods.plan, S, F),
+      // A fixture step: over `ctx.fixture`'s client when the experiment has one, so an option the server's client carries on purpose
+      // does not end the lock.
+      lock: async () => holdForkLock((ctx.fixture ?? ctx.door).mongo, ctx.mods.plan, S, F),
       run: () => ctx.door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S }),
     }],
     'server/src/brain/chrono.ts:updateChrono': [{

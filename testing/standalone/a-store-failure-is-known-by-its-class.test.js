@@ -217,3 +217,139 @@ describe('one message, true on every door', () => {
     assert.match(answer.body.error, /retry/i, 'and still says what to do');
   });
 });
+
+// ── bundle-53 G1: the pool's own errors, the exhaustive table, and an unsatisfiable write concern ─────────────────
+
+// The module under test; a missing one fails the cases that ask it, by name, rather than the whole file at load.
+const storeCondition = await import('../../server/dist/db/store-condition.js').catch(() => ({}));
+const POOL_NAMES = storeCondition.POOL_CHECKOUT_ERROR_NAMES ?? [];
+const { MongoDriverError, MongoWriteConcernError, MongoBulkWriteError } = driver;
+
+describe('the connection pool\'s errors are the store\'s (Q-330)', () => {
+  const cmap = requireFromServer(path.join(driverLib, 'cmap', 'errors.js'));
+  const poolErrors = Object.values(cmap).filter(v => typeof v === 'function' && v.prototype instanceof MongoError);
+
+  it('finds the pool\'s errors at all — the four the driver raises from its pool', () => {
+    assert.ok(poolErrors.length >= 4, `only ${poolErrors.length} classes exported from lib/cmap/errors.js`);
+  });
+
+  for (const C of poolErrors) {
+    it(`${C.name}: a failure to check a connection out answers 503, retryable, in our words`, async () => {
+      const { answer } = await answerFor(instanceOf(C));
+      assert.equal(answer?.status, 503, `${C.name} answered ${answer?.status}: the pool is the store's, and a retry is what the caller needs`);
+      assert.equal(answer.body.retryable, true);
+      assert.ok(answer.retryAfterSeconds > 0);
+      assert.doesNotMatch(said(answer), LEAK);
+    });
+  }
+
+  it('the production name table holds the INSTANCE name of each pool error that is not a network error (TST-11)', () => {
+    const notNetwork = poolErrors.filter(C => !(C.prototype instanceof MongoNetworkError));
+    assert.ok(notNetwork.length >= 2, 'the driver derives every pool error from the network error now: the table is dead weight, re-read it');
+    for (const C of notNetwork) {
+      const name = instanceOf(C).name;
+      assert.ok(POOL_NAMES.includes(name),
+        `${C.name} (instance name ${name}) is a pool error outside the network class and is not in the table`);
+    }
+    for (const name of POOL_NAMES) {
+      assert.ok(notNetwork.some(C => instanceOf(C).name === name), `the table names ${name}, which no driver class reports`);
+    }
+  });
+});
+
+describe('every driver-side class is either the store\'s condition or a driver fault — said with a reason', () => {
+  // A driver upgrade that adds a class lands in NEITHER table and fails here, which is the point: someone decides.
+  const STORE = {
+    MongoClientClosedError: 'the client was closed: there is no store connection to use',
+    MongoNotConnectedError: 'the client has not connected, or has lost its topology',
+    MongoServerClosedError: 'the server connection was closed under the operation',
+    MongoStalePrimaryError: 'the primary the operation was sent to is no longer one',
+    MongoTopologyClosedError: 'the topology closed under the operation',
+    MongoOperationTimeoutError: 'a bound (timeoutMS) ended the operation; answered by isWriteTimeout, 503',
+    PoolClosedError: 'a connection cannot be checked out of a closed pool',
+    WaitQueueTimeoutError: 'a connection could not be checked out in time: the pool is exhausted or the store is not answering',
+  };
+  const FAULT = {
+    MongoAPIError: 'a misuse of the driver\'s API', MongoAWSError: 'AWS authentication', MongoAzureError: 'Azure authentication',
+    MongoBatchReExecutionError: 'a batch executed twice: ours', MongoChangeStreamError: 'a change stream we do not open',
+    MongoClientBulkWriteCursorError: 'the client bulk write we do not use', MongoClientBulkWriteExecutionError: 'the client bulk write we do not use',
+    MongoCompatibilityError: 'the server and driver versions disagree', MongoCursorExhaustedError: 'a cursor read after its end',
+    MongoCursorInUseError: 'a cursor used twice', MongoDecompressionError: 'a wire payload that does not decompress',
+    MongoExpiredSessionError: 'a session used after it ended: ours', MongoGCPError: 'GCP authentication',
+    MongoGridFSChunkError: 'GridFS, which is not used', MongoGridFSStreamError: 'GridFS, which is not used',
+    MongoInvalidArgumentError: 'an argument we passed is wrong: ours', MongoKerberosError: 'Kerberos authentication',
+    MongoMissingCredentialsError: 'no credentials configured', MongoMissingDependencyError: 'an optional dependency is absent',
+    MongoOIDCError: 'OIDC authentication', MongoParseError: 'the connection string does not parse', MongoRuntimeError: 'the driver\'s own invariant failed',
+    MongoTailableCursorError: 'a tailable cursor we do not open', MongoTransactionError: 'a transaction misused: ours',
+    MongoUnexpectedServerResponseError: 'the server sent something the driver cannot read',
+  };
+
+  const reaching = CLASSES.filter(C => C.prototype instanceof MongoDriverError);
+
+  it('finds the driver-side classes — a walk that finds nothing passes every loop below', () => {
+    assert.ok(reaching.length >= 25, `only ${reaching.length} classes reach MongoDriverError`);
+  });
+
+  it('every one is in exactly one table', () => {
+    const missing = reaching.filter(C => !(C.name in STORE) && !(C.name in FAULT)).map(C => C.name);
+    assert.deepEqual(missing, [], `classified by nobody: ${missing.join(', ')} — decide: the store's condition, or a driver fault (with a reason)`);
+    const both = Object.keys(STORE).filter(n => n in FAULT);
+    assert.deepEqual(both, []);
+  });
+
+  it('no table names a class the driver no longer has', () => {
+    const present = new Set(CLASSES.map(C => C.name));
+    for (const n of [...Object.keys(STORE), ...Object.keys(FAULT)]) assert.ok(present.has(n), `${n} is not in the driver`);
+  });
+
+  for (const C of reaching) {
+    if (C.name in STORE) {
+      it(`${C.name} (the store's) answers 503, retryable`, async () => {
+        const { answer } = await answerFor(instanceOf(C));
+        assert.equal(answer?.status, 503);
+        assert.equal(answer.body.retryable, true);
+      });
+    } else if (C.name in FAULT) {
+      it(`${C.name} (a driver fault) answers 500, not retryable, in our words`, async () => {
+        const { answer } = await answerFor(instanceOf(C));
+        assert.equal(answer?.status, 500);
+        assert.equal(answer.body.retryable, false);
+        assert.doesNotMatch(said(answer), LEAK);
+      });
+    }
+  }
+});
+
+describe('an unsatisfiable write concern is never a 503 (Q-343)', () => {
+  // The module's own set; the two literals only let each code's case run (and fail by name) before the module exists.
+  const codes = [...(storeCondition.UNSATISFIABLE_WRITE_CONCERN_CODES ?? [100, 79])];
+  const single = (code) => new MongoWriteConcernError({ writeConcernError: { code, errmsg: SENTINEL } });
+  const bulk = (code) => new MongoBulkWriteError({ message: SENTINEL, writeErrors: [] }, { getWriteConcernError: () => ({ code, errmsg: SENTINEL }) });
+
+  it('there are codes to check — an empty set passes every loop below', () => {
+    assert.ok(storeCondition.UNSATISFIABLE_WRITE_CONCERN_CODES, 'db/store-condition.ts does not export the set');
+    assert.ok(codes.length >= 2);
+  });
+
+  for (const [shape, make] of [['single', single], ['bulk', bulk]]) {
+    for (const code of codes) {
+      it(`${shape} code ${code}: 500, not retryable, carries the code, no Retry-After, no driver text`, async () => {
+        const { answer } = await answerFor(make(code));
+        assert.ok(answer, 'not answered as the store\'s at all');
+        assert.equal(answer.status, 500, `an unsatisfiable write concern (${code}) answered ${answer.status}`);
+        assert.equal(answer.body.retryable, false);
+        assert.equal(answer.body.code, code);
+        assert.ok(answer.body.codeName, 'and its stable name');
+        assert.equal(answer.retryAfterSeconds, undefined, 'a Retry-After invites a retry nobody knows will help');
+        assert.doesNotMatch(said(answer), LEAK);
+      });
+    }
+  }
+
+  it('a write concern TIMEOUT (64) stays the store\'s: 503, retryable', async () => {
+    for (const make of [single, bulk]) {
+      const { answer } = await answerFor(make(64));
+      assert.equal(answer?.status, 503);
+    }
+  });
+});

@@ -374,6 +374,14 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
       assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
       assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
       assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+      // The line names the step the failure was in and when the space is tried again, and is said once per window: the
+      // reporter's throttle (bundle-53 G12), not a hand-written one beside it.
+      const said = (all) => all.filter(l => l.includes(`Stray file-metadata drain (write) failed for space '${BAD}'`));
+      assert.equal(said(lines).length, 1, `one line, under the sub-step: ${lines.join(' | ')}`);
+      assert.match(said(lines)[0], /retried next cycle/);
+      lines.length = 0;
+      await sweepExpired();
+      assert.equal(said(lines).length, 0, 'a failure that repeats inside the window was said again');
     });
   });
 });

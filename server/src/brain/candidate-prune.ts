@@ -30,14 +30,30 @@
  * run on most instances while the orphans accumulated anyway. Not folded into the TTL sweep either — that
  * deletes through the normal record paths, which emit tombstones and webhooks. These are internal review
  * state and were never user records; publishing `*.deleted` events for them would be wrong.
+ *
+ * ── What one space's trouble costs the others (`Q-274`, `Q-358`) ─────────────────────────────────────────
+ *
+ * The prune is a walk over the spaces (`eachSpace`, `util/housekeeping-walk.ts`) and, inside a space, over its two candidate
+ * collections (`eachUnit`). A failure of either — the read of the findings, the lookup of the records they name, the delete —
+ * is said ONCE per window under the step, with the collection named, and the next collection and the next space are still
+ * pruned; an operation that hangs ends at the housekeeping bound and the space is passed over for a while. Nothing here swallows:
+ * the old per-collection `catch` logged on every pass, and the lookup's `catch` said nothing at all, so a space that never
+ * pruned looked the same as a space with nothing to prune.
+ *
+ * It stays **fail closed**, and for the same reason as before: a failure of the lookup throws, so nothing is deleted on the
+ * strength of a read that did not happen.
  */
 import { col, asFilter } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { concreteSpaces } from '../spaces/proxy.js';
+import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { intervalJob } from '../util/interval-job.js';
 import { log } from '../util/log.js';
 import type { DupeScanType } from '../config/types.js';
-import { runExclusive } from '../util/single-flight.js';
+
+const STEP = declareStep('Candidate prune');
 
 /** Both collections key their rows by the same singular vocabulary. */
 // The record-to-collection map is imported. The copy here was typed `Record<string, string>`, which is a
@@ -83,94 +99,91 @@ export function decideCandidatePrune(
 
 export interface PruneResult { merged: number; orphaned: number }
 
-/**
- * Prune one space's findings across both candidate collections.
- *
- * Best-effort and **fail-closed**: any error, or any inability to confirm which records exist, leaves the
- * rows alone. The dangerous failure here is not missing a prune — it is a lookup that comes back empty for
- * an unrelated reason and makes every finding look orphaned.
- */
-export async function pruneSpaceCandidates(spaceId: string): Promise<PruneResult> {
+/** Prune one candidate collection of one space. THROWS on any failure: nothing is deleted on a read that did not happen. */
+async function pruneCandidateCollection(spaceId: string, suffix: (typeof CANDIDATE_COLLECTIONS)[number]): Promise<PruneResult> {
   const result: PruneResult = { merged: 0, orphaned: 0 };
+  const coll = col<PrunableCandidate & { _id: string; type?: string }>(`${spaceId}_${suffix}`);
+  const rows = await coll.find({}, { projection: { _id: 1, type: 1, status: 1, resolution: 1, aId: 1, bId: 1 } })
+    .toArray() as Array<PrunableCandidate & { _id: string; type?: string }>;
+  if (rows.length === 0) return result;
 
-  for (const suffix of CANDIDATE_COLLECTIONS) {
-    try {
-      const coll = col<PrunableCandidate & { _id: string; type?: string }>(`${spaceId}_${suffix}`);
-      const rows = await coll.find({}, { projection: { _id: 1, type: 1, status: 1, resolution: 1, aId: 1, bId: 1 } })
-        .toArray() as Array<PrunableCandidate & { _id: string; type?: string }>;
-      if (rows.length === 0) continue;
+  // Resolve existence per record type, one query each rather than one per finding.
+  const idsByType = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.type) continue;
+    const set = idsByType.get(r.type) ?? new Set<string>();
+    if (r.aId) set.add(r.aId);
+    if (r.bId) set.add(r.bId);
+    idsByType.set(r.type, set);
+  }
 
-      // Resolve existence per record type, one query each rather than one per finding.
-      const idsByType = new Map<string, Set<string>>();
-      for (const r of rows) {
-        if (!r.type) continue;
-        const set = idsByType.get(r.type) ?? new Set<string>();
-        if (r.aId) set.add(r.aId);
-        if (r.bId) set.add(r.bId);
-        idsByType.set(r.type, set);
-      }
+  const existing = new Map<string, Set<string>>();
+  for (const [type, ids] of idsByType) {
+    const recSuffix = COLLECTION_SUFFIX[type as DupeScanType];
+    if (!recSuffix) return result;   // unknown type ⇒ cannot judge ⇒ keep everything (a shape this code does not know, not a failure)
+    // A lookup that fails THROWS: fail closed, and the failure is said by the walk rather than lost here.
+    const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {});
+    existing.set(type, new Set(found.keys()));
+  }
 
-      const existing = new Map<string, Set<string>>();
-      let lookupFailed = false;
-      for (const [type, ids] of idsByType) {
-        const recSuffix = COLLECTION_SUFFIX[type as DupeScanType];
-        if (!recSuffix) { lookupFailed = true; break; }   // unknown type ⇒ cannot judge ⇒ keep everything
-        try {
-          const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {});
-          existing.set(type, new Set(found.keys()));
-        } catch {
-          lookupFailed = true;
-          break;
-        }
-      }
-      if (lookupFailed) continue;   // fail closed: keep everything rather than mass-delete on a bad read
+  const toDelete: string[] = [];
+  for (const r of rows) {
+    const present = r.type ? existing.get(r.type) : undefined;
+    if (!present) continue;     // no knowledge for this type ⇒ keep
+    const verdict = decideCandidatePrune(r, !!r.aId && present.has(r.aId), !!r.bId && present.has(r.bId));
+    if (verdict === 'keep') continue;
+    toDelete.push(r._id);
+    if (verdict === 'prune-merged') result.merged++; else result.orphaned++;
+  }
 
-      const toDelete: string[] = [];
-      for (const r of rows) {
-        const present = r.type ? existing.get(r.type) : undefined;
-        if (!present) continue;     // no knowledge for this type ⇒ keep
-        const verdict = decideCandidatePrune(r, !!r.aId && present.has(r.aId), !!r.bId && present.has(r.bId));
-        if (verdict === 'keep') continue;
-        toDelete.push(r._id);
-        if (verdict === 'prune-merged') result.merged++; else result.orphaned++;
-      }
-
-      if (toDelete.length > 0) {
-        await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: toDelete } }));
-      }
-    } catch (err) {
-      log.warn(`Candidate prune (${spaceId}/${suffix}): ${err instanceof Error ? err.message : String(err)}`);
-    }
+  if (toDelete.length > 0) {
+    await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: toDelete } }));
   }
   return result;
 }
 
-/** Prune every real (non-proxy) space. */
-export async function pruneAllSpaces(): Promise<void> {
-  let merged = 0, orphaned = 0;
-  for (const s of concreteSpaces()) {
-    const r = await pruneSpaceCandidates(s.id);
-    merged += r.merged; orphaned += r.orphaned;
-  }
-  if (merged + orphaned > 0) {
-    log.info(`Candidate prune: removed ${orphaned} finding(s) whose records are gone and ${merged} merged pair(s)`);
-  }
+/**
+ * Prune one space's findings across both candidate collections, adding what each collection removed to `into` as it finishes
+ * (so a space whose second collection hung still reports what the first removed).
+ *
+ * **Fail-closed**: any error, or any inability to confirm which records exist, leaves that collection's rows alone. The
+ * dangerous failure here is not missing a prune — it is a lookup that comes back empty for an unrelated reason and makes every
+ * finding look orphaned. A collection that fails is said and the other is still pruned (`eachUnit`).
+ *
+ * Runs inside a walk (`eachSpace`): `eachUnit` reports against the space being walked, and THROWS when there is none.
+ */
+export async function pruneSpaceCandidates(spaceId: string, into: PruneResult = { merged: 0, orphaned: 0 }): Promise<PruneResult> {
+  await eachUnit(CANDIDATE_COLLECTIONS, async (suffix) => {
+    const r = await pruneCandidateCollection(spaceId, suffix);
+    into.merged += r.merged;
+    into.orphaned += r.orphaned;
+  });
+  return into;
 }
 
-let _timer: NodeJS.Timeout | null = null;
+/** Prune every real (non-proxy) space. Returns what it removed and what the walk concluded (who failed, a stop). */
+export async function pruneAllSpaces(): Promise<PruneResult & { walk: WalkResult<void> }> {
+  const total: PruneResult = { merged: 0, orphaned: 0 };
+  const walk = await eachSpace(STEP, concreteSpaces(), space => pruneSpaceCandidates(space.id, total));
+  if (total.merged + total.orphaned > 0) {
+    log.info(`Candidate prune: removed ${total.orphaned} finding(s) whose records are gone and ${total.merged} merged pair(s)`);
+  }
+  return { ...total, walk };
+}
+
+const pruneJob = intervalJob('Candidate prune', PRUNE_INTERVAL_MS, () => pruneAllSpaces());
 
 /**
  * Start the background prune. Always on — unlike the scanners it has no cost worth gating and no behaviour
  * an operator would want to opt out of: it only removes findings that cannot be acted on.
  */
 export function startCandidatePrune(): void {
-  if (_timer) return;
-  _timer = setInterval(() => { void runExclusive('Candidate prune', () => pruneAllSpaces()); }, PRUNE_INTERVAL_MS);
-  _timer.unref();   // never keep the process alive for housekeeping
+  if (pruneJob.armed) return;
+  pruneJob.start();
   log.debug('Candidate prune worker started');
 }
 
 export function stopCandidatePrune(): void {
-  if (_timer) { clearInterval(_timer); _timer = null; }
+  pruneJob.stop();
 }
 

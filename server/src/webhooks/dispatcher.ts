@@ -19,17 +19,19 @@ import { log, peerText } from '../util/log.js';
 import { publishBrainChange } from '../brain/brain-events.js';
 import type { WebhookEventType, WebhookEventPayload, WebhookDelivery, WebhookSubscription } from './types.js';
 import { withJitter } from '../util/backoff.js';
+import { intervalJob, type IntervalJob, type IntervalJobDeps } from '../util/interval-job.js';
+import { mapLimit } from '../util/map-limit.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
-const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
+export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
 const DELIVERY_TIMEOUT_MS = 10_000;
 const RETRY_COLLECTION = '_webhook_retry_queue';
 const RETRY_POLL_INTERVAL_MS = 10_000;
 
 // ── Retry queue document ────────────────────────────────────────────────────
 
-interface RetryJob {
+export interface RetryJob {
   _id: string;
   webhookId: string;
   body: string;
@@ -43,55 +45,107 @@ interface RetryJob {
 
 // ── Retry worker ────────────────────────────────────────────────────────────
 
-let _retryTimer: ReturnType<typeof setInterval> | null = null;
+/** The poll's name: its interval job's label, and so the `job` of `ythril_interval_tick_skipped_total`. A constant. */
+export const RETRY_JOB_LABEL = 'Webhook retry poll';
+/** How many due retries one tick delivers at once. */
+export const RETRY_CONCURRENCY = 4;
+/** The most due retries one tick takes from the queue. */
+const RETRY_BATCH = 50;
+
+/**
+ * What one retry tick reaches. Production is {@link realRetryPollDeps}; a test hands in fakes (the queue is a collection, and a
+ * delivery is an outbound request that the SSRF guard would refuse to send to anything a test could listen on).
+ */
+export interface RetryPollDeps {
+  dueJobs(now: Date): Promise<RetryJob[]>;
+  removeJob(id: string): Promise<void>;
+  getWebhook(id: string): Promise<WebhookSubscription | null>;
+  deliver(sub: WebhookSubscription, job: RetryJob): Promise<WebhookDelivery>;
+  markSuccess(webhookId: string): Promise<void>;
+  markFailure(webhookId: string): Promise<void>;
+  /** Put the job back for its next attempt (`job.attempt + 1`), at the next backoff step. */
+  requeue(job: RetryJob): Promise<void>;
+}
+
+const realRetryPollDeps: RetryPollDeps = {
+  dueJobs: async (now) => await col<RetryJob>(RETRY_COLLECTION)
+    .find({ scheduledAt: { $lte: now } } as Filter<RetryJob>)
+    .sort({ scheduledAt: 1 } as Sort)
+    .limit(RETRY_BATCH)
+    .toArray() as RetryJob[],
+  removeJob: async (id) => { await col<RetryJob>(RETRY_COLLECTION).deleteOne({ _id: id } as Filter<RetryJob>); },
+  getWebhook: (id) => getWebhookFull(id),
+  deliver: (sub, job) => attemptDelivery(sub, job.body, job.event, job.spaceId, job.deliveryId),
+  markSuccess: markWebhookSuccess,
+  markFailure: markWebhookFailure,
+  requeue: (job) => enqueueRetry(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1),
+};
+
+/**
+ * The retry poll as an interval job (`Q-317`), and `deps` is a test seam: production never passes it.
+ *
+ * ## It SKIPS an overlapping tick, and delivers four at a time
+ *
+ * A bare `setInterval` ran a pass every 10 s whether or not the last had ended, and a pass delivered its due jobs one after
+ * another. Both were wrong in a way a slow sink exposes: a sink that takes its whole delivery timeout held every other sink's
+ * retries behind it, and the passes that fired meanwhile read the same queue. The job skips an overlapping tick (a second
+ * delivery of the same event is the worse failure: the queue is re-read next tick, so a skip costs a delay, never a retry) and
+ * counts it. And a tick delivers with a concurrency of {@link RETRY_CONCURRENCY} (`mapLimit`), so one slow sink holds one slot
+ * of four and every other sink's retry goes out meanwhile.
+ *
+ * **What bounds a tick.** The job's tick runs inside the housekeeping bound, so every database operation here ends at
+ * `housekeepingOpMs()`. A delivery is not a database operation and carries its own timeout (`DELIVERY_TIMEOUT_MS`, an abort
+ * signal on the request). The one wait with no signal is the DNS lookup inside `ssrfSafeFetch`, which is its own ticket.
+ *
+ * One job failing (a database error after its row was removed, an unexpected throw in delivery) is said and the others of the
+ * tick go on; a failure before any job is read (the queue itself) is the interval job's: `Webhook retry poll failed: …`.
+ */
+export function createRetryWorker(deps: RetryPollDeps = realRetryPollDeps, jobDeps?: IntervalJobDeps): { job: IntervalJob } {
+  const job = intervalJob(RETRY_JOB_LABEL, RETRY_POLL_INTERVAL_MS, () => pollRetryQueue(deps), jobDeps);
+  return { job };
+}
+
+const retryWorker = createRetryWorker();
 
 /** Start the background retry queue poller. Call once during startup. */
 export function startRetryWorker(): void {
-  if (_retryTimer) return;
-  _retryTimer = setInterval(processRetryQueue, RETRY_POLL_INTERVAL_MS);
-  _retryTimer.unref(); // don't prevent process exit
+  if (retryWorker.job.armed) return;
+  retryWorker.job.start();
   log.debug('Webhook retry worker started');
 }
 
 /** Stop the retry queue poller. Called during graceful shutdown. */
 export function stopRetryWorker(): void {
-  if (_retryTimer) {
-    clearInterval(_retryTimer);
-    _retryTimer = null;
-  }
+  retryWorker.job.stop();
 }
 
-async function processRetryQueue(): Promise<void> {
+async function pollRetryQueue(deps: RetryPollDeps): Promise<void> {
+  const jobs = await deps.dueJobs(new Date());
+  await mapLimit(jobs, RETRY_CONCURRENCY, (job) => retryOne(deps, job));
+}
+
+async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
   try {
-    const now = new Date();
-    const jobs = await col<RetryJob>(RETRY_COLLECTION)
-      .find({ scheduledAt: { $lte: now } } as Filter<RetryJob>)
-      .sort({ scheduledAt: 1 } as Sort)
-      .limit(50)
-      .toArray() as RetryJob[];
+    // Remove from queue before delivery attempt (at-least-once: if we crash
+    // mid-delivery, the webhook gets a duplicate rather than being lost).
+    await deps.removeJob(job._id);
 
-    for (const job of jobs) {
-      // Remove from queue before delivery attempt (at-least-once: if we crash
-      // mid-delivery, the webhook gets a duplicate rather than being lost).
-      await col<RetryJob>(RETRY_COLLECTION).deleteOne({ _id: job._id } as Filter<RetryJob>);
+    const sub = await deps.getWebhook(job.webhookId);
+    if (!sub) return; // webhook deleted while retry was queued
 
-      const sub = await getWebhookFull(job.webhookId);
-      if (!sub) continue; // webhook deleted while retry was queued
+    const result = await deps.deliver(sub, job);
 
-      const result = await attemptDelivery(sub, job.body, job.event, job.spaceId, job.deliveryId);
-
-      if (result.success) {
-        await markWebhookSuccess(sub.id);
-      } else if (job.attempt < MAX_ATTEMPTS) {
-        await enqueueRetry(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1);
-        log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${job.webhookId}: ${result.error ?? `HTTP ${result.responseStatus}`}`);
-      } else {
-        await markWebhookFailure(sub.id);
-        log.error(`Webhook ${sub.id} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
-      }
+    if (result.success) {
+      await deps.markSuccess(sub.id);
+    } else if (job.attempt < MAX_ATTEMPTS) {
+      await deps.requeue(job);
+      log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${peerText(job.webhookId)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`);
+    } else {
+      await deps.markFailure(sub.id);
+      log.error(`Webhook ${peerText(sub.id)} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
     }
   } catch (err) {
-    log.warn(`Webhook retry queue error: ${err}`);
+    log.warn(`Webhook retry queue error for ${peerText(job.webhookId)}: ${peerText(err)}`);
   }
 }
 

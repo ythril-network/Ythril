@@ -110,7 +110,7 @@ describe('the declaration exists where new AND existing spaces will get it', () 
     // would reach the changelog and never an operator's existing database.
     const ensure = strip(readFileSync('server/src/spaces/ensure-query-indexes.ts', 'utf8'));
     assert.match(ensure, /createIndex\(\{ type: 1 \}\)/);
-    assert.match(ensure, /of concreteSpaces\(\)/, 'a proxy owns no collections, so the pass walks concrete spaces');
+    assert.match(ensure, /eachSpace\(QUERY_INDEXES_STEP, concreteSpaces\(\)/, 'a proxy owns no collections, so the pass walks concrete spaces');
     assert.match(strip(readFileSync('server/src/bootstrap.ts', 'utf8')), /ensureQueryIndexes\(\)/,
       'the boot step must actually be called');
   });
