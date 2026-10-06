@@ -1113,226 +1113,127 @@ default); take it if your agents call them.
 | Changes on upgrade | Action |
 |---|---|
 | A peer below 5.0.0 is refused at the handshake with `426` | Upgrade every instance in the network before restarting any |
-| The knowledge type `memory` is now `fact`, everywhere | Send `fact`; `memory` is refused, not translated |
-| Every MCP tool is renamed verb-first and three fold into others (45 tools, was 48); a retired name is an error | Re-read `tools/list`; reconnect any MCP client that stayed connected, it still holds the 4.x list |
-| Every tool is `POST /api/<tool-name>`; ten `GET` routes are gone: `.../spaces/:spaceId/{facts,entities,edges,chrono,files}`, `.../{facts,entities,edges,chrono}/:id`, `.../entities/by-ids` | Read a collection with `POST /api/filter` |
+| The knowledge type `memory` is now `fact`: `remember` / `update_memory` / `delete_memory` → `save_fact` / `update_fact` / `delete_fact`, `.../memories` → `.../facts` | Send `fact`; `memory` is refused, not translated |
+| Webhook event `memory.created` is `fact.created`, metric `ythril_memories_total` is `ythril_facts_total`, edge label `memory.entityIds` is `fact.entityIds` | Update receivers, dashboards and label matches; subscriptions, `recordTtlDays` and collections migrate on first boot (log: `WARN`) |
+| `ythril_mcp_tool_calls_total` is `ythril_tool_calls_total` and gains a `door` label (`mcp` or `rest`) | Update dashboards; `door="mcp"` is the old series |
+| Every MCP tool is renamed verb-first, no aliases: `query` → `filter`, `find_similar` → `similar`, `entity_cascade_preview` → `delete_entity_preview`, `wipe_space` → `delete_space_data`; the rest are listed under Changed | Re-read `tools/list`; a retired name is an error |
+| `er_model`, `find_entities_by_name` and `list_chrono` fold into other tools (45 tools, was 48), and `GET .../er-model` and `.../entities/by-name` go | `space_meta` answers `actualSchema`; use `filter` with `collection: 'entities'` and `filter: { name }`, or `collection: 'chrono'` |
+| An MCP client that stayed connected still holds the 4.x tool list | Reconnect it; until then its calls fail |
+| Ten `GET` routes are gone: `.../spaces/:spaceId/{facts,entities,edges,chrono,files}`, `.../{facts,entities,edges,chrono}/:id`, `.../entities/by-ids` | Read a collection with `POST /api/filter` |
 | Routes that still exist: `PATCH`/`DELETE` on the `:id` paths, `PATCH .../files`, `GET .../entities/:id/cascade-preview`, `GET .../files/extract` | Nothing; match on method and path, not path alone |
-| The search family drops the space from its path | Call `POST /api/brain/recall` with `space` in the body |
-| The six link array fields are gone | Send `linkEntities` / `linkFacts` / `linkChronos` with the same ids; the refusal names the field |
-| A record no longer returns its links | Walk them with `traverse`, or `filter` over the `links` collection |
-| Links convert to their own collection on the first 5.0 boot; `completeLinkage` cannot be turned off | Nothing; a space whose conversion failed is named in the startup log and refuses link reads until re-converted |
-| Recall parameters `includeFreshWrites`, `includeContent`, `charsPerToken` are renamed or removed | Delete `includeFreshWrites` and `charsPerToken`; `includeContent` is now `includeFileContent` |
-| `recall` on REST returns the MCP tool's result shape | Parse that one shape on both doors |
-| Emptying a space is `POST /api/delete_space_data` | Re-point the call |
-| Space administrator is a rung you grant; the four admin rungs no longer imply it | Grant it explicitly |
+| The search family drops the space from its path: `POST /api/brain/spaces/:spaceId/{query,find-similar,recall}` → `POST /api/filter`, `/api/brain/similar`, `/api/brain/recall` | Send `space` in the body (optional: omitted searches every space the token can read) |
+| `filter` answers `{ok: true, text, data}` (rows in `data.results`) and refuses with `{ok: false, error, data}`; a record that is not there is `200` with `results: []`, not `404` | Parse the one envelope; branch on `results.length` |
+| `filter` `limit` defaults to 200 with no maximum; a chrono `status` is the stored value; file chunks are listed; `matchedText`, `embeddingModel` are withheld | To get what the list routes gave: `deriveStatus: true`, `filter: { parentFileId: { "$exists": false } }`, `includeDiagnostics: true` |
+| `filter: {"type": "note"}` (a bare scalar) was silently dropped, so `recall` answered `200` unfiltered; it now filters on equality | Expect fewer results where you sent one; `{"type": "NOT-A-REAL-TYPE"}` used to return everything |
+| `POST /api/brain/recall` hits are `{score, spaceId, type, record}` like MCP; a bad key is a `400` whose `error` names it, no `unrecognized_keys` | Read `hit.record.<field>` where you read `hit.<field>` |
+| In `recall(traverse: n)` each `_graph` entry carries `edges` (a list) with `direction`, in place of `edge` with `from` / `to` | Read `edges[]`; the far end is `paths[0]`'s second-to-last id |
+| Recall parameters `includeFreshWrites`, `includeContent`, `charsPerToken` are renamed or removed; sending one is a `400` | Delete `includeFreshWrites` (the scan always runs) and `charsPerToken` (fixed at 3.5; send `maxChars`); `includeContent` is `includeFileContent` |
+| `recall` omits empty `tags` / `properties`, and `createdAt` / `updatedAt` are opt-in | Send `includeRecordMeta: true` to get them back |
+| With `includeMemories` unsaid, a `recall` walk brings the attributed (AI-originated) facts of what it reached | `includeMemories: false` brings none; `true` brings every linked fact |
+| A filtered `recall` no longer returns just-written records that do not match its `filter` or `tags` | Nothing; drop any client-side filtering of them |
+| `POST /api/recall` defaults to a 50 000-character byte budget, was 25 000; MCP keeps its lower default | Send `maxChars` for a fixed ceiling |
+| The link arrays `entityIds`, `memoryIds`, `chronoIds` are gone from facts, chrono and files; a body carrying one is refused, `[]` and `null` too | Send `linkEntities` / `linkFacts` / `linkChronos` with the same ids; the refusal names the field |
+| A record no longer returns its links, and a `filter` predicate over an old array matches nothing | Walk them with `graph_traverse` or recall's `traverse`, or `filter` the `links` collection |
+| Links convert to their own collection on every 5.0 start; `npm run links:convert` could not run on a deployed image | Nothing: a space whose conversion failed is named in the startup log and refuses link reads until restarted; the boot conversion goes in 6.0 |
+| `completeLinkage` can no longer be turned off, by anyone | Nothing |
+| `GET /api/brain/spaces/:spaceId/links/convert-preflight` and the `graph_link_preflight` tool are gone | Delete the calls; there is no array shape left to pre-flight |
+| A link id naming nothing is refused with `400` before anything is stored, and so is a link class the record kind cannot hold | Send existing ids and only the classes the kind holds |
+| Emptying a space is `POST /api/delete_space_data` with `{ "space", "confirm": true, "types" }` on both doors, replacing the per-collection wipe routes | Re-point the call; `confirm: true` is required |
+| Space administrator is a rung you grant; the four `admin` areas no longer imply it | Grant `{ "spaceAdmin": { "floor": false, "spaces": ["work"] } }`; a boot migration grants it to every token that held all four |
+| `POST /api/notify/trigger` (deprecated in 4.5) is gone | Use `POST /api/networks/:id/sync` or `POST /api/networks/peers/:peerId/sync`; an unknown network or peer is now `404`, not `200` |
+| `DELETE /api/brain/spaces/:spaceId/files?path=` (the metadata-only delete) is gone | Use the file delete: it removes bytes and metadata and answers `204` for an orphaned record |
 
 ### Added
 
 - **Records:** `superseded` is a boolean on facts, entities, edges and chrono entries, accepted on create and update
   on REST and MCP alike. A superseded record still embeds and ranks and comes back with `superseded: true`.
-- **Records:** A `supersedes` edge says which record replaced another; a retirement may have no successor. Filtering
-  on `superseded` is index-served.
-- **Records:** Resolving a contradiction now marks the losing record `superseded` (response field `markedRecord`) and
-  draws the `supersedes` edge for every pair kind except two edges, where `note` says why.
-- **Embedding:** An attributed claim is stored without a vector: `recall` never ranks it, while `filter`,
-  `graph_traverse` and recall's own expansion still reach it in full.
+- **Records:** A `supersedes` edge says which record replaced another. Resolving a contradiction marks the loser
+  `superseded` (response field `markedRecord`) and draws the edge for every pair kind except two edges (`note` says why).
+- **Embedding:** An attributed claim (one an AI assistant originated, `attributed: true`) is stored without a vector:
+  `recall` never ranks it, while `filter`, `graph_traverse` and recall's own expansion still reach it in full.
 - **UI:** A superseded record is badged wherever records are listed, such as the Facts tab.
-- **Docs:** Two new integration-guide pages cover the links API and graph-augmented recall; 44 of 52 documentation
-  files changed, so a size-based docs refresh needs no `--force` for 5.0.0.
 
 ### Changed
 
-- **Search:** `query` → `filter` and `find_similar` → `similar`, and the space leaves the path. Routes: `POST /api/filter`,
-  `POST /api/brain/similar`, `POST /api/brain/recall` (name unchanged). `traverse` keeps its path.
-- **Search:** `space` is an optional body field on all three: omitted, the search runs across every space the token holds
-  `knowledge: read` in, ranked together. An unreadable space is skipped; a NAMED unreadable one is a `403`.
-- **Search:** `recall`, `filter` and `similar` take `space` as a list on both doors: exactly those spaces, proxies
-  expanded and deduplicated. `[]` is refused, and one named space you cannot reach refuses the whole call, naming it.
-- **Search:** Every other tool acts on one space and refuses a list rather than using its first entry.
-- **Search:** `filter` `limit` defaults to **200** on both doors, with no maximum (it was clamped to 100, so a page for
-  200 came back short and looked complete).
+- **Search:** `recall`, `filter` and `similar` take `space` as an optional body field, and as a list on both doors:
+  omitted, every space the token holds `knowledge: read` in, ranked together (an unreadable one is skipped).
+- **Search:** A list searches exactly those spaces, proxies expanded and deduplicated. `[]` is refused, and a named
+  space you cannot reach is a `403` for the whole call, naming it. Every other tool takes one space and refuses a list.
 - **Search:** A `filter` answer stays bounded without a row cap: `maxChars` / `maxBytes` trims the page (`truncated`,
   `nextSkip`), `maxTimeMS` is capped at 10 000, and on a proxy space `skip + limit` past the merge ceiling is a `400`.
-- **Search:** `recall` drops `includeFreshWrites` (the fresh-write scan always runs) and `charsPerToken` (the ratio is
-  fixed at 3.5; send `maxChars` for an exact ceiling) and renames `includeContent` → `includeFileContent`. A `400` if sent.
-- **Search:** The fresh-write scan now honours `filter` and `tags`: a filtered `recall` no longer returns just-written
-  records that do not match.
-- **Search:** With `includeMemories` unsaid, a `recall` walk brings the attributed claims (AI-originated facts, stored
-  without a vector) of what it reached, and no other fact. `false` brings nothing; `true` brings every linked fact.
 - **Search:** `graph_traverse` is unchanged: its `includeMemories` is a real `false` by default.
-- **Search:** `POST /api/brain/recall` hits are `{score, spaceId, type, record}` like MCP: read `hit.record.<field>` where
-  you read `hit.<field>`. `score`, `spaceId`, `type`, `_graph` and the stage scores stay where they were.
-- **Search:** A bad key on `POST /api/brain/recall` is a `400` whose `error` names it (`unexpected property 'topk'`);
-  `unrecognized_keys` is no longer returned there.
-- **Search:** `recall` no longer sends empty `tags` / `properties`, and `createdAt` / `updatedAt` are opt-in through
-  `includeRecordMeta` (default false, both doors), about a third fewer bytes. `createdAt` is when the record was written.
-- **Records:** The knowledge type `memory` is now `fact`, and the old word is not accepted: `remember` / `update_memory` /
-  `delete_memory` → `save_fact` / `update_fact` / `delete_fact`; `POST /api/brain/spaces/:id/memories` → `…/facts`.
-- **Records:** `<space>_memories` → `<space>_facts`; `recordTtlDays: { memory }` → `{ fact }`; webhook `memory.created` →
-  `fact.created`; `ythril_memories_total` → `ythril_facts_total`; edge label `memory.entityIds` → `fact.entityIds`.
 - **Records:** Boot migrations rename `<space>_memories` collections and `memory.*` webhooks, rewrite `recordTtlDays` and
   re-key edge and link ids, tombstones and embed jobs. A conflict is logged at `WARN` and left: read the first 5.0 boot log.
 - **Records:** Audit entries for fact, chrono and file updates carry the before/after link sets under `linkEntities`,
   `linkFacts` and `linkChronos`, so a re-link no longer logs a change with no detail.
 - **Records:** `update_file_meta` accepts `linkEntities`, `linkFacts` and `linkChronos` on both doors, and its MCP schema
   declares them.
-- **Records:** A link id naming nothing is refused with `400` (not `500`) before anything is written. `save_bulk` checks edge
-  endpoints under `strictLinkage`, so a space with linkage off still accepts a staged import.
-- **Records:** There are six link classes. A write naming one the record kind cannot hold (`save_fact` with `linkChronos`)
-  is refused on both doors, and the create tools advertise only the classes their kind holds.
-- **MCP:** Every remaining tool is renamed verb-first, no aliases, nothing else changed: `save_fact`, `save_entity`,
-  `save_edge`, `save_link`, `save_chrono`, `save_space`, `save_bulk`, `update_fact`, `delete_fact`, `graph_traverse`, `graph_merge`.
-- **MCP:** Also renamed: `entity_cascade_preview` → `delete_entity_preview`, `wipe_space` → `delete_space_data`, `space_stats`,
-  `space_meta`, `space_reindex`, `schema_update`, `network_peers`, `network_sync`.
-- **MCP:** The embed-retry tools are `retry_embed_record`, `retry_embed_media` and `retry_embed_file`. Recall's `traverse` body
-  field keeps its name.
-- **MCP:** `er_model` and `GET /api/brain/spaces/:id/er-model` are gone: `space_meta` / `GET /api/spaces/:id/meta` answers
-  it as `actualSchema`, in the declared schema's own format, so a held type can be promoted into the declared schema.
-- **MCP:** `find_entities_by_name` (and `GET …/entities/by-name`) → `filter` with `collection: 'entities'`,
-  `filter: { name }`; `list_chrono` → `filter` with `collection: 'chrono'`. The MCP surface is 45 tools, was 48.
+- **Records:** A refused link write stores nothing. `save_bulk` checks edge endpoints under `strictLinkage`, so a space
+  with linkage off still accepts a staged import, and the create tools advertise only the link classes their kind holds.
+- **MCP:** Verb-first names, nothing else changed: `save_fact`, `save_entity`, `save_edge`, `save_link`, `save_chrono`,
+  `save_space`, `save_bulk`, `update_fact`, `delete_fact`, `graph_traverse`, `graph_merge`. Recall's `traverse` body field keeps its name.
+- **MCP:** Also verb-first: `space_stats`, `space_meta`, `space_reindex`, `schema_update`, `network_peers`, `network_sync`,
+  `retry_embed_record`, `retry_embed_media`, `retry_embed_file`. No parameter, default, cap or refusal moved.
+- **MCP:** `space_meta` / `GET /api/spaces/:id/meta` returns `actualSchema` in the declared schema's own format, so a
+  held type can be promoted into the declared schema.
 - **REST:** Every tool is `POST /api/<tool-name>`: the body is the tool's arguments (`space` included) and one envelope
   comes back, `{ok: true, text, data}` or `{ok: false, error, data}`, with `error` word-for-word what MCP returns.
-- **REST:** `POST /api/networks/:id/sync` gains `?wait=true` and `?timeoutMs`, and every sync trigger answers
+- **Sync:** `POST /api/networks/:id/sync` gains `?wait=true` and `?timeoutMs`, and every sync trigger answers
   `triggered`, `completed`, `timeout` or `error` instead of a bare `{ ok: true }` (`ok` stays as the summary).
-- **REST:** New `POST /api/networks/peers/:peerId/sync` syncs one peer across every network it belongs to; the id is
+- **Sync:** New `POST /api/networks/peers/:peerId/sync` syncs one peer across every network it belongs to; the id is
   checked against the configured members and never treated as a URL.
-- **Spaces:** Emptying a space is `POST /api/delete_space_data` with `{ "space", "confirm": true, "types" }` on both doors,
-  replacing the per-collection wipe routes. `confirm: true` is now required on both.
 - **Spaces:** Emptying a collection no longer writes a tombstone per record (on a networked space it opens a governed round
   and every member wipes), and wiping `entities` unlabels every face (`faceEntityId`) on both doors.
-- **Spaces:** A space id must match `^[a-z0-9-]+$` wherever its collections are named, so deleting one space cannot take
-  another's data. No collection is renamed and no data moves.
-- **Tokens:** `{ "spaceAdmin": { "floor": false, "spaces": ["work"] } }` grants space administrator: `admin` in all four areas
-  of those spaces (`floor: true` reaches every space, later ones too). Four `admin` areas no longer imply it.
-- **Tokens:** A boot migration grants `spaceAdmin` to every token holding `admin` in all four areas (an all-admin floor
-  becomes the `floor` form), so no administrator is stranded.
 - **Tokens:** `delete_space_data` now needs `admin` on the space, as its REST route does, instead of instance admin: a space
   administrator can empty it over MCP too.
 - **Tokens:** `space` is optional on every writing tool for a token reaching exactly one space (`save_fact({fact: "…"})`
   lands); with two or more it stays required and the refusal lists them. The schema each token is shown says which.
-- **Tokens:** A multi-space `recall` over MCP is now authorised against every named space (it checked the first and read
-  all), and the destructive-call throttle of five wipes a minute now also holds MCP callers, not only the browser.
 - **Help:** `help()` lists what MCP lacks: network governance (create, join, fork, invite, members, sync history, votes), a
   file's original bytes, listing the media embedding queue, the per-type schema write and the rights catalogue.
-- **Server:** `ythril_mcp_tool_calls_total` is renamed `ythril_tool_calls_total` and gains a `door` label (`mcp` or
-  `rest`); `door="mcp"` is the old series.
 - **Database:** Spaces upgraded from 4.x get the full index set on their `links` collection at boot (the conversion had
   created it unindexed), so link reads on large spaces stop scanning.
 - **UI:** The Brain and Files tabs read a record's links from the `links` collection and their forms name `linkEntities` /
   `linkFacts` / `linkChronos`; a searched list shows the same links as the paged one.
-- **Docs:** The graph guide's `Links` section is its own page, `04g-links-api.md`.
+- **Docs:** Two new integration-guide pages, the links API (`04g-links-api.md`) and graph-augmented recall
+  (`04h-graph-augmented-recall.md`); 44 of 52 documentation files changed, so a size-based docs refresh needs no `--force`.
 
 ### Removed
 
-- **Records:** The 4.x link arrays are gone from the wire, storage and input: `entityIds` → `linkEntities`, `memoryIds` →
-  `linkFacts`, `chronoIds` → `linkChronos`, on facts, chrono and files. A connection is a link record only; ids are unchanged.
-- **Records:** A body still carrying an old array name is refused on both doors, naming the new one, and the whole call
-  fails; `[]` and `null` are refused too, so *detach everything* is never read as *said nothing*.
-- **Records:** Records come back without the arrays, `includeRecordMeta` no longer adds them, and a `filter` predicate over
-  one matches nothing. Find connections with `traverse`, recall's `traverse` object, or `filter` on the `links` collection.
-- **Records:** Every space converts itself on the first 5.0 start. A space whose conversion failed refuses every link read
-  with an error naming it (never an empty answer); read the startup log, then restart or run `npm run links:convert`.
-- **Records:** `npm run links:convert -- --preview` counts what would move without writing; `-- <spaceId>` converts one
-  space. `GET /api/brain/spaces/:spaceId/links/convert-preflight` and the `graph_link_preflight` tool are gone.
-- **Spaces:** `completeLinkage` can no longer be turned off by anyone, an instance administrator included.
-- **Search:** `POST /api/brain/filter` is gone: read at `POST /api/filter`. The envelope is `{ok: true, text, data}`, with
-  `results`, `count`, `total`, `limit`, `skip` and `truncated` inside `data`, and `{ok: false, error, data}` on refusal.
-- **Search:** The list routes `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` are gone: use `filter`
-  with `collection`. Rows come back as `results` for every collection, and `limit` defaults to 200 with no maximum.
-- **Search:** Porting a list route: `?name=` → `filter: { name }`, `?tags=` / `?tagsAny=` → `$all` / `$in`,
-  `?after=` / `?before=` → a `createdAt` range, `?path=` → `path`. `?entity=` has no predicate; walk the links.
-- **Search:** `filter` needs `deriveStatus: true` for a chrono `status` derived on read (else the stored value; refused on other
-  collections) and `filter: { parentFileId: { "$exists": false } }` to hide file chunks, as the list routes did.
+- **Records:** A space whose link conversion failed refuses every link read with an error naming it: read the startup
+  log and restart. Outside a container `npm run links:convert` converts too (`-- --preview` counts, `-- <spaceId>`: one).
+- **Search:** Port a list route to `filter` with `collection`: `?name=` → `filter: { name }`, `?tags=` / `?tagsAny=` →
+  `$all` / `$in`, `?after=` / `?before=` → a `createdAt` range, `?path=` → `path`, one id → `{ "_id": "…" }`, a set `$in`.
+- **Search:** `?entity=<id>` has no `entityIds` predicate now that the link arrays are gone: filter the `links` collection
+  or walk with `graph_traverse`.
 - **Search:** An unsupported paging name such as `offset` is a `400` naming the parameter to use (`skip`).
-- **Search:** The routes reading ONE record are gone: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
-  `GET …/entities/by-ids`. Use `filter` with `{ "_id": "…" }`, or `$in` for a set.
-- **Search:** A record that is not there is now `200` with `results: []`, not `404`: branch on `results.length`.
-  `matchedText` and `embeddingModel` are withheld unless `includeDiagnostics: true`.
-- **Files:** `DELETE /api/brain/spaces/:spaceId/files?path=` (the metadata-only delete) is gone: the file delete removes
-  bytes and metadata together and answers `204` for an orphaned record.
-- **Sync:** `POST /api/notify/trigger` (deprecated in 4.5) is gone: use `POST /api/networks/:id/sync` for a network or
-  `POST /api/networks/peers/:peerId/sync` for one peer. `?wait=true`, `?timeoutMs` and the answer shape are unchanged.
-- **Sync:** Both replacements validate their subject first and answer `404` for an unknown network or peer; the old route
-  answered `200 {status:"triggered"}` for any `networkId`, so a stale id is now a refusal rather than a silent success.
 
 ### Fixed
 
 - **Search:** `filter` finds one file by `path` and forgives its spelling (Windows separators, leading slash), exact
   after normalisation. Sending both `path` and `filter: { path }` is a `400`. Files only, tool and REST alike.
-
-- **Search:** `filter` on edges now returns both endpoints' display names and on files the embedding job's step
-  progress, as the list routes do. `includeDiagnostics` is accepted and applied (default false), not refused.
-
-- **Search:** `filter` now takes `tag` (case-insensitive substring), `type`, `description`, `properties` and `search`,
-  on the tool and `POST /api/brain/filter`; `filter` itself is optional. `links` refuses them, naming the collection.
-
-- **Search:** `filter` takes `entityName`, `fromName` and `toName` on the MCP tool as on REST, refusing them on a
-  collection they cannot mean. `entityName` also finds records attached with `linkEntities` (answered `total: 0`).
-
+- **Search:** `filter` on edges returns both endpoints' display names and on files the embedding job's step progress,
+  as the list routes do. `includeDiagnostics` is accepted and applied (default false), not refused.
+- **Search:** `filter` takes `tag` (case-insensitive substring), `type`, `description`, `properties`, `search`,
+  `entityName`, `fromName` and `toName` on the tool and `POST /api/filter`; `filter` itself is optional.
+- **Search:** `entityName` also finds records attached with `linkEntities`; they used to answer `total: 0`.
+- **Search:** `filter` takes `deriveStatus` on both doors (default `false`): `true` returns a chrono entry's derived
+  status (`overdue` once due, unless `whenDuePasses` says otherwise); refused outside `chrono`, combinable with `status`.
 - **Search:** `filter` refuses an unusable `limit` (`abc`, `-5`, `0`) with a `400`, as it does `skip`; it used to
-  answer the default page with a `200`.
-
-- **Search:** `deriveStatus: true` plus any convenience (e.g. `?status=overdue&search=…`) is no longer refused with
-  `Filter too deeply nested`, and a chrono `status` matches the derived value, as on the list route.
-
-- **Search:** A `Date` value in a filter no longer turns into `{}` and answers `200` over the wrong set.
-
-- **Search:** `filter: {"type": "note"}` (a bare scalar) now filters on equality; it was silently dropped and recall
-  answered `200` unfiltered. Operator-object form is every value an object keyed by the eight operator names.
-
-- **Search:** An operator-object filter such as `{"$where": {"eq": "x"}}` reached MongoDB unsanitised; `$`-prefixed
-  keys now take the sanitised path. `__proto__`, `constructor`, `prototype` as filter keys are refused on both grammars.
-
-- **Search:** A raw MongoDB equality on a declared field (`{"type": "note"}`) is now served by the vector index, not a
+  answer the default page with a `200`. A `Date` value in a filter no longer turns into `{}` and answers over the wrong set.
+- **Search:** A raw MongoDB equality on a declared field (`{"type": "note"}`) is served by the vector index, not a
   full scan; `$or`, `$not`, `$exists`, `$regex` and nested filters still scan.
-
-- **Search:** MCP `filter` no longer requires `space`; omitted, it reads across spaces like `POST /api/brain/filter`.
-
-- **Search:** `POST /api/recall` now defaults to the same 50 000-character byte budget as `POST /api/brain/recall` (was
-  25 000); the lower default is MCP's alone.
-
-- **Records:** `graph_traverse` / `POST /traverse` return every edge among the returned nodes, including self-loops and
-  a second edge between one pair, where they held one per node.
-
-- **Records:** In `recall(traverse: n)` each `_graph` entry carries `edges` (plural) in place of `edge`, with
-  `direction` (`outbound`, `inbound`, `self`) instead of `from` / `to`; the far end is `paths[0]`'s second-to-last id.
-
-- **Records:** `graph_traverse` returns the start node at depth 0 (a fact or chrono entry too), counted against
-  `limit`; an id that resolves to nothing still gives an empty `nodes`.
-
-- **Records:** `linkEntities`, `linkFacts`, `linkChronos`, `linkFiles` and `edges` are now accepted on update of
-  `facts`, `chrono` and `entities`, on both surfaces: links replace per class (`[]` detaches), edges upsert.
-
-- **Records:** Merging two entities now re-keys the absorbed entity's link records to the survivor, tombstoning the
-  old id; they were left pointing at the deleted entity.
-
-- **Records:** The 5.0 link conversion no longer deletes links that exist only as records (written by `linkEntities`).
-  On a space already converted they are gone, and the deletion replicated to peers; re-create them.
-
-- **Records:** The link-conversion pre-flight no longer reports the full retention window on an instance without a
-  recorder-start stamp; it clamps `since` to when recording began.
-
-- **Help:** Tool and schema descriptions, guide pages and examples that named tools 5.0 removed or renamed (`query`,
-  `traverse`, `list_chrono`, `er_model`) now name the live tool (`filter`, `graph_traverse`, `space_meta`).
-
-- **Docs:** The recall guide now states that `lexicalScore`, `fusedScore` and `rerankScore` are always returned, and
-  `includeDiagnostics` governs only `matchedText`, `embeddingModel` and `seq`.
-
-- **Docs:** The guides say which reranker to pick: a cross-encoder replaces the retrieval order, and
-  `bge-reranker-base` cut first-answer accuracy to 27.4% from 45.7%. Use `ms-marco-MiniLM-L-6-v2`; measure first.
-
-- **Records:** `linkEntities` and its three siblings now store the link in the shape the space is read through; on a
-  space created since the last restart they answered `201` and `traverse`, graph `recall` and deletes missed it.
-- **Records:** An edge to a fact, chrono entry or file is now reached by a graph walk (it was silently dropped) and
-  expands like any neighbour; no `includeMemories`/`includeFiles` flag governs it. A walk may start from a fact.
-- **Records:** Claims an AI assistant originated are written with `attributed: true` (a declared boolean, a native
-  pre-filter on both doors); the validator refuses an unmarked assistant claim and a person's claim carrying the mark.
 - **Search:** Sorting the `links` collection now sorts by `createdAt`, `updatedAt`, `from` or `to`; it crashed (MCP
   `Cannot read properties of undefined`, REST `500` with `retryable: true`).
-- **Search:** `filter` takes `deriveStatus` on both doors (default `false`): `true` returns a chrono entry's derived
-  status (`overdue` once due, unless `whenDuePasses` says otherwise), `false` the stored one; refused outside `chrono`.
-- **Search:** A top-level chrono `status` now combines with `deriveStatus` and the `filter` conveniences instead of
-  being refused with advice to put `status` at the top level.
+- **Records:** `graph_traverse` / `POST /traverse` return every edge among the returned nodes (self-loops and a second
+  edge between one pair included) and the start node at depth 0, counted against `limit`.
+- **Records:** An edge to a fact, chrono entry or file is now reached by a graph walk (it was silently dropped) and
+  expands like any neighbour; no `includeMemories`/`includeFiles` flag governs it. A walk may start from a fact.
+- **Records:** `linkEntities`, `linkFacts`, `linkChronos`, `linkFiles` and `edges` are accepted on update of `facts`,
+  `chrono` and `entities`, on both surfaces: links replace per class (`[]` detaches), edges upsert.
+- **Records:** `linkEntities` and its three siblings store the link in the shape the space is read through; on a space
+  created since the last restart they answered `201` and `traverse`, graph `recall` and deletes missed it.
+- **Records:** Merging two entities re-keys the absorbed entity's link records to the survivor, tombstoning the old id;
+  they were left pointing at the deleted entity.
 - **Schemas:** A type schema (4000 characters) and any property (2000) take a prose `description`: stored, returned by
   `get_space_meta` and the space listing, editable in the Schema tab, never parsed.
 - **Schemas:** A property `default` now follows the declared type when the type changes (it was saved as `"5"` for a
@@ -1355,23 +1256,22 @@ default); take it if your agents call them.
   `strictLinkage` off, an emptied `purpose` or `usageNotes`) now counts as a change and is sent.
 - **UI:** The Brain page now says a chrono status it shows is derived; a backup or export holds the stored status, so
   an entry shown overdue reads `active` there.
-- **Server:** Every start converts each space not yet marked `completeLinkage` to link records, additively (an
-  interrupted run completes next boot), because `npm run links:convert` failed on deployed instances; removal in 6.0.
-- **Server:** Upgrading no longer rewrites file records peers also hold: the boot conversion does links only, and the
-  pre-4.0 file stamp is back on `npm run links:convert`, which prints records stamped per space (containers cannot).
-- **Server:** The conversion pre-flight clamps `since` to when this instance began recording and returns
-  `recorderStartedAt` (`null` until the instance has started since upgrading), so it no longer claims ninety days.
 - **MCP:** Every tool now fills `structuredContent` (was empty; HTTP `data`) with the record written or id acted on:
   delete `{"_id", "deleted"}`, `move_file` `{"from", "to"}`, `list_spaces` `{"spaces"}`, `network_peers` `{"peers"}`.
-- **Docs:** Graph-augmented recall has its own integration-guide page, `04h-graph-augmented-recall.md`, split out of
-  `04a-recall-api.md`.
+- **Server:** Upgrading no longer rewrites file records peers also hold: the boot conversion does links only, and the
+  pre-4.0 file stamp is on `npm run links:convert` (which prints records stamped per space; a container cannot run it).
+- **Help:** Tool and schema descriptions, guide pages and examples that named tools 5.0 removed or renamed (`query`,
+  `traverse`, `list_chrono`, `er_model`) now name the live tool (`filter`, `graph_traverse`, `space_meta`).
+- **Docs:** The recall guide states that `lexicalScore`, `fusedScore`, `rerankScore` are always returned and
+  recommends the `ms-marco-MiniLM-L-6-v2` reranker (`bge-reranker-base` cut accuracy).
 
-### Internal
+### Security
 
-- **Build:** `npm run test:standalone` now runs the offline test files in parallel (257s to 160s) and refuses a stale
-  `server/dist`; `--allow-stale` overrides.
-- **Build:** The benchmark fetcher now streams and hash-verifies each corpus instead of buffering it (it died with
-  `JavaScript heap out of memory` on `longmemeval_s`); `benchmarks/` holds a folder per benchmark.
+- **Search:** An operator-object filter with a `$`-prefixed key (`{"$where": {"eq": "x"}}`) reached MongoDB unsanitised;
+  it now takes the sanitised path. `__proto__`, `constructor` and `prototype` filter keys are refused on both grammars.
+- **Tokens:** A multi-space `recall` over MCP is authorised against every named space; it checked the first and read
+  all, so a token could read a space its rung did not cover.
+- **Tokens:** The destructive-call throttle of five wipes a minute now holds MCP callers, not only the browser.
 
 ## Earlier releases
 
