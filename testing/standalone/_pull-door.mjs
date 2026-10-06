@@ -104,6 +104,24 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
      */
     failFamily: null,
     /**
+     * `(req, res, family) => void | Promise<void>` — answers a record family's page GET INSTEAD of the canned route below
+     * (which serves one page and ignores `sinceSeq`, `limit` and `cursor`). For a case whose subject is how a page is
+     * PAGED: the real handler (`door.serveFamily`) over `seedPeerRecords`, or a fake pinned to another server's paging
+     * (a 5.6 server's strict `seq >` and riders). Unset, the canned route answers, as every other case expects.
+     */
+    family: null,
+    /**
+     * `(key, items, n) => { status?: number, body?: object } | undefined` — answers a `batch-upsert` POST INSTEAD of the
+     * default `{ status: 'ok' }` (`n` counts the requests since `reset`, from 1). A non-200 `status` is a refusal of the
+     * whole request, and its items are NOT added to `pushedRecords`; a `body` of `{ [key]: { rejected } }` is the peer
+     * discarding records it answered 200 for. `undefined` falls through to the default.
+     */
+    batchUpsert: null,
+    /** Every `batch-upsert` request the receiver sent, accepted or not: `{ key, ids, status }`, in arrival order. */
+    batchRequests: [],
+    /** Every record-family page GET `serveFamily` answered, its query as the receiver wrote it plus the `family`. */
+    familyRequests: [],
+    /**
      * `(req, res, next) => void` — answers the governance routes under `/api/sync/networks` (member gossip, votes,
      * change notes) as a case scripts them; `req.path` is what follows `/api/sync/networks`. Unset, they 404, as
      * every route the fake peer does not serve does.
@@ -140,8 +158,14 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   });
   // A record page this instance pushes is accepted whole — what a push of records does is the push door's question.
   app.post('/api/sync/batch-upsert', express.json({ limit: '100mb' }), (req, res) => {
-    for (const [key, items] of Object.entries(req.body ?? {})) if (Array.isArray(items)) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
-    res.json({ status: 'ok' });
+    const entries = Object.entries(req.body ?? {}).filter(([, items]) => Array.isArray(items));
+    const scripted = entries.length === 1 && state.batchUpsert
+      ? state.batchUpsert(entries[0][0], entries[0][1], state.batchRequests.length + 1) : undefined;
+    const status = scripted?.status ?? 200;
+    for (const [key, items] of entries) state.batchRequests.push({ key, ids: items.map(d => d?._id), status });
+    if (status !== 200) { res.status(status).json(scripted?.body ?? { error: 'scripted refusal' }); return; }
+    for (const [key, items] of entries) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
+    res.json(scripted?.body ?? { status: 'ok' });
   });
   app.use('/api/sync/networks', express.json({ limit: '100mb' }), (req, res, next) => {
     if (state.network) state.network(req, res, next); else next();
@@ -149,6 +173,11 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
     if (state.failFamily === req.params.family) { req.socket.destroy(); return; }
+    if (state.family) {
+      Promise.resolve(state.family(req, res, req.params.family))
+        .catch(err => { if (!res.headersSent) res.status(500).json({ error: String(err) }); });
+      return;
+    }
     const items = state.records[req.query.spaceId]?.[req.params.family] ?? [];
     res.json({ items: req.query.cursor ? [] : items, nextCursor: null });
   });
@@ -196,7 +225,38 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
     const m = member();
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
-    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null });
+    for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
+    Object.assign(state, {
+      tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null,
+      family: null, batchUpsert: null, batchRequests: [], familyRequests: [],
+    });
+  }
+
+  /** The collection suffix a family's records are stored in (`filemeta` is the `files` collection). */
+  const familyCollection = (payloadKey) => (payloadKey === 'filemeta' ? 'files' : payloadKey);
+
+  /**
+   * Store record documents on the fake peer for the space it is asked for as `remote`, and settle them, for a case that
+   * serves them through the REAL page handler (`serveFamily`). The documents keep whatever `spaceId` the case gave them.
+   */
+  async function seedPeerRecords(remote, payloadKey, docs) {
+    if (docs.length === 0) return;
+    await door.mongo.col(`${peerSide(remote)}_${familyCollection(payloadKey)}`).insertMany(docs.map(d => ({ ...d })), { ordered: false });
+    await seq.bumpSeq(peerSide(remote), docs.reduce((m, d) => Math.max(m, d.seq), 0));
+  }
+
+  /**
+   * Answer a record family's page GET with the REAL handler over the peer's own storage, as `GET /tombstones` is
+   * answered above: the query's space is rewritten to the peer-side space and the serving token set. For `state.family`.
+   */
+  async function serveFamily(req, res, family) {
+    const asked = { ...req.query };
+    state.familyRequests.push({ ...asked, family });
+    const query = { ...asked, spaceId: peerSide(asked.spaceId) };
+    delete query.networkId;
+    Object.defineProperty(req, 'query', { value: query, writable: true, configurable: true, enumerable: true });
+    req.authToken = SERVING_TOKEN;
+    await door.handler('get', `/${family}`)(req, res);
   }
 
   /** One sync cycle of the real engine with the fake peer. */
@@ -222,6 +282,6 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
 
   return {
     ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
-    member, seedPeer, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
+    member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
   };
 }
