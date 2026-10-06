@@ -39,7 +39,10 @@
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { warnOnce } from '../util/warn-once.js';
 import {
   needsContentRedaction, REDACTED_CHRONO_FIELDS, declaredRetention,
   type RetentionSpace,
@@ -76,9 +79,17 @@ export function policedChronoTypes(space: RetentionSpace): string[] {
  * Windows already reported at info, so switching a policy on announces itself ONCE rather than per sweep.
  *
  * Process-lifetime, deliberately not persisted: a restart re-announcing the active delete policies is useful,
- * and a stamp count in a debug line was not enough. Bounded by the number of policed types.
+ * and a stamp count in a debug line was not enough. A `warnOnce` rather than a Set: the key carries a TYPE name an
+ * operator chose, so the number of keys is not bounded by anything this code controls, and `warnOnce` forgets its
+ * least recently reported key past its limit (a forgotten one is announced again, the safe direction for a notice).
+ * `forget` is how a policy that was switched off and on again is announced again.
  */
-const announced = new Set<string>();
+export const retentionAnnounced = warnOnce<string>();
+
+/** The key one announcement is remembered under: a space, a collection and a type. */
+export function retentionAnnouncementKey(spaceId: string, collection: KnowledgeType, type: string | undefined): string {
+  return `${spaceId}|${collection}|${type ?? ''}`;
+}
 
 /**
  * Stamp records that a schema policy covers but that carry no expiry yet.
@@ -123,13 +134,11 @@ export async function backfillTypedExpiry(
     if (Object.keys($set).length === 0) continue;
     // A policy configured months ago and never applied begins deleting records the moment this pass reaches it.
     // That is the documented behaviour and it is still worth saying out loud, once, at info.
-    const key = `${spaceId}|${collection}|${type ?? ''}`;
-    if (!announced.has(key)) {
-      announced.add(key);
-      log.info(`Retention: '${spaceId}' ${collection}/${type} is being stamped from its schema window`
+    retentionAnnounced(retentionAnnouncementKey(spaceId, collection, type), () => {
+      log.info(`Retention: '${peerText(spaceId)}' ${collection}/${peerText(type)} is being stamped from its schema window`
         + `${expireAt ? ` — delete at ${expireAt.toISOString()} for the oldest in this batch` : ''}`
         + `${contentAt ? `, detail dropped at ${contentAt.toISOString()}` : ''}`);
-    }
+    });
     await col(name).updateOne(asFilter({ _id: r._id }), asUpdate({ $set }));
     stamped++;
   }
@@ -171,22 +180,36 @@ export async function redactLapsedChronoContent(spaceId: string, now: Date): Pro
   return redacted;
 }
 
-/** Both passes across every real space. Best-effort per space: one bad collection must not stop the rest. */
+/** The step the sweep's failures are said and counted under. */
+const CHRONO_RETENTION_STEP = declareStep('Chrono retention');
+
+/** A unit of one space's pass: one half applied to one collection, named as a failure line quotes it (`backfill: fact`). */
+interface RetentionUnit { name: string; run: () => Promise<void> }
+
+/**
+ * Both passes across every real space, through the housekeeping walk (`util/housekeeping-walk.ts`): a space that fails is
+ * reported once and the next is swept, and a read that hangs ends at the housekeeping figure, not at the driver's patience.
+ *
+ * A space's pass is one UNIT per half AND collection (`backfill: entity`, `backfill: fact`, ..., `redaction: chrono`), so a
+ * failure is reported naming the collection that failed and neither starves the collections or the half after it in the same
+ * space that cycle. The backfill is bounded by `housekeepingOpMs()` and not by the write figure on purpose: its
+ * `_expireAt: { $exists: false }` scan can be slow and healthy, and the bound is for "hung", not "slow".
+ */
 export async function sweepChronoRetention(now: Date = new Date()): Promise<ChronoRetentionResult> {
   const result: ChronoRetentionResult = { stamped: 0, redacted: 0 };
-  for (const s of concreteSpaces()) {
+  await eachSpace(CHRONO_RETENTION_STEP, concreteSpaces(), async (s) => {
     const space: RetentionSpace = { recordTtlDays: s.recordTtlDays, meta: s.meta };
-    try {
+    const units: RetentionUnit[] = [
       // All four typed collections, not just chrono. The schema tier is documented as reaching every one of
       // them, and for three of them nothing had ever stamped a record.
-      for (const collection of TYPED_COLLECTIONS) {
-        result.stamped += await backfillTypedExpiry(s.id, space, collection);
-      }
-      result.redacted += await redactLapsedChronoContent(s.id, now);
-    } catch (err) {
-      log.warn(`Chrono retention (${s.id}): ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+      ...TYPED_COLLECTIONS.map((collection): RetentionUnit => ({
+        name: `backfill: ${collection}`,
+        run: async () => { result.stamped += await backfillTypedExpiry(s.id, space, collection); },
+      })),
+      { name: 'redaction: chrono', run: async () => { result.redacted += await redactLapsedChronoContent(s.id, now); } },
+    ];
+    await eachUnit(units, unit => unit.run());
+  });
 
   if (result.redacted > 0) {
     log.info(`Chrono retention: dropped the detail of ${result.redacted} record(s) past their content window `
