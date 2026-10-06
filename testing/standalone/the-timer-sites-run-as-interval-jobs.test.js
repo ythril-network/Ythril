@@ -29,6 +29,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
 
 let signals, wb, retention, seq, activity;
 const read = (p) => fs.readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
@@ -154,7 +155,7 @@ describe('the space activity flush', () => {
 
 describe('the SSE keepalive is the one named exemption', () => {
   const src = read('server/src/util/sse-stream.ts');
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const code = stripComments(src);
 
   it('stays one plain setInterval', () => {
     assert.equal((code.match(/\bsetInterval\b/g) ?? []).length, 1);

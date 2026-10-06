@@ -75,9 +75,10 @@ export function latchesIn(src) {
     const cond = condText.slice(1, -1).trim();
     const afterCond = open + condText.length;
     const bodyAt = afterCond + /^\s*/.exec(src.slice(afterCond))[0].length;
-    // Only the HEAD of the consequence is read first: the block is balanced (and so must parse) only when its head already has a
-    // latch's shape, so a file this reader cannot balance a large unrelated block of is not a file it silently drops.
-    const head = src.slice(bodyAt, bodyAt + 600);
+    // Every test of the consequence below is anchored at its START (`^`), so it reads only the head it needs: the block is balanced (and
+    // so must parse) only when its head already has a latch's shape, so a file this reader cannot balance a large unrelated block of is
+    // not a file it silently drops. Nothing here is a window — the rest of the source is merely what follows the anchor.
+    const head = src.slice(bodyAt);
 
     // (1) `if (!X) { X = true; … }` and `if (!S.has(k)) { S.add(k); … }`
     const negFlag = new RegExp(String.raw`(?:^|&&)\s*!\s*(${IDENT})\s*(?=&&|$)`).exec(cond)?.[1];
@@ -130,7 +131,7 @@ function nextStatementIsLog(src, from) {
 }
 
 /** The latch's own text, for the message: line numbers of a comment-stripped source are not the file's. */
-const excerpt = (src, at) => src.slice(at, at + 90).replace(/\s+/g, ' ').trim();
+const excerpt = (src, at) => src.slice(at, src.indexOf('\n', at) < 0 ? src.length : src.indexOf('\n', at)).replace(/\s+/g, ' ').trim();
 
 describe('the latch reader finds each spelling (fixtures are the audit\'s own, so the reader is seen red on them)', () => {
   /** [what it is, source, kind, form] — every one is a once-only warning. */

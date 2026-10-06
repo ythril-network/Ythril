@@ -60,6 +60,16 @@
  * that stalled nothing makes "nothing landed" a claim about nothing. That the door answered `503` where the door table says it must. That the release did not fail
  * (`_write-faults.mjs` makes it wait for the server to be quiet, and throw when it is not).
  *
+ * ## A repetition that never had a write to stall is run again, not failed (`Q-372`)
+ *
+ * A call answered while NO write was alive on the locked collection (the server is asked every 50 ms for the whole call) was
+ * not ended by the bound ending a write: the door answered before it had a write to stall — measured under the full parallel
+ * suite as a `503` after 587 ms, where a write the bound really ends is answered at about 1.9 s (the bound, its backstop and
+ * the kill's two looks). Such an attempt says nothing about the rule, so it is discarded and the repetition is run again, up to
+ * `MAX_ATTEMPTS` attempts in all (`_write-landing-experiment.mjs`); a repetition still without a live write after the last fails the lane with the same message as
+ * before, so a door that never stalls cannot pass. A discarded attempt is still read for a landing, and what the server said
+ * about it (its `answered 5xx` log lines) is reported as a test diagnostic.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-write-the-bound-ended-never-lands-db.test.js
  * (requires a prior `npm run build` in server/)

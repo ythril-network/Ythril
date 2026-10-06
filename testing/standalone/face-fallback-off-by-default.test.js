@@ -25,6 +25,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { statementFrom } from './_structural-window.mjs';
 
 const src = readFileSync(new URL('../../server/src/files/media/face-embedder.ts', import.meta.url), 'utf8');
 const ext = readFileSync(new URL('../../server/src/files/media/face-external.ts', import.meta.url), 'utf8');
@@ -142,11 +143,13 @@ describe('the fallback-disabled warning is a warnOnce that a recovered provider 
   });
 
   it('an answer from the provider is reported to the latch on the path that receives it', () => {
-    const lines = src.split('\n');
-    const at = lines.findIndex((l) => l.includes('detectFacesExternal('));
+    // The call's own statement and the statement that follows it, each bounded by its `;` — not a count of lines that happens
+    // to reach the next one today.
+    const at = code.indexOf('detectFacesExternal(');
     assert.ok(at > 0);
-    const after = lines.slice(at, at + 12).join('\n');
-    assert.match(after, /noteExternalFaceProviderAnswered\(\)/, 'a provider that recovers never re-arms the warning');
+    const call = statementFrom(code, at, 'the detectFacesExternal call');
+    const next = statementFrom(code, at + call.length, 'the statement after the detectFacesExternal call');
+    assert.match(next, /noteExternalFaceProviderAnswered\(\)/, 'a provider that recovers never re-arms the warning');
   });
 
   it('the latch is a warnOnce, not a hand-written boolean', () => {
