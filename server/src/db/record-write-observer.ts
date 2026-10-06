@@ -235,7 +235,8 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
 export function observeRecordWrites(db: Db, isObserved: (name: string) => boolean, listener: RecordWriteListener): Db {
   // What a plain write's backstop ends the server's operation with (`Q-380`): the database's own `Admin`, one for every call
   // this door bounds. A `Db` that has none (a test's fake) states `undefined`, and the backstop's line says so.
-  const serverOperations: ServerOperations | undefined = typeof db.admin === 'function' ? db.admin() : undefined;  return new Proxy(db, {
+  const serverOperations: ServerOperations | undefined = typeof db.admin === 'function' ? db.admin() : undefined;
+  return new Proxy(db, {
     get(target, prop, receiver) {
       // The Db's own bounded calls (`listCollections`, `dropCollection`): the same bound, at the same door, through the Db
       // table. Everything else a Db has is the driver's own, unchanged.
