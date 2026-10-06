@@ -188,6 +188,96 @@ const CITED = [
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`within at most ${v} ms\\. Only then is the hold released`),
   },
+  // ── bundle-53: the figures an operator plans around when the database slows or stops answering ─────────────────────────
+  // Every one is read from the module that owns it; the guide states them in the sentence the pattern names, so a figure
+  // that moves makes the sentence stop matching and this row names both sides.
+  {
+    what: 'the client\'s connect timeout when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const CONNECT_TIMEOUT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`connectTimeoutMS=${v}\``),
+  },
+  {
+    what: 'the client\'s heartbeat frequency when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const HEARTBEAT_FREQUENCY_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`heartbeatFrequencyMS=${v}\``),
+  },
+  {
+    what: 'the client\'s server-selection timeout when MONGO_URI names none (MONGO_URI row, hosting)',
+    source: 'server/src/db/client-options.ts',
+    code: /export const SERVER_SELECTION_TIMEOUT_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\`serverSelectionTimeoutMS=${v}\``),
+  },
+  {
+    what: 'the per-operation bound of a background housekeeping job (hosting, environment table)',
+    source: 'server/src/db/write-bound.ts',
+    code: /const DEFAULT_HOUSEKEEPING_OP_MS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\\| \`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS\` \\| \`${v}\` \\|`),
+  },
+  {
+    what: 'the bound of a queue claim or a stall reset (background jobs note, setup API)',
+    source: 'server/src/db/write-bound.ts',
+    code: /export const CLAIM_OP_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`claim or a stall reset[^.]*\\*\\*${v} s\\*\\*`, 'i'),
+  },
+  {
+    what: 'how many spaces in a row may time out before a housekeeping pass stops (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const STALLED_AFTER_TIMEOUTS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`\\*\\*${v}\\*\\* spaces in a row`),
+  },
+  {
+    what: 'the first quarantine of a space that timed out (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_BASE_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`quarantine starts at \\*\\*${v} s\\*\\*`),
+  },
+  {
+    what: 'the longest a quarantine grows to (background jobs note, setup API)',
+    source: 'server/src/util/housekeeping-walk.ts',
+    code: /export const QUARANTINE_MAX_MS = ([0-9_]+);/,
+    scale: 1000,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`doubles up to \\*\\*${v} s\\*\\*`),
+  },
+  {
+    what: 'how often one failure is said in the log, per step and space (background jobs note, setup API)',
+    source: 'server/src/util/space-failure.ts',
+    code: /export const SPACE_FAILURE_WINDOW_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`once per \\*\\*${v} minutes\\*\\*`),
+  },
+  {
+    what: 'how often the retention sweep runs (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_INTERVAL_MS = ([0-9_]+) \* 60_000;/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`every \\*\\*${v} minutes\\*\\*`),
+  },
+  {
+    what: 'the most records the retention sweep deletes per collection per cycle (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const SWEEP_BATCH = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`up to \\*\\*${v}\\*\\* records? per collection`),
+  },
+  {
+    what: 'the most distinct records the retention sweep looks at per collection per cycle (write semantics)',
+    source: 'server/src/brain/ttl-sweep.ts',
+    code: /export const ATTEMPT_CAP = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`no more than \\*\\*${v}\\*\\* distinct records`),
+  },
 ];
 
 /**
