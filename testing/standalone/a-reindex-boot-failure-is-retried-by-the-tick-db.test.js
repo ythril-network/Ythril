@@ -44,7 +44,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { assertViewStalls, setWriteBoundForTest, settleWithin, withCollectionAsView } from './_write-faults.mjs';
+import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
@@ -118,37 +118,25 @@ async function withFailingRunReads(space, fn) {
 }
 
 /**
- * Reads of the run collection STALL for `STALL_MS`, interruptible by the server's `maxTimeMS`. `withStalledReads` stalls per
- * source document the reader's filter lets through, and the reader asks for `_id: 'run'` (which the view's own `$match` would
- * coalesce with, so every document but that one never reaches the stall: a second sleep step, not 23). So the view is built
- * here from the same one interruptible form (`$match` over `$expr` / `$function`, `_write-faults.mjs`) over SOURCE documents the
- * reader never names, and its last stages collapse them into the one `run` document: the `$group` must consume every source
- * document (a `$sort` + `$limit` over the `_id` index would stop after the first), and `$replaceWith` makes the output a document
- * of its own, which the reader's filter cannot reach back past.
+ * Reads of the run collection STALL for `STALL_MS`, interruptible by the server's `maxTimeMS`. The reader asks for `_id: 'run'`, which
+ * the view's own `$match` would coalesce with, so every source document but that one would never reach the stall (a second sleep step,
+ * not 23): `withStalledReads` takes `collapseTo` for exactly this reader. The view then stalls over every source document and answers
+ * the one `run` document, which the reader's filter cannot reach back past.
  *
- * Two guards, because a stall that stalled nothing passes every bound test: `assertViewStalls` (a raw read takes this long AND is
- * ended by the server's own code 50 before it is over) and the READER's own read, `findOne({ _id: 'run' })`, which must take it too.
+ * Two guards, because a stall that stalled nothing passes every bound test: the fixture's own (`assertViewStalls`, run with the
+ * reader's filter: a read takes this long AND is ended by the server's own code 50 before it is over) and the READER's own read,
+ * `findOne({ _id: 'run' })`, which must take it too.
  */
 async function withStalledRunReads(space, fn) {
   const name = spaceCollection(space, 'reindexRun');
-  await db().collection(`${space}_src`).insertMany(Array.from({ length: STALL_STEPS }, (_, i) => ({ _id: `stall-${i}` })));
-  try {
-    return await withCollectionAsView(db(), name, `${space}_src`, async () => {
-      await assertViewStalls(db(), name, { ms: STALL_MS });
-      const started = Date.now();
-      const doc = await db().collection(name).findOne({ _id: 'run' });
-      const tookMs = Date.now() - started;
-      assert.ok(doc && tookMs >= STALL_MS - STALL_STEP_MS,
-        `the reader's own read (_id: 'run') took ${tookMs}ms and found ${JSON.stringify(doc)}: the view stalls a raw read but not the read the code under test makes`);
-      return fn();
-    }, {
-      pipeline: [
-        { $match: { $expr: { $function: { body: `function(){sleep(${STALL_STEP_MS});return true}`, args: [], lang: 'js' } } } },
-        { $group: { _id: null } },
-        { $replaceWith: { _id: 'run' } },
-      ],
-    });
-  } finally { await db().collection(`${space}_src`).deleteMany({}); }
+  return withStalledReads(db(), name, `${space}_src`, { ms: STALL_MS, readerFilter: { _id: 'run' }, collapseTo: { _id: 'run' } }, async () => {
+    const started = Date.now();
+    const doc = await db().collection(name).findOne({ _id: 'run' });
+    const tookMs = Date.now() - started;
+    assert.ok(doc && tookMs >= STALL_MS - STALL_STEP_MS,
+      `the reader's own read (_id: 'run') took ${tookMs}ms and found ${JSON.stringify(doc)}: the view stalls a raw read but not the read the code under test makes`);
+    return fn();
+  });
 }
 
 /** How many `aggregate` calls each collection received while `fn` ran: a sweep reads a kind twice (its count, then its walk). */

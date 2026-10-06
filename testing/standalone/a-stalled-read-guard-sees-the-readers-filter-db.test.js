@@ -13,6 +13,9 @@
  *
  * - the guard reads with the READER's filter (`readerFilter`), so a filter that matches nothing the fixture stalls throws, naming it, and
  *   the callback never runs;
+ * - `readerFilter` is REQUIRED (bundle-53 G25b): it used to default to `{}`, so a caller that left it out was checked as a reader that asks
+ *   for everything, and the guard that exists for this defect was the part a caller could forget. A call without it throws, naming the
+ *   view, before anything is seeded; a reader that really asks for everything states `readerFilter: {}`;
  * - `seed` stalls over documents the reader's filter DOES match, and `collapseTo` stalls a reader that names one document;
  * - what the fixture put in the source is removed afterwards, and the view is put back as an ordinary collection, whether it threw or not.
  *
@@ -80,12 +83,34 @@ describe('a stalled-read fixture stalls the reader\'s read, or throws', { skip }
 
   it('a seed of one document is refused: the server interrupts a read between documents, so one cannot be ended by maxTimeMS', async () => {
     await assert.rejects(
-      () => faults.withStalledReads(db, 'sf_view_d', 'sf_src_d', { ms: MS, seed: [{ _id: 'only' }] }, async () => {}),
+      () => faults.withStalledReads(db, 'sf_view_d', 'sf_src_d', { ms: MS, readerFilter: {}, seed: [{ _id: 'only' }] }, async () => {}),
       /at least 2 documents/);
   });
 
-  it('the default is unchanged: a reader that asks for everything is stalled over the default seeds', async () => {
-    const read = await faults.withStalledReads(db, 'sf_view_e', 'sf_src_e', { ms: MS }, () => timedFind('sf_view_e', {}));
+  it('a reader that asks for everything says so (`readerFilter: {}`), and is stalled over the default seeds', async () => {
+    const read = await faults.withStalledReads(db, 'sf_view_e', 'sf_src_e', { ms: MS, readerFilter: {} }, () => timedFind('sf_view_e', {}));
     assert.ok(read.ms >= MS, `the read took ${read.ms} ms, less than the ${MS} ms stall`);
+  });
+
+  it('a call with NO readerFilter is refused, naming the collection it was for: the guard is not a thing a caller can leave out', async () => {
+    let ran = false;
+    await assert.rejects(
+      () => faults.withStalledReads(db, 'sf_view_f', 'sf_src_f', { ms: MS }, async () => { ran = true; }),
+      (err) => /readerFilter/.test(err.message) && /sf_view_f/.test(err.message),
+      'a stall with no stated reader was accepted, or refused without saying which collection it was for');
+    assert.equal(ran, false, 'the callback ran over a stall nobody checked the reader against');
+    assert.equal(await db.collection('sf_src_f').countDocuments({}), 0, 'the refusal came after seeding: the source was left holding documents');
+    assert.equal(await kindOf('sf_view_f')(), undefined, 'the refusal came after the view was made');
+  });
+
+  it('a readerFilter that is not a plain object is refused the same way (an absent filter must not be spelt as a different nothing)', async () => {
+    for (const readerFilter of [null, undefined, 'run', ['run'], 0]) {
+      let ran = false;
+      await assert.rejects(
+        () => faults.withStalledReads(db, 'sf_view_g', 'sf_src_g', { ms: MS, readerFilter }, async () => { ran = true; }),
+        (err) => /readerFilter/.test(err.message) && /sf_view_g/.test(err.message),
+        `readerFilter ${JSON.stringify(readerFilter)} was accepted`);
+      assert.equal(ran, false);
+    }
   });
 });

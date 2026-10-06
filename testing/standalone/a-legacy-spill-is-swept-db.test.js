@@ -168,20 +168,21 @@ describe('legacy read spills are swept from the space', { skip }, () => {
     it('a space whose read HANGS ends at the housekeeping bound, is reported once, and the spaces after it are swept', async () => {
       const db = mongo.getDb();
       // The stall costs a sleep per source document the READER's filter lets through, and the sweep's filter is an
-      // indexed `_tmp/` prefix: so the source holds documents of that shape, or the stage is never reached.
-      const mine = Array.from({ length: 20 }, () => ({ _id: `_tmp/graph-${randomUUID()}.json` }));
-      await db.collection(`${HUNG}_src`).insertMany(mine);
+      // anchored `_tmp/` prefix on `_id` (`files/legacy-spill-sweep.ts`): the guard reads with that filter, and the seeds are
+      // documents of that shape, or the stage is never reached.
+      const { SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
+      const readerFilter = { _id: { $regex: `^${SPILL_DIR}/` } };
+      const seed = Array.from({ length: 20 }, () => ({ _id: `_tmp/graph-${randomUUID()}.json` }));
       const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: 1_000 });
       let outcome, lines;
       try {
-        await withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: 3_000 }, async () => {
+        await withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: 3_000, readerFilter, seed }, async () => {
           ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(sweepMod.sweepLegacySpills(), 2_800)));
           // Left unsettled, the stall's own end is waited for before the view is put back.
           if (!outcome.settled) await outcome.rest;
         });
       } finally {
         restoreBound();
-        await db.collection(`${HUNG}_src`).deleteMany({ _id: { $in: mine.map(d => d._id) } });
       }
 
       assert.ok(outcome.settled, `the sweep was still waiting after ${outcome.elapsedMs}ms on a read that stalls for 4000ms: nothing ended it at the 1000ms bound`);

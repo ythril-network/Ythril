@@ -160,8 +160,8 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
       const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
       let outcome, lines;
       try {
-        // The reader's filter is empty (`find({})`), so every source document of the view reaches the stalling stage.
-        await withStalledReads(db, `${HUNG_CANDIDATES}_dupe_candidates`, `${HUNG_CANDIDATES}_dupe_src`, { ms: STALL_MS }, async () => {
+        // The reader's filter is empty (`coll.find({})` in `brain/candidate-prune.ts`), so every source document of the view reaches the stalling stage.
+        await withStalledReads(db, `${HUNG_CANDIDATES}_dupe_candidates`, `${HUNG_CANDIDATES}_dupe_src`, { ms: STALL_MS, readerFilter: {} }, async () => {
           ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(candidate.pruneAllSpaces(), STALL_MS - 200)));
           if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
         });

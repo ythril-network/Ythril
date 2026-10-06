@@ -17,12 +17,12 @@
  *  - three spaces in a row that time out end the walk once ("the store looks stalled"), the space after them waits for the next
  *    cycle, and the next cycle sweeps it (the three are in quarantine).
  *
- * ## What the stall costs, and why the fixture is topped up here
+ * ## What the stall costs, and why the fixture is given the reader's filter and its own seeds
  *
  * `withStalledReads` makes a source document cost a read one sleep, but the sweep reads with `_expireAt <= now`, and the server
- * evaluates that cheap predicate BEFORE the view's sleeping stage, so the fixture's own seeds (which carry no `_expireAt`) cost
- * nothing to THIS read: it measured 161 ms against a 3 s stall. The test seeds expired documents into the source so each one the
- * sweep's filter lets through pays the sleep.
+ * evaluates that cheap predicate BEFORE the view's sleeping stage, so the fixture's own default seeds (which carry no `_expireAt`)
+ * cost nothing to THIS read: it measured 161 ms against a 3 s stall. The test passes the sweep's filter as `readerFilter`, so the
+ * fixture's guard reads with it, and expired documents as `seed`, so each one the sweep's filter lets through pays the sleep.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/the-ttl-sweep-ends-a-hung-space-and-goes-on-db.test.js
@@ -40,20 +40,16 @@ const BOUND_MS = 1000;
 const STALL_MS = 3000;
 /** What `withStalledReads` costs one source document, ms (`_write-faults.mjs`). */
 const STALL_STEP_MS = 200;
-const TOPUP = /^__hung_/;
 
 const factDoc = (space, id) => ({ _id: id, spaceId: space, content: `expired ${id}`, seq: 1, createdAt: '2020-01-01T00:00:00.000Z', _expireAt: PAST });
 
 /** Reads of `<space>_<part>` stall for at least STALL_MS for the sweep's own query while `fn` runs. */
 async function hung(db, space, part, fn) {
-  const source = `${space}_${part}_src`;
-  const topUp = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => ({ _id: `__hung_${i}`, _expireAt: PAST }));
-  await db.collection(source).insertMany(topUp);
-  try {
-    return await withStalledReads(db, `${space}_${part}`, source, { ms: STALL_MS }, fn);
-  } finally {
-    await db.collection(source).deleteMany({ _id: { $regex: TOPUP } });
-  }
+  // The sweep's own first read of a collection (`expiredPage`, `brain/ttl-sweep.ts`): `_expireAt <= now`, plus `SWEEP_FILTER[part]` for
+  // files (not used here: facts and entities have none). `now` is the sweep's tick, which a later `new Date()` is at or after.
+  const readerFilter = { _expireAt: { $lte: new Date() } };
+  const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => ({ _id: `__hung_${i}`, _expireAt: PAST }));
+  return withStalledReads(db, `${space}_${part}`, `${space}_${part}_src`, { ms: STALL_MS, readerFilter, seed }, fn);
 }
 
 describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, () => {

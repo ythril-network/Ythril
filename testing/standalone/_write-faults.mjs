@@ -296,12 +296,15 @@ export async function assertViewStalls(db, name, { ms, filter = {} }) {
  *   sleep only when the reader's filter reaches it**: the server applies the filter before the view's stage wherever it can (an `_id`,
  *   an indexed prefix), so a document the filter excludes is never stalled on. It does NOT stall per source document whatever the
  *   reader asks for, and an earlier version of this comment said it did.
- * @param {{ ms: number, restore?: () => Promise<void>, readerFilter?: object, seed?: object[], collapseTo?: object }} o
+ * @param {{ ms: number, restore?: () => Promise<void>, readerFilter: object, seed?: object[], collapseTo?: object }} o
  *   `ms` is the least a read takes; `restore` as in `withCollectionAsView` (indexes recreated on the ordinary collection put back).
  *   **The reader's filter decides what stalls, so say what it is:**
- *   - `readerFilter` is the filter the code under test reads the view with (default `{}`). The guard reads with it, so a filter that
- *     matches nothing this stalls THROWS instead of passing a bound test over a read that never hung. Pass it whenever the code under
- *     test filters: the default checks the view for a reader that asks for everything, which is not every reader.
+ *   - `readerFilter` is REQUIRED: the filter the code under test reads the view with, copied from the server source it reads with and
+ *     not from the seeds. The guard reads with it, so a filter that matches nothing this stalls THROWS instead of passing a bound test
+ *     over a read that never hung. A call without it THROWS, naming the view, before anything is seeded or made: it used to default to
+ *     `{}`, which checks the view for a reader that asks for everything, and a test whose reader filters (an `_id`, an indexed prefix, a
+ *     `_expireAt` cut-off) then passed over a view whose stall its own read never met. A reader that really asks for everything says so:
+ *     `readerFilter: {}`.
  *   - `seed` is the source documents to stall on (at least 2, each with a string `_id`, removed afterwards), for a reader whose filter
  *     the default seeds cannot match (`{ status: 'pending' }` needs documents that are pending); `ms` is split across them, so give
  *     seeds the filter ALL matches.
@@ -312,10 +315,14 @@ export async function assertViewStalls(db, name, { ms, filter = {} }) {
  * ## The guard a hand-written copy drops
  *
  * `assertViewStalls`, run before `fn`, with the reader's filter, and THROWING (so `fn` never runs over a stall that stalls nothing).
- * `ms` that is not a positive number throws first: 0 seeds nothing and would stall nothing.
+ * `ms` that is not a positive number throws first: 0 seeds nothing and would stall nothing. Then a `readerFilter` that is not an object
+ * (absent included) throws, naming `name`: the guard above is only as good as the filter it reads with, so the filter is not optional.
  */
-export async function withStalledReads(db, name, viewOn, { ms, restore, readerFilter = {}, seed: given, collapseTo } = {}, fn) {
+export async function withStalledReads(db, name, viewOn, { ms, restore, readerFilter, seed: given, collapseTo } = {}, fn) {
   assert.ok(Number.isFinite(ms) && ms > 0, `withStalledReads: ms must be a positive number, got ${ms} - a stall of nothing stalls nothing`);
+  assert.ok(readerFilter && typeof readerFilter === 'object' && !Array.isArray(readerFilter),
+    `withStalledReads(${name}): readerFilter is required - the filter the code under test reads this view with, copied from the server source `
+    + '(`{}` when it really asks for everything). Without it the guard checks the view for a reader nobody has, and a bound test passes over a read that never hung');
   assert.ok(given === undefined || (Array.isArray(given) && given.length >= 2 && given.every((d) => typeof d?._id === 'string')),
     'withStalledReads: seed must be an array of at least 2 documents with a string _id (the server interrupts a read BETWEEN source documents, '
     + 'so one document is a stall maxTimeMS cannot end)');

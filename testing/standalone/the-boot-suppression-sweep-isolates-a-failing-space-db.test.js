@@ -253,16 +253,21 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     const db = mongo.getDb();
     let ms;
     // The sweep reads with a filter, and the server may test the filter before the stalling stage: documents the sweep's filter
-    // MATCHES are what must reach the stage, so the source holds as many of them as the fixture seeds stalling ones.
-    // EVERY collection of the space hangs (derived from the sweep's own kinds, with a floor), so a sweep that went on past the first
-    // timeout would pay one bound per kind: the assertion below is that cost, seen.
+    // MATCHES are what must reach the stage, so `seed` is as many of them as the fixture would seed stalling ones, and `readerFilter` is
+    // the filter the sweep reads that collection with: `suppressedWithVectorFilter` for a record kind (the sweep's own function, over the
+    // meta the config gives this space), and the space tier's `{ embedding: { $exists: true } }` for files (`sweepFiles`, which is not
+    // exported). EVERY collection of the space hangs (derived from the sweep's own kinds, with a floor), so a sweep that went on past
+    // the first timeout would pay one bound per kind: the assertion below is that cost, seen.
     const { COLLECTION_SUFFIX } = await import('../../server/dist/config/types.js');
-    const parts = [...Object.values(COLLECTION_SUFFIX), 'files'];
+    const parts = [
+      ...Object.entries(COLLECTION_SUFFIX).map(([kind, suffix]) => ({ suffix, readerFilter: sweep.suppressedWithVectorFilter(SUPPRESSING, kind) })),
+      { suffix: 'files', readerFilter: { embedding: { $exists: true } } },
+    ];
     assert.ok(parts.length >= 5, `only ${parts.length} collections derived for the sweep's kinds`);
-    const matching = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
-    for (const part of parts) await db.collection(`g18_stall_src_${part}`).insertMany(matching);
+    const seed = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
     const stalled = (rest, fn) => rest.length === 0 ? fn()
-      : withStalledReads(db, `echo_${rest[0]}`, `g18_stall_src_${rest[0]}`, { ms: STALL_MS }, () => stalled(rest.slice(1), fn));
+      : withStalledReads(db, `echo_${rest[0].suffix}`, `g18_stall_src_${rest[0].suffix}`, { ms: STALL_MS, readerFilter: rest[0].readerFilter, seed },
+        () => stalled(rest.slice(1), fn));
     try {
       await stalled(parts, async () => {
         const started = Date.now();
@@ -271,7 +276,6 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
       });
     } finally {
       restore();
-      for (const part of parts) await db.collection(`g18_stall_src_${part}`).deleteMany({ _id: { $in: matching.map(d => d._id) } });
     }
 
     // ONE bound plus margin, not one per kind: the stop at the first timeout is what keeps a hung space from costing
