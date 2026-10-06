@@ -163,7 +163,10 @@ export const FROZEN = {
   // LOWERED 739 -> 733 with bundle-30 I13: the pull's linkage check moved into a `finally` (+4 lines past 739), and
   // vote-round retention (`isRoundPrunable`, `pruneExpiredRounds`) moved out to `sync/vote-round-retention.ts`, a
   // rule about rounds rather than transfers with its own tests.
-  'server/src/sync/engine.ts': 733,
+  // LOWERED 733 -> 640 with bundle-52 (`Q-277`): the per-family pull (`pullType`) and push (`pushCollection`) left for
+  // `sync/pull-family.ts` and `sync/push-family.ts`, over the two pagers that own a position inside a run of equal seqs
+  // (`sync/seq-run-pager.ts`, `sync/push-seq-runs.ts`). The ceiling follows the file down.
+  'server/src/sync/engine.ts': 640,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

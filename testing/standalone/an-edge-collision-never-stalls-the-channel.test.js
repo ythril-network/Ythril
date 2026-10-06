@@ -12,8 +12,8 @@
  * **The push side did not**, and it is the worse half:
  *
  *   1. `POST /api/sync/edges` (or the `batch-upsert` edges loop) lets E11000 reach the route's catch → `500`.
- *   2. On the sender, `pushCollection` does `if (!resp.ok) { truncated = true; break; }` — **before**
- *      `seqCursor` is advanced.
+ *   2. On the sender, a refused batch stops the push (`pushFamily` hands the refusal to `pushSeqRuns`, which marks the
+ *      transfer truncated and returns) — **before** the position is advanced.
  *   3. `resolveWatermark` caps a truncated transfer at `deliveredThrough`, i.e. the last batch that landed.
  *   4. Next cycle re-selects the identical batch and fails identically.
  *
@@ -129,7 +129,7 @@ describe('every edge ingest absorbs a duplicate triplet', () => {
 
   it('the response still says 200, so the sender does not stall', () => {
     /*
-     * `pushCollection` breaks on `!resp.ok` BEFORE advancing `seqCursor`, and `resolveWatermark` then caps
+     * The push stops on `!resp.ok` BEFORE advancing its position, and `resolveWatermark` then caps
      * the watermark at the last batch that landed — so any non-2xx here is a permanent stall for that
      * channel, not a retry. Read BACKWARDS to the `res.status(` that opens this response: the nearest preceding
      * one IS the one that carries this body.
@@ -148,25 +148,39 @@ describe('the sender still treats a non-ok push as a stall', () => {
   // Pinned because it is the OTHER half of the mechanism and this fix relies on it staying true: if the push
   // loop ever advanced its cursor past a failed batch, a 500 would become silent data loss instead of a
   // visible stall — a different bug, and the reason the fix belongs on the receiving side.
-  const engine = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
+  /*
+   * Re-anchored for bundle-52: the loop is `pushSeqRuns` (`sync/push-seq-runs.ts`), shared by the record push and the
+   * tombstone push, and a family's send is `pushFamily` (`sync/push-family.ts`). The send answers WHY it stopped instead of
+   * breaking, and the loop owns the cursor: so the two halves are asserted where they now live, each anchor found first.
+   */
+  const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
+  const loop = stripComments(readFileSync('server/src/sync/push-seq-runs.ts', 'utf8'));
 
-  it('breaks without advancing the cursor', () => {
+  it('the send answers a refusal and moves nothing', () => {
     /*
-     * Anchored on the push loop's OWN warning, not on `if (!resp.ok)`.
-     *
-     * There are five `if (!resp.ok)` guards in this file and `indexOf` finds the first — a pull guard several
-     * hundred lines above the loop this test is about. It failed with "must mark the transfer truncated"
-     * against code that does exactly that, which is the tell for an anchor that landed somewhere else.
+     * Anchored on the push's OWN stop reason, not on `if (!resp.ok)`: a file has several of those guards and `indexOf` finds
+     * the first, which can be one in a different function — the tell for an anchor that landed somewhere else.
      */
-    const at = engine.indexOf('truncationWarn(`Batch push');
-    assert.notEqual(at, -1, 'the batch-push truncation warning is gone — re-point this gate');
-    const block = enclosingBlockMatching(engine, at, /if \(!resp\.ok\) \{/, 'the non-ok push branch');
-    assert.ok(block, 'the batch-push warning is no longer inside a non-ok guard — re-point this gate');
-    assert.match(block, /truncated = true/, 'a failed push must mark the transfer truncated');
-    assert.doesNotMatch(
-      block, /seqCursor\s*=/,
-      'the cursor must NOT advance past a batch the peer refused — that would turn a visible stall into '
-      + 'silent loss',
-    );
+    const at = family.indexOf('the peer answered ${resp.status}');
+    assert.notEqual(at, -1, 'the push no longer answers a refused batch with its reason — re-point this gate');
+    const block = enclosingBlockMatching(family, at, /if \(!resp\.ok\) \{/, 'the non-ok push branch');
+    assert.ok(block, 'the refusal is no longer inside a non-ok guard — re-point this gate');
+    assert.match(block, /return `the peer answered/, 'a failed push must hand its reason back to the loop, which stops');
+    assert.doesNotMatch(block, /deliveredThrough|localMaxSeq|pushed \+=/,
+      'a batch the peer refused must not count as delivered — that would turn a visible stall into silent loss');
+  });
+
+  it('the loop marks the transfer truncated and does not advance past the batch the peer refused', () => {
+    const at = loop.indexOf('o.send(rows)');
+    assert.notEqual(at, -1, 'the loop no longer sends through `send` — re-point this gate');
+    const block = enclosingBlockMatching(loop, loop.indexOf('o.stopped(refusal', at), /if \(refusal !== null\) \{/, 'the refusal branch');
+    assert.ok(block, 'the stop is no longer inside a refusal guard — re-point this gate');
+    assert.match(block, /outcome\.truncated = true/, 'a failed push must mark the transfer truncated');
+    assert.match(block, /return;/, 'a failed push must stop the loop');
+    assert.doesNotMatch(block, /deliveredThrough\s*=|after\s*=/,
+      'the position must NOT advance past a batch the peer refused — that would turn a visible stall into silent loss');
+    // The advance exists, and it is after the send: nothing moves before the peer has taken the page.
+    const advance = loop.indexOf('outcome.deliveredThrough = Math.max', at);
+    assert.ok(advance > at, 'the loop no longer advances after the send — re-point this gate');
   });
 });

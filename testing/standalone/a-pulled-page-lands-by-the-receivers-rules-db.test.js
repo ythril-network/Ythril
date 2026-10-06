@@ -72,7 +72,7 @@ const SUPPRESSING = 'muted';     // a type whose schema says suppressEmbeddings:
 const UNSUPPRESSING = 'loud';    // a type whose schema says suppressEmbeddings: false
 const BRIEF = 'brief';           // a type whose schema has its own retention window
 
-let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod;
+let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod, encodeSeqCursor;
 const coll = (space, c) => mongo.col(`${space}_${c}`);
 
 /** What the fake peer serves: space -> payloadKey -> pages (arrays of items). */
@@ -90,10 +90,14 @@ function startPeer() {
     if (m[1] === 'tombstones') return send(200, {});
     const pages = served[space]?.[m[1]];
     if (!families.some(f => f.payloadKey === m[1])) return send(404, { error: 'not a family' });
-    const at = Number(url.searchParams.get('cursor') ?? 0);
+    // The cursor is the real codec's, naming the LAST item of the page it follows (`util/seq-keyset.ts`): a pager that follows
+    // a peer's cursor reads it back, and takes it only when it names the page's last element.
+    const cursorOf = (page) => encodeSeqCursor({ seq: page[page.length - 1].seq, id: page[page.length - 1]._id });
+    const asked = url.searchParams.get('cursor');
+    const at = asked === null ? 0 : (pages ?? []).findIndex(p => cursorOf(p) === asked) + 1;
     if (onServe) await onServe(space, m[1], at);
     const items = pages?.[at] ?? [];
-    send(200, { items, nextCursor: pages && at + 1 < pages.length ? String(at + 1) : null });
+    send(200, { items, nextCursor: pages && at + 1 < pages.length ? cursorOf(items) : null });
   });
   return new Promise(resolve => server.listen(0, '0.0.0.0', () => resolve(server)));
 }
@@ -169,6 +173,7 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     peer = await startPeer();
     peerUrl = `http://${privateHostAddress()}:${peer.address().port}`;
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
+    ({ encodeSeqCursor } = await import('../../server/dist/util/seq-keyset.js'));
     const kinds = await import('../../server/dist/config/types-knowledge.js');
     recordTypeOf = Object.fromEntries(families.map(f => [f.collection,
       Object.entries(kinds.RECORD_COLLECTION).find(([, c]) => c === f.collection)?.[0] ?? null]));

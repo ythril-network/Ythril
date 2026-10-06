@@ -150,9 +150,13 @@ describe('every door plans by this accept, and the writer applies it only at the
     const { bodyOf } = await import('./_structural-window.mjs');
     const accept = bodyOf(stripComments(readFileSync('server/src/sync/accept-page.ts', 'utf8')), 'acceptArrivingPage');
     assert.match(accept, /planArrivals\(docs, \{/, 'the page accept no longer plans with planArrivals');
+    // Re-anchored for bundle-52: the pull's page hand-over is `pullFamily` (`sync/pull-family.ts`), out of `pullFromPeer`.
+    const pull = bodyOf(stripComments(readFileSync('server/src/sync/pull-family.ts', 'utf8')), 'pullFamily');
+    assert.match(pull, /acceptArrivingPage\([^)]*door: 'pull'/s, 'the pull no longer hands its pages to the page accept');
+    assert.doesNotMatch(pull, /writeArrivals\(/, 'the pull writes its pages without the page accept again');
     const engine = bodyOf(stripComments(readFileSync('server/src/sync/engine.ts', 'utf8')), 'pullFromPeer');
-    assert.match(engine, /acceptArrivingPage\([^)]*door: 'pull'/s, 'the pull no longer hands its pages to the page accept');
-    assert.doesNotMatch(engine, /writeArrivals\(/, 'the pull writes its pages without the page accept again');
+    assert.match(engine, /await pullFamily\(/, 'the engine\'s pull no longer goes through the per-family pull');
+    assert.doesNotMatch(engine, /writeArrivals\(|acceptArrivingPage\(/, 'the engine writes pulled pages itself again');
     const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
     assert.match(writer, /seqGuard\(d\._id, d\.seq\)/, 'the writer no longer guards its write with seqGuard');
     assert.doesNotMatch(writer, /planArrivals\(|planSeqUpserts\(/, 'the writer plans a page of its own again');
