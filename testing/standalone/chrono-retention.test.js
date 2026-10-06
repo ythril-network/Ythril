@@ -32,7 +32,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { balancedFrom, bodyOf } from './_structural-window.mjs';
+import { balancedFrom, bodyOf, statementUpTo } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -290,5 +290,38 @@ describe('the feature is reachable and wired', () => {
     // An agent writing records is the caller most likely to need the override and least likely to read docs.
     const src = readFileSync(join(ROOT, 'server/src/mcp/tools/shared.ts'), 'utf8');
     assert.match(src, /RECORD > SCHEMA > SPACE/);
+  });
+});
+
+describe('the retention sweep is walked, not looped (bundle-53 G13)', () => {
+  // The two halves of a space are two units of one walk: a failing half is said once and the other half still runs; a hung read
+  // ends at the housekeeping figure. What a hand loop with a `try` cannot do is the point, so the gate is on the shape that cannot
+  // lose it: no `catch` of its own in the sweep, the spaces handed to `eachSpace`, the halves to `eachUnit`.
+  const SRC = () => stripComments(readFileSync(join(ROOT, 'server/src/brain/chrono-redaction.ts'), 'utf8'));
+
+  it('the sweep walks the spaces through eachSpace under a declared step, with the halves as units', () => {
+    const src = SRC();
+    assert.match(src, /const \w+ = declareStep\('Chrono retention'\)/, 'the step is declared once, at module scope, so its counters start at 0');
+    const body = bodyOf(src, 'sweepChronoRetention');
+    assert.match(body, /eachSpace\(\s*\w+,\s*concreteSpaces\(\)/, 'the spaces are not handed to the walk');
+    assert.match(body, /eachUnit\(/, 'the halves of a space are not units of the walk');
+    assert.doesNotMatch(body, /\bcatch\b/, 'the sweep has a catch of its own again: a failure it swallows is one the walk never reports or counts');
+    assert.doesNotMatch(body, /for \(const s of concreteSpaces\(\)\)/, 'a hand loop over the spaces is back');
+  });
+
+  it('the announcement is a bounded warnOnce, not a Set that grows for the life of the process', () => {
+    const src = SRC();
+    assert.match(src, /warnOnce<string>\(/);
+    assert.doesNotMatch(src, /new Set<string>\(\)/, 'a hand-written once-latch is back: it grows with every space and type');
+    assert.doesNotMatch(src, /announced\.(has|add)\(/);
+  });
+
+  it('the announcement bounds what it quotes where the line is written', () => {
+    const src = SRC();
+    const at = src.indexOf('is being stamped from its schema window');
+    assert.ok(at > -1, 'the announcement is gone — re-anchor this gate');
+    const line = statementUpTo(src, at, 'the announcement');
+    assert.match(line, /peerText\(spaceId\)/);
+    assert.match(line, /peerText\(type\)/);
   });
 });
