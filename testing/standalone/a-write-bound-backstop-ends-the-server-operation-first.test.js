@@ -54,7 +54,7 @@ function fakeServer({ killable = true, arrivesAfterLooks = 0, commandLatencyMs =
       const match = stages.find(st => st.$match)?.$match;
       assert.equal(typeof match?.['command.comment'], 'string', 'the operation must be found by the comment the write carried');
       s.looks += 1;
-      if (!s.alive && arrivesAfterLooks > 0 && s.looks > arrivesAfterLooks) s.alive = true;
+      if (!s.alive && !s.ended && arrivesAfterLooks > 0 && s.looks > arrivesAfterLooks) s.alive = true;
       const found = s.alive && match['command.comment'] === s.comment;
       return { cursor: { firstBatch: found ? [{ opid: 4242 }] : [] }, ok: 1 };
     }

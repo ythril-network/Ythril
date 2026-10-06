@@ -172,12 +172,19 @@ async function runAll(lanes, results, reps) {
   let next = 0;
   async function worker() {
     for (let t = tasks[next++]; t; t = tasks[next++]) {
-      await previous[t.i];
+      // The lane's NEXT repetition waits for THIS one's settle window, and is told so the moment this one is TAKEN — not after
+      // its stall has run: a worker that pulls the lane's next repetition while this one is still stalling must find this one's
+      // `done`, or it seeds the lane (wipe, insert, counter) under an open settle window, and the experiment reports its own
+      // seed as a landing (`Q-380`).
+      const before = previous[t.i];
+      let done = () => {};
+      previous[t.i] = new Promise(resolve => { done = resolve; });
+      await before;
       const ran = await t.lane.seed().then(() => stallAndRelease(t.lane)).catch(error => ({ error }));
       const finished = finishOnce(t.lane, t.rep, ran)
         .catch(error => ({ rep: t.rep, fixtureError: String(error?.stack ?? error), landed: [] }))
         .then(r => { results[t.i].push(r); });
-      previous[t.i] = finished;
+      finished.then(done);
       watching.push(finished);
     }
   }
