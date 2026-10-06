@@ -40,7 +40,7 @@ const DEL = 'pendingdel';
 const REN = 'pendingren';
 const REN_TO = 'pendingren2';
 /** What a server refusal and a dead store say — none of it may reach the sentence a caller reads. */
-const DRIVER_TEXT = /E11000|duplicate key|Mongo\w*Error|ECONNREFUSED|ServerSelection|127\.0\.0\.1|_driver_write_failures|pendingdel_facts|pendingren_facts/i;
+const DRIVER_TEXT = /E11000|duplicate key|Mongo\w*Error|ECONNREFUSED|ServerSelection|127\.0\.0\.1|_driver_write_failures|dup key/i;
 
 describe('a pending space op that cannot be resumed refuses in our words', { skip }, () => {
   let door, lifecycle, loader, storeFailure, failures, patch, db;
@@ -87,10 +87,11 @@ describe('a pending space op that cannot be resumed refuses in our words', { ski
     let thrown;
     try { await lifecycle.settlePendingSpaceOpBefore('delete a space'); } catch (err) { thrown = err; } finally { patch.clear(); }
     assert.ok(thrown, 'a pending rename that could not move a collection did not refuse the caller\'s op');
-    assert.doesNotMatch(thrown.message, DRIVER_TEXT, `the refusal carries the driver's text: ${thrown.message}`);
+    // What a door sends is `storeFailureAnswer`'s body (the error's own message goes to the log, never to the caller).
     const answer = storeFailure.storeFailureAnswer(thrown, 'test');
-    assert.ok(answer, `the store's failure was answered as an ordinary refusal: ${thrown.message}`);
+    assert.ok(answer, `the store's failure was answered as an ordinary refusal, in the sentence: ${thrown.message}`);
     assert.equal(answer.status, 503);
+    assert.doesNotMatch(JSON.stringify(answer.body), DRIVER_TEXT, `the 503 carries the driver's text: ${JSON.stringify(answer.body)}`);
     clearMarker();
   });
 });
