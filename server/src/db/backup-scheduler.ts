@@ -27,6 +27,7 @@ import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js'
 import { loadBackupConfig } from './backup-config.js';
 import { log } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
+import { runExclusive } from '../util/single-flight.js';
 
 const DEFAULT_KEEP_OFFSITE = 14;
 
@@ -162,8 +163,10 @@ export function startBackupScheduler(): void {
     return;
   }
 
+  // node-cron fires on schedule whether or not the last dump finished: one that outlasts its period is skipped, not overlapped.
+  // `runExclusive` never throws; a failed dump is logged as "Scheduled backup failed: …".
   _task = schedule(cfg.schedule, () => {
-    runBackupNow().catch(err => log.error(`Scheduled backup error: ${err}`));
+    void runExclusive('Scheduled backup', () => runBackupNow());
   });
   _armed.note(ARMED, cfg.schedule);
 
