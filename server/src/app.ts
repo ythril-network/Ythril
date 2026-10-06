@@ -52,7 +52,7 @@ import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
-import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
+import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { col } from './db/mongo.js';
 import { log, peerList, peerText, runWithRequestId } from './util/log.js';
 import { messageOf } from './util/errors.js';
@@ -549,6 +549,8 @@ export function createApp() {
         tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
         method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
       });
+      // Owed from here, so a reload that throws before its init step (the built-in space, a pending-op resume) still owes them.
+      markSpacesOwedInit(diff.added);
       for (const id of diff.added) audit(CONFIG_RELOAD_OPERATIONS.added, id, 200);
       for (const id of diff.removed) audit(CONFIG_RELOAD_OPERATIONS.removed, id, 200);
       for (const s of diff.kept) audit(CONFIG_RELOAD_OPERATIONS.kept, s.id, 409);
@@ -566,27 +568,22 @@ export function createApp() {
     // gives operators a restart-free way to finish a stuck op. Runs before the
     // new-space init below so a rename isn't shadowed by re-creating its old id.
     await reconcilePendingSpaceOp();
-    // Initialise any spaces that were added to the config file
-    const newCfg = getConfig();
-    for (const space of newCfg.spaces) {
-      if (!oldSpaceIds.has(space.id) && !space.proxyFor) {
-        await initSpace(space.id);
-      }
-    }
     /*
-     * Re-arm the schedulers whose cron expression is captured at START time — the sync engine, the duplicate
-     * scanner, the contradiction scanner.
+     * Initialise the spaces that were added to the config file (a proxy owns no collections and owes nothing) and every space an
+     * earlier reload or the boot could not, then re-arm the schedulers whose cron expression is captured at START time — the sync
+     * engine, the duplicate scanner, the contradiction scanner — and throw ONE error naming the spaces still not initialised. All of
+     * it is `initAddedSpaces` (`spaces/lifecycle.ts`): a space whose init throws is said once and retried by the next reload, and
+     * does not stop the spaces after it or the re-arm.
      *
-     * Without this, reloading a config that changed `dupeScanner.schedule` left the scanner on its boot-time
-     * schedule, and ENABLING a scanner that was off did nothing at all until the instance was restarted. This
-     * function is reached by the config watcher AND by `POST /api/admin/reload-config`, which answered
-     * `{ ok: true }` — an endpoint whose entire purpose is "apply what I just changed", reporting success
-     * without applying it.
-     *
-     * Last in the reload, deliberately: a scheduler re-armed before `initSpace` could fire against a space that
-     * does not exist yet. See `schedulers.ts` for why the interval-driven sweeps are NOT re-armed here.
+     * The re-arm is why this is last in the reload: without it, reloading a config that changed `dupeScanner.schedule` left the
+     * scanner on its boot-time schedule, and ENABLING a scanner that was off did nothing at all until the instance was restarted.
+     * This function is reached by the config watcher AND by `POST /api/admin/reload-config`, which answered `{ ok: true }` — an
+     * endpoint whose entire purpose is "apply what I just changed", reporting success without applying it. It runs after the init,
+     * so a scheduler re-armed cannot fire against a space that does not exist yet, and it runs even when a space failed. See
+     * `schedulers.ts` for why the interval-driven sweeps are NOT re-armed here.
      */
-    await rearmCronSchedulers();
+    const added = getConfig().spaces.filter(s => !oldSpaceIds.has(s.id)).map(s => s.id);
+    await initAddedSpaces({ added, rearm: rearmCronSchedulers });
   }
 
   /*

@@ -32,6 +32,7 @@ import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
 import { log, peerText } from '../util/log.js';
 import { caughtFailureText } from '../brain/store-failure.js';
+import { runSpaceStep } from '../spaces/space-step.js';
 
 
 export interface LegacySpillSweep {
@@ -41,51 +42,60 @@ export interface LegacySpillSweep {
   failed: { spaceId: string; path: string; error: string }[];
 }
 
+/**
+ * Every space is its own step (`runSpaceStep`): a space whose listing or query throws is said once, naming it, and the spaces after it
+ * are still swept. This loop used to have no `try` of its own, so the first such space ended the sweep — and with it the rest of the TTL
+ * cycle's housekeeping — for every space behind it, every cycle.
+ */
 export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
   const out: LegacySpillSweep = { removed: 0, failed: [] };
   for (const space of getConfig().spaces) {
     if (isProxy(space)) continue;
-    const spaceId = space.id;
-    const started = Date.now();
-    const found = new Set<string>();
-
-    const dir = path.join(spaceRoot(spaceId), SPILL_DIR);
-    const names = await fs.readdir(dir).catch(() => [] as string[]);
-    for (const name of names) {
-      const rel = `${SPILL_DIR}/${name}`;
-      if (spillIdFromPath(rel)) found.add(rel);
-    }
-    const metas = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
-      // An anchored, case-sensitive prefix, so the query walks only the `_tmp/` range of the `_id` index on every
-      // cycle; the exact spill shape is then decided by `spillIdFromPath` below, the one test for it.
-      .find(asFilter({ _id: { $regex: `^${SPILL_DIR}/` } }), { projection: { _id: 1 } }).toArray();
-    for (const m of metas) if (spillIdFromPath(m._id)) found.add(m._id);
-    if (found.size === 0) continue;
-
-    const removed: string[] = [];
-    for (const rel of found) {
-      try {
-        await deleteStored(path.join(dir, rel.slice(SPILL_DIR.length + 1))).catch((err: NodeJS.ErrnoException) => {
-          if (err?.code !== 'ENOENT') throw err;   // the blob never arrived, or is already gone
-        });
-        removed.push(rel);
-      } catch (err) {
-        const error = caughtFailureText(err, 'remove a legacy read spill');
-        out.failed.push({ spaceId, path: rel, error });
-        log.warn(`Legacy spill sweep: could not remove ${peerText(spaceId)}/${peerText(rel)}: ${peerText(error)}`);
-      }
-    }
-    if (removed.length === 0) continue;
-    await col(spaceCollection(spaceId, 'files')).deleteMany(asFilter({ _id: { $in: removed } }));
-    await col(spaceCollection(spaceId, 'fileHashes')).deleteMany(asFilter({ _id: { $in: removed } }));
-    out.removed += removed.length;
-    // The disk this freed is the files quota's, and a cached figure would keep charging for it until expiry.
-    invalidateUsageCache();
-
-    log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${peerText(spaceId)}'`);
-    logInternalAudit({
-      method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId, operation: LEGACY_SPILL_SWEEP_OPERATION, startedAt: started,
-    });
+    await runSpaceStep('Legacy spill sweep', space.id, () => sweepSpace(space.id, out));
   }
   return out;
+}
+
+/** One space's share of the sweep, added to `out`. */
+async function sweepSpace(spaceId: string, out: LegacySpillSweep): Promise<void> {
+  const started = Date.now();
+  const found = new Set<string>();
+
+  const dir = path.join(spaceRoot(spaceId), SPILL_DIR);
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  for (const name of names) {
+    const rel = `${SPILL_DIR}/${name}`;
+    if (spillIdFromPath(rel)) found.add(rel);
+  }
+  const metas = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
+    // An anchored, case-sensitive prefix, so the query walks only the `_tmp/` range of the `_id` index on every
+    // cycle; the exact spill shape is then decided by `spillIdFromPath` below, the one test for it.
+    .find(asFilter({ _id: { $regex: `^${SPILL_DIR}/` } }), { projection: { _id: 1 } }).toArray();
+  for (const m of metas) if (spillIdFromPath(m._id)) found.add(m._id);
+  if (found.size === 0) return;
+
+  const removed: string[] = [];
+  for (const rel of found) {
+    try {
+      await deleteStored(path.join(dir, rel.slice(SPILL_DIR.length + 1))).catch((err: NodeJS.ErrnoException) => {
+        if (err?.code !== 'ENOENT') throw err;   // the blob never arrived, or is already gone
+      });
+      removed.push(rel);
+    } catch (err) {
+      const error = caughtFailureText(err, 'remove a legacy read spill');
+      out.failed.push({ spaceId, path: rel, error });
+      log.warn(`Legacy spill sweep: could not remove ${peerText(spaceId)}/${peerText(rel)}: ${peerText(error)}`);
+    }
+  }
+  if (removed.length === 0) return;
+  await col(spaceCollection(spaceId, 'files')).deleteMany(asFilter({ _id: { $in: removed } }));
+  await col(spaceCollection(spaceId, 'fileHashes')).deleteMany(asFilter({ _id: { $in: removed } }));
+  out.removed += removed.length;
+  // The disk this freed is the files quota's, and a cached figure would keep charging for it until expiry.
+  invalidateUsageCache();
+
+  log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${peerText(spaceId)}'`);
+  logInternalAudit({
+    method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId, operation: LEGACY_SPILL_SWEEP_OPERATION, startedAt: started,
+  });
 }

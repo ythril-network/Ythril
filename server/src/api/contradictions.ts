@@ -24,6 +24,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { log, peerText } from '../util/log.js';
 import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace } from '../brain/contradiction-scanner.js';
+import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import { upsertEdge } from '../brain/edges.js';
 import { retireRecord, canBeRetired } from '../brain/retire-record.js';
@@ -307,9 +308,11 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
   try {
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
     const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write').filter(id => !spaceFilter || id === spaceFilter);
+    // A space that fails is named in `failedSpaces` and the rest are still scanned (`scanSpacesInRequest`); `scannedSpaces` counts
+    // the spaces that WERE scanned, and the other counts are over those.
+    const { results, failedSpaces } = await scanSpacesInRequest('Contradiction scan', spaces, (spaceId) => scanSpace(spaceId));
     let scanned = 0, found = 0, nliStalled = false, judgedPairs = 0, modelCalls = 0, budgetExhausted = false;
-    for (const spaceId of spaces) {
-      const r = await scanSpace(spaceId);
+    for (const r of results) {
       scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
       nliStalled = nliStalled || r.nliStalled;
       budgetExhausted = budgetExhausted || r.budgetExhausted;
@@ -323,7 +326,7 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
     // the sweep SETTLED, `modelCalls` is what it SPENT — the number their endpoint's own request log shows,
     // and the one `maxJudgedPairsPerRun` bounds. Reporting only the first is what made our report look 2×
     // short of a judge's own counter.
-    res.json({ scannedSpaces: spaces.length, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted });
+    res.json({ scannedSpaces: results.length, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces });
   } catch (err) {
     log.error(`POST /api/contradictions/scan: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });

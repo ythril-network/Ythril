@@ -32,6 +32,7 @@ import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 import { caughtFailureText } from '../brain/store-failure.js';
+import { runSpaceStep } from './space-step.js';
 
 export async function initSpace(
   spaceId: string,
@@ -285,35 +286,100 @@ const FINALIZE_CONCURRENCY = 3;
  *
  * Recall on a still-building index returns empty rather than failing, which is the pre-existing
  * behaviour and is why deferring is safe: the ceiling was never protecting correctness, only tidiness.
+ *
+ * ## One space that cannot be initialised does not stop the boot (5.6.6)
+ *
+ * This was a bare `for` over `initSpace`, so the first space that threw ended the boot's init: every space after it was never
+ * initialised, marked or confirmed, and the one line that said so named a driver error and not the space. Each space is now its own
+ * step (`initOwedSpaces`): a failure is said once naming it, the others are initialised and confirmed, and the failed space stays owed
+ * — the next reload initialises it again.
  */
 export async function initAllSpaces(): Promise<void> {
-  // Collect ids, not space objects: a config reload during these awaits replaces cfg.spaces and every
-  // held object becomes an orphan — status flips would then be written to detached records and lost,
-  // leaving spaces stuck reporting 'building' forever with nothing to explain it.
-  //
   // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
   // collections — which its creation never made and its deletion (config-only) never drops — while the
   // reload path, which initialises spaces added to the file, already skipped proxies.
-  const spaceIds = concreteSpaces().map(s => s.id);
+  markSpacesOwedInit(concreteSpaces().map(s => s.id));
+  await initOwedSpaces({ confirmInBackground: true });
+}
 
-  for (const spaceId of spaceIds) {
+/**
+ * The spaces this process owes an init: added to the config by a reload, or present at boot, and not initialised yet.
+ *
+ * A reload merges the spaces a file adds into the config BEFORE it initialises them, so a space whose init failed is, to the next
+ * reload, already known — nothing but this set would find it owed. In memory only, deliberately: a restart initialises every space
+ * (`initAllSpaces`), so what a restart forgets it also repays.
+ */
+const owedInit = new Set<string>();
+
+/** Record that these spaces owe an init. Idempotent. A reload calls it as soon as it knows the spaces it added, before anything that can throw. */
+export function markSpacesOwedInit(ids: readonly string[]): void {
+  for (const id of ids) owedInit.add(id);
+}
+
+/**
+ * Initialise every space this process owes an init, each as its own step — the one walk for boot (`initAllSpaces`) and a reload
+ * (`initAddedSpaces`). A space that throws is said once naming it (`runSpaceStep`, every time: boot and reload run rarely and the
+ * operator is waiting), stays owed, and does not stop the spaces after it; a space that lands is no longer owed.
+ *
+ * `confirmInBackground` is the boot's way: `initSpace` does not wait for the index builds, the landed spaces are marked `building` and
+ * handed to `confirmSpaceIndexesInBackground`, which settles each to `ready`/`failed`. A reload passes false and keeps `initSpace`'s
+ * default, which waits for its indexes itself. Ids, not space objects, are held throughout: a config reload during these awaits
+ * replaces `cfg.spaces` and every held object becomes an orphan, so status flips written to it would be lost and the space would
+ * report `building` for ever.
+ *
+ * Never throws for a space's failure: the caller reads `failed`. A space the config no longer holds, and a proxy (which owns no
+ * collections), owes nothing.
+ */
+async function initOwedSpaces({ confirmInBackground }: { confirmInBackground: boolean }): Promise<{ landed: string[]; failed: string[] }> {
+  const concrete = new Set(concreteSpaces().map(s => s.id));
+  for (const id of [...owedInit]) if (!concrete.has(id)) owedInit.delete(id);
+
+  const landed: string[] = [];
+  const failed: string[] = [];
+  for (const spaceId of [...owedInit]) {
     log.debug(`Initialising space: ${peerText(spaceId)}`);
     // Collections, regular indexes and the vector-index create/update all still happen here and are
-    // still awaited. Only the READY *poll* is deferred — the schema work must be done before the
+    // still awaited. Only the READY *poll* is deferred (boot) — the schema work must be done before the
     // instance serves traffic, and it is fast.
-    await initSpace(spaceId, { waitForVectorReady: false });
+    const step = await runSpaceStep('Space init', spaceId,
+      () => (confirmInBackground ? initSpace(spaceId, { waitForVectorReady: false }) : initSpace(spaceId)),
+      { everyTime: true });
+    if (step.ok) { owedInit.delete(spaceId); landed.push(spaceId); } else failed.push(spaceId);
   }
 
-  // Every space is now either genuinely ready or building; say so, and let the background pass settle it.
-  mutateConfig(fresh => {
-    for (const spaceId of spaceIds) {
-      const live = fresh.spaces.find(s => s.id === spaceId);
-      if (live) live.indexStatus = 'building';
-    }
-  });
+  if (confirmInBackground && landed.length > 0) {
+    // Every space that landed is now either genuinely ready or building; say so, and let the background pass settle it.
+    mutateConfig(fresh => {
+      for (const spaceId of landed) {
+        const live = fresh.spaces.find(s => s.id === spaceId);
+        if (live) live.indexStatus = 'building';
+      }
+    });
+    log.info(`Initialised ${landed.length} space(s); confirming vector index readiness in the background.`);
+    void confirmSpaceIndexesInBackground(landed);
+  }
+  return { landed, failed };
+}
 
-  log.info(`Initialised ${spaceIds.length} space(s); confirming vector index readiness in the background.`);
-  void confirmSpaceIndexesInBackground(spaceIds);
+/**
+ * Initialise the spaces a config reload added — and every space an earlier reload or the boot could not — then re-arm the schedulers,
+ * and say, by throwing, which spaces still are not.
+ *
+ * This was a bare loop in the reload, so the first space that threw ended the reload before it re-armed the schedulers (a changed
+ * schedule was ignored), the spaces behind it were not initialised, and nothing remembered it: the reload that added the space had
+ * already merged it into the config, so the next reload did not find it new. Now each space is its own step, the re-arm runs whether or
+ * not every space landed, and a failed space stays owed until a reload initialises it.
+ *
+ * The throw names the spaces and nothing of the driver's (its text is in the log, once, from `runSpaceStep`): a route answers it as the
+ * reload's failure and a watcher records it as a failed reload, so a reload that did not apply everything never reports that it did.
+ */
+export async function initAddedSpaces({ added, rearm }: { added: readonly string[]; rearm: () => Promise<void> }): Promise<void> {
+  markSpacesOwedInit(added);
+  const { failed } = await initOwedSpaces({ confirmInBackground: false });
+  await rearm();
+  if (failed.length > 0) {
+    throw new Error(`Space init failed for ${peerList(failed)}. ${failed.length === 1 ? 'It is' : 'They are'} initialised again by the next reload.`);
+  }
 }
 
 /**

@@ -17,6 +17,7 @@ import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { scanSpace, pairContentHash, pairByAge } from '../brain/dupe-scanner.js';
+import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
@@ -316,14 +317,16 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
       .map(s => s.id);
     if (spaceFilter && targets.length === 0) { res.status(404).json({ error: `Space '${spaceFilter}' not found or not accessible` }); return; }
 
+    // A space that fails is named in `failedSpaces` and the rest are still scanned (`scanSpacesInRequest`); `scannedSpaces` counts
+    // the spaces that WERE scanned, and the other counts are over those.
+    const { results, failedSpaces } = await scanSpacesInRequest('Dupe scan', targets, (spaceId) => scanSpace(spaceId, { reset: true }));
     let scanned = 0;
     let pairs = 0;
-    for (const spaceId of targets) {
-      const r = await scanSpace(spaceId, { reset: true });
+    for (const r of results) {
       scanned += r.scanned;
       pairs += r.pairs;
     }
-    res.json({ scannedSpaces: targets.length, scanned, pairs });
+    res.json({ scannedSpaces: results.length, scanned, pairs, failedSpaces });
   } catch (err) {
     log.error(`POST /api/duplicates/scan: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });

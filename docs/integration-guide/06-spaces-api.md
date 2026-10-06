@@ -227,7 +227,7 @@ The rename atomically:
 | `404`  | Source space does not exist |
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
-| `500`  | Partial rename failure (collections may be in an inconsistent state) |
+| `500`  | Partial rename failure (collections may be in an inconsistent state). A step the **file system** refused (moving the space's files directory, writing the config) is answered by its code in Ythril's words — `the file system refused this step (EPERM); the reason is in the server log` — and never by the runtime's message, which holds the instance's absolute data path. The path is in the Server Log. |
 
 **A rename or delete that did not finish does not block the next one.** Each records its intent before it moves
 anything, and an interrupted one is finished forward (a delete is never undone). That used to happen only at

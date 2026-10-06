@@ -45,7 +45,9 @@ function initAllSpacesBody() {
   assert.ok(start >= 0, 'initAllSpaces should exist');
   const end = lines.findIndex((l, i) => i > start && l.replace(/\r$/, '') === '}');
   assert.ok(end > start, 'initAllSpaces should be closed at column 0');
-  return lines.slice(start, end + 1).join('\n');
+  // Boot's init walks the spaces through `initOwedSpaces` (one step per space, shared with the reload), so the boot path is
+  // both bodies: `initAllSpaces` marks every space owed and calls the walk with `confirmInBackground`.
+  return `${lines.slice(start, end + 1).join('\n')}\n${bodyOf(LIFECYCLE, 'initOwedSpaces', 'the boot\'s init walk')}`;
 }
 
 describe('startup does not block on index readiness', () => {

@@ -171,9 +171,11 @@ describe('the Data quality routes', () => {
     // iterates is built from `allowed`. A walk whose result is never used narrows nothing.
     const bound = /\b(?:const|let)\s+(\w+)\s*=/.exec(statementAround(handler, walk.at));
     assert.ok(bound, 'the walk is not bound to a name, so nothing downstream can depend on it');
-    const loops = [...handler.slice(0, scans[0].index).matchAll(/for\s*\(\s*const\s+\w+\s+of\s+(\w+)\s*\)/g)];
-    assert.ok(loops.length > 0, 'scanSpace is not called from a loop over a derived list');
-    const iterable = loops.at(-1)[1];
+    // The loop over the spaces is `scanSpacesInRequest`'s (`brain/scan-spaces-in-request.ts`, which a failing space does not
+    // end): the list the handler hands it is the one that must be built from the walk.
+    const request = /\bscanSpacesInRequest\s*\(\s*'[^']*'\s*,\s*(\w+)\s*,/.exec(handler);
+    assert.ok(request && request.index < scans[0].index, 'scanSpace is not called through scanSpacesInRequest over a derived list');
+    const iterable = request[1];
     const declared = new RegExp(`\\b(?:const|let)\\s+${iterable}\\s*=`).exec(handler);
     assert.ok(declared && declared.index > walk.at, `\`${iterable}\` is not declared after the walk`);
     assert.match(statementAround(handler, declared.index), new RegExp(`\\b${bound[1]}\\b`),

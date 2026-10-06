@@ -63,6 +63,12 @@ scanner and the contradiction scanner. It did not always: changing `dupeScanner.
 config and left the scanner running on the schedule it had at boot, and **enabling a scanner that was off did
 nothing at all** until the instance was restarted — while this endpoint answered `{ "ok": true }`.
 
+**A space that cannot be initialised does not stop the reload.** Each space the file added is initialised on its own: one that
+fails is named once in the Server Log (`Space init failed for space '<id>': …`), the spaces after it are initialised, and the
+schedulers are re-armed all the same. The reload then answers `500` naming the spaces still not initialised — in Ythril's words, the
+driver's text is in the log — because it did not apply everything, and **the next reload initialises them again**, though the file
+no longer lists them as new. The same holds at startup: one such space no longer leaves the spaces after it uninitialised.
+
 The interval-driven sweeps (auto-delete/TTL, candidate prune, tombstone prune, audit-change retention) are
 deliberately **not** restarted: they re-read the config on every run, so a change reaches them on the next tick.
 Restarting them would only reset the phase of a six-hour timer, pushing the next run up to six hours away each

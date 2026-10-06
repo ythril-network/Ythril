@@ -131,6 +131,8 @@ The server's security report (`GET /api/about/security`, and the boot log) shows
 full operator reference, including rollback and Kubernetes notes, is
 [Encryption at Rest](../integration-guide/02a-encryption-at-rest.md#uploaded-files).
 
+**A backup that is still running when the next one is due is not overlapped.** A scheduled backup that takes longer than its schedule's period makes the next run wait: that tick is skipped and the Server Log says so (`Scheduled backup: skipping this tick — the previous pass has been running for N s`). The next tick after the dump finishes runs as scheduled.
+
 > **The two retention settings default in opposite directions.** Local backups are kept forever until you set `keepLocal`; offsite sets are pruned to the 14 most recent unless you set `keepCount`. If you rely on the offsite copy as a long-term archive, set `keepCount` to the number of sets you actually want — otherwise older ones are removed on the next run.
 
 Each backup set at the offsite destination contains:
