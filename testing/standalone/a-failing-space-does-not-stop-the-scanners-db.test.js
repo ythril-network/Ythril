@@ -97,8 +97,11 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
     realFindOne = proto.findOne;
     proto.findOne = function recording(filter, ...rest) {
       const name = this.collectionName;
-      findOneSeen.set(name, (findOneSeen.get(name) ?? 0) + 1);
-      if (armed.has(name)) return Promise.reject(armed.get(name)());
+      // Only the reads made while a case has armed the collection: the fixture's own deletes and inserts read too.
+      if (armed.has(name)) {
+        findOneSeen.set(name, (findOneSeen.get(name) ?? 0) + 1);
+        return Promise.reject(armed.get(name)());
+      }
       return realFindOne.call(this, filter, ...rest);
     };
   });
@@ -206,7 +209,7 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
         const said1 = lines.filter(l => l.includes(`${scanner.step} failed for space '${space}' (fact)`));
         assert.equal(said1.length, 1, `one line naming the unit, not one per seed and not silence: ${lines.join(' | ')}`);
         assert.match(said1[0], /— retried next cycle$/);
-        assert.ok(findOneSeen.get(`${space}_facts`) >= SEEDS, 'a seed that failed ended the scan of the seeds behind it');
+        assert.equal(findOneSeen.get(`${space}_facts`), SEEDS, 'a seed that failed ended the scan of the seeds behind it');
         assert.equal(await cursorOf(scanner, space), SEEDS, 'a seed that fails every time would hold the cursor: it moves past it, as it always did');
         assert.equal(await cursorOf(scanner, OK), 3, 'the space behind it was scanned');
       });
