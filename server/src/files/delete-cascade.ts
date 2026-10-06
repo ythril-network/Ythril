@@ -28,19 +28,19 @@
  * **A file whose bytes are already gone and whose metadata remains** (removed out of band, or by a cascade a store
  * failure stopped) is COMPLETED here: tombstone, jobs, artifacts, metadata, webhook — rather than left for each door
  * to special-case. The REST door answered that case itself and wrote no tombstone, and the TTL sweep failed on it for
- * ever. **A path with neither bytes nor metadata** is a `NotFoundError`: `404` on REST, on `/api/delete_file` and in
- * MCP's error result — it used to reach MCP as the filesystem's `ENOENT`, carrying the absolute data path.
+ * ever. **A path with neither bytes nor a LIVE file record** is a `NotFoundError`: `404` on REST, on `/api/delete_file`
+ * and in MCP's error result — it used to reach MCP as the filesystem's `ENOENT`, carrying the absolute data path.
+ * "Live" is `hasLiveFileRecordExactlyAt` (Q-343): a record a soft delete flagged (`deletedAt`) or a derived one
+ * (`parentFileId`) is not a delete still owed, so a retry of a delete that completed is not found — it used to
+ * answer `204`, write a second tombstone, move the record's seq and fire a second `file.deleted`.
  */
 import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
-import { col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
-import type { FileMetaDoc } from '../config/types.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStored, isMissingPath } from './stored-bytes.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder,markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
 import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { listFilesRecursive } from './files.js';
@@ -53,10 +53,10 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
   const present = await bytesPresent(abs);
-  if (!present) {
-    const known = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-      .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: { _id: 1 } });
-    if (!known) throw new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
+  // No bytes: a LIVE file record at the path is a delete a failure stopped, owed to completion. A flagged one (a soft
+  // delete that finished) and a derived one (chunk, face) are not — the file is already gone, so the answer is not found.
+  if (!present && !(await hasLiveFileRecordExactlyAt(spaceId, filePath))) {
+    throw new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
   }
   // BEFORE the bytes go, pending; published once they have: a peer's manifest re-pushes a file it has no tombstone
   // for, and a peer told of a file still here deletes it and tells us back.

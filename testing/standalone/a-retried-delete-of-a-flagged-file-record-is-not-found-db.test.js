@@ -152,6 +152,15 @@ describe('a delete of a file record already gone answers 404 on every door', { s
         assert.equal(deletedEvents(), 0, 'a delete of a derived record fired file.deleted');
       });
 
+      it('a path with live records only UNDER it (no bytes, no record of its own) is 404: it is not a file', async () => {
+        await door.coll(S, 'files').insertOne({ _id: 'gone/inner.txt', spaceId: S, path: 'gone/inner.txt', sizeBytes: 1, tags: [], createdAt: T0, updatedAt: T0 });
+        const answer = await del(doorName, 'gone');
+        assert.equal(answer.status, 404, `${answer.status} ${JSON.stringify(answer.detail)}`);
+        const inner = await record('gone/inner.txt');
+        assert.ok(inner && !inner.deletedAt, 'a file delete of a folder-shaped path touched the records under it');
+        assert.deepEqual(await tombstones(), [], 'a file delete of a folder-shaped path wrote a tombstone');
+      });
+
       for (const soft of [true, false]) {
         it(`an interrupted first delete (bytes gone, record live) is completed by the retry, soft delete ${soft ? 'on' : 'off'}`, async () => {
           config.softDeleteFileMeta = soft;
