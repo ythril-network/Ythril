@@ -1899,346 +1899,69 @@ default); take it if your agents call them.
 
 ### Fixed
 
-#### The benchmark corpus and its extraction pipeline
-
-- **A tracker row said the graded benchmark harness exists. It was deleted eight weeks ago** (`B-2`).
-  The row opened *"it is a DECISION rather than a build: the harness exists (`benchmarks/harness/` —
-  dataset, ingest, retrieve, grade, report, pins)"*, and there is no such directory: `#1282` removed 56
-  files on the owner's instruction, because everything in them rested on one premise — that a
-  conversation is a pile of transcript chunks — under which **multi-hop scored 0.0% across all twelve**
-  strategies built on it, since those answers need two remarks from sessions weeks apart.
-
-- **The extraction prompt opened by describing one corpus, and five sections now contradicted it**
-  (`B-5`). Its first paragraph said *"a long conversation between people, recorded over many sessions
-  spread across months"* — written against LoCoMo and true of it. By the time the second corpus had
-  been read, the sections below covered a person and an assistant, a fortnight with six sessions in a
-  day, sessions handed over out of time order, and a turn that is an entire pasted document. The
-  opening paragraph is the first thing a model reads and it was telling it none of that applied.
-
-  It now says the shape is not to be assumed and names the four that have their own section, because a
-  rule written for one shape applied to another is the failure every one of those sections exists for.
-
-- **A history's sessions are handed to extraction in TIME order, which the release is not** (`B-5`).
-  Measured across the pinned corpus: **211 of 500 histories list their sessions out of chronological
-  order**, 3,382 backward steps, the largest a full day. LoCoMo: **0 of 10** — so nothing in the harness had
-  ever needed to think about it, and the array order was being read as time everywhere.
-
-  That is worse than untidy. The extraction prompt's supersession rule is *"when a LATER session makes an
-  earlier fact wrong"* and the parts protocol splits on *"a contiguous run of sessions"*; told to retire the
-  earlier claim, a model reading position would retire the wrong one in nearly half the corpus — asserting
-  the stale fact and marking the current one dead, which is the exact inverse of what supersession is for
-  and appears in no count.
-
-- **A day with more than one session no longer loses all but the last of them** (`B-5`). The writer named
-  each transcript `transcripts/<date>.md` and filed each claim by `statedOn`. That is correct for a
-  conversation with one session a day and silently destructive for one without — measured across both
-  pinned corpora, LoCoMo has **0 of 272** sessions sharing a date and LongMemEval has **18,565 of 25,112,
-  in 500 of 500 histories**. Six sessions on one day became one transcript, keeping the last, and all six
-  sessions' claims were filed under whichever survived. Nothing failed: the space held most of the
-  conversation, and a question about a lost session returned nothing, which reads as a retrieval result.
-
-  A session now carries an optional `key` and a claim an optional `session`, both falling back to the date
-  so none of the ten committed LoCoMo extractions changes. Two sessions resolving to one identity are
-  REFUSED by the validator, before the first record is written — a key that merely defaults to the date is
-  a fix a caller can forget, and forgetting it restores the overwrite exactly. The writer holds no second
-  copy of that check: `writeSpace` validates first, so a copy there could not be reached, and an
-  unreachable guard is a claim about safety rather than safety.
-
-- **A product rule was justified by a benchmark corpus, in the text every ingest reads.** The assistant-turn
-  rules shipped citing *"54 of the 896 evidence turns"* and *"842 of the 896"* in the extraction prompt —
-  and there is one ingester, so those sentences are read when somebody ingests a support history, a
-  transcript or an agent's own conversation. The rules were right on product grounds and said so nowhere.
-
-  **Tuning does not arrive as a decision, it arrives as a justification.** A rule that cites a corpus
-  teaches the next reader it exists for the benchmark, and the day the corpus changes somebody deletes it.
-  The rules now stand on what is true of any conversation; the measurements stay in the changelog and the
-  tracker, where a number about a corpus belongs.
-
-  A gate holds it: no product-facing instruction may name a pinned corpus, with the names derived from the
-  pin files rather than listed, because a corpus is added by dropping a `pin.json` in — which is exactly
-  the moment nobody edits a gate.
-
-#### One API, two doors: the 5.0 renames
-
-- **Another seventeen schema descriptions told a caller to use `query`, a tool 5.0 renamed `filter`** —
-  *"sortable by `query`"*, *"filterable by `query` on the `files` collection"*, *"as `recall` and `query`
-  report it"* — plus a dozen more naming `traverse` where they meant `graph_traverse`. All of them sit in
-  the text a caller reads while constructing a call.
-
-- **Twenty-four sentences still sent a caller to a tool 5.0 had removed.** A rename is the one change that
-  passes the compiler while leaving the writing wrong, and these were in the writing a caller reads while
-  constructing a call: `save_entity` told them to look an entity up with a tool that is gone, `space_meta`
-  told them to read the shape with `er_model` — which it had absorbed — ten chrono sentences named
-  `list_chrono` after `filter` replaced it, and the integrator's MCP page described what `merge_entities`
-  carries over the webhook. Each now names the live tool.
-
-  **Nobody would have reported any of them.** A caller sent to a tool that is not there does not file a bug
-  about the sentence; they conclude the capability is missing. So the fix comes with a gate that derives the
-  retired set from the previous major's last release tag rather than a list, and holds every tool
-  description, every guide page and every use-case example to naming only tools that exist — unless the
-  sentence is saying the old one is gone, which is the most useful sentence a migration note has.
-
-#### `filter` is the one read path
-
-- **`filter` finds one file by `path`, and forgives how you spell it.** *(files only, both doors.)* The
-  file-metadata list route always did — it ran the path through the same normalisation the store uses, so
-  a Windows-style spelling and a leading slash both find `notes/a.md`. `filter` did not, and
-  `filter: { path }` is a bare equality: a caller holding a path from their own filesystem got an empty
-  page and a `200`, which reads exactly like "no such file".
-
-  It is EXACT after the normalisation — not a prefix, not a substring. For those there is `search`, which
-  also spans the description.
-
-  **Sending both spellings is a `400` rather than one of them quietly winning.** `path` and
-  `filter: { path }` are two ways to ask one question and only the argument is normalised, so together
-  they would disagree — the same call `recall` made about its two filter grammars.
-
-- **`filter` returned an edge as two bare UUIDs, and a file with no job progress.** Two of the nine
-  per-collection list routes do work on their rows AFTER the query, and the one call meant to replace all
-  nine did neither: `GET .../edges` resolves both endpoints' display names — batched by endpoint KIND,
-  because an entity's name is `name`, a chrono entry's is `title` and a fact's is `fact` — and
-  `GET .../files` joins the embedding job's step progress for rows still in flight. `filter` now does
-  both, on the tool and on `POST /api/brain/filter`, through one module.
-
-  **A decoration is not a parameter, which is why nothing had reported this.** It appears in no body
-  allowlist, no `inputSchema` and no capability map, so the two doors were never compared. The retirement
-  of those routes would have taken both with them silently — an agent reading edges would have started
-  getting ids where a browser gets names, and the Files tab would have shown a stage indicator that never
-  resolves.
-
-  **`includeDiagnostics` was the third, and it was refused rather than ignored.** Four list routes honour
-  it; `filter` accepted it nowhere — a `400` on the route, an `additionalProperties` refusal on the tool.
-  It is accepted and APPLIED on both doors now, defaulting false on each. Admitting it without wiring the
-  projection would have been the worse half: a `200` with the flag doing nothing.
-
-- **An agent could not ask for "facts tagged release", and a browser could.** `filter` took a MongoDB
-  predicate and knew nothing else, while the nine per-collection list routes it is meant to replace have
-  always accepted five conveniences: `tag` (a case-insensitive SUBSTRING over the tag array, so `rel`
-  finds `release`), `type`, `description` (that column only), `properties` (a value scan) and `search`
-  (freetext over the collection's own text fields). Both doors were present and one accepted less, which
-  is the half of the parity rule that hides — and it hid here for as long as the capability map paired
-  the tool with the routes and called the pair answered.
-
-  All five are arguments of `filter` now, on the tool and on `POST /api/brain/filter`, in the same
-  change. `filter` itself is no longer REQUIRED: narrowing by tag alone used to mean sending
-  `filter: {}` to say "and no predicate", which is a shape you have to be told about.
-
-  **`links` refuses rather than ignoring.** It is a pair of ids, with no tags, type, description or text
-  of its own, so `search` there would have matched every link in the space — and a filter that matched
-  everything is indistinguishable from a filter that was ignored. Both doors answer with the same
-  refusal naming the collection. Same shape as the `links` sort crash fixed earlier this release: the
-  answer lives in the function that RECEIVES the collection, not at a call site.
-
-- **`filter` takes `entityName`, `fromName` and `toName`.** They were REST-only, so an agent could not ask
-  for “facts about Alice” by name — it had to filter entities, take the ids, then filter facts, and on a
-  proxy space the ids differ per member. They are a JOIN rather than a predicate, which is why no Mongo
-  filter a caller writes can express them. Refused on a collection they cannot mean rather than ignored.
-
-- **`filter` refused a bad `skip` and quietly ignored a bad `limit`.** One endpoint, one question — where
-  does this page start and how big is it — and two answers to a value it cannot use. `skip: "abc"` was a
-  `400`; `limit: "abc"`, `limit: -5` and `limit: 0` were accepted and silently answered with the default,
-  which is a page nobody asked for with a `200` on it.
-
-  Both refuse now, through one parser. The per-collection list routes had to coerce — a query string has
-  no types, so `?limit=abc` is indistinguishable from a caller who meant something. A JSON body does, so
-  there is no guess left to make, and this only became visible when the last list callers moved across.
-
-- **The filter nesting cap counted the SERVER's clauses against the CALLER's budget.** `MAX_FILTER_DEPTH`
-  bounds what a caller may ask for, and it was enforced at the last moment before the database — by which
-  point the caller's filter had the server's own composition wrapped around it.
-
-  That budget was already spent. A derived chrono `overdue` clause is itself depth 8 — an `$or` over an
-  `$expr` over a `$toDate` over an `$ifNull` — so `deriveStatus: true` plus ANY convenience reached 9 and
-  was refused with `Filter too deeply nested`, about a filter the caller had written one level deep. The
-  combination it refused is `?status=overdue&search=…`, an ordinary query on the list route being removed
-  in the same release: the capability would have gone quietly with it.
-
-- **`filter` matched a chrono `status` against the STORED value while the list route matched the DERIVED
-  one, so the same question returned different records.** `deriveStatus` made the displayed status
-  askable; this is the half that changes which rows come back. `status: "active"` returned a fortnight-old
-  episode through `filter` and not through the list route, and `status: "overdue"` found derived ones
-  through the route and only hand-typed ones through `filter`.
-
-  `deriveStatus: true` now means the whole call speaks in derived terms, predicate included — through the
-  same clause builder the route uses, extracted rather than copied, because `whenDuePasses` makes "what a
-  passed due moment means" a per-TYPE decision and a second copy would be a second answer to it. A
-  `status` nested inside `$or`/`$and` is REFUSED rather than rewritten: the derived clause is itself a
-  disjunction in two of the three cases, so folding it into a caller's would change what theirs means.
-
-- **The filter sanitiser silently turned a `Date` into `{}`.** Found by the above: it walks a filter and
-  rebuilds each object key by key, and `Object.entries(new Date())` is empty — so a date value came out
-  as an empty object, the comparison it was part of stopped meaning anything, and the query answered
-  `200` over the wrong set.
-
-- **BREAKING — `filter: {"type": "note"}` was accepted and silently DROPPED.** A bare scalar value was read
-  as a malformed operator object — the grammar where a value is spelled `{"eq": "note"}` — so the
-  translation produced no predicate and the recall answered `200` with the **unfiltered** ranking.
-  `{"type": "NOT-A-REAL-TYPE"}` returned every record. It is the defect the fleet integrator reported on
-  `/query` (*"it cost us a fabricated number"*), on the spelling the schema description now recommends, and
-  it went unbounded the moment the filter key allowlist was removed.
-
-  Which grammar a filter is in is now decided by the shape of its VALUES rather than by whether a `$`
-  appears anywhere: the operator-object form is every value being an object whose keys all come from the
-  eight names it has, and everything else — a scalar, an array, a `$`-operator, a sub-document — is
-  ordinary MongoDB. A filter that mixes the two is still refused rather than guessed at.
-
-- **`{"$where": {"eq": "x"}}` reached the database.** The operator-object path has no sanitizer between it
-  and Mongo, and the key check that had been incidentally blocking `$`-prefixed keys went with the field
-  allowlist. Anything `$`-prefixed now routes to the raw path where the sanitizer lives, with a floor under
-  it so a change to the classifier cannot reopen the hole. `__proto__`, `constructor` and `prototype` as
-  filter keys are refused on both grammars for a related reason: `out[key] = …` on a plain object would set
-  the prototype and add no key, so the constraint vanished from the filter and the query answered `200`
-  unfiltered.
-
-- **A raw Mongo filter was always exhaustive, including when the index could serve it.** `{"type": "note"}`
-  is an equality on a declared field and pushes into `$vectorSearch` natively; it was taking the full scan
-  on the note that *"a raw filter is never declarable"* — true of `$or`, false of the common case, and
-  newly expensive because raw Mongo is now the recommended grammar. `$or`, `$not`, `$exists`, `$regex` and
-  anything nested still go exhaustive as a whole: half a filter pushed natively would restrict the
-  candidate set before scoring and silently change which records `topK` is filled from.
-
-- **`entityName` could not see a record linked the recommended way.** A fact or chrono entry attached with
-  `linkEntities` — the form the integration guide leads with — was invisible to `?entityName=`, on both
-  doors, and the filter said so by answering `{facts: [], total: 0}`. Not an error: it reads as *there are
-  none*.
-
-  | written with | `entityIds` array | link record | found before |
-  |---|---|---|---|
-  | `entityIds: [id]` | populated | written | yes |
-  | `linkEntities: [id]` | **empty** | written | **no** |
-
-  Both shapes are read now, through one predicate. **Neither side is complete on its own** — the arrays
-  miss what `linkEntities` wrote, the link records miss what predates the upgrade — and both coexist on
-  every space written to since. If you have been filtering by entity name and getting short answers, this
-  is why.
-
-- **The `filter` MCP tool required a space while its route did not — one rule, two doors, the MCP one
-  narrower.** Introduced by the change that moved the search family off the space path: `POST
-  /api/brain/filter` took an optional space and read across spaces, and the tool kept demanding one. An
-  agent asking the obvious question — *what do I have about X, anywhere* — got a validation error through
-  one door and an answer through the other.
-
-#### Recall, expansion and the byte budget
-
-- **`POST /api/recall` answered to HALF the byte budget of `POST /api/brain/recall`.** 25 000 characters
-  against 50 000, same server, same capability, same transport — because the tool module picked MCP's
-  default itself, which was correct while MCP was the only door it had and stopped being correct when
-  `B-9` gave every tool an HTTP one. The lower default belongs to the TRANSPORT that received the call, not
-  to the module that answers it: `defaultBudgetChars(transport)` is the one place that is decided.
-
-- **The recall guide said `includeDiagnostics` hides the per-stage scores. It does not, deliberately, and
-  has not for some time.**
-
-  `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors — the reasoning
-  is in the code and it is sound: the number that DECIDED a result's position must not be the one a caller
-  cannot read, and three floats are not a cost worth a flag. The flag governs `matchedText`,
-  `embeddingModel` and `seq`, which is three fields rather than six.
-
-- **The guides now say which cross-encoder to pick, because the wrong one is a regression rather than a
-  no-op.** Same instance, same questions, same budget, only the model changed: no reranker 45.7% first
-  answers right, `bge-reranker-base` **27.4%**, `ms-marco-MiniLM-L-6-v2` **53.8%**.
-
-  A cross-encoder replaces the retrieval ordering, which is right when it knows better and catastrophic
-  when it does not. The failing model saturated — 0.9958 for the right passage against 0.9969 for a wrong
-  one — so a difference of 0.001 overturned a vector margin of 0.100, confidently, on every query. Nothing
-  in the API can say a reranker is making things worse: from outside, a worse ordering looks exactly like
-  an ordering. So the advice is to pick a model trained for question-to-passage relevance, and to measure
-  it against no reranker on your own corpus before leaving it on.
-
-#### Links, edges and entity merges
-
-- **A traversal answered per NODE while its response promised per EDGE, so a self-loop and a second edge
-  between one pair were silently dropped** (`Q-24`). Reported from outside against a live instance and
-  reproduced through both graph-reading doors. `truncated` stayed `false` throughout — which the product
-  documents as *"nothing was cut for size reasons"* — so the one signal a caller had for an incomplete
-  answer was actively saying the answer was complete.
-
-  **So the answer is the subgraph: the nodes reached, and every relationship among them.** `traverse`
-  already returned a flat `edges` list and its shape is unchanged — it now holds every edge among the
-  returned nodes rather than one per node, and an edge to a record that is not in `nodes` is still left out.
-  **`recall(traverse: n)`'s `_graph` entries carry `edges` (plural) in place of `edge`**, whole documents as
-  before, and a record that loops back on itself appears as its own neighbour. Both doors, same commit, plus
-  the two schema descriptions, the recall and graph API guides, and the sentence in the graph guide that
-  said the list held *"only the edges actually traversed"*.
-
-  **The endpoint ids go, and the answer gets SMALLER rather than larger.** Every edge in one `_graph` entry
-  joins the same pair — this node and the one it is nested under — so `from` and `to` were two UUIDs per
-  edge restating what `node._id` and `paths[0]` already say. They are replaced by `direction`:
-  `outbound`, `inbound`, or `self` for a record joined to itself. The far end is
-  `paths[0][paths[0].length - 2]`. The flat `edges` list on `POST /traverse` is unaffected — it has no entry
-  around it to state the ends — so this is one shape changing, not two.
-
-- **The recorder-start stamp could be skipped by an unrelated failure five statements earlier.** The
-  conversion pre-flight clamps its `since` to when this instance began recording, so an unstamped
-  instance reports the full retention window over a recorder it cannot vouch for — the defect `B-13`
-  was filed for, where a space of 270 chronos answered `count: 1`.
-
-- **A record's links and edges can be changed after it is created.** `linkEntities`, `linkFacts`,
-  `linkChronos`, `linkFiles` and `edges` are now accepted on the UPDATE verb of every door that accepts
-  them on create — `facts`, `chrono` and `entities`, on both surfaces — with the same meaning they have
-  there: links REPLACE per class (`[]` detaches, a kind you do not name is untouched) and edges UPSERT.
-
-  **Until now they were create-only, and on a converted space that left no way at all.** `entityIds` and
-  its siblings were the workaround, and `array-write-refusal` refuses those outright once a space has
-  been through the link conversion — so a record's relationships were settled the moment it was written,
-  by either door, and the gap grew as spaces converted. The only way round was to delete and re-create
-  the record, which costs its id and its history.
-
-  **`edges` rides in the same body**, so an edge can be drawn or adjusted through the record it hangs
-  off, on an update as well as a create.
-
-- **Merging two entities left every LINK RECORD pointing at the entity it had just deleted.** `merge.ts`
-  relinks edges, facts, chrono entries and file metadata by rewriting their `entityIds` arrays, and had
-  no reference to the `links` collection at all. On a space that has been through the link conversion —
-  which every space becomes at the boot after it is created — the links therefore survived the merge
-  unchanged, pointing at an id phase 5 then removed.
-
-  **A link is RE-KEYED rather than updated.** Its `_id` is derived from both endpoints, so moving the
-  `to` changes its identity — the same reason edges have a re-key path. The old id gets a tombstone, or
-  the next pull from a peer still holding it would re-create the dangling link and undo the repair.
-
-  **Deleting an entity was never exposed to this**: the delete guard reads link records and refuses with
-  a `409`. A merge deletes the absorbed entity directly rather than passing that guard, which is why it
-  was the one path that could do it.
-
-- **The link conversion DELETED links that existed only as records, and its own log said it removed
-  nothing.** The 5.0 migration walks each record and reconciles its links from the legacy ARRAY fields.
-  A link written through `linkEntities` before that spelling was fixed exists as a link RECORD with an
-  empty array beside it — so the desired set said "this record links to nothing" and the reconcile
-  deleted it. **With a tombstone**, so the loss replicated to every peer and a re-run could not repair
-  it.
-
-  The operator was told the opposite in the same breath: *"It is additive: nothing is removed, the
-  arrays keep being read until a space is marked."*
-
-  The conversion no longer deletes, and it reports the creation count `reconcileLinks` already returns
-  rather than measuring around it. **An ordinary write still deletes** — `linkEntities: []` means
-  detach, and that is the whole point of it — so the exception is pinned by a gate to the one module
-  entitled to it: a sync ingest that became additive would stop honouring a peer's detach and the link
-  would return on every pull.
-
-  **If you converted a space while holding record-only links, those links are gone and the tombstones
-  are with them.** They can be re-created; nothing else was touched.
-
-- **A test wrote the retired link arrays to the built-in `general` space, and failed whenever the stack
-  had restarted.** Every boot converts every space that is not yet marked, so `general` becomes
-  `completeLinkage` and then refuses `entityIds` / `memoryIds` — correctly. A rebuild wipes the config,
-  so the first-run boot converts nothing and CI never saw it; any restart that preserves the config did.
-  The failure named the link migration, which the test had nothing to do with.
-
-  A new gate refuses an array-link field aimed at a space a test did not create.
-
-- **A walk did not return the node it started from, so an isolated record and a bad id looked the same.**
-  `graph_traverse`'s own schema has always described *"`startId` itself at depth 0, so a walk that finds
-  nothing still comes back with one node rather than empty — an empty `nodes` means the id resolved to
-  nothing, which is a different answer from 'it has no neighbours'."* It never sent that node.
-
-  The start node counts against `limit`, because it is a node: `limit: 1` answers the start alone, which
-  is also the cheapest way to ask whether an id exists. **An id that resolves to nothing is still empty**,
-  which is the other half — the promise is only useful while a bad id is actually empty.
-
-  A walk started from a fact or chrono entry returns that record, with its `kind`, resolved exactly as a
-  neighbour is.
+- **Search:** `filter` finds one file by `path` and forgives its spelling (Windows separators, leading slash), exact
+  after normalisation. Sending both `path` and `filter: { path }` is a `400`. Files only, tool and REST alike.
+
+- **Search:** `filter` on edges now returns both endpoints' display names and on files the embedding job's step
+  progress, as the list routes do. `includeDiagnostics` is accepted and applied (default false), not refused.
+
+- **Search:** `filter` now takes `tag` (case-insensitive substring), `type`, `description`, `properties` and `search`,
+  on the tool and `POST /api/brain/filter`; `filter` itself is optional. `links` refuses them, naming the collection.
+
+- **Search:** `filter` takes `entityName`, `fromName` and `toName` on the MCP tool as on REST, refusing them on a
+  collection they cannot mean. `entityName` also finds records attached with `linkEntities` (answered `total: 0`).
+
+- **Search:** `filter` refuses an unusable `limit` (`abc`, `-5`, `0`) with a `400`, as it does `skip`; it used to
+  answer the default page with a `200`.
+
+- **Search:** `deriveStatus: true` plus any convenience (e.g. `?status=overdue&search=…`) is no longer refused with
+  `Filter too deeply nested`, and a chrono `status` matches the derived value, as on the list route.
+
+- **Search:** A `Date` value in a filter no longer turns into `{}` and answers `200` over the wrong set.
+
+- **Search:** `filter: {"type": "note"}` (a bare scalar) now filters on equality; it was silently dropped and recall
+  answered `200` unfiltered. Operator-object form is every value an object keyed by the eight operator names.
+
+- **Search:** An operator-object filter such as `{"$where": {"eq": "x"}}` reached MongoDB unsanitised; `$`-prefixed
+  keys now take the sanitised path. `__proto__`, `constructor`, `prototype` as filter keys are refused on both grammars.
+
+- **Search:** A raw MongoDB equality on a declared field (`{"type": "note"}`) is now served by the vector index, not a
+  full scan; `$or`, `$not`, `$exists`, `$regex` and nested filters still scan.
+
+- **Search:** MCP `filter` no longer requires `space`; omitted, it reads across spaces like `POST /api/brain/filter`.
+
+- **Search:** `POST /api/recall` now defaults to the same 50 000-character byte budget as `POST /api/brain/recall` (was
+  25 000); the lower default is MCP's alone.
+
+- **Records:** `graph_traverse` / `POST /traverse` return every edge among the returned nodes, including self-loops and
+  a second edge between one pair, where they held one per node.
+
+- **Records:** In `recall(traverse: n)` each `_graph` entry carries `edges` (plural) in place of `edge`, with
+  `direction` (`outbound`, `inbound`, `self`) instead of `from` / `to`; the far end is `paths[0]`'s second-to-last id.
+
+- **Records:** `graph_traverse` returns the start node at depth 0 (a fact or chrono entry too), counted against
+  `limit`; an id that resolves to nothing still gives an empty `nodes`.
+
+- **Records:** `linkEntities`, `linkFacts`, `linkChronos`, `linkFiles` and `edges` are now accepted on update of
+  `facts`, `chrono` and `entities`, on both surfaces: links replace per class (`[]` detaches), edges upsert.
+
+- **Records:** Merging two entities now re-keys the absorbed entity's link records to the survivor, tombstoning the
+  old id; they were left pointing at the deleted entity.
+
+- **Records:** The 5.0 link conversion no longer deletes links that exist only as records (written by `linkEntities`).
+  On a space already converted they are gone, and the deletion replicated to peers; re-create them.
+
+- **Records:** The link-conversion pre-flight no longer reports the full retention window on an instance without a
+  recorder-start stamp; it clamps `since` to when recording began.
+
+- **Help:** Tool and schema descriptions, guide pages and examples that named tools 5.0 removed or renamed (`query`,
+  `traverse`, `list_chrono`, `er_model`) now name the live tool (`filter`, `graph_traverse`, `space_meta`).
+
+- **Docs:** The recall guide now states that `lexicalScore`, `fusedScore` and `rerankScore` are always returned, and
+  `includeDiagnostics` governs only `matchedText`, `embeddingModel` and `seq`.
+
+- **Docs:** The guides say which reranker to pick: a cross-encoder replaces the retrieval order, and
+  `bge-reranker-base` cut first-answer accuracy to 27.4% from 45.7%. Use `ms-marco-MiniLM-L-6-v2`; measure first.
 
 - **`linkEntities` and its three siblings were accepted with a `201` and the link was reached by
   nothing** — on any space created since the instance last restarted.
