@@ -105,6 +105,11 @@ export const NUMERIC_SETTINGS: readonly NumericSetting[] = [
   { name: 'YTHRIL_WRITE_TIMEOUT_MS', min: 1_000, max: 600_000, what: 'how long one database operation inside a seq hold may take' },
   { name: 'YTHRIL_HOLD_DEADLINE_MS', min: 1_000, max: BATCH_FETCH_TIMEOUT_MS - 1_000,
     what: 'how long one seq hold may last, below the time a peer waits for a push answer' },
+  // `Q-358`: the bound on ONE database operation a housekeeping unit issues (a sweep, a claim walk, a drain). No deadline
+  // across the unit, so a ceiling of an hour is only the sanity limit of one operation; never 0 (no bound to the driver).
+  // Read at start (`db/write-bound.ts`): a changed value takes a restart.
+  { name: 'YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS', min: 1_000, max: 3_600_000,
+    what: 'how long one database operation of a background housekeeping job may take before it is ended' },
 ] as const;
 
 const BY_NAME = new Map(NUMERIC_SETTINGS.map(s => [s.name, s]));
