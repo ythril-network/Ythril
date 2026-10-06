@@ -83,7 +83,11 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
   describe('withStalledReads', () => {
     it('stalls a read for at least ms, lets the server end it at maxTimeMS (code 50), and puts everything back', async () => {
       assert.equal(typeof faults.withStalledReads, 'function', 'withStalledReads is not exported');
+      const started = Date.now();
       const out = await faults.withStalledReads(db, 'stall_view', 'stall_src', { ms: 600 }, async () => {
+        // The guard reads the view (a stall of 600 ms) before the callback is let in: a callback that arrives sooner ran
+        // without it, over a stall nothing had checked.
+        assert.ok(Date.now() - started >= 600, `the callback was entered after ${Date.now() - started} ms: the stall guard did not run first`);
         const slow = await timedRead('stall_view');
         assert.ok(!slow.error, `a plain read of the stalled view threw: ${slow.error?.message}`);
         assert.ok(slow.ms >= 600, `the read took ${slow.ms} ms, less than the 600 ms asked for`);
@@ -184,8 +188,34 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
       });
       try {
         const noop = { uri: testMongoUri(DB, { port: passthrough.port }), freeze() {}, thaw() {}, flow: () => ({ ...flow }) };
-        await assert.rejects(() => freezable.assertRelayFreezes(noop), /freeze/);
+        await assert.rejects(() => freezable.assertRelayFreezes(noop), /settled/);
       } finally { await passthrough.close(); }
+    });
+
+    /*
+     * One case per clause of the guard, each over a REAL freezable relay with exactly one thing wrong in the handle the
+     * guard is given - so a clause that is deleted turns exactly its case green-for-the-wrong-reason into red.
+     */
+    it('its guard names each way a freeze can fail to be one', async () => {
+      assert.equal(typeof freezable.assertRelayFreezes, 'function', 'assertRelayFreezes is not exported');
+      const real = await freezable.startFreezableRelay(DB);
+      try {
+        // Bytes still flowing to the server while frozen (the counters say so).
+        let reads = 0;
+        const leaks = { ...real, flow: () => { const f = real.flow(); reads += 1; return reads > 1 ? { ...f, toServer: f.toServer + 1 } : f; } };
+        await assert.rejects(() => freezable.assertRelayFreezes(leaks), /forwarded while frozen/);
+        real.thaw();
+        // The operation stalled, but its bytes never reached the relay: it stalled for another reason.
+        const unseen = { ...real, flow: () => ({ ...real.flow(), droppedToServer: 0 }) };
+        await assert.rejects(() => freezable.assertRelayFreezes(unseen), /never reached the relay/);
+        real.thaw();
+        // A thaw that does not thaw: the store does not answer again.
+        const stuck = { ...real, thaw() {} };
+        await assert.rejects(() => freezable.assertRelayFreezes(stuck, { recoveryMs: 1500 }), /did not answer again/);
+      } finally {
+        real.thaw();
+        await real.close();
+      }
     });
   });
 

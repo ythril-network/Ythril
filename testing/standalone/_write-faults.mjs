@@ -195,14 +195,110 @@ export async function withCounterCeiling(db, spaceId, ceiling, fn) {
  * `name` is a VIEW on `viewOn` while `fn` runs: every write to it fails at the command level, with no
  * per-document shape, and a read of it reads `viewOn`. Put back as an empty ordinary collection afterwards —
  * with whatever indexes `restore` recreates, since a dropped collection loses its own.
+ *
+ * `pipeline` is what the view is MADE of (default none: a plain view). Two uses, both measured against this store:
+ *
+ * - **A view whose READS fail** (P2): `[{ $addFields: { _x: { $toInt: '$field' } } }]` over a source document whose `field`
+ *   is a string. The stage sits on the SOURCE and the reader's filter on the view, so the read throws only when a source
+ *   document that matches the reader's filter reaches the stage; a filter that excludes the bad document reads clean.
+ *   Seed the bad document and make the reader's filter match it, or the fault you armed never fires.
+ * - **A view whose reads STALL** is `withStalledReads`, not a pipeline written here: only one stage form is interruptible by
+ *   `maxTimeMS` and that function holds it, with the guard that says so.
  */
-export async function withCollectionAsView(db, name, viewOn, fn, { restore } = {}) {
+export async function withCollectionAsView(db, name, viewOn, fn, { restore, pipeline = [] } = {}) {
   await db.collection(name).drop().catch(() => {});
-  await db.createCollection(name, { viewOn, pipeline: [] });
+  await db.createCollection(name, { viewOn, pipeline });
   try { return await fn(); } finally {
     await db.collection(name).drop();
     await db.createCollection(name);
     if (restore) await restore();
+  }
+}
+
+// ── A read that stalls ───────────────────────────────────────────────────────────────────────────────────────
+
+/** The sleep one source document costs a stalled view, ms: also the granularity at which `maxTimeMS` can interrupt it. */
+const STALL_STEP_MS = 200;
+/** What a source document's `_id` starts with when `withStalledReads` seeded it, so only those are removed afterwards. */
+const STALL_SEED_PREFIX = '__stall_seed_';
+
+/**
+ * The pipeline of a view whose read sleeps `stepMs` per source document and stays interruptible by the server's
+ * `maxTimeMS`. A `$match` over `$expr` / `$function`: the one form that is (code 50 at ~600 ms for 20 x 200 ms, probe
+ * p7d). NEVER `$addFields` + `$function`, which stalls identically and is not interruptible at all (p7b, p7c) - a bound
+ * "proved" on it would be proved on a read nothing can end.
+ */
+const stalledViewPipeline = (stepMs) => [{ $match: { $expr: { $function: { body: `function(){sleep(${stepMs});return true}`, args: [], lang: 'js' } } } }];
+
+/**
+ * Throw unless reading view `name` really stalls: (a) a raw read takes at least `ms`, and (b) a raw read with
+ * `maxTimeMS` well under `ms` ends with the server's own code 50 - before the stall would have ended on its own.
+ *
+ * ## What it prevents
+ *
+ * **A stall that stalled nothing.** An empty source, a view that is not there, `javascriptEnabled` off on a different
+ * store image, or a stall written in the one form `maxTimeMS` cannot interrupt: each leaves a bound test passing for
+ * reasons that have nothing to do with the bound. Both halves are asserted, because (a) alone passes the
+ * non-interruptible form and (b) alone passes a view that stalls too briefly to be the stall the test means.
+ *
+ * `maxTimeMS` is a third of `ms`, so with two or more interrupt points the server is past its limit while the stall
+ * still has time to run. No `timeoutMS` rides on the read: the driver drops a `maxTimeMS` that arrives beside one.
+ */
+export async function assertViewStalls(db, name, { ms }) {
+  assert.ok(Number.isFinite(ms) && ms > 0, `assertViewStalls: ms must be a positive number, got ${ms}`);
+  const coll = db.collection(name);
+  const started = Date.now();
+  await coll.find({}).toArray();
+  const tookMs = Date.now() - started;
+  if (tookMs < ms) {
+    throw new Error(`assertViewStalls: a raw read of ${name} took ${tookMs}ms, less than the ${ms}ms stall asked for. `
+      + 'The view stalls nothing (an empty source, a plain view, or server-side JavaScript off), so every bound test over it passes whatever the bound does.');
+  }
+  const limit = Math.max(1, Math.floor(ms / 3));
+  const cutStarted = Date.now();
+  let ended;
+  try { await coll.find({}, { maxTimeMS: limit }).toArray(); } catch (err) { ended = err; }
+  const cutMs = Date.now() - cutStarted;
+  if (ended?.code !== 50 || cutMs >= ms) {
+    throw new Error(`assertViewStalls: a read of ${name} with maxTimeMS ${limit} ${ended ? `ended after ${cutMs}ms with code ${ended.code} (${ended.name})` : `completed after ${cutMs}ms`}, `
+      + 'not with the server\'s own code 50 before the stall was over. The stall cannot be interrupted by maxTimeMS '
+      + '($addFields + $function is not; only $match over $expr / $function is), so a server-side bound cannot be shown on it.');
+  }
+}
+
+/**
+ * Reads of view `name` STALL for at least `ms` while `fn` runs, and the server's `maxTimeMS` can end them: a hung read on
+ * ONE space of a live store, the condition a housekeeping walk must survive (Q-358) - produced by the real server, so the
+ * error the code under test sees is whatever the driver raises for it.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {string} name  the view
+ * @param {string} viewOn  its source collection: this function seeds `ceil(ms / 200)` (at least 2) documents of its own
+ *   into it, `{ _id: '__stall_seed_<n>' }` and nothing else, and removes them afterwards. Every document of the source
+ *   costs a read one sleep, whatever the reader's filter: the stage sits on the source (see `withCollectionAsView`)
+ * @param {{ ms: number, restore?: () => Promise<void> }} o  `ms` is the least a read takes; `restore` as in
+ *   `withCollectionAsView` (indexes recreated on the ordinary collection put back)
+ * @param {() => Promise<any>} fn
+ *
+ * ## The guard a hand-written copy drops
+ *
+ * `assertViewStalls`, run before `fn` and THROWING (so `fn` never runs over a stall that stalls nothing). `ms` that is not
+ * a positive number throws first: 0 seeds nothing and would stall nothing.
+ */
+export async function withStalledReads(db, name, viewOn, { ms, restore } = {}, fn) {
+  assert.ok(Number.isFinite(ms) && ms > 0, `withStalledReads: ms must be a positive number, got ${ms} - a stall of nothing stalls nothing`);
+  const docs = Math.max(2, Math.ceil(ms / STALL_STEP_MS));
+  const stepMs = Math.ceil(ms / docs);
+  const seed = Array.from({ length: docs }, (_, i) => ({ _id: `${STALL_SEED_PREFIX}${i}` }));
+  const source = db.collection(viewOn);
+  await source.insertMany(seed);
+  try {
+    return await withCollectionAsView(db, name, viewOn, async () => {
+      await assertViewStalls(db, name, { ms });
+      return fn();
+    }, { restore, pipeline: stalledViewPipeline(stepMs) });
+  } finally {
+    await source.deleteMany({ _id: { $in: seed.map((d) => d._id) } });
   }
 }
 
@@ -266,6 +362,35 @@ export function parkWrites(proto) {
 
 // ── What the driver raises when a write fails, in each shape it has ──────────────────────────────────────────
 
+/** The server's code for a write concern that cannot be met by the members that exist (`UnsatisfiableWriteConcern`). */
+const UNSATISFIABLE_WRITE_CONCERN = 100;
+
+/**
+ * Return `err` when it is the driver's unsatisfiable-write-concern error (code 100) in the given shape, else THROW naming
+ * the replica-set precondition. `single` is a `MongoWriteConcernError` (`err.code`); `bulk` is a `MongoBulkWriteError`
+ * whose code lives on `err.result.getWriteConcernError()` - the wrapper's own `codeName` is empty (probe P5).
+ *
+ * ## What it prevents
+ *
+ * **A fixture that hands back a different error than the one it names.** `w: 5` is unsatisfiable (code 100, the write
+ * APPLIES and its concern cannot be met) on a replica set. A standalone mongod refuses the command itself instead: code 2,
+ * `BadValue`, "cannot use 'w' > 1 when a host is not replicated", nothing applied. Both are errors, so the "did not fail"
+ * guard passes both - and every test of "an unsatisfiable write concern answers like THIS" would then be a test of the
+ * refusal, passing or failing for the wrong reason on whichever store image the machine happens to run.
+ *
+ * @param {unknown} err
+ * @param {'single' | 'bulk'} shape
+ */
+export function assertUnsatisfiableWriteConcern(err, shape) {
+  const code = shape === 'bulk' ? err?.result?.getWriteConcernError?.()?.code : err?.code;
+  if (code !== UNSATISFIABLE_WRITE_CONCERN) {
+    throw new Error(`driverWriteFailures: the ${shape} w: 5 write failed with code ${code} (${err?.name ?? typeof err}: ${err?.message ?? err}), `
+      + `not ${UNSATISFIABLE_WRITE_CONCERN} (UnsatisfiableWriteConcern). The test store must be a REPLICA SET: a standalone mongod refuses `
+      + 'w > 1 outright (code 2, BadValue) and applies nothing, which is not the error this fixture stands for.');
+  }
+  return err;
+}
+
 /**
  * Every shape the installed driver gives a failed write, produced by the DRIVER against the real store — for a
  * classifier, or a door, tested against what it will actually be handed (bundle-30 I14, verify-drive-4 D1).
@@ -291,7 +416,9 @@ export function parkWrites(proto) {
  * **An operation that did not fail.** Each shape is produced by a call expected to throw; one that succeeded (a
  * store that is not a replica set accepts no `w: 5`, a relay that was not torn down lets the write through)
  * would leave `undefined` where an error belongs, and a classifier handed `undefined` answers like it was handed
- * nothing at all. So this THROWS when any expected failure did not happen, naming it.
+ * nothing at all. So this THROWS when any expected failure did not happen, naming it. **And an error of the wrong
+ * kind** is the same defect: the `w: 5` pair must be code 100 on a replica set, and a store that refuses `w > 1`
+ * outright (code 2) throws here naming that precondition (`assertUnsatisfiableWriteConcern`).
  *
  * @param {string} dbName  a database the caller already holds (its harness database); a collection in it is used
  * @returns {Promise<{ address: string, storeGone: { bulk: Error, single: Error }, writeConcern: { bulk: Error,
@@ -320,8 +447,10 @@ export async function driverWriteFailures(dbName) {
     const healthy = {
       duplicateKey: await failed('a duplicate _id in insertMany', () => coll.insertMany([{ _id: 'taken' }])),
       // More members than a single-node replica set has: the write applies, its concern cannot be met.
-      wcBulk: await failed('insertMany with w: 5', () => coll.insertMany([{ _id: 'wc-bulk' }], { writeConcern: { w: 5, wtimeoutMS: 200 } })),
-      wcSingle: await failed('insertOne with w: 5', () => coll.insertOne({ _id: 'wc-one' }, { writeConcern: { w: 5, wtimeoutMS: 200 } })),
+      wcBulk: assertUnsatisfiableWriteConcern(
+        await failed('insertMany with w: 5', () => coll.insertMany([{ _id: 'wc-bulk' }], { writeConcern: { w: 5, wtimeoutMS: 200 } })), 'bulk'),
+      wcSingle: assertUnsatisfiableWriteConcern(
+        await failed('insertOne with w: 5', () => coll.insertOne({ _id: 'wc-one' }, { writeConcern: { w: 5, wtimeoutMS: 200 } })), 'single'),
       // A driver-side refusal raised inside the bulk write's operation, so the driver wraps it like a transport one.
       expired: await failed('insertMany on an ended session', () => coll.insertMany([{ _id: 'late' }], { session: ended })),
     };
