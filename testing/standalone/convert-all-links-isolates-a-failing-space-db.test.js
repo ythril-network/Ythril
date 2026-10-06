@@ -74,7 +74,7 @@ const failingView = (name) =>
 
 const linkCount = (id) => mongo.getDb().collection(`${id}_links`).countDocuments({});
 const marked = (id) => loader.getConfig().spaces.find(s => s.id === id)?.completeLinkage === true;
-const said = (re) => lines.filter(l => re.test(l));
+const said = (re, from = lines) => from.filter(l => re.test(l));
 
 describe('the link conversion isolates a failing space and names it (real MongoDB)', { skip }, () => {
   before(async () => {
@@ -110,6 +110,7 @@ describe('the link conversion isolates a failing space and names it (real MongoD
     const SOFT = 'g19soft';
     const GOOD = 'g19good';
     let outcome;
+    let walkLines;
 
     before(async () => {
       const db = mongo.getDb();
@@ -122,6 +123,8 @@ describe('the link conversion isolates a failing space and names it (real MongoD
       faults.fail('bulkWrite', `${SOFT}_links`, new Error('g19 simulated: the link write was refused'), { times: 50 });
       lines.length = 0;
       outcome = await conversion.convertAllLinks();
+      // `beforeEach` empties `lines` before every case, and these were said by the walk above.
+      walkLines = [...lines];
     });
 
     it('returns the reports and the failed spaces, in the order the spaces were given', () => {
@@ -146,14 +149,14 @@ describe('the link conversion isolates a failing space and names it (real MongoD
     });
 
     it('each failure is said by the walk\'s reporter, the unreadable space once and each document of the other by name', () => {
-      const bad = said(new RegExp(`Link conversion failed for space '${BAD}'`));
+      const bad = said(new RegExp(`Link conversion failed for space '${BAD}'`), walkLines);
       assert.equal(bad.length, 1, `expected one line for the unreadable space, got:\n${bad.join('\n')}`);
       assert.match(bad[0], /retried next boot/);
       for (let i = 0; i < 3; i++) {
-        assert.equal(said(new RegExp(`Link conversion failed for space '${SOFT}' \\(facts/${SOFT}-fact-${i}\\)`)).length, 1,
-          `the document ${i} that did not reconcile is not named once:\n${lines.join('\n')}`);
+        assert.equal(said(new RegExp(`Link conversion failed for space '${SOFT}' \\(facts/${SOFT}-fact-${i}\\)`), walkLines).length, 1,
+          `the document ${i} that did not reconcile is not named once:\n${walkLines.join('\n')}`);
       }
-      assert.deepEqual(said(new RegExp(`Link conversion failed for space '${GOOD}'`)), []);
+      assert.deepEqual(said(new RegExp(`Link conversion failed for space '${GOOD}'`), walkLines), []);
     });
 
     it('convertLinksOnBoot says ONE ERROR line naming both, with their reasons and the remedy, and marks nothing it must not', async () => {

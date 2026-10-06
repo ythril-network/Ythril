@@ -52,9 +52,8 @@
  * function reads the space list and returns.
  */
 import { getConfig } from '../config/loader.js';
-import { convertSpaceLinks, linkConversionConcerns } from './links-conversion.js';
-import { updateSpace } from '../spaces/spaces.js';
-import { log } from '../util/log.js';
+import { convertAndMarkSpaces, linkConversionConcerns } from './links-conversion.js';
+import { log, peerList, peerText } from '../util/log.js';
 
 /**
  * Convert and mark every space that is not yet converted.
@@ -69,7 +68,7 @@ export async function convertLinksOnBoot(): Promise<void> {
     /*
      * The OUTER guard, and it exists because the inner one was not enough.
      *
-     * The per-space `try` below covers a walk that throws. It does not cover this function's own first
+     * The walk below isolates a space that throws. It does not cover this function's own first
      * line: `getConfig()` throws `Config not loaded` before any config exists, and on a first-run boot
      * that took the whole instance down — the module promising it could not take a boot down, broken by
      * the statement that reads the spaces it was going to convert. The call site is guarded too; this is
@@ -92,27 +91,21 @@ async function convertPendingSpaces(): Promise<void> {
     + 'nothing is removed, the arrays keep being read until a space is marked, and an interrupted run is '
     + 'fixed by the next boot.');
 
-  const failures: string[] = [];
-  for (const space of pending) {
-    try {
-      const report = await convertSpaceLinks(space.id);
-      if (report.failed > 0) {
-        failures.push(`${space.id} (${report.failed} document(s) failed to reconcile)`);
-        continue;
-      }
-      // Marked only on a clean walk, which is the same condition the script used. A marked space refuses
-      // array writes, so marking one whose walk was partial would start refusing writes for links that
-      // were never created.
-      updateSpace(space.id, { completeLinkage: true });
-      log.info(`Link conversion: ${space.id} converted — ${report.added} link(s) created, marked complete`);
-    } catch (err) {
-      failures.push(`${space.id} (${err instanceof Error ? err.message : String(err)})`);
-    }
+  /*
+   * The walk, the isolation of a space that fails, the bound on a hung one and the rule that a space is marked ONLY on a clean
+   * walk are `convertAndMarkSpaces`'s, shared with the operator's script: this function chooses the spaces and says the outcome.
+   * `failedSpaces` carries each space that is not converted WITH its reason, which is what the line below quotes.
+   */
+  const { reports, failedSpaces } = await convertAndMarkSpaces(pending);
+  const failedIds = new Set(failedSpaces.map(f => f.spaceId));
+  for (const report of reports) {
+    if (failedIds.has(report.spaceId)) continue;
+    log.info(`Link conversion: ${peerText(report.spaceId)} converted — ${report.added} link(s) created, marked complete`);
   }
 
-  if (failures.length > 0) {
+  if (failedSpaces.length > 0) {
     log.error(
-      `Link conversion FAILED for ${failures.length} space(s): ${failures.join('; ')}. `
+      `Link conversion FAILED for ${failedSpaces.length} space(s): ${peerList(failedSpaces.map(f => `${f.spaceId} (${f.reason})`), '; ')}. `
       + 'Those spaces are NOT marked `completeLinkage`, so they keep reading their arrays and keep '
       + 'accepting array writes — nothing is lost and nothing has changed for them. The next boot retries. '
       + 'Until they convert, the 5.0 removal of the array fields would lose their links.');

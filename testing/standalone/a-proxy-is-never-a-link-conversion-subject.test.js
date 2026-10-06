@@ -61,7 +61,7 @@ describe('every site that decides conversion work asks the one question', () => 
   ]
     .map(f => ({ ...f, code: stripComments(f.text) }))
     .filter(f => /getConfig\(\)\.spaces/.test(f.code)
-      && (/\b(convertSpaceLinks|previewSpaceLinks)\(/.test(f.code) || /\bunconverted\.push\(/.test(f.code)));
+      && (/\b(convertSpaceLinks|convertAndMarkSpaces|previewSpaceLinks)\(/.test(f.code) || /\bunconverted\.push\(/.test(f.code)));
 
   it('finds the sites (boot, full run, script, array clear)', () => {
     assert.ok(sites.length >= 4, `only ${sites.length} site(s): ${sites.map(s => s.file).join(', ')}`);
