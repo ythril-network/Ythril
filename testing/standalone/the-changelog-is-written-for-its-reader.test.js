@@ -60,6 +60,8 @@ const MAX_OPENING_CHARS = 300;
  * agree. The file was 445 058 bytes.
  */
 const SECTION_MAX_LINES = 250;
+/** A `**Subject:**` lead names a product area; longer than this, it is a sentence in bold. */
+const SUBJECT_MAX_CHARS = 39;
 const FILE_MAX_BYTES = 134000;
 
 /** The six kinds, in Keep-a-Changelog order with this project's `Internal` last. */
@@ -234,8 +236,9 @@ describe('the changelog is written for its reader', () => {
       for (const e of bullets) {
         const h = [...headingAt].filter(([n]) => n < e.n).map(([, t]) => t).pop() ?? null;
         if (h !== heading) { heading = h; order = []; closed.clear(); last = null; }
-        const m = /^(?:[-*]|\d+\.) \*\*([A-Z][A-Za-z0-9 /&,.'-]{0,38}):\*\*/.exec(e.text);
-        if (!m) { offenders.push({ section: s.name, n: e.n, why: `no \`**Subject:**\` lead: ${e.text.slice(0, 60)}…` }); continue; }
+        // A subject is a product area, so a short name: the length is the rule, checked beside the shape.
+        const m = /^(?:[-*]|\d+\.) \*\*([A-Z][A-Za-z0-9 /&,.'-]*):\*\*/.exec(e.text);
+        if (!m || m[1].length > SUBJECT_MAX_CHARS) { offenders.push({ section: s.name, n: e.n, why: `no \`**Subject:**\` lead: ${e.text.slice(0, 60)}…` }); continue; }
         const subject = m[1];
         if (subject !== last) {
           if (closed.has(subject)) offenders.push({ section: s.name, n: e.n, why: `"${subject}" returns after other subjects (${heading})` });
