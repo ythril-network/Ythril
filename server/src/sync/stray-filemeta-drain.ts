@@ -23,8 +23,11 @@
  * - **A record with no file row WAITS**: its bytes may still arrive and create the row (`recordArrivedFile`). It is
  *   discarded only when the file is known to be deleted (a file tombstone holds its path) or after waiting
  *   `WAIT_DAYS`. Waiting records are read after fresh ones, so they never use up a cycle's pages.
- * - **One space at a time, each in its own try.** A failure is logged naming the space and the step, at most every
- *   `REPORT_EVERY_MS` per space, and that space's collection is kept for the next cycle; the others carry on.
+ * - **One space's trouble is that space's** (`Q-274`, `Q-358`). The spaces are walked through `walkSpaces`
+ *   (`util/housekeeping-walk.ts`): a space's drain runs inside the housekeeping bound, so a database operation that hangs
+ *   ends at its figure (the `Db`-level listing and drop included), and a failure — or a bound that fired — is reported once
+ *   per window by the shared reporter, naming the space and the SUB-STEP it was in (list, read, write, settle, drop). That
+ *   space's collection is kept and retried next cycle; the others carry on. No throttle of this file's own.
  * - **The drop is audited** (`file.stray_filemeta.drain`), after it succeeds, because it cannot be undone.
  * - **Recurring, inside the TTL sweep cycle**, like `files/legacy-spill-sweep.ts`: cheap when there is nothing (one
  *   `listCollections` per space). The source is local state no transport carries, so draining it is not a
@@ -40,18 +43,20 @@ import { admitArrivals } from './arrival-shape.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
-import { log, logSafe } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
-import { withinWriteBound } from '../db/write-bound.js';
+import { log } from '../util/log.js';
+import { walkSpaces, type WalkContext } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 
 /** How long a record whose file has no row waits for the file's bytes before it is discarded. */
 const WAIT_DAYS = 30;
-/** How often one space's repeating failure is logged. */
-const REPORT_EVERY_MS = 10 * 60_000;
 /*
- * A stuck read or write must not hold the sweep cycle: every step below runs inside the one write bound
- * (`withinWriteBound`, `db/write-bound.ts`), which bounds each operation it issues — rather than a literal per call
- * restating how long that is (bundle-30 I6, C5). Each record's own fill is bounded by `fillFileMetaFromStray`.
+ * A stuck read or write must not hold the sweep cycle, and it does not: the drain walks the spaces through `walkSpaces`
+ * (`util/housekeeping-walk.ts`), which runs each space's callback inside the housekeeping bound
+ * (`withinHousekeepingBound`, `db/write-bound.ts`). Every database operation the callback issues ends at that figure — the
+ * reads, the writes, and the two calls on the `Db` itself (`listCollections`, `dropCollection`, which go through the same
+ * door), the drop included — rather than a literal per call restating how long that is. A step of its own is not wrapped
+ * again: a scope inside a scope only tightens (a hold's deadline of its own would cut a long page the walk lets run).
+ * Each record's own fill is bounded the same way, by being inside it (`fillFileMetaFromStray`).
  */
 
 type StrayDoc = { _id: string; keptSince?: string };
@@ -59,29 +64,33 @@ type StrayDoc = { _id: string; keptSince?: string };
 /** Who the drain's records came from, for the log lines. */
 const FROM = 'a 4.0-5.6.1 pull (stray filemeta collection)';
 
-/** One report per space per `REPORT_EVERY_MS` (`util/warn-once.ts`). */
-const failureReports = warnOnce<string>({ every: REPORT_EVERY_MS });
+/** The name a failure of this drain is reported, counted and quarantined under. */
+const STEP = declareStep('Stray file-metadata drain');
+/**
+ * The sub-steps of one space's drain, in order. A failure is reported under the one it happened in, so the line says which
+ * half of the work to look at; each is declared here, once, so its counter series starts at 0 like the step's.
+ */
+const SUB = {
+  list: declareStep(`${STEP} (list)`),
+  read: declareStep(`${STEP} (read)`),
+  write: declareStep(`${STEP} (write)`),
+  settle: declareStep(`${STEP} (settle)`),
+  drop: declareStep(`${STEP} (drop)`),
+} as const;
 
 /** Drain every space's stray file-metadata collection. Returns the spaces whose collection was dropped. */
 export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pageSize?: number; maxPages?: number } = {}): Promise<string[]> {
-  const dropped: string[] = [];
-  // Proxy spaces own no collections; `concreteSpaces` is empty before setup.
-  for (const space of concreteSpaces()) {
-    const step = { name: 'list' };
-    try {
-      if (await drainSpace(space.id, pageSize, maxPages, step)) dropped.push(space.id);
-    } catch (err) {
-      failureReports(space.id, () => log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
-        + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`));
-    }
-  }
-  return dropped;
+  // Proxy spaces own no collections; `concreteSpaces` is empty before setup. A space whose drain throws is reported once, by
+  // name and sub-step, with its collection kept for the next cycle; the walk goes on to the next.
+  const walk = await walkSpaces(STEP, concreteSpaces(), (space, ctx) => drainSpace(space.id, pageSize, maxPages, ctx));
+  return walk.outcomes.filter(o => o.value === true).map(o => o.spaceId);
 }
 
 /** One space: recover up to `maxPages` pages, and drop the collection when it is empty. Returns whether it dropped. */
-async function drainSpace(spaceId: string, pageSize: number, maxPages: number, step: { name: string }): Promise<boolean> {
+async function drainSpace(spaceId: string, pageSize: number, maxPages: number, ctx: WalkContext): Promise<boolean> {
   // The name the 4.0-5.6.1 pull built (`${spaceId}_${payloadKey}`); not a collection this version routes.
   const collName = `${spaceId}_filemeta`;
+  ctx.step = SUB.list;
   if ((await getDb().listCollections({ name: collName }, { nameOnly: true }).toArray()).length === 0) return false;
   const startedAt = Date.now();
   const stray = col<StrayDoc>(collName);
@@ -94,17 +103,16 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
   for (const waiting of [false, true]) {
     let after: string | undefined;
     while (pages < maxPages) {
-      step.name = 'read';
+      ctx.step = SUB.read;
       const filter = {
         keptSince: waiting ? { $lt: cycleStart } : { $exists: false },
         ...(after === undefined ? {} : { _id: { $gt: after } }),
       };
-      const page = await withinWriteBound(() => stray.find(asFilter<StrayDoc>(filter as never))
-        .sort({ _id: 1 }).limit(pageSize).toArray());
+      const page = await stray.find(asFilter<StrayDoc>(filter as never)).sort({ _id: 1 }).limit(pageSize).toArray();
       if (page.length === 0) break;
       pages++;
       after = page[page.length - 1]!._id;
-      step.name = 'write';
+      ctx.step = SUB.write;
       // The one validation step every arrival passes (`Q-225`), over the record's WIRE keys: an old pull stored the
       // peer's row whole, and what it held besides the wire keys was never the publisher's to give. A record its
       // schema refuses — a `parentFileId` of any type, a field of the wrong type — is answered, and never filled. As a
@@ -116,25 +124,22 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
       n.complete += out.complete.length;
       n.newer += out.newerLocal.length;
       n.refused += refused.length + out.refused.length + out.derived.length + out.duplicates.length;
-      step.name = 'settle';
-      const { discard, wait } = await withinWriteBound(async () => {
-        const settled = await settleUnstored(spaceId, page, out.unstored);
-        const unstored = new Set(out.unstored);
-        const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...settled.discard];
-        if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }));
-        if (settled.wait.length > 0) {
-          await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: settled.wait }, keptSince: { $exists: false } } as never),
-            { $set: { keptSince: new Date().toISOString() } });
-        }
-        return settled;
-      });
-      n.deleted += discard.length;
-      n.waiting += wait.length;
+      ctx.step = SUB.settle;
+      const settled = await settleUnstored(spaceId, page, out.unstored);
+      const unstored = new Set(out.unstored);
+      const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...settled.discard];
+      if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }));
+      if (settled.wait.length > 0) {
+        await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: settled.wait }, keptSince: { $exists: false } } as never),
+          { $set: { keptSince: new Date().toISOString() } });
+      }
+      n.deleted += settled.discard.length;
+      n.waiting += settled.wait.length;
     }
   }
 
-  step.name = 'drop';
-  const empty = (await withinWriteBound(() => stray.countDocuments({}))) === 0;
+  ctx.step = SUB.drop;
+  const empty = (await stray.countDocuments({})) === 0;
   if (empty) {
     await getDb().dropCollection(collName);
     logInternalAudit({ method: 'SWEEP', path: 'internal:stray-filemeta-drain', spaceId, operation: STRAY_FILEMETA_DRAIN_OPERATION, startedAt });
@@ -150,7 +155,7 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
 /**
  * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone holds the
  * path (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
- * Read inside the caller's bound (`withinWriteBound`).
+ * Read inside the walk's bound (`withinHousekeepingBound`).
  */
 async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: string[]): Promise<{ discard: string[]; wait: string[] }> {
   if (unstored.length === 0) return { discard: [], wait: [] };
