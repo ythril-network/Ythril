@@ -2167,347 +2167,189 @@ transition.
 
 ## [5.5.2] — 2026-09-27
 
-**A patch: recall ranks reranked results first again, a proxy recall reranks once, and a proxy is no longer
-reported unconverted at every start.** Upgrade every instance with a reranker configured, and every instance
-that holds a proxy space made before 5.0. Nothing to change in configuration or calls.
+**A patch for instances with a reranker or a proxy space made before 5.0: reranked recall results rank first
+again.**
 
 ### Fixed
 
-**Recall**
-
-- **A reranked result always ranks above one the reranker did not score** (`Q-79`). The cross-encoder scores
-  at most 100 candidates, and an unfiltered recall gathers more; the rest kept only their vector or fused score,
-  which sits on a higher scale than a cross-encoder's relevance, so they took the top of the answer. The recall
-  came back in vector order with no `degraded` and every batch answered 200. The 100 scored are now the
-  `minPerType` floor results first, then the pool's best by its fused order (by vector similarity across several
-  spaces), and the rest follow every scored result. Floor results are also fused with the pool now, so they
-  are ranked on the same scale as the results around them. *Docs changed:* `docs/integration-guide/04a-recall-api.md`,
-  `05b-media-embedding.md`, `02-hosting.md`; `docs/userguide/02-brain.md`.
-- **A recall on a proxy or on named spaces reranks once** (`Q-81`). It merged its members by hand and sent one
-  rerank request per member, the fan-out already fixed for a recall naming no space; it now takes the same path,
-  with one query embedding and one rerank pass.
-
-**Links**
-
-- **A proxy space is no longer reported unconverted on every start** (`Q-78`). The link conversion never walks a
-  proxy, because it holds no records, so a proxy made before 5.0 never carries the marker, and the array clean-up
-  that runs after the conversion listed it as still holding its links as arrays. Link reads through a proxy were
-  not affected: they are answered by its members. The warning and the link-read refusal now say that each start
-  retries the conversion, since `npm run links:convert` is not in the image; the script refuses a proxy by name.
-  *Docs changed:* `docs/integration-guide/04g-links-api.md`, `06-spaces-api.md`; `docs/userguide/02-brain.md`.
+- **Search:** A reranked result now always ranks above one the reranker did not score. An unfiltered `recall` that
+  gathered more than 100 candidates used to return the unscored rest on top, in vector order, with no `degraded`.
+- **Search:** `recall` on a proxy or on named spaces now reranks once, with one query embedding, not once per member.
+- **Spaces:** A proxy space made before 5.0 is no longer reported unconverted at every start; link reads were never
+  affected. The warning says each start retries the conversion (`npm run links:convert` is not in the image).
 
 ## [5.5.1] — 2026-09-27
 
-**A patch: a network no longer deletes a member's space.** Upgrade every instance that is a member of a network,
-since the change applies on each member when a deletion vote passes.
+**A patch: a network no longer deletes a member's space, so upgrade every instance that is a member of a network.**
 
 ### Fixed
 
-- **A network never deletes a member's space** (`Q-70`). Deleting a networked space opens a vote as before, but
-  when it passes the space now leaves the network on every member instead of being deleted there: each member
-  keeps its copy and data as a local space and can add it to a network again. Only the instance that asked for the
-  delete removes its own copy. On a club or pub/sub network one yes used to delete the space on every member.
-  Emptying a space by vote is unchanged. *Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`,
-  `docs/integration-guide/08-networks-api.md`, `docs/userguide/04-settings.md`.
+- **Networks:** A passed deletion vote now makes a networked space leave the network on every member, each keeping its
+  copy and data as a local space; only the requester removes its own copy. Emptying a space by vote is unchanged.
 
 ## [5.5.0] — 2026-09-27
 
 **Files sync between members again, a file edited on one side is no longer a conflict, and a sync can carry a
-change note to the members below.** It also carries everything in 5.4.2 and 5.4.3.
+change note to the members below, and it includes everything in 5.4.2 and 5.4.3.**
 
-| what changed | what to do |
+| Changes on upgrade | Action |
 |---|---|
-| `DELETE /api/conflicts/:id` and the Dismiss button are gone | resolve with `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space) |
-| idle connections stay open 95 s | a proxy that holds idle upstream connections longer than 95 s should be lowered below it (*Hosting → TLS Termination*) |
-
-*Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`, and in `docs/integration-guide/`
-`02-hosting`, `06a-schema-api`, `08-networks-api`, `09-sync-api`, `10-mfa-and-conflicts`, `13-audit-log-api`,
-`14-duplicates-and-webhooks`, `15-about-and-embedding`, `16-mcp`; in `docs/userguide/` `03-files-and-schemas`
-and `04-settings`.
+| `DELETE /api/conflicts/:id` and the Dismiss button are removed; a call answers `404` | Resolve with `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space) |
+| Idle connections stay open 95 s (was Node's 5 s) | Lower a proxy's idle upstream timeout below 95 s (*Hosting → TLS Termination*) |
+| `GET /api/conflicts?spaceId=` now narrows to that space and answers `403` for one the token cannot reach | Nothing |
 
 ### Added
 
-- **A sync can carry a change note to the members below** (`F-42`). A pub/sub publisher or a braintree node
-  can attach a note (markdown, and the spaces it concerns) to a sync, on every door: the `{ note, spaces }` body
-  of `POST /api/networks/:id/sync`, `note` and `spaces` on MCP `network_sync` (which also gains `networkId`), and
-  **Sync with this note** on the network card. The note is queued per member and delivered in that member's next
-  exchange, so a member that is offline gets it when it is back. A note that cannot travel — no member below this
-  instance, or a network type that syncs both ways — is refused with `409` and the sync does not run. The network
-  drafts its own for a schema update it carries and for a space added to it. Each member lists what arrived
-  (`GET /api/networks/:id/change-notes`, MCP `network_change_notes`, the card's **Change notes**), and each arrival
-  fires the new webhook event `change_note.received`.
+- **Networks:** A pub/sub publisher or braintree node can attach a markdown change note to a sync: `{ note, spaces }`
+  on `POST /api/networks/:id/sync`, `note`/`spaces`/`networkId` on MCP `network_sync`, **Sync with this note** on the card.
+- **Networks:** Notes are queued per member and delivered in its next exchange; one that cannot travel (no member below,
+  or a two-way type) is refused `409`. A network also drafts one for a schema update and for an added space.
+- **Networks:** Members list notes with `GET /api/networks/:id/change-notes`, MCP `network_change_notes` or the card's
+  **Change notes**; each arrival fires the new webhook event `change_note.received`.
 
 ### Removed
 
-- **Dismiss on a file conflict, and `DELETE /api/conflicts/:id` behind it.** It closed the conflict and left the
-  incoming copy in the space under its conflict name, where it replicated to every member: a keep-both without the
-  rename, shown as if it deferred the choice. A call now answers `404` and leaves the conflict open; resolve with
-  `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space).
+- **Files:** The Dismiss action on a file conflict and `DELETE /api/conflicts/:id` are gone: it left the incoming copy
+  replicating under its conflict name, a keep-both without the rename. Use `POST /api/conflicts/:id/resolve`.
 
 ### Fixed
 
-**File sync**
-
-- **A file changed on one side only is no longer a conflict** (`Q-66`). Each end now remembers, per file and per
-  peer, the version both last held. A copy nobody touched locally takes the other side's edit; our own edit is
-  carried by the push instead of raising a conflict on our next pull; only edits on both sides still make a
-  conflict, and then nothing is overwritten (the push no longer overwrites a peer's edit because its file is
-  older). Conflict copies and each instance's `schemas/` snapshots no longer replicate, so a schema change stops
+- **Files:** A file changed on one side only is no longer a conflict: each end remembers per file and peer the version
+  both last held, so the edit is carried. Only edits on both sides conflict, and nothing is overwritten.
+- **Files:** Conflict copies and each instance's `schemas/` snapshots no longer replicate, so a schema change stops
   raising a conflict on every member.
-- **The files of a space renamed on both ends of a network sync again** (`Q-68`). A rename keeps the network's id
-  for the space and maps it to the new local one, and the sync routes translate that id, but a file travels through
-  the plain file routes, which do not: every file push and pull was refused `403` while the space's records synced.
-  The peer's file manifest now names its local id for the space (`spaceId` in `GET /api/sync/manifest`), and the
-  transfers use it. A peer on an older build is addressed as before.
-- **A file's description and tags replicate** (`Q-69`). The push sent a file's whole stored metadata, including
-  what only the local instance derives (size, hash, vector, excerpt), and the receiver's strict schema refused
-  every one, so a file's bytes arrived on a peer and its description and tags never did. Both ends now send and
-  write only the fields the sync schema declares, so the receiver also no longer takes the sender's size and hash.
-- **`GET /api/conflicts?spaceId=` narrows to that space**, as documented, and answers `403` for a space the token
-  cannot reach. It read the parameter nowhere and returned every accessible space's conflicts.
-- **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
-  stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
-  and a gate now holds every `var()` the client reads to a defined token.
-
-**Networks and schemas**
-
-- **A push the receiver refused is no longer reported as pushed** (`Q-59`). `batch-upsert` answers a `rejected`
-  count per family, covering every record it neither stored nor already held: schema-invalid, an implausible
-  `seq`, a fork chain at its cap, or a chrono type the space does not declare. The sender subtracts it and records
-  the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
-  `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
-  advances, as before. Links are now counted in the cycle's totals too.
-- **A space added to a network reaches its members with its schema** (`Q-60`). A schema-library reference now
-  travels resolved, where it was sent as a name the member's library did not have and the member refused the
-  whole schema. A type whose reference neither side can resolve is left out on its own. A space added to a club,
-  closed or democratic network carries its schema on the vote. And the proposer of a club schema change now
-  updates the network's layer as well as its own definitions: before, the stale layer outranked its own edit, so
-  the one instance that made the change could not see it.
-- **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
-  applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
-  every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
-  sentence, on REST and MCP alike, and the members are sent a change note naming the kept types. Removing a type
-  from a network stays impossible on purpose: it could break a member's customisation, its reuse of the type, or
-  another network the space is in.
-
-**Server**
-
-- **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
-  Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
-  work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
-  nothing was logged. Idle connections now stay open for 95 seconds, above the common proxy defaults; see
-  *Hosting → TLS Termination*.
-- **A space update that carries no schema no longer logs "Suppression sweep failed"** (`Q-74`). Changing only a
-  setting such as the text level ran the embedding-suppression sweep without a schema to read, so it failed and
-  warned on every such write. It now runs only when the write carried one.
-
-**Embedding in a frame**
-
-- **`?embedded=1` survives a sign-in inside the frame.** The flag was read from the URL only, so after the identity
-  provider's redirect, a new document whose query is `code` and `state`, the topbar and Sign out came back in a
-  framed brain. It is now kept for the tab in `sessionStorage`; another tab is unaffected and `?embedded=0` clears it.
-
+- **Files:** The files of a space renamed on both ends of a network sync again; every file push and pull was refused
+  `403`. `GET /api/sync/manifest` now names the peer's local `spaceId`, and older peers are addressed as before.
+- **Files:** A file's description and tags now replicate; both ends send and write only the fields the sync schema
+  declares, so the receiver no longer takes the sender's size and hash.
+- **Files:** `GET /api/conflicts?spaceId=` narrows to that space, as documented; it used to return every accessible
+  space's conflicts.
+- **Sync:** A push the receiver refused no longer reads as pushed: `batch-upsert` answers a `rejected` count per family
+  and the sender records the cycle as **partial**, naming family and count, not `success`. Links count in totals too.
+- **Networks:** A space added to a network reaches members with its schema: library references travel resolved (members
+  used to refuse the whole schema), and a club, closed or democratic network carries it on the vote.
+- **Networks:** The proposer of a club schema change now updates the network's layer too, so it sees its own edit.
+- **Schemas:** A schema replace on a networked space now answers `appliedAsMerge`, `keptTypes` and a sentence on REST
+  and MCP alike, as the round is a merge and removes no type; members get a change note naming the kept types.
+- **Server:** A request sent on a pooled connection after the server was busy is no longer dropped with "other side
+  closed"; idle connections now stay open 95 seconds, above common proxy defaults.
+- **Server:** A space update that carries no schema no longer logs "Suppression sweep failed".
+- **UI:** `?embedded=1` survives a sign-in inside a frame (kept per tab in `sessionStorage`; `?embedded=0` clears it).
+- **UI:** The conflict page's action selects look editable on every theme; five other undefined theme tokens are fixed.
 
 ## [5.4.3] — 2026-09-27
 
-**A security patch for democratic networks: a round needs a real majority of the members.** Upgrade every
-instance that is a member of a democratic network.
+**A security patch for democratic networks: a round needs a real majority of the members, so upgrade every
+instance that is a member of one.**
 
-### Fixed
+| Changes on upgrade | Action |
+|---|---|
+| A democratic round passes only on more than half of all members (was half of the others) | Nothing; make sure enough members vote |
 
-- **A democratic network needs a majority of its members, not half** (`Q-77`, security). The yes votes were
-  compared against half of the OTHER members, so on an even-sized network exactly half passed a round, and on two
-  members the proposer's own yes decided for both. A round now passes on more than half of all members, and only a
-  member's yes counts. No documentation changed: the docs always said majority.
+### Security
+
+- **Networks:** A democratic network no longer passes a round on exactly half; on two members the proposer's own yes
+  used to decide for both. A round needs more than half of all members.
 
 ## [5.4.2] — 2026-09-27
 
 **A security patch for closed networks: no member's space can be deleted, wiped or changed without that member's
-own vote.** Upgrade every instance that is a member of a closed or braintree network.
+own vote, so upgrade every instance that is a member of a closed or braintree network.**
 
-### Fixed
-
-- **A closed network no longer passes a round on a member that has not voted** (`Q-76`, security). A member counted
-  only the OTHER members' yeses, so a round it learned from a peer passed as soon as they had all voted. On two
-  members, the proposer alone decided for the other, which then deleted, wiped or changed its own space without
-  having voted. Every member's own yes is now required, as the docs always said; braintree's every-member fallback
-  had the same gap and is fixed with it. *Docs changed:* `docs/network-types.md` (Closed network),
-  `docs/sync-protocol.md` (round conclusion).
-
-## [5.4.1] — 2026-09-26
-
-**Subscribing a webhook to fact events works from Settings → Webhooks again.** Since 5.0 the page offered event
-names the server no longer accepts, so any subscription that ticked a fact event was refused.
-
-| | |
+| Changes on upgrade | Action |
 |---|---|
-| fixed | the Webhooks page offers `fact.created`, `fact.updated` and `fact.deleted`, the names the server emits |
-| what to do | upgrade; a subscription that failed to save from the page can be saved again. Subscriptions made through the API were never affected |
-
-**Documents that changed**: none.
-
-### Fixed
-
-- **Subscribing a webhook to fact events works from Settings → Webhooks again** (`Q-65`). Since 5.0 renamed the
-  knowledge type `memory` to `fact`, the server's events are `fact.created`, `fact.updated` and `fact.deleted`, but
-  the page went on offering `memory.created`, `memory.updated` and `memory.deleted`, and the server refused any
-  subscription that ticked one with "Invalid event type". The page now offers the server's names. A gate reads both
-  lists, so an event added on one side and not the other fails the build. Subscriptions made through the API were not
-  affected.
-
-## [5.4.0] — 2026-09-26
-
-**A network now asks before it adds a space, and a pub/sub can be joined by pasting its key.** A space a publisher,
-a tree parent or a passed vote adds is created here only if the token that joined the network could have joined
-it; everything else waits on the network card for you to accept or dismiss. A config reload no longer drops a
-space the file forgot, and a published pub/sub key is enough to join, with no step on the publisher.
-
-| | |
-|---|---|
-| added | **Join network** takes a publisher URL and its published key; nobody on the publisher has to admit you |
-| security | spaces a network proposes wait unless the joining token could have joined them; a same-named local space always waits; a reload keeps a space it no longer lists unless `removeSpaces` names it |
-| what changes on upgrade | networks joined or created before 5.4.0 have no recorded joining token, so every space they announce from now on waits for an accept on the network card |
-| what to do | upgrade; then check each network card for **Announced, waiting for you** after its next sync. If you remove spaces by editing `config.json`, list them in `removeSpaces` |
-
-**Documents that changed**, for anyone who keeps a copy: `docs/integration-guide/08-networks-api.md`, `docs/integration-guide/09-sync-api.md`, `docs/integration-guide/12-admin-api.md`, `docs/integration-guide/13-audit-log-api.md`, `docs/integration-guide/16-mcp.md`, `docs/network-types.md`, `docs/sync-protocol.md`, `docs/userguide/04-settings.md`.
-
-### Added
-
-- **Join a pub/sub network by pasting its published key** (`F-41`). The docs always said a pub/sub key is
-  reusable so it can be published, and that a subscriber's join is accepted without a vote. But the only route that
-  took the key demanded an admin token on the publisher, so a stranger holding the key could not use it. Now the
-  publisher answers `POST /api/invite/redeem` with a handshake for the key alone. The joiner's
-  `POST /api/networks/join-by-key` (MCP `network_join_by_key`) runs the whole join from the publisher's URL and the
-  key, and the **Join network** dialog takes both. Redeem answers only for a pub/sub network the instance
-  publishes, and is bounded because anyone may call it: rate-limited, at most 25 open handshakes per network and 3
-  per caller, each living 10 minutes. Regenerating the key closes every handshake it already opened, and looking a
-  handshake up costs one password-hash comparison however many are open.
+| A closed or braintree round passes only with every member's own yes | Nothing; make sure each member votes |
 
 ### Security
 
-- **A network's announcement is a proposal: the token that joined it decides what it may add** (`S-9`). A
-  publisher or tree parent that added a space made every subscriber or child create it, join a same-named local
-  space to the network, and widen the peer tokens to it, whatever the joining token was allowed. Now the join
-  records its token, and a later announced space is added only if that token could have joined it. A same-named
-  local space is never joined this way. The same rule governs a passed vote that would create a space here, and a
-  joining token that was deleted or has expired adds nothing. Anything else waits on the network card as a pending
-  space with its reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
-  `network_pending_space`. A dismissal is remembered, so the network does not propose that space again. **Networks joined or created before this version have no recorded joining token, so every space
-  they announce from now on waits for an accept.**
-- **A config reload never drops a space silently** (`S-10`). A space the running instance had and a reloaded
-  `config.json` no longer listed simply left the configuration, with its data orphaned and nothing logged beyond
-  "reloading". Whoever wrote the file (a deploy step, a restore, a second replica, a hand edit) removed spaces.
-  Now such a space is kept and the log says so. To remove one by editing the file, list its id in a top-level
-  `removeSpaces`. Every space a reload adds, removes or keeps is audited (`space.reload_added`,
-  `space.reload_removed`, `space.reload_kept`), whether the watcher or `POST /api/admin/reload-config` ran it.
+- **Networks:** A closed or braintree network no longer passes a round on a member that has not voted; on two members
+  the proposer used to decide alone, and the other deleted, wiped or changed its own space.
 
-## [5.3.1] — 2026-09-26
+## [5.4.1] — 2026-09-26
 
-**An instance administrator holds every right on every space again.** Since 5.0 an instance-admin token stored
-with rows for only some spaces was refused on every other space, including spaces a network had just created,
-and could not widen itself. Granting instance admin now also grants space admin on the all-spaces floor, so it
-covers spaces created later, and instance-admin tokens stored without it are repaired when the instance starts.
-Renaming a space also keeps its named administrators.
-
-| | |
-|---|---|
-| fixed | instance admins reach every space, present and future; a renamed space keeps its space admins; an OIDC login mapped to instance admin gets the same floor |
-| what changes on upgrade | at startup, each instance-admin token without the space-admin floor gets it, and the log names every token changed |
-| docs | the tokens guides no longer say four admin cells make a space administrator; only the **Space admin** grant does |
-| what to do | upgrade. Nothing to configure |
-
-**Documents that changed**, for anyone who keeps a copy: `docs/integration-guide/06-spaces-api.md`, `docs/integration-guide/07-tokens-api.md`, `docs/userguide/04-settings.md`.
+**Subscribing a webhook to fact events works from Settings → Webhooks again; since 5.0 the page offered event
+names the server refuses.**
 
 ### Fixed
 
-- **An instance administrator holds every right on every space again** (`S-11`). Before 5.0, space admin was
-  worked out from holding all four admin rungs, so an instance admin had it everywhere. The 5.0 grant migration
-  kept that only for tokens whose all-spaces floor was admin in every area, so an instance admin stored with rows
-  for one space lost space admin everywhere else. It was refused (403) on spaces it did not name, including
-  spaces a network had just created, and it could not widen itself. Granting instance admin now also sets
-  **Space admin** on the all-spaces floor, through every door that writes a token's rights, so it covers spaces
-  created later. Instance-admin tokens stored without it are repaired at startup, and the log names each one.
-  Three readers that ignored space admin now respect it:
-  - a space administrator reaches the spaces it administers even with no area rows;
-  - a space-admin floor can delegate the admin floor rungs it holds;
-  - the token list's rights glyph draws a space administrator at admin instead of at nothing.
+- **UI:** Settings → Webhooks offers `fact.created`, `fact.updated` and `fact.deleted`, not `memory.*` (refused
+  "Invalid event type"). A subscription that failed to save can be saved again; API ones were never affected.
 
-  An OIDC identity mapped to instance admin gets the same floor. The audit entry for a rights edit now records
-  the rights as stored. The tokens guides said four admin cells make a token its space's administrator; they
-  do not (only the **Space admin** grant does), and both guides now say so.
-- **Renaming a space keeps its named administrators** (`Q-58`). A rename moved each token's per-space rights to the
-  new id but left the space-admin list on the old one, so a token that administered the space by name silently
-  stopped administering it.
+## [5.4.0] — 2026-09-26
 
-### Internal
+**A network now asks before it adds a space (the rest waits on the network card for you to accept or dismiss), and
+a pub/sub network can be joined by pasting its key.**
 
-- **`todo:check` no longer reads a working-order checklist.** Its checks were written for a hand-ticked file,
-  and that ordering is now enforced by the flow's own gates, so the rule, its helper and its tests are gone.
-  The exemption list also loses the three loop write-ups deleted from `todo/`.
-- **`todo:check` passes a `todo/` with no queue file and no open work.** A project whose queue is kept elsewhere
-  (tickets, checked by the flows' own tracker check) failed every local preflight on the missing index. Open items
-  left in a tracker file with no index still fail, and name each one.
-
-## [5.3.0] — 2026-09-25
-
-**The assist model can keep to a budget, fall back when it cannot answer, and be a Claude model.** A token budget
-caps what the External assist model spends in a rolling window, and a fallback answers when the main endpoint is
-unreachable, rate-limited, over budget or declines a request — a local fallback needs no consent, a hosted one is
-consented per use. Either endpoint can speak the Claude API with a Claude Console API key. The guides now describe
-only what exists, and the code lost about a thousand lines of dead code and history.
-
-| | |
+| Changes on upgrade | Action |
 |---|---|
-| new | assist budget and fallback; the Claude API as an assist backend; the Models card shows which endpoint is answering and what the budget has spent |
-| consent | a hosted fallback asks for its own per-use consent; a local one sends nothing off the instance |
-| docs | the integration guide and user guide name only tools, routes and types that exist, and state rules rather than their history |
-| fixed | the NLP sidecar has its card on the Models tab; a file deleted while it was being processed no longer leaves records behind |
-| what to do | upgrade. Nothing changes until an operator sets a budget or a fallback |
-
-**Documents that changed**, for anyone who keeps a copy: `CLAUDE.md`, `docs/integration-guide/04-brain-api.md`, `docs/integration-guide/04a-recall-api.md`, `docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/04c-chrono-api.md`, `docs/integration-guide/04d-brain-ops-api.md`, `docs/integration-guide/04f-write-semantics.md`, `docs/integration-guide/05a-conversion-pipeline.md`, `docs/integration-guide/07-tokens-api.md`, `docs/integration-guide/16-mcp.md`, `docs/sync-protocol.md`, `docs/usecase-examples/01-sharing-and-distribution.md`, `docs/usecase-examples/02-operations-research-and-agents.md`, `docs/usecase-examples/03-proxy-multi-space-and-personal.md`, `docs/userguide/02-brain.md`, `docs/userguide/04-settings.md`, `docs/userguide/04a-media-and-embedding.md`, `NOTICE`.
+| Networks joined or created before 5.4.0 have no recorded joining token, so every space they announce waits for an accept | After the next sync, check each network card for **Announced, waiting for you** |
+| A config reload keeps a space the file no longer lists | To remove one by editing `config.json`, list its id in a top-level `removeSpaces` |
+| A space a network announces is added only if the joining token could have joined it; a same-named local space always waits | Accept or dismiss it on the network card |
 
 ### Added
 
-- **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
-  caps what the assist endpoint spends — so many tokens in any rolling so many hours — and a fallback answers when it
-  cannot: unreachable, rate-limited, over budget, or declining a request. A local fallback (a model on this instance)
-  sends nothing off it and needs no consent; a hosted one is consented per use like the main endpoint. The assist
-  endpoint and its fallback can each speak the Claude API with an API key from the Claude Console, besides any
-  OpenAI-compatible server. The Models card shows which endpoint is answering documents and conversations now, what
-  the budget has spent, and when the main one is paused after a failure; Test and Verify check the fallback too.
+- **Networks:** A pub/sub network can be joined with its published key alone: `POST /api/networks/join-by-key` (MCP
+  `network_join_by_key`) and the **Join network** dialog take the publisher's URL and key; no one admits you.
+- **Networks:** The publisher answers `POST /api/invite/redeem` with no admin token, for a pub/sub network it publishes
+  only, rate-limited: 25 open handshakes per network, 3 per caller, 10 minutes each. Regenerating the key closes them.
+
+### Security
+
+- **Networks:** A network's announcement is now a proposal: a publisher or tree parent used to make every subscriber
+  create a space, join a same-named local one and widen peer tokens, whatever the joining token allowed.
+- **Networks:** A passed vote follows the same rule. What does not qualify waits on the card as a pending space; accept
+  or dismiss it with `POST /api/networks/:id/pending-spaces` or MCP `network_pending_space`.
+- **Spaces:** A config reload no longer silently drops a space that `config.json` stopped listing (its data used to be
+  orphaned). It is kept and logged; list its id in `removeSpaces` to remove it.
+- **Spaces:** Every space a reload adds, removes or keeps is audited (`space.reload_added`, `space.reload_removed`,
+  `space.reload_kept`), whether the watcher or `POST /api/admin/reload-config` ran it.
+
+## [5.3.1] — 2026-09-26
+
+**An instance administrator holds every right on every space again; since 5.0 one stored with rows for only some
+spaces was refused on the others.**
+
+| Changes on upgrade | Action |
+|---|---|
+| Granting instance admin now also sets **Space admin** on the all-spaces floor, so it covers spaces created later | Nothing |
+| At startup each instance-admin token without that floor gets it, and the log names every token changed | Nothing |
 
 ### Changed
 
-- **The integration guide and user guide describe only what exists, as it works now** (`Q-45.1`, `Q-45.2`). Examples
-  and references to tools, routes and types that are gone now name their replacements (`save_fact`, `filter`,
-  `POST /api/filter`, `FactDoc`). Nine pages that told the history of a behaviour — what it used to do, which
-  release fixed it — now state the rule, keeping a version note only where an older client has to change
-  something. Several statements that no longer matched the server were corrected on the way: for example, a
-  supplied unknown id is ignored and the server mints one, an entity's `type` is required, and `filter`'s default
-  `limit` is 200.
+- **Docs:** The tokens guides no longer say four admin cells make a token its space's administrator; only the
+  **Space admin** grant does.
 
 ### Fixed
 
-- **The NLP sidecar has a card on the Models tab** (`F-31`). It was wired and probed on the About page, but
-  missing from the Models screen and from the pipeline status that screen reads. So an operator could not see
-  from there that conversation ingest has what it needs. The sidecar cards are now one shared component, and the
-  gate that checks every sidecar has a card reads the list from the compose file instead of a hand-written one.
+- **Tokens:** An instance administrator reaches every space, present and future, again; one stored with rows for a
+  single space got `403` elsewhere. An OIDC identity mapped to instance admin gets the same floor.
+- **Tokens:** A space administrator reaches its spaces even with no area rows, a space-admin floor can delegate the
+  admin rungs it holds, and the rights glyph draws it at admin. The rights-edit audit entry records rights as stored.
+- **Spaces:** Renaming a space keeps its named administrators; a token that administered it by name used to stop doing
+  so.
 
-- **A file deleted while it was being processed no longer leaves records behind.** A text file's chunk records
-  are written at the end of its processing job, so deleting the file or its folder during the job left those
-  records behind as orphans that still appeared in file metadata. The job now checks that its file still exists
-  after writing, and removes what it wrote if not.
+## [5.3.0] — 2026-09-25
 
-### Internal
+**The assist model can keep to a token budget, fall back when it cannot answer, and be a Claude model; nothing
+changes until an operator sets one.**
 
-- **Cleanup, part 2** (`Q-45.3`, `Q-45.4`). No behaviour changes:
-  - About 250 unused imports, locals and parameters are gone from server and client, and the compiler now
-    refuses new ones (`noUnusedLocals`, `noUnusedParameters`). An intentionally unused parameter starts with `_`.
-  - Four of the most commented server files keep what each comment prevents and lose the history, about 680
-    lines.
-  - Four rules that were asserted in several test files each have one home. Two gates that could miss a case
-    now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
-  - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
+### Added
+
+- **Embedding:** The assist model gets a token budget per rolling window and a fallback for when the main endpoint is
+  unreachable, rate-limited, over budget or declines. A hosted fallback is consented per use; a local one needs none.
+- **Embedding:** The assist endpoint and its fallback can each speak the Claude API with a Claude Console key. The Models
+  card shows which endpoint answers, the budget spent and a pause after failure.
+
+### Changed
+
+- **Docs:** The guides name only tools, routes and types that exist (`save_fact`, `filter`, `POST /api/filter`).
+  Corrected: an unknown supplied id is ignored, an entity's `type` is required, `filter`'s default `limit` is 200.
+
+### Fixed
+
+- **Files:** A file or folder deleted while its text file was being processed no longer leaves chunk records behind as
+  orphans in file metadata.
+- **UI:** The NLP sidecar has its card on the Models tab and in the pipeline status it reads.
 
 ## [5.2.0] — 2026-09-25
 
