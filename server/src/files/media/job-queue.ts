@@ -16,6 +16,9 @@ import { log, peerText } from '../../util/log.js';
 import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
+import { eachSpace } from '../../util/housekeeping-walk.js';
+import { declareStep } from '../../util/housekeeping-signals.js';
+import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { jobIdsUnder, movedId } from '../moved-paths.js';
 
@@ -317,6 +320,13 @@ export async function enqueueTextJob(
 // keeps its own instance, so a brain enqueue never wakes the media worker.
 const _signal = createWorkSignal();
 
+/** The names a failure of each walk is counted and said under (`declareStep`: the series start at 0). */
+const CLAIM_STEP = declareStep('Media claim');
+const STALL_RESET_STEP = declareStep('Media stall reset');
+
+/** Test seam: forget the probe hint, so the next claim is a full scan (the embed queue's twin is `resetEmbedPendingHint`). */
+export const resetMediaPendingHint = (): void => _signal.reset();
+
 // ── Worker wake-up ──────────────────────────────────────────────────────────
 //
 // On an empty queue the worker backs its poll interval off to workerMaxPollIntervalMs (30s by
@@ -359,13 +369,11 @@ export async function claimNextJob(
 ): Promise<MediaJobDoc | null> {
   const now = new Date().toISOString();
 
-  // On a full scan, probe every space (authoritative). Otherwise probe only the spaces the
-  // hint says are worth probing — which, on an idle queue, is none. Consumes the full-scan slot,
-  // so it is called exactly once per claim.
-  const candidates = _signal.spacesToProbe(spaceIds);
-
-  for (const spaceId of candidates) {
-    const claimed = await jobCollection(spaceId).findOneAndUpdate(
+  // The walk is `WorkSignal.claimAcross`'s: on a full scan every space is probed (authoritative), otherwise only the hinted ones
+  // (on an idle queue, none); a space that threw or hung is isolated and quarantined; a claim is bounded by `CLAIM_OP_MS`. A
+  // claim is ONE pass here (the embed queue's lanes are its own).
+  return _signal.claimAcross(spaceIds, [null], async (spaceId) =>
+    await jobCollection(spaceId).findOneAndUpdate(
       asFilter<MediaJobDoc>({
         status: 'pending',
         // Either no backoff set, or backoff has elapsed.
@@ -385,18 +393,8 @@ export async function claimNextJob(
         $inc: { attempts: 1 },
       }),
       { returnDocument: 'after', sort: { createdAt: 1 } },
-    ) as MediaJobDoc | null;
-
-    if (claimed) {
-      // There may be MORE work in this space — keep probing it on the next claim.
-      _signal.noteClaimed(spaceId);
-      return claimed;
-    }
-    // Nothing claimable here right now. Drop the hint; a future enqueue, a requeue, or the
-    // periodic full scan will put it back.
-    _signal.noteEmpty(spaceId);
-  }
-  return null;
+    ) as MediaJobDoc | null,
+  { step: CLAIM_STEP });
 }
 
 // ── Complete / fail ────────────────────────────────────────────────────────
@@ -623,7 +621,9 @@ export async function resetStalledJobs(
   const cutoff = new Date(Date.now() - stalledJobTimeoutMs).toISOString();
   let reset = 0;
 
-  for (const spaceId of spaceIds) {
+  // One space's failure is isolated and a hung one quarantined, so a space that does not answer cannot hold the reset (and the
+  // sweep timer behind it) from the spaces that do. Each of the up-to-`maxPerSpace` operations carries the claim's bound.
+  await eachSpace(STALL_RESET_STEP, spaceIds, async (spaceId) => {
     for (let i = 0; i < maxPerSpace; i++) {
       const now = new Date().toISOString();
       const claimed = await jobCollection(spaceId).findOneAndUpdate(
@@ -658,7 +658,7 @@ export async function resetStalledJobs(
       markSpaceMayHaveWork(spaceId);
       reset++;
     }
-  }
+  }, { opMs: CLAIM_OP_MS, when: 'next stall sweep' });
 
   if (reset > 1) {
     // Each job already logged its own WARN above; this only adds the shape of a batch — several at once is

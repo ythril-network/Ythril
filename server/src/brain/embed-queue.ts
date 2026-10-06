@@ -39,6 +39,9 @@ import { log, peerText } from '../util/log.js';
 import { inChunks } from '../util/chunks.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { CLAIM_OP_MS } from '../db/write-bound.js';
 import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
 import { LOST_MARKER, NOT_SENT_MARKER } from './embed-errors.js';
@@ -83,6 +86,11 @@ function nextClaimableAfter(nextAttempt: number): string {
 }
 
 const _signal = createWorkSignal();
+
+/** The names a failure of each walk is counted and said under (`declareStep`: the series start at 0). */
+const CLAIM_STEP = declareStep('Embed claim');
+const REVIVE_STEP = declareStep('Embed revive');
+const STALL_RESET_STEP = declareStep('Embed stall reset');
 
 function jobs(spaceId: string) {
   return col<BrainEmbedJobDoc>(spaceCollection(spaceId, 'embedJobs'));
@@ -383,40 +391,30 @@ function writeJobOps(
  * the old single query's three-way `$or` sorted every pending job in memory on every claim (61 ms a claim at 40k).
  *
  * A space leaves the probe hint only when EVERY pass found nothing there. Dropping it after an empty lane-0 pass
- * would strand its lane-2 jobs until the next full scan, which is the line that looks like bookkeeping.
+ * would strand its lane-2 jobs until the next full scan, which is the line that looks like bookkeeping — and it is the
+ * decision `WorkSignal.claimAcross` makes, with the probe, the per-space catch, the quarantine of a space whose claim hung
+ * and the claim's bound (`CLAIM_OP_MS`). This function is the lanes and the one query; the walk is not written here.
  */
 export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJobDoc | null> {
   const now = new Date().toISOString();
-  // Consumes the full-scan slot, so it is called exactly once per claim.
-  const probe = _signal.spacesToProbe(spaceIds);
-  const order = claimOrder(claimCount++);
-  for (const priority of order) {
-    for (const due of [false, true]) {
-      for (const spaceId of probe) {
-        const claimed = await jobs(spaceId).findOneAndUpdate(
-          asFilter<BrainEmbedJobDoc>({
-            status: 'pending',
-            priority: laneMatch(priority) as never,
-            claimableAfter: (due ? { $ne: null, $lte: now } : null) as unknown as string,
-          }),
-          asUpdate<BrainEmbedJobDoc>({
-            $set: {
-              status: 'processing', claimedAt: now, progressAt: now, claimableAfter: null,
-              updatedAt: now, claimToken: newClaimToken(),
-            },
-            $inc: { attempts: 1 },
-          }),
-          { returnDocument: 'after', sort: { createdAt: 1 } },
-        ) as BrainEmbedJobDoc | null;
-        if (claimed) {
-          _signal.noteClaimed(spaceId);
-          return claimed;
-        }
-      }
-    }
-  }
-  for (const spaceId of probe) _signal.noteEmpty(spaceId);
-  return null;
+  const passes = claimOrder(claimCount++).flatMap(priority => [false, true].map(due => ({ priority, due })));
+  return _signal.claimAcross(spaceIds, passes, async (spaceId, { priority, due }) =>
+    await jobs(spaceId).findOneAndUpdate(
+      asFilter<BrainEmbedJobDoc>({
+        status: 'pending',
+        priority: laneMatch(priority) as never,
+        claimableAfter: (due ? { $ne: null, $lte: now } : null) as unknown as string,
+      }),
+      asUpdate<BrainEmbedJobDoc>({
+        $set: {
+          status: 'processing', claimedAt: now, progressAt: now, claimableAfter: null,
+          updatedAt: now, claimToken: newClaimToken(),
+        },
+        $inc: { attempts: 1 },
+      }),
+      { returnDocument: 'after', sort: { createdAt: 1 } },
+    ) as BrainEmbedJobDoc | null,
+  { step: CLAIM_STEP });
 }
 
 /**
@@ -679,10 +677,20 @@ export async function failEmbedJob(
  *
  * This does not make the retry policy right, only survivable: an "embedder unreachable" and a "this text is
  * malformed" still cost the same one attempt. Classifying them is the other half, tracked as EJ-1.
+ *
+ * ## It answers WHICH spaces it did not finish (`Q-274`, `S-R3`)
+ *
+ * Returns `{ revived, failed }`: `failed` is every space whose revive did not complete (it threw, it was quarantined, or the walk
+ * stopped before it). A revive that threw at boot used to be a warn line and nothing else, so the version's one honest retry of a
+ * space was lost for as long as the process lived. The worker keeps the set and its stall tick asks again until each succeeds.
  */
-export async function reviveFailedEmbedJobs(spaceIds: string[], version: string): Promise<number> {
+export async function reviveFailedEmbedJobs(
+  spaceIds: string[], version: string,
+): Promise<{ revived: number; failed: string[] }> {
   let revived = 0;
-  for (const spaceId of spaceIds) {
+  // The walk's default bound (`housekeepingOpMs()`), not the claim's: this is an `updateMany` over every failed job of a space,
+  // which is as long as the outage that failed them was. One space's failure is isolated, and a hung one quarantined.
+  const walked = await eachSpace(REVIVE_STEP, spaceIds, async (spaceId) => {
     const res = await jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'failed', revivedForVersion: { $ne: version } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
@@ -693,8 +701,11 @@ export async function reviveFailedEmbedJobs(spaceIds: string[], version: string)
       revived += res.modifiedCount;
       _signal.markSpaceMayHaveWork(spaceId);
     }
-  }
-  return revived;
+  }, { when: 'next stall sweep' });
+  // Every space the walk did not finish is owed: one that failed, one it passed over (quarantined), and one it never reached
+  // because the store stopped answering. The caller keeps the set and asks again (revive is idempotent per version).
+  const done = new Set(walked.outcomes.filter(o => o.status === 'ok').map(o => o.spaceId));
+  return { revived, failed: spaceIds.filter(spaceId => !done.has(spaceId)) };
 }
 
 /**
@@ -707,7 +718,9 @@ export async function reviveFailedEmbedJobs(spaceIds: string[], version: string)
 export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: number): Promise<number> {
   const cutoff = new Date(Date.now() - timeoutMs).toISOString();
   let reset = 0;
-  for (const spaceId of spaceIds) {
+  // The claim's bound: a reset is a handful of jobs (the worker's own in-flight ones), so a space that takes longer is not
+  // answering and must not hold the sweep, or the revive behind it, from the spaces that are.
+  await eachSpace(STALL_RESET_STEP, spaceIds, async (spaceId) => {
     const res = await jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'processing', progressAt: { $lt: cutoff } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
@@ -718,7 +731,7 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
       reset += res.modifiedCount;
       _signal.markSpaceMayHaveWork(spaceId);
     }
-  }
+  }, { opMs: CLAIM_OP_MS, when: 'next stall sweep' });
   return reset;
 }
 
