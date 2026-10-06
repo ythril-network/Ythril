@@ -6,6 +6,7 @@ import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { withinWriteBound, holdWarnMs } from '../db/write-bound.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { warnOnce } from './warn-once.js';
+import { intervalJob } from './interval-job.js';
 
 /*
  * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
@@ -230,7 +231,6 @@ export function oldestHoldAgeSeconds(spaceId: string): number {
  * now — is named by the watchdog, once per hold, as soon as it is older than `holdWarnMs()`. Started with the
  * background services, unref'd so it never keeps the process alive, and stopped on shutdown.
  */
-let watchdog: NodeJS.Timeout | null = null;
 const holdWarnings = warnOnce<Hold>();
 
 /** Check every open hold now: warn once for each older than `holdWarnMs()`. Exported for the watchdog's test. */
@@ -246,14 +246,21 @@ function warnStalledHolds(now = Date.now()): void {
   }
 }
 
+/**
+ * The watchdog is an interval job (`Q-317`) whose interval is a FUNCTION: a quarter of the hold warning, at least 250 ms, read when
+ * the job starts (`intervalJob` reads it once per start). `startSeqHoldWatchdog` is a restart (`stop(); start()`), so a hold figure
+ * changed since the last start is the one in force for the next. The tick is synchronous and touches no database, so it never
+ * overlaps and the bound it runs inside has nothing to end.
+ */
+const watchdog = intervalJob('Seq hold watchdog', () => Math.max(250, Math.floor(holdWarnMs() / 4)), () => warnStalledHolds());
+
 export function startSeqHoldWatchdog(): void {
-  stopSeqHoldWatchdog();
-  watchdog = setInterval(() => warnStalledHolds(), Math.max(250, Math.floor(holdWarnMs() / 4)));
-  watchdog.unref();
+  watchdog.stop();
+  watchdog.start();
 }
 
 export function stopSeqHoldWatchdog(): void {
-  if (watchdog) { clearInterval(watchdog); watchdog = null; }
+  watchdog.stop();
 }
 
 /**
