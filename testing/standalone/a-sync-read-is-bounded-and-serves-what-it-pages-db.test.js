@@ -192,4 +192,18 @@ describe('no limit falls through a falsy default', () => {
     assert.deepEqual(offenders, [],
       'a falsy default lets a negative limit through, and `limit=-1` read a whole collection; use parseLimit (util/pagination.ts)');
   });
+
+  /*
+   * The start's twin: a route that parses `sinceSeq` itself turns `abc` into NaN, an empty page and a
+   * `nextCursor: null` that reads as "nothing left". Every sync start goes through `syncReadStart`, so a new
+   * route cannot quietly bring the silent default back.
+   */
+  it('no source reads a sync start by hand', () => {
+    const offenders = [];
+    for (const { file, text } of readTrackedSources('server/src', { ext: ['.ts'], floor: 100 })) {
+      const src = stripComments(text);
+      for (const m of src.matchAll(/(?:parseInt|Number|parseFloat)\([^)]*\bsinceSeq\b[^)]*\)/g)) offenders.push(`${file}: ${m[0]}`);
+    }
+    assert.deepEqual(offenders, [], 'read a sync start with syncReadStart (api/sync/_shared.ts), which refuses what it cannot read');
+  });
 });
