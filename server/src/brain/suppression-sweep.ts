@@ -227,9 +227,18 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
  * every such write with a warning that meant nothing (`Q-74`).
  */
 export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
-  if (meta === undefined) return;
+  void queueSweep(id, meta);
+}
+
+/**
+ * Queue `id`'s coalesced sweep against `meta`; settles when the run it started or joined has, with the failure that run handed
+ * back (see {@link sweepLatestMeta}), if any. Nothing to sweep without a meta. Not `async`: the job is started, or joined, before
+ * this returns, which {@link sweepForTheWalk} relies on to mark the run it joined.
+ */
+function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<HandedFailure | undefined> {
+  if (meta === undefined) return Promise.resolve(undefined);
   nextSweep.set(id, meta);
-  void metaSweeps.run(id, () => sweepLatestMeta(id));
+  return metaSweeps.run(id, () => sweepLatestMeta(id));
 }
 
 /** Per space, the meta its next sweep runs against: the last one written and not yet swept. */
@@ -287,9 +296,9 @@ async function sweepLatestMeta(id: string): Promise<HandedFailure | undefined> {
  * it. Goes through the runner (not the job directly) so it still coalesces with a meta write racing the boot.
  */
 async function sweepForTheWalk(id: string, meta: SpaceMeta | undefined): Promise<void> {
+  // Nothing to sweep: and no run is awaited, so none may be marked (its failure would be handed to nobody).
   if (meta === undefined) return;
-  nextSweep.set(id, meta);
-  const settled = metaSweeps.run(id, () => sweepLatestMeta(id));
+  const settled = queueSweep(id, meta);
   // `run` has started or joined the in-flight job synchronously: the run now registered is the one this call awaits.
   const run = inFlight.get(id);
   if (run) run.walkAwaits = true;
