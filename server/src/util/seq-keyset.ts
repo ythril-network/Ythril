@@ -132,6 +132,8 @@ export const SEQ_KEYSET_SORT = Object.freeze({ seq: 1, _id: 1 } as const);
 
 /** The sort of the read that is NOT keyset-safe, used only while a collection has no compound index (see the header). */
 const SEQ_ONLY_SORT = Object.freeze({ seq: 1 } as const);
+/** The order inside one seq, which is the order the compound's second key gives and `compareSeqPositions` follows. */
+const ID_SORT = Object.freeze({ _id: 1 } as const);
 
 /**
  * `guard` AND `extra` through `andPredicates` (`db/and-predicates.ts`, an intersection by `$and` and never a spread), so a key
@@ -238,12 +240,42 @@ export async function readAfterSeq<T extends Document>(
     await col<T>(collName).find(asFilter<T>(filter as Filter<T>), projection ? { projection } : {}).sort({ ...sort }).limit(n).toArray() as T[];
 
   // One horizon for both finds, taken before either: a position past it reads nothing, and a seq that settles meanwhile waits.
-  const { tie, range, horizon } = await settledSeqKeysetFilters(spaceId, after, extra);
-  if (!(await keysetReady(collName))) {
-    // No compound yet: by seq alone, strictly above, as before this module — a pair cursor is read by its seq.
-    return find(seqKeysetFilters({ seq: after.seq }, horizon, extra).range, SEQ_ONLY_SORT, limit);
-  }
+  const { tie, range } = await settledSeqKeysetFilters(spaceId, after, extra);
+  // `lastSeq` in the fallback comes from `range`, so it is below the horizon too: the run re-read needs no bound of its own.
+  if (!(await keysetReady(collName))) return readWithoutCompound(find, tie, range, extra, limit);
   const first = tie ? await find(tie, SEQ_KEYSET_SORT, limit) : [];
   if (first.length >= limit) return first;
   return [...first, ...await find(range, SEQ_KEYSET_SORT, limit - first.length)];
+}
+
+/**
+ * The same `(seq, _id)` answer from a collection whose compound index is still being built, using its `{ seq: 1 }` index.
+ *
+ * Reading by seq alone, strictly above, was the fallback here once, and it lost the tail of a run of equal seqs at every page
+ * boundary while the background build ran: the server handed out a pair cursor the client trusts, and the next page skipped
+ * the rest of the run (the pre-ship sweep of bundle-52). So the pair is kept, and only the ORDER inside one seq is sorted in
+ * memory, never the whole tail: the run after the cursor's record is read in `_id` order, and a full range page that ends
+ * inside a run has that one run re-read in `_id` order, so the page ends at a position the pair names exactly. The cost is
+ * one run read per page, and a run is as long as the number of authors sharing a seq.
+ */
+async function readWithoutCompound<T extends Document>(
+  find: (filter: Record<string, unknown>, sort: Readonly<Record<string, 1>>, n: number) => Promise<T[]>,
+  tie: Record<string, unknown> | null, range: Record<string, unknown>,
+  extra: Readonly<Record<string, unknown>> | undefined, limit: number,
+): Promise<T[]> {
+  const first = tie ? await find(tie, ID_SORT, limit) : [];
+  if (first.length >= limit) return first;
+  const want = limit - first.length;
+  const page = await find(range, SEQ_ONLY_SORT, want);
+  if (page.length === 0) return first;
+  const positionOf = (d: T): SeqPosition => {
+    const r = d as unknown as { seq: number; _id: string };
+    return { seq: r.seq, id: r._id };
+  };
+  const lastSeq = positionOf(page[page.length - 1]!).seq;
+  // The runs before the last one are complete in this page; their order is fixed here, a page at most, so the answer is
+  // `(seq, _id)` throughout, as with the compound.
+  const head = page.filter(d => positionOf(d).seq < lastSeq).sort((a, b) => compareSeqPositions(positionOf(a), positionOf(b)));
+  const run = await find(composed({ seq: lastSeq }, extra), ID_SORT, want - head.length);
+  return [...first, ...head, ...run];
 }

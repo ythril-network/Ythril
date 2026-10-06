@@ -94,8 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; the file manifest is still walked. `computedAt` is when the root was computed.
 - **Sync:** A page's `nextCursor` now names a position (seq and record), still opaque: send it back unchanged. `GET /api/sync/tombstones`
   takes the same `cursor`; without one it answers as before. The push no longer sends a record's vector or retention stamps.
-- **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on the first start; paging is as before
-  until a collection's build ends. Rolling back to 5.6.x rebuilds the old `seq` index before the server listens.
+- **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on the first start; paging stays
+  tie-safe meanwhile, only slower. Rolling back to 5.6.x rebuilds the old `seq` index before the server listens.
+- **Sync:** A page asked for without `full=true` (ids and seqs only) no longer carries the deletion stubs; read deletions from
+  `GET /api/sync/tombstones`.
 - **Embedding:** The bundled model runs in a supervised child process, so embedding no longer blocks the server (`/health` stays fast
   in bulk imports) and a native fault no longer takes it down; it exits after ten idle minutes (next embed pays a 1-2 s load).
 - **Embedding:** `mem_limit` or a pod memory limit now counts both processes. The child gets a minimal environment (never the Mongo

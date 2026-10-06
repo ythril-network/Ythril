@@ -27,8 +27,8 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 - **Integrators that branch on status:** a pool checkout that timed out, or a closed pool, answers `503` retryable (it answered `500`); a write concern the deployment can never meet answers `500` with `retryable: false`, `code` and `codeName` (it answered `503`); a store failure under renaming a space, creating one or adding a link answers `503` (it answered `404`, `409` or `422` in the driver's words); and a second delete of a file record already flagged as deleted, or a delete naming a derived record, answers `404` on REST and MCP. See [Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field) and [Files](05-files-api.md).
 - **Background jobs no longer stop at the first failing space.** A failing or hanging space is reported (see [Background jobs and the spaces they walk](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and the other spaces are processed; four new metrics count it. Nothing needs configuring: `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` is optional.
 
-**Upgrading past 5.6.x builds a new index on every record collection, in the background, and sync reads are unchanged
-until each collection's build ends.** Sync pages, the push and the two scanners now read in `(seq, _id)` order, so records
+**Upgrading past 5.6.x builds a new index on every record collection, in the background; until a collection's build ends
+its sync reads stay tie-safe and are only slower.** Sync pages, the push and the two scanners now read in `(seq, _id)` order, so records
 that share a `seq` are never skipped at a page boundary, and that order needs `{ seq: 1, _id: 1 }` on the facts, entities,
 edges, chrono, links and files collections and on the tombstones. A collection that already exists gets it from a pass that
 starts AFTER the server is listening (the boot does not wait for it), one collection at a time; the log says when the first
