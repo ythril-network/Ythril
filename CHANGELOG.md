@@ -1963,485 +1963,57 @@ default); take it if your agents call them.
 - **Docs:** The guides say which reranker to pick: a cross-encoder replaces the retrieval order, and
   `bge-reranker-base` cut first-answer accuracy to 27.4% from 45.7%. Use `ms-marco-MiniLM-L-6-v2`; measure first.
 
-- **`linkEntities` and its three siblings were accepted with a `201` and the link was reached by
-  nothing** — on any space created since the instance last restarted.
-
-  A link is stored in two shapes during the 4.x transition: a record in the space's `links` collection,
-  and the array on the record itself. `usesLinkRecords` picks which shape a space is READ through, and
-  `link-adjacency.ts` calls it *"the ONLY place that decides"* — which was true of readers and of nothing
-  else. The writer wrote a link record and stopped, so on a space still read through the arrays it wrote
-  a row every reader looks away from: not `traverse`, not a graph-augmented `recall`, not the delete
-  guard.
-
-  **The conversion that flips a space runs at BOOT**, so a space created afterwards keeps the array path
-  until the next restart. The same call therefore worked or silently lost the link depending on when the
-  instance was last rebooted — which is why it went unreported: a reporter could not reproduce it and a
-  responder could.
-
-  The writer now resolves the shape through the same selector every reader uses. **Nothing about the
-  request changed**, and a caller who worked around this with `entityIds` is unaffected.
-
-- **An edge you drew to a fact, chrono entry or file was stored and reached by nothing.** An edge declares
-  the kind at each end, the writer REFUSES a kind that does not match the record, and the edge is then
-  validated, stored, hashed and replicated — so `supersedes` between two claims is a real edge that
-  everything accepted. The walk resolved every neighbour against the entities collection alone and dropped
-  whatever was not there: no flag, no `truncated`, no error. On the Graph tab such an edge was saved, listed
-  on the Edges table, and never drawn.
-
-  **No include flag governs it, and the asymmetry is deliberate.** `includeMemories` and `includeFiles` are
-  opt-in because they follow IMPLICIT links — a record that happens to name this one — of which a busy node
-  has thousands. An edge exists only because somebody drew it, so there are exactly as many as were meant.
-  A record reached through an edge also EXPANDS, unlike one reached through a mention: an edge chains, and a
-  chain of `supersedes` stopped at one hop would answer a fragment and call it the neighbourhood.
-
-  **A walk may now start from a fact or a chrono entry**, not only an entity.
-
-- **A declared edge end could not be REMOVED once its entity type was deleted.** Owner-reported. The
-  ends picker listed one checkbox per entity type the space currently declares, so a name stored on the
-  edge and no longer declared had no checkbox at all — nothing to untick, still enforced, invisible on a
-  control that looked complete. It lists the union of the vocabulary and what is already picked now, and
-  marks the strays, so an operator meeting a name they do not recognise can tell what it is.
-
-- **The conversion pre-flight claimed ninety days on an instance that had been recording for thirty
-  minutes.** Reported by the canary operator 2026-09-15 with a controlled measurement: the endpoint caught
-  a single `entityIds` write within two seconds and named the token and the field — it works — but the
-  space holds 270 chronos already carrying `entityIds`, `count` was 1, and `since` reported ninety days
-  back because that is `retentionDays`.
-
-  `since` is clamped to when this instance began recording, and the new `recorderStartedAt` says why a
-  ninety-day request came back as half an hour. The stamp is written once when the instance's services start —
-  the path a first-run install goes through too, not only a restart — and it is **the oldest existing
-  note rather than `now`** — a note from sixty days ago is proof the recorder was running sixty
-  days ago, and stamping `now` would make an instance that has recorded for a year claim it started
-  today. `null` means it has not started since this shipped, so nothing can be clamped.
-
-- **Sorting `links` crashed instead of sorting, and on the REST door it crashed as a RETRYABLE 500.**
-  Reported by the canary operator 2026-09-15 against the tool door, which answers
-  `Cannot read properties of undefined (reading 'has')`. Measured here, the REST door is the worse half
-  and was not in the report: `500 {"error":"Internal server error","retryable":true}` — telling a caller
-  to retry a request that can never succeed.
-
-  `SORTABLE_FIELDS` declared five collections while the `collection` enum offered six, so the lookup was
-  `undefined` and `allowed.has()` threw where the tool's own text promises the field "is refused and
-  names the allowed ones". `links` now sorts by `createdAt`, `updatedAt`, `from` and `to` — a link has no
-  name, title or type of its own, it IS a pair of endpoints.
-
-- **The link conversion runs itself at boot, because the documented way to run it could not be run.**
-  The canary operator, 2026-09-15: `npm run links:convert` on a deployed instance answers
-
-  ```
-  Error: Cannot find module '/app/scripts/convert-links.mjs'
-  ```
-
-  Every start now converts each space not yet marked `completeLinkage` and marks the ones whose walk
-  finished cleanly. It is additive — links are created, no array is removed, a space reads correctly
-  before, during and after — so an interrupted run is fixed by the next boot, and an already-marked space
-  is skipped outright. Owner: *"make the script autorun at startup … remove that on 6.0"*, recorded as
-  `_DEPRECATIONS.md` row 6.1.
-
-  **A boot migration over synced data is normally forbidden, and the peer floor is what suspends it.**
-  `MIN_PEER_VERSION` derives from our own major, so a 5.0 instance refuses every 4.x peer at the
-  handshake and no peer can write the arrays back. `renameMemoriesToFacts` runs at boot in the same
-  release on the same argument.
-
-#### Claims, chrono, supersession and contradictions
-
-- **A claim an AI assistant originated is marked, so the graph records that it was SAID rather than that it
-  is SO.** Ingesting a chat log is not ingesting a conversation between people: an assistant's turn may
-  state a fact about the world, hand back one the user just gave it, or invent one — and until now nothing
-  told the extractor which, so a model's guess would land beside the user's own words and rank the same.
-
-  Three rules, and the middle one carries most of the weight. An assistant turn is CONTEXT first, read to
-  resolve the user's (*"Yes."* means nothing alone). A fact is attributed to whoever ORIGINATED it, not to
-  the turn it was read in — most of what an assistant appears to state is the user's own fact echoed back.
-  What is left, where the assistant really is the origin, is written with `attributed: true`.
-
-  The mark is a declared boolean on the claim type, so a filter on it is a native index pre-filter on both
-  doors rather than an exhaustive scan, and the validator refuses a file in BOTH directions — an unmarked
-  assistant claim, and a person's claim wearing the mark. The second is the quiet one: it retires a real
-  fact from every reader that filters, and nothing contradicts it.
-
-- **A chrono entry's `status` meant two different things, and which one you got was decided by the DOOR
-  you read through.** The chrono list route returns the DERIVED status — `overdue` where a due moment has
-  passed, unless the type's `whenDuePasses` says otherwise — while `filter` and sync return the value the
-  collection holds. Both are correct, and a predicate read must see the stored one or it cannot be used
-  to repair anything. What was wrong is that the two were indistinguishable from outside.
-
-  Reported in substance by the canary operator, 2026-09-15, after a fortnight-old episode read `active`
-  through one door and `overdue` through the other: *"'I checked the status' is not a claim anyone can
-  evaluate without the door being named"*. Every attempt they made to confirm the suspicion queried the
-  collection, got `active`, and read as a clean bill of health. It degrades rather than breaking, too —
-  a record read shortly after it is written still says `active`, so code built against the stored literal
-  works the day it ships and starts failing only as records outlive their due moment.
-
-  `filter` takes `deriveStatus` now, on both doors, **defaulting false** — so every existing caller sees
-  exactly what it saw before, and the client asks for `true`, so the Brain page is unchanged too. Nothing
-  moves for anybody who does not ask. Sending it on any collection but `chrono` is refused rather than
-  ignored: a silently dropped flag is a caller who believes they asked for something.
-
-  **And the operator page now says the status it shows is worked out rather than stored**, because that
-  is the half an operator meets: a backup or an export reads what was stored, so an entry the page calls
-  overdue reads as active there.
-
-- **A derived chrono status could not be combined with a convenience.** The status rewrite ran AFTER the
-  conveniences, which accumulate under `$and` — so a caller's top-level `status` was buried in one by the
-  server, and the rewrite's refusal (written for a `status` the CALLER nested inside `$or`) fired on the
-  server's own transformation. The error told the caller to put `status` at the top level, which is
-  exactly where they had put it. The rewrite reads the caller's filter first now.
-
-#### Schemas and the space editor
-
-- **A suppressed record being REACHABLE had never been tested, only its being stored.** Three schema descriptions promise that
-  a suppressed record cannot be ranked but is still reached — the behaviour the field was renamed for in
-  August, after *"i want entries to be findable via traversal even if they are not embedded themselves"*.
-  The suite proved suppression is STORED, that `false` is stored rather than dropped, and that a re-embed
-  sweep skips it. That it is still REACHED was asserted nowhere: a promise living in three descriptions and
-  no gate, which is the shape nobody reports, because nobody reports a capability they were told they had.
-
-  Now an integration test, run against a live instance, with an unsuppressed control on every assertion —
-  without one, *"recall did not return it"* is equally good evidence that recall returned nothing at all.
-
-- **A schema type and each of its properties can now say what they are FOR, in prose.** `description` on
-  a type schema (4000 characters) and on any property (2000) — stored, returned by `get_space_meta` and
-  the space listing, editable in the Schema tab, and **never parsed**. The type already says a value is a
-  number; the property note is where you say it is the retry BUDGET rather than the retry count, or that
-  one record means one deployed instance rather than one repository.
-
-  **It is deliberately prose rather than an ontology, and that is the whole decision.** Owner,
-  2026-09-17, asking whether `F-24`'s semantic layer could be satisfied this way: the answer splits by
-  who READS it. Everything whose reader is a model — what a type is for, which property carries meaning,
-  whether two types in different spaces are the same thing — is satisfied by a sentence, and better,
-  because it needs no vocabulary and cannot be wrong-but-parseable. Nothing whose reader is the ENGINE is
-  satisfied by it at all: a query cannot widen to subtypes it cannot parse.
-
-  So the engine-facing half — inverse pairs, transitivity, subtyping — is not built, and will not be
-  until a named consumer changes behaviour because of it. **A vocabulary that nothing enforces looks
-  machine-readable and is not**, which is worse than prose rather than a lesser version of it: shipping
-  `transitive: true` while `traverse` ignores it is the documented-but-inert defect at the scale of a
-  feature.
-
-- **The space editor could reach a state where saving was IMPOSSIBLE, and the only way out read as
-  discard.** Owner-reported, and it was two defects that made each other worse.
-
-  The footer swapped **Save changes** for the close-and-finish button whenever any notice was set. That
-  was written for the vote-pending path, where it is right — a networked space answers `202`, the change
-  IS submitted, and a button still offering to submit invites a second proposal for the same change. But
-  the same signal carries *"nothing to save"*, which is not a submission. One Save that reported doing
-  nothing retired the Save button for the rest of the session: the form stayed editable and the only
-  control left closed the dialog.
-
-  And *"nothing to save"* was easy to reach by accident, because **the diff could not see a key being
-  removed**. It walked the keys of the CURRENT payload, while `strictLinkage` is emitted only when true
-  and `purpose`/`usageNotes` only when non-empty — so turning strict linkage off, or clearing the
-  purpose, produced an empty diff. The unsaved-changes guard said there were changes and the save said
-  there were none; both were right about their own question, which is why neither looked wrong.
-
-  The diff walks the union of both key sets now and sends a vanished key as its cleared value, and a
-  finished state ends the moment there is another edit. **The server was never wrong** — its merge
-  guards on "present", so `''` and `false` always cleared correctly; only the client failed to send
-  them. It had bitten once before and been fixed for `typeSchemas` alone, which is why the rule now
-  lives in the diff rather than in each key's emission.
-
-- **A property `default` kept its string type after the property became a number.** Owner-reported. The
-  detail pane binds the default to a text input, so it is always text; change the type afterwards and
-  the schema was saved with `default: "5"` for a numeric property. That is not cosmetic — the default is
-  written into records that omit the property, so a strict space starts refusing records it created
-  itself. The emitted schema carries a default of the DECLARED type now, or omits it when the text
-  cannot be one: a default that cannot be honoured is worse than none.
-
-- **A schema type can be RENAMED, on every knowledge type.** Owner-reported: *"i created an entity with
-  full property definitions but made a spelling mistake in the entity name — had to redo all"*. A type's
-  name is a map key and the editor offered add and delete and nothing between. The rename keeps every
-  property and the type's position in the list, and follows the name into every edge-endpoint list that
-  named it — leaving those behind would break the declaration exactly the way a deletion did. Records
-  already written keep the old type: a schema rename does not migrate them, and the case this is for is
-  a type built minutes ago.
-
-#### Spaces, tokens and the rights matrix
-
-- **`space_reembed` — the embedding backfill now has a tool.** `POST /api/spaces/:id/reembed` has queued
-  embeddings for records with no vector since 4.4, and had no MCP counterpart. It is also
-  `POST /api/space_reembed`, takes `kinds` and `limit`, and returns the same counts the route does.
-
-- **A route was attributed to a path nothing serves, in every gate that reads the route list.** The MCP
-  OAuth consent screen is served at `/mcp-oauth/consent`; the mount graph resolved its router by bare name,
-  another file's function parameter is also called `router`, and that one is mounted under `/api/files` —
-  so the route was reported at `/api/files/mcp-oauth/consent`. A guard gate checking a path that does not
-  exist is checking nothing, and the real path went unchecked.
-
-  The graph now scopes a parameter alias to the file that binds it, keeps a direct mount authoritative
-  everywhere (a first attempt at this dropped all five space routes), and learned the fourth mount form —
-  a router BUILT by a function and mounted through the value it returns.
-
-  It reads the shared list and the imported map now, accounts explicitly for the routes only one side can
-  see, and **runs in preflight**. A check nobody runs is a claim.
-
-- **Two more gates were asking their question of two thirds of the API.** The rights-row gate and the
-  route-parameter reader each kept their own copy of the route scan — the same pattern, with the same two
-  blind spots: it cannot match a route declared straight on the express app, and it walks `server/src/api`,
-  which does not contain `app.ts`. Between them that hid fifteen routes, including every one of the five
-  heaviest admin operations and all three MCP transport routes.
-
-  Nothing was wrong behind them; what was wrong is that neither gate had looked. Both read the shared route
-  list now, which gained the ability to hand back the source that registers each route — that window was
-  the reason the second copy existed.
-
-- **A backfill could report records as suppressed when nothing was suppressed.** `space_reembed`'s
-  `skippedSuppressed` is the number that tells an operator *"the setting is still on"*, and it was
-  computed as `count(vectorless) - count(vectorless AND allowed)` — two separate reads of a collection
-  the embed worker is actively DRAINING. Every record the worker finishes gains a vector and leaves the
-  first population, so a worker landing between the two reads shrinks the second count for a reason that
-  has nothing to do with suppression, and the difference goes positive.
-
-  Both counts now come from one `$facet` pass, so they describe the same instant and their difference is
-  what the exclusion removed rather than what the worker happened to finish in between. `remaining` came
-  from a third live read and now shares the same snapshot.
-
-#### Files
-
-- **An AI assistant can save a picture, a PDF or anything else that is not text.** `write_file` takes
-  `encoding: "base64"` alongside its existing UTF-8 default, which the REST upload had accepted throughout.
-  Reported by the canary operator after one of their coding sessions was asked to put a photograph of a
-  whiteboard on a record and could not: `write_file` is the only file-writing tool a write-capable token is
-  offered, so a session reached through MCP could create a text file and could never create a byte file.
-
-  **The ceiling is the request rather than the file store, and the schema says so.** A tool call arrives as
-  one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of
-  file fits; anything larger goes through `POST /api/files/{path}`, which takes a raw body and supports
-  chunked upload.
-
-  **Base64 that is not base64 is now refused on BOTH doors.** `Buffer.from` skips characters outside the
-  alphabet rather than failing, so a `data:image/png;base64,…` URL used to be stored as a short, corrupt
-  file under a `201` — with a plausible sha256 and a plausible size, and nothing downstream able to tell.
-  The decode, the encoding vocabulary and that refusal are one module behind both doors.
-
-- **A file keeps its description, tags and properties across a move, and across a rewrite that does not
-  mention them.** Both already held; neither was written down, and the cost of that landed on somebody
-  else. A file is the one record type with no id of its own — its `_id` IS its path — so an integrator
-  mapping an external reference onto a file measured the two behaviours from outside, found them correct,
-  and then re-asserted their key after every single write **because they were undocumented**, paying a
-  round trip per write to insure against a promise we were keeping.
-
-  `05-files-api.md` now states both as guarantees, says why a file is path-keyed rather than UUID-keyed
-  (a delete writes a tombstone per path and a file's link records hang off the same id, so a second
-  identity is a second thing to reconcile), and shows the stable-handle pattern. Two tests hold it: a
-  source gate on the two shapes that make it structural, and a live round trip through move and rewrite.
-
-- **Upgrading stopped quietly rewriting file records that every peer also holds.** Giving a file uploaded
-  before 4.0 its position in a space's history is a one-time change to a record that replicates, and it rode
-  inside the link conversion — which was an operator-run script until 5.0 taught the instance to run it at
-  every startup. From then on every instance in a network stamped the same records with its own counter at
-  whatever moment it happened to restart, and each overwrote the others in turn. The stamp is back on
-  `npm run links:convert`, which now prints how many records it stamped per space; the boot conversion does
-  links only.
-
-  **A container deployment cannot run that script, so its pre-4.0 file descriptions stay local** until the
-  record is next written — which is what they did before 5.0, and is the smaller of the two problems.
-
-#### Sync, peers and migrations
-
-- **The gate that refuses boot migrations over synced data can follow a call.** It read one function's own
-  body, so a migration that did its writing three calls away was invisible to it — which is how the case
-  above went unnoticed for eleven days. It now resolves each call through the importing module's own import
-  list, keyed `path:name` rather than by bare name, and walks the real startup graph to exhaustion. Its list
-  of which collections replicate is read out of `sync/replicated-families.ts` rather than kept by hand,
-  which is how `links` came to be missing from it.
-
-#### Documentation, gates and internal structure
-
-- **An entry that breaks a caller can no longer fall off the end of an abridged GitHub Release.** Lifting
-  those entries ahead of everything else was the fix after an operator read the 4.0.0 notes and missed the
-  link system. It stops being enough once they no longer fit BETWEEN THEM: this release has twenty of them
-  totalling some 26 000 characters, so a tighter budget dropped whole entries off the end of the lifted
-  block — the same failure one level in, and with the reader's guard down, because the notes now promise
-  those entries come first.
-
-  Each of their headlines is charged to the budget before anything else is spent; what is left upgrades
-  entries to their full text in order, and the notice says how many were cut to one line. Twenty headlines
-  beat fifteen full entries because of what a reader can DO with them — a headline sends you to the full
-  notes, and an entry that is not there cannot.
-
-  **It never reached a reader.** At the real ceiling all twenty fit; the gate squeezing to 20 000
-  characters is what found it, which is what that squeeze is for.
-
-- **The gate holding the never-embed rename asked the wrong file, and a correct release process made it
-  red.** It read `CHANGELOG.md` for both spellings of the suppression mark on the rule that an upgrader
-  searching the old one must find it. Archiving the 4.x notes at this release moved both into
-  `changelog/CHANGELOG-4.x.md`, so the gate reported a documentation hole where the release process had
-  done exactly what it is supposed to. **Its own comment had predicted the day** — *"when this file is
-  archived, the gate goes red and asks to be revisited"*.
-
-  It reads the whole series now, derived from `changelog/` with a floor, and asserts the file holding the
-  answer is linked from the current notes — because a word documented in a file nobody opens is not
-  documented. That is the third time this assertion's window has decayed at a release; a window measured
-  in releases always will.
-
-- **Two feature ids were reused for different work, so grepping either one misled in both directions.**
-  `#1262` shipped as `F-25` — *"find out who still writes the arrays before converting a space"* — and
-  `#1265` as `F-26`, *"a passed date means what the schema says"*. Seven source files cite `F-25` and
-  three cite `F-26` meaning exactly those. The tracker then reused both ids in September for new
-  owner-directed asks: a skill endpoint and aggregation pipelines.
-
-  So a reader of the skill-endpoint row who greps the code finds writer-attribution plumbing and
-  concludes it is half built; a reader of `request-actor.ts` who looks up `F-25` finds a skill endpoint
-  that has nothing to do with it. I made the first mistake myself while checking the queue.
-
-  The UNSTARTED rows move — to `F-27` and `F-28` — because the shipped side is quoted in source
-  comments and in merged PR titles that cannot be corrected. Both rows record why.
-
-- **A client method called a route the server has never served.** `updateSyncSchedule` PATCHed
-  `/api/networks/{id}/members/{memberId}`; that collection takes a `POST`, a `PUT` on the signing key and a
-  `DELETE`, and nothing else. Nothing in the client called the method, so nobody had seen the 404 yet — it
-  is deleted rather than pointed somewhere, because a method with no caller and no route is not a feature
-  waiting to be wired up.
-
-- **The gate that checks every mutating route is guarded could not see the five most destructive ones.**
-  Wiping a space, importing one, exporting one, reloading the config and rotating the signing key are
-  declared straight on the express app rather than on a router, and both halves of the analysis missed
-  them: the pattern matched only names containing "router", and the file scan never read `app.ts` at all.
-  They were not reported as unguarded — they were **absent**.
-
-  **All five turned out to be correctly guarded and correctly audited**, so nothing was exposed; what was
-  missing was the check. Proven by mutation: stripping the admin guard off `POST /api/admin/reload-config`
-  left the suite green before this change and names the route after it.
-
-- **Every path the client calls is now checked against a route the server mounts.** There is no type
-  between a template string and a router, so a renamed route is a runtime 404 rather than a build error —
-  and what an operator sees is an empty panel, not an error naming the call. Nothing was broken when the
-  check was added; 5.0 renames almost every public name, which is why it exists now.
-
-- **One refusal, written out by hand in three places, is built from the vocabulary instead.**
-  `Invalid knowledgeType … Must be one of: entity, fact, edge, chrono` sat beside a check that reads the
-  same list from the code. They agree today; the rename from `memory` to `fact` had to find all three, and
-  nothing would have failed had it missed one.
-
-  These three close the pre-5.0 audit (`Q-22`).
-
-- **Almost every tool answered with no structured half, so `data` was `null` over HTTP and
-  `structuredContent` was absent over MCP.** Thirty-three successful returns across eleven tool files put
-  the whole answer in the text half and nothing beside it. A client that surfaces the structured form —
-  several do — got `null` and had to parse prose to recover a result it had just asked for.
-
-  **This is the defect the canary operator reported against `query`, answered on the tool they named.**
-  Nothing swept the siblings, and the sweep is where the cost was.
-
-  **What a tool carries now is the record it wrote, or the identity of what it acted on** — one rule, not
-  a decision per tool. A delete answers `{"_id": …, "deleted": true}`; a merge answers the survivor and
-  the absorbed id; `move_file` answers `{"from": …, "to": …}`.
-
-  Where the answer is naturally an array the structured half NAMES it, because `structuredContent` must
-  be an object: `list_spaces` carries `{"spaces": […]}` and `network_peers` carries `{"peers": […]}`.
-  **The text half of both is still the bare array**, so a caller that indexes it is unaffected —
-  `network_peers` has a recorded refusal of an envelope on exactly that ground, and it governs the text
-  half only.
-
-- **A gate had claimed this rule and could not see it.** `mcp-structured-content-carries-its-payload`
-  refuses a `structuredContent` built from metadata alone; its subject is every `structuredContent: { … }`
-  literal, so a return carrying none matched nothing and sat outside the sweep. It was green throughout
-  while refusing the *lesser* form of the same defect — metadata with no answer — and blind to the greater
-  one. Its replacement asserts presence instead, and **the parity test was wrong in the same direction**:
-  it compared `data` across the two doors with `deepEqual`, which passes for two nulls, so it reported
-  agreement about an answer neither door gave.
+- **Records:** `linkEntities` and its three siblings now store the link in the shape the space is read through; on a
+  space created since the last restart they answered `201` and `traverse`, graph `recall` and deletes missed it.
+- **Records:** An edge to a fact, chrono entry or file is now reached by a graph walk (it was silently dropped) and
+  expands like any neighbour; no `includeMemories`/`includeFiles` flag governs it. A walk may start from a fact.
+- **Records:** Claims an AI assistant originated are written with `attributed: true` (a declared boolean, a native
+  pre-filter on both doors); the validator refuses an unmarked assistant claim and a person's claim carrying the mark.
+- **Search:** Sorting the `links` collection now sorts by `createdAt`, `updatedAt`, `from` or `to`; it crashed (MCP
+  `Cannot read properties of undefined`, REST `500` with `retryable: true`).
+- **Search:** `filter` takes `deriveStatus` on both doors (default `false`): `true` returns a chrono entry's derived
+  status (`overdue` once due, unless `whenDuePasses` says otherwise), `false` the stored one; refused outside `chrono`.
+- **Search:** A top-level chrono `status` now combines with `deriveStatus` and the `filter` conveniences instead of
+  being refused with advice to put `status` at the top level.
+- **Schemas:** A type schema (4000 characters) and any property (2000) take a prose `description`: stored, returned by
+  `get_space_meta` and the space listing, editable in the Schema tab, never parsed.
+- **Schemas:** A property `default` now follows the declared type when the type changes (it was saved as `"5"` for a
+  number, so a strict space refused records it created itself) and is omitted when the text cannot be one.
+- **Schemas:** A schema type can be renamed on every knowledge type, keeping its properties and position and following
+  the name into every edge-endpoint list; records already written keep the old type.
+- **Spaces:** `space_reembed` is now an MCP tool (also `POST /api/space_reembed`), taking `kinds` and `limit` and
+  returning the counts of `POST /api/spaces/:id/reembed`, which has queued embeddings for vectorless records since 4.4.
+- **Spaces:** `space_reembed`'s `skippedSuppressed` and `remaining` now come from one snapshot, so a draining embed
+  worker no longer makes them report suppressed records that are not.
+- **Files:** `write_file` takes `encoding: "base64"` beside its UTF-8 default, so an MCP session can save a picture, a
+  PDF or any binary file. About 7 MB fits (10 MB JSON body cap); larger goes through `POST /api/files/{path}`.
+- **Files:** Text that is not valid base64 (such as a `data:image/png;base64,…` URL) is now refused on both doors; it
+  used to store a short corrupt file under a `201`.
+- **Files:** A file keeps its description, tags and properties across a move and across a rewrite that does not mention
+  them; both are now documented guarantees, so there is no need to re-assert them after each write.
+- **UI:** The edge-ends picker lists the declared entity types plus any name already on the edge (strays marked), so an
+  end whose type was deleted can be unticked.
+- **UI:** The space editor's Save no longer disappears after a "nothing to save" notice, and clearing a key (strict
+  `strictLinkage` off, an emptied `purpose` or `usageNotes`) now counts as a change and is sent.
+- **UI:** The Brain page now says a chrono status it shows is derived; a backup or export holds the stored status, so
+  an entry shown overdue reads `active` there.
+- **Server:** Every start converts each space not yet marked `completeLinkage` to link records, additively (an
+  interrupted run completes next boot), because `npm run links:convert` failed on deployed instances; removal in 6.0.
+- **Server:** Upgrading no longer rewrites file records peers also hold: the boot conversion does links only, and the
+  pre-4.0 file stamp is back on `npm run links:convert`, which prints records stamped per space (containers cannot).
+- **Server:** The conversion pre-flight clamps `since` to when this instance began recording and returns
+  `recorderStartedAt` (`null` until the instance has started since upgrading), so it no longer claims ninety days.
+- **MCP:** Every tool now fills `structuredContent` (was empty; HTTP `data`) with the record written or id acted on:
+  delete `{"_id", "deleted"}`, `move_file` `{"from", "to"}`, `list_spaces` `{"spaces"}`, `network_peers` `{"peers"}`.
+- **Docs:** Graph-augmented recall has its own integration-guide page, `04h-graph-augmented-recall.md`, split out of
+  `04a-recall-api.md`.
 
 ### Internal
 
-#### The benchmark corpus and its extraction pipeline
-
-- **The benchmark fetcher could not fetch the corpus it was written to pin, and every LongMemEval URL
-  404d.** Two independent failures on the same step.
-
-  The pinned URLs append `.json`; the publisher's files have no extension. They were recorded from the
-  dataset page rather than from a fetch, so nothing ever proved they resolved — which is the one thing
-  pinning by URL is supposed to make impossible. Corrected against the HuggingFace file listing.
-
-  And `fetchPinned` read `await res.arrayBuffer()`, holding the body twice. `longmemeval_s` is 278 MB
-  against LoCoMo's 2.8 MB, so the process died with `JavaScript heap out of memory` before it could
-  print a hash. It now hashes the response as it streams, writes to a `.partial`, and renames into the
-  cache only after the digest verifies — so an unverified corpus never appears where a reader expects a
-  pinned one.
-
-  `longmemeval_s` is now pinned at `08d8dad4be43…`, 278,025,796 bytes. `_m` and `_oracle` remain
-  recorded and unpinned, which the fetcher refuses exactly as it refuses a mismatch.
-
-- **`benchmarks/` now holds a folder per benchmark: LoCoMo, LongMemEval and MemoryArena.** LongMemEval is
-  recorded and not yet fetched, MemoryArena is not released by its authors, and a dataset whose hash is
-  missing is now refused rather than read as nothing to check.
-
-- **The LoCoMo benchmark was rebuilt around the conversation schema.** Storing resolved facts instead of
-  transcript lines, with provenance and cross-session synthesis, took first-result accuracy from 33.0% to
-  55.3% and evidence delivery to 91.4% on the first conversation. The measurements, the dead ends and the
-  ceiling that method has are in `benchmarks/DEVELOPMENT-LOG.md`.
-
-#### `filter` is the one read path
-
-- **The `filter` tool moved out of `search.ts` into `mcp/tools/filter.ts`.** Not a tidy-up: the size gate
-  refused the two lines the `path` argument added, and the file was at its ceiling. The three tools there
-  were never one responsibility — `recall` and `similar` RANK, and `filter` is the one that does not,
-  which is what its own description already calls it.
-
-  **Six gates named `server/src/mcp/tools/search.ts` as "the MCP door for `filter`" and all six went red
-  at once.** Each would have been fixed by editing a literal, and six literals is six chances for the next
-  move to leave one pointing at a file that no longer holds what the gate reads. They derive it now, from
-  `testing/_shared/search-doors.mjs`, which also asserts that each file still declares the handler that
-  makes it a door — a gate handed a file that moved concludes whatever its regex says about the wrong text.
-
-#### Recall, expansion and the byte budget
-
-- **A cross-door budget fixture was sized from the larger door, and only luck made it bind on the other.**
-
-  A REST result flattens the record into the ranking envelope; an MCP result nests it under `record` with a
-  narrower envelope, so the same corpus is a different number of bytes through each door and MCP’s has
-  always been the smaller. The spill test budgeted at 80% of REST’s full answer and asserted that MCP
-  truncates too — which held by a margin nobody had measured.
-
-#### Documentation, gates and internal structure
-
-- **Graph-augmented recall is its own page, and the gates that named the page it used to be on now find it
-  by its heading** (`Q-26`). `docs/integration-guide/04a-recall-api.md` stood at exactly 900 lines, which is
-  the cap every tracked document is held to, so the next change to it was blocked — the previous one had
-  already been squeezed to net zero lines to fit. The `traverse`-on-recall section is now
-  `04h-graph-augmented-recall.md`, registered in `HELP_DOCS` and the index in numbered order. Moved by
-  `split-part.mjs` and checked by `verify-part.mjs`: 746 prose lines before, 747 after, nothing lost.
-
-  **The interesting half is what a split does to the gates around it.** Two named `04a-recall-api.md` as
-  "the integrator's recall page" and both went red the moment the section left it — the lucky outcome. The
-  unlucky one is a gate that asserts an ABSENCE, or greps a spelling the remaining page happens to keep: it
-  goes on passing about a document that no longer contains its subject, and nothing ever contradicts it. So
-  the page is resolved by DERIVATION now, from headings rather than from a filename, in
-  `testing/_shared/integration-guide-parts.mjs`. Headings and not whole files, because `04a` still refers to
-  graph-augmented recall twice by name — a file search answers with the page the section moved out of. It
-  throws on no match and on more than one, so a reworded heading cannot arrive as `undefined` and be read as
-  "nothing to check here".
-
-  **And a split silently breaks every "above" and "below" that now points at another file.** Nothing
-  mechanical sees those: the link resolves, the anchor exists, the sentence is simply about a page the reader
-  is not on. Two here, both rewritten to name what they mean.
-
-- **The offline standalone tests run in parallel, and the split is one module instead of two copies.**
-  Measured on 591 offline files: **191.0s serialised, 46.6s at default concurrency**, both green.
-  `npm run test:standalone` goes 257s → 160s, and preflight's own offline pass — which was serialised
-  too — drops by the same three and a half minutes, so the set is no longer paid for twice per cycle.
-
-  **`--test-concurrency=1` is right where it came from and wrong here.** `testing/integration` shares
-  ONE live instance: run concurrently it latches maintenance mode and reports 314 false failures. The
-  offline files have no instance to share, which is what `@needs-instance` declares — and the 16 files
-  that do declare it still run one at a time.
-
-  **And the runner REFUSES a stale `server/dist`.** These files import from it; preflight builds it
-  first and `test:all:core` never has, so running the suite straight after a branch switch tested
-  whatever was compiled last. That cost two confused diagnoses in one evening — a fix that was already
-  merged looked broken, and a build from two branches ago looked like a regression in the change under
-  test. A check rather than a build, deliberately: building would hide the mistake and add a minute to
-  every run, while refusing costs milliseconds and says what to do. `--allow-stale` is the escape hatch.
-
-- **Six gates asserted a SITE rather than a rule, and every one of them went red on a change that improved
-  the code.**
-
-  All six now assert the rule: the guard list is DERIVED from the middleware that reaches `resolveAuthOrFail`
-  with a floor under it, the extractor knows both route shapes, the wrapper is checked per route, and the
-  reach rule is checked in the module it moved to. This is the argument for doing the whole rename at once
-  rather than a name at a time — it moves every identifier together, so it finds these as a batch instead of
-  one false alarm a year that somebody talks themselves past.
+- **Build:** `npm run test:standalone` now runs the offline test files in parallel (257s to 160s) and refuses a stale
+  `server/dist`; `--allow-stale` overrides.
+- **Build:** The benchmark fetcher now streams and hash-verifies each corpus instead of buffering it (it died with
+  `JavaScript heap out of memory` on `longmemeval_s`); `benchmarks/` holds a folder per benchmark.
 
 ## Earlier releases
 
