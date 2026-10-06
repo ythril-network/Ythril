@@ -31,13 +31,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { withCollectionAsView, withStalledReads, setWriteBoundForTest } from './_write-faults.mjs';
+import { MongoNetworkError } from 'mongodb';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 
 const STEP = 'Suppression sweep';
 const SUPPRESSING = { suppressEmbeddings: true };
-const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
+// One failing space per case: the report's throttle is process-wide, so a space that failed in one case would say nothing in the next.
+const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf'];
 const HEALTHY = ['bravo', 'charlie'];
 const VECTOR = { embedding: [0.1, 0.2, 0.3], embeddingModel: 'test-model' };
 const STALL_MS = 3000;
@@ -50,6 +52,7 @@ process.env['CONFIG_PATH'] = path.join(tmp, 'config.json');
 let mongo;
 let sweep;
 let signals;
+let walk;
 let unsubscribeLog = () => {};
 let unsubscribeSignals = () => {};
 const lines = [];
@@ -58,6 +61,18 @@ const unhandled = [];
 const onUnhandled = (err) => { unhandled.push(err); };
 
 const warnsFor = (space) => lines.filter(l => l.includes('WARN') && l.includes(STEP) && l.includes(`'${space}'`));
+/**
+ * Reads of `collName` fail with `makeError()` once `gate` (a promise) opens: `find(...).toArray()` is what the sweep reads with.
+ * Returns the restore. A failure made at the call, not by the store, so the CLASS of the error is the test's to choose.
+ */
+function failReadsOf(proto, collName, makeError, gate = Promise.resolve()) {
+  const original = proto.find;
+  proto.find = function patched(...args) {
+    if (this.collectionName !== collName) return original.apply(this, args);
+    return { toArray: async () => { await gate; throw makeError(); } };
+  };
+  return () => { proto.find = original; };
+}
 const hasVector = async (space) => (await mongo.col(`${space}_facts`).findOne({ _id: `${space}-1` }))?.embedding !== undefined;
 
 describe('the suppression sweep isolates a failing space', { skip }, () => {
@@ -69,6 +84,7 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     mongo = await openTestMongo('g18sweep');
     sweep = await import('../../server/dist/brain/suppression-sweep.js');
     signals = await import('../../server/dist/util/housekeeping-signals.js');
+    walk = await import('../../server/dist/util/housekeeping-walk.js');
     const { subscribeLogLines } = await import('../../server/dist/util/log.js');
     unsubscribeLog = subscribeLogLines(l => lines.push(l));
     unsubscribeSignals = signals.onHousekeepingSignal(e => { if (e.type === 'space-failure' && e.step === STEP) failures.push(e); });
@@ -129,6 +145,66 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     assert.deepEqual(unhandled, [], 'the sweep rejected unhandled');
   });
 
+  it('a store that stops answering at boot stops the walk after the first space and says so once', async () => {
+    lines.length = 0;
+    failures.length = 0;
+    for (const space of HEALTHY) await mongo.col(`${space}_facts`).updateOne({ _id: `${space}-1` }, { $set: VECTOR });
+    // A network error is the store's CONDITION by its class, so the verdict is store-down without a ping.
+    const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'alpha_facts', () => new MongoNetworkError('connection 7 closed'));
+    try { await sweep.sweepEverySpaceAtBoot(); } finally { restore(); }
+
+    for (const space of HEALTHY) assert.equal(await hasVector(space), true, `'${space}' was swept after the store stopped answering: the walk went on`);
+    assert.equal(lines.filter(l => l.includes('WARN') && l.includes(`${STEP} stopped: the store is not answering`)).length, 1, `no single stop line:\n${lines.join('\n')}`);
+    assert.equal(warnsFor('alpha').length, 0, 'the first space was reported as its own failure, not the store\'s');
+    assert.deepEqual(failures, [{ type: 'space-failure', step: STEP, kind: 'store_down' }], 'the stop was not counted once as store_down');
+  });
+
+  it('with no walk above it, a failure on the meta-write path is said once per sweep, a rerun included, and never rejects unhandled', async () => {
+    lines.length = 0;
+    failures.length = 0;
+    unhandled.length = 0;
+    let open;
+    const gate = new Promise(r => { open = r; });
+    const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'foxtrot_facts', () => new Error('foxtrot read refused'), gate);
+    try {
+      sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING);
+      await new Promise(r => setTimeout(r, 50)); // the first sweep is now held at its read
+      sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING); // joins it and queues one rerun, which nobody awaits
+      open();
+      assert.ok(await waitFor(() => failures.length >= 2, 10_000, 50, undefined, { what: 'the sweep and its rerun to fail' }));
+      await new Promise(r => setTimeout(r, 300));
+    } finally { restore(); }
+
+    assert.equal(failures.length, 2, `${failures.length} failures counted for one sweep and one rerun: a failure was said twice or lost`);
+    assert.equal(warnsFor('foxtrot').length, 1, `the line is said once per window:\n${lines.join('\n')}`);
+    assert.deepEqual(unhandled, [], 'a sweep rejected unhandled');
+  });
+
+  it('a boot walk that joins a sweep already running is handed its failure, and it is said once', async () => {
+    lines.length = 0;
+    failures.length = 0;
+    unhandled.length = 0;
+    let open;
+    const gate = new Promise(r => { open = r; });
+    const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'golf_facts', () => new Error('golf read refused'), gate);
+    let boot;
+    try {
+      sweep.sweepAfterMetaWrite('golf', SUPPRESSING);
+      await new Promise(r => setTimeout(r, 50)); // held at its read
+      boot = sweep.sweepEverySpaceAtBoot(); // reaches golf, joins the held sweep
+      await new Promise(r => setTimeout(r, 300));
+      open();
+      await boot;
+      await new Promise(r => setTimeout(r, 300));
+    } finally { restore(); }
+
+    // The held sweep failed once (the walk, which awaited it, says it) and the rerun the join queued failed once (nobody
+    // awaited it, so it says itself): two failures, two reports, never three.
+    assert.equal(failures.length, 2, `${failures.length} failures counted for one sweep and its rerun`);
+    assert.equal(warnsFor('golf').length, 1, `the line is said once per window:\n${lines.join('\n')}`);
+    assert.deepEqual(unhandled, [], 'a sweep rejected unhandled');
+  });
+
   it('a space whose read hangs is ended by the housekeeping bound, reported, and the others are swept', async () => {
     lines.length = 0;
     failures.length = 0;
@@ -154,7 +230,11 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     }
 
     assert.ok(ms < STALL_MS - 1000, `the boot sweep took ${ms} ms: the hung read ran to its end (${STALL_MS} ms) instead of the ${BOUND_MS} ms bound`);
-    assert.equal(warnsFor('echo').length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
+    const hung = warnsFor('echo');
+    assert.equal(hung.length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
+    // The walk read the failure: the bound's own words, and the space is in quarantine (a hung space is not retried at once).
+    assert.match(hung[0], new RegExp(`ran past its time bound of ${BOUND_MS} ms .*retried after quarantine \\(\\d+s\\)`), `not the walk's wording for a timeout: ${hung[0]}`);
+    assert.ok(walk.quarantinedSpaces().includes('echo'), 'the hung space was not quarantined');
     for (const space of HEALTHY) assert.equal(await hasVector(space), false, `'${space}' was not swept after the hung space`);
     assert.equal(failures.length, 1, 'the hung space was not counted exactly once');
   });
