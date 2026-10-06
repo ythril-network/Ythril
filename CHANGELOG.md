@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A proxy space no longer gets collections at boot, and a hand-edited `"proxyFor": []` is removed on load (warning), so that space becomes a real one that is embedded and scanned | Remove `proxyFor: []` if it was not meant |
 | MCP `save_bulk` refuses a retired or unknown key (such as `{"memories": […]}`) with REST's `400`, naming `facts`; it answered success and wrote nothing | Send `facts`, not `memories` |
 | `POST /api/duplicates/scan` and `POST /api/contradictions/scan` answer `200` with `failedSpaces` (`[{ spaceId, reason }]`) and `scannedSpaces` when one space fails, was `500`; a dead store is `503` | Read `failedSpaces` |
+| Sync reads: a `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400` (was an empty page); `limit` below 1 reads 1 | Send back the `nextCursor` a page returned |
 
 ### Changed
 
@@ -237,6 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wrote, is refused and no longer blocks that record's author. Author-less (older) records stay deletable by an admitted peer's tombstone.
 - **Sync:** A record pushed with its author's own peer token is no longer refused as `tombstoned` by a tombstone another instance
   planted; pushed by anyone else, a record with a deleted id is still refused.
+- **Sync:** A negative `limit` on a sync read no longer returns the whole collection, and a read by id (`/api/sync/<family>/:id`)
+  no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
 
 ## [5.6.6] — 2026-10-06
 
