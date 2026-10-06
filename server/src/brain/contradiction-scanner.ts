@@ -51,8 +51,11 @@ import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
 
-/** The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. */
-const SCAN_STEP = declareStep('Contradiction scan');
+/**
+ * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
+ * the route's manual scan reports under it too (`scanSpacesInRequest`).
+ */
+export const SCAN_STEP = declareStep('Contradiction scan');
 
 const SCAN_STATE = 'ythril_dupe_scan_state';
 const DEFAULT_BATCH_SIZE = 200;

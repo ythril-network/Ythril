@@ -50,8 +50,11 @@ import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
 
-/** The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. */
-const SCAN_STEP = declareStep('Dupe scan');
+/**
+ * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
+ * the route's manual scan reports under it too (`scanSpacesInRequest`).
+ */
+export const SCAN_STEP = declareStep('Dupe scan');
 
 const DEFAULT_SCHEDULE = '0 3 * * *';   // 03:00 daily
 const DEFAULT_BATCH_SIZE = 200;

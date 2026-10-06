@@ -422,7 +422,9 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   `Stale chunk cleanup failed: <reason>`. A folder on a hung network mount is not ended by the bound, which is about the
   database.
 - `Dupe scan failed for space '<id>': …` and `Contradiction scan failed for space '<id>': …`. A failure while a scan reads the
-  records it starts from in a space is said too, not skipped in silence.
+  records it starts from in a space is said too, not skipped in silence. A scan an operator starts (**Scan now**, or the API) says
+  the same line ending `— retried next scan`: a space that fails does not stop the others from being scanned, and the API
+  answers which spaces failed.
 - `Suppression sweep failed for space '<id>': … — retried with the next meta write`.
 - `Embed claim`, `Embed revive`, `Embed stall reset`, `Media claim` and `Media stall reset` name the embedding and media
   queues. A space that fails to hand out a job does not stop the next space's jobs, and a queue is not marked empty

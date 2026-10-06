@@ -488,6 +488,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A duplicate or contradiction scan, scheduled or manual, no longer loses a failure silently (`Q-274`).** A seed
   failure other than "not found" was swallowed and a failed existence lookup in the candidate prune was silent; both
   are reported now, and the scan moves past a record that keeps failing instead of stopping on it.
+- **A manual scan of every space no longer fails as a whole when one space fails (`Q-381`).** `POST /api/duplicates/scan`
+  and `POST /api/contradictions/scan` answered `500` for the request, naming no space, when one space's scan threw, and
+  never reached the spaces behind it. They scan every space they can now and answer `200` with `failedSpaces`
+  (`[{ spaceId, reason }]`, present and empty when nothing failed), the reason in Ythril's words and the database's own in
+  the Server Log (`… failed for space '<id>': … — retried next scan`); `scannedSpaces` counts the spaces scanned. A store
+  that is not answering still ends the request with the retryable `503`. The Review tab's **Scan now** reports a space it
+  could not scan instead of finishing quietly.
 - **A failed space init is retried by the next reload (`Q-274`).** A space whose initialisation failed was recorded as
   added and never tried again until the next start; every reload now initialises it again until it has succeeded.
 - **Shutdown stops every job it started (`Q-317`).** The retention sweep, the candidate and tombstone prunes, the
