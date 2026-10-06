@@ -64,11 +64,18 @@
  *      node --test testing/standalone/a-write-the-bound-ended-never-lands-db.test.js
  * (requires a prior `npm run build` in server/)
  */
-import { defineLandingExperiment } from './_write-landing-experiment.mjs';
+import { describe, it, before, after } from 'node:test';
+import { landingExperiment } from './_write-landing-experiment.mjs';
 
-defineLandingExperiment({
+// Declared HERE, not in the helper: node records a test against the file that calls `it`.
+const x = landingExperiment({
   title: 'a write the bound ended never lands afterwards',
   suite: 'boundlands',
   query: '',
   reps: 20,
+});
+describe(x.title, { skip: x.skip }, () => {
+  before(x.before, { timeout: x.timeout });
+  after(x.after);
+  for (const c of x.cases) it(c.name, c.fn);
 });

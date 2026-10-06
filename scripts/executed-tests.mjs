@@ -28,23 +28,27 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trackedTestFiles } from '../testing/standalone/_sources.mjs';
 import { readTimingResults } from './_shared/timing-results.mjs';
+import { readClientResults } from './_shared/client-results.mjs';
 import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
 import { slashPath } from './_shared/repo-path.mjs';
 
 /**
- * The files that reported at least one test, across every `*.jsonl` in `dir`.
+ * The files that reported at least one test: the node suites' across every `*.jsonl` in `dir`, and the client's spec files
+ * from its vitest report (`client.json`) — the node JSONL holds no client spec, so reading only it named every spec unrun.
  *
  * @param {string} dir
  * @returns {{ executed: Set<string>, logs: number, events: number }}
- * @throws when `dir` holds no results, or any of them is incomplete
+ * @throws when `dir` holds no results, any of them is incomplete, or the client report is missing or empty
  */
 export function executedFiles(dir) {
-  // The reading, and the refusals that make it whole-or-nothing, are `readTimingResults` (shared with unexpected-skips).
+  // The reading, and the refusals that make it whole-or-nothing, are `readTimingResults` and `readClientResults` (both shared
+  // with unexpected-skips).
   const { lines, logs, events } = readTimingResults(dir);
   const executed = new Set(lines
     .filter(l => l.type === 'test' && typeof l.file === 'string' && l.file !== '')
     .map(l => slashPath(l.file)));
-  return { executed, logs, events };
+  for (const spec of readClientResults(dir).executed) executed.add(spec);
+  return { executed, logs: logs + 1, events };
 }
 
 /** @returns {{ missing: string[], total: number, logs: number }} */

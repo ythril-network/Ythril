@@ -27,55 +27,16 @@
  *      sentinel; no client report beside the node ones, or one that does not parse or holds no test; a bad command line.
  *      The unknown wins over a finding: a partial list is never reported as the list.
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { readTimingResults } from './_shared/timing-results.mjs';
 import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
-import { repoRelative, slashPath } from './_shared/repo-path.mjs';
+import { slashPath } from './_shared/repo-path.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
-import { REPO_ROOT } from '../testing/standalone/_sources.mjs';
+import { CLIENT_RESULTS, readClientResults } from './_shared/client-results.mjs';
 
-/** The client's report inside the results folder: written by ci.yml's client job, downloaded beside the node results. */
-export const CLIENT_RESULTS = 'client.json';
-
-// REPO_ROOT (the repository the script lives in) is `_sources.mjs`'s: a vitest report names absolute paths, and a reader
-// wants repo-relative ones.
-/** Forward-slash path, relative to the repository when it lies inside it (one outside it is kept as it came). */
-const repoPath = (file) => repoRelative(file, REPO_ROOT) ?? slashPath(file);
-
-/**
- * The client's vitest JSON report as the tests that did not run to a verdict.
- *
- * @returns {{ tests: number, passed: number, failed: number, unexpected: Array<{ file: string, test: string, reason: string }> }}
- * @throws when the report is missing, does not parse, or holds no test
- */
-export function readClientResults(dir) {
-  const path = join(dir, CLIENT_RESULTS);
-  if (!existsSync(path)) {
-    throw new Error(`${CLIENT_RESULTS} is not in ${dir}: the client job's results are part of the run, and a set without them cannot say whether the client skipped`);
-  }
-  let report;
-  try { report = JSON.parse(readFileSync(path, 'utf8')); } catch (e) { throw new Error(`${path} does not parse: ${e.message}`); }
-  if (report === null || typeof report !== 'object' || !Array.isArray(report.testResults)) {
-    throw new Error(`${path} is not a vitest JSON report (no testResults array)`);
-  }
-  let tests = 0;
-  let passed = 0;
-  let failed = 0;
-  const unexpected = [];
-  for (const file of report.testResults) {
-    for (const t of Array.isArray(file?.assertionResults) ? file.assertionResults : []) {
-      tests++;
-      if (t.status === 'passed') passed++;
-      else if (t.status === 'failed') failed++;
-      else {
-        unexpected.push({ file: repoPath(file.name ?? '(unnamed spec)'), test: String(t.fullName ?? t.title ?? '(unnamed test)'), reason: `vitest status ${t.status}` });
-      }
-    }
-  }
-  if (tests === 0) throw new Error(`${path} holds no test: an empty client run is not a clean one`);
-  return { tests, passed, failed, unexpected };
-}
+// The client report is read by one module, shared with `executed-tests.mjs`; both names stay exported here for the callers
+// that import them from this script.
+export { CLIENT_RESULTS, readClientResults };
 
 /**
  * Every skipped test of the results in `dir` that CI did not expect.

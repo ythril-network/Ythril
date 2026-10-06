@@ -23,9 +23,11 @@
  * (requires a prior `npm run build` in server/)
  */
 
-import { defineLandingExperiment } from './_write-landing-experiment.mjs';
+import { describe, it, before, after } from 'node:test';
+import { landingExperiment } from './_write-landing-experiment.mjs';
 
-defineLandingExperiment({
+// Declared HERE, not in the helper: node records a test against the file that calls `it`.
+const x = landingExperiment({
   title: 'a write the bound ended never lands afterwards, on a client whose MONGO_URI sets timeoutMS=1500',
   suite: 'boundlandsuri',
   query: '&timeoutMS=1500',
@@ -38,4 +40,9 @@ defineLandingExperiment({
   clientTimeoutMs: 1500,
   boundMs: 3000,
   holdMs: 6000, // an operation late in a hold is bounded by what is left of it: the hold must not be the shorter of the two
+});
+describe(x.title, { skip: x.skip }, () => {
+  before(x.before, { timeout: x.timeout });
+  after(x.after);
+  for (const c of x.cases) it(c.name, c.fn);
 });

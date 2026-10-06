@@ -139,18 +139,30 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
 
   const line = timingLine;
 
+  /** A client spec: what the client job runs with vitest and reports in `client.json`, never in the node JSONL. */
+  const isClientSpec = (file) => file.startsWith('client/');
+
   /**
-   * Write a results directory for the copy: one passing test event per tracked test file, spread over two JSONL
-   * files (the union is what counts), except as `without` and `summaryOnly` say.
+   * Write a results directory for the copy the way a run does: one passing test event per tracked NODE test file, spread
+   * over two JSONL files (the union is what counts), and the client's specs in a vitest report `client.json` — except as
+   * `without` and `summaryOnly` say, and with no report at all when `noClientReport`. (This used to write the client specs
+   * into the JSONL too, a shape no run produces, so the script passed here while reading no client report at all.)
    */
-  function results({ without = [], summaryOnly = [], failedOnly = [], skip = false } = {}) {
+  function results({ without = [], summaryOnly = [], failedOnly = [], skip = false, noClientReport = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'ythril-results-'));
     resultsDirs.push(dir);
     if (skip) return dir;
     const files = ci.tracked().filter(isTestFile);
     assert.ok(files.length >= 500, `only ${files.length} test files in the copy — the listing is broken`);
+    const specs = files.filter(isClientSpec).filter(f => !without.includes(f));
+    assert.ok(files.filter(isClientSpec).length >= 50, 'the copy holds too few client specs for the client half to mean anything');
+    if (!noClientReport) {
+      writeFileSync(join(dir, 'client.json'), JSON.stringify({
+        testResults: specs.map(name => ({ name, assertionResults: [{ fullName: 'registers', status: 'passed' }] })),
+      }));
+    }
     const halves = [[], []];
-    files.forEach((file, i) => {
+    files.filter(f => !isClientSpec(f)).forEach((file, i) => {
       if (without.includes(file)) return;
       const lines = halves[i % 2];
       if (summaryOnly.includes(file)) {
@@ -201,6 +213,19 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
     const { out } = run('executed-tests.mjs', ['--root', ci.root, '--results', results({ without: [a, b] })]);
     assert.ok(out.includes(a) && out.includes(b), `the two missing files are not both named:\n${out.slice(0, 1500)}`);
     assert.ok(!out.includes(pick(4)), 'a file that did run is named as unexecuted');
+  });
+
+  it('a client spec the client report does not hold is named — the client half is read from client.json', () => {
+    const spec = ci.tracked().filter(isTestFile).filter(isClientSpec)[3];
+    const { status, out } = run('executed-tests.mjs', ['--root', ci.root, '--results', results({ without: [spec] })]);
+    assert.notEqual(status, 0, 'a client spec with no test in the client report was reported as executed');
+    assert.ok(out.includes(spec), `${spec} is not named:\n${out.slice(0, 1500)}`);
+  });
+
+  it('a run with no client report fails: it cannot say whether the client ran, which is not "nothing unrun"', () => {
+    const { status, out } = run('executed-tests.mjs', ['--root', ci.root, '--results', results({ noClientReport: true })]);
+    assert.notEqual(status, 0, `a run without the client report was reported clean:\n${out.slice(0, 800)}`);
+    assert.match(out, /client\.json/, 'the refusal does not name the missing report');
   });
 
   it('no results at all fails — an empty run is not a clean one', () => {

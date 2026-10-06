@@ -26,7 +26,6 @@
  *   asserts that the client really carries it, below the bound, and that no answer came before the server's deadline —
  *   the ORDER the bound promises: the server's deadline first, never a driver clock of the client's.
  */
-import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { RECORD_PARTS, snapshotSpaceInOneRead, changedDocuments } from './_space-snapshot.mjs';
@@ -182,40 +181,38 @@ async function runAll(results, reps) {
 // ── The experiment, then one case per lane ───────────────────────────────────────────────────────────────────
 
 /**
- * Define the suite for one client. Call it ONCE per test file (see the docblock for why).
+ * The experiment for one client, as data the test file declares: its title and skip, the `before`/`after` that run it, and
+ * one case per check. Call it ONCE per test file (see the docblock for why).
+ *
+ * ## Why it returns cases instead of calling `describe` and `it` itself
+ *
+ * Node records a test against the file that CALLED `it`, not the file it ran. While this module declared the suite, all of
+ * its cases were recorded under `_write-landing-experiment.mjs`, and the two test files that run it reported no test of
+ * their own — so the CI gate that proves every test file ran (`scripts/executed-tests.mjs`) named both as never run, and
+ * their durations went to a helper. The test file declares: `describe(x.title, { skip: x.skip }, () => { before(x.before,
+ * { timeout: x.timeout }); after(x.after); for (const c of x.cases) it(c.name, c.fn); })`. `a-test-is-declared-where-it-runs`
+ * holds that no helper module declares a test.
  *
  * @param {{ title: string, suite: string, query: string, reps: number, clientTimeoutMs?: number, boundMs?: number, holdMs?: number }} o
  *   `boundMs`: the write bound the experiment sets (default 1000, the least it may be); `holdMs`: the hold deadline (default
  *   the same). A variant that asserts WHEN an answer came gives the hold more than the bound: an operation late in a hold is
  *   bounded by what is left of the hold, which is less than the bound, and would read as an early answer
+ * @returns {{ title: string, skip: string | false | undefined, timeout: number, before: () => Promise<void>, after: () => Promise<void>, cases: Array<{ name: string, fn: () => void }> }}
  */
-export function defineLandingExperiment({ title, suite, query, reps, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
+export function landingExperiment({ title, suite, query, reps, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
   const REPS = reps;
   BOUND = { writeTimeoutMs: boundMs, holdDeadlineMs: holdMs };
   CAP_MS = holdMs + 2500;
-  describe(title, { skip }, () => {
-    let doors;
-    let relay;
-    let seamError = null;
-    let restoreBound = () => {};
-    /** `results[laneIndex]` — one entry per repetition. */
-    const results = LANES.map(() => []);
+  let doors;
+  let relay;
+  let seamError = null;
+  let restoreBound = () => {};
+  /** `results[laneIndex]` — one entry per repetition. */
+  const results = LANES.map(() => []);
+  const cases = [];
+  const it = (name, fn) => cases.push({ name, fn });
 
-    before(async () => {
-      relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
-      doors = await openStalledWriteDoors({ suite, spaces: LANES.map(l => l.space), mongoPort: relay.port, mongoQuery: query });
-      Object.assign(env, doors.env);
-      Object.assign(ctx, { door: env.door, mods: await loadHolderModules() });
-      try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
-      relay.setDelay(LATE_BY_MS);
-      await runAll(results, REPS);
-    }, { timeout: 120_000 + REPS * LANES.length * (CAP_MS + SETTLE_MS) / WORKERS });
-    after(async () => {
-      restoreBound();
-      await doors?.close();
-      await relay?.close();
-    });
-
+  {
     it('the write bound has a test seam (db/write-bound.ts setWriteBoundForTest)', () => {
       assert.equal(seamError, null, seamError?.message);
     });
@@ -276,5 +273,26 @@ export function defineLandingExperiment({ title, suite, query, reps, clientTimeo
           + `the client's deadline passed before the server's, so the server operation outlived the answer and the hold`);
       });
     }
-  });
+  }
+
+  return {
+    title,
+    skip,
+    timeout: 120_000 + REPS * LANES.length * (CAP_MS + SETTLE_MS) / WORKERS,
+    async before() {
+      relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
+      doors = await openStalledWriteDoors({ suite, spaces: LANES.map(l => l.space), mongoPort: relay.port, mongoQuery: query });
+      Object.assign(env, doors.env);
+      Object.assign(ctx, { door: env.door, mods: await loadHolderModules() });
+      try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
+      relay.setDelay(LATE_BY_MS);
+      await runAll(results, REPS);
+    },
+    async after() {
+      restoreBound();
+      await doors?.close();
+      await relay?.close();
+    },
+    cases,
+  };
 }
