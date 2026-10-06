@@ -24,6 +24,7 @@ import { deliverToWebhook } from '../webhooks/dispatcher.js';
 import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
 import { log, peerText } from '../util/log.js';
+import { parseLimit } from '../util/pagination.js';
 
 export const webhooksRouter = Router();
 
@@ -191,7 +192,7 @@ webhooksRouter.get('/:id/deliveries', async (req, res) => {
       return;
     }
 
-    const limit = Math.min(parseInt(req.query['limit'] as string, 10) || 100, 100);
+    const limit = parseLimit(req.query['limit'], 100, 100);
     const deliveries = await listDeliveries(req.params['id'] as string, limit);
     res.json({ deliveries });
   } catch (err) {

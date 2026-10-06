@@ -19,7 +19,8 @@ import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { FileTombstoneDoc } from '../../config/types.js';
 
-import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, callerPeerId } from './_shared.js';
+import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, callerPeerId, syncReadStart, BAD_SYNC_START } from './_shared.js';
+import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -41,12 +42,14 @@ export const syncTombstonesRouter = Router();
  */
 syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq = '0', limit = '1000' } = req.query as Record<string, string>;
-    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const { spaceId, networkId, sinceSeq, limit } = req.query as Record<string, unknown>;
+    if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
+    if (!spaceAllowed(spaceId, networkId as string | undefined, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
-    const since = parseInt(sinceSeq, 10);
-    const pageSize = Math.min(parseInt(limit, 10) || 1000, 5000);
+    // One reading of the start and the size for every sync read (`Q-388`): see `syncReadStart`.
+    const since = syncReadStart(sinceSeq, undefined);
+    if (since === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
+    const pageSize = parseLimit(limit, 1000, 5000);
     /*
      * DERIVED from `TOMBSTONE_TYPES`, and it was four hand-written calls with a four-key response.
      *
