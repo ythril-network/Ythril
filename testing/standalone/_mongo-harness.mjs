@@ -152,6 +152,35 @@ export async function openTestMongo(suite, { port, query } = {}) {
   return mongo;
 }
 
+/**
+ * A client of the harness's own for a test's FIXTURE steps — seeding, wiping, holding a lock, reading what a case left — that
+ * is not the server's client.
+ *
+ * ## What it prevents
+ *
+ * A test that makes the server's client carry an option on purpose (`'&timeoutMS=1500'`, an operator's `MONGO_URI`) makes every
+ * fixture step that goes through `openTestMongo`'s module carry it too, and the option is the SUBJECT of the test, not of its
+ * setup: on a loaded host a seed, a lock or a read died with `Timed out during socket read (1499ms)` and the case reported "a
+ * repetition could not run" — about the machine, not the rule. This client has the driver's defaults, goes straight to the stack
+ * (not through a relay that holds writes back) and answers to the harness database the server's client uses, so what the
+ * server does and what the fixture sees are one database.
+ *
+ * It has the SURFACE the fixture helpers read (`getDb`, `getMongo`, `col`), so `holdDocumentLock`, `activeOperations` and
+ * `snapshotSpaceInOneRead` take it where they take the server's module. The server's own module is still what runs the write
+ * under test.
+ *
+ * @param suite the same slug the server's client was opened with (`openTestMongo`)
+ * @returns {Promise<{ getMongo: () => object, getDb: () => object, col: (name: string) => object, close: () => Promise<void> }>}
+ */
+export async function openFixtureMongo(suite) {
+  const { MongoClient } = await import('mongodb');
+  const dbName = `ythril_harness_${suite}`;
+  const client = new MongoClient(testMongoUri(dbName));
+  await client.connect();
+  const db = client.db(dbName);
+  return { getMongo: () => client, getDb: () => db, col: (name) => db.collection(name), close: () => client.close() };
+}
+
 /** Drop the harness database and disconnect. Call from `after()`. */
 export async function closeTestMongo() {
   if (!_mongo) return;

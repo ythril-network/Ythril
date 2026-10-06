@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
+import { openTestMongo, closeTestMongo, openFixtureMongo, testMongoUri } from './_mongo-harness.mjs';
 import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 import { drainWrites } from './_active-operations.mjs';
 import { refuseConflictingPushDoorOptions } from './_push-door-options.mjs';
@@ -106,11 +106,14 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`)
  * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'` (applied after the door is open; refused together with `monitorCommands`, see `_push-door-options.mjs`)
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
+ * @param {boolean} [o.fixtureClient]  also open a client of the harness's own (`openFixtureMongo`) and hand back `fixture`: the
+ *   `{ mongo, coll, setCounter, wipe }` of the door's fixture steps on THAT client, for a test whose server client carries an option
+ *   on purpose (`mongoQuery`) that its seeds, wipes and locks must not inherit
  * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
  *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
  *   tokens in here rather than write them afterwards
  */
-export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort, mongoQuery }) {
+export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, fixtureClient = false, secrets, mongoPort, mongoQuery }) {
   refuseConflictingPushDoorOptions({ monitorCommands, mongoQuery });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
@@ -124,8 +127,10 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   if (secrets) fs.writeFileSync(path.join(tmpDir, 'secrets.json'), JSON.stringify(secrets), { mode: 0o600 });
 
   const mongo = await openTestMongo(suite, { port: mongoPort });
+  let fixtureMongo;
   try {
-    const door = await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+    fixtureMongo = fixtureClient ? await openFixtureMongo(suite) : undefined;
+    const door = await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir, fixtureMongo });
     if (mongoQuery) {
       // The option is the SUBJECT of the test that passes it, not of the setup: the door's own setup (dropping the database,
       // creating each space's indexes) is slow on a loaded Mongo and would be ended by a short client clock before the test
@@ -139,19 +144,20 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   } catch (err) {
     // A setup that throws after the connect must still close it: an open client keeps this test process alive,
     // and node's runner waits on the file for ever instead of reporting it failed (PR #1475's hung Build & Test).
-    await releaseHarness(tmpDir);
+    await releaseHarness(tmpDir, fixtureMongo);
     throw err;
   }
 }
 
 /** Close the harness database and remove the door's config directory: the one teardown, success or failure. */
-async function releaseHarness(tmpDir) {
+async function releaseHarness(tmpDir, fixtureMongo) {
+  await fixtureMongo?.close().catch(() => {});
   await closeTestMongo();
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
 /** Everything `openPushDoor` builds once the harness database is open; split out so its failure can close it. */
-async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir }) {
+async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir, fixtureMongo }) {
   const DB = `ythril_harness_${suite}`;
   let counting = false;
   let commands = [];
@@ -241,28 +247,37 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
     return res.body;
   }
 
-  const coll = (space, part) => mongo.col(`${space}_${part}`);
   /** The stored counter, after every counter write already started has landed. */
   async function counter(space) {
     await settled();
     return (await mongo.col('ythril_counters').findOne({ _id: space }))?.seq ?? 0;
   }
-  async function setCounter(space, seq) {
-    await mongo.col('ythril_counters').updateOne({ _id: space }, { $set: { seq } }, { upsert: true });
-  }
   /**
-   * Empty the space and its counter row — once nothing that could write to them is still running. The tracked counter
+   * The door's FIXTURE steps over one client: a collection of the space, the counter row set, the space emptied. The door's own
+   * are over the server's client; `fixture` (`openPushDoor({ fixtureClient: true })`) is the same three over the harness's.
+   *
+   * `wipe` empties the space and its counter row — once nothing that could write to them is still running. The tracked counter
    * writes are awaited (client promises), and then the SERVER is asked: a write whose client gave up (a bound that
    * fired first) or that still waits behind a lock has no promise here, and would land after the clear (`Q-372`).
    * Throws, naming the collection, when a write does not end within `drainMs`.
    */
-  async function wipe(space, { drainMs } = {}) {
-    await settled();
-    await drainWrites(mongo, [...RECORD_PARTS.map(p => `${space}_${p}`), 'ythril_counters'], { drainMs });
-    await wipeParts(mongo, space, RECORD_PARTS);
-    await mongo.col('ythril_counters').deleteMany({ _id: space });
-    landed.delete(space);
+  function fixtureOps(m) {
+    return {
+      coll: (space, part) => m.col(`${space}_${part}`),
+      async setCounter(space, seq) {
+        await m.col('ythril_counters').updateOne({ _id: space }, { $set: { seq } }, { upsert: true });
+      },
+      async wipe(space, { drainMs } = {}) {
+        await settled();
+        await drainWrites(m, [...RECORD_PARTS.map(p => `${space}_${p}`), 'ythril_counters'], { drainMs });
+        await wipeParts(m, space, RECORD_PARTS);
+        await m.col('ythril_counters').deleteMany({ _id: space });
+        landed.delete(space);
+      },
+    };
   }
+  const { coll, setCounter, wipe } = fixtureOps(mongo);
+  const fixture = fixtureMongo ? { mongo: fixtureMongo, ...fixtureOps(fixtureMongo) } : undefined;
   /**
    * Commands the harness database saw while `fn` ran, minus the driver's own housekeeping.
    *
@@ -290,11 +305,11 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   async function close() {
     proto.updateOne = originals.updateOne;
     proto.findOneAndUpdate = originals.findOneAndUpdate;
-    await releaseHarness(tmpDir);
+    await releaseHarness(tmpDir, fixtureMongo);
   }
 
   /** The route's own handler, past rate limit and auth — for a fake peer that serves a real route (`_pull-door.mjs`). */
   const handler = (method, routePath) => handlerFor(method, routePath);
 
-  return { mongo, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, handler, close };
+  return { mongo, fixture, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, handler, close };
 }

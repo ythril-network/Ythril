@@ -84,7 +84,7 @@ const DOOR_COUNT = stalledWriteDoors(env, 'x').length;
 for (let i = 0; i < DOOR_COUNT; i++) {
   const space = laneSpace();
   const d = stalledWriteDoors(env, space)[i];
-  LANES.push({ name: `door: ${d.name}`, space, collection: d.collection, expect503: true, seed: () => seedDoorSpace(env.door, space), lock: d.lock, call: d.call });
+  LANES.push({ name: `door: ${d.name}`, space, collection: d.collection, expect503: true, seed: () => seedDoorSpace(env.fixture, space), lock: d.lock, call: d.call });
 }
 const HOLDERS = Object.entries(holderCases(ctx, 'x'));
 for (const [holder, cases] of HOLDERS) {
@@ -95,8 +95,8 @@ for (const [holder, cases] of HOLDERS) {
     if (!collection) throw new Error(`holder case '${mine.label}' locks a document but names no collection in _seq-hold-cases.mjs`);
     LANES.push({
       name: `holder ${holder}: ${mine.label}`, space, collection, expect503: false,
-      seed: () => seedHolderSpace(env.door, space),
-      lock: mine.lock === 'counter' ? () => holdCounterLock(env.door.mongo, space) : mine.lock,
+      seed: () => seedHolderSpace(env.fixture, space),
+      lock: mine.lock === 'counter' ? () => holdCounterLock(env.fixture.mongo, space) : mine.lock,
       call: mine.run,
     });
   });
@@ -105,14 +105,25 @@ for (const [holder, cases] of HOLDERS) {
 // ── One repetition of one lane ───────────────────────────────────────────────────────────────────────────────
 
 /** The space's documents by identity, and its counter row — one read, so lanes at once do not exhaust the driver's pool. */
-const readLane = (space) => snapshotSpaceInOneRead(env.door.mongo, space, RECORD_PARTS);
+const readLane = (space) => snapshotSpaceInOneRead(env.fixture.mongo, space, RECORD_PARTS);
+
+/**
+ * Run one step of the FIXTURE — not the write under test — and, when it throws, say which step it was.
+ *
+ * A fixture step that dies is reported as "a repetition could not run", whose text is the driver's own (`Timed out during socket
+ * read`) and names nothing of ours: the stack of a driver error holds no frame of this file. Which of the five steps it was is
+ * what a reader needs first, because each runs through a different client.
+ */
+const step = (name, fn) => Promise.resolve().then(fn).catch((error) => {
+  throw new Error(`during ${name}: ${error?.stack ?? error}`);
+});
 
 /**
  * Stall one lane, call it, and the moment it answers read its documents AND release the stall — in that order, in one
  * tick, so the read is on the wire before the abort and nothing is waited for between them.
  */
 async function stallAndRelease(lane) {
-  const lock = await lane.lock();
+  const lock = await step('the lock', () => lane.lock());
   let res;
   let atAnswer = null;
   let releaseError = null;
@@ -123,21 +134,21 @@ async function stallAndRelease(lane) {
   try {
     const started = Date.now();
     startedAt = started;
-    watching = sawLiveWrite(env.door.mongo, lane.collection, () => answered);
+    watching = sawLiveWrite(env.fixture.mongo, lane.collection, () => answered);
     res = await settleWithin(Promise.resolve().then(lane.call), CAP_MS);
     answered = true;
     answeredAt = Date.now();
     res.elapsedMs = answeredAt - started;
     const reads = readLane(lane.space);
     const released = lock.release().then(() => null, err => err);
-    atAnswer = await reads;
+    atAnswer = await step('the read at the answer', () => reads);
     releaseError = await released;
   } finally {
     answered = true;
     await lock.release().catch(() => {});
   }
   if (!res.settled) await res.rest;
-  return { res, atAnswer, releaseError, sawStall: await watching, startedAt, answeredAt };
+  return { res, atAnswer, releaseError, sawStall: await step('the watch for a live write', () => watching), startedAt, answeredAt };
 }
 
 /** Wait the settle window out, reading the lane every `POLL_MS`; the documents that differ from the answer's, by identity. */
@@ -146,7 +157,7 @@ async function watchForLanding(lane, atAnswer) {
   const until = Date.now() + SETTLE_MS;
   do {
     await sleep(POLL_MS);
-    for (const d of changedDocuments(atAnswer, await readLane(lane.space))) landed.add(d);
+    for (const d of changedDocuments(atAnswer, await step('the read of the settle window', () => readLane(lane.space)))) landed.add(d);
   } while (Date.now() < until);
   return [...landed].sort();
 }
@@ -229,7 +240,7 @@ async function runRound(tasks, previous, results, discarded, again) {
       let done = () => {};
       previous[t.i] = new Promise(resolve => { done = resolve; });
       await before;
-      const ran = await t.lane.seed().then(() => stallAndRelease(t.lane)).catch(error => ({ error }));
+      const ran = await step('the seed', () => t.lane.seed()).then(() => stallAndRelease(t.lane)).catch(error => ({ error }));
       const finished = finishOnce(t.lane, t.rep, ran)
         .catch(error => ({ rep: t.rep, fixtureError: String(error?.stack ?? error), landed: [], serverSaid: [] }))
         .then(r => {
@@ -313,6 +324,12 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       });
     }
 
+    it('the fixture steps run on a client of their own, which carries no client clock: only the write under test meets the server\'s', () => {
+      const fixtureClient = env.fixture.mongo.getMongo();
+      assert.notEqual(fixtureClient, env.door.mongo.getMongo(), 'the fixture steps run through the server\'s client, so its option ends a seed or a lock too');
+      assert.ok(!fixtureClient.options.timeoutMS, `the fixture client carries timeoutMS=${fixtureClient.options.timeoutMS}: its own steps would die of it on a loaded host`);
+    });
+
     it('the relay held writes back, so the server\'s deadline really was later than the client\'s', () => {
       assert.ok(relay.delayedWrites() > 0,
         `the relay held back no bounded write in ${REPS * lanes.length} lane-repetitions — the lateness this file depends on was not produced`);
@@ -333,7 +350,7 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
             + 'MONGO_URI, ended the write first; the bound must carry the server\'s deadline and no driver clock of its own');
         }
         const broken = rs.filter(r => r.fixtureError);
-        assert.deepEqual(broken.map(r => `#${r.rep}: ${r.fixtureError.slice(0, 300)}`), [],
+        assert.deepEqual(broken.map(r => `#${r.rep}: ${r.fixtureError.slice(0, 500)}`), [],
           `${lane.name}: a repetition could not run. An E11000 from holdDocumentLock means a write of an EARLIER repetition `
           + 'landed after this one wiped its space, which is the defect itself, seen from the next case');
         const unanswered = rs.filter(r => !r.answered);
@@ -367,9 +384,9 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     timeout: 120_000 + REPS * lanes.length * (CAP_MS + SETTLE_MS) / WORKERS,
     async before() {
       relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
-      doors = await openStalledWriteDoors({ suite, spaces: lanes.map(l => l.space), mongoPort: relay.port, mongoQuery: query });
+      doors = await openStalledWriteDoors({ suite, spaces: lanes.map(l => l.space), mongoPort: relay.port, mongoQuery: query, fixtureClient: true });
       Object.assign(env, doors.env);
-      Object.assign(ctx, { door: env.door, mods: await loadHolderModules() });
+      Object.assign(ctx, { door: env.door, fixture: env.fixture, mods: await loadHolderModules() });
       try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
       relay.setDelay(lateByMs);
       const { subscribeLogLines } = await import('../../server/dist/util/log.js');
