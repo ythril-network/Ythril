@@ -24,7 +24,7 @@ import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
+import { listReadMaxMs } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planEdge, edgeWant, resolveEdgeEndsForWrite, type EdgeInput } from './write-plan/plan-edge.js';
@@ -177,8 +177,11 @@ export async function listEdges(
   if ('error' in merged) throw new Error(merged.error);
   const q = merged.predicate;
   return col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>(q), { projection: NEVER_RETURNED_PROJECTION })
-    .maxTimeMS(q['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an option of the read, not a call on its cursor (Q-358; see `listChrono`).
+    .find(asFilter<EdgeDoc>(q), {
+      projection: NEVER_RETURNED_PROJECTION,
+      maxTimeMS: listReadMaxMs(Boolean(q['$expr'])),
+    })
     .sort(sort ? toMongoSort(sort) : { seq: -1, createdAt: -1, _id: -1 })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))

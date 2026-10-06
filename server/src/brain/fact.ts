@@ -23,7 +23,7 @@ import type { FactDoc } from '../config/types.js';
 import { writeTombstone } from './tombstones.js';
 import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
-import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
+import { listReadMaxMs } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -296,8 +296,8 @@ export async function listFacts(
   sort?: SortSpec,
 ) {
   return col<FactDoc>(spaceCollection(spaceId, 'facts'))
-    .find(asFilter<FactDoc>(filter))
-    .maxTimeMS(filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000)
+    // The deadline is an option of the read, not a call on its cursor (Q-358; see `listChrono`).
+    .find(asFilter<FactDoc>(filter), { maxTimeMS: listReadMaxMs(Boolean(filter['$expr'])) })
     .project({ embedding: 0 })
     .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
     .skip(parseSkip(skip))

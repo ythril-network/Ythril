@@ -42,6 +42,30 @@ export const tagContains = textContains;
 /** How long a properties-value scan may run before Mongo aborts it. See `propertiesValueContains`. */
 export const PROPERTIES_SCAN_MAX_MS = 3_000;
 
+/** How long an ordinary list read (one an index can answer) may run before Mongo aborts it. */
+export const LIST_READ_MAX_MS = 60_000;
+
+/**
+ * The `maxTimeMS` a LIST read gets for the filter it runs: the short scan deadline when the filter walks every record,
+ * the long one when an index answers it.
+ *
+ * `scansEveryRecord` is whether the predicate holds an `$expr` (a properties-value filter, or a chrono date compared
+ * against the clock): `$expr` cannot use an index, so it is a collection scan by nature and a big space must cost a
+ * bounded query rather than an unbounded one.
+ *
+ * ## What it prevents
+ *
+ * The choice was written four times, once per list function (chrono, edges, entities, facts). A copy that forgets the
+ * scan branch, or reads the wrong predicate, leaves a scan on the long deadline with nothing failing: the answer is
+ * right, only slower and unbounded. A fifth hand-written copy is refused by `column-filters.test.js`.
+ *
+ * The figure is for the caller to place in the OPTIONS of its read (`find(f, { maxTimeMS })`), never chained onto
+ * the cursor (`no-chained-max-time-ms.test.js`).
+ */
+export function listReadMaxMs(scansEveryRecord: boolean): number {
+  return scansEveryRecord ? PROPERTIES_SCAN_MAX_MS : LIST_READ_MAX_MS;
+}
+
 /**
  * Match records whose `properties` bag holds ANY value containing `value` (case-insensitive substring).
  *

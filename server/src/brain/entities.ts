@@ -22,7 +22,7 @@ import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
-import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
+import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
@@ -329,10 +329,14 @@ export async function listEntities(
   sort?: SortSpec,
 ): Promise<EntityDoc[]> {
   const cursor = col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-    .find(asFilter<EntityDoc>({ ...filter, spaceId }), { projection: NEVER_RETURNED_PROJECTION });
-  // A properties-value filter is a collection scan by nature ($expr cannot use an index), so it
-  // carries its own deadline instead of running unbounded on a large space.
-  cursor.maxTimeMS(filter['$expr'] ? PROPERTIES_SCAN_MAX_MS : 60_000);
+    // A properties-value filter is a collection scan by nature ($expr cannot use an index), so it
+    // carries its own deadline instead of running unbounded on a large space. The deadline is an option of the
+    // read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it can see in the options, and the
+    // driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
+    .find(asFilter<EntityDoc>({ ...filter, spaceId }), {
+      projection: NEVER_RETURNED_PROJECTION,
+      maxTimeMS: listReadMaxMs(Boolean(filter['$expr'])),
+    });
   // Default is natural (insertion) order — unchanged for every existing caller. A sort is only
   // applied when one is explicitly requested.
   if (sort) cursor.sort(toMongoSort(sort));
