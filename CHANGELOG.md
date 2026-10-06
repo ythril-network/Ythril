@@ -3850,596 +3850,119 @@ Two guides are NEW: `docs/integration-guide/04g-links-api.md` (links as their ow
 
 ### Changed
 
-#### The benchmark corpus and its extraction pipeline
-
-- **The extraction prompt learned three things from reading a second corpus, which is what `B-5` is for.**
-  Each was visible in the output with no question involved, which is the rule that keeps this work from
-  contaminating the benchmark.
-
-  **World knowledge is only worth recording when the conversation TURNS on it.** An assistant answers at
-  length — lists of options, examples, background — and the rule as written would have made a claim of each
-  one, burying the handful of facts about the person under a hundred records of generic advice. The test is
-  now whether the exchange did something: the user picked one, said they would use it, or came back to it.
-
-  **An approximation stays approximate.** *"For about three weeks now"* was being resolved to an exact day,
-  which is searchable and invented. The anchor date is the exact part and the offset is as exact as the
-  speaker made it — and a fuzzy span gets no chrono entry, because a chrono entry is for something that
-  happened ON a date and one built from a guess puts a made-up day on the timeline.
-
-  **A day may hold more than one session**, so each gets a `key` and each claim names its session.
-
-- **The gate that keeps the extractor blind now derives its corpora.** Its title has claimed something
-  about *"the extraction step"* since it was written, while its body read LoCoMo alone — so LongMemEval
-  would have been covered by nothing, and it is the corpus that needed covering most. Adding a third is now
-  a row rather than an edit to the assertions. Seen red before being believed: putting `has_answer` back
-  into the loader's output fails it.
-
-#### One API, two doors: the 5.0 renames
-
-- **A link is audited again, as the sets a caller sends.** An audit entry recorded what changed by diffing
-  the record before against the record after, and a record no longer carries its connections — so a re-link
-  would have left an entry saying something changed and not what, which reads as *the links were untouched*.
-  The fact, chrono and file update routes now fold the before/after link sets into their snapshots, under
-  the names a caller writes: `linkEntities`, `linkFacts`, `linkChronos`.
-
-- **`update_file_meta` honours the link fields its own description promised.** Both doors accept
-  `linkEntities`, `linkFacts` and `linkChronos` on a file, and the MCP tool declares them, so the schema a
-  caller reads while constructing arguments is the contract the dispatcher enforces.
-
-- **A link id is existence-checked wherever it is written.** It was checked at each door for the array
-  spelling and NOWHERE for `linkEntities`, so on a strict space one spelling was refused and the other
-  stored. The check moved into the writer, which is what `write-connections.ts` always claimed. `save_bulk`
-  checks its edge endpoints under the same `strictLinkage` setting the single-record doors read — a space
-  that turns linkage off still accepts a staged import whose targets resolve later.
-
-- **A refused link no longer leaves the record behind.** The existence check moved into the writers, and
-  they reconcile AFTER the insert — so a link id naming nothing answered `400` with the record already
-  stored, which is the silent unlinked write made noisy rather than fixed. Every writer now refuses the
-  whole call before it touches anything, and the refusal is a `400` rather than a `500`.
-
-- **A write door cannot ask for a link class that does not exist.** There are six, and a pair outside them
-  has no label — so `save_fact` naming `linkChronos` stored a link nothing reads. Refused now, on both
-  doors, and the create tools advertise only the classes their record kind can hold.
-
-- **The UI reads a record's links as records.** The Brain and Files tabs draw their chips from one query
-  over the links collection per page, and every form and label names the field the API takes. A searched
-  list shows the same links the paged list does.
-
-- **An index the conversion never created.** A space upgraded from 4.x got its `links` collection from the
-  conversion's first insert, which creates a collection and no indexes — so the spaces with the most links
-  to read were the ones reading them unindexed. The boot backfill now asks for the same index set space
-  creation does.
-
-- **BREAKING — three recall parameters renamed or removed.** 5.0 breaks every public name, and these three
-  were each lying in their own way.
-
-  | before | after | why |
-  |---|---|---|
-  | `includeFreshWrites` | **gone — the scan always runs** | the name read as *exclude recent records*, which is not what it did and not something anybody wants. Measured: a plain recall answered `count: 0` for **three seconds** after a write, then found the record. The cost of always scanning, on a space with 220 records inside the window: 91–101 ms against 159–167 ms, and nothing at all on a quiet space. Owner: *"if checking the parameter takes >10ms remove the parameter and just always do it."* A flag whose only function is to let a caller opt into a blind spot is not a performance feature |
-  | `includeContent` | `includeFileContent` | it gates one field on one record kind — a file chunk's `content` — and nothing else. Read as a general switch it looked like the way to trim a large answer; that is `projection` |
-  | `charsPerToken` | **gone — the ratio is fixed at 3.5** | it did nothing unless `maxTokens` was also set, and what the override bought was the ability to make an estimate differently wrong. A caller who needs the ceiling exact states `maxChars`, which is the unit the budget is applied in |
-
-  All three are unknown fields now, so a caller still sending one gets a `400` rather than silence.
-
-- **BREAKING — every tool is `POST /api/<tool-name>`, and both doors call ONE function.** Owner,
-  2026-09-16: *"create modules that are used by both doors"*, then *"this shared module concept for both
-  doors should be applied to each and every tool"*.
-
-  ```http
-  POST /api/recall
-  { "space": ["work", "research"], "query": "quarterly targets", "limit": 5 }
-  ```
-
-  The body is the tool's arguments exactly — the same JSON you would send over MCP, `space` included. One
-  envelope comes back for every tool: `{ok: true, text, data}` on success, `{ok: false, error, data}` on a
-  refusal, with `error` word-for-word what MCP puts in `content`.
-
-  **Two real defects fell out of the extraction**, both the same shape — one rule, two implementations,
-  the weaker one deciding:
-
-  - **The rung was checked against the FIRST named space.** Since space lists landed, a three-space
-    `recall` over MCP was authorised against one of the three and read all three. The REST body-scoped
-    guard checked every one. The check is inside the per-space loop now.
-  - **The destructive-call throttle only existed on REST.** `bulkWipeRateLimit` was express middleware, so
-    a browser was held to five wipes a minute and an agent to none. It is declared by the tool
-    (`heavy: true`) and enforced in the shared function, before the gates — a caller getting it wrong in a
-    loop is slowed down too.
-
-  **`ythril_mcp_tool_calls_total` is renamed `ythril_tool_calls_total` and gains a `door` label** (`mcp` or
-  `rest`). It was about to start counting browser traffic under a name that says MCP, which an operator
-  reading a dashboard has no way to notice. `door="mcp"` is the old question, still answerable.
-
-  The older REST routes are unchanged and still work. They are the shapes this replaces.
-
-- **`help()` told every caller the two doors reach the same things, and that was false in twenty-two
-  places.** `REST_ONLY_CAPABILITIES` was empty, its own comment called the emptiness *"the finished state
-  rather than an oversight"*, and the gate guarding it asserted both halves of every row — so with zero
-  rows it asserted nothing, for ever.
-
-  The list now names what is actually missing: **network governance** (create, join, fork, invite, manage
-  members, read the sync history, and cast a **vote** — an agent can belong to a governance process it
-  cannot take part in), **a file's original bytes** (`read_file` returns extracted text, which is right for
-  a document and wrong for a PNG), **the media embedding queue** (`retry_embed_media` can retry what no
-  tool can list), **the per-type schema write**, and **the rights catalogue**.
-
-  **What replaces the empty list is a derivation.** The build enumerates all 222 mounted routes and fails
-  unless each is answered by a named tool, declared here, or classified as something an agent would never
-  call — with the reason. A route in none of the three fails, so "I did not think about MCP" is no longer
-  expressible, and the published capability table is generated from the same classification a gate holds
-  true.
-
-- **BREAKING — the knowledge type `memory` is now `fact`, everywhere, and 5.0 does not accept the old word.**
-
-  | was | is |
-  |---|---|
-  | `remember`, `update_memory`, `delete_memory` | `save_fact`, `update_fact`, `delete_fact` |
-  | `POST /api/brain/spaces/:id/memories` | `POST /api/brain/spaces/:id/facts` |
-  | `<space>_memories` | `<space>_facts` |
-  | `recordTtlDays: { memory }`, `memory.created` | `recordTtlDays: { fact }`, `fact.created` |
-  | `ythril_memories_total` | `ythril_facts_total` |
-
-  **The six array fields keep their spelling.** `memoryIds`, `includeMemories` and `chrono.memoryIds` are
-  replicated and merkle-hashed, so renaming them is a wire break this release did not take. A link's synthetic
-  edge LABEL does move, because its first half is the kind: `memory.entityIds` is now `fact.entityIds`.
-
-  **Three boot migrations run once, automatically, and there is nothing for an operator to do** — but read
-  what they cover, because every failure they prevent is SILENT and none of them would appear in a log:
-
-  | migration | what it moves | what happens without it |
-  |---|---|---|
-  | `db/rename-memories-to-facts.ts` | `<space>_memories` → `<space>_facts`, and `memory.*` webhook subscriptions | a space reports zero facts while holding thousands, because reading a collection that does not exist is an empty result |
-  | `config/migrate-memory-to-fact.ts` | `recordTtlDays: { memory }` → `{ fact }` | the retention window is unread, so those records are kept for ever |
-  | `db/rekey-memory-kind-to-fact.ts` | the `_id` of every edge and link, plus tombstone types and queued embed jobs | a fact's connections match no query; a peer hits the unique index; a deletion is never served; a record never enters search |
-
-  Each is idempotent, and each REPORTS a conflict rather than guessing: two collections with the same name,
-  or an id another row already holds, are logged and left for a human. Watch the boot log once on the first
-  5.0 start — a `WARN` there is the only case that needs you.
-
-- **BREAKING — three tools fold into others, and the MCP surface is 45 rather than 48.**
-
-  | gone | use instead |
-  |---|---|
-  | `er_model`, `GET /api/brain/spaces/:id/er-model` | `space_meta` / `GET /api/spaces/:id/meta` — the same answer arrives as `actualSchema` |
-  | `find_entities_by_name`, `GET …/entities/by-name` | `filter` with `collection: 'entities'`, `filter: { name }` |
-  | `list_chrono` | `filter` with `collection: 'chrono'`. `GET …/chrono` is UNCHANGED |
-
-  **The `er_model` fold gains something neither half had.** `actualSchema` comes back in the DECLARED
-  schema’s own format, so a type a space really holds can be **promoted into its declared schema** without
-  the JSON being written by hand. They were always two answers to one question — a space can declare twenty
-  types and hold three, or hold records of a type nobody declared — and a caller needed both to know either.
-
-  **`list_chrono` was the only list TOOL any record type had**, while every type has a REST listing. Removing
-  it makes the surface consistent rather than poorer, and its REST route is untouched. Every parameter it
-  took is expressible — `status`/`type` as equality, `tagsAny` as `$in`, `after`/`before` as
-  `startsAt: {$gte,$lt}`, and `search` as `$or` of two case-insensitive `$regex` — verified against the
-  operator allowlist rather than assumed. The cost is four lines of predicate where there was one word.
-
-- **BREAKING — every remaining MCP tool is renamed to the verb-first scheme.** 22 of them, on top of the
-  search family that moved with its routes. No aliases: the old names are gone.
-
-  | | |
-  |---|---|
-  | create or update a record | `save_fact`, `save_entity`, `save_edge`, `save_link`, `save_chrono`, `save_space`, `save_bulk` |
-  | edit one by id | `update_fact` (was `update_memory`) |
-  | delete | `delete_fact`, `delete_entity_preview` (was `entity_cascade_preview`), `delete_space_data` (was `wipe_space`) |
-  | graph actions | `graph_traverse`, `graph_merge` |
-  | the space | `space_stats`, `space_meta`, `space_reindex` |
-  | schema, federation, embedding | `schema_update`, `network_peers`, `network_sync`, `retry_embed_record`, `retry_embed_media`, `retry_embed_file` |
-
-  **What a caller changes: the tool name, nothing else.** No parameter, default, cap or refusal moved.
-  `delete_space_data` is the one worth reading twice — it was `wipe_space`, and the new name says what it
-  removes rather than what it does.
-
-  **Three names were NOT swept, deliberately.** `remember` is also a brain function, `traverse` is also
-  recall's `traverse` BODY FIELD — including its entry in the allowlist — and `reindex` is also a route
-  segment. A blanket rename would have removed a documented parameter from `RECALL_BODY_FIELDS`, so every
-  caller sending `traverse` would get a 400 naming a key the guide tells them to send. Measured before
-  applying: of seven `'traverse'` sites in the server, two are the tool.
-
-- **BREAKING — the search family is renamed and drops the space from its path.**
-
-  | was | is |
-  |---|---|
-  | `query` — `POST /api/brain/spaces/:spaceId/query` | **`filter`** — `POST /api/brain/filter` |
-  | `find_similar` — `…/find-similar` | **`similar`** — `POST /api/brain/similar` |
-  | `recall` — `…/recall` | `recall` — `POST /api/brain/recall` |
-
-  **The space is a body field on all three, and you may omit it.**
-
-  Omit it and the search runs across every space the token holds `knowledge: read` in, ranked together. A
-  `traverse` keeps its path deliberately: it walks FROM an entity, and an entity lives in exactly one
-  space, so there is nothing to omit.
-
-  **What a caller changes:** move the space out of the URL and into the body as `space`, or leave it out.
-  A space you cannot read is skipped, not an error; a space you NAME and cannot read is a 403.
-
-#### `filter` is the one read path
-
-- **Every Brain tab reads through `filter` now, which is what the nine per-collection list routes were
-  waiting on.** Facts, Entities, Edges and Chrono all issue one `POST /api/brain/filter`; the service
-  re-keys `results` to the key each tab already destructures, so **not one caller changed** and deleting
-  those routes becomes a server-only change.
-
-  **What the client sends is arguments, not rules.** The fuzzy things — `tag`, `search`, `description`,
-  `properties` — go as conveniences the server assembles; the exact ones — an entity's `name`, a fact's
-  `entityIds`, a chrono tag set or date range — go as plain predicates. The line matters: a RULE written
-  twice drifts, and a second copy of the substring-and-scan logic in the browser is the thing this whole
-  row exists to avoid.
-
-- **`filter` silently returned 100 rows to a caller who asked for 200.** `limit` was clamped, not
-  defaulted — so a page came back short and `total` with `truncated` made it read as a correct short
-  page. It matters because `filter` is replacing the nine per-collection list routes, which serve 200
-  (`edges`, `files`) and 500 (`facts`, `entities`, `chrono`): the replacement returned LESS than every
-  door it replaces, and those three did not agree with each other either.
-
-  Owner, 2026-09-17: *"cap should be a parameter and default to 200"*. `limit` is that parameter on both
-  doors, it defaults to **200**, and there is no maximum. The MCP schema carries no `maximum` for the
-  same reason `windowDays` carries none: the dispatcher enforces the schema before the handler, so one
-  would refuse a page the REST door serves.
-
-  **What bounds an answer now that a row count does not** — and none of it is new, which is why the
-  clamp was never the protection:
-
-  | | |
-  |---|---|
-  | the byte budget | `maxChars` / `maxBytes` trims the page, says `truncated`, and hands back `nextSkip` |
-  | `maxTimeMS` | hard-capped at 10 000, so an absurd `limit` is bounded in time |
-  | a PROXY space | `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
-
-- **BREAKING — the fresh-write scan honours `filter` and `tags`, and it did not.** The scan adds records
-  the vector index has not ingested yet, and it added them without applying the caller's predicate: a
-  recall with `filter: {"type": "note"}` could return a record whose type is not `note`, at `200`. It was
-  survivable while the scan was opt-in behind `includeFreshWrites`, because combining that flag with a
-  filter was rare; making the scan unconditional made it the common case, which is how it was found. A
-  filtered recall now excludes non-matching fresh records, as it always claimed to.
-
-- **The filter sanitizer is its own module.** Owner: *"add the sanitizer and make it a real module."* The
-  operator refusals and the ReDoS guard lived in `brain/query.ts` beside the query builder that happened to
-  be their first caller, while the key-shape guard for the other filter grammar lived in `brain/filter.ts`
-  — one rule, two files, each grammar protected by a different subset of it. `brain/filter-sanitizer.ts`
-  answers the whole question for every door, and is where value coercion will go when it arrives.
-
-- **`space` takes a LIST on `recall`, `filter` and `similar` — both doors.** Naming three of your twelve
-  spaces used to mean three calls and a merge, or reading all twelve and paying for the nine you did not
-  want. The byte budget is spent before a client-side merge, so that second option dropped results it never
-  showed you.
-
-  | you send | you get |
-  |---|---|
-  | `"space": "a"` | that space, as before |
-  | `"space": ["a", "b"]` | exactly those, proxies expanded, deduplicated |
-  | `"space"` omitted | every space the token can read |
-  | `"space": []` | **refused** — an empty list is not "all" |
-
-  **One named space you cannot reach refuses the whole call**, and the message names which. Filtering it
-  away would answer with fewer results, and a caller cannot tell a filtered answer from a small one: "three
-  matches" reads as *there are three* rather than as *you may not see the rest*. Omitting `space` still
-  filters, because a caller who named nothing asked for whatever they can see.
-
-  **Only the search family takes a list.** Every other tool acts on one space, and is handed a list it
-  refuses rather than using the first entry — being told a write succeeded in a space you did not mean is
-  worse than being told the tool takes one space.
-
-#### Recall, expansion and the byte budget
-
-- **BREAKING — a recall's expansion now brings the ATTRIBUTED claims of what it reached, unasked.** A claim
-  an AI assistant originated is stored with no vector, so nothing can rank it. That is half a decision: it
-  has to ARRIVE, or it is merely hidden by a different mechanism. So with `includeMemories` unsaid, a walk
-  brings those claims — and no other fact.
-
-  **A narrowing, not the whole class.** Admitting linked facts wholesale is what the flag's `false` default
-  existed to prevent: *"a match is counted with its whole `_graph` subtree, so every record admitted by
-  default is paid for in matches that no longer fit."* Measured on a live instance against a control space
-  holding ten ordinary linked facts and one attributed claim:
-
-  | call | bytes | graph nodes | attributed | ordinary |
-  |---|---|---|---|---|
-  | default | 2 894 | 1 | yes | 0 |
-  | `includeMemories: false` | 2 332 | 0 | no | 0 |
-  | `includeMemories: true` | 6 485 | 7 | yes | 6 |
-
-  **`false` still means false.** An explicit refusal brings nothing, attributed included — a default that
-  overrode it would make the flag stop meaning what its own description says. Absent and `false` were
-  already kept apart by the parser, which is what made this expressible.
-
-  **The standalone `graph_traverse` is unchanged**: its `includeMemories` is a real `false`, because its
-  caller is explicitly exploring a graph and says what it wants.
-
-- **BREAKING — `POST /api/brain/recall` returns the same result SHAPE as the MCP tool.** A hit is
-  `{score, spaceId, type, record: {…}}` — the ranking beside the record rather than mixed into it. REST
-  returned one FLAT object until now.
-
-  ```json
-  { "score": 0.86, "spaceId": "work", "type": "fact",
-    "record": { "_id": "…", "fact": "…", "tags": ["…"] } }
-  ```
-
-  **What to change:** read `hit.record.<field>` where you read `hit.<field>`. `score`, `spaceId`, `type`,
-  `_graph` and the per-stage scores stay where they were. Traversed neighbours under `_graph` are
-  unchanged — they were already `{edge, node, paths}`.
-
-  **`unrecognized_keys` is not on this route's 400 any more.** It came from `unknownBodyFields`, which a
-  route uses when it parses its own body; the refusal now comes from the shared dispatcher, which names the
-  offending key in `error` (`unexpected property 'topk'`). The other read routes are unchanged.
-
-- **`POST /api/brain/recall` holds no implementation.** It was four hundred lines answering the same
-  question as the `recall` tool, kept in step by somebody checking both every time either changed — and
-  they had already drifted where nobody was looking (the byte budget, above). It hands its body to
-  `callTool` now and translates the envelope back, which is what every door is supposed to be. The response
-  shape is unchanged; `POST /api/recall` still returns the tool envelope.
-
-- **A recall answer now spends the byte budget on what was remembered, not on where it is filed.**
-
-  `maxChars` is a contract: it is how much of their context window a caller is willing to give to memory.
-  Measured on a real corpus, **30% of what came back was content** — 3,314 characters of JSON carrying 986
-  characters of remembered fact. The rest described the record's place in the store.
-
-  Two rules, and only one of them is a choice. **An empty collection is never sent**: `"tags":[]` and
-  `"properties":{}` say nothing their absence does not, and no caller can tell the difference — so that
-  needs no flag and takes nothing away. **Storage bookkeeping is opt-in** through the new
-  `includeRecordMeta`, default false on both doors: `createdAt`, `updatedAt` and the link-id arrays.
-  Together they cut a response by about a third, and the space goes back to the caller as more evidence
-  inside the same budget.
-
-  `createdAt` is the one worth calling out: it is when the RECORD was written, not when the remembered
-  thing happened. That lives in the record's own properties, put there by whoever stored it, and the two
-  are routinely confused.
-
-#### Spaces, tokens and the rights matrix
-
-- **A token that reaches exactly ONE space no longer has to name it.** `space` is optional on every
-  writing tool when the calling token's accessible-space list has one member — `save_fact({fact: "…"})`
-  lands. With two or more it stays required, and the refusal lists the spaces you can choose between.
-
-  **The schema you are SHOWN says so**, per token: `space` is absent from `required` for a single-space
-  token and present for every other. Advertising and enforcement come from one materialisation, so a
-  caller cannot be told to send something they need not, or told they may omit it and then refused.
-
-  **A READ did not move.** `recall`, `filter` and `similar` treat an omitted `space` as *every space this
-  token can reach* — an answer rather than a default — and folding the two would turn a cross-space
-  search into a single-space one the day a token gained a second space.
-
-- **BREAKING — emptying a space is `POST /api/delete_space_data`, and both doors call one module.**
-
-  ```json
-  { "space": "work", "confirm": true, "types": ["facts", "chrono"] }
-  ```
-
-  `confirm: true` is required on both doors now, and the route is named after the tool with `space` as a
-  body parameter — the shape the rest of the REST surface moves to.
-
-  **Two things the collapse changed that are worth knowing before you upgrade:**
-
-  - **Emptying a collection no longer writes a tombstone per record.** The five routes did; the tool never
-    has, because on a space belonging to a network it opens a governed round instead and every member
-    wipes — so there is nothing for a peer to offer back. On a space in no network there is no peer. The
-    tombstone-writing path had no caller left and is deleted rather than kept warm.
-  - **Wiping entities unlabels every face, on both doors.** A face descriptor is a file-meta record
-    carrying `faceEntityId`, and that cascade lived in the ROUTE — so the door being kept was the one
-    without it, and `types: ["entities"]` would have left every labelled face pointing at a person who no
-    longer exists. It is inside `wipeSpace` now, where neither door can drop it.
-
-- **BREAKING — space administrator is a rung you GRANT, and four admin rungs are no longer it.**
-
-  ```json
-  { "spaceAdmin": { "floor": false, "spaces": ["work"] } }
-  ```
-
-  | | |
-  |---|---|
-  | `spaceAdmin` | ⟹ `admin` in all four areas of that space |
-  | `admin` in all four | ⟹̸ `spaceAdmin` |
-
-  **Two scopes, like everything else in the matrix.** `spaces` names them; `floor` reaches every space
-  including ones created later. The floor form exists because a real configuration needs it: a token
-  administering every space holds no per-space rows at all.
-
-  **Nobody is stranded.** A boot migration writes the grant for every token that held all four — under the
-  previous rule those tokens WERE administrators, and an upgrade is not the moment to reinterpret that. A
-  floor of all-admin migrates to the floor form, never to a list of the spaces that happen to exist today.
-
-- **`delete_space_data` asks what its REST routes ask.** It carried `admin: true` — instance admin — while
-  the wipe routes need admin on the space in the path, so a space's administrator could empty it over REST
-  and was refused over MCP.
-
-- **A space's collection name is built in one place, and that place refuses an id it cannot vouch for.**
-
-  Every per-space collection is `{spaceId}_{suffix}`, and 298 call sites built that string by hand. They now
-  go through `spaceCollection(spaceId, part)`, which carries the check a template literal cannot: a space id
-  must match `^[a-z0-9-]+$`, because `_` is the separator and three operations select a space's collections
-  by that prefix — one of which DROPS them. An id containing `_` would make one space's collections carry
-  another's prefix, so deleting `work` would take `work_archive`'s data with it.
-
-  **Four collections turn out never to have been mapped at all** — `_file_tombstones`, `_media_jobs`,
-  `_link_violations` and `_file_hashes` — alongside six more that were spelled out at every call. Nothing is
-  renamed and no data moves; this is where the name comes from, not what it is.
-
-#### Files
-
-- **Removed: the metadata-only file delete.** `DELETE /api/brain/spaces/:spaceId/files?path=` purged a
-  metadata record without touching disk. Every file has metadata and `deleteFileCascade` removes both, and
-  the orphan case — a record whose bytes went missing out of band — is already handled by the file delete,
-  which answers `204` when it finds one. It was a second door onto half of one act, and the half it could
-  do alone left a file with no metadata.
-
-#### Sync, peers and migrations
-
-- **Two doors trigger a sync, and each one now says what it acts on.**
-
-  `POST /api/networks/:id/sync` is the network door and has gained what the other route had: `?wait=true`
-  and `?timeoutMs`. It also stops answering a bare `{ ok: true }` that said nothing about what happened —
-  every door now answers `triggered`, `completed`, `timeout` or `error`, with `ok` kept as the one-bit
-  summary so an existing reader is unaffected.
-
-  `POST /api/networks/peers/:peerId/sync` is new, and syncs one peer across every network it belongs to.
-  It sits on the networks COLLECTION rather than under one network's id because a peer is not a property
-  of one network. The id is checked against the configured members and never treated as a URL.
-
-  Both go through `sync/trigger.ts`, so a fourth door cannot invent a fourth set of semantics. The one
-  asymmetry is deliberate and documented there: a network cycle races the timeout because it can span many
-  peers, a peer cycle does not because it is already bounded by that peer's own request timeouts.
-
-- **`POST /api/notify/trigger` is DEPRECATED.** Use the two routes above. It still works and delegates to the same code,
-  so nothing breaks today.
-
-#### Documentation, gates and internal structure
-
-- **The graph guide's `Links` section is its own page, `04g-links-api.md`.** `04b-graph-api.md` sat on the
-  900-line cap, and the last three changes to it each ended in compressing a paragraph to make room —
-  which is the cap doing its job and being answered the wrong way. Links is a distinct capability with its
-  own conversion story, its own pre-flight and its own lifecycle, so it is the boundary.
+- **Search:** `query` → `filter` and `find_similar` → `similar`, and the space leaves the path. Routes: `POST /api/filter`,
+  `POST /api/brain/similar`, `POST /api/brain/recall` (name unchanged). `traverse` keeps its path.
+- **Search:** `space` is an optional body field on all three: omitted, the search runs across every space the token holds
+  `knowledge: read` in, ranked together. An unreadable space is skipped; a NAMED unreadable one is a `403`.
+- **Search:** `recall`, `filter` and `similar` take `space` as a list on both doors: exactly those spaces, proxies
+  expanded and deduplicated. `[]` is refused, and one named space you cannot reach refuses the whole call, naming it.
+- **Search:** Every other tool acts on one space and refuses a list rather than using its first entry.
+- **Search:** `filter` `limit` defaults to **200** on both doors, with no maximum (it was clamped to 100, so a page for
+  200 came back short and looked complete).
+- **Search:** A `filter` answer stays bounded without a row cap: `maxChars` / `maxBytes` trims the page (`truncated`,
+  `nextSkip`), `maxTimeMS` is capped at 10 000, and on a proxy space `skip + limit` past the merge ceiling is a `400`.
+- **Search:** `recall` drops `includeFreshWrites` (the fresh-write scan always runs) and `charsPerToken` (the ratio is
+  fixed at 3.5; send `maxChars` for an exact ceiling) and renames `includeContent` → `includeFileContent`. A `400` if sent.
+- **Search:** The fresh-write scan now honours `filter` and `tags`: a filtered `recall` no longer returns just-written
+  records that do not match.
+- **Search:** With `includeMemories` unsaid, a `recall` walk brings the attributed claims (AI-originated facts, stored
+  without a vector) of what it reached, and no other fact. `false` brings nothing; `true` brings every linked fact.
+- **Search:** `graph_traverse` is unchanged: its `includeMemories` is a real `false` by default.
+- **Search:** `POST /api/brain/recall` hits are `{score, spaceId, type, record}` like MCP: read `hit.record.<field>` where
+  you read `hit.<field>`. `score`, `spaceId`, `type`, `_graph` and the stage scores stay where they were.
+- **Search:** A bad key on `POST /api/brain/recall` is a `400` whose `error` names it (`unexpected property 'topk'`);
+  `unrecognized_keys` is no longer returned there.
+- **Search:** `recall` no longer sends empty `tags` / `properties`, and `createdAt` / `updatedAt` are opt-in through
+  `includeRecordMeta` (default false, both doors), about a third fewer bytes. `createdAt` is when the record was written.
+- **Records:** The knowledge type `memory` is now `fact`, and the old word is not accepted: `remember` / `update_memory` /
+  `delete_memory` → `save_fact` / `update_fact` / `delete_fact`; `POST /api/brain/spaces/:id/memories` → `…/facts`.
+- **Records:** `<space>_memories` → `<space>_facts`; `recordTtlDays: { memory }` → `{ fact }`; webhook `memory.created` →
+  `fact.created`; `ythril_memories_total` → `ythril_facts_total`; link edge label `memory.entityIds` → `fact.entityIds`.
+  `includeMemories` keeps its name.
+- **Records:** Boot migrations rename `<space>_memories` collections and `memory.*` webhooks, rewrite `recordTtlDays` and
+  re-key edge and link ids, tombstones and embed jobs. A conflict is logged at `WARN` and left: read the first 5.0 boot log.
+- **Records:** Audit entries for fact, chrono and file updates carry the before/after link sets under `linkEntities`,
+  `linkFacts` and `linkChronos`, so a re-link no longer logs a change with no detail.
+- **Records:** `update_file_meta` accepts `linkEntities`, `linkFacts` and `linkChronos` on both doors, and its MCP schema
+  declares them.
+- **Records:** A link id naming nothing is refused with `400` (not `500`) before anything is written. `save_bulk` checks edge
+  endpoints under `strictLinkage`, so a space with linkage off still accepts a staged import.
+- **Records:** There are six link classes. A write naming one the record kind cannot hold (`save_fact` with `linkChronos`)
+  is refused on both doors, and the create tools advertise only the classes their kind holds.
+- **MCP:** Every remaining tool is renamed verb-first, no aliases, nothing else changed: `save_fact`, `save_entity`,
+  `save_edge`, `save_link`, `save_chrono`, `save_space`, `save_bulk`, `update_fact`, `delete_fact`, `graph_traverse`, `graph_merge`.
+- **MCP:** Also renamed: `entity_cascade_preview` → `delete_entity_preview`, `wipe_space` → `delete_space_data`, `space_stats`,
+  `space_meta`, `space_reindex`, `schema_update`, `network_peers`, `network_sync`.
+- **MCP:** The embed-retry tools are `retry_embed_record`, `retry_embed_media` and `retry_embed_file`. Recall's `traverse` body
+  field keeps its name.
+- **MCP:** `er_model` and `GET /api/brain/spaces/:id/er-model` are gone: `space_meta` / `GET /api/spaces/:id/meta` answers
+  it as `actualSchema`, in the declared schema's own format, so a held type can be promoted into the declared schema.
+- **MCP:** `find_entities_by_name` (and `GET …/entities/by-name`) → `filter` with `collection: 'entities'`,
+  `filter: { name }`; `list_chrono` → `filter` with `collection: 'chrono'`. The MCP surface is 45 tools, was 48.
+- **REST:** Every tool is `POST /api/<tool-name>`: the body is the tool's arguments (`space` included) and one envelope
+  comes back, `{ok: true, text, data}` or `{ok: false, error, data}`, with `error` word-for-word what MCP returns.
+- **REST:** `POST /api/networks/:id/sync` gains `?wait=true` and `?timeoutMs`, and every sync trigger answers
+  `triggered`, `completed`, `timeout` or `error` instead of a bare `{ ok: true }` (`ok` stays as the summary).
+- **REST:** New `POST /api/networks/peers/:peerId/sync` syncs one peer across every network it belongs to; the id is
+  checked against the configured members and never treated as a URL.
+- **Spaces:** Emptying a space is `POST /api/delete_space_data` with `{ "space", "confirm": true, "types" }` on both doors,
+  replacing the per-collection wipe routes. `confirm: true` is now required on both.
+- **Spaces:** Emptying a collection no longer writes a tombstone per record (on a networked space it opens a governed round
+  and every member wipes), and wiping `entities` unlabels every face (`faceEntityId`) on both doors.
+- **Spaces:** A space id must match `^[a-z0-9-]+$` wherever its collections are named, so deleting one space cannot take
+  another's data. No collection is renamed and no data moves.
+- **Tokens:** `{ "spaceAdmin": { "floor": false, "spaces": ["work"] } }` grants space administrator: `admin` in all four areas
+  of those spaces (`floor: true` reaches every space, later ones too). Four `admin` areas no longer imply it.
+- **Tokens:** A boot migration grants `spaceAdmin` to every token holding `admin` in all four areas (an all-admin floor
+  becomes the `floor` form), so no administrator is stranded.
+- **Tokens:** `delete_space_data` now needs `admin` on the space, as its REST route does, instead of instance admin: a space
+  administrator can empty it over MCP too.
+- **Tokens:** `space` is optional on every writing tool for a token reaching exactly one space (`save_fact({fact: "…"})`
+  lands); with two or more it stays required and the refusal lists them. The schema each token is shown says which.
+- **Tokens:** A multi-space `recall` over MCP is now authorised against every named space (it checked the first and read
+  all), and the destructive-call throttle of five wipes a minute now also holds MCP callers, not only the browser.
+- **Help:** `help()` lists what MCP lacks: network governance (create, join, fork, invite, members, sync history, votes), a
+  file's original bytes, listing the media embedding queue, the per-type schema write and the rights catalogue.
+- **Server:** `ythril_mcp_tool_calls_total` is renamed `ythril_tool_calls_total` and gains a `door` label (`mcp` or
+  `rest`); `door="mcp"` is the old series.
+- **Database:** Spaces upgraded from 4.x get the full index set on their `links` collection at boot (the conversion had
+  created it unindexed), so link reads on large spaces stop scanning.
+- **UI:** The Brain and Files tabs read a record's links from the `links` collection and their forms name `linkEntities` /
+  `linkFacts` / `linkChronos`; a searched list shows the same links as the paged one.
+- **Docs:** The graph guide's `Links` section is its own page, `04g-links-api.md`.
 
 ### Removed
 
-#### The 4.x link arrays
-
-- **BREAKING — the six link array fields are gone, on the wire, in storage and as input.** `fact.entityIds`,
-  `chrono.entityIds`/`memoryIds` and `file.entityIds`/`memoryIds`/`chronoIds` were a record's connections
-  written onto the record itself. A connection is a link RECORD and nothing else now, so an ordinary edit of
-  a fact can no longer drop a link somebody else made, and one indexed lookup answers *"what points at
-  this?"* where six collection scans used to.
-
-  | you sent | send instead |
-  |---|---|
-  | `entityIds` | `linkEntities` |
-  | `memoryIds` | `linkFacts` |
-  | `chronoIds` | `linkChronos` |
-
-  **The ids do not change.** A body still carrying an old name is REFUSED, with the new name in the message,
-  on both doors — the whole call, so a record never lands without the connections it asked for. `[]` and
-  `null` are refused too: the call that meant *detach everything* is the one that must not be read as *said
-  nothing*.
-
-  **They are no longer READ either.** A record comes back without them, `recall`'s `includeRecordMeta` no
-  longer adds them, and a `filter` predicate over one matches nothing because no document has the key. To
-  find what a record is connected to, walk it — `traverse`, or `recall`'s `traverse` object, both of which
-  return the records rather than ids to look up one at a time — or filter the `links` collection directly.
-
-  **Every space converts itself on the first 5.0 start, and a space whose conversion FAILED is refused
-  rather than answered.** Every link read on it returns an error naming the space; answering "no links" for
-  records that have plenty is the one outcome worse than an error. The failure is in the startup log.
-
-- **The conversion pre-flight is gone with the arrays it watched** — `GET /api/brain/spaces/:spaceId/links/`
-  `convert-preflight` and the `graph_link_preflight` tool. It answered *"who still writes the old lists to
-  this space"* so an operator could convert with their eyes open; there is no shape left to write, so the
-  question has no subject.
-
-- **`completeLinkage` can no longer be turned off**, by anyone, an instance administrator included. It was a
-  reversible setting while a space could be read either way. With one shape left, turning it off would mean
-  *"read my links from a shape that does not exist"* — a working space that stops answering.
-
-#### `filter` is the one read path
-
-- **`POST /api/brain/filter` is gone, and with it the last second shape of any capability.** `B-9` step
-  3c, which closes a row open since 2026-09-16. It was not a thin route over the `filter` tool — it was a
-  SECOND IMPLEMENTATION of it: its own body validation, its own paging parse, its own proxy fan-out, its
-  own budget resolution and its own error handling, four hundred lines beside a tool that already did all
-  of it.
-
-  Read a collection at `POST /api/filter` — the generic tool door, which has no per-tool code at all.
-
-  **THE ENVELOPE CHANGES, and that is the port.** One shape for every tool, so a caller writes the
-  response handling once:
-
-  | | was | is |
-  |---|---|---|
-  | `200` | `{results, count, total, limit, skip, truncated, …}` | `{ok: true, text, data}` — all of that inside `data` |
-  | a refusal | `{error}` | `{ok: false, error, data}`, with the same sentence the MCP door uses |
-
-- **The five collection LIST routes are gone. Reading a collection is `filter`.** `B-9` step 3b, and a
-  break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` each answered what a
-  predicate over one collection answers, with their own query grammar, their own page caps and their own
-  response key.
-
-  ```json
-  POST /api/brain/filter
-  { "space": "work", "collection": "facts", "limit": 100, "tag": "release" }
-  ```
-
-  | | the routes | `filter` |
-  |---|---|---|
-  | the rows | `{ facts }`, `{ entities }`, `{ edges }`, `{ chrono }`, `{ files }` | `{ results }`, whichever collection |
-  | the page | default 50 or 100, hard max 200 or 500, and the five did not agree | `limit`, default 200, no maximum |
-  | a fact by entity id | `?entity=<id>` | `filter: { entityIds: "<id>" }` |
-  | an entity by exact name | `?name=` | `filter: { name: ... }` |
-  | chrono tag sets and date ranges | `?tags=`, `?tagsAny=`, `?after=`, `?before=` | `$all`, `$in` and a `createdAt` range |
-  | a file by path | `?path=` | `path`, an argument, normalised the same way |
-
-  **THREE THINGS THE ROUTES DID THAT A CALLER NOW HAS TO ASK FOR**, and each is silent if you miss it:
-
-  - **a chrono `status` derived on read** — send `deriveStatus: true`, or `active` means what is stored
-    rather than what is true. The route always derived; `filter` defaults to the stored value because a
-    predicate has to be able to match what is on disk.
-  - **chunk records hidden from a file listing** — the route excluded them by default, `filter` does not.
-    Send `filter: { parentFileId: { "$exists": false } }` or a converted document looks like the same
-    file many times over.
-  - **an unsupported paging name refused by name** — the routes answered `'offset' is not a parameter,
-    use 'skip'`. `filter`'s body is strictly allowlisted so it is still a `400`, and it still names the
-    parameter to use: the alias list moved onto the strict-body refusal rather than going with the routes.
-
-  Nothing an operator does in the UI changed. `listFileMeta` went with them: it had no caller, because the
-  file manager lists through the file STORE, which is a different question.
-
-- **The five `GET` routes that read ONE brain record are gone. Read a record through `filter`.** `B-9`
-  step 3a, and a break: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
-  `GET .../entities/by-ids` all answered what a predicate over one collection answers, with their own
-  response shape, their own refusals and their own 404.
-
-  ```json
-  POST /api/brain/filter
-  { "space": "work", "collection": "entities", "filter": { "_id": "8f3c…" }, "limit": 1 }
-  ```
-
-  A set of ids is the same call with `$in`, which is what `entities/by-ids` did; unknown ids are absent
-  from `results` exactly as they were absent from `entities`.
-
-  **The one behaviour that CHANGED, and it is the reason this is a `Removed` rather than a rename: a
-  record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
-  record not existing are the same event to a filter, and pretending otherwise would mean `filter`
-  answering 404 for an ordinary empty page. Branch on `results.length`.
-
-  **Two things the routes DID after the query, which a straight swap drops silently.** Both are
-  identical on most records and wrong on exactly the record somebody is looking at:
-
-  | | the route | `filter` |
-  |---|---|---|
-  | a chrono `status` | derived on read | the STORED value unless `deriveStatus: true` |
-  | `matchedText`, `embeddingModel` | returned by a by-id read, withheld by the list beside it | withheld unless `includeDiagnostics: true` |
-
-  Send `deriveStatus: true` on a chrono read to get what the route gave you; it is refused on any other
-  collection rather than ignored. The diagnostics default is now the same on both shapes, which the two
-  routes never were.
-
-  Nothing an operator does in the UI changed: the client was already reading everything else through
-  `filter` and now reads these the same way.
-
-#### Sync, peers and migrations
-
-- **`POST /api/notify/trigger` is gone. Trigger a sync through the door that names its subject.** Deprecated
-  in 4.5, removed here: `POST /api/networks/:id/sync` for a network and `POST /api/networks/peers/:peerId/sync`
-  for one peer across every network it belongs to. The body goes into the path; `?wait=true` and `?timeoutMs`
-  behave exactly as they did, and the answer shape is unchanged.
-
-  **ONE BEHAVIOUR DOES CHANGE, and only a request shows it.** The removed route accepted any `networkId` and
-  answered `200 {status:"triggered"}` for one that does not exist, because it fired and forgot before
-  anything looked. **Both replacements validate their subject first and answer `404`.** A caller that
-  fire-and-forgets a stale or mistyped id used to get a success it could not act on; it now gets a refusal
-  naming the subject. Nothing else about the two doors differed.
-
-  **It was removed rather than left working because the NAME was the defect.** A sync trigger sat on the peer
-  notification channel, so the guard-coverage gate was told to look away by a router-wide exemption written for
-  the notification endpoint beside it — and the route accepted any valid token, one with every area `none` and
-  no spaces, until 4.4. With it gone the exemption's reason is finally true of every route on that router.
-
-  **And the deletion moved something nothing would have reported.** `network_sync` was audited under
-  `sync.trigger`, which was THIS route's operation, so removing the route would have left the tool writing a
-  name no route records: an operator filtering the audit log by the REST operation would have seen no agent
-  traffic, and the cross-door parity gate would have gone quiet rather than red, because an unpaired tool is
-  skipped. A gate now refuses any tool whose operation no route records.
-
-  **A tool may now name more than one REST operation**, because `network_sync` IS both routes — a full cycle or
-  one named peer — and REST spells them apart only because a path has to name its subject. With a single name
-  the parity gate compared the tool against half of itself and called `peerId` a parameter no route accepts.
+- **Records:** The 4.x link arrays are gone from the wire, storage and input: `entityIds` → `linkEntities`, `memoryIds` →
+  `linkFacts`, `chronoIds` → `linkChronos`, on facts, chrono and files. A connection is a link record only; ids are unchanged.
+- **Records:** A body still carrying an old array name is refused on both doors, naming the new one, and the whole call
+  fails; `[]` and `null` are refused too, so *detach everything* is never read as *said nothing*.
+- **Records:** Records come back without the arrays, `includeRecordMeta` no longer adds them, and a `filter` predicate over
+  one matches nothing. Find connections with `traverse`, recall's `traverse` object, or `filter` on the `links` collection.
+- **Records:** Every space converts itself on the first 5.0 start. A space whose conversion failed refuses every link read
+  with an error naming it (never an empty answer); read the startup log, then restart or run `npm run links:convert`.
+- **Records:** `npm run links:convert -- --preview` counts what would move without writing; `-- <spaceId>` converts one
+  space. `GET /api/brain/spaces/:spaceId/links/convert-preflight` and the `graph_link_preflight` tool are gone.
+- **Spaces:** `completeLinkage` can no longer be turned off by anyone, an instance administrator included.
+- **Search:** `POST /api/brain/filter` is gone: read at `POST /api/filter`. The envelope is `{ok: true, text, data}`, with
+  `results`, `count`, `total`, `limit`, `skip` and `truncated` inside `data`, and `{ok: false, error, data}` on refusal.
+- **Search:** The list routes `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}` are gone: use `filter`
+  with `collection`. Rows come back as `results` for every collection, and `limit` defaults to 200 with no maximum.
+- **Search:** Porting a list route: `?name=` → `filter: { name }`, `?tags=` / `?tagsAny=` → `$all` / `$in`,
+  `?after=` / `?before=` → a `createdAt` range, `?path=` → `path`. `?entity=` has no predicate; walk the links.
+- **Search:** `filter` needs `deriveStatus: true` for a chrono `status` derived on read (else the stored value; refused on other
+  collections) and `filter: { parentFileId: { "$exists": false } }` to hide file chunks, as the list routes did.
+- **Search:** An unsupported paging name such as `offset` is a `400` naming the parameter to use (`skip`).
+- **Search:** The routes reading ONE record are gone: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and
+  `GET …/entities/by-ids`. Use `filter` with `{ "_id": "…" }`, or `$in` for a set.
+- **Search:** A record that is not there is now `200` with `results: []`, not `404`: branch on `results.length`.
+  `matchedText` and `embeddingModel` are withheld unless `includeDiagnostics: true`.
+- **Files:** `DELETE /api/brain/spaces/:spaceId/files?path=` (the metadata-only delete) is gone: the file delete removes
+  bytes and metadata together and answers `204` for an orphaned record.
+- **Sync:** `POST /api/notify/trigger` (deprecated in 4.5) is gone: use `POST /api/networks/:id/sync` for a network or
+  `POST /api/networks/peers/:peerId/sync` for one peer. `?wait=true`, `?timeoutMs` and the answer shape are unchanged.
+- **Sync:** Both replacements validate their subject first and answer `404` for an unknown network or peer; the old route
+  answered `200 {status:"triggered"}` for any `networkId`, so a stale id is now a refusal rather than a silent success.
 
 ### Fixed
 
