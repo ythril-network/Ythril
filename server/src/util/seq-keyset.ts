@@ -23,8 +23,8 @@
  *
  *   - the horizon (`settledSeqRange`, `util/seq.ts`) is applied HERE and nowhere else: a position that hands a reader a
  *     seq at or above an unsettled write moves it past that write for good (`Q-196`);
- *   - the caller's extra filter (a family's `pushFilter`, `ownedFilter`) is composed with `$and` into BOTH finds, never
- *     spread beside the position, so a key it happens to share with the guard cannot overwrite it;
+ *   - the caller's extra filter (a family's `pushFilter`, `ownedFilter`) is composed through `andPredicates` (an `$and`) into
+ *     BOTH finds, never spread beside the position, so a key it happens to share with the guard cannot overwrite it;
  *   - the sort is `SEQ_KEYSET_SORT`, which ends in `_id`: a tie ordered by whatever the storage engine likes cannot be
  *     continued by the next page.
  *
@@ -42,11 +42,15 @@
  * `{ seq: 1 }` over the `{ seq: 1 }` index the collection still has. That is tie-unsafe and no slower than before; a
  * blocking in-memory sort over the tail would be worse than either. A pair cursor received in that window is read by its
  * seq alone. Readiness is one `listIndexes` per collection, cached, and refreshed by the pass that builds the index
- * ({@link noteKeysetIndexes}); a collection that does not exist yet is not ready and is not cached.
+ * ({@link noteKeysetIndexes}); a collection that does not exist yet has no indexes and is not ready, a store that did not answer
+ * is not ready and is not remembered, and a "not ready" is looked at again within 30 s.
  */
 import type { Document, Filter } from 'mongodb';
 import { col, asFilter } from '../db/mongo.js';
+import { andPredicates } from '../db/and-predicates.js';
+import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { createProbeCache, type ProbeTtl } from './cached-probe.js';
 import { MAX_SYNC_SEQ, SEQ_CARRYING, settledSeqRange } from './seq.js';
 
 // ── The position and its cursor ────────────────────────────────────────────────
@@ -62,17 +66,29 @@ export const MAX_CURSOR_ID_LENGTH = 1024;
 
 const CURSOR_TEXT = /^[A-Za-z0-9_-]+={0,2}$/;
 
+/**
+ * Is `value` a seq a position may name: a whole number of 0 or more, within what a record may carry (`MAX_SYNC_SEQ`)?
+ *
+ * The ONE spelling of that rule for every reader and writer of a position — the cursor codec below and the pager's reading of
+ * an element it was served (`sync/seq-run-pager.ts`). It prevents a copy that forgets the upper bound: a position naming a
+ * seq no cursor can carry is then accepted from a peer in one place and refused in another, and the two disagree about the
+ * same element.
+ */
+export function isPositionSeq(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_SYNC_SEQ;
+}
+
 /** A seq written as a whole decimal number of 0 or more, within what a record may carry; `undefined` otherwise. */
 export function parseSeqText(text: string): number | undefined {
   if (!/^\d{1,16}$/.test(text)) return undefined;
   const n = Number(text);
-  return Number.isSafeInteger(n) && n <= MAX_SYNC_SEQ ? n : undefined;
+  return isPositionSeq(n) ? n : undefined;
 }
 
 /** The cursor for a position: opaque, base64url, a pair when it can carry the id and the bare seq when it cannot. */
 export function encodeSeqCursor(position: SeqPosition): string {
   const { seq, id } = position;
-  if (!Number.isSafeInteger(seq) || seq < 0 || seq > MAX_SYNC_SEQ) throw new RangeError(`a cursor cannot name seq ${String(seq)}`);
+  if (!isPositionSeq(seq)) throw new RangeError(`a cursor cannot name seq ${String(seq)}`);
   const text = id !== undefined && id !== '' && id.length <= MAX_CURSOR_ID_LENGTH ? `${seq}:${id}` : String(seq);
   return Buffer.from(text).toString('base64url');
 }
@@ -117,10 +133,13 @@ export const SEQ_KEYSET_SORT = Object.freeze({ seq: 1, _id: 1 } as const);
 /** The sort of the read that is NOT keyset-safe, used only while a collection has no compound index (see the header). */
 const SEQ_ONLY_SORT = Object.freeze({ seq: 1 } as const);
 
-/** `guard` AND `extra`, by `$and`, so a key `extra` shares with the guard is a second condition and not a replacement. */
-function composed(guard: Record<string, unknown>, extra: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> {
-  return extra !== undefined && Object.keys(extra).length > 0 ? { $and: [guard, extra] } : guard;
-}
+/**
+ * `guard` AND `extra` through `andPredicates` (`db/and-predicates.ts`, an intersection by `$and` and never a spread), so a key
+ * `extra` shares with the guard is a second condition and not a replacement. A guard here always names `seq`, so the answer is
+ * never the empty `undefined` that `andPredicates` gives for no constraint at all.
+ */
+const composed = (guard: Record<string, unknown>, extra: Readonly<Record<string, unknown>> | undefined): Record<string, unknown> =>
+  andPredicates(guard, extra) as Record<string, unknown>;
 
 /**
  * The two finds that read everything after `after`, below `horizon`: `tie` (the rest of the run at `after.seq`, or `null`
@@ -176,34 +195,30 @@ export const bareKeysOf = (index: SeqKeysetIndex): Record<string, 1> =>
 
 // ── Readiness: does this collection have its compound yet ──────────────────────
 
-interface Readiness { ready: boolean; at: number }
-const readiness = new Map<string, Readiness>();
-/** A positive answer is revalidated rarely; a negative one soon, so a build that finished is noticed even without the pass. */
-const READY_FOR_MS = 10 * 60_000;
-const NOT_READY_FOR_MS = 30_000;
+/**
+ * The cache of "does this collection have its compound": a probe cache of its own (`util/cached-probe.ts`, which owns the
+ * single flight, the LRU bound and the never-throws), sized for every collection of every space rather than for the few keys
+ * the shared one is bounded to — a bound below the number of collections would make every read of an evicted one a `listIndexes`.
+ */
+const readiness = createProbeCache({ maxKeys: 50_000 });
+/**
+ * A positive answer is revalidated rarely; a negative one soon, so a build that finished is noticed even without the pass; and
+ * a store that did not answer is not an answer about the index, so it is not remembered at all.
+ */
+const READINESS_TTL: ProbeTtl = { yesMs: 10 * 60_000, noMs: 30_000, failedMs: 0 };
 const COMPOUND = indexNameOf({ seq: 1, _id: 1 });
 
 /** Record what a collection's index list says. Called by the pass that builds the compound, after it has looked. */
 export function noteKeysetIndexes(collName: string, indexNames: readonly string[]): void {
-  readiness.set(collName, { ready: indexNames.includes(COMPOUND), at: Date.now() });
+  readiness.prime(collName, indexNames.includes(COMPOUND));
 }
 
 /** Forget what is cached: the next read looks again. For tests that rebuild a collection's indexes underneath it. */
-export function forgetKeysetReadiness(): void { readiness.clear(); }
+export function forgetKeysetReadiness(): void { readiness.forget(); }
 
-async function keysetReady(collName: string): Promise<boolean> {
-  const known = readiness.get(collName);
-  if (known && Date.now() - known.at < (known.ready ? READY_FOR_MS : NOT_READY_FOR_MS)) return known.ready;
-  let names: string[];
-  try {
-    names = (await col(collName).listIndexes().toArray()).map(ix => String(ix['name']));
-  } catch {
-    // A collection that does not exist yet, or a store that did not answer: not ready, and not remembered as such.
-    return false;
-  }
-  noteKeysetIndexes(collName, names);
-  return names.includes(COMPOUND);
-}
+/** Does the collection have the compound? `false` (and not remembered) when the store does not answer. */
+const keysetReady = (collName: string): Promise<boolean> =>
+  readiness.probe(collName, READINESS_TTL, async () => (await indexNamesOf(collName)).includes(COMPOUND));
 
 // ── The read ───────────────────────────────────────────────────────────────────
 

@@ -47,11 +47,10 @@
  * pair cursor re-serves nothing below its own seq, and a legacy ask re-serves from its seq plus one. Everything below is
  * dropped after every page, so a transfer of a million records holds a few pages of keys and not a million.
  */
-import { compareSeqPositions, decodeSeqCursor, type SeqPosition } from '../util/seq-keyset.js';
-import type { TransferOutcome } from './watermark.js';
-
-/** Requests one transfer makes before it stops as capped, when the caller names no bound of its own. */
-export const DEFAULT_MAX_PAGES = 200;
+import { compareSeqPositions, decodeSeqCursor, isPositionSeq, type SeqPosition } from '../util/seq-keyset.js';
+import {
+  completeThrough, MAX_TRANSFER_PAGES, stopAtPageBound, stopTransfer, type TransferOutcome, type TransferStopped,
+} from './watermark.js';
 
 /** Where an ask starts: `cursor` is the SERVER's own cursor (a pair), handed back verbatim; otherwise `sinceSeq` is the position. */
 export interface SeqRunAsk {
@@ -72,10 +71,25 @@ export interface SeqRunAdmission {
   key: string;
 }
 
-/** A position an element names, or `undefined` for one that names none (no string `_id`, or a seq that is not a whole number). */
+/**
+ * What a server's `nextCursor` field says, in the pager's terms: a string is its cursor, `null` says this was the last page, and
+ * anything else (no such key, which is a server without the cursor mode) is `undefined`.
+ *
+ * One reading for both pulls (`sync/pull-family.ts`, `sync/tombstone-transfer.ts`): the three-way answer is what decides
+ * whether a page is "full" and whether a cursor is followed, and a copy that folds `undefined` into `null` calls a 5.6 server's
+ * every page the last one and ends the transfer after its first.
+ */
+export function serverCursorOf(next: unknown): string | null | undefined {
+  return typeof next === 'string' ? next : next === null ? null : undefined;
+}
+
+/**
+ * A position an element names, or `undefined` for one that names none (no string `_id`, or a seq no position may name:
+ * `isPositionSeq`, the rule of the cursor codec, so an element is read by the same bound its cursor is).
+ */
 function positionOf(raw: unknown): SeqPosition | undefined {
   const { _id: id, seq } = (raw ?? {}) as { _id?: unknown; seq?: unknown };
-  return typeof id === 'string' && id !== '' && typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0 ? { seq, id } : undefined;
+  return typeof id === 'string' && id !== '' && isPositionSeq(seq) ? { seq, id } : undefined;
 }
 
 /** The greatest position among the elements of every group, or `undefined` when there are none or one names no position. */
@@ -95,7 +109,7 @@ function lastPositionOf(groups: readonly (readonly unknown[])[]): SeqPosition | 
  * Page a transfer from `outcome.deliveredThrough` until the peer has nothing more, or stop and say where.
  *
  * @param o.limit what a request asks for; `o.maxLimit` (default `o.limit`) is the one larger ask a legacy page made of a
- *   single seq is retried at before the transfer gives up; `o.maxPages` (default {@link DEFAULT_MAX_PAGES}) bounds the
+ *   single seq is retried at before the transfer gives up; `o.maxPages` (default `MAX_TRANSFER_PAGES`) bounds the
  *   requests of one call, after which the transfer stops as capped and the next cycle resumes.
  * @param o.admit the caller's ONE admission rule: `null` for an element it refuses. Only an admitted element counts as
  *   handed on, and only an admitted seq may move anything this reports.
@@ -111,11 +125,11 @@ export async function pageSeqRuns(o: {
   fetch: (ask: SeqRunAsk, limit: number) => Promise<SeqRunPage>;
   admit: (raw: unknown) => SeqRunAdmission | null;
   deliver: (fresh: unknown[]) => Promise<string | null>;
-  stopped: (why: string, heldAt: number) => void;
+  stopped: TransferStopped;
 }): Promise<void> {
   const { outcome } = o;
   const maxLimit = Math.max(o.limit, o.maxLimit ?? o.limit);
-  const maxPages = o.maxPages ?? DEFAULT_MAX_PAGES;
+  const maxPages = o.maxPages ?? MAX_TRANSFER_PAGES;
   /** `identity@seq` -> seq, for what was handed on and can still be served again. */
   const seen = new Map<string, number>();
   const forgetBelow = (seq: number): void => { for (const [key, at] of seen) if (at < seq) seen.delete(key); };
@@ -124,10 +138,10 @@ export async function pageSeqRuns(o: {
   let floor: SeqPosition = { seq: ask.sinceSeq };
   let limit = o.limit;
   let highestAdmitted = -1;
-  const stop = (why: string): void => { outcome.truncated = true; o.stopped(why, outcome.deliveredThrough); };
+  const stop = (why: string): void => stopTransfer(outcome, o.stopped, why);
 
   for (let pages = 0; ; pages++) {
-    if (pages >= maxPages) { stop(`the ${maxPages}-request bound of one cycle was reached`); return; }
+    if (stopAtPageBound(outcome, o.stopped, pages, maxPages)) return;
     const got = await o.fetch(ask, limit);
     if ('status' in got) { stop(`the peer answered ${got.status}`); return; }
     const { groups, nextCursor } = got;
@@ -180,11 +194,11 @@ export async function pageSeqRuns(o: {
 
     if (pair !== undefined) {
       // Complete through the highest admitted seq — less one when the cursor sits inside that seq's run.
-      if (pageHighest >= 0) outcome.deliveredThrough = Math.max(outcome.deliveredThrough, pageHighest >= pair.seq ? pageHighest - 1 : pageHighest);
+      if (pageHighest >= 0) outcome.deliveredThrough = Math.max(outcome.deliveredThrough, completeThrough(pageHighest, pageHighest >= pair.seq));
       forgetBelow(pair.seq);
       // `sinceSeq` rides beside the cursor as the seq BELOW the position, so a server that reads it instead of the cursor (one
       // rolled back between two asks) re-serves the run at that seq, which the seen set absorbs, and never skips the rest of it.
-      ask = { sinceSeq: Math.max(0, pair.seq - 1), cursor: nextCursor as string };
+      ask = { sinceSeq: completeThrough(pair.seq, true), cursor: nextCursor as string };
       floor = pair;
       limit = o.limit;
       continue;
@@ -198,7 +212,7 @@ export async function pageSeqRuns(o: {
 
     // A server that cannot continue a run: ask again at the lowest last seq of a full group, minus one, so the run at
     // that seq is served whole and what was handed on is skipped.
-    const next = fullLast - 1;
+    const next = completeThrough(fullLast, true);
     if (next <= floor.seq) {
       if (limit < maxLimit) { limit = maxLimit; continue; }
       stop(fullRefused

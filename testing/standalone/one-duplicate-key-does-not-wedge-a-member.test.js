@@ -145,7 +145,10 @@ describe('one duplicate key does not wedge a member', () => {
     assert.notEqual(refusalAt, -1, `${PAGER} no longer checks what \`deliver\` handed back — re-point this gate`);
     assert.match(statementFrom(pager, refusalAt, 'the refusal branch'), /stop\(refusal\); return;/,
       'a reason handed back by the page write must stop the transfer');
-    assert.match(pager, /const stop = \(why: string\): void => \{ outcome\.truncated = true;/, 'a stop must mark the transfer truncated');
+    // A stop is `stopTransfer` (`sync/watermark.ts`), and that is where the transfer is marked truncated.
+    assert.match(pager, /const stop = \(why: string\): void => stopTransfer\(outcome, o\.stopped, why\);/, 'a stop must go through stopTransfer');
+    const watermark = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
+    assert.match(watermark, /function stopTransfer\([^)]*\): void \{\s*outcome\.truncated = true;/, 'a stop must mark the transfer truncated');
   });
 
   it('the member-level escalation still exists for real failures', () => {

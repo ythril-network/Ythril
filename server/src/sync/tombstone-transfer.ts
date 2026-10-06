@@ -36,19 +36,16 @@ import { boundedJson } from '../util/bounded-read.js';
 import { listTombstones } from '../brain/tombstones.js';
 import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
 import { CounterBehindError } from './counter-after-page.js';
-import { pageSeqRuns } from './seq-run-pager.js';
+import { pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
 import { pushSeqRuns } from './push-seq-runs.js';
 import { encodeSeqCursor } from '../util/seq-keyset.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { NetworkMember } from '../config/types.js';
-import type { TransferOutcome } from './watermark.js';
+import { MAX_TRANSFER_PAGES, type TransferOutcome } from './watermark.js';
 
 /** What a push asks for per request. */
 const PUSH_PAGE = 500;
-
-/** Requests one transfer makes per cycle before it stops as truncated, so a cycle is bounded; the next one resumes. */
-const MAX_TOMBSTONE_PAGES = 200;
 
 /**
  * Fetch the peer's tombstones since `sinceSeq` and apply them to the LOCAL space `spaceId`.
@@ -73,7 +70,7 @@ export async function pullTombstones(opts: {
     await pageSeqRuns({
       outcome,
       limit: MAX_TOMBSTONES_PER_REQUEST,
-      maxPages: MAX_TOMBSTONE_PAGES,
+      maxPages: MAX_TRANSFER_PAGES,
       fetch: async (ask, limit) => {
         // `cursor` on EVERY request: a server with the cursor mode reads it (a first request's is the bare seq of the
         // position), one without ignores it and reads `sinceSeq` — the two ways of asking are one request.
@@ -85,11 +82,9 @@ export async function pullTombstones(opts: {
         // Keyed by COLLECTION name, as `GET /api/sync/tombstones` derives them from `TOMBSTONE_TYPES`. A key missing
         // here is a delete a peer told us about and we dropped on the floor.
         const data = await boundedJson<Record<string, unknown>>(resp, 'sync peer');
-        const next = data?.['nextCursor'];
         return {
           groups: TOMBSTONE_TYPES.map(t => data?.[TOMBSTONE_COLLECTION[t]]).map(g => (Array.isArray(g) ? g : [])),
-          // A string is the server's cursor, `null` says the last page, and no such key is a server without the mode.
-          nextCursor: typeof next === 'string' ? next : next === null ? null : undefined,
+          nextCursor: serverCursorOf(data?.['nextCursor']),
         };
       },
       admit: (raw) => {
@@ -134,7 +129,7 @@ export async function pushTombstones(opts: {
   await pushSeqRuns({
     outcome,
     pageSize: PUSH_PAGE,
-    maxPages: MAX_TOMBSTONE_PAGES,
+    maxPages: MAX_TRANSFER_PAGES,
     read: (after, limit) => listTombstones(spaceId, after, limit),
     send: async (rows) => {
       const resp = await peerSafeFetch(endpoint, {

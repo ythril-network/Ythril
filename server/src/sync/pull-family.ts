@@ -29,7 +29,7 @@ import { peerSafeFetch } from './peer-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
 import { arrivalRefusal } from './arrivals.js';
-import { pageSeqRuns } from './seq-run-pager.js';
+import { pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
 import { truncationWarn, type TransferOutcome } from './watermark.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import type { LinkageCheck } from './linkage-check.js';
@@ -80,10 +80,9 @@ export async function pullFamily(o: {
       const resp = await peerSafeFetch(`${member.url}/api/sync/${key}?${params}`, o.requestInit());
       if (!resp.ok) return { status: resp.status };
       const page = await boundedJson<ServedPage>(resp, 'sync peer');
-      const next = page.nextCursor;
       return {
         groups: [(Array.isArray(page.items) ? page.items : []).filter(item => !isRider(item))],
-        nextCursor: typeof next === 'string' ? next : next === null ? null : undefined,
+        nextCursor: serverCursorOf(page.nextCursor),
       };
     },
     // The writer's own shape rule: an element it would refuse names no seq the transfer may stand on.

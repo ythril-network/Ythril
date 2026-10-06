@@ -134,7 +134,16 @@ describe('module A is the one place a seq position is built', () => {
     const a = byFile.get(KEYSET);
     assert.ok(a, `${KEYSET} does not exist yet`);
     assert.doesNotMatch(a.text, /\.\.\.\s*(?:extra|extraFilter|ownedFilter|pushFilter)\b/, `${KEYSET} spreads the extra filter`);
-    assert.match(a.text, /\$and\b/, `${KEYSET} must compose the extra filter with $and`);
+    // The RULE is "an intersection, never a spread", not one spelling of it: a literal `$and`, or `andPredicates`
+    // (`db/and-predicates.ts`) — which is then itself held to the rule, so the delegation cannot hollow out unseen.
+    const viaAnd = /\$and\b/.test(a.text);
+    const viaHelper = /\bandPredicates\s*\(/.test(a.text) && /from\s+['"][^'"]*\band-predicates\.js['"]/.test(a.text);
+    assert.ok(viaAnd || viaHelper, `${KEYSET} must compose the extra filter by $and, directly or through andPredicates`);
+    if (viaHelper) {
+      const helper = byFile.get('server/src/db/and-predicates.ts');
+      assert.ok(helper, 'db/and-predicates.ts is not tracked: the keyset module delegates the intersection to it');
+      assert.match(helper.text, /\{\s*\$and\s*:/, 'andPredicates no longer builds an $and, so the keyset filters are no longer an intersection');
+    }
     for (const r of readers) {
       const spread = r.text.match(/seqKeysetFilters\s*\([^;]*\.\.\./);
       assert.equal(spread, null, `${r.file} spreads into a seqKeysetFilters call`);

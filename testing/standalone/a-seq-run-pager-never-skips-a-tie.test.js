@@ -452,3 +452,32 @@ describe('maxPages bounds one cycle, and the next one resumes from what was comp
     assert.equal(r.outcome.deliveredThrough, 13);
   });
 });
+
+describe('the pager\'s shared helpers', () => {
+  it('serverCursorOf reads nextCursor three ways: a string, null for the last page, undefined for a server with no cursor', () => {
+    const { serverCursorOf } = needModule(pagerLoaded, ['serverCursorOf'], 'one reading of nextCursor for both pulls');
+    assert.equal(serverCursorOf('abc'), 'abc');
+    assert.equal(serverCursorOf(null), null);
+    for (const none of [undefined, 5, {}, [], true]) assert.equal(serverCursorOf(none), undefined, `${JSON.stringify(none)} is no cursor`);
+  });
+
+  it('with no maxPages named, a transfer that never ends stops as capped at the one shared bound', async () => {
+    const m = modules('the shared page bound');
+    let n = 0;
+    const idOf = (i) => `e${String(i).padStart(4, '0')}`;
+    const endless = async () => { n++; return { groups: [[rec(n, idOf(n))]], nextCursor: m.encodeSeqCursor({ seq: n, id: idOf(n) }) }; };
+    const r = await run(m, endless, { limit: 1 });
+    assert.equal(r.asks.length, 200, 'the bound is one constant, 200 requests');
+    assert.equal(r.outcome.truncated, true);
+    assert.equal(r.stops.length, 1);
+    assert.match(r.stops[0].why, /200-request bound/);
+  });
+
+  it('an element naming a seq no cursor can carry names no position, so the page is refused rather than followed', async () => {
+    const m = modules('the one seq-validity rule');
+    const serve = async () => ({ groups: [[rec(2 ** 51, 'h1')]], nextCursor: m.encodeSeqCursor({ seq: 5, id: 'h1' }) });
+    const r = await run(m, serve, { limit: 1 });
+    assert.equal(r.outcome.truncated, true);
+    assert.deepEqual(r.handedOn, [], 'nothing is handed on from a page whose cursor cannot be reconciled with its elements');
+  });
+});

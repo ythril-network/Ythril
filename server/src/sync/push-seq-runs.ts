@@ -20,7 +20,7 @@
  * only after the peer took the page, and a stop leaves it where it was — which is what a stop inside a run needs to report.
  */
 import type { SeqPosition } from '../util/seq-keyset.js';
-import type { TransferOutcome } from './watermark.js';
+import { completeThrough, stopAtPageBound, stopTransfer, type TransferOutcome, type TransferStopped } from './watermark.js';
 
 /**
  * @param o.outcome `deliveredThrough` is the position to start after (the member's watermark); updated as pages land.
@@ -35,27 +35,22 @@ export async function pushSeqRuns<T extends { _id: string; seq: number }>(o: {
   maxPages?: number;
   read: (after: SeqPosition, limit: number) => Promise<T[]>;
   send: (rows: T[]) => Promise<string | null>;
-  stopped: (why: string, heldAt: number) => void;
+  stopped: TransferStopped;
 }): Promise<void> {
   const { outcome } = o;
   let after: SeqPosition = { seq: outcome.deliveredThrough };
   for (let pages = 0; ; pages++) {
-    if (o.maxPages !== undefined && pages >= o.maxPages) {
-      outcome.truncated = true;
-      o.stopped(`the ${o.maxPages}-request bound of one cycle was reached`, outcome.deliveredThrough);
-      return;
-    }
+    if (stopAtPageBound(outcome, o.stopped, pages, o.maxPages)) return;
     const rows = await o.read(after, o.pageSize);
     const last = rows[rows.length - 1];
     if (last === undefined) return;
     const refusal = await o.send(rows);
     if (refusal !== null) {
-      outcome.truncated = true;
-      o.stopped(refusal, outcome.deliveredThrough);
+      stopTransfer(outcome, o.stopped, refusal);
       return;
     }
     const full = rows.length >= o.pageSize;
-    outcome.deliveredThrough = Math.max(outcome.deliveredThrough, full ? last.seq - 1 : last.seq);
+    outcome.deliveredThrough = Math.max(outcome.deliveredThrough, completeThrough(last.seq, full));
     if (!full) return;
     after = { seq: last.seq, id: last._id };
   }
