@@ -318,6 +318,9 @@ async function main(): Promise<void> {
     stopBrainEmbeddingWorker();
     const { stopRetryWorker } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
+    // The reindex watcher resumes a run whose lease is stale, which starts a sweep: not while the process drains.
+    const { stopReindexWatcher } = await import('./brain/reindex.js');
+    stopReindexWatcher();
 
     await new Promise<void>(resolve => {
       const forced = setTimeout(() => {

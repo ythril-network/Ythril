@@ -108,6 +108,15 @@ describe('the shutdown handler in index.ts', () => {
   it('bounds the drain rather than waiting forever', () => {
     assert.match(src, /closeAllConnections\(\)/);
   });
+
+  it('stops the reindex watcher before the drain, so a tick cannot start a sweep over the closing database (bundle-53 G15)', () => {
+    const body = src.slice(src.indexOf('const shutdown ='), src.indexOf("process.on('SIGTERM'"));
+    const stopAt = body.indexOf('stopReindexWatcher(');
+    const closeAt = body.indexOf('server.close(');
+    assert.ok(stopAt > 0, 'the shutdown handler never stops the reindex watcher: its 5 s tick keeps resuming runs while the process drains');
+    assert.ok(stopAt < closeAt, 'the watcher must be stopped before the drain starts, with the other timers');
+    assert.match(body, /import\('\.\/brain\/reindex\.js'\)/, 'and it is the reindex module\'s own stop that is called');
+  });
 });
 
 /**
