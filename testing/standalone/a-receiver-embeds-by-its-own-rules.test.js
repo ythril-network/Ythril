@@ -57,8 +57,11 @@ import { embeddableIncomingSchemas } from '../_shared/incoming-sync-schemas.mjs'
 const { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES, COLLECTION_SUFFIX } = await import('../../server/dist/config/types-knowledge.js');
 
 const DOCS = 'server/src/api/sync/docs.ts';
-/** The three files that store what arrived from elsewhere: the push router, the pull engine, the importer. */
-const INGEST_FILES = [DOCS, 'server/src/sync/engine.ts', 'server/src/api/admin-import.ts'];
+/**
+ * The three files that store what arrived from elsewhere: the push router, the pull's per-family transfer, the importer.
+ * Re-anchored for bundle-52: the pull's page write moved out of `sync/engine.ts` (where it was `pullType`) into `sync/pull-family.ts`.
+ */
+const INGEST_FILES = [DOCS, 'server/src/sync/pull-family.ts', 'server/src/api/admin-import.ts'];
 const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));

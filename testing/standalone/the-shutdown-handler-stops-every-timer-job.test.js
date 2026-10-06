@@ -42,6 +42,16 @@ const AFTER_THE_DRAIN = {
     + 'connections were closing are counted too; it runs before `closeMongo`, since the write needs the connection',
 };
 
+/**
+ * `stop…` exports that are NOT a timer's stop, and so are never called by the shutdown handler — with why. They end ONE sync transfer
+ * (they mark its outcome truncated and say where it is held, `sync/watermark.ts`, bundle-52), which is a step inside a cycle and not
+ * a job that outlives it. Held true like the other table: each named export must still exist (`a row outliving the code` is a finding).
+ */
+const NOT_A_TIMER_STOP = {
+  stopTransfer: 'it marks one transfer truncated and reports where it is held (`sync/watermark.ts`); it holds no timer',
+  stopAtPageBound: 'it ends one transfer at its page bound through `stopTransfer` (`sync/watermark.ts`); it holds no timer',
+};
+
 const FLOORS = { stops: 10, calls: 10, intervals: 1 };
 
 const sources = readTrackedSources('server/src', { floor: 100 });
@@ -77,6 +87,7 @@ describe('the shutdown handler stops every timer job', () => {
     const findings = [];
     let calls = 0;
     for (const { file, name } of stops) {
+      if (name in NOT_A_TIMER_STOP) continue;
       const at = body.search(new RegExp(String.raw`\b${name}\s*\(`));
       if (at < 0) { findings.push(`${file}: \`${name}\` is exported and the shutdown handler never calls it`); continue; }
       calls++;
@@ -89,6 +100,9 @@ describe('the shutdown handler stops every timer job', () => {
     const exported = new Set(stops.map(s => s.name));
     for (const name of Object.keys(AFTER_THE_DRAIN)) {
       if (!exported.has(name)) findings.push(`AFTER_THE_DRAIN lists \`${name}\`, which no module exports: a row outliving the code`);
+    }
+    for (const name of Object.keys(NOT_A_TIMER_STOP)) {
+      if (!exported.has(name)) findings.push(`NOT_A_TIMER_STOP lists \`${name}\`, which no module exports: a row outliving the code`);
     }
     // The findings first: a handler missing calls is the defect, and the floor below would otherwise report it as a broken derivation.
     assert.deepEqual(findings, [], findings.join('\n'));

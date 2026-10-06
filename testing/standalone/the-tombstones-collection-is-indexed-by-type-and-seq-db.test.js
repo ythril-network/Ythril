@@ -13,6 +13,11 @@
  *
  * Asserted on the index's KEY, in order, not on its name: a name is a spelling, the key is what the planner uses.
  *
+ * **5.6.8 (bundle-52, `Q-277`):** the index is `{ type: 1, seq: 1, _id: 1 }` — the tie-safe tombstone read pages by `(seq, _id)`, which the
+ * bare `{ type: 1, seq: 1 }` cannot order. The key is read out of `SEQ_KEYSET_INDEXES` (`util/seq-keyset.ts`), the one declaration, and a
+ * space initialised here is a NEW one, so `initSpace` creates it with the collection; a space that existed before gets it from the
+ * background pass (`a-keyset-read-uses-its-index-db`).
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/the-tombstones-collection-is-indexed-by-type-and-seq-db.test.js
  * (requires a prior `npm run build` in server/)
@@ -33,12 +38,16 @@ describe('a space\'s tombstones are indexed by type, then seq', { skip }, () => 
   });
   after(async () => { await door?.close(); });
 
-  it('after initSpace the tombstones collection has an index keyed { type: 1, seq: 1 }', async () => {
+  it('after initSpace the tombstones collection has an index keyed { type: 1, seq: 1, _id: 1 }', async () => {
+    const { SEQ_KEYSET_INDEXES } = await import('../../server/dist/util/seq-keyset.js');
+    const declared = SEQ_KEYSET_INDEXES.find(ix => ix.part === 'tombstones' && 'type' in ix.keys);
+    assert.ok(declared, 'SEQ_KEYSET_INDEXES no longer declares the typed tombstone index — re-point this gate');
+    assert.deepEqual(Object.entries(declared.keys), [['type', 1], ['seq', 1], ['_id', 1]], 'the declared typed tombstone index is not { type, seq, _id }');
     const indexes = await door.coll(S, 'tombstones').indexes();
     assert.ok(indexes.length >= 1, 'fixture check: the tombstones collection has no index at all, so initSpace never ran');
     const keys = indexes.map(i => Object.entries(i.key));
-    assert.ok(keys.some(k => JSON.stringify(k) === JSON.stringify([['type', 1], ['seq', 1]])),
-      `no { type: 1, seq: 1 } index on ${S}_tombstones, so every per-type tombstone page is a scan and a sort: `
+    assert.ok(keys.some(k => JSON.stringify(k) === JSON.stringify(Object.entries(declared.keys))),
+      `no { type: 1, seq: 1, _id: 1 } index on ${S}_tombstones, so every per-type tombstone page is a scan and a sort: `
       + JSON.stringify(indexes.map(i => i.key)));
   });
 });

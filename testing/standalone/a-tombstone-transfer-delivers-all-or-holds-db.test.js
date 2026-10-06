@@ -14,11 +14,14 @@
  * ## The rules, each against the real engine and a fake peer serving the real GET handler (`_pull-door.mjs`)
  *
  *  1. **Everything is applied**: more tombstones than one page holds, with a run of equal seqs across the boundary.
- *  2. **A refused element does not move the cursor**: the page's highest seq belongs to an element the receiver
- *     refused, and the next page is asked from what was ACCEPTED.
- *  3. **A whole page of one seq cannot be paged past**, so the transfer answers `truncated`, warns naming the space,
- *     the peer and the seq, and the record watermark stays below the deletions it did not apply.
- *  4. **The push pager the same**, for both shapes of tie.
+ *  2. **A refused element does not move the cursor**: the page's last element is one the receiver refused, and the
+ *     next page is asked from the peer's position after it (bundle-52: the cursor is the SERVER's, never read off an
+ *     element). An element whose seq is not the one the peer's cursor names is not followed at all: the transfer stops.
+ *  3. **A whole page of one seq from a peer WITHOUT the cursor mode cannot be paged past** (a 5.6 peer; bundle-52 gives the
+ *     mode, and `a-tombstone-run-at-one-seq-does-not-wedge-db` holds that a peer with it pages any run), so the transfer
+ *     answers `truncated`, warns naming the space, the peer and the seq, and the record watermark stays below the
+ *     deletions it did not apply.
+ *  4. **The push pages by `(seq, _id)`**, for both shapes of tie and for a run longer than a page.
  *  5. **A full page is affordable**: the pull asks at the handler's clamp (5000 per type) and the answer arrives
  *     compressed, under the `boundedJson` cap, every type full.
  *  6. **Characterised, must not get worse**: a record the peer re-created after deleting it survives the tombstone
@@ -81,23 +84,47 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
     it('an element the receiver refuses does not move the cursor past the ones after it', async () => {
       const all = run(CLAMP + 1, i => i);
       await door.seedPeer(S, all);
-      // The first page's highest-seq element arrives forged: the cursor must come from what was ACCEPTED.
+      // The first page's last element arrives malformed (its `instanceId` is not a string): the receiver refuses it, and the
+      // next page is asked from the SERVER's position after it — the cursor is never read off an element it refused.
+      door.state.tamper = (body, asked) => {
+        if (asked.sinceSeq !== '0' || !body.facts?.length) return body;
+        const facts = [...body.facts];
+        facts[facts.length - 1] = { ...facts[facts.length - 1], instanceId: 12 };
+        return { ...body, facts };
+      };
+      await door.sync();
+      const have = await storedIds();
+      // The refused element itself (the 5000th) is not stored; the one after it, on the next page, is.
+      assert.deepEqual(missing(all.slice(-1), have), [],
+        'the tombstone after a refused element was never applied: the transfer stopped at, or paged past, the element it refused');
+      assert.ok(!have.has(all[CLAMP - 1]._id), 'the malformed element was stored');
+    });
+
+    it('a last element whose seq is not the one the peer\'s cursor names is not followed: the transfer stops and the counter does not move', async () => {
+      const all = run(CLAMP + 1, i => i);
+      await door.seedPeer(S, all);
+      // The first page's last element claims a seq far above its place, beside the peer's honest cursor: nothing the page says
+      // can be trusted to place the next ask, so the transfer holds below it and says so.
+      door.state.records[S] = { facts: [build.fact(S, 'rec', 100, { author: PEER_AUTHOR })] };
       door.state.tamper = (body, asked) => {
         if (asked.sinceSeq !== '0' || !body.facts?.length) return body;
         const facts = [...body.facts];
         facts[facts.length - 1] = { ...facts[facts.length - 1], seq: MAX_INGEST_SEQ + 5 };
         return { ...body, facts };
       };
-      await door.sync();
-      const have = await storedIds();
-      assert.deepEqual(missing(all.slice(-2), have), [],
-        'the tombstones after a refused max-seq element were never applied: the transfer stopped at, or paged past, the element it refused');
+      const { lines } = await door.logsDuring(() => door.sync());
       assert.ok(await door.counter(S) < MAX_INGEST_SEQ, 'the refused seq moved the counter');
+      assert.ok((door.member().lastSeqReceived?.[S] ?? 0) < MAX_INGEST_SEQ, 'the refused seq moved the receive watermark');
+      assert.ok(lines.some(l => l.includes(S) && l.includes(PEER_LABEL) && /tombstone/i.test(l) && /stopped/.test(l)),
+        `no warning says the tombstone transfer stopped:\n${lines.join('\n')}`);
     });
 
-    it('a whole page of one seq answers truncated with a warning, and the record watermark is capped', async () => {
+    it('a whole page of one seq from a peer without the cursor mode answers truncated with a warning, and the record watermark is capped', async () => {
       await door.seedPeer(S, run(CLAMP + 1, () => 7));
       door.state.records[S] = { facts: [build.fact(S, 'rec', 100, { author: PEER_AUTHOR })] };
+      // A 5.6 peer ignores `cursor` and sends no `nextCursor`: its page is what the per-type read gave, here one type's 5000.
+      // (A peer WITH the mode pages past the run: `a-tombstone-run-at-one-seq-does-not-wedge-db`.)
+      door.state.tamper = (body) => { const { nextCursor: _dropped, ...legacy } = body; return legacy; };
       const { lines } = await door.logsDuring(() => door.sync());
       const watermark = door.member().lastSeqReceived?.[S] ?? 0;
       assert.ok(watermark < 7,
@@ -162,22 +189,21 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       assert.deepEqual(lost, [], `${lost.length} tombstone(s) of a page of one seq were never pushed`);
     });
 
-    it('more of one seq than the clamp holds answers truncated with a warning, and the push watermark is capped', async () => {
-      // A record of this instance's own at seq 100 is pushed in the same cycle, so the push watermark would reach
-      // 100 if the tombstone transfer claimed it was complete.
+    it('more of one seq than the clamp holds is delivered whole, in pages that continue the run, and the push watermark passes it', async () => {
+      // The push pages by `(seq, _id)`, so a run of any length goes out in pages (it used to stop at the clamp and hold the
+      // watermark below the run for ever). A record of this instance's own at seq 100 is pushed in the same cycle: the push
+      // watermark reaches 100 only if the tombstone transfer is complete.
       const local = run(CLAMP + 1, () => 7, 'w');
       await door.reset({ direction: 'push' });
       await door.coll(S, 'facts').insertOne(build.fact(S, 'mine', 100, { author: { instanceId: door.instanceId, instanceLabel: 'Receiver' } }));
       await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: door.instanceId })));
       await door.bumpSeq(S, 100);
-      const { lines } = await door.logsDuring(() => door.sync());
+      await door.sync();
       assert.ok(door.state.pushedRecords.some(r => r._id === 'mine'), 'the record was not pushed, so the watermark proves nothing');
-      const watermark = door.member().lastSeqPushed?.[S] ?? 0;
-      assert.ok(watermark < 7,
-        `the push watermark moved to ${watermark}, past seq-7 deletions the push could not page through — they are never `
-        + 'offered again');
-      assert.ok(lines.some(l => l.includes(S) && l.includes(PEER_LABEL) && /\b7\b/.test(l) && /tombstone/i.test(l)),
-        `no warning names the space, the peer and the seq the push stopped at:\n${lines.join('\n')}`);
+      const lost = missing(local, new Set(door.state.received.map(t => t._id)));
+      assert.deepEqual(lost, [], `${lost.length} tombstone(s) of a run longer than a page were never pushed`);
+      assert.equal(door.state.received.length, local.length, 'a tombstone of the run was offered twice');
+      assert.equal(door.member().lastSeqPushed?.[S], 100, 'the push watermark was held below a run that was delivered whole');
     });
   });
 });

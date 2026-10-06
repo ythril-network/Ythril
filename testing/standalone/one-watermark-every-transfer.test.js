@@ -24,9 +24,14 @@
  * give, so the next cycle re-fetches the same pages and stops in the same place for ever, and a space more than
  * one cap behind can never catch up. That trades losing one record for syncing nothing.
  *
- * So: a transfer that ran to completion places no ceiling; one that stopped early vouches only up to what it
- * delivered; the watermark advances to the lowest such ceiling. Nothing is skipped and a capped transfer still
- * makes a full page-set of progress per cycle.
+ * So: a transfer that ran to completion places no ceiling; one that stopped early vouches only up to the seq it is
+ * COMPLETE through; the watermark advances to the lowest such ceiling. Nothing is skipped and a capped transfer
+ * still makes a full page-set of progress per cycle.
+ *
+ * "Complete through" is not "delivered through" (bundle-52, `Q-277`): records relayed from several authors share
+ * seqs, so a transfer that stopped inside a run of equal seqs has delivered that seq without finishing it, and
+ * vouches for the seq BEFORE it. `safeWatermark` is the pure half (below); the engine-side cases at the end hold the
+ * two modules that compute the position — the pull's pager and the push's loop.
  *
  * Run: node --test testing/standalone/one-watermark-four-transfers.test.js
  * (requires a prior `npm run build` in server/)
@@ -35,11 +40,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { statementFrom } from './_structural-window.mjs';
 // The collection list itself, so the transfer count below is derived rather than typed. Read from `dist`
 // the way every other gate that needs a server value does — preflight builds it first for exactly this.
 import { BRAIN_COLLECTIONS } from '../../server/dist/config/types.js';
 
-const { safeWatermark, truncatedTransfers } = await import('../../server/dist/sync/watermark.js');
+const { safeWatermark, truncatedTransfers, completeThrough } = await import('../../server/dist/sync/watermark.js');
 
 /** A transfer that finished everything above the old watermark. */
 const done = () => ({ deliveredThrough: 0, truncated: false });
@@ -192,36 +198,84 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
       'a second hand-written list of the families is back beside the set it duplicates');
   });
 
+  /*
+   * ## "Complete through", restated (bundle-52, `Q-277`)
+   *
+   * `deliveredThrough` is the last seq a transfer is COMPLETE through — not "the last seq delivered", which is what these
+   * cases used to read. The two differ at exactly one place, and it is the place that loses records: a stop inside a run of
+   * records that share a seq (several authors' records keep their author's seq) has delivered the seq without finishing it.
+   * The rule is held in two modules, once each — `pageSeqRuns` for a pull, `pushSeqRuns` for a push — and the cases below
+   * hold what the engine's side of it still owns: every transfer is passed, and the per-family transfers hand the position
+   * the rule computed to `resolveWatermark` unchanged. Their behaviour is `a-seq-run-pager-never-skips-a-tie` and the -db
+   * suites over the real engine.
+   */
+  const pager = stripComments(readFileSync('server/src/sync/seq-run-pager.ts', 'utf8'));
+  const pushLoop = stripComments(readFileSync('server/src/sync/push-seq-runs.ts', 'utf8'));
+  const pullFamily = stripComments(readFileSync('server/src/sync/pull-family.ts', 'utf8'));
+  const pushFamily = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
+
   it('the pull records its position only AFTER the page is applied', () => {
-    // Vouching before the write would promise records that a throw between the two would have lost — the same
-    // class of mistake one layer down. Re-anchored for 5.6.2 (`Q-218`): the page is written by the arrival writer
-    // (`writeArrivals`), and a failed write — or a store refusal (cut `C3`) — `break`s out of the page loop before
-    // the advance is reached.
-    const write = src.search(/=\s*await writeArrivals\(/);
-    const advance = src.indexOf('if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;');
-    assert.ok(write > 0, 'the pull no longer writes its page through writeArrivals — re-anchor this gate');
-    assert.ok(advance > write, 'deliveredThrough must be advanced after the page write, not before');
-    assert.equal(src.split('deliveredThrough = maxSeq').length - 1, 1, 'a second advance of deliveredThrough is back');
-    assert.match(src.slice(write, advance), /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,
+    // Vouching before the write would promise records that a throw between the two would have lost — the same class of
+    // mistake one layer down. The page is written in `deliver` by the arrival writer (`writeArrivals`, 5.6.2 `Q-218`); the
+    // pager moves `deliveredThrough` only after `deliver` has returned null, and a reason it hands back — a failed write, a
+    // counter that could not be moved, a store refusal (cut `C3`) — stops the transfer before any advance.
+    const accept = pullFamily.search(/=\s*await writeArrivals\(/);
+    assert.ok(accept > 0, 'the pull no longer writes its page through the arrival writer — re-anchor this gate');
+    const deliver = pager.search(/const refusal = await o\.deliver\(fresh\);/);
+    assert.notEqual(deliver, -1, 'the pager no longer hands a page to `deliver` — re-anchor this gate');
+    const advances = [...pager.matchAll(/outcome\.deliveredThrough = /g)].map(m => m.index);
+    assert.ok(advances.length >= 3, `the pager advances deliveredThrough at ${advances.length} place(s) — re-anchor this gate`);
+    assert.ok(advances.every(i => i > deliver), 'deliveredThrough is advanced before the page was handed on, not after');
+    const refusalAt = pager.indexOf('if (refusal !== null)', deliver);
+    assert.notEqual(refusalAt, -1, 'the pager no longer checks what `deliver` handed back — re-anchor this gate');
+    assert.match(statementFrom(pager, refusalAt, 'the refusal branch'), /stop\(refusal\); return;/,
       'a page whose write failed must stop the transfer as truncated, before the advance');
-    assert.match(src.slice(write, advance), /if \(written\.storeRefused\.length > 0\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,
+    const settle = pullFamily.indexOf('const seen = settlePulledPage(', accept);
+    assert.ok(settle > accept, 'the pull no longer settles its page after the write — re-anchor this gate');
+    assert.match(pullFamily.slice(accept, settle), /catch \(err\) \{\s*\n\s*return `sync pull/,
+      'a failed page write must be handed back as a reason, not rethrown past the pager');
+    assert.match(pullFamily.slice(accept, settle), /if \(written\.storeRefused\.length > 0\) \{[\s\S]*?return `/,
       'a page the store refused a document of must stop the transfer as truncated, before the advance');
   });
 
   it('the page cap counts as a truncation', () => {
-    // Easy to miss, because nothing failed. The loop exits with a live cursor and the transfer has more to give.
-    assert.match(src, /if \(cur\) \{\s*\n\s*truncated = true;/,
-      'a live cursor at the page cap must set truncated, or the watermark passes what was not fetched');
+    // Easy to miss, because nothing failed. The loop reaches its bound with the peer still having more to give.
+    // Both loops stop at the bound through the ONE helper (`stopAtPageBound`), which stops through the ONE stop
+    // (`stopTransfer`), which is where `truncated` is set — each link is held, so the chain cannot be cut unseen.
+    assert.match(pager, /if \(stopAtPageBound\(outcome, o\.stopped, pages, maxPages\)\) return;/,
+      'a pager at its page bound must stop (and so set truncated), or the watermark passes what was not fetched');
+    assert.match(pushLoop, /if \(stopAtPageBound\(outcome, o\.stopped, pages, o\.maxPages\)\) return;/,
+      'a push at its page bound must stop (and so set truncated)');
+    assert.match(pager, /const stop = \(why: string\): void => stopTransfer\(outcome, o\.stopped, why\);/, 'a stop must go through stopTransfer');
+    const wm = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
+    assert.match(wm, /function stopTransfer\([^)]*\): void \{\s*outcome\.truncated = true;/, 'stopTransfer no longer marks the transfer truncated');
+    assert.match(wm, /function stopAtPageBound\([\s\S]*?stopTransfer\(outcome, stopped,/, 'stopAtPageBound no longer stops through stopTransfer');
+  });
+
+  it('a stop inside a run reports the seq before it, in both directions', () => {
+    // The rule, as one sentence each, spelled once in `completeThrough`. Pull: a pair cursor sitting inside the highest
+    // admitted seq's run holds that seq minus one. Push: a FULL page may continue at its last seq, a short one cannot.
+    assert.match(pager, /completeThrough\(pageHighest, pageHighest >= pair\.seq\)/,
+      'the pull no longer reports a seq it is still inside as incomplete');
+    assert.match(pushLoop, /completeThrough\(last\.seq, full\)/, 'the push no longer reports a seq it is still inside as incomplete');
+    assert.equal(completeThrough(7, true), 6, 'a run that may continue is complete through the seq before it');
+    assert.equal(completeThrough(7, false), 7, 'a run that cannot continue is complete through its own seq');
+    assert.equal(completeThrough(0, true), 0, 'there is nothing before seq 0 to be complete through');
+    for (const [name, src] of [['pull', pager], ['push', pushLoop], ['pull-family', pullFamily], ['push-family', pushFamily]]) {
+      assert.doesNotMatch(src, /\b(?:[a-z]*[sS]eq|fullLast|pageHighest|highestAdmitted)\s*-\s*1\b/, `${name} subtracts one from a seq by hand again: that is \`completeThrough\``);
+    }
   });
 
   it('the push caps with the ACCEPTED position, not the author-guarded one', () => {
-    // `localMaxSeq` answers "how far did our own records reach"; `seqCursor` answers "how far did this transfer
-    // get at all". On pubsub and braintree networks `ownedFilter` is empty and we relay foreign docs, so
-    // capping with the author-guarded number would advance past a relayed doc the peer never accepted.
-    assert.match(src, /deliveredThrough: seqCursor, truncated[ ,}]/,
-      'the push ceiling must be the last accepted seq');
-    assert.doesNotMatch(src, /deliveredThrough: localMaxSeq/,
+    // `localMaxSeq` answers "how far did our own records reach"; the outcome's `deliveredThrough` answers "how far is the
+    // peer complete". On pubsub and braintree networks `owned` is empty and we relay foreign docs, so capping with the
+    // author-guarded number would advance past a relayed doc the peer never accepted. (Moved with `pushCollection` to
+    // `pushFamily`: the outcome is the one `pushSeqRuns` fills, spread into the result.)
+    assert.match(pushFamily, /return \{ pushed, maxSeq: localMaxSeq, refused, \.\.\.outcome \};/,
+      'the push ceiling must be the position `pushSeqRuns` reports, which is the last accepted seq');
+    assert.doesNotMatch(pushFamily, /deliveredThrough[:=]\s*localMaxSeq/,
       'the author-guarded max answers a different question and would leave relayed docs strandable');
+    assert.match(pushFamily, /await pushSeqRuns</, 'the family push no longer goes through the push loop that owns the position');
   });
 
   it('a pull tombstone fetch that failed is no longer silent, and both halves live together', () => {

@@ -52,19 +52,43 @@ describe('one list of families, iterated by both directions', () => {
     assert.ok(rows >= 5, `only ${rows} rows in the family list — it has stopped being the list`);
   });
 
+  /*
+   * Re-anchored for bundle-52: the per-family transfers moved out of the engine (`pullType` -> `pullFamily` in
+   * `sync/pull-family.ts`, `pushCollection` -> `pushFamily` in `sync/push-family.ts`) so that the engine could shrink. The
+   * rule is unchanged — ONE call site per direction, inside the loop over the list — and each case asserts the anchor
+   * is FOUND before it counts, so a rename that leaves it matching nothing fails here rather than passing.
+   */
   it('PULL iterates it instead of naming each family', () => {
     const src = code(ENGINE);
-    const calls = [...src.matchAll(/await pullType[<(]/g)].length;
+    assert.match(src, /import \{[^}]*\bpullFamily\b[^}]*\} from '\.\/pull-family\.js'/, 'the engine no longer imports the per-family pull — re-anchor this case');
+    const loop = src.search(/for \(const family of REPLICATED_FAMILIES\) \{\s*pulled\[family\.payloadKey\] = await pullFamily\(/);
+    assert.notEqual(loop, -1, 'the pull is no longer a loop over REPLICATED_FAMILIES calling pullFamily — re-anchor this case');
+    const calls = [...src.matchAll(/await pullFamily[<(]/g)].length;
     assert.equal(calls, 1,
-      `${calls} pullType call sites — the pull side must call it once, inside the loop over the list, or a `
+      `${calls} pullFamily call sites — the pull side must call it once, inside the loop over the list, or a `
       + 'seventh family is an edit here as well as in the list');
   });
 
   it('and PUSH iterates it too', () => {
     const src = code(ENGINE);
-    const calls = [...src.matchAll(/await pushCollection[<(]/g)].length;
+    assert.match(src, /import \{[^}]*\bpushFamily\b[^}]*\} from '\.\/push-family\.js'/, 'the engine no longer imports the per-family push — re-anchor this case');
+    const calls = [...src.matchAll(/await pushFamily[<(]/g)].length;
     assert.equal(calls, 1,
-      `${calls} pushCollection call sites — the push side must call it once, inside the loop`);
+      `${calls} pushFamily call sites — the push side must call it once, inside the loop`);
+    assert.match(src, /for \(const family of REPLICATED_FAMILIES\) \{\s*pushed\[family\.payloadKey\] = await pushFamily\(/,
+      'the push call is not inside the loop over REPLICATED_FAMILIES');
+    // And the engine must not have grown a per-family transfer of its own back.
+    assert.doesNotMatch(src, /\basync function (?:pullType|pushCollection|pullFamily|pushFamily)\b/, 'a per-family transfer is declared in the engine again');
+  });
+
+  it('the per-family transfers read the family row, not a name', () => {
+    // The filter and the url come from the ROW (`family.pushFilter`, `family.payloadKey`): a transfer that took them as
+    // arguments from the engine is where a seventh family with its own filter would be forgotten.
+    const push = code('server/src/sync/push-family.ts');
+    assert.match(push, /family\.pushFilter\b/, 'the push no longer reads the family\'s own filter');
+    assert.match(push, /family\.collection\b/, 'the push no longer reads the family\'s collection');
+    const pull = code('server/src/sync/pull-family.ts');
+    assert.match(pull, /family\.payloadKey\b/, 'the pull no longer reads the family\'s payload key');
   });
 
   it('the file-metadata push filter travels WITH the list, not beside it', () => {

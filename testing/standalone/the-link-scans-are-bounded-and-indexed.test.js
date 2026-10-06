@@ -34,6 +34,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 const { LINK_INDEXES } = await import('../../server/dist/brain/link-adjacency.js');
+const { SEQ_KEYSET_INDEXES } = await import('../../server/dist/util/seq-keyset.js');
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
@@ -150,7 +151,7 @@ describe('the collection every link scan reads is indexed', () => {
       'lifecycle writes its link indexes out instead of taking the declared set, so the backfill and the '
       + 'creation can ask for different things');
     // The floor: a loop over an empty declaration satisfies the assertion above and indexes nothing.
-    assert.ok(LINK_INDEXES.length >= 3,
+    assert.ok(LINK_INDEXES.length >= 2,
       `only ${LINK_INDEXES.length} link index(es) declared — the import is stale, and the loop is over nothing`);
     /*
      * BOTH directions, and the uniqueness. From a record: what does this concern. From an entity: what
@@ -161,7 +162,11 @@ describe('the collection every link scan reads is indexed', () => {
     const declared = LINK_INDEXES.map(keysOf);
     assert.ok(declared.some(k => k.startsWith('from')), 'no index serves "what does this record concern"');
     assert.ok(declared.some(k => k.startsWith('to')), 'no index serves "what concerns this record"');
-    assert.ok(declared.includes('seq'), 'no index serves the sync page, so every peer page sorts the collection');
+    // The sync page's index is the keyset compound, declared once for every replicated collection (`SEQ_KEYSET_INDEXES`) and created
+    // by `spaces/keyset-indexes.ts`: new collections by `initSpace`, existing ones by the background pass. Not a row here.
+    assert.ok(!declared.includes('seq'), 'LINK_INDEXES declares a bare seq index again: the keyset declaration is the one place');
+    assert.ok(SEQ_KEYSET_INDEXES.some(ix => ix.part === 'links' && keysOf(ix) === 'seq,_id'),
+      'no index serves the sync page of the links collection, so every peer page sorts it');
     assert.ok(LINK_INDEXES.some(ix => ix.unique && keysOf(ix).startsWith('from')),
       'the identity index is not unique, so two peers noticing the same connection can fork it');
   });

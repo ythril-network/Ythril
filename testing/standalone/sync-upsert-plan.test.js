@@ -140,6 +140,12 @@ describe('the arrival writer applies this accept, and no copy of it', () => {
     assert.match(body, /if \(restore\) return \{ toWrite: docs, stored \};/, 'a restore no longer bypasses the accept');
     assert.match(body, /toWrite: planSeqUpserts\(/, 'the writer accepts by a rule of its own instead of planSeqUpserts');
     assert.doesNotMatch(body, /\.seq\s*>=?\s*\w+\.seq|seq\s*>=\s*prev/, 'a hand-written seq comparison is back beside planSeqUpserts');
+    // Re-anchored for bundle-52: the pull's page hand-over is `pullFamily` (`sync/pull-family.ts`), out of `pullFromPeer`.
+    const pull = bodyOf(stripComments(readFileSync('server/src/sync/pull-family.ts', 'utf8')), 'pullFamily');
+    assert.match(pull, /await writeArrivals\(/, 'the pull no longer hands its pages to the arrival writer');
+    const engine = bodyOf(stripComments(readFileSync('server/src/sync/engine.ts', 'utf8')), 'pullFromPeer');
+    assert.match(engine, /await pullFamily\(/, 'the engine\'s pull no longer goes through the per-family pull');
+    assert.doesNotMatch(engine, /writeArrivals\(/, 'the engine writes pulled pages itself again');
   });
 });
 
@@ -193,7 +199,7 @@ describe('one accept rule: isNewerCopy', () => {
     const doors = trackedSources('server/src', { specs: false })
       .filter(f => f !== 'server/src/sync/arrivals.ts' && /\bwriteArrivals\s*\(/.test(read(f)));
     assert.ok(doors.length >= 3, `only ${doors.length} door(s) call writeArrivals: ${doors}`);
-    const NOT_THE_ACCEPT = /^(?:tomb(?:stone)?\??\.seq\s*>=?\s*incoming\.seq|[\w.]*\s*>\s*(?:0|\w*maxSeq|highSeq|deliveredThrough|since\w*|lastSeq\w*))$/i;
+    const NOT_THE_ACCEPT = /^(?:tomb(?:stone)?\??\.seq\s*>=?\s*incoming\.seq|[\w.]*\s*>\s*(?:0|\w*maxSeq|highSeq|deliveredThrough|since\w*(?:\.seq)?|lastSeq\w*))$/i;
     const raw = [];
     for (const f of doors) {
       const src = read(f);

@@ -24,6 +24,7 @@ import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { createKeysetIndexesFor } from './keyset-indexes.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
@@ -46,10 +47,12 @@ export async function initSpace(
   const existingColls = await db.listCollections().toArray();
   const existing = new Set(existingColls.map(c => c.name));
 
+  const createdNow = new Set<string>();
   for (const suffix of SPACE_COLLECTIONS) {
     const name = `${spaceId}_${suffix}`;
     if (!existing.has(name)) {
       await db.createCollection(name);
+      createdNow.add(name);
       log.debug(`Created collection ${peerText(name)}`);
     }
   }
@@ -62,7 +65,7 @@ export async function initSpace(
   // P10 migration: these collections are ALREADY per-space (`{spaceId}_facts`, …), so every
   // document in them carries the same `spaceId` value. Leading that field in a compound index adds
   // write cost and index bytes with zero selectivity. The indexes below are de-prefixed
-  // (`{seq:1}` not `{spaceId:1, seq:1}`); `dropLegacyPrefixedIndexes` removes any old
+  // (`{tags:1}` not `{spaceId:1, tags:1}`); `dropLegacyPrefixedIndexes` removes any old
   // `spaceId`-leading index left over from before the migration. It is idempotent: after the first
   // boot rebuilds them, no `spaceId`-leading index remains, so the drop loop finds nothing and the
   // `createIndex` calls are no-ops. (The former standalone entity-unique-index migration is folded
@@ -89,7 +92,10 @@ export async function initSpace(
     dropSupersededEdgeIdentityIndex(edgesColl),
   ]);
 
-  await memoriesColl.createIndex({ seq: 1 });
+  // The seq-keyset indexes (`SEQ_KEYSET_INDEXES`) are NOT created here for a collection that already exists: this runs for every
+  // space at every boot, before the server listens, so a compound over a large collection would be a boot that does not finish.
+  // A collection created just now gets them; an existing one gets them from the background pass (`ensureQueryIndexes`).
+  await createKeysetIndexesFor(spaceId, part => createdNow.has(spaceCollection(spaceId, part)));
   await memoriesColl.createIndex({ tags: 1 });
   // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
   // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
@@ -100,7 +106,6 @@ export async function initSpace(
   // and only the plan changes. This is the cheapest load reduction available on the read path.
   await memoriesColl.createIndex({ type: 1 });
   await entitiesColl.createIndex({ name: 1, type: 1 });
-  await entitiesColl.createIndex({ seq: 1 });
   await entitiesColl.createIndex({ type: 1 });
   /*
    * Unique within the (already per-space) collection — the leading constant `spaceId` distinguished no
@@ -122,11 +127,9 @@ export async function initSpace(
   // "which entities does the graph touch" question scanned the whole collection on the inbound half.
   // Completeness' unlinked-entity join asks it per entity; traversal asks it per hop.
   await edgesColl.createIndex({ to: 1 });
-  await edgesColl.createIndex({ seq: 1 });
   await edgesColl.createIndex({ type: 1 });
   await chronoColl.createIndex({ startsAt: 1 });
   await chronoColl.createIndex({ status: 1 });
-  await chronoColl.createIndex({ seq: 1 });
   await chronoColl.createIndex({ type: 1 });
   /*
    * Link records (`M-2`), and every one of these answers a question that would otherwise be a scan.
@@ -140,14 +143,9 @@ export async function initSpace(
    * Both directions are indexed separately because both are asked. From a record: what does this concern.
    * From an entity: what concerns this — the backlink scan that blocks a delete, once per candidate.
    *
-   * `seq` for the sync page, exactly as every other replicated collection has it: `pageBySeq` orders on it,
-   * and without the index every page a peer asks for sorts the whole collection.
+   * The sync page's index (`seq`, `_id`) is the keyset index, created above for every collection that has one.
    */
   for (const ix of LINK_INDEXES) await linksColl.createIndex(ix.keys, ix.unique ? { unique: true } : {});
-  await tombstonesColl.createIndex({ seq: 1 });
-  // `GET /api/sync/tombstones` reads each type from a seq, and a pull now asks it a full page per type (bundle-46):
-  // without this, every page of every type scans the space's tombstones of all types. Local, so boot ensures it.
-  await tombstonesColl.createIndex({ type: 1, seq: 1 });
   await conflictsColl.createIndex({ detectedAt: -1 });
   // Serves the list query: equality on `status` (now the leading field) + sort by (score desc,
   // detectedAt desc).

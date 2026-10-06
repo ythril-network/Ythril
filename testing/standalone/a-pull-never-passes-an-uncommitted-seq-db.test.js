@@ -79,7 +79,8 @@ const HOLD_TIMEOUT = 30_000; // a hang (e.g. a fix that serialises allocation) r
 
 // ── The derivation: every seq-paged GET route on the sync surface ────────────────────────────────────────────
 function seqPagedRoutes() {
-  const readsBySeq = (text) => /seq:\s*\{\s*\$gt|listTombstones\(/.test(text);
+  // A pager reads by seq through `readAfterSeq` (`util/seq-keyset.ts`, which owns the horizon) or serves the tombstones through `listTombstones`.
+  const readsBySeq = (text) => /seq:\s*\{\s*\$gt|readAfterSeq\(|listTombstones\(/.test(text);
   const routes = [];
   for (const { file, text } of readTrackedSources('server/src/api/sync', { ext: ['.ts'], floor: 5 })) {
     const src = stripComments(text);
@@ -96,7 +97,7 @@ function seqPagedRoutes() {
   return routes;
 }
 
-let mongo, fact, ents, edges, chrono, links, fileMeta, shared, seqMod;
+let mongo, fact, ents, edges, chrono, links, fileMeta, keyset, seqMod;
 const routers = {};
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
@@ -158,7 +159,7 @@ async function pull(route, query = {}) {
 /** What a page delivered, as seqs, and the cursor position it hands back (or null). */
 function delivered(body) {
   if (Array.isArray(body?.items)) {
-    return { seqs: body.items.map(i => i.seq), cursor: body.nextCursor ? shared.decodeCursor(body.nextCursor) : null };
+    return { seqs: body.items.map(i => i.seq), cursor: body.nextCursor ? keyset.decodeSeqCursor(body.nextCursor).seq : null };
   }
   // The tombstones route answers grouped by collection.
   return { seqs: Object.values(body).flat().map(t => t.seq), cursor: null };
@@ -210,7 +211,7 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
     chrono = await import('../../server/dist/brain/chrono.js');
     links = await import('../../server/dist/brain/links.js');
     fileMeta = await import('../../server/dist/files/file-meta.js');
-    shared = await import('../../server/dist/api/sync/_shared.js');
+    keyset = await import('../../server/dist/util/seq-keyset.js');
     seqMod = await import('../../server/dist/util/seq.js');
     for (const r of ROUTES) {
       const mod = await import(`../../server/dist/${r.file.replace(/^server\/src\//, '').replace(/\.ts$/, '.js')}`);
