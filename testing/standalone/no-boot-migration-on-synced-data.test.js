@@ -53,7 +53,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
-import { moduleIndex, reachableFrom, callsIn } from './_call-graph.mjs';
+import { moduleIndex, indexSources, reachableFrom as reachableByCalls, callsIn } from './_call-graph.mjs';
+import { walkEntryNames, walkCallbackEdges } from './_housekeeping-walks.mjs';
 
 const ROOT = process.cwd();
 const BOOT_FILE = 'server/src/index.ts';
@@ -156,6 +157,17 @@ function writesSynced(body) {
 const INDEX = moduleIndex('server/src');
 
 /**
+ * What the boot walk reaches follows CALLS and, since `Q-274`, the callbacks of a WALK (`eachSpace` and its kin).
+ *
+ * A boot walk cuts every closure with a block body, because `createApp()` registers handlers it never runs. A walk's callback is the
+ * other kind of closure: the runner runs it, once per space, as part of the call. Cut like any other it hid everything written inside,
+ * so a boot migration in `eachSpace(…, async (space) => { … })` was invisible to this gate unless it happened to call a named helper
+ * from a concise arrow. The edge is the walk's callbacks only — a closure handed to anything else is not known to run.
+ */
+const WALK_CALLBACK_EDGES = walkCallbackEdges(INDEX, walkEntryNames(INDEX));
+const reachableFrom = (index, roots) => reachableByCalls(index, roots, { edges: WALK_CALLBACK_EDGES });
+
+/**
  * The functions `index.ts` invokes in its startup sequence, as `path:name`.
  *
  * Each one is a separate ROOT rather than one merged set, because an exemption has to name the migration
@@ -236,6 +248,28 @@ describe('the sweep works before it is trusted', () => {
     // it through that walk, and `convertSpaceLinks` is the single-space entry the script uses.
     assert.ok(reach.has('server/src/brain/links-conversion.ts:convertSpaceInWalk'),
       'the boot walk no longer reaches the link conversion, so it is back to reading one body at a time');
+  });
+
+  it('the boot walk follows a call written INSIDE a walk callback, and not one inside any other closure', () => {
+    /*
+     * The case this gate could not see: a migration whose per-space work is a block-bodied callback of `eachSpace`. The runner runs
+     * that callback, so what it calls is part of the boot; a closure handed to anything else (`app.get(…, async () => { … })`) is
+     * not known to run, and following it would put every request handler back into the boot walk.
+     */
+    const fixture = indexSources(new Map([['server/src/boot.ts', [
+      'export async function bootEntry(ids) {',
+      "  await eachSpace('s', ids, async (space) => { await migrateSpace(space); });",
+      "  app.get('/x', async () => { await requestOnly(); });",
+      '}',
+      'async function migrateSpace(space) { await col(`${space}_files`).updateMany({}, {}); }',
+      'async function requestOnly() {}',
+    ].join('\n')]]), { functionFloor: 1, label: 'the fixture' });
+    const edges = walkCallbackEdges(fixture, walkEntryNames(INDEX));
+    const reach = reachableByCalls(fixture, ['server/src/boot.ts:bootEntry'], { edges });
+    assert.ok(reach.has('server/src/boot.ts:migrateSpace'), 'a call inside an eachSpace callback is not followed: a boot migration written there is invisible');
+    assert.equal(reach.has('server/src/boot.ts:requestOnly'), false, 'a call inside a closure that is NOT a walk callback was followed');
+    assert.equal(reachableByCalls(fixture, ['server/src/boot.ts:bootEntry']).has('server/src/boot.ts:migrateSpace'), false,
+      'without the edge the fixture is reached anyway, so this case proves nothing');
   });
 
   it('every sanctioned entry is still a boot entry point', () => {

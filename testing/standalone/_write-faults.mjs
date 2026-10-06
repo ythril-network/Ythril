@@ -227,8 +227,16 @@ const STALL_SEED_PREFIX = '__stall_seed_';
  * `maxTimeMS`. A `$match` over `$expr` / `$function`: the one form that is (code 50 at ~600 ms for 20 x 200 ms, probe
  * p7d). NEVER `$addFields` + `$function`, which stalls identically and is not interruptible at all (p7b, p7c) - a bound
  * "proved" on it would be proved on a read nothing can end.
+ *
+ * `collapseTo` makes the view answer ONE document of that shape however many source documents there were: a `$group` that must
+ * consume every source document (a `$sort` + `$limit` over the `_id` index would stop after the first), then a `$replaceWith`,
+ * whose output the reader's filter cannot be pushed back past. It is for a reader that asks for one document by name (`{ _id: 'run' }`),
+ * whose filter would otherwise exclude every seed before the stall.
  */
-const stalledViewPipeline = (stepMs) => [{ $match: { $expr: { $function: { body: `function(){sleep(${stepMs});return true}`, args: [], lang: 'js' } } } }];
+const stalledViewPipeline = (stepMs, collapseTo) => [
+  { $match: { $expr: { $function: { body: `function(){sleep(${stepMs});return true}`, args: [], lang: 'js' } } } },
+  ...(collapseTo ? [{ $group: { _id: null } }, { $replaceWith: collapseTo }] : []),
+];
 
 /**
  * Throw unless reading view `name` really stalls: (a) a raw read takes at least `ms`, and (b) a raw read with
@@ -243,21 +251,31 @@ const stalledViewPipeline = (stepMs) => [{ $match: { $expr: { $function: { body:
  *
  * `maxTimeMS` is a third of `ms`, so with two or more interrupt points the server is past its limit while the stall
  * still has time to run. No `timeoutMS` rides on the read: the driver drops a `maxTimeMS` that arrives beside one.
+ *
+ * **`filter` is the filter the code under test reads the view with, and the guard reads with it.** A view's stall is a stage on the
+ * SOURCE, and the server applies the reader's filter before it where it can (an `_id` or an indexed prefix is evaluated first, and the
+ * view's own `$match` is coalesced behind it), so a document the filter excludes never reaches the stall. A guard that read with `{}`
+ * proved the view stalls for a reader nobody has: the test then passed over a hung read that never hung. (A reader asking for
+ * `{ _id: 'run' }` over seeds named `__stall_seed_n` stalls nothing.) Pass the reader's filter; a filter that matches nothing the
+ * fixture stalls THROWS here, naming it.
  */
-export async function assertViewStalls(db, name, { ms }) {
+export async function assertViewStalls(db, name, { ms, filter = {} }) {
   assert.ok(Number.isFinite(ms) && ms > 0, `assertViewStalls: ms must be a positive number, got ${ms}`);
   const coll = db.collection(name);
+  const asked = Object.keys(filter).length > 0 ? ` with the reader's filter ${JSON.stringify(filter)}` : '';
   const started = Date.now();
-  await coll.find({}).toArray();
+  await coll.find(filter).toArray();
   const tookMs = Date.now() - started;
   if (tookMs < ms) {
-    throw new Error(`assertViewStalls: a raw read of ${name} took ${tookMs}ms, less than the ${ms}ms stall asked for. `
-      + 'The view stalls nothing (an empty source, a plain view, or server-side JavaScript off), so every bound test over it passes whatever the bound does.');
+    throw new Error(`assertViewStalls: a raw read of ${name}${asked} took ${tookMs}ms, less than the ${ms}ms stall asked for. `
+      + 'The view stalls nothing (an empty source, a plain view, server-side JavaScript off, or a reader\'s filter that matches none of the documents '
+      + 'the stall was seeded on: the server applies the filter before the stall, so an excluded document costs nothing), '
+      + 'so every bound test over it passes whatever the bound does.');
   }
   const limit = Math.max(1, Math.floor(ms / 3));
   const cutStarted = Date.now();
   let ended;
-  try { await coll.find({}, { maxTimeMS: limit }).toArray(); } catch (err) { ended = err; }
+  try { await coll.find(filter, { maxTimeMS: limit }).toArray(); } catch (err) { ended = err; }
   const cutMs = Date.now() - cutStarted;
   if (ended?.code !== 50 || cutMs >= ms) {
     throw new Error(`assertViewStalls: a read of ${name} with maxTimeMS ${limit} ${ended ? `ended after ${cutMs}ms with code ${ended.code} (${ended.name})` : `completed after ${cutMs}ms`}, `
@@ -273,30 +291,46 @@ export async function assertViewStalls(db, name, { ms }) {
  *
  * @param {import('mongodb').Db} db
  * @param {string} name  the view
- * @param {string} viewOn  its source collection: this function seeds `ceil(ms / 200)` (at least 2) documents of its own
- *   into it, `{ _id: '__stall_seed_<n>' }` and nothing else, and removes them afterwards. Every document of the source
- *   costs a read one sleep, whatever the reader's filter: the stage sits on the source (see `withCollectionAsView`)
- * @param {{ ms: number, restore?: () => Promise<void> }} o  `ms` is the least a read takes; `restore` as in
- *   `withCollectionAsView` (indexes recreated on the ordinary collection put back)
+ * @param {string} viewOn  its source collection. Without `seed`, this function seeds `ceil(ms / 200)` (at least 2) documents of its
+ *   own into it, `{ _id: '__stall_seed_<n>' }` and nothing else, and removes them afterwards. **A source document costs a read one
+ *   sleep only when the reader's filter reaches it**: the server applies the filter before the view's stage wherever it can (an `_id`,
+ *   an indexed prefix), so a document the filter excludes is never stalled on. It does NOT stall per source document whatever the
+ *   reader asks for, and an earlier version of this comment said it did.
+ * @param {{ ms: number, restore?: () => Promise<void>, readerFilter?: object, seed?: object[], collapseTo?: object }} o
+ *   `ms` is the least a read takes; `restore` as in `withCollectionAsView` (indexes recreated on the ordinary collection put back).
+ *   **The reader's filter decides what stalls, so say what it is:**
+ *   - `readerFilter` is the filter the code under test reads the view with (default `{}`). The guard reads with it, so a filter that
+ *     matches nothing this stalls THROWS instead of passing a bound test over a read that never hung. Pass it whenever the code under
+ *     test filters: the default checks the view for a reader that asks for everything, which is not every reader.
+ *   - `seed` is the source documents to stall on (at least 2, each with a string `_id`, removed afterwards), for a reader whose filter
+ *     the default seeds cannot match (`{ status: 'pending' }` needs documents that are pending); `ms` is split across them, so give
+ *     seeds the filter ALL matches.
+ *   - `collapseTo` is for a reader that asks for ONE document by name (`{ _id: 'run' }`): the view stalls over every source document and
+ *     then answers exactly this document, which the filter cannot be pushed back past (`stalledViewPipeline`).
  * @param {() => Promise<any>} fn
  *
  * ## The guard a hand-written copy drops
  *
- * `assertViewStalls`, run before `fn` and THROWING (so `fn` never runs over a stall that stalls nothing). `ms` that is not
- * a positive number throws first: 0 seeds nothing and would stall nothing.
+ * `assertViewStalls`, run before `fn`, with the reader's filter, and THROWING (so `fn` never runs over a stall that stalls nothing).
+ * `ms` that is not a positive number throws first: 0 seeds nothing and would stall nothing.
  */
-export async function withStalledReads(db, name, viewOn, { ms, restore } = {}, fn) {
+export async function withStalledReads(db, name, viewOn, { ms, restore, readerFilter = {}, seed: given, collapseTo } = {}, fn) {
   assert.ok(Number.isFinite(ms) && ms > 0, `withStalledReads: ms must be a positive number, got ${ms} - a stall of nothing stalls nothing`);
-  const docs = Math.max(2, Math.ceil(ms / STALL_STEP_MS));
+  assert.ok(given === undefined || (Array.isArray(given) && given.length >= 2 && given.every((d) => typeof d?._id === 'string')),
+    'withStalledReads: seed must be an array of at least 2 documents with a string _id (the server interrupts a read BETWEEN source documents, '
+    + 'so one document is a stall maxTimeMS cannot end)');
+  assert.ok(collapseTo === undefined || (collapseTo && typeof collapseTo === 'object' && !Array.isArray(collapseTo)),
+    'withStalledReads: collapseTo must be the document the view answers');
+  const docs = given ? given.length : Math.max(2, Math.ceil(ms / STALL_STEP_MS));
   const stepMs = Math.ceil(ms / docs);
-  const seed = Array.from({ length: docs }, (_, i) => ({ _id: `${STALL_SEED_PREFIX}${i}` }));
+  const seed = given ?? Array.from({ length: docs }, (_, i) => ({ _id: `${STALL_SEED_PREFIX}${i}` }));
   const source = db.collection(viewOn);
   await source.insertMany(seed);
   try {
     return await withCollectionAsView(db, name, viewOn, async () => {
-      await assertViewStalls(db, name, { ms });
+      await assertViewStalls(db, name, { ms, filter: readerFilter });
       return fn();
-    }, { restore, pipeline: stalledViewPipeline(stepMs) });
+    }, { restore, pipeline: stalledViewPipeline(stepMs, collapseTo) });
   } finally {
     await source.deleteMany({ _id: { $in: seed.map((d) => d._id) } });
   }
