@@ -50,6 +50,7 @@ import {
 } from 'mongodb';
 import { errorChain, wrapsAThrownError } from './error-chain.js';
 import { writeErrorCode } from './write-errors.js';
+import { isWriteTimeout } from './write-timeout.js';
 
 /**
  * Driver classes that mean "there is no store to talk to right now" — matched with `instanceof`, so every subclass
@@ -242,4 +243,25 @@ export function isStoreCondition(e: object): boolean {
  */
 export function isStoreUnreachable(err: unknown): boolean {
   return errorChain(err).some(isStoreCondition);
+}
+
+/**
+ * Is the store (or the space's data in it) not answering: a bound ended the operation (`isWriteTimeout`) OR the store cannot be
+ * reached ({@link isStoreUnreachable})? For code with NO walk above it.
+ *
+ * ## Why it is not `isStoreUnreachable`
+ *
+ * That one deliberately EXCLUDES a timeout, because a hung space and a dead store both time out and the housekeeping walk tells them
+ * apart with a ping (`walkVerdict`). Code outside a walk (the suppression sweep a meta write starts, a request that scans one space) has
+ * no ping to ask and nothing above it to end its unit: for it a read that timed out and a store that cannot be reached mean the same,
+ * that the NEXT unit would wait the driver's timeout again, once per unit, while an operator waits. It was written by hand as
+ * `isWriteTimeout(err) || isStoreUnreachable(err)` in the sweep and was about to be written again in the scanners' request runner;
+ * this is the one copy.
+ *
+ * **Inside a walk it is not asked**: `eachUnit` / `eachSpace` decide through `walkVerdict`, which also tells a hung space from a dead
+ * store. A plain refusal (a validation failure, a `NotFoundError`) and a write concern that can never be met are not "not answering":
+ * the next unit may well succeed, and a retry would not help the latter.
+ */
+export function storeIsNotAnswering(err: unknown): boolean {
+  return isWriteTimeout(err) || isStoreUnreachable(err);
 }

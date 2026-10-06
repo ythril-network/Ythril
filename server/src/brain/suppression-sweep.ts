@@ -62,8 +62,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { isStoreUnreachable } from '../db/store-condition.js';
-import { isWriteTimeout } from '../db/write-timeout.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 
 /** The step a failed sweep is reported and counted under (`ythril_housekeeping_space_failures_total{step}`). */
@@ -154,9 +153,9 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
       causes.push(err);
-      // The existing questions, not a classifier of its own: a bound that ended the read, or the store's own condition. A plain
+      // The one question (`db/store-condition.ts`): a bound that ended the read, or the store's own condition. A plain
       // refusal (a view, a validation failure) is one kind's and the others are still swept.
-      notAnswering = isWriteTimeout(err) || isStoreUnreachable(err);
+      notAnswering = storeIsNotAnswering(err);
     }
   };
   for (const kind of Object.keys(COLLECTION) as KnowledgeType[]) {
