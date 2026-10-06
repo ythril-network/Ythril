@@ -60,7 +60,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
   const H1 = 'hang-1'; const OK1 = 'hang-ok-1';
   const H2 = 'hang-2'; const OK2 = 'hang-ok-2';
   const K1 = 'hang-k1'; const K2 = 'hang-k2'; const K3 = 'hang-k3'; const TAIL = 'hang-tail';
-  let door; let sweepExpired; let walkMod; let restoreBound;
+  let door; let sweepExpired; let walkMod; let restoreBound; let TTL_COLLECTIONS;
   const lines = [];
   const undo = [];
 
@@ -70,6 +70,8 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
       spaces: [H1, OK1, H2, OK2, K1, K2, K3, TAIL].map((id) => ({ id, label: id, folders: [] })),
     });
     ({ sweepExpired } = await import('../../server/dist/brain/ttl-sweep.js'));
+    // Loaded after the door: the server's config module reads its path when first imported.
+    ({ TTL_COLLECTIONS } = await import('../../server/dist/brain/ttl.js'));
     walkMod = await import('../../server/dist/util/housekeeping-walk.js');
     restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
     const logMod = await import('../../server/dist/util/log.js');
@@ -110,8 +112,10 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     await hung(db, H2, 'facts', () => hung(db, H2, 'entities', async () => {
       await sweepExpired(new Date());
     }));
-    assert.equal(said('TTL sweep: facts', H2).length, 1);
-    assert.equal(said('TTL sweep: entities', H2).length, 0, 'the second collection was read: a timeout did not end the space');
+    // The sweep reads the collections in TTL_COLLECTIONS order: the first of the two is read and times out, the second is never read.
+    const [first, second] = ['facts', 'entities'].sort((a, b) => TTL_COLLECTIONS.indexOf(a) - TTL_COLLECTIONS.indexOf(b));
+    assert.equal(said(`TTL sweep: ${first}`, H2).length, 1);
+    assert.equal(said(`TTL sweep: ${second}`, H2).length, 0, 'the second collection was read: a timeout did not end the space');
     assert.equal(await door.coll(OK2, 'facts').countDocuments({}), 0);
   });
 

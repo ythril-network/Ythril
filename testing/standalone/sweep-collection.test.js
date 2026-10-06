@@ -54,7 +54,7 @@ function world(n, { failing = () => false, keepOnTrue = () => false } = {}) {
     },
     remove: async (_s, _c, id) => {
       calls.removes++;
-      if (failing(id)) throw new Error(`delete refused for ${id}`);
+      if (failing(id)) throw new Error('delete refused');
       if (!keepOnTrue(id)) left.delete(id);
       return true;
     },
@@ -215,10 +215,11 @@ describe('sweepCollection: the report runs whatever ended the loop', () => {
 
   it('a timeout of a bound, on a store that answers, propagates too (it ends the space)', async () => {
     const w = world(5);
-    w.deps.remove = async () => { throw new MongoOperationTimeoutError('Timed out during socket read'); };
+    let asked = 0;
+    w.deps.remove = async () => { asked++; throw new MongoOperationTimeoutError('Timed out during socket read'); };
     try {
       await assert.rejects(sweepCollection('s', 'facts', NOW, w.deps), (e) => e instanceof MongoOperationTimeoutError);
-      assert.equal(w.calls.removes, 1, 'the next record would only cost another bound against the same hung space');
+      assert.equal(asked, 1,'the next record would only cost another bound against the same hung space');
       assert.deepEqual(w.lines, []);
     } finally { w.off(); }
   });
