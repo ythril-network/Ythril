@@ -291,8 +291,46 @@ describe('the helper, against values an operator really types', () => {
       assert.match(problems[0], /in-flight requests/i,
         'the message must say what the setting does, in words the variable name does not already give away');
     } finally {
-      if (before === undefined) delete process.env['MONGO_CONNECT_RETRY_MS'];
-      else process.env['MONGO_CONNECT_RETRY_MS'] = before;
+      // Restores the variable this case SET (it restored MONGO_CONNECT_RETRY_MS, and left SHUTDOWN_DRAIN_MS="oops" in the
+      // process for every case after it).
+      if (before === undefined) delete process.env['SHUTDOWN_DRAIN_MS'];
+      else process.env['SHUTDOWN_DRAIN_MS'] = before;
     }
+  });
+});
+
+describe('the housekeeping per-operation bound is a validated setting (Q-358)', () => {
+  const NAME = 'YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS';
+  const row = () => NUMERIC_SETTINGS.find(s => s.name === NAME);
+
+  it('is a registered setting with the stated range and a real sentence of what it does', () => {
+    assert.ok(row(), `${NAME} is not a row of NUMERIC_SETTINGS, so a typo in it is NaN and a NaN bound is no bound`);
+    assert.equal(row().min, 1_000, 'below a second an operation could never finish; 0 is the driver\'s "no bound"');
+    assert.equal(row().max, 3_600_000);
+    assert.ok(row().what.split(/\s+/).length >= 6, `the description is not a sentence an operator can act on: ${row().what}`);
+  });
+
+  it('the boot refuses a value outside the range, or not a number, naming the variable; the ends are accepted', async () => {
+    const { validateNumericEnv } = await import('../../server/dist/config/env-num.js');
+    const before = process.env[NAME];
+    try {
+      for (const raw of ['0', '999', '3600001', '4min', '240000.5', '-1']) {
+        process.env[NAME] = raw;
+        const { ok, problems } = validateNumericEnv();
+        assert.equal(ok, false, `${JSON.stringify(raw)} was accepted`);
+        assert.ok(problems.some(p => p.includes(NAME)), `the refusal of ${JSON.stringify(raw)} does not name the variable`);
+      }
+      for (const raw of ['1000', '240000', '3600000', '']) {
+        process.env[NAME] = raw;
+        assert.deepEqual(validateNumericEnv().problems.filter(p => p.includes(NAME)), [], `${JSON.stringify(raw)} was refused`);
+      }
+    } finally {
+      if (before === undefined) delete process.env[NAME]; else process.env[NAME] = before;
+    }
+  });
+
+  it('is read through the helper by the write bound, not parsed there', () => {
+    const src = stripComments(read('server/src/db/write-bound.ts'));
+    assert.match(src, new RegExp(`envInt\\(\\s*'${NAME}'`), 'write-bound.ts does not read the setting through envInt');
   });
 });

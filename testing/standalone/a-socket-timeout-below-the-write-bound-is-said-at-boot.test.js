@@ -107,6 +107,18 @@ describe('socketTimeoutMS below the write bound', () => {
   });
 });
 
+describe('the connection string\'s query has ONE reader (bundle-53 G2/G5)', () => {
+  it('warnIfSocketTimeoutBelowWriteBound reads it through uriQueryOptions, and carries no scanner of its own', () => {
+    const code = stripComments(readFileSync(join(REPO_ROOT, 'server/src/db/write-bound.ts'), 'utf8'));
+    const at = code.indexOf('export function warnIfSocketTimeoutBelowWriteBound(');
+    assert.ok(at >= 0, 'the function is not where this gate looks');
+    const rest = code.slice(at);
+    const body = rest.slice(0, rest.search(/\r?\n}\r?\n/) + 2);
+    assert.match(body, /\buriQueryOptions\(\s*uri\s*\)/, 'it does not read the query through db/client-options.ts\'s one reader');
+    assert.doesNotMatch(body, /\.split\(\s*['"]&['"]\s*\)|indexOf\(\s*['"]\?['"]\s*\)/, 'it still splits the query string by hand: a second reader that can disagree about what the string says');
+  });
+});
+
 describe('the boot path makes the call', () => {
   it('connectMongo hands the connection string it connects with to warnIfSocketTimeoutBelowWriteBound', () => {
     const code = stripComments(readFileSync(join(REPO_ROOT, 'server/src/db/mongo.ts'), 'utf8'));

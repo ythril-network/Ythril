@@ -42,6 +42,17 @@ export const omitted = callBounded('updateOne', [], (a) => a);
 const HALF_STATED = `import { callBounded } from '${WRITE_BOUND}';
 export const half = callBounded('updateOne', [], (a) => a, { inheritedTimeoutMs: undefined });
 `;
+// A Db-level call states its LEVEL in the target (`database`), never as a defaulted extra parameter (bundle-53 G5): a call
+// that says neither a collection nor a database, or a database without what the client inherits, does not compile.
+const DB_STATED = `import { callBounded } from '${WRITE_BOUND}';
+export const dbStated = callBounded('dropCollection', [], (a) => a, { database: 'ythril', inheritedTimeoutMs: undefined });
+`;
+const DB_HALF_STATED = `import { callBounded } from '${WRITE_BOUND}';
+export const dbHalf = callBounded('dropCollection', [], (a) => a, { database: 'ythril' });
+`;
+const NO_LEVEL = `import { callBounded } from '${WRITE_BOUND}';
+export const noLevel = callBounded('dropCollection', [], (a) => a, { inheritedTimeoutMs: undefined });
+`;
 
 function check(name, source) {
   const file = join(DIR, `${name}.ts`);
@@ -73,6 +84,23 @@ describe('callBounded states what its database inherits', () => {
   it('a call that states only part of it is a type error too', () => {
     const r = check('half', HALF_STATED);
     assert.notEqual(r.status, 0, 'a target missing a field compiled');
+    assert.match(r.out, /TS2345|TS2741/, r.out);
+  });
+
+  it('a Db-level call states its database and what the client inherits, and compiles (the control for the two below)', () => {
+    const r = check('dbstated', DB_STATED);
+    assert.equal(r.status, 0, r.out);
+  });
+
+  it('a Db-level target missing what the client inherits is a type error', () => {
+    const r = check('dbhalf', DB_HALF_STATED);
+    assert.notEqual(r.status, 0, 'a Db-level target without inheritedTimeoutMs compiled');
+    assert.match(r.out, /TS2345|TS2741/, r.out);
+  });
+
+  it('a target that states neither a collection nor a database is a type error: the level is never defaulted', () => {
+    const r = check('nolevel', NO_LEVEL);
+    assert.notEqual(r.status, 0, 'a target with no level compiled');
     assert.match(r.out, /TS2345|TS2741/, r.out);
   });
 });

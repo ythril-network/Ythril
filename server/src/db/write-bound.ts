@@ -68,11 +68,20 @@
  * The deadline defaults to three quarters of `BATCH_FETCH_TIMEOUT_MS`, the time a SENDER waits for a push answer,
  * so a stalled push answers a retryable `503` before the sender gives up and re-sends a page into the same stall.
  *
+ * ## Two constructors of ONE scope: a hold, and a housekeeping unit (`Q-358`)
+ *
+ * `withinWriteBound` is a hold: a deadline across the scope AND a per-operation figure (`writeTimeoutMs()`).
+ * `withinHousekeepingBound` is a unit of background work: NO deadline — a walk is as long as its work, and its caller owns that
+ * — and a per-operation figure of its own (`housekeepingOpMs()`, or the scope's `opMs`; `CLAIM_OP_MS` for a claim). Both ends
+ * an operation the same way (the server first, the backstop behind it, `StoreTimeout`), through the same door. A scope's
+ * figure is `min(own, the enclosing active scope's)`, as its deadline is: an inner scope can only tighten.
+ *
  * ## Where the bound is applied
  *
  * At the one door every collection is reached through, `getDb()` — composed into its existing proxy
  * (`db/record-write-observer.ts`) rather than as a second door, which `a-record-write-reaches-the-index-presence-
- * observer` refuses. So no write path can skip it without skipping `getDb()`.
+ * observer` refuses. So no write path can skip it without skipping `getDb()`. The `Db`'s own `listCollections` and
+ * `dropCollection` go through the same proxy and the same `callBounded`, their level stated in the call's target.
  *
  * ## A dead scope binds nothing
  *
@@ -86,18 +95,33 @@ import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { log, peerText } from '../util/log.js';
 import { StoreTimeout, isWriteTimeout } from './write-timeout.js';
 import { parseSpaceCollection } from './space-collection.js';
+import { uriQueryOptions } from './client-options.js';
 
 /** The per-operation bound when `YTHRIL_WRITE_TIMEOUT_MS` is unset. */
 const DEFAULT_WRITE_TIMEOUT_MS = 30_000;
 /** The per-hold deadline when `YTHRIL_HOLD_DEADLINE_MS` is unset: three quarters of what a sender waits for a push. */
 const DEFAULT_HOLD_DEADLINE_MS = Math.floor(BATCH_FETCH_TIMEOUT_MS * 3 / 4);
-// The least either may be set to is `config/env-num.ts`'s (1 000): never 0, which to the driver means unbounded.
+/**
+ * The per-operation bound of a HOUSEKEEPING unit when `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` is unset. Below the five-minute
+ * tick the periodic jobs run on, so one hung operation ends before the next tick finds the walk still running; far above a
+ * healthy bulk delete (a slow one is not cut).
+ */
+const DEFAULT_HOUSEKEEPING_OP_MS = 240_000;
+/**
+ * The per-operation bound of a CLAIM or a stall RESET (`withinHousekeepingBound(fn, { opMs: CLAIM_OP_MS })`): one
+ * `findOneAndUpdate` on a queue's head. A claim that takes longer than this is a store that is not answering, and the
+ * claiming loop is the thing that must not wait on it. A constant beside the figure above and not a setting: nobody has a
+ * reason to want a claim to wait longer, and a figure an operator can raise is one a stall can be hidden behind.
+ */
+export const CLAIM_OP_MS = 10_000;
+// The least any of the settings may be set to is `config/env-num.ts`'s (1 000): never 0, which to the driver means unbounded.
 
-interface Bounds { writeTimeoutMs: number; holdDeadlineMs: number }
+interface Bounds { writeTimeoutMs: number; holdDeadlineMs: number; housekeepingOpMs: number }
 
 const fromEnv = (): Bounds => ({
   writeTimeoutMs: envInt('YTHRIL_WRITE_TIMEOUT_MS', DEFAULT_WRITE_TIMEOUT_MS),
   holdDeadlineMs: envInt('YTHRIL_HOLD_DEADLINE_MS', DEFAULT_HOLD_DEADLINE_MS),
+  housekeepingOpMs: envInt('YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS', DEFAULT_HOUSEKEEPING_OP_MS),
 });
 let bounds: Bounds = fromEnv();
 
@@ -105,6 +129,8 @@ let bounds: Bounds = fromEnv();
 export function writeTimeoutMs(): number { return bounds.writeTimeoutMs; }
 /** The longest one seq hold (one bound scope) may last. */
 export function holdDeadlineMs(): number { return bounds.holdDeadlineMs; }
+/** The longest one operation inside a housekeeping bound scope (`withinHousekeepingBound`) may take. Read at start. */
+export function housekeepingOpMs(): number { return bounds.housekeepingOpMs; }
 /**
  * The age past which a hold is reported — half the deadline, BELOW it, so a hold the bound is about to end has
  * already been named once, and every hold that ended late says so when it is released.
@@ -122,14 +148,11 @@ export function holdWarnMs(): number { return Math.floor(bounds.holdDeadlineMs /
  * `uri` carries credentials and is never put in the line.
  */
 export function warnIfSocketTimeoutBelowWriteBound(uri: string): boolean {
-  const query = uri.includes('?') ? uri.slice(uri.indexOf('?') + 1) : '';
-  let socketMs: number | undefined;
-  for (const pair of query.split('&')) {
-    const cut = pair.indexOf('=');
-    if (cut < 0 || pair.slice(0, cut).toLowerCase() !== 'sockettimeoutms') continue;
-    const n = Number(pair.slice(cut + 1));
-    socketMs = pair.slice(cut + 1) !== '' && Number.isFinite(n) ? n : undefined;
-  }
+  // The raw value, read by the one reader of the connection string's query: a name with no figure, or one that is not a
+  // number, says nothing (the driver refuses it at connect).
+  const raw = uriQueryOptions(uri).get('sockettimeoutms');
+  const n = raw === undefined || raw === '' ? Number.NaN : Number(raw);
+  const socketMs = Number.isFinite(n) ? n : undefined;
   if (socketMs === undefined || socketMs <= 0 || socketMs >= bounds.writeTimeoutMs) return false;
   log.warn(`MongoDB connection string: socketTimeoutMS=${socketMs} is below the write bound (YTHRIL_WRITE_TIMEOUT_MS=${bounds.writeTimeoutMs}). `
     + 'A write the server is still holding can be ended by the socket before the server\'s own deadline, and the caller answered a timeout '
@@ -138,15 +161,37 @@ export function warnIfSocketTimeoutBelowWriteBound(uri: string): boolean {
 }
 
 /**
- * The test seam: set both bounds for this process (`null` puts back the environment's), so a test of "the bound
- * ends it" runs in seconds rather than the production 45. Never called by the server.
+ * The test seam: set the figures it is given for this process, over the CURRENT ones (`null` puts back the
+ * environment's), so a test of "the bound ends it" runs in seconds rather than the production 45. Never called by the server.
+ *
+ * It MERGES, and it refuses what it cannot use. The seam used to copy exactly the figures it knew, so a caller that passed the
+ * two it had always passed set a third one that was added later to `undefined` — and `Math.min(undefined, …)` is `NaN`, a bound
+ * that is no bound (`C7`). A figure that is not a finite positive number is refused too: `0` is, to the driver, "no bound",
+ * and a typo in a name (`writeTimeoutM`) would otherwise set nothing and let the test pass for the wrong reason. A refusal
+ * changes nothing.
  */
-export function setWriteBoundForTest(b: Bounds | null): void {
-  bounds = b ? { writeTimeoutMs: b.writeTimeoutMs, holdDeadlineMs: b.holdDeadlineMs } : fromEnv();
+export function setWriteBoundForTest(given: Partial<Bounds> | null): void {
+  if (given === null) { bounds = fromEnv(); return; }
+  const known = Object.keys(bounds);
+  const entries = Object.entries(given);
+  if (entries.length === 0) throw new Error(`setWriteBoundForTest: no figure given (${known.join(', ')})`);
+  for (const [name, value] of entries) {
+    if (!known.includes(name)) throw new Error(`setWriteBoundForTest: "${name}" is not a figure of the bound (${known.join(', ')})`);
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`setWriteBoundForTest: ${name} must be a finite positive number, got ${String(value)}`);
+    }
+  }
+  bounds = { ...bounds, ...given };
 }
 
+/**
+ * What one scope carries. `deadline` is the instant the whole scope's work must be over (`Infinity`: none), `perOpMs` the
+ * longest ONE operation inside it may take. A hold has both; a housekeeping unit has only the second — the unit's length is
+ * its caller's (a cycle's own budget), and a hold's deadline across it would cut the unit off for being thorough.
+ */
 interface BoundScope {
   readonly deadline: number;
+  readonly perOpMs: number;
   active: boolean;
 }
 const scopes = new AsyncLocalStorage<BoundScope>();
@@ -157,17 +202,49 @@ function activeScope(): BoundScope | undefined {
 }
 
 /**
- * Run `fn` with every database operation it issues bounded — see the module docblock. The scope's deadline is
- * `holdDeadlineMs()` from now, or the enclosing active scope's when that is sooner; the scope ends with `fn`.
+ * Open a scope of `deadline` and `perOpMs`, both lowered to the enclosing active scope's when that is lower, and run `fn` in
+ * it. The one place a scope is made: the two public constructors differ only in the figures they ask for, so an inner scope
+ * can never raise what an outer one bounded (an operator who sets the housekeeping figure below a hold's sees it applied inside
+ * a deleter's hold, and a hold's shorter figure still wins inside a walk).
  */
-export async function withinWriteBound<T>(fn: () => Promise<T>): Promise<T> {
+async function withinScope<T>(deadline: number, perOpMs: number, fn: () => Promise<T>): Promise<T> {
   const outer = activeScope();
-  const scope: BoundScope = { deadline: Math.min(outer?.deadline ?? Infinity, Date.now() + holdDeadlineMs()), active: true };
+  const scope: BoundScope = {
+    deadline: Math.min(outer?.deadline ?? Infinity, deadline),
+    perOpMs: Math.min(outer?.perOpMs ?? Infinity, perOpMs),
+    active: true,
+  };
   try {
     return await scopes.run(scope, fn);
   } finally {
     scope.active = false;
   }
+}
+
+/**
+ * Run `fn` with every database operation it issues bounded — see the module docblock. The scope's deadline is
+ * `holdDeadlineMs()` from now, or the enclosing active scope's when that is sooner; each operation takes at most
+ * `writeTimeoutMs()`, or the enclosing scope's figure when that is lower; the scope ends with `fn`.
+ */
+export async function withinWriteBound<T>(fn: () => Promise<T>): Promise<T> {
+  return withinScope(Date.now() + holdDeadlineMs(), writeTimeoutMs(), fn);
+}
+
+/**
+ * Run `fn` — one housekeeping unit — with every database operation it issues ended at a figure of its own: `opMs`, or
+ * `housekeepingOpMs()`. The same scope as `withinWriteBound` and the same door: a plain write is ended by the SERVER at the
+ * figure with the client backstop `SERVER_FIRST_MARGIN_MS` later, so a housekeeping write the bound ended can no more land
+ * afterwards than a hold's can (`Q-372`); a read carries the driver's `timeoutMS`.
+ *
+ * **There is no deadline across the unit.** A walk that touches every space, or sweeps a collection in batches, issues as
+ * many operations as it has work for, and each is bounded; a deadline here would end a healthy unit part-way through for being
+ * thorough. The unit's own length belongs to its caller. Inside a hold the hold's deadline stays (the enclosing one), and the
+ * smaller per-operation figure of the two applies.
+ */
+export async function withinHousekeepingBound<T>(fn: () => Promise<T>, { opMs }: { opMs?: number } = {}): Promise<T> {
+  const perOpMs = opMs ?? housekeepingOpMs();
+  if (!Number.isFinite(perOpMs) || perOpMs <= 0) throw new Error(`withinHousekeepingBound: opMs must be a finite positive number, got ${String(perOpMs)}`);
+  return withinScope(Infinity, perOpMs, fn);
 }
 
 /**
@@ -178,10 +255,18 @@ export function outsideWriteBound<T>(fn: () => T): T {
   return scopes.exit(fn);
 }
 
-/** Milliseconds left in the active scope, or `undefined` outside one. Never below 0. */
+/**
+ * Milliseconds left before the active scope's DEADLINE, or `undefined` when there is none to be left before: outside any
+ * scope, and inside a housekeeping scope that has no deadline. Never below 0, never `Infinity`.
+ *
+ * The one caller (`brain/held-transaction.ts`) hands the answer to the driver as a session's `defaultTimeoutMS`, where an
+ * `Infinity` is a transaction with no bound at all; it always runs under a hold today (`withSeqHorizonHeld`), so it never sees a
+ * deadline-less scope — and `undefined` is what makes a future caller that does fall back to the finite figure it
+ * already has beside it (`?? writeTimeoutMs()`), rather than begin an unbounded transaction.
+ */
 export function boundTimeLeft(): number | undefined {
   const s = activeScope();
-  return s ? Math.max(0, s.deadline - Date.now()) : undefined;
+  return s && Number.isFinite(s.deadline) ? Math.max(0, s.deadline - Date.now()) : undefined;
 }
 
 /**
@@ -202,7 +287,21 @@ export const BOUNDED_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
  * and a cursor in a timed transaction is the one that must not `getMore`. One set for both questions (bundle-30 I6,
  * C4: the observer and `inTimedTransactionCursor` each spelled it).
  */
-export const RETURNS_CURSOR: ReadonlySet<string> = new Set(['find', 'aggregate']);
+export const RETURNS_CURSOR: ReadonlySet<string> = new Set(['find', 'aggregate', 'listCollections']);
+
+/**
+ * Where each bounded `Db` method takes its options — the Db-level twin of `BOUNDED_OPTIONS_ARGUMENT`, applied by the same
+ * proxy (`db/record-write-observer.ts`), so a housekeeping unit's `listCollections` and `dropCollection` end at the figure like
+ * every collection call does. A name is in ONE of the two tables; `record-write-observer.ts` checks it at load.
+ *
+ * What is NOT here is named, with its reason, in `UNBOUNDED_DB_METHODS` (record-write-observer.ts). The index calls stay
+ * unbounded on purpose, at both levels (`createIndex*`, `listIndexes`, `listSearchIndexes`, `db.createIndex`): an index build
+ * scales with the data in the collection, so no one figure is right for every collection — a bound that cut a build of a large
+ * one would leave it half made, and one high enough for it is no bound on a hung call.
+ */
+export const BOUNDED_DB_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
+  listCollections: 1, dropCollection: 1,
+};
 
 /** The first batch a cursor in a timed transaction asks for: everything, up to the server's own 16 MB per batch. */
 const IN_TRANSACTION_BATCH = 1_000_000;
@@ -239,6 +338,15 @@ export const PLAIN_WRITE_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The Db-level methods that WRITE and are bounded: server-first like `PLAIN_WRITE_METHODS`, and for the same reason — a drop
+ * that the client's clock ended could still be applied afterwards. Probed (P8, driver 7.1.1): `{ maxTimeMS }` on a drop held
+ * behind another session's open transaction ends it at the figure with code 50, and the collection is still there once the
+ * blocker goes. A separate set from the Collection's because the names live at different levels and the Collection's is
+ * derived from by gates that index `BOUNDED_OPTIONS_ARGUMENT` with each of them.
+ */
+export const PLAIN_DB_WRITE_METHODS: ReadonlySet<string> = new Set(['dropCollection']);
+
+/**
  * How long after the server's deadline the caller is answered `StoreTimeout` anyway, when the server has not answered.
  * It has to be MORE than how late a command can reach the server (the connection wait plus the send), because the
  * server's clock starts on arrival and the client's at the call: a margin smaller than that lateness is the defect this
@@ -257,12 +365,37 @@ export const SERVER_FIRST_MARGIN_MS = 500;
  * back; it is required here, and `undefined` is stated, not implied. `collection` is only for the backstop's warning,
  * which says where the server stalled (and in which space, read from the collection's name).
  */
-export interface BoundTarget {
-  /** The collection the call goes to, as the driver names it. */
-  readonly collection: string;
-  /** The client's own `timeoutMS`, `undefined` when it carries none. */
+export type BoundTarget = CollectionTarget | DatabaseTarget;
+
+/** What both levels state: the client's own `timeoutMS`, `undefined` when it carries none. */
+interface InheritedTimeout {
   readonly inheritedTimeoutMs: number | undefined;
 }
+
+/** A call on a `Collection`: it goes through `BOUNDED_OPTIONS_ARGUMENT` and `PLAIN_WRITE_METHODS`. */
+export interface CollectionTarget extends InheritedTimeout {
+  /** The collection the call goes to, as the driver names it. */
+  readonly collection: string;
+}
+
+/**
+ * A call on the `Db` itself (`listCollections`, `dropCollection`): it goes through `BOUNDED_DB_OPTIONS_ARGUMENT` and
+ * `PLAIN_DB_WRITE_METHODS`. The LEVEL is stated here, by which of the two shapes the target has, and never as a defaulted extra
+ * parameter — an optional argument is how a call came to leave out what it inherits.
+ */
+export interface DatabaseTarget extends InheritedTimeout {
+  /** The database the call goes to, for the backstop's warning. */
+  readonly database: string;
+}
+
+const isDatabaseTarget = (t: BoundTarget): t is DatabaseTarget => 'database' in t;
+/** Where `method` takes its options at the target's level; `undefined` when that level does not bound it. */
+const optionsArgumentOf = (method: string, target: BoundTarget): number | undefined =>
+  isDatabaseTarget(target) ? BOUNDED_DB_OPTIONS_ARGUMENT[method] : BOUNDED_OPTIONS_ARGUMENT[method];
+const isPlainWrite = (method: string, target: BoundTarget): boolean =>
+  (isDatabaseTarget(target) ? PLAIN_DB_WRITE_METHODS : PLAIN_WRITE_METHODS).has(method);
+/** The collection or database the target names, for the backstop's warning. */
+const placeOf = (target: BoundTarget): string => (isDatabaseTarget(target) ? target.database : target.collection);
 
 /** The bounded call: its arguments, and — for a plain write — the time its client backstop is armed for. */
 interface BoundedCall {
@@ -279,8 +412,9 @@ interface BoundedCall {
  * `undefined` when there is nothing to bound (no scope, an unbounded method). THROWS `StoreTimeout` when the scope's
  * deadline has passed: the operation is not sent.
  */
-function planBound(method: string, args: unknown[], { inheritedTimeoutMs }: BoundTarget): BoundedCall | undefined {
-  const at = BOUNDED_OPTIONS_ARGUMENT[method];
+function planBound(method: string, args: unknown[], target: BoundTarget): BoundedCall | undefined {
+  const { inheritedTimeoutMs } = target;
+  const at = optionsArgumentOf(method, target);
   if (at === undefined) return undefined;
   const scope = activeScope();
   if (!scope) return undefined;
@@ -290,11 +424,17 @@ function planBound(method: string, args: unknown[], { inheritedTimeoutMs }: Boun
   if (options['session'] !== undefined) return { args: inTimedTransactionCursor(method, args, at, options), options, at };
   const left = scope.deadline - Date.now();
   if (left <= 0) throw new StoreTimeout();
-  const bound = Math.min(writeTimeoutMs(), left);
+  // The one place the per-operation figure enters: the scope's own (`writeTimeoutMs()` for a hold, the housekeeping figure
+  // for a walk, the lower of it and the enclosing scope's), never a global read here — a global read is how a walk's figure
+  // would be ignored inside a hold's.
+  const bound = Math.min(scope.perOpMs, left);
   const amended: Record<string, unknown> = { ...options };
   const out = [...args];
   while (out.length < at) out.push(undefined);
-  if (PLAIN_WRITE_METHODS.has(method)) {
+  // A plain write is ended by the server first, with the client backstop behind it. A Db-level call carries the SERVER's
+  // deadline too, whether it writes or reads (`listCollections` takes `maxTimeMS`; probe P8: the driver keeps `timeoutMS` and
+  // drops `maxTimeMS` when both are sent, so only one is ever sent) — but only a write needs the backstop.
+  if (isPlainWrite(method, target) || isDatabaseTarget(target)) {
     // The server's deadline, and no `timeoutMS`: the driver would derive the wire value from its own earlier clock.
     const carried = [options['maxTimeMS'], options['timeoutMS']].filter((v): v is number => typeof v === 'number' && v > 0);
     delete amended['timeoutMS'];
@@ -309,6 +449,7 @@ function planBound(method: string, args: unknown[], { inheritedTimeoutMs }: Boun
     const serverMs = Math.min(bound, ...carried);
     amended['maxTimeMS'] = serverMs;
     out[at] = amended;
+    if (!isPlainWrite(method, target)) return { args: out, options: amended, at };
     return { args: out, options: amended, at, backstopMs: serverMs + SERVER_FIRST_MARGIN_MS, ourDeadline: carried.length === 0 };
   }
   if (typeof options['maxTimeMS'] === 'number') {
@@ -351,8 +492,8 @@ export function callBounded(
       // Said once, here, and only here: the server's own answer (code 50) is an ordinary timeout and says nothing. The
       // backstop is the other state — the server could not answer by its own deadline (an upsert behind another
       // session's uncommitted insert is the one measured) — and the caller's 503 does not tell an operator which.
-      const space = parseSpaceCollection(target.collection)?.spaceId;
-      const where = `${peerText(target.collection)}${space === undefined ? '' : ` (space ${peerText(space)})`}`;
+      const space = isDatabaseTarget(target) ? undefined : parseSpaceCollection(target.collection)?.spaceId;
+      const where = `${peerText(placeOf(target))}${space === undefined ? '' : ` (space ${peerText(space)})`}`;
       log.warn(`Write bound: the server did not answer ${peerText(method)} on ${where} by its own deadline (${backstopMs - SERVER_FIRST_MARGIN_MS} ms); the client backstop `
         + `ended it ${SERVER_FIRST_MARGIN_MS} ms later, answered the caller a retryable timeout and aborted the driver call. A write blocked behind another session's uncommitted insert does this.`);
       reject(new StoreTimeout());
