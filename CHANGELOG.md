@@ -3089,398 +3089,152 @@ timeline.
 
 ## [5.1.7] — 2026-09-25
 
-A security patch for networks: a deletion or wipe vote can only act on a space its network carries, and only once it
-has passed, and a member can no longer be named as a round's proposer to have its vote ignored. Please roll it onto
-every instance that is in a network.
+A security patch for networks: a deletion or wipe vote acts only on a passed round for a space its network carries,
+and a member can no longer be named proposer to have its vote ignored; roll it onto every networked instance.
 
-**Who is affected.** Every instance in a network. A `space_deletion` or `space_wipe` round was applied whenever it had
-concluded with no veto — so a proposal that EXPIRED without enough yes deleted or emptied the space as if it had
-passed — and it acted on the space id exactly as the round named it, without checking that the network shares that
-space. Any member of any network could therefore delete or empty any space on another member, including a private
-one no network carries, and an old deletion round re-applied to a space later re-created under the same name.
+### Security
 
-**What to do.** Roll the image. There is no config change and no migration. If a space disappeared or was emptied
-on a networked instance and nobody voted for it, it is gone; restore it from a backup.
-
-### Fixed
-
-- **A deletion or wipe vote acts only on a round that passed, only on a space its network carries, and once**
-  (security). An expired round deletes nothing, a round naming a space the network does not share is ignored, and a
-  concluded round is applied here at most once.
-- **A member cannot be named as another round's proposer to drop its vote** (security). A round's subject was left
-  out of its voters on every round type, so a peer could name any member as the proposer of a deletion or schema
-  change and that member's vote was no longer needed on the other members. The subject is now left out only on a
-  join or a removal; the real proposer's yes is cast, signed, when it opens the round.
+- **Networks:** A `space_deletion` or `space_wipe` round now acts only once passed, only on a space its network
+  carries, and once. An expired round, or one naming an unshared (even private) space, let any member delete it;
+  restore from backup if so.
+- **Networks:** A member can no longer be named as another round's proposer to drop its vote: the subject is left out of the
+  voters only on a join or removal, and the real proposer's signed yes is cast when it opens the round.
 
 ## [5.1.6] — 2026-09-25
 
-A security patch for networks: an invite can no longer be applied under another peer's instance id. Please roll it onto
-every instance that is in a network.
+A security patch for networks: an invite can no longer be applied under another peer's instance id; roll it onto
+every networked instance.
 
-**Who is affected.** Every instance in two or more networks with the same peer. Since 5.1.2 the token an invite
-handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
-on its word. So anyone handed an invite bundle for one network — including, since 5.1.x, one minted by a space
-administrator — could apply under the id of a peer the inviter already syncs with, and read every space the inviter
-shares with that peer. The joining side trusted the inviter's claimed id the same way.
+| Changes on upgrade | Action |
+|---|---|
+| An older joiner already connected to the inviter and joining a second network is refused (`403`, naming the reason) by a patched inviter | Upgrade the joiner to 5.1.6; a patched peer proves itself automatically. |
 
-**What to do.** Roll the image. There is no config change and no migration. An instance joining a network for the
-first time is unaffected; a peer that is already connected and joins a SECOND network proves itself automatically once
-it runs 5.1.6 too — an older joiner is refused (`403`, naming the reason) by a patched inviter until it is upgraded.
+### Security
 
-### Fixed
-
-- **An invite cannot be applied under another peer's instance id** (security). An id that is already a peer must now
-  present a token the inviter issued to it, which a genuine peer's own join does, and a joiner refuses an inviter that
-  claims a known peer's id from another address. A refused apply mints nothing and is logged.
+- **Networks:** An invite can no longer be applied under another peer's instance id: an existing peer must present a token the
+  inviter issued to it. Any invite-bundle holder could otherwise read every space the inviter shares with that peer.
+- **Networks:** A joining side now refuses an inviter that claims a known peer's id from another address.
 
 ## [5.1.5] — 2026-09-25
 
 A patch for networks: two networks joined from the same peer at the same moment both keep syncing.
 
-**Who is affected.** An operator who joins two networks from the same instance within seconds of each other — or
-whose two instances join each other into two networks at once. Each instance keeps one token per peer, and each
-handshake hands over a new one scoped to the networks the pair shared at that moment. When the two handshakes'
-steps interleaved, the token that was kept lacked one of the two networks, and that network answered every sync with
-`403` until another handshake happened. Joins made one after the other were never affected (fixed in 5.1.2).
-
-**What to do.** Roll the image. A pair already caught by it recovers on its next handshake, or by leaving and
-rejoining the network that answers `403`. There is no config change and no migration.
-
 ### Fixed
 
-- **Two networks joined from the same peer at once both keep syncing.** Once a join is registered, every token
-  either side keeps for the other now also reaches that network's spaces — at finalize on the inviter, and after
-  registration on the joiner — so whichever token a racing second handshake leaves in place reaches both. A wider
-  token is not wider access: a peer is still admitted only to the spaces of networks it is a member of.
+- **Networks:** Networks joined from the same peer within seconds of each other both keep syncing; one used to answer
+  every sync with `403`. A pair already caught recovers on its next handshake, or by leaving and rejoining that network.
+- **Networks:** Once a join is registered, every token either side keeps for the other reaches that network's spaces
+  too; a peer is still admitted only to the spaces of networks it is a member of.
 
 ## [5.1.4] — 2026-09-25
 
-A patch for the web interface: network votes can be seen and cast from the Networks page again.
-
-**Who is affected.** Every operator who governs a network from the web interface. Since the vote list was written,
-the page read a vote round in a shape the server never sent, so it listed no open round at all — on the Networks page
-and on the Brain overview's Governance panel — and showed nothing to vote on. Votes cast through the API or MCP, and
-votes that peers cast, were never affected: the server always held and decided the rounds correctly, and a round
-nobody could see from the page simply ran to its deadline. A network whose join, removal or space-settings change
-seemed stuck for that reason can now be decided from the page.
-
-**What to do.** Roll the image, open Settings → Networks, and look under **Open votes** on each network. There is no
-config change and no migration.
+A patch for the web interface: open network votes are listed and can be cast from the Networks page again.
 
 ### Fixed
 
-- **The Networks page lists open votes, and Yes and Veto reach the round.** The page read `id`, `subject` and
-  `status` where the server sends `roundId`, `subjectLabel` and `concluded`, so every round was filtered out as not
-  open, and a cast would have gone to `/votes/undefined`. The rounds are now translated in one place, where both the
-  Networks page and the Governance panel read them.
+- **UI:** Settings → Networks (under **Open votes**) and the Brain overview's Governance panel list open vote rounds
+  again, and Yes and Veto reach the round, so a stuck join, removal or space-settings change can be decided there.
+  API, MCP and peer votes were unaffected.
 
 ## [5.1.3] — 2026-09-25
 
 A patch: a token granted only space administration can write again.
 
-**Who is affected.** Only tokens whose rights are a space-administration grant and nothing else — no floor and no
-per-space rungs. That shape has been possible since 5.0, when space administration became a grant of its own. Such a token could read its
-spaces and was refused every write with *"This token has read-only access"*, although it administers them. A token
-that also holds any written `write` rung was never affected.
-
-**What to do.** Nothing, beyond rolling the image. There is no config change and no migration: the grant was always
-stored correctly, and it is only the check that now reads it.
-
 ### Fixed
 
-- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
-  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
-  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
-  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
+- **Tokens:** A token whose rights are only a space-administration grant (no floor, no per-space rungs) is no longer
+  refused every write with "This token has read-only access"; the grant counts as `admin` on those spaces.
 
 ## [5.1.2] — 2026-09-25
 
-A patch for networks: two instances that share more than one network keep syncing all of them, a sync that
-transferred nothing no longer reports success, and a space-settings change your own vote passes applies at once.
+A patch for networks: two instances that share several networks keep syncing all of them, a sync that transferred
+nothing no longer reports success, and your own passing vote applies at once.
+
+| Changes on upgrade | Action |
+|---|---|
+| A peer token now reaches every network the two instances share (it reached only the network being joined) | After upgrading, re-join any second network created between the same two instances. |
+| A sync cycle with a refused or cut-short transfer now fails (`partial` or `failed`) instead of recording `success` | Expect networks that answered `403` unnoticed to show failures in sync history. |
+| A space-settings change your own vote already passes answers `200` (was `202 vote_pending`) | Nothing. |
 
 ### Fixed
 
-- **Joining a second network with the same peer no longer cuts off the first.** Each instance keeps one token per
-  peer, and every handshake replaced it with a token that reached only the network being joined — so the moment
-  two instances shared a second network, every push and pull on the first answered `403`, in both directions, with
-  nothing logged as an error. A peer token now reaches every network the two instances share; each request is still
-  admitted only to the spaces of networks the peer is a member of, so leaving one network still withdraws its
-  spaces. The joining side also no longer hands over an all-spaces token when the network carries no spaces — it
-  reaches none. **After upgrading, re-join any second network created between the same two instances**, so both
-  sides hold a token that reaches all of them.
-
-- **A sync cycle whose transfers were refused is no longer recorded as a success.** A refused or cut-short
-  transfer held its watermark and logged a warning, and the cycle still counted the member as synced — so a network
-  answering `403` on every request showed `success` in its history while nothing transferred. Such a member now
-  fails the cycle (`partial` or `failed`), the history's `errors` names the space, direction and transfers that
-  stopped, and the member's consecutive-failure count rises. A member with no peer token is reported the same way.
-
-- **A space-settings change your own vote already passes is applied at once.** On a club or pub/sub network one
-  yes passes a vote, and the proposer's yes was recorded when the vote opened, but nothing counted it — so the
-  change answered `202 vote_pending` and did nothing until somebody cast the same yes again or the vote expired a
-  day later. It now concludes when it opens if the proposer's vote is enough, and answers `200`.
+- **Networks:** Joining a second network with the same peer no longer cuts off the first, whose pushes and pulls
+  answered `403` both ways with nothing logged. Each request is still admitted only to spaces of networks the peer
+  belongs to, so leaving one withdraws its spaces.
+- **Networks:** A joining side no longer hands over an all-spaces token when the network carries no spaces; the token
+  reaches none.
+- **Networks:** A space-settings change that your own vote already passes (one yes on a club or pub/sub network) now
+  concludes when it opens; it used to wait for the same yes to be cast again or the vote to expire a day later.
+- **Sync:** A cycle whose transfers were refused is no longer recorded as `success`. The history's `errors` names the
+  space, direction and transfers that stopped, and the member's consecutive-failure count rises; a member with no peer
+  token is reported the same way.
 
 ## [5.1.1] — 2026-09-24
 
-A security patch: a network invite that was applied and never finalized no longer leaves a permanent peer
-token behind, and any left by earlier handshakes are revoked when the instance starts.
+A security patch: a network invite that was applied and never finalized no longer leaves a permanent peer token behind.
 
-### Fixed
+| Changes on upgrade | Action |
+|---|---|
+| At start, peer tokens whose instance shares no network with this one are revoked, removing leftovers of earlier handshakes | Nothing; a member or a joiner with an open vote round is never touched. |
 
-- **A network invite that was applied and never finalized left a permanent peer token behind** (security). Apply
-  creates the joiner's token on the inviting instance before finalize registers the member, and it had no expiry;
-  the handshake session that knew about it lived only in memory for an hour. So a joiner that crashed, was
-  refused, or lost the connection between the two steps — or a restart in between — left a token to the
-  network's spaces that never expired and belonged to no member. The token now expires with its handshake and
-  finalize clears the expiry once the member is real. **At start, peer tokens whose instance shares no network
-  with this one are revoked**, which removes any left by earlier handshakes; a member or a joiner with an open
-  vote round is never touched.
+### Security
+
+- **Networks:** An invite applied but never finalized (joiner crashed, was refused, lost the connection, or a restart
+  in between) left a peer token to the network's spaces that never expired and belonged to no member. It now expires
+  with its handshake; finalize clears the expiry.
 
 ## [5.1.0] — 2026-09-23
 
-**A batch item can carry its own relationships, and five things that answered success while doing nothing
-now say so.** One capability and a week of reports from the canary operator and the fleet integrator,
-released before the benchmark work starts so none of it waits behind that.
+A `/bulk` / `save_bulk` item can now carry its own relationships, and a refused batch key, a failed config reload and
+a reranker refusal no longer pass silently.
 
-| | |
+| Changes on upgrade | Action |
 |---|---|
-| new | a `/bulk` / `save_bulk` item takes the `link*` fields its kind can hold plus `edges`, and the reply counts them under `connections` |
-| now refused | `/bulk` with a retired key (`memories`) or an item with a retired link array (`entityIds`), which used to answer `207` with nothing written |
-| now visible | a failed watched config reload, on `ythril_config_reload_pending` and `ythril_config_reload_failed_total` |
-| now works | reranking against a stock reranker, which refused the unbatched request |
-| what to do | upgrade. A batch still sending `memories` gets a `400` naming `facts` — that is the fix, not a regression |
+| `/bulk` and `save_bulk` refuse the retired key `memories` (it answered `207` with nothing written) and any unknown top-level key, with a `400` | Send `facts`; the accepted keys are `facts`, `entities`, `edges` and `chrono`. |
+| A bulk item carrying a retired link array (`entityIds`, `memoryIds`, `chronoIds`) is refused instead of dropped | Send the item's current `link*` fields. |
+| A bulk item's link field its kind cannot hold (`linkFiles` on a fact) or a non-array link value is refused (was ignored, or read as empty) | Send only the link fields the item's kind supports, as arrays. |
+| A bulk item's own `edges` entry naming a `$ref` is refused, naming the top-level `edges` array | Use existing record ids in an item's `edges`; keep `$ref` edges in the top-level array. |
 
 ### Added
 
-- **A batch item attaches its own relationships, exactly as a single write does** (`Q-44`). Every
-  single-record door takes the link classes its kind can hold plus `edges`, so a record and everything it
-  points at is one call. The batch door took two link classes, validated by its own copy of the rule, and
-  refused `edges` outright — so the door where the arithmetic is worst, hundreds of records at a time, was
-  the one that still needed a second pass.
-
-  Both surfaces now build those fields from the same module the single doors call, which is also what
-  retires the copy: this loop had a UUID pattern per link field that checked less than the shared one and
-  had drifted from it in the direction nothing reports — a `linkFiles` on a fact was accepted and never
-  read, a non-array `linkEntities` was quietly treated as empty.
-
-  **The response grew a `connections` count**, separate from `inserted.edges` deliberately: that number is
-  the top-level `edges` array, a collection the caller wrote, while these are relationships hung off records
-  the caller wrote. Folded together neither could be reconciled against the payload. The `bulk.write`
-  webhook carries it too, and it counts toward whether that webhook fires at all — fifty attachments to
-  records that were only updated is fifty rows written, and a workflow watching for exactly that would have
-  been told nothing happened.
-
-  **An item's own `edges` name records that already exist; a `$ref` there is refused** and the refusal names
-  the top-level array, which runs after every record array and resolves one. An item is applied when it is
-  written, so a key declared further down could not resolve, and resolving only backwards would make a
-  payload's validity depend on the order it was typed in. **A connection that cannot be honoured is refused
-  before the record is written**, so a bad `edges` entry leaves no row behind.
+- **Records:** A `/bulk` / `save_bulk` item takes the link fields its kind can hold plus `edges`, as a single write
+  does, so a record and its relationships are one call; an unhonourable connection is refused before the record is written.
+- **Records:** The `/bulk` reply counts these relationships under `connections`, separate from `inserted.edges`; the
+  `bulk.write` webhook carries it and fires when only connections were written.
+- **Server:** A failed watched config reload now shows on `ythril_config_reload_pending` (gauge, `1` until the next
+  successful reload; alert on it) and `ythril_config_reload_failed_total`. The watcher never retries a refused file itself.
 
 ### Fixed
 
-- **A config reload that failed left one log line and nothing to alert on** (`Q-43`). Reported by the
-  canary operator, whose edit sat out of effect until the next restart with the only evidence in a pod log
-  nobody was tailing. The endpoint they blamed is correct — `POST /api/admin/reload-config` answers `500`
-  on a file it refuses. The silent half is the **watcher**, which has no caller to answer and logs instead.
-
-  Two metrics now, because they answer different questions. `ythril_config_reload_pending` is the one to
-  alert on: `1` while a refused reload has left the running configuration older than the file, cleared by
-  the next reload that succeeds. `ythril_config_reload_failed_total` is the history beside it.
-
-  **The gauge matters more than the counter here**, and the reason is in the watcher: it claims the file's
-  modification time *before* reloading, so broken bytes are not re-read every tick — which means a failed
-  watched reload is never retried on its own. A counter that moved an hour ago says it happened; the gauge
-  says it is still true.
-
-- **`/bulk` read a retired name as success, and it was the one write door that did** (`Q-41`). Reported by
-  the fleet integrator: `{"memories": […]}` answered `207` with nothing inserted and an empty `errors`
-  array — the same answer a body that legitimately wrote nothing gives. Around thirty of their builders had
-  been writing into that key and seeing success.
-
-  The batch body takes its four keys and no others now. `memories` is refused by name with `facts` as the
-  replacement; any other unrecognised key is refused with the four that are accepted. **An item carrying a
-  retired link array is refused the same way** — `entityIds`, `memoryIds` and `chronoIds` were dropped just
-  as quietly one level down, and a batch is where that costs most.
-
-  Both go through the module every single-record door already calls, rather than a second check that would
-  need its own sentence kept in step. The allowed keys are derived from one tuple, so a fifth collection
-  cannot be accepted by the writer and refused by the door.
-
-- **The reranker was sent up to a hundred passages in one request, and a stock server refuses that**
-  (`Q-42`). Reported by the canary operator: every unfiltered search on their fleet had been served in
-  fused order, for as long as their settings had been what they are. A `413 Payload Too Large` reaches the
-  caller as `degraded: ["rerank_unavailable"]`, which is indistinguishable from a search with no reranker
-  configured — so it can be true for months with nothing to see.
-
-  Candidates are split into batches of **32** now, settable as
-  `mediaEmbedding.rerank.maxPassagesPerRequest` (1 … 100) through the admin API. Total work is unchanged —
-  a cross-encoder is a forward pass per passage — and the pass keeps **one** deadline rather than one per
-  batch, so a recall somebody is waiting on is bounded exactly as it was.
-
-  **If any batch fails the whole pass is abandoned** and the vector order stands. A list ordered partly by
-  cross-encoder score and partly by vector score, with nothing saying which is which, is a plausible wrong
-  answer; no opinion at all is an honest one.
-
-  The candidate pool still scales with the number of knowledge types searched, which is why an unfiltered
-  recall is the most expensive shape there is. That is a separate question and is not changed here.
-
-- **Sync never checked a FILE's links, so a broken one was recorded as nothing at all** (`Q-39`). A peer
-  sending a file linked to an entity this instance does not hold produced no violation, no warning and no
-  trace — and an operator reads an empty violation list as everything being fine. Absent and clean looked
-  identical, which is the one failure a diagnostic must not have.
-
-  A file's links are checked like any other record's now, and `docType` on a link violation can be `file`.
-  For that one, `docId` is the file's **path** rather than a UUID, because that is what identifies a file.
-
-  **The narrowing was removed rather than extended.** It read `fromKind !== 'fact' && fromKind !== 'chrono'`;
-  what decides whether a link is checked is now the link vocabulary itself, so a fifth kind declared next
-  year is checked on the day it is declared instead of waiting for somebody to add it to a list.
-
-- **Deleting an entity that has an edge failed SILENTLY in the Brain UI.** Reported by the owner: the row
-  stayed on screen, nothing was said, and the click looked as though it had not registered.
-
-  **The server had already said everything.** It answers `409` with what blocks the delete, the preview
-  route and the name of the parameter that authorises a cascade. The client's handler was
-  `error: () => {}`.
-
-  The refusal now opens a confirmation naming what would go — **counted by kind, not listed as
-  identifiers**, because the decision in front of an operator is *how much goes with it* and twenty UUIDs
-  obscure that. It also says what does NOT go: an edge is removed and the record at the other end of it
-  stays. On confirm the delete repeats with the token from the preview, which removes the entity and the
-  records blocking it. A stale token is not retried — the server returns the CURRENT set with its
-  refusal, so the operator is asked again about the set as it now stands.
-
-  An entity with nothing pointing at it still deletes in one click. Asking to confirm a cascade that
-  would remove nothing is a dialog that teaches people to dismiss dialogs.
-
-- **All four record tabs threw their delete error away, not just entities.** Facts, chrono and edges had
-  the identical `error: () => {}` — the same omission four times, so the surface for it lives on the
-  state the four already share rather than being added to each. A delete that did not happen now says
-  why, above the list, where the row that would not go is still visible.
-
-- **An integration file stopped testing anything the day 5.0 shipped, and reported itself as skipped**
-  (`Q-38`). `a-traversed-recall-returns-whole-graphs` sent `includeFreshWrites: true` on every recall.
-  5.0 removed that parameter, so every call answered `400` — and the file's own fixture guard turned that
-  into a skip, saying *"could not measure the full traversed answer"*, which reads as a fixture that
-  could not be built.
-
-  **A test that skips is indistinguishable from one that passes in every summary anybody reads.** The
-  measuring call asserts its status now, so a refusal fails loudly instead of disappearing into a guard
-  written for a different problem.
-
-  **Waking it found a SECOND 5.0 change it had been too inert to notice**, which is the argument for
-  doing this rather than deleting the file: `recall`'s hit became `{score, spaceId, type, record}`,
-  so every `r._id` read `undefined`. The comparison keyed every graph on that same `undefined`,
-  collapsed to one entry, and compared one hub's subtree against a different hub's — reporting *"the
-  graph on undefined differs"*, which is the tell. One accessor now reads the record, and it falls
-  back to the hit itself rather than asserting which shape it got.
-
-  A gate derives the allowed parameter names from the `recall` tool's own input schema — which IS the
-  REST body's schema, because the route hands its body to `callTool` — and refuses any test sending a
-  name that is not one of them. A parameter renamed or removed next year is covered as it stands.
-
-- **A missing import in a Docker-only suite now fails in `preflight` instead of in CI.** Adding the
-  index wait above to four files and the import to three of them threw `waitForIndexed is not
-  defined` inside a `before` — which CANCELS every subtest under it, so one missing word reported as
-  **eight failures**, seven of them saying only *"test did not finish before its parent and was
-  cancelled"*.
-
-  There is no ESLint here to lean on, and `preflight` cannot run the integration, sync or red-team
-  suites because they need Docker — so that class of mistake was invisible locally and cost a full
-  CI round trip. A gate derives the helper names from the shared module and checks those three
-  directories, which is where the cost is: a standalone gate with the same mistake fails the moment
-  anybody runs preflight.
-
-- **Three tests recalled a record they had just written without waiting for the vector index** (`Q-38`).
-  Recall's fresh-write scan covers a record whose embedding is still PENDING, so there is a window —
-  after the embed job finishes and before `$vectorSearch` holds the vector — where neither path finds it.
-  A test landing in it fails saying its own control is missing, which reads as a defect in the thing
-  under test.
-
-  **Pinning a seed by `_id` is not an exemption**, which is what two of the three assumed: recall ranks,
-  and a filter narrows what `$vectorSearch` may return rather than replacing it.
-
-  **Read one by one rather than swept.** Of the fifteen recall tests with no wait, most are right without
-  one: some assert a refusal, some assert only a status, and `result-spill-both-doors` deliberately
-  relies on the fresh-write scan and records the measurement behind that choice — waiting there hit the
-  index-lag timeout and failed twelve assertions for a reason unrelated to its subject.
-
-### Internal
-
-- **A test named after the bulk 500-item cap had never exercised it** — exposed by the `/bulk` refusal
-  above. It posted its 502 items under the retired `memories` key, so nothing was written, and its
-  assertion — `inserted + errors <= 500` — was satisfied by zero. It sends `facts` now and asserts that
-  exactly 500 of the 502 were processed, because a bound a zero satisfies is not a bound.
+- **Search:** Reranking works against a stock reranker, which refused up to 100 passages in one request (`413`,
+  surfacing as `degraded: ["rerank_unavailable"]` and fused order).
+- **Search:** Rerank candidates go in batches of 32 (`mediaEmbedding.rerank.maxPassagesPerRequest`, 1 to 100, admin
+  API) under one deadline; if any batch fails the pass is abandoned and the vector order stands.
+- **Sync:** A file's links are now checked, so a file linked to an entity this instance lacks is reported as a link
+  violation; `docType` can be `file`, with `docId` the file's path.
+- **UI:** Deleting an entity that has edges in the Brain UI now opens a confirmation counting what goes by kind (an
+  edge is removed, the record at its other end stays); confirming repeats the delete with the preview token. An entity
+  nothing points at deletes in one click.
+- **UI:** A failed delete of a fact, chrono entry, edge or entity now shows its reason above the list, not nothing.
 
 ## [5.0.1] — 2026-09-22
 
-**A read was logged as a write on the MCP door, so an operator who had turned read logging OFF still got
-them.** Found hours after 5.0.0 published, and patched rather than held: a defect in an image people can
-already pull is a different thing from one in a tree nobody has.
+A patch: `filter` and `similar` on MCP are no longer audit-logged as writes when `audit.logReads` is `false` (the
+default); take it if your agents call them.
 
-| | |
-|---|---|
-| who is affected | any instance on the default `audit.logReads: false` whose agents call `filter` or `similar` |
-| what it cost | extra rows in the audit log. No data lost, no call refused, no record changed |
-| what to do | upgrade. Nothing to re-point and nothing to re-configure |
+### Changed
 
-Entries already written for those two operations stay where they are. They are correct entries under a
-wrong classification, not wrong entries.
+- **Docs:** The audit guide now lists every operation the log can contain (it lacked `conflict.*`, `contradiction.*`,
+  `data.*`, `schema_library.*`, `token.update`, `token.regenerate`, `link.create`, `link.delete`) and drops five that
+  nothing records: `brain.query`, `brain.er_model`, `brain.find_similar`, `brain.recall_global`, `brain.bulk_write`.
 
 ### Fixed
 
-- **Two read tools were logged as writes, so an operator who turned reads OFF still got them.** A
-  regression of the 5.0 renames, found the same day. `audit.logReads` is off by default; REST declares
-  which operations are reads with `read: true` on the route rule, and the MCP door held a second,
-  hand-written set of nine operation names beside it.
-
-  `query` became `filter` and `find_similar` became `similar`; the audit MAP was updated and that set was
-  not. So it still named `brain.query`, which nothing records any more, and named neither `brain.filter`
-  nor `brain.similar` — **the two highest-volume read paths an agent has**. Nothing said so, because a
-  read logged as a write is an extra row rather than an error, and a dead name in a hand-written set is
-  never wrong out loud.
-
-  The set is derived from the route rules now, where `read: true` sits beside the route it describes. One
-  rule, one declaration: a capability cannot be a read on one door and not the other, and a new read
-  route classifies the tool that mirrors it without anybody remembering to. `entity.cascade_preview` was
-  also reclassified by that — it reports what a cascade would remove and removes nothing.
-
-- **The audit guide documented 53 of the 115 operations the log can contain** (`Q-40`). The page opens by
-  promising *"a full access trail"* and then lists the operations; 62 were missing, including every
-  `conflict.*` and `contradiction.*`, all of `data.*`, all of `schema_library.*`, `token.update`,
-  `token.regenerate`, `link.create` and `link.delete`. An integrator builds an audit query from that
-  table, so an operation absent from it is a filter nobody writes.
-
-  Found by deriving the set to check that the two operations above were documented — they were not.
-
-  **A gate keeps it true rather than a corrected table**, which would be the same defect with a later
-  date: the set comes from the route rules, the tool map and the one operation neither produces, and the
-  window is the table itself, because several operations appear in that page's prose and a whole-file
-  check would pass while the table stayed short.
-
-  The gate also runs the other way. It found five operations the table named that nothing records —
-  `brain.query`, `brain.er_model`, `brain.find_similar`, `brain.recall_global` and `brain.bulk_write`,
-  all left behind by the 5.0 renames and folds. An integrator filtering for those reads the silence as
-  *"this never happens here"* rather than as a stale page.
-
-- **An agent syncing ONE peer was audited under the network-wide name** (`Q-37`). `network_sync` with a
-  `peerId` does exactly what `POST /api/networks/peers/:peerId/sync` does, and that route records
-  `peer.sync_trigger` — the tool recorded `network.sync_trigger` for both subjects, because the resolver
-  was handed the tool NAME and nothing else. So an operator filtering the audit log for
-  `peer.sync_trigger` saw the browser's peer syncs and none of an agent's.
-
-  It is the defect `a-tool-and-its-route-log-one-operation` exists for, one level down, and invisible to
-  that gate because the tool's first operation IS a name a route records.
-
-  **The resolver takes the call's arguments now, and it does not trust them.** A chooser is a function of
-  caller input, so it is caught, and a result outside the tool's own declared operations is refused.
-  Both failures fall back to the first name: **an unaudited call is worse than one under a
-  slightly-wrong name**, and that is the direction this must not fail in. The gate asserts the rule for
-  every tool with a chooser rather than for the one that has one.
-
-  **Not put on the tool definition**, where it would have been lighter for a single case: that puts the
-  audit name somewhere the coverage gate does not read, and answers a question the audit map already
-  answers — the same rule in two places.
+- **Audit:** MCP `filter` and `similar` (`brain.filter`, `brain.similar`) no longer appear as writes when
+  `audit.logReads` is `false`; an MCP tool's read or write class now comes from its REST route, so
+  `entity.cascade_preview` is a read too. Existing rows stay as written.
+- **Audit:** MCP `network_sync` with a `peerId` now records `peer.sync_trigger`, as
+  `POST /api/networks/peers/:peerId/sync` does, not `network.sync_trigger`; a filter on it now sees an agent's syncs.
 
 ## [5.0.0] — 2026-09-22
 
