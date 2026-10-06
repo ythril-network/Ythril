@@ -25,6 +25,7 @@
  * `NotFoundError` from `findSimilar`). That stays in the scanner, which is the only one that knows, and it must be handled INSIDE the
  * seed's function: whatever escapes it is a failure.
  */
+import { storeIsNotAnswering } from '../db/store-condition.js';
 import { eachUnit } from '../util/housekeeping-walk.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 
@@ -36,7 +37,13 @@ export const seedsInWalk: SeedRunner = async (seeds, fn, type) => {
   await eachUnit(seeds, (seed) => fn(seed), () => type);
 };
 
-/** The seed runner of a scan a request asked for: no walk above it, so a failure is reported here and the scan goes on. */
+/**
+ * The seed runner of a scan a request asked for: no walk above it, so a failure is reported here and the scan goes on — except a
+ * failure that says the store is not answering (`storeIsNotAnswering`, `db/store-condition.ts`: the one question for code with no walk
+ * above it). The next seed would wait the driver's timeout again, once per seed of the batch, while the operator waits on the request:
+ * so it is reported once and RETHROWN, and the route answers it the way its door maps a store failure (`sendCaughtFailure`: 503,
+ * retryable).
+ */
 export function seedsInRequest(step: string, spaceId: string): SeedRunner {
   return async (seeds, fn, type) => {
     for (const seed of seeds) {
@@ -44,6 +51,7 @@ export function seedsInRequest(step: string, spaceId: string): SeedRunner {
         await fn(seed);
       } catch (err) {
         reportSpaceFailure(step, spaceId, err, { unit: type, when: 'next scan' });
+        if (storeIsNotAnswering(err)) throw err;
       }
     }
   };
