@@ -61,6 +61,13 @@ process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
 let server, mongo, loader, reindex, queue, worker, shared, lifecycle, registry, spaceCollection;
 
+/**
+ * A run another process is sweeping, for the cases that HOLD a run in a state (no sweep is running) and read it. Since the tick
+ * resumes a run whose lease is stale (`a-reindex-boot-failure-is-retried-by-the-tick-db.test.js`), a seeded incomplete run
+ * without one is a run the 5 s watcher may start sweeping under the case.
+ */
+const HELD_LEASE = () => Date.now() + 60 * 60_000;
+
 const vectorFor = (text) => Array.from({ length: DIMS }, (_, i) => ((String(text).length + i) % 10) / 10);
 
 const runCol = (space) => mongo.col(spaceCollection(space, 'reindexRun'));
@@ -188,6 +195,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
       await runCol('early').insertOne({
         _id: 'run', spaceId: 'early', members: ['early'], flagged: false, target: await currentTarget(),
         startedAt: new Date().toISOString(), cursor: null, sweepComplete: false,
+        sweepLeaseAt: HELD_LEASE(), // a lease nobody lets go of: the watcher (armed by earlier cases) must not start the sweep this holds back
       });
       const first = await reindex.reindexStateFor(['early']);
       assert.equal(first.reindexRun.running, true);
@@ -310,7 +318,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
       const target = await currentTarget();
       await runCol('flagged').insertOne({
         _id: 'run', spaceId: 'flagged', members: ['flagged'], flagged: true, target,
-        startedAt: new Date().toISOString(), cursor: null, sweepComplete: false,
+        startedAt: new Date().toISOString(), cursor: null, sweepComplete: false, sweepLeaseAt: HELD_LEASE(),
       });
       // No fact carries a different embeddingModel, so the sample check alone would answer false.
       await lifecycle.initSpace('flagged', { waitForVectorReady: false });
@@ -322,7 +330,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
   describe('the guard is per space', () => {
     const activeRun = (space, extra = {}) => runCol(space).insertOne({
       _id: 'run', spaceId: space, members: [space], flagged: false, target: { model: 'm', dimensions: DIMS, prefixScheme: 'none' },
-      startedAt: new Date().toISOString(), cursor: null, sweepComplete: false, ...extra,
+      startedAt: new Date().toISOString(), cursor: null, sweepComplete: false, sweepLeaseAt: HELD_LEASE(), ...extra,
     });
 
     it('an active run in A refuses A with 409, naming only A; B is allowed', async () => {
