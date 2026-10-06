@@ -67,6 +67,9 @@ const WORKERS = 4;
 /** How long past the bound a call may take to answer. */
 let CAP_MS = BOUND.holdDeadlineMs + 2500;
 
+/** The server's `answered 5xx` log lines with the time they were said (`before` fills it, `after` stops it). */
+const answered5xx = [];
+
 /** Filled by `before`; the doors and the holder cases read them when they run. */
 const env = {};
 const ctx = {};
@@ -114,13 +117,17 @@ async function stallAndRelease(lane) {
   let atAnswer = null;
   let releaseError = null;
   let answered = false;
+  let startedAt = 0;
+  let answeredAt = 0;
   let watching = Promise.resolve(false);
   try {
     const started = Date.now();
+    startedAt = started;
     watching = sawLiveWrite(env.door.mongo, lane.collection, () => answered);
     res = await settleWithin(Promise.resolve().then(lane.call), CAP_MS);
     answered = true;
-    res.elapsedMs = Date.now() - started;
+    answeredAt = Date.now();
+    res.elapsedMs = answeredAt - started;
     const reads = readLane(lane.space);
     const released = lock.release().then(() => null, err => err);
     atAnswer = await reads;
@@ -130,7 +137,7 @@ async function stallAndRelease(lane) {
     await lock.release().catch(() => {});
   }
   if (!res.settled) await res.rest;
-  return { res, atAnswer, releaseError, sawStall: await watching };
+  return { res, atAnswer, releaseError, sawStall: await watching, startedAt, answeredAt };
 }
 
 /** Wait the settle window out, reading the lane every `POLL_MS`; the documents that differ from the answer's, by identity. */
@@ -154,20 +161,62 @@ async function finishOnce(lane, rep, ran) {
     elapsedMs: ran.res?.elapsedMs,
     sawStall: !!ran.sawStall,
     status: value?.status ?? value?.code,
+    // What the answer SAID, so a repetition the bound did not end is told apart from one it did (`notASample` reads it).
+    said: [value?.body?.error ?? value?.text, value?.body?.codeName].filter(Boolean).join(' / ').slice(0, 240),
+    // The server's own account of WHY it answered 5xx is in its log, never in the body: the lines said while this call waited.
+    // Read only for a call answered with no write alive, which is the one a reader then has to explain.
+    serverSaid: ran.res?.settled && !ran.sawStall
+      ? answered5xx.filter(l => l.at >= ran.startedAt - 50 && l.at <= ran.answeredAt + 50 && new RegExp(`\\b${lane.space}\\b`).test(l.line)).map(l => l.line.slice(0, 300)) : [],
     thrown: ran.res?.settled && !ran.res.ok ? `${ran.res.error?.name}: ${String(ran.res.error?.message).slice(0, 200)}` : null,
     releaseError: ran.releaseError ? String(ran.releaseError.message ?? ran.releaseError) : null,
     landed: ran.atAnswer ? await watchForLanding(lane, ran.atAnswer) : [],
   };
 }
 
+/** How many times in all one repetition is run when the attempts before it proved nothing (see {@link notASample}). */
+const MAX_ATTEMPTS = 4;
+
+/**
+ * Did this repetition prove nothing, because the thing it exists to hold up never happened?
+ *
+ * ## What it prevents
+ *
+ * The rule is "a write the bound ended never lands". A repetition says something about it only when a write was ALIVE behind
+ * the lock while the call waited: the server was asked, every 50 ms, for the whole of the call. A call that was answered with
+ * no write ever alive was ended by something that is not the bound ending a write — the door answered before it had a write to
+ * stall (a store failure of the loaded machine, a connection the driver had to open again), so there is nothing the lock could
+ * have held and nothing that could land. Counting it as a sample failed the lane on the machine's load rather than on the
+ * rule; counting it as GREEN would be the opposite fault, a lane that passes having stalled nothing.
+ *
+ * So it is neither: it is run again, up to {@link MAX_ATTEMPTS} times, and when the attempts run out it is reported as it is
+ * (the lane fails on "no write was ever alive", which is then a fact about the door and not about one unlucky moment).
+ * An attempt discarded this way is still read for a landing: nothing it left may appear later.
+ *
+ * A repetition that did not answer, or whose fixture failed, is NOT this: those are the rule's own failures.
+ */
+const notASample = (r) => r.answered && !r.fixtureError && !r.sawStall;
+
 /**
  * Every repetition of every lane, `WORKERS` stalls at a time. A lane's repetitions are in order, and its settle window
  * is waited out in the BACKGROUND of the next lanes' stalls — only the next repetition of the same lane waits for it.
+ *
+ * A repetition that proved nothing ({@link notASample}) is queued again for the next round, after every settle window of
+ * this one has closed, so its seed never lands under another attempt's open window. `discarded[i]` holds the attempts
+ * of lane `i` that were not samples; `results[i]` holds exactly one entry per repetition.
  */
-async function runAll(lanes, results, reps) {
-  const tasks = [];
-  for (let rep = 0; rep < reps; rep++) lanes.forEach((lane, i) => tasks.push({ lane, i, rep }));
+async function runAll(lanes, results, reps, discarded) {
+  let tasks = [];
+  for (let rep = 0; rep < reps; rep++) lanes.forEach((lane, i) => tasks.push({ lane, i, rep, attempt: 1 }));
   const previous = lanes.map(() => Promise.resolve());
+  while (tasks.length > 0) {
+    const queue = tasks;
+    tasks = [];
+    await runRound(queue, previous, results, discarded, tasks);
+  }
+}
+
+/** One pass over `tasks`: the repetitions that proved nothing are pushed onto `again` for the next. */
+async function runRound(tasks, previous, results, discarded, again) {
   const watching = [];
   let next = 0;
   async function worker() {
@@ -182,8 +231,15 @@ async function runAll(lanes, results, reps) {
       await before;
       const ran = await t.lane.seed().then(() => stallAndRelease(t.lane)).catch(error => ({ error }));
       const finished = finishOnce(t.lane, t.rep, ran)
-        .catch(error => ({ rep: t.rep, fixtureError: String(error?.stack ?? error), landed: [] }))
-        .then(r => { results[t.i].push(r); });
+        .catch(error => ({ rep: t.rep, fixtureError: String(error?.stack ?? error), landed: [], serverSaid: [] }))
+        .then(r => {
+          if (notASample(r) && t.attempt < MAX_ATTEMPTS) {
+            discarded[t.i].push({ ...r, attempt: t.attempt });
+            again.push({ ...t, attempt: t.attempt + 1 });
+          } else {
+            results[t.i].push({ ...r, attempts: t.attempt });
+          }
+        });
       finished.then(done);
       watching.push(finished);
     }
@@ -227,8 +283,11 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
   let relay;
   let seamError = null;
   let restoreBound = () => {};
+  let stopListening = () => {};
   /** `results[laneIndex]` — one entry per repetition. */
   const results = lanes.map(() => []);
+  /** `discarded[laneIndex]` — the attempts that proved nothing ({@link notASample}) and were run again. */
+  const discarded = lanes.map(() => []);
   const cases = [];
   const it = (name, fn) => cases.push({ name, fn });
 
@@ -261,8 +320,11 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
 
 
     for (const [i, lane] of lanes.entries()) {
-      it(`${lane.name}: nothing it would have written lands after the answer (${REPS} repetitions)`, () => {
+      it(`${lane.name}: nothing it would have written lands after the answer (${REPS} repetitions)`, (t) => {
         const rs = results[i];
+        for (const r of discarded[i]) {
+          t.diagnostic(`${lane.name}: attempt ${r.attempt} of #${r.rep} proved nothing and was run again — answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}), no write alive on ${lane.collection}: ${r.said || r.thrown}; the server said: ${r.serverSaid.join(' | ') || 'nothing'}`);
+        }
         assert.equal(rs.length, REPS, `only ${rs.length} of ${REPS} repetitions ran — ${seamError ? 'no seam' : 'the experiment stopped'}`);
         if (clientTimeoutMs !== undefined) {
           const early = rs.filter(r => r.answered && r.elapsedMs < clientTimeoutMs + CLOCK_WINDOW_MS);
@@ -278,8 +340,8 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
         assert.deepEqual(unanswered.map(r => `#${r.rep}`), [],
           `${lane.name}: still waiting ${CAP_MS} ms into a write stalled behind a lock — no bound ended it`);
         const unstalled = rs.filter(r => !r.sawStall);
-        assert.deepEqual(unstalled.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms (${r.thrown ?? r.status})`), [],
-          `${lane.name}: no write was ever alive on ${lane.collection} while the call waited — the lock stalled nothing, so "nothing landed" proves nothing`);
+        assert.deepEqual(unstalled.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}: ${r.said}), ${r.attempts} attempt(s); the server said: ${r.serverSaid.join(' | ') || 'nothing'}`), [],
+          `${lane.name}: no write was ever alive on ${lane.collection} while the call waited, in ${MAX_ATTEMPTS} attempts — the lock stalled nothing, so "nothing landed" proves nothing`);
         const notTimedOut = rs.filter(r => !(r.status === 503 || /Timeout|timed out/i.test(r.thrown ?? '')));
         assert.deepEqual(notTimedOut.map(r => `#${r.rep}: ${r.thrown ?? r.status}`), [],
           `${lane.name}: answered, but not with the bound's timeout — the write was not ended by the bound`);
@@ -288,7 +350,8 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
         }
         assert.deepEqual(rs.filter(r => r.releaseError).map(r => `#${r.rep}: ${r.releaseError}`), [],
           `${lane.name}: the lock could not be released cleanly`);
-        const landed = rs.filter(r => r.landed.length > 0);
+        // An attempt that proved nothing and was run again is read for a landing too: a write it left must not appear later.
+        const landed = [...rs, ...discarded[i]].filter(r => r.landed.length > 0);
         assert.deepEqual(landed.map(r => `#${r.rep}: ${r.landed.join('; ')}`), [],
           `${lane.name}: in ${landed.length} of ${REPS} repetitions the write the caller was told had timed out LANDED after the answer — `
           + `the client's deadline passed before the server's, so the server operation outlived the answer and the hold`);
@@ -309,9 +372,14 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       Object.assign(ctx, { door: env.door, mods: await loadHolderModules() });
       try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
       relay.setDelay(lateByMs);
-      await runAll(lanes, results, REPS);
+      const { subscribeLogLines } = await import('../../server/dist/util/log.js');
+      stopListening = subscribeLogLines((line) => {
+        if (/answered 5\d\d/.test(line)) { answered5xx.push({ at: Date.now(), line }); if (answered5xx.length > 500) answered5xx.shift(); }
+      });
+      await runAll(lanes, results, REPS, discarded);
     },
     async after() {
+      stopListening();
       restoreBound();
       await doors?.close();
       await relay?.close();
