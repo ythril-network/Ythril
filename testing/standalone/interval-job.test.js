@@ -24,14 +24,14 @@ import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createVirtualTime, settle } from './_virtual-time.mjs';
 
-let intervalJob, INTERVAL_JOB_WINDOW_MS, wb, createHousekeepingWalk, StoreTimeout, onHousekeepingSignal;
+let intervalJob, INTERVAL_JOB_WINDOW_MS, wb, createHousekeepingWalk, StoreTimeout, onHousekeepingSignal, declareJob, declaredJobs;
 
 before(async () => {
   ({ intervalJob, INTERVAL_JOB_WINDOW_MS } = await import('../../server/dist/util/interval-job.js'));
   wb = await import('../../server/dist/db/write-bound.js');
   ({ createHousekeepingWalk } = await import('../../server/dist/util/housekeeping-walk.js'));
   ({ StoreTimeout } = await import('../../server/dist/db/write-timeout.js'));
-  ({ onHousekeepingSignal } = await import('../../server/dist/util/housekeeping-signals.js'));
+  ({ onHousekeepingSignal, declareJob, declaredJobs } = await import('../../server/dist/util/housekeeping-signals.js'));
 });
 after(() => wb?.setWriteBoundForTest(null));
 
@@ -380,5 +380,46 @@ describe('every tick runs inside the housekeeping bound and shares one walk budg
     await r.vt.advance(3000);
     assert.equal(results.length, 3);
     assert.ok(results.every(x => x.stalled === undefined), 'two timeouts a tick never reach K = 3');
+  });
+});
+
+describe('a job names itself at construction, so its skipped-tick series can start at 0', () => {
+  /** Every `job-declared` event for `label` while `fn` runs. */
+  const declaredDuring = (label, fn) => {
+    const seen = [];
+    const off = onHousekeepingSignal((e) => { if (e.type === 'job-declared' && e.job === label) seen.push(e.job); });
+    try { fn(); } finally { off(); }
+    return seen;
+  };
+  const make = (label) => intervalJob(label, 1000, async () => {});
+
+  it('constructing a job declares its label once: it is in declaredJobs() and the event fires once, before any tick or start', () => {
+    const label = 'Declared at construction';
+    assert.equal(declaredJobs().includes(label), false);
+    const seen = declaredDuring(label, () => { make(label); });
+    assert.deepEqual(seen, [label]);
+    assert.equal(declaredJobs().filter(j => j === label).length, 1);
+  });
+
+  it('a second job with the same label, and start() of either, declare nothing more', () => {
+    const label = 'Declared twice';
+    make(label);
+    const seen = declaredDuring(label, () => { const again = make(label); again.start(); again.stop(); });
+    assert.deepEqual(seen, []);
+    assert.equal(declaredJobs().filter(j => j === label).length, 1);
+  });
+
+  it('declareJob is idempotent and returns the name; declaredJobs is a copy; an empty name throws', () => {
+    assert.equal(declareJob('Declared by hand'), 'Declared by hand');
+    assert.deepEqual(declaredDuring('Declared by hand', () => declareJob('Declared by hand')), []);
+    declaredJobs().push('not a job');
+    assert.equal(declaredJobs().includes('not a job'), false);
+    for (const bad of ['', '   ', undefined, 7]) assert.throws(() => declareJob(bad), /needs a name/, `name = ${String(bad)}`);
+  });
+
+  it('a listener that throws does not stop the declaration', () => {
+    const off = onHousekeepingSignal(() => { throw new Error('registry mid-reset'); });
+    try { assert.doesNotThrow(() => make('Declared past a failing listener')); } finally { off(); }
+    assert.ok(declaredJobs().includes('Declared past a failing listener'));
   });
 });

@@ -54,7 +54,7 @@
  */
 import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js';
 import { withWalkBudget } from './housekeeping-walk.js';
-import { signalHousekeeping } from './housekeeping-signals.js';
+import { declareJob, signalHousekeeping } from './housekeeping-signals.js';
 import { log, peerText } from './log.js';
 import { singleFlight, SKIP_WARNING_WINDOW_MS } from './single-flight.js';
 import { warnOnce } from './warn-once.js';
@@ -77,6 +77,7 @@ export interface IntervalJobDeps {
   /** Arm a repeating timer. Default `setInterval`, the only one in `server/src`. */
   arm?: (fn: () => void, ms: number) => TimerHandle;
   disarm?: (handle: TimerHandle) => void;
+  /** Where lines go INSTEAD of the process log. Never a forwarder to it: the default is a direct `log.warn(<bounded text>)`, which the log-line gate reads. */
   warn?: (message: string) => void;
   error?: (message: string) => void;
 }
@@ -99,11 +100,10 @@ export function intervalJob(
   const now = deps.now ?? Date.now;
   const arm = deps.arm ?? realArm;
   const disarm = deps.disarm ?? realDisarm;
-  const warn = deps.warn ?? ((message: string) => log.warn(message));
-  const error = deps.error ?? ((message: string) => log.error(message));
   const name = peerText(label);
+  declareJob(label);   // so its skipped-tick series starts at 0; the label is the metric's `job`, so keep it constant
 
-  const flight = singleFlight(label, { now, warn, error });
+  const flight = singleFlight(label, { now, ...(deps.warn && { warn: deps.warn }), ...(deps.error && { error: deps.error }) });
   const failedOnce = warnOnce<string>({ max: 1, every: INTERVAL_JOB_WINDOW_MS, now });
   const overranOnce = warnOnce<string>({ max: 1, every: INTERVAL_JOB_WINDOW_MS, now });
   let timer: TimerHandle | null = null;
@@ -122,7 +122,10 @@ export function intervalJob(
     try {
       await withinHousekeepingBound(() => withWalkBudget(async () => { await run(); }));
     } catch (err) {
-      failedOnce(label, () => error(`${name} failed: ${peerText(err)}`));
+      failedOnce(label, () => {
+        const text = `${name} failed: ${peerText(err)}`;
+        if (deps.error) deps.error(text); else log.error(text);
+      });
     }
   };
 
@@ -134,8 +137,11 @@ export function intervalJob(
     // Read now, not at start: the housekeeping figure is a setting, and the line must name the one in force.
     const overrunMs = Math.max(OVERRUN_INTERVALS * intervalMs, housekeepingOpMs());
     if (running !== null && running > overrunMs) {
-      overranOnce(label, () => warn(`${name} tick running for ${Math.round(running / 1000)}s — longer than ${Math.round(overrunMs / 1000)}s, `
-        + `so it is hung or slower than its interval; the ticks behind it are skipped until it ends`));
+      overranOnce(label, () => {
+        const text = `${name} tick running for ${Math.round(running / 1000)}s — longer than ${Math.round(overrunMs / 1000)}s, `
+          + `so it is hung or slower than its interval; the ticks behind it are skipped until it ends`;
+        if (deps.warn) deps.warn(text); else log.warn(text);
+      });
     }
   };
 
