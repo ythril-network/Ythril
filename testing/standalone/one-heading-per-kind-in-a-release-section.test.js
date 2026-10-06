@@ -34,16 +34,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { CHANGELOG_KINDS as KINDS } from '../../scripts/changelog-section.mjs';
 
 const CHANGELOG = 'CHANGELOG.md';
-
-/**
- * The six, in Keep-a-Changelog order with this project's `Internal` last.
- *
- * `Deprecated` is absent because this project records a deprecation in `todo/_DEPRECATIONS.md` and announces
- * it under `Changed` — adding it here would invite a seventh heading nobody reads.
- */
-const KINDS = ['Added', 'Changed', 'Removed', 'Fixed', 'Security', 'Internal'];
 
 /** The body of `## [Unreleased]`, up to the first tagged release. */
 function unreleasedBody(src) {
