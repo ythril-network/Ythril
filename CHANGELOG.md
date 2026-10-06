@@ -2511,581 +2511,146 @@ only what exists, and the code lost about a thousand lines of dead code and hist
 
 ## [5.2.0] — 2026-09-25
 
-**Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can
-be ingested into records.** Every network act now has its MCP tool, a token below instance admin can govern the
-networks of the spaces it holds, a space can join an existing network later, and a space in two networks keeps each
-network's schema as its own layer — the clashes shown, the order the operator's to change, and a combined
-definition proposed to one network by vote. `ingest` turns a raw conversation into entities, claims, edges and a
-timeline.
+**Networks become a whole feature on both doors: every network act has an MCP tool, a space's schema travels with its
+records, and `ingest` turns a conversation into records.**
 
-| | |
+| Changes on upgrade | Action |
 |---|---|
-| new | MCP tools for every network act (invite, fork, join, members, votes, topology); a Networks column in token rights; a space added to an existing network; schema replicated with the records, per network, with clash view, reorder and propose; `ingest`; `graph_traverse` bodies via `projection`; a batch answers with its `refs` |
-| now voted | a schema write on a NETWORKED space through `PUT /schema`, the single-type upsert and delete, and the library's apply answers `202 vote_pending` instead of `200`, and changes only when the round passes — as `PATCH` already did |
-| consent | the External assist model is consented to per use: an instance that ingested conversations through it must **Allow conversations** once, or ingest refuses and says so |
-| memory | the compose install caps `ythril` and `ythril-mongo` at 4 GB each by default (`YTHRIL_MEM_LIMIT`, `YTHRIL_MONGO_MEM_LIMIT`); raise them in `.env` for very large spaces |
-| security | a round from a peer can no longer pass itself off as this instance's own; starting ingest runs is rate limited on REST as on MCP |
-| what to do | upgrade. A script that writes a networked space's schema should expect `202`; an instance using an external assist model for conversations allows conversations once on Settings → Models |
-
-**Documents that changed**, for anyone who keeps a copy: `README.md`, `docs/dependencies.md`, `docs/integration-guide.md`, `docs/integration-guide/02-hosting.md`, `docs/integration-guide/04-brain-api.md`, `docs/integration-guide/04a-recall-api.md`, `docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/04d-brain-ops-api.md`, `docs/integration-guide/04i-ingest-api.md`, `docs/integration-guide/05a-conversion-pipeline.md`, `docs/integration-guide/05b-media-embedding.md`, `docs/integration-guide/06-spaces-api.md`, `docs/integration-guide/06a-schema-api.md`, `docs/integration-guide/06b-schema-library-api.md`, `docs/integration-guide/07-tokens-api.md`, `docs/integration-guide/08-networks-api.md`, `docs/integration-guide/09-sync-api.md`, `docs/integration-guide/13-audit-log-api.md`, `docs/integration-guide/16-mcp.md`, `docs/network-types.md`, `docs/sync-protocol.md`, `docs/userguide.md`, `docs/userguide/02-brain.md`, `docs/userguide/03-files-and-schemas.md`, `docs/userguide/04-settings.md`, `docs/userguide/04a-media-and-embedding.md`.
+| A schema write on a networked space (`PUT /schema`, single-type upsert and delete, library apply) answers `202 vote_pending`, was `200`, and applies when the `meta_change` round passes | Expect `202` in scripts; re-read the schema after the vote |
+| `acknowledgedHost` now covers documents only; conversations need `acknowledgedHostForConversations` | Click **Allow conversations** once on Settings → Models, or `ingest` through the assist model refuses |
+| The compose install caps `ythril` and `ythril-mongo` at 4 GB each (`YTHRIL_MEM_LIMIT`, `YTHRIL_MONGO_MEM_LIMIT`) | Applied on the next `docker compose up`; raise them in `.env` for very large spaces |
+| Members of a network now exchange a space's schema over sync (`GET /api/sync/meta`) and serve passed vote rounds to peers | Upgrade every member to receive schemas |
+| Token rights gain a `networks` column: existing tokens and a matrix body omitting it get `none`, and a missing area now reads as `none` | Grant `networks` where a token must act on networks |
 
 ### Added
 
-- **A schema clash between two networks can be settled by proposing a definition to one of them** (`F-39.5`,
-  closing `F-39`). `targetNetwork` on `PATCH /api/spaces/:id` and MCP `schema_update` proposes the meta to that
-  network alone, as its definition: a vote there, landing in its layer on every member once passed, with this
-  instance's own definitions untouched. The Schema tab's clash list has a **Propose** action beside each network
-  that holds the other definition.
-
-- **An agent can mint an invite key and fork a network over MCP** (`F-36`, slice 3). `network_invite` and
-  `network_fork` are the same acts as `POST /api/networks/:id/invite` and `/fork` — same parameters, answers and
-  refusals on both doors.
-
-- **An agent can join a remote network and manage its members over MCP** (`F-36`, slice 4). `network_join_remote`,
-  `network_member_add` and `network_member_remove` are the same acts as `POST /api/networks/join-remote`,
-  `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`: the same handshake and Networks
-  rung, the same vote-or-direct answer per network type, and an inviter's refusal relayed with its own sentence.
-
-- **Every network route now has its MCP tool** (`F-36`, slice 5, closing it). `network_member_admit` (the inviter's
-  half of a join by invite key), `network_member_signing_key`, and the braintree topology acts `network_reparent_self`,
-  `network_member_adopt` and `network_member_revert_parent` are the same acts as their routes, instance-admin on both
-  doors. `mcp/parity.ts` no longer declares any network capability REST-only.
-
-- **A passed space-settings vote reaches every member** (`F-39.4`). On a club the organiser's own yes passed a
-  meta change before any member could see the round, and a member that joined later never saw it either, so the
-  change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it
-  from the casts, and applies it as that network's definition — beside its own, never over it.
-
-- **See and settle a schema clash between networks** (`F-39.3`). A space in several schema-sending networks
-  shows, on its Schema tab, each network's layer in the order it applies and every clash between them, with the
-  network that currently applies marked; the order can be changed there. `GET /api/spaces/:id/schema-layers` and
-  `PUT /api/spaces/:id/network-precedence`, and MCP `space_schema_layers` / `space_set_network_precedence`, with the
-  same parameters and answers.
-
-- **An agent can see and cast network votes over MCP** (`F-36`, slice 2). `network_votes`, `network_vote` and
-  `network_sync_history` are the same acts as the votes and sync-history routes — same parameters, answers and
-  refusals, instance-admin on both doors. A vote is how a networked space approves a destructive act, and until now
-  an agent could be a member of a governance process it could not take part in.
-
-- **A space in two networks keeps each network's schema apart** (`F-39.2`). What each network sends is kept as
-  its own layer beside this instance's own definitions, and the space runs on own ⊕ layers in precedence: the network
-  joined first wins where two define the same property differently, and both keep syncing their records. Each
-  network is sent only this instance's own definitions plus its own layer, never the other network's, and an
-  operator's schema edits land in the own definitions so they survive the next layer. Seeing clashes and reordering
-  come next (`F-39.3`).
-
-- **A space can be added to a club, closed or democratic network too** (`F-38.4`). There it is a `space_addition`
-  vote: a club organiser's own yes carries it at once, a closed network needs every member, a democratic one a
-  majority with no veto. Same route, tool and picker as the pub/sub and braintree case; a vote answers `202`. Each
-  member applies the passed round itself, and a member that already has a local space of that name keeps it out of
-  the network unless it voted yes, because those networks sync both ways and joining it would send its records to
-  everyone.
-
-- **A space's schema flows down its network with the records** (`F-39.1`). On a pub/sub network or a tree, each
-  instance now takes a shared space's type schemas, purpose, usage notes and the rest of its governed meta from the
-  instance above it every cycle (`GET /api/sync/meta`), so a space created by a join is no longer bare. The merge only
-  adds: new types are added, a type both sides hold keeps its local properties and gains the network's, and an exact
-  type-and-property match takes the network's definition. Nothing local is removed, nothing flows up, operational
-  settings stay local, and a schema that cannot be merged is skipped without stopping the records.
-
-- **A space can be added to an existing network** (`F-38.3`). Until now a network carried the spaces it was created
-  with and nothing more. The publisher of a pub/sub network, or the root of a tree, now adds one from the network card,
-  `POST /api/networks/:id/spaces` or MCP `network_add_space` — same parameters, rights and refusals on all three. The
-  members' tokens reach the new space at once, and each instance below adopts it on its next sync from its upstream
-  only (a subscriber from its publisher, a node from its parent): created if missing, merged into if present, nothing
-  overwritten or deleted. Club, closed and democratic networks decide it by vote (`F-38.4`, below). Audited as
-  `network.space.add`.
-
-- **Joining a network lets you choose where each of its spaces goes** (`F-38.2`). The join dialog lists every space
-  the invite carries, not only the ones whose name collides with a local space, and each can go under the same name,
-  into any space you already have, or under a new name. The dialog says, beside the choice, that joining only adds:
-  nothing local is overwritten or deleted.
-
-- **Each network says what this instance is in it** (`F-38.1`). The Networks page shows a role — Publisher or
-  Subscriber, Organiser or Member, Root, Node or Leaf — instead of a flat member count, and lists the members that
-  role acts on: a publisher's subscribers, a subscriber's publisher, a club's or voted network's peers, and in a tree
-  the path to the root and the subtree below. It also lists the spaces the network carries. `GET /api/networks/:id`,
-  the list, and MCP `network_get` carry the same `myRole`. A club created from now on remembers its organiser; one
-  stored before reads as Member.
-
-- **A network can be read, created, updated and left over MCP** (`F-36`, first slice): `network_get`,
-  `network_create`, `network_update` and `network_leave`. Each is the same act as its REST route — same parameters,
-  the same rights (the Networks column, or administering every space), the same refusal sentence and the same body
-  — so an agent is no longer limited to listing peers and triggering a sync. Joining, invites, members, votes,
-  topology and sync history stay REST-only for now and are listed as such.
-
-- **A space admin creates, joins and invites into networks with the spaces it administers** (`F-37`). A token
-  administering every space an act touches may create a network carrying them, join a network mapped onto them —
-  onto a new space too, when it may also create spaces — see that network, and generate its invite, with no
-  Networks column. A space it does not administer still needs the column and is named in the refusal; a network
-  carrying one stays invisible to it. Peers, votes, topology and sync are unchanged and instance-admin.
-
-- **Joining a remote network goes by the Networks column too** (`F-34.1`, `POST /api/networks/join-remote`). A
-  token below instance admin may join with `networks: write` on every local space the join maps to; a space the
-  join would create also needs `createSpaces` and a floor of `write`. The check runs after the handshake's apply
-  and before finalize — the only point the space list is known and nothing is written — so a refused join leaves
-  nothing behind, and the membership is recorded as the joining token's for the leave rule.
-- **Token rights gain a Networks column** (`F-34`). A token below instance admin can now act on networks through
-  the `networks` rung it holds on the spaces a network carries — on EVERY one of them: `read` sees a network
-  (`GET /api/networks`, `GET /api/networks/:id`, MCP `network_peers`; one it may not see is a 404), `write` creates
-  one with the space and leaves a membership it established, `admin` changes a network's settings and leaves
-  anyone's. A membership with no recorded establisher needs `admin` to leave. Joining a remote network, invites,
-  peers, topology, votes and sync stay instance-admin. Existing tokens hold `networks: none`; a matrix body may
-  omit `networks` and gets `none`, so a client written before the column keeps minting. Space admin does not
-  include it — sharing a space with another instance is its own decision.
-- **An `ingest` run reports its provenance** — `ids` (each key of the extraction → the record id it has now)
-  and `sourceTurns` (record id → the turns it came from), on `GET …/ingest/:runId` and `ingest_status`.
-  Reported, never stored: a turn id in a record would be noise in its vector, so the run is the one place a
-  caller can join a record back to the conversation.
-- **`ingest`: a conversation in, records out** (`F-31`; `POST /api/brain/spaces/:spaceId/ingest` and
-  `GET …/ingest/:runId`, MCP `ingest` and `ingest_status`). A raw conversation (`sessions`) runs every phase of
-  the conversation extractor; an extraction already made (`extraction`) is validated and written with no model.
-  It answers `202` with a run id at once and the run is read back: phase, counts written, claims dropped and
-  why, turns no claim covers, which backends answered. Refused with `409` BEFORE any model is paid for when the
-  space lacks the `conversation` group or, for a raw conversation, a decision model, the assist model or the
-  `doc-nlp` sidecar — each refusal names what to change. Every record goes through the batch door's rules;
-  transcripts are files, so they are written only for a token that also holds `files: write`. Runs are held in
-  memory. See the integration guide's Ingest page.
-- **The Schema Library ships the `conversation` group** — the types the extractor writes — seeded into every
-  instance at start, first run included. Seeding adds a missing entry by name and never replaces one, so an
-  operator's edit is kept. Apply it to a space with **Apply group to space**.
-- **A batch answers with the ids its keys were given** (`refs` on `POST /bulk` and `save_bulk`). An item's
-  `$ref` key was resolved inside the call and thrown away, so a caller that needed the new ids read the
-  space back by text. The response now carries `{ "post-1": { id, kind } }`, one row per key whose item
-  was written; a refused item's key is absent.
-- **An NLP sidecar for the conversation extractor** (`F-31`, `sidecars/doc-nlp`). It is bundled like the
-  other models, and `DOC_NLP_REPLICAS=0` leaves it out. It returns spaCy's named entities and noun phrases, which the
-  extractor proposes as candidate mentions (step 4.1). The decision model then judges them, so casing and
-  misspellings are its to handle, not a rule's.
-  - **Why spaCy's transformer model:** measured on the ten committed LoCoMo extractions, it proposes 96% of
-    the entities whose name the conversation says. That is ahead of spaCy's large model (92%), wink-nlp
-    (87%), hand-written rules (88%) and GLiNER (87%), at about 30 ms a turn over HTTP.
-  - **Hardening and wiring:** it is hardened like `doc-render` (non-root, read-only, internal network, no
-    egress) and never downloads at runtime. The server reaches it through `NLP_SIDECAR_URL`.
-
-- **A decision model for the extractors, configurable on Settings → Models** (`F-31`). The conversation
-  extractor asks a model only its judgement questions (*who is "she"*, *is this turn pasted*), and this is
-  the model it asks. It defaults to TypeSafe's System One (`https://api.typesafe.ai`, `jev-latest`) and
-  follows that API's contract, so choices come back with their full probability distribution. Set it in
-  config (`decisionModel`), through `PATCH /api/admin/media-config`, or with `DECISION_URL` /
-  `DECISION_MODEL` / `DECISION_API_KEY`. The key lives in `secrets.json`. **Nothing is sent until the operator
-  acknowledges the host**, and that is checked when the call is made as well as on save. Without consent,
-  the same questions go to the assist model, constrained to the listed options. With neither, extraction
-  is refused up front instead of guessed. Code checks every answer before anything reads it: a choice
-  outside its options, or a missing answer, is marked `invalid`. A question that offers no no-match option
-  is refused before it is sent. It has its own call budget (`modelSlots.decision`) and private-address
-  switch (`YTHRIL_ALLOW_PRIVATE_DECISION`), and appears in the egress matrix.
-- **`graph_traverse` returns the records it reached, not only their names** (`F-32`). A new `projection`
-  parameter on both doors (MCP `graph_traverse` and `POST /spaces/:spaceId/traverse`) takes the same
-  grammar as `query` and `recall` and is applied to every node and every stored edge. With it, one call
-  reads a whole subgraph with its content. Without it, reading one flow from a space took a walk plus a
-  `query` per collection over the ids the walk returned.
-  - Omitted, the answer is the lean one, unchanged.
-  - The walk's envelope always survives: `_id`, `depth` and `kind` on a node; `_id`, `from`, `to` and `label`
-    on an edge.
-  - The vector never comes back, and the diagnostics only with the new `includeDiagnostics`.
-  - An edge's `properties` come with it, so a conditional edge's instruction and predicate arrive in the
-    same answer.
-
-  The owner, shown the three-call recipe, asked *"is that not just an includes flag?"* — and `recall`'s own
-  traverse has taken a projection for a long time.
-
-- **The benchmark schema is fingerprinted beside the prompt, and a pet can like a place** (`Q-27`). The
-  schema is an input every extractor reads, exactly as the prompt is, and it went unrecorded — so a
-  vocabulary change landing mid-round would leave half a corpus written against one schema and half against
-  another, with nothing in any file to say so. Every extraction now carries `schemaSha256` beside
-  `promptSha256`; `check` refuses a file without it, `merge` stamps it from the tree, `status` counts a file
-  done only under both, and `stats` warns on a two-schema corpus.
-
-  **The ten committed extractions are stamped with the schema of the commit that produced them**, which
-  neither the schema nor any of the ten has moved from since. Then `likes` widened to run from an `animal`
-  as well as a `person`: `conv-44`'s extractor drew one from a dog to a dog park and the merge refused it.
-  Landed between rounds and after the stamp, so the corpus records the vocabulary it was written against.
-
-- **One graded benchmark run: every question, both arms, every seed, one report** (`B-6`). The retrieve, arm
-  and grade steps each held one rule; `benchmarks/harness/run.mjs` holds the ones that only exist once they
-  are joined, and each of them produces a plausible number when dropped. The judge's independence is checked
-  before anything is called. Retrieval runs once per question, not once per seed. The answerer is handed
-  the question, the context and the seed, and nothing that names which arm it is in. A failed step leaves a
-  seed UNSCORED rather than low, and the published figure carries its min and max across seeds.
-
-  **The grade step ships with it, and had never been committed.** `grade.mjs` and its test were written for
-  the previous `B-6` increment and existed in one working tree only. The answerer and the judge are handed
-  in, so all of this runs against fakes today; with the two provider keys it is configuration, not a build.
-
-- **A graded run that needs no provider key, and survives a rate limit** (`B-6`). `benchmarks/tier0.mjs`
-  runs the whole round as files: one input and one answer file per conversation per arm, one batch file
-  per judge upload, every write atomic, and `status` read off the disk. So a run stopped at any point
-  resumes from what is already there. An answer file counts as done only for the input it was made
-  from, so a changed input cannot be graded against a stale answer. Every answer gets LoCoMo's token F1
-  with no model. A balanced 200-question sample goes to an external judge blind to the arm, and a
-  truncated reply leaves the rest ungraded rather than wrong. What the answerer is handed is checked to
-  carry no reference answer, adversarial answer or evidence.
-
-  **The first round is recorded, and its method is disclosed with it.** One answerer answered both arms
-  of all ten conversations, memory arm first and each arm independently of the other, so a baseline
-  answer never saw the retrieved hits and a memory answer never saw the transcript. On F1 over 1,540
-  scored questions the memory arm reads 62.7 against the baseline's 67.5. The baseline is the whole
-  transcript in context, which is the ceiling and not a competitor. **Judged by a GPT model from a
-  different vendor on a blind, balanced 200-question sample: memory 82.5% against the baseline's 84.5%,
-  a gap of −2.0 with a 95% interval of −6.2 to +2.2**, from about 2% of the text per question. With the
-  judge in place the graded runner shipped: retrieve, both arms, a different-family judge and the baseline
-  column. Method and caveats are in `benchmarks/README.md` → Results.
+- **Networks:** MCP `network_get`, `network_create`, `network_update` and `network_leave` are the same acts as their
+  REST routes: same parameters, rights, answers and refusals.
+- **Networks:** MCP `network_invite`, `network_fork`, `network_join_remote`, `network_member_add` and
+  `network_member_remove` are likewise the same acts as their REST routes.
+- **Networks:** MCP `network_votes`, `network_vote`, `network_sync_history`, `network_member_admit` and
+  `network_member_signing_key` are instance-admin like their routes.
+- **Networks:** MCP `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` cover the
+  braintree topology acts, instance-admin; no network act is REST-only now.
+- **Networks:** Each network shows what this instance is in it (Publisher, Subscriber, Organiser, Member, Root, Node,
+  Leaf) and the members and spaces it acts on; `myRole` is on `GET /api/networks`, `GET /api/networks/:id`, `network_get`.
+- **Networks:** A pub/sub publisher or tree root can add a space to an existing network from the network card,
+  `POST /api/networks/:id/spaces` or MCP `network_add_space` (audited `network.space.add`).
+- **Networks:** Members adopt an added space on their next sync from upstream only: created if missing, merged if
+  present, nothing overwritten or deleted.
+- **Networks:** On club, closed and democratic networks adding a space is a `space_addition` vote (`202`): a club
+  organiser's yes carries it, closed needs every member, democratic a majority with no veto.
+- **Networks:** A member with a same-named local space keeps it out of the network unless it voted yes, since these
+  networks sync both ways.
+- **Networks:** The join dialog lists every space the invite carries; each goes under the same name, into an existing
+  space or under a new name. Joining only adds: nothing local is overwritten or deleted.
+- **Tokens:** The `networks` rung on every space a network carries governs a token below instance admin: `read` sees
+  the network (`network_peers` too; else `404`), `write` creates one and leaves its own, `admin` changes settings.
+- **Tokens:** `networks: admin` also leaves anyone's membership; space admin does not include the column, and a
+  membership with no recorded establisher needs `admin` to leave.
+- **Tokens:** A token administering every space an act touches may create, join, see and invite into a network
+  carrying them without the column; any other space needs it and is named in the refusal.
+- **Tokens:** `POST /api/networks/join-remote` needs `networks: write` on every local space the join maps to, plus
+  `createSpaces` and a `write` floor for a space it creates; a refused join leaves nothing behind.
+- **Sync:** On a pub/sub network or tree each instance takes a shared space's type schemas, purpose, usage notes and
+  governed meta from upstream every cycle (`GET /api/sync/meta`); the merge only adds, nothing flows up.
+- **Sync:** A passed space-settings vote now reaches every member, late joiners included, and each applies it as that
+  network's definition beside its own.
+- **Schemas:** A space in several networks keeps each network's schema as its own layer beside its own definitions;
+  the network joined first wins a clash and both keep syncing records.
+- **Schemas:** Each network is sent only your own definitions plus its own layer, never another network's.
+- **Schemas:** The Schema tab shows each layer, every clash and which network applies, and the order can be changed:
+  `GET /api/spaces/:id/schema-layers`, `PUT /api/spaces/:id/network-precedence`.
+- **Schemas:** MCP `space_schema_layers` and `space_set_network_precedence` are the same acts as those two routes.
+- **Schemas:** `targetNetwork` on `PATCH /api/spaces/:id` and MCP `schema_update` proposes the meta to that network
+  alone, by vote there; the clash list has a **Propose** action per network.
+- **Schemas:** The Schema Library ships the `conversation` group (the types the extractor writes), seeded at start
+  without replacing an operator's edit; apply it with **Apply group to space**.
+- **Search:** MCP `graph_traverse` and `POST /spaces/:spaceId/traverse` take `projection` (the `query` / `recall`
+  grammar) for every node and stored edge, so one call reads a subgraph with its content.
+- **Search:** With `projection`, a node keeps `_id`, `depth` and `kind` and an edge `_id`, `from`, `to` and `label`;
+  an edge's `properties` come too; vectors never return and diagnostics only with `includeDiagnostics`.
+- **Records:** A batch (`POST /bulk`, `save_bulk`) answers with `refs`, `{ "post-1": { id, kind } }`, one row per
+  `$ref` key whose item was written.
+- **Ingest:** `POST /api/brain/spaces/:spaceId/ingest` and MCP `ingest` turn a raw conversation (`sessions`) into
+  entities, claims, edges and a timeline, or write an extraction made already (`extraction`) with no model; `202`.
+- **Ingest:** `GET /api/brain/spaces/:spaceId/ingest/:runId` and MCP `ingest_status` report phase, counts, dropped
+  claims, uncovered turns and backends; runs are held in memory.
+- **Ingest:** A run also reports `ids` (extraction key to record id) and `sourceTurns` (record id to its source turns).
+- **Ingest:** Refused with `409` before any model is paid for when the space lacks the `conversation` group or, for a
+  raw conversation, a decision model, the assist model or the `doc-nlp` sidecar; the refusal names what to change.
+- **Ingest:** Records are written under the batch door's rules; transcripts are files, so they need a token that also
+  holds `files: write`.
+- **Ingest:** The extractor asks the decision model judgement questions over options the space's schema supplies and
+  checks every claim against its own turns (one rewrite, then dropped and reported).
+- **Ingest:** An unclear or refused model answer takes the outcome that cannot add a wrong fact; a `supersedes` edge
+  is drawn only on a clear replacement.
+- **Ingest:** It writes one arc claim for a subject spanning three or more sessions and folds a repeated telling of an
+  unchanged state into one claim.
+- **Ingest:** It dates an edge (`since`, `until`) only when its own text does, builds a timeline of completed,
+  upcoming or cancelled events, and describes each entity from its own claims.
+- **Ingest:** Text is written by `documentProcessing.assistModel` once its host is consented to; an extraction links
+  entities the space already holds by UUID through `existingEntities`.
+- **Media:** A decision model for the extractors is set on Settings → Models: default TypeSafe System One
+  (`https://api.typesafe.ai`, `jev-latest`), via `decisionModel`, `PATCH /api/admin/media-config` or `DECISION_URL`.
+- **Media:** `DECISION_MODEL` and `DECISION_API_KEY` set the model and key (the key lives in `secrets.json`); it has its
+  own `modelSlots.decision` budget and `YTHRIL_ALLOW_PRIVATE_DECISION` switch, and shows in the egress matrix.
+- **Media:** Nothing is sent to the decision model until the operator acknowledges its host, checked on every call;
+  without consent the questions go to the assist model, and with neither extraction is refused.
+- **Media:** A decision answer outside its options, or missing, is marked `invalid`.
+- **Server:** A bundled `doc-nlp` sidecar (spaCy) proposes named entities and noun phrases to the extractor;
+  `NLP_SIDECAR_URL` points the server at it and `DOC_NLP_REPLICAS=0` leaves it out.
+- **Server:** The sidecar runs non-root, read-only, with no egress, and never downloads at runtime.
 
 ### Changed
 
-- **The compose install caps the app and the database's memory** (`Q-46`). `ythril` and `ythril-mongo` had no
-  ceiling while every sidecar did, so on a shared host MongoDB sized its cache from the whole machine and the
-  app grew without bound. Both now default to 4 GB (`YTHRIL_MEM_LIMIT`, `YTHRIL_MONGO_MEM_LIMIT`), and MongoDB
-  sizes its cache from the ceiling. An existing install picks the limit up on the next `docker compose up`;
-  raise it in `.env` for very large spaces or ingests. Kubernetes deployments keep setting their own pod limits.
-
-- **The benchmark writes its corpus through `ingest`** (`F-31`). `benchmarks/writer/write-space.mjs` validates
-  an extraction, creates the space and hands the extraction to the product's door, so the space a benchmark
-  scores is written exactly as a user's conversation is — by one writer. Three things the old writer never
-  did now happen, so **a score measured after this is not comparable blind to one before it**: an entity's
-  description is written, a chrono entry links the claims that dated it, and transcripts live under
-  `transcripts/<conversationId>/`.
-- **The External assist model is consented to per use** (`F-35`). It does two jobs that send different things —
-  the document repair pass, and conversation work for `ingest` (writing claims, and answering the extractor's
-  questions when no decision model is set). Consent was one host acknowledgement, given under a dialog that
-  named document content alone, and both jobs read it. `acknowledgedHost` now means documents only, so no
-  consent given before grows; conversations have their own `acknowledgedHostForConversations`, set by the card's
-  **Allow conversations** in a dialog that names what they send. **An instance that ingested raw conversations
-  through the assist model must allow conversations once** — until then ingest refuses and says so.
-- **The user guide's media, model and embedding settings are their own chapter**
-  (`docs/userguide/04a-media-and-embedding.md`). The settings chapter had reached the 900-line limit, and
-  the Models tab is a topic of its own. Every anchor is unchanged, so the in-app help links still land.
-
-- **The README describes Ythril as a knowledge management system, and its quickstart works on 5.x.**
-  It pitched a memory for one assistant, and a rename had left it saying *"give your AI a fact"* and *"the
-  fact layer"*. The quickstart pointed MCP clients at `/mcp/general`, a 4.x per-space address that 5.0
-  replaced with the single `/mcp`, and it named two tools, `find_similar` and `er_model`, that 5.x does
-  not register. It now leads with what the product holds (semantic search, the graph, the timeline,
-  files, sync, one API over MCP and REST), shows the REST door beside the MCP one, and publishes the
-  LoCoMo result with its method. The gate holding the README's lookup claim matched the retired
-  `find_similar` name, so it kept passing on a stale sentence. It now matches the blind-spots claim, and
-  the tool names are checked against the registry.
+- **Docs:** The user guide's media, model and embedding settings are their own chapter (`04a`), anchors unchanged.
+- **Docs:** The README describes Ythril as a knowledge management system; its quickstart points MCP clients at `/mcp`.
+- **Docs:** The 5.0.0 breaking table lists all ten retired `GET` routes with their verb and says to reconnect MCP
+  clients after upgrading.
 
 ### Fixed
 
-- **A round arriving from a peer can no longer pass itself off as this instance's own** (security, `S-7`). An
-  instance read "I proposed this" off the round's subject, which a peer sets — so a peer could make a member
-  treat a space addition as its own, joining a private space of the same name to the network, and a passed schema
-  change as an edit of its own definitions. Each instance now records which rounds it opened itself and never takes
-  that from a peer. (The same fix's voter rule shipped in 5.1.7.)
-- **Starting ingest runs is rate limited on REST as it already was on MCP** (security, `S-8`). The MCP
-  `ingest` tool was held to the heavy-call limit while `POST /api/brain/spaces/:spaceId/ingest` had only the global
-  limiter, so a token allowed to write knowledge could start runs without bound over REST and exhaust the model
-  backends. The limit now sits in the one module both doors call, the two doors share a single count per token, and
-  only a run that actually starts is counted.
+- **Networks:** A network card counts one member in the singular in English, German and Polish.
+- **Networks:** A member's link direction and address now show on the Networks page; every member read `both` with no
+  address.
+- **Sync:** A space mapped under another name at join now answers its peers; their requests for the network's name were
+  refused with `403`, so every sync cycle a peer ran for it failed.
+- **Sync:** An unchanged network schema no longer rewrites the config file on every sync cycle.
+- **Records:** A batch item (`POST /bulk`, `save_bulk`) no longer drops `superseded` and `suppressEmbeddings` on any
+  record kind; a non-boolean refuses the item.
+- **Files:** A REST upload whose metadata write failed now fails the request instead of answering 2xx with bytes on disk
+  and no record behind them, as MCP `write_file` always did.
+- **Search:** A recall across several spaces reranks once over all candidates, in one request of at most 100 passages,
+  instead of once per space; an instance reaching many spaces no longer answers `degraded: ["rerank_unavailable"]`.
+- **MCP:** An edit made through an MCP tool is audited with its before and after as `changes` and the record id, as REST
+  already did, on ten tools (record edits, entity merge, network settings and space additions, space and schema updates).
+- **Help:** The MCP server instructions and `help()` no longer name removed tools (`list_chrono`, `find_similar`,
+  `list_peers`, `sync_now`, `find_entities_by_name`, `get_space_meta`); `retry_embed_record` names `retry_embed_file`.
+- **Errors:** The entity-delete `409` no longer says there is no cascade delete; it says the cascade removes the
+  blocking edges.
+- **Ingest:** A document pasted into a conversation is no longer mined into claims; it is marked as material the speaker
+  brought and no longer sets the size of the writer's prompt.
+- **Ingest:** A fact an assistant supplied is no longer filed as the person's: only a fact the assistant originated is
+  its claim (`attributed`, stored unranked), and a speaker named `assistant` no longer fails validation.
 
+### Security
 
-- **A network card counts one member in the singular** (`Q-54`). The role badge read "1 peers", "1 subscribers";
-  one member now takes its own string in English, German and Polish.
-
-- **An unchanged network schema no longer rewrites the config every sync cycle** (`F-39.2` follow-up). Storing what
-  an upstream sent, and rebuilding the space's schema from it, saved the whole config file for every space on every
-  cycle even when nothing had changed. An identical layer is now nothing to do, and a rebuild writes only when
-  something it holds changed.
-
-- **A networked space's schema is changed by the network's vote on every door** (`Q-52`). `PATCH` and MCP
-  `schema_update` turned a schema edit on a networked space into a vote; `PUT /schema`, the single-type upsert and
-  delete, and the schema library's apply wrote it at once. They now open the same `meta_change` round and answer
-  `202 vote_pending`. A space in no network is unchanged.
-  **For an integrator:** a script that writes a networked space's schema through those routes now gets `202`
-  rather than `200`, and the schema changes only when the round passes.
-
-- **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
-  before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
-  no record id. Ten tools now record both — the record edits, the entity merge, the network settings and space
-  additions, and the space and schema updates — and a gate derives the set from the routes that record changes, so a
-  new pair cannot miss it.
-
-- **A space mapped under another name at join answers its peers** (`Q-51`). When a join maps a network's space onto
-  a local space of a different name, this instance translated the name on its own requests but not on its peers':
-  they asked for the network's name and were refused with `403`, so every sync cycle a peer ran for that space
-  failed, while this instance's own cycle still moved the data. Incoming sync requests are now translated before
-  anything admits or reads by them.
-
-- **A network member's link direction and address were never shown on the Networks page.** Each member row read two
-  field names the server does not send, so every member was labelled `both` — a publisher's subscriber included —
-  and no address appeared. The rows now show the real direction and the peer's URL.
-
-- **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
-  area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
-  reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
-- **A document pasted into an ingested conversation could be mined into claims** (`F-31`, 2.5). The claim
-  writer now sees a pasted turn marked as material the speaker brought, as a bounded preview, under a rule to
-  say what was shared and asked — never to state its contents as facts. A pasted document also no longer sets
-  the size of the writer's prompt.
-- **An ingested conversation with an assistant in it filed the assistant's facts as the person's** (`F-31`,
-  5.4 / 5.5). A claim took the speaker of its exchange's first turn, so a restaurant or a dosage an assistant
-  supplied became something the person said — and a speaker named `assistant` failed the whole ingest at
-  validation. Where an assistant speaks, the extractor now asks who originated the fact: only the assistant
-  as origin is its claim, marked `attributed` and stored unranked; restating, unclear or a refused answer is the
-  person's. An assistant's fact the conversation did nothing with is dropped and reported.
-- **A batch item dropped `superseded` and `suppressEmbeddings`** (`POST /bulk`, `save_bulk`), on all four
-  record kinds and both doors. The guide says an item takes the same fields as its single-record endpoint,
-  and every single create takes both; the batch answered 207 and stored the record without them. Both are
-  now read by one shared parser that iterates the declared flags (`parseRecordFlags`), so a non-boolean
-  refuses the item and a future flag reaches the batch door by being declared.
-- **A REST upload whose metadata write failed answered 2xx** (`files/store-file.ts`). The single-request
-  upload swallowed that failure and reported the file as written, so the bytes sat on disk with no record
-  behind them and nothing said so. It now fails the request, the same as MCP `write_file` always did.
-- **MCP clients were told to call tools that no longer exist** (Q-45). The server instructions, the first
-  text a connecting agent reads, named `list_chrono`, `find_similar`, `list_peers` and `sync_now`. `help()`
-  named `find_entities_by_name`, `get_space_meta` and a `query` tool. All of these were renamed or folded
-  away. The instructions' space sentence is now derived from the tools' own schemas.
-  `mcp-text-names-only-real-tools.test.js` fails on any snake_case word in the help, the instructions or a
-  tool description that is neither a tool nor a parameter. `retry_embed_record` pointed files at a
-  nonexistent `retry_embedding` (it is `retry_embed_file`), and a schema refusal said `get_space_meta`.
-- **The entity-delete refusal contradicted itself** (Q-45). The 409 said *"there is no cascade delete for an
-  entity"* while the same body described the cascade. It now says the cascade removes the blocking edges.
-
-- **A recall across several spaces reranks once, over all of them** (`P-35`). Reported by the platform
-  operator, 2026-09-23T1842Z: one recall naming no space, on an instance reaching 15 spaces, put 13
-  concurrent requests on the reranker. Ten of them died under the shared deadline, so the answer came back
-  `degraded: ["rerank_unavailable"]` with 2 of 10 rows reranked. Each per-space `recall` ran its own
-  cross-encoder pass, the same fan-out the query embedding had until it was embedded once. The spaces now
-  hand back their candidate pools, and the merged pool is scored in one request of at most 100 passages, so
-  the scores in one answer also come from one call. Single-space recall is unchanged.
-
-- **The benchmark harness reaches a 5.x instance** (`B-6`). Three 4.x addresses stopped it the first
-  time it ran against 5.1. The writer sent `entityIds`/`memoryIds`, which 5.0 refuses by name, so every
-  conversation stopped at its first chrono entry. The client called `recall` and `query` at their 4.x
-  per-space addresses, both removed in 5.0. And retrieval flattened recall's results but not the
-  `_graph` each one carries, so a run recorded `traverse: 1` and handed the answerer nothing the
-  traversal reached. The dropped half was the multi-hop half of the graph.
-
-- **The 5.0.0 breaking table names the retired routes with their methods, and says to reconnect MCP clients.**
-  Reported by the canary operator, 2026-09-23T0850Z and 0840Z. It said *"the five per-collection list routes
-  are gone"* — ten `GET` routes went, and an audit that matched on PATH cleared `GET .../files` because
-  `PATCH .../files` still exists. The path survived, the method did not, and their documentation ingest
-  went stale with one warning in a long log. The table now lists all ten with their verb. A client that
-  stayed connected across the upgrade holds the old tool list and sees every call fail rather than the
-  rename, so the table now says to reconnect.
+- **Networks:** A round arriving from a peer can no longer pass itself off as this instance's own: a peer could make a
+  member join a same-named private space to the network or treat a passed schema change as its own edit.
+- **Ingest:** Starting runs over REST is rate limited per token like MCP, sharing one count; before, a token allowed to
+  write could start runs without bound and exhaust the model backends.
+- **Tokens:** A stored rights matrix missing an area now reads it as `none`; before, such a matrix reached every space
+  it had a row or floor for.
 
 ### Internal
 
-- **The test stack leaves the machine room to work** (`Q-57`). Every test service now has a CPU ceiling as well as a
-  memory one, and the defaults together come to 8.5 CPUs and 16 GB — two thirds of the Docker VM at most — where nine memory
-  ceilings had added up to more than the VM and nothing bounded CPU. Each is raised by
-  `YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}` on a bigger runner, and instance A — which carries the standalone and
-  integration suites — has its own larger memory defaults (`YTHRIL_TEST_APP_A_MEM`, `YTHRIL_TEST_MONGO_A_MEM`).
-
-- **Build & Test runs on pull requests into a release branch** (`Q-56`). A patch is bumped through a PR into
-  `release/X.Y.x`, and the changelog check counts an entry under a version section that same change adds, as it
-  counts one under `[Unreleased]` — a section that already existed still does not.
-
-- **Which endpoint each assist-model caller uses is pinned before it changes** (`F-33`, characterization).
-  `which-assist-endpoint-each-caller-uses.test.js` states, through a loaded config, when the describe step, the
-  extractor's writer and its decision fallback use the assist model, so the resolver `F-33` moves them to is held to
-  the same answers.
-
-- **`npm run machine:free` gives the machine back its disk and memory in one command** (`Q-55`, `scripts/machine-free.ps1`):
-  removes the test stack, prunes everything no running container needs, trims the VM disk, then runs
-  `docker:compact` — which restarts WSL, the only thing that returns the Docker VM's held memory. `-Wipe` deletes
-  the whole data disk instead. First run: 21.9 GB returned to O:, 14 GB of memory freed.
-
-- **A merge its dates contradict can be seen as one** (`F-31`, 4.7). The entity judge now sees each turn's resolved
-  dates beside every candidate's description, and the merge question says a card whose dates contradict them is
-  not it — judged where both halves are visible, rather than guessed by a code rule.
-- **The conversation extractor writes the ARC as well as the moments** (`F-31`, 5.8, `arcs.ts`). A subject with
-  claims in three or more sessions gets one claim saying how it developed, written from those claims and checked
-  like any claim — linted, refused by the evidence gate, citation-checked, one rewrite; the writer may answer NONE.
-  It cites a few turns, never most of the conversation, and is added after change tracking so it cannot retire
-  the moments it describes.
-- **A state told in several sessions is written once** (`F-31`, 5.9, `repeats.ts`). A later telling of the same
-  unchanged fact is folded into the first claim as its source turns, so one answer does not fill five ranked slots.
-  Asked only across sessions and between claims sharing an entity; it runs before change tracking, so a change is
-  never folded away, and a person's claim is never merged with an assistant's.
-- **The conversation extractor dates an edge only when its text does** (`F-31`, 6.3, `edge-dates.ts`). `since`
-  and `until` are asked per day-precise, non-approximate date of the edge's own claims, and written only on a
-  confident yes; a date merely near the relationship dates nothing, and an end before its start writes neither.
-- **The server build copies `src/**/*.json` into `dist/`** (`server/scripts/copy-src-assets.mjs`). `tsc` emits
-  JavaScript only and the image ships `dist` only, so a data file under `src` did not exist at runtime; an empty
-  copy fails the build.
-- **The conversation extractor writes what it found** (`F-31`, phase 10, `extractor/conversation/write-extraction.ts`).
-  The server port of the benchmark's `write-space.mjs`, over the batch door rather than the bare record
-  writers, so an ingested record meets the same schema, linkage and flag rules as any other write. An
-  entity the space already held is linked by id; the validator now accepts those keys and requires a UUID.
-- **Every door writes a file through one sequence** (`files/store-file.ts`, `storeFile` / `recordStoredFile`):
-  quota, bytes, metadata, the processing queue and the webhook. The REST upload (single and chunked) and MCP
-  `write_file` each held a copy, and `ingest` was about to be the third. The hash-hand-over gate now asserts
-  the sequence once and that no door writes metadata or dispatches on its own.
-- **The extraction validator moved into the server** (`F-31`, 9.2, `extractor/validate-extraction.ts`). The
-  benchmark's `writer/validate-extraction.mjs` now re-exports it, so the benchmark writer and the product's
-  `ingest` refuse the same files for the same reasons, from one copy of the rules.
-
-- **An evidence check refutes what code can prove, before any model is asked** (`evidence/evidence-check.ts`).
-  - **What it refutes.** A text that names someone, states a number or states a date its evidence does not
-    hold is refused, with the reason.
-  - **What it never does.** It never passes a text: every term being present proves nothing about the relation
-    between them. A negation mismatch is reported as a signal and decides nothing.
-  - **Where it runs.** It is reusable. The extractor calls it in front of the citation check on claims and on
-    entity descriptions, so those failures are rewritten without a model call.
-  - The month and number words it shares with the time tagger now live in one list (`text/english.ts`).
-
-- **The conversation extractor runs end to end** (`F-31`, `extract.ts`, `assemble.ts`). Phases 1–9 run in order,
-  from a raw conversation to an extraction in the committed format. The benchmark's own validator accepts
-  the output under test.
-  - **Injected.** Every model and service is: the decision model, the writer, the NLP sidecar, the space's
-    search.
-  - **Returned.** Every judgement is kept with its raw answers, alongside the dropped claims and any
-    uncovered turns.
-  - **Existing entities.** Mentions merged into entities the space already holds go in `existingEntities`,
-    so no Ythril id appears inside a record.
-
-- **The conversation extractor describes each entity from its own claims** (`F-31`, 4.10,
-  `describe-entities.ts`). Each description is written once, at the end, and the assist model is handed only
-  the claims that name the entity. It is checked like a claim and gets one rewrite. If it still fails, the
-  entity's first claim is used as the description, because the format requires every entity to have one.
-
-- **The conversation extractor tracks change over time** (`F-31`, 7.1–7.6, `change.ts`). Each claim is compared
-  with the few earlier claims that share an entity with it. The decision model is asked four things:
-  - whether the situation was replaced, simply ended, or is unchanged;
-  - whether the earlier claim was still true of its own period (a yes vetoes retiring it);
-  - whether the two are incompatible tellings of the same fact;
-  - how two numbers relate.
-
-  Only a clear change supersedes, and a `supersedes` edge is drawn only when something replaced the earlier
-  claim. Incompatible tellings and cumulative counts are both dated to their telling ("As of 9 June 2023, …").
-
-- **The conversation extractor builds its timeline** (`F-31`, 8.1–8.4, `timeline.ts`). A claim with a resolved
-  day is a candidate event, and the decision model is asked three things:
-  - its status: completed, upcoming, cancelled, or unclear (`active` and `overdue` cannot be chosen);
-  - whether it is merely ongoing;
-  - whether it genuinely lasted more than a day, asked only when the conversation gave both ends.
-
-  An unclear status, an ongoing thing, or no usable date means no timeline entry, and the date stays in the
-  claim. A span needs both given ends and a confident multi-day answer.
-
-- **The conversation extractor draws only legal edges** (`F-31`, 6.1 / 6.2, `relations.ts`). For each pair of
-  entities one claim names, the decision model chooses among the labels whose declared endpoint types fit the
-  pair, in the direction they fit, or `none`. Code filters the vocabulary before asking and checks the answer
-  after, so an illegal edge is never written. The same edge from two claims is one edge citing both.
-
-- **The conversation extractor writes one claim per exchange, and checks it** (`F-31`, 5.2 + 5.10,
-  `write-claim.ts`).
-  - **Writing.** The assist model is handed the exchange with its dates already resolved ("9 May 2023") and
-    its entities already named, so it has nothing to work out itself. Turns about nothing are cited but never
-    handed to it.
-  - **Checking.** The claim is linted, then the decision model judges whether its own turns support it.
-  - **Failures.** Either failure gets one rewrite with the reason attached; a second failure drops the claim
-    and reports it. A refused check is not a pass.
-
-- **The extractors write through the assist model, and wait out a busy model in one place** (`F-31`,
-  `extractor/generate.ts`, `extractor/model-post.ts`).
-  - **Who writes.** The steps that must write text (a claim's sentence, an arc, a description) go to
-    `documentProcessing.assistModel`, and only once its host is consented to.
-  - **Waiting.** The retry-and-stop logic for 429, 503 and 529 is now one helper, shared by the decision
-    client and the generation client.
-
-- **The conversation extractor groups turns into exchanges and checks its claims** (`F-31`, 5.1 / 5.3 / 5.7,
-  `claims.ts`).
-  - **Grouping.** Per session, one request asks whether each turn continues the exchange before it, starts
-    one, or is about nothing. A refused answer continues; a turn about nothing rides along and is never
-    written from.
-  - **Checking.** A written claim is refused if a resolved date is missing, if it opens with a pronoun, or if
-    it carries turn or session references.
-  - **Coverage.** Every turn ends up in some claim's source turns, and an exchange with no claim is reported.
-  - **Linking.** A claim is linked to the entities it names among those its turns mention. A thing
-    mentioned once is minted when a claim names it; a turn that merely falls inside a claim is not enough.
-
-- **The conversation extractor judges its entities** (`F-31`, 4.12 / 4.2 / 4.4 / 4.6, `judge-entities.ts`).
-  - **What is asked.** Per turn, one request asks the decision model about every mention: is it a thing the
-    conversation is about, which shortlisted entity is it or is it new, which of the space's types it would
-    be, and whether it names a group.
-  - **What is not asked.** A pronoun is only asked what it refers to. *"I"* and *"you"* are the speaker and
-    the addressee, and are not asked at all.
-  - **The policy, in code.**
-    - A picked entity is a merge.
-    - A type the space does not declare, or `none`, means no entity.
-    - Only what the conversation returns to is minted: a thing mentioned once is kept aside for a claim to
-      link.
-    - Every other surface form becomes an alias.
-  - Raw answers are kept with the run; the thresholds are 0.5 and still unmeasured.
-
-- **The conversation extractor shortlists what a mention could be** (`F-31`, 4.3, `shortlist.ts`). The
-  decision model then picks from the shortlist (4.4); it can only pick a card it was dealt, so the hand is
-  generous, bounded to six, and built from four sources:
-  - the run's own entities, exact names first, then near spellings and shared distinctive words;
-  - the speaker for *"I"* and the other person for *"you"*;
-  - the recent turns' entities for *"it"*, *"they"* and *"the book"*;
-  - the space's own entity search, once per distinct mention.
-
-  On the committed extractions it deals the right entity for 85% of later mentions, up from 62% on names
-  alone. The recall gate is local-only.
-
-- **Cleanup, part 1** (Q-45). Removed, in each case with nothing referencing it:
-  - 165 committed build files (`client/out-tsc/`, now ignored).
-  - Debris files: `purge_networks.py`, `server/_gen_token.mjs`, two `testing/_init` scratch scripts, and a
-    one-off script carrying a personal path.
-  - Eight npm packages that nothing imports: `multer`, `@types/multer`, eslint and its two plugins (there is no
-    eslint config), `@phosphor-icons/core`, `@angular/platform-browser-dynamic`, `@types/sharp`,
-    `@types/dompurify`. The lockfile is ~1,100 lines shorter.
-  - 24 eslint-disable comments.
-  - 30 exported functions and constants that no code or test used, including a second, unused file-quota
-    check.
-  - Six test files that guarded features removed in 3.0/3.1 or tested local copies of the code instead of the
-    code.
-
-- **Sidecar health probes are one module** (`util/sidecar-health.ts`). The cached `/health` probe was private
-  to the render client, and the NLP client would have been its second copy.
-
-- **The conversation extractor asks its first judgement questions** (`F-31`, DECOMPOSITION.md 2.3, 2.5,
-  3.4, 3.12). `judge-turns.ts` asks only about what the code half flagged:
-  - a speaker's role, when the source does not say, asked once per speaker;
-  - whether a candidate paste is material the speaker brought;
-  - whether a bare weekday points back or forward;
-  - whether a forward weekday said on that same weekday means today.
-
-  A turn with nothing to ask sends no request. An unclear or refused answer always takes the outcome that
-  cannot add a wrong fact: a person, the speaker's own words, no day. The raw answers are kept with the run,
-  so the thresholds (0.5, unmeasured) can be measured later without asking again.
-
-- **Egress consent is one function** (`config/egress-consent.ts`). The *"is this the host the operator
-  acknowledged"* comparison was written out in the document describer, the repair pass, the face model and
-  the settings route. All four now ask `egressConsented`, and a gate refuses a hand-written comparison
-  anywhere in `server/src`. The save-time refusal moved there too, so the decision model's settings reuse it.
-
-- **The conversation extractor's load, classify and time phases are code** (`F-31`). `classify.ts` splits
-  image captions from speech and keeps them apart, so a caption can never become a claim. It proposes paste
-  candidates, each with the reason it was proposed. It also marks a photo-only reaction to ride along in a
-  neighbour's claim. `load.ts` refuses a conversation it
-  cannot read, naming every problem at once. It puts sessions in time order rather than page order, keys
-  two sessions on one day apart, and gives every turn an id. `time.ts` finds temporal expressions and
-  resolves them by the prompt's own rules, as calendar arithmetic in UTC:
-  - *"last Friday"* said on a Friday is seven days back;
-  - a weekend that contains today is not *"last weekend"*;
-  - *"about three weeks ago"* stays approximate, with no day derived from it;
-  - *"last week"* gives no day.
-
-  It also decides what may reach a timeline. A two-ended range becomes a span only when the event
-  genuinely took more than a day. That judgement, and whether the exchange places a weekday today, are
-  handed in rather than guessed. So is a bare weekday's direction — newly decomposed as step 3.12,
-  because it is the sentence's tense. 30 tests, each worked from a rule the prompt states; two were seen
-  red by letting the day of speaking count. No route yet.
-
-- **The conversation extractor is decomposed before it is built** (`F-31`, first step). `ingest` will turn
-  a raw conversation into records inside the product, so an independent harness can reproduce what today
-  needs an assistant session. `server/src/extractor/conversation/DECOMPOSITION.md` traces every rule of the
-  extraction prompt to one of three treatments:
-  - code;
-  - a bounded Jev-style decision over a domain the code supplies (choice, score or probability);
-  - open-world writing.
-
-  Of 66 steps, 40 become code and 4 remain writing: even a mention is found by code and judged by the
-  model, never named by it, and every written claim is checked against its own source turns. The space must already hold the extractor's schema
-  group; `ingest` refuses before any model call otherwise, and never writes schema itself. The type and label choices draw from the schema, so an
-  invented type is impossible rather than forbidden. The schemas sit beside it one file per record type, the
-  way the `flows` space lays its own out. A gate recounts the tally from the tables and holds the split
-  schemas identical to the benchmark's until the benchmark reads them from here.
-
-- **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
-  engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
-  stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.
+- **Server:** Unused npm packages (`multer`, eslint and its plugins, `@phosphor-icons/core`,
+  `@angular/platform-browser-dynamic`, several `@types/*`) are no longer dependencies.
+- **Server:** `npm run machine:free` removes the test stack, prunes unused Docker data, trims the VM disk and runs
+  `docker:compact`; `-Wipe` deletes the whole data disk instead.
+- **Server:** Test services have CPU and memory ceilings, raised by `YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}`, and
+  Build & Test runs on pull requests into `release/X.Y.x`.
 
 ## [5.1.7] — 2026-09-25
 
