@@ -241,6 +241,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A negative `limit` on a sync read no longer returns the whole collection, and a read by id (`/api/sync/<family>/:id`)
   no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
 
+## [5.6.7] — 2026-10-06
+
+A security patch: the sync read routes no longer return a whole collection, or a record's internal fields, to a caller that asks.
+
+| Changes on upgrade | Action |
+|---|---|
+| Sync reads: a `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400` (was an empty page); `limit` below 1 reads 1 | Send back the `nextCursor` a page returned |
+
+### Security
+
+- **Sync:** A negative `limit` on a sync read no longer returns the whole collection, and a read by id (`/api/sync/<family>/:id`)
+  no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
+
 ## [5.6.6] — 2026-10-06
 
 Fixes only: one failing space no longer stops the others, and four background-job defects are gone.
