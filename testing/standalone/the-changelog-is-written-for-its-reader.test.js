@@ -37,6 +37,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { CHANGELOG_KINDS as KINDS } from '../../scripts/changelog-section.mjs';
 
 const FILE = 'CHANGELOG.md';
 
@@ -49,23 +50,20 @@ const MAX_OPENING_CHARS = 300;
 
 /**
  * THE CEILINGS ARE A RATCHET: lower them, never raise them. Both are the densified file's own figure plus a margin
- * of about 10 per cent, so a section that grows past its neighbours fails here before it becomes the next 1 272
+ * of about 10 per cent, so a section that grows past its neighbours fails here before it becomes the next thousand
  * lines. A change that genuinely needs more room tightens older entries to make it — which is the point.
  *
- * SECTION_MAX_LINES: the longest section of the densified file (`[Unreleased]`, 229 lines, whose upgrade table alone
- * is 32 rows) plus the margin. Every released section is far under it — the largest, 5.0.0 which renamed every public
- * name at once, is 167 — so for a patch release it is a loose bound; the entry cap above is what keeps a patch short.
- * And at the cut `[Unreleased]` becomes a release section, so it must fit the same ceiling.
+ * SECTION_MAX_LINES: the longest section of the densified file (`[Unreleased]`, whose upgrade table is most of it)
+ * plus the margin. Every released section is far under it, so for a patch release it is a loose bound; the entry cap
+ * above is what keeps a patch short. And at the cut `[Unreleased]` becomes a release section, so it must fit the same
+ * ceiling.
  * FILE_MAX_BYTES: the whole file, densified, plus the margin, counted with LF endings so a Windows checkout and CI
- * agree. The file was 445 058 bytes.
+ * agree.
  */
 const SECTION_MAX_LINES = 250;
 /** A `**Subject:**` lead names a product area; longer than this, it is a sentence in bold. */
 const SUBJECT_MAX_CHARS = 39;
 const FILE_MAX_BYTES = 134000;
-
-/** The six kinds, in Keep-a-Changelog order with this project's `Internal` last. */
-const KINDS = ['Added', 'Changed', 'Removed', 'Fixed', 'Security', 'Internal'];
 
 /** The table a release's breaking changes go in. */
 const TABLE_HEADER = '| Changes on upgrade | Action |';
@@ -114,12 +112,15 @@ function sectionsOf(src) {
 }
 
 /**
- * Every list entry of a section and every table row, each with the lines it spans.
- * An entry is a `- ` line and the non-blank lines after it that are not a new bullet, heading or table row.
+ * Every list entry of a section, every table row, and every paragraph under a kind heading, each with the lines it
+ * spans. An entry is a `- ` line and the non-blank lines after it that are not a new bullet, heading or table row.
+ * A paragraph under a `###` heading is an entry too: left out, a block of prose there would escape every rule below.
+ * The prose BEFORE the first `###` is the release's opening sentence, which has its own rule.
  */
 function entriesOf(section) {
   const out = [];
   let cur = null;
+  let underHeading = false;
   const flush = () => { if (cur) { out.push(cur); cur = null; } };
   for (const { n, text } of section.lines) {
     if (!text.trim()) { flush(); continue; }
@@ -129,9 +130,9 @@ function entriesOf(section) {
       if (!/^\|[\s|:-]+\|?$/.test(text)) out.push({ n, kind: 'row', rows: [text] });
       continue;
     }
-    if (/^#{1,6} /.test(text)) { flush(); continue; }
+    if (/^#{1,6} /.test(text)) { flush(); underHeading = true; continue; }
     if (cur) cur.rows.push(text);
-    else flush();
+    else if (underHeading) cur = { n, kind: 'prose', rows: [text] };
   }
   flush();
   return out.map(e => ({ ...e, text: e.rows.map(r => r.trim()).join(' ') }));

@@ -204,6 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server:** The notify event store holds at most 1 MiB (oldest out first) and its event list pages and says when it is cut.
 - **Database:** Pushed and pulled pages and store-side bulks write in chunks of at most 99 999 operations and 16 MiB; a duplicate key
   then a timeout answers `503`, not `400`. The `MONGO_URI` user must be able to list and end its own operations, or each backstop ending logs an error.
+- **Database:** A write answered `503` "timed out, retry" can no longer land after the answer: the server's own deadline
+  ends it, and a backstop 500 ms later covers the one wait it does not interrupt.
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large
   entity merge no longer prints `MaxListenersExceededWarning`.
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup
@@ -868,6 +870,7 @@ records, and `ingest` turns a conversation into records.**
   braintree topology acts, instance-admin; no network act is REST-only now.
 - **Networks:** Each network shows what this instance is in it (Publisher, Subscriber, Organiser, Member, Root, Node,
   Leaf) and the members and spaces it acts on; `myRole` is on `GET /api/networks`, `GET /api/networks/:id`, `network_get`.
+- **Networks:** A club created from 5.2.0 on remembers its organiser; one stored before reads as Member there.
 - **Networks:** A pub/sub publisher or tree root can add a space to an existing network from the network card,
   `POST /api/networks/:id/spaces` or MCP `network_add_space` (audited `network.space.add`).
 - **Networks:** Members adopt an added space on their next sync from upstream only: created if missing, merged if
@@ -1222,6 +1225,8 @@ default); take it if your agents call them.
 
 - **Records:** A space whose link conversion failed refuses every link read with an error naming it: read the startup
   log and restart. Outside a container `npm run links:convert` converts too (`-- --preview` counts, `-- <spaceId>`: one).
+- **Records:** The link conversion no longer deletes links that existed only as link records. A space converted before
+  this fix lost them, with tombstones that reached peers: re-create them; nothing else was touched.
 - **Search:** Port a list route to `filter` with `collection`: `?name=` → `filter: { name }`, `?tags=` / `?tagsAny=` →
   `$all` / `$in`, `?after=` / `?before=` → a `createdAt` range, `?path=` → `path`, one id → `{ "_id": "…" }`, a set `$in`.
 - **Search:** `?entity=<id>` has no `entityIds` predicate now that the link arrays are gone: filter the `links` collection
@@ -1256,7 +1261,7 @@ default); take it if your agents call them.
 - **Records:** Merging two entities re-keys the absorbed entity's link records to the survivor, tombstoning the old id;
   they were left pointing at the deleted entity.
 - **Schemas:** A type schema (4000 characters) and any property (2000) take a prose `description`: stored, returned by
-  `get_space_meta` and the space listing, editable in the Schema tab, never parsed.
+  `space_meta` and the space listing, editable in the Schema tab, never parsed.
 - **Schemas:** A property `default` now follows the declared type when the type changes (it was saved as `"5"` for a
   number, so a strict space refused records it created itself) and is omitted when the text cannot be one.
 - **Schemas:** A schema type can be renamed on every knowledge type, keeping its properties and position and following
