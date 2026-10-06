@@ -16,6 +16,13 @@
  * so it would not even truncate in the same place twice.
  */
 
+/**
+ * The six heading kinds a section may hold, in Keep-a-Changelog order with this project's `Internal` last.
+ * `Deprecated` is absent: a deprecation is recorded in `todo/_DEPRECATIONS.md` and announced under `Changed`.
+ * One list for every gate that reads the headings — a second copy is a kind one gate accepts and another refuses.
+ */
+export const CHANGELOG_KINDS = Object.freeze(['Added', 'Changed', 'Removed', 'Fixed', 'Security', 'Internal']);
+
 /** Match a dated release heading for `version`, e.g. `## [3.1.0] — 2026-08-17`. Both dash forms. */
 export function headingFor(version) {
   return new RegExp(`^## \\[${version.replace(/\./g, '\\.')}\\]\\s+[—-]\\s+(\\d{4}-\\d{2}-\\d{2})`, 'm');
