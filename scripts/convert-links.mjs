@@ -21,6 +21,10 @@
  * only where that space's walk had no failures. The marker cannot be turned off again: with the 4.x arrays
  * removed in 5.0 there is no other shape for a space to be read through.
  *
+ * **A space that cannot be converted does not stop the others, and the exit code says so.** Each space is converted on its
+ * own; one that fails is NAMED with its reason, is not marked, and has its file seqs left unstamped, and the script exits
+ * non-zero so a deploy step does not read a partial run as a clean one.
+ *
  * Safe to run twice. A link's id is derived from the connection, so a second run recomputes the same ids,
  * finds them already stored, and writes nothing — which also means an interrupted run is fixed by running it
  * again rather than by working out where it stopped.
@@ -37,7 +41,7 @@ const dist = (p) => pathToFileURL(path.join(process.cwd(), 'server', 'dist', p))
 
 const { loadConfig } = await import(dist('config/loader.js'));
 const { connectMongo, closeMongo } = await import(dist('db/mongo.js'));
-const { convertSpaceLinks, convertAllLinks, previewSpaceLinks, stampFileMetaSeqs, linkConversionConcerns } =
+const { convertSpaceLinks, convertAllLinks, previewSpaceLinks, stampFileMetaSeqs, linkConversionConcerns, unreconciledReason } =
   await import(dist('brain/links-conversion.js'));
 const { getConfig } = await import(dist('config/loader.js'));
 
@@ -86,14 +90,25 @@ if (preview) {
 }
 
 let reports;
+// Every space this run did NOT convert, each with its reason: what the output names and the exit code answers for.
+let failedSpaces;
 try {
   if (only) {
     // One named space converts but is NOT marked complete: `completeLinkage` says every link in the space is
     // a record, and a single-space run is the shape an operator uses to try one first. Marking it from here
     // would let a partial pass answer for the whole instance.
-    reports = [await convertSpaceLinks(only)];
+    try {
+      const report = await convertSpaceLinks(only);
+      reports = [report];
+      failedSpaces = report.failed > 0 ? [{ spaceId: only, reason: unreconciledReason(report) }] : [];
+    } catch (err) {
+      // A space that could not be converted at all is named, with its reason: a stack trace names a line of ours.
+      reports = [];
+      failedSpaces = [{ spaceId: only, reason: err instanceof Error ? err.message : String(err) }];
+    }
   } else {
-    reports = await convertAllLinks();
+    // Each space on its own: one that fails is named in `failedSpaces` and the others are still converted and marked.
+    ({ reports, failedSpaces } = await convertAllLinks());
   }
 
   /*
@@ -108,20 +123,34 @@ try {
    *
    * So it lives on the operator path, which is this file, and it covers BOTH branches from one place —
    * a second call inside the `if` above is the shape that lets one branch drift away from the other.
+   *
+   * NOT for a space that failed. A file's `seq` is what makes it page to a peer, and a space whose walk was partial is a
+   * space the operator is about to run again: stamping its records now would hand them a counter value from a run that
+   * did not finish. The output says so beside each such space.
    */
-  for (const r of reports) r.fileSeqsStamped = await stampFileMetaSeqs(r.spaceId);
+  const failedIds = new Set(failedSpaces.map(f => f.spaceId));
+  for (const r of reports) {
+    if (!failedIds.has(r.spaceId)) r.fileSeqsStamped = await stampFileMetaSeqs(r.spaceId);
+  }
 } finally {
   await closeMongo();
 }
 
-let failed = 0;
+const failedIds = new Set(failedSpaces.map(f => f.spaceId));
 for (const r of reports) {
+  if (failedIds.has(r.spaceId)) continue;
   const scanned = Object.entries(r.scanned).map(([c, n]) => `${c}=${n}`).join(' ');
   console.log(`${r.spaceId}: ${scanned} | links added ${r.added} | failed ${r.failed}`
     + ` | file seqs stamped ${r.fileSeqsStamped ?? 0}`);
-  failed += r.failed;
+}
+for (const f of failedSpaces) {
+  console.error(`${f.spaceId}: FAILED (${f.reason}) | not converted, not marked | file seqs NOT stamped`);
+}
+if (failedSpaces.length > 0) {
+  console.error(`\n${failedSpaces.length} space(s) were NOT converted: ${failedSpaces.map(f => f.spaceId).join(', ')}. `
+    + 'Every other space was converted. A boot retries them, and so does running this again once the cause is fixed.');
 }
 if (only) console.log('single space: completeLinkage was NOT set — run without an argument to mark the instance.');
 
-// A non-zero exit on failures, so a run inside a deploy step does not report success over a partial walk.
-process.exit(failed > 0 ? 1 : 0);
+// A non-zero exit when a space was not converted, so a run inside a deploy step does not report success over a partial walk.
+process.exit(failedSpaces.length > 0 ? 1 : 0);

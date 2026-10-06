@@ -197,18 +197,23 @@ describe('the link conversion is complete, idempotent and non-destructive', { sk
   });
 
   it('convertAllLinks sets completeLinkage on a clean run', async () => {
-    await convertMod.convertAllLinks();
+    const { reports, failedSpaces } = await convertMod.convertAllLinks();
     const space = loader.getConfig().spaces.find(s => s.id === SPACE);
     assert.equal(space.completeLinkage, true,
       'the conversion finished clean and the space is not marked, so nothing in 2b can tell a converted'
       + '\n  space from one that has never been touched');
+    assert.deepEqual(failedSpaces, [], 'a clean run names a failed space');
+    assert.deepEqual(reports.map(r => [r.spaceId, r.added, r.failed]), [[SPACE, EXPECTED.length, 0]]);
   });
 
   it('and a space that is already converted stays marked without re-writing anything', async () => {
     await convertMod.convertAllLinks();
     const before = await linkPairs();
-    await convertMod.convertAllLinks();
+    const second = await convertMod.convertAllLinks();
     assert.deepEqual(await linkPairs(), before);
     assert.equal(loader.getConfig().spaces.find(s => s.id === SPACE).completeLinkage, true);
+    assert.deepEqual(second.failedSpaces, []);
+    assert.deepEqual(second.reports.map(r => [r.spaceId, r.added, r.failed]), [[SPACE, 0, 0]],
+      'the second run created records, or named a failure over a space that is already converted');
   });
 });

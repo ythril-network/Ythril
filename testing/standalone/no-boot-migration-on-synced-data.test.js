@@ -232,7 +232,9 @@ describe('the sweep works before it is trusted', () => {
      * was a reason the earlier attempts resolved nothing.
      */
     const reach = reachableFrom(INDEX, bootRoots());
-    assert.ok(reach.has('server/src/brain/links-conversion.ts:convertSpaceLinks'),
+    // `convertSpaceInWalk`, the conversion of ONE space inside the walk `convertAndMarkSpaces` runs (b53 G19): the boot reaches
+    // it through that walk, and `convertSpaceLinks` is the single-space entry the script uses.
+    assert.ok(reach.has('server/src/brain/links-conversion.ts:convertSpaceInWalk'),
       'the boot walk no longer reaches the link conversion, so it is back to reading one body at a time');
   });
 

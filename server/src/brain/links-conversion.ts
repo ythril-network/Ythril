@@ -34,7 +34,8 @@ import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
 import { LINK_CLASSES, legacyField } from './link-adjacency.js';
-import { log } from '../util/log.js';
+import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isProxy } from '../spaces/proxy.js';
 
@@ -201,7 +202,30 @@ export async function previewSpaceLinks(spaceId: string): Promise<ConversionPrev
   return out;
 }
 
+/** The step the conversion's failures are counted and said under (`util/housekeeping-signals.ts`). */
+export const LINK_CONVERSION_STEP = declareStep('Link conversion');
+
+/**
+ * Convert ONE space and report it, as a walk of its own: the entry for a caller that has a single space in hand (the script's
+ * named-space mode). It THROWS when the space itself could not be converted (a collection that cannot be read, a store that
+ * stopped answering), as the walk it replaced did; a document that did not reconcile is `report.failed`, not a throw.
+ *
+ * A caller that already walks spaces does not call this: it calls {@link convertAndMarkSpaces}, which converts inside ITS walk.
+ * Two walks nested would report one failure twice and count one timeout against two budgets.
+ */
 export async function convertSpaceLinks(spaceId: string): Promise<ConversionReport> {
+  let report: ConversionReport | undefined;
+  const walk = await eachSpace(LINK_CONVERSION_STEP, [spaceId], async () => { report = await convertSpaceInWalk(spaceId); }, { when: 'next boot' });
+  if (report) return report;
+  throw new Error(walk.failed[0]?.reason ?? 'the conversion did not run');
+}
+
+/**
+ * Convert one space, inside a walk: the documents are the units (`eachUnit`), so a document that fails is reported by name and
+ * counted, and a timeout or a store that stopped answering ends the SPACE at once. A catch of its own here would count a hung
+ * space's every document as a document that did not reconcile and pay one bound for each of them.
+ */
+async function convertSpaceInWalk(spaceId: string): Promise<ConversionReport> {
   const report: ConversionReport = { spaceId, scanned: {}, added: 0, failed: 0 };
 
   for (const [suffix, fromKind] of Object.entries(LINK_BEARING_COLLECTIONS)) {
@@ -218,32 +242,11 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
         .toArray() as Array<Record<string, unknown> & { _id: string }>;
       if (docs.length === 0) break;
 
-      for (const doc of docs) {
-        report.scanned[suffix] = (report.scanned[suffix] ?? 0) + 1;
-        try {
-          /*
-           * ADDITIVE, and the COUNT comes from the writer rather than from a measurement around it.
-           *
-           * Both halves were wrong together. The desired set is built from the legacy ARRAYS, so a link
-           * that already existed as a RECORD — which is what `linkEntities` wrote before `Q-28` — was
-           * named by nothing and got deleted, with a tombstone, so the loss replicated to every peer.
-           * A migration announced as *"additive: nothing is removed"* removed data.
-           *
-           * And the count was a countDocuments DELTA reported as *"N link(s) created"*: one creation
-           * and one removal netted to `0`, indistinguishable from nothing to do, and a lone removal
-           * printed `-1`. A live instance printed exactly that. `reconcileLinks` already returns both
-           * numbers; measuring around it was a second implementation of a count it hands back.
-           */
-          const { added } = await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc, { additive: true });
-          report.added += added;
-        } catch (err) {
-          // One bad document must not stop the walk. It is counted, and the count is what withholds the
-          // marker — a conversion that skipped a record and then claimed completeness is the failure this
-          // whole design exists to avoid.
-          report.failed++;
-          log.warn(`convert links ${spaceId}/${suffix}/${doc._id}: ${err}`);
-        }
-      }
+      // One bad document must not stop the walk. It is reported by name and counted, and the count is what withholds the
+      // marker — a conversion that skipped a record and then claimed completeness is the failure this whole design exists
+      // to avoid.
+      const { failed } = await eachUnit(docs, doc => convertDocument(report, suffix, fromKind, doc), doc => `${suffix}/${doc._id}`);
+      report.failed += failed.length;
       after = docs[docs.length - 1]?._id;
     }
   }
@@ -252,18 +255,94 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
 }
 
 /**
- * Convert every space this instance holds, then mark the ones that finished clean.
- *
- * The marker is written per space and only when that space's walk had no failures. A single space that could
- * not be converted must not stop the others from being marked, and must not be marked itself.
+ * One document's links, added to `report`. A concise call from `eachUnit` on purpose: `no-boot-migration-on-synced-data` walks the
+ * boot graph through a call and not into a closure's braces, so what a document's conversion reaches would be invisible to it.
  */
-export async function convertAllLinks(): Promise<ConversionReport[]> {
+async function convertDocument(
+  report: ConversionReport, suffix: string, fromKind: NonNullable<(typeof LINK_BEARING_COLLECTIONS)[string]>,
+  doc: Record<string, unknown> & { _id: string },
+): Promise<void> {
+  report.scanned[suffix] = (report.scanned[suffix] ?? 0) + 1;
+  /*
+   * ADDITIVE, and the COUNT comes from the writer rather than from a measurement around it.
+   *
+   * Both halves were wrong together. The desired set is built from the legacy ARRAYS, so a link
+   * that already existed as a RECORD — which is what `linkEntities` wrote before `Q-28` — was
+   * named by nothing and got deleted, with a tombstone, so the loss replicated to every peer.
+   * A migration announced as *"additive: nothing is removed"* removed data.
+   *
+   * And the count was a countDocuments DELTA reported as *"N link(s) created"*: one creation
+   * and one removal netted to `0`, indistinguishable from nothing to do, and a lone removal
+   * printed `-1`. A live instance printed exactly that. `reconcileLinks` already returns both
+   * numbers; measuring around it was a second implementation of a count it hands back.
+   */
+  const { added } = await reconcileLinksForDocument(report.spaceId, doc._id, fromKind, doc, { additive: true });
+  report.added += added;
+}
+
+/** A space that was not converted, and why: what the boot ERROR line and the script's output name. */
+export interface FailedLinkConversion { spaceId: string; reason: string }
+
+/** What a conversion run did: a report per space it walked to the end, and every space that is NOT converted. */
+export interface ConversionOutcome {
+  reports: ConversionReport[];
+  /**
+   * Every space this run left unconverted and unmarked, in the order given, each with its reason: one that threw, one with
+   * documents that did not reconcile, and one the run never reached (the store stopped answering, or the space is in
+   * quarantine). A space absent from this list, and present in `reports`, is converted.
+   */
+  failedSpaces: FailedLinkConversion[];
+}
+
+/** Why a space whose walk finished is still not converted: the documents that did not reconcile. */
+export function unreconciledReason(report: ConversionReport): string {
+  return `${report.failed} document(s) failed to reconcile`;
+}
+
+/**
+ * One space, inside `convertAndMarkSpaces`'s walk: converted, and marked only when no document failed. A concise call from the
+ * walk on purpose (see {@link convertDocument}: the boot gate follows calls, not closure bodies).
+ */
+async function convertAndMarkSpace(spaceId: string, reports: ConversionReport[], unreconciled: Map<string, string>): Promise<void> {
+  const report = await convertSpaceInWalk(spaceId);
+  reports.push(report);
+  if (report.failed > 0) { unreconciled.set(spaceId, unreconciledReason(report)); return; }
+  updateSpace(spaceId, { completeLinkage: true });
+}
+
+/**
+ * Convert each of `spaces` on its own and mark the ones that finished clean — the ONE place the rule "marked only on a clean
+ * walk" is written, for the boot conversion and the operator's script alike (they had a copy each, and the weaker one is the
+ * one that threw away the other spaces).
+ *
+ * The marker is written per space and only when that space's walk had no failures: `completeLinkage` makes a space refuse
+ * array writes, so marking one whose walk was partial would start refusing writes for links that were never created. A space
+ * that failed does not stop the others (`eachSpace`: isolated, bounded, one bound for a hung space, the walk ended for a store
+ * that does not answer), is not marked, and is NAMED in `failedSpaces` with its reason, because a caller that was handed only
+ * the reports could not tell "converted" from "never reached".
+ */
+export async function convertAndMarkSpaces(spaces: readonly { id: string }[]): Promise<ConversionOutcome> {
   const reports: ConversionReport[] = [];
-  for (const space of getConfig().spaces) {
-    if (!linkConversionConcerns(space)) continue;
-    const report = await convertSpaceLinks(space.id);
-    if (report.failed === 0) updateSpace(space.id, { completeLinkage: true });
-    reports.push(report);
+  const unreconciled = new Map<string, string>();
+  const walk = await eachSpace(LINK_CONVERSION_STEP, spaces, space => convertAndMarkSpace(space.id, reports, unreconciled), { when: 'next boot' });
+
+  const threw = new Map(walk.failed.filter(f => f.unit === undefined).map(f => [f.spaceId, f.reason]));
+  const reached = new Set(walk.outcomes.filter(o => o.status !== 'skipped').map(o => o.spaceId));
+  const notReached = walk.storeDown ? 'not reached: the store stopped answering before this space'
+    : walk.stalled ? 'not reached: several spaces in a row ran past their time bound, so the walk stopped'
+      : 'skipped: it ran past its time bound recently and is waiting out its quarantine';
+  const failedSpaces: FailedLinkConversion[] = [];
+  for (const { id } of spaces) {
+    const reason = threw.get(id) ?? unreconciled.get(id) ?? (reached.has(id) ? undefined : notReached);
+    if (reason !== undefined) failedSpaces.push({ spaceId: id, reason });
   }
-  return reports;
+  return { reports, failedSpaces };
+}
+
+/**
+ * Convert every space this instance holds, then mark the ones that finished clean ({@link convertAndMarkSpaces}). A proxy is
+ * not walked: it holds no records of its own (`linkConversionConcerns`).
+ */
+export async function convertAllLinks(): Promise<ConversionOutcome> {
+  return convertAndMarkSpaces(getConfig().spaces.filter(linkConversionConcerns));
 }
