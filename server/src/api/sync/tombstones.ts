@@ -23,6 +23,7 @@ import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectional
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { encodeSeqCursor } from '../../util/seq-keyset.js';
 
 export const syncTombstonesRouter = Router();
 
@@ -32,24 +33,46 @@ export const syncTombstonesRouter = Router();
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq=
- * Bulk tombstone export for efficient deletion sync.
+ * GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq=&cursor=
+ * Bulk tombstone export for efficient deletion sync, in one of two modes.
+ *
+ * **`sinceSeq` alone (legacy mode)** serves `seq > sinceSeq` per type, at most `limit` of each, and is UNCHANGED: a 5.6
+ * puller reads a full group as "more may follow" and moves on from the group's last seq, so a different shape would be
+ * misread. It cannot page past more than `limit` tombstones at one seq, and a peer token can plant that many (it names the
+ * seq of what it issues): such a puller stays held below that seq until it upgrades.
+ *
+ * **`cursor` (cursor mode)** is one read of every type, `limit` rows in `(seq, _id)` order after the cursor's position
+ * (`util/seq-keyset.ts`), grouped by type in the answer, with `nextCursor` beside the type keys — `null` on the last page.
+ * It pages through a run at one seq, which is what closes that wedge. A first request carries the bare-seq cursor of
+ * its watermark. The cursor wins over `sinceSeq`, and it is opaque: a client echoes it and never builds one.
  *
  * Also records how far this peer has been served (`lastSeqServed`), which is what makes the tombstones
  * prunable at all — see `sync/served-watermark.ts`. This is the right hook for it: `pullFromPeer` calls this
- * endpoint first, once per space per cycle, with the peer's raw confirmed watermark, whereas the
- * record-family GETs page with opaque cursors.
+ * endpoint first, once per space per cycle, with the peer's raw confirmed watermark. Legacy mode records `sinceSeq`;
+ * cursor mode records the cursor's seq MINUS ONE — everything below it was delivered, and part of the run at it may not
+ * have been, so a prune must keep that run.
  */
 syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq, limit } = req.query as Record<string, unknown>;
+    const { spaceId, networkId, sinceSeq, cursor, limit } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId as string | undefined, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
     // One reading of the start and the size for every sync read (`Q-388`): see `syncReadStart`.
-    const since = syncReadStart(sinceSeq, undefined);
+    const since = syncReadStart(sinceSeq, cursor);
     if (since === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
     const pageSize = parseLimit(limit, 1000, 5000);
+
+    if (cursor !== undefined && cursor !== '') {
+      // One more row than asked for decides `nextCursor` without a second query, as the record pages do.
+      const rows = await listTombstones(spaceId, since, pageSize + 1);
+      const page = rows.slice(0, pageSize);
+      const last = page[page.length - 1];
+      const byType = Object.fromEntries(TOMBSTONE_TYPES.map(t => [TOMBSTONE_COLLECTION[t], page.filter(r => r.type === t)] as const));
+      recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, Math.max(0, since.seq - 1));
+      res.json({ ...byType, nextCursor: rows.length > pageSize && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null });
+      return;
+    }
     /*
      * DERIVED from `TOMBSTONE_TYPES`, and it was four hand-written calls with a four-key response.
      *
@@ -64,11 +87,11 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
      * parses changes.
      */
     const grouped = Object.fromEntries(await Promise.all(TOMBSTONE_TYPES.map(async (t) =>
-      [TOMBSTONE_COLLECTION[t], await listTombstones(spaceId, since, pageSize, t)] as const,
+      [TOMBSTONE_COLLECTION[t], await listTombstones(spaceId, since.seq, pageSize, t)] as const,
     )));
 
     // After the read, so a bookkeeping failure can never cost the peer its tombstones.
-    recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
+    recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since.seq);
     res.json(grouped);
   } catch (err) {
     log.error(`sync GET tombstones: ${logSafe(String(err))}`);

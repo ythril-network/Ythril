@@ -277,12 +277,16 @@ describe('every seq-keyset read is answered from its index', { skip }, () => {
           const ex = await coll(reader.part).find(filter).sort(SORT).limit(201).explain('queryPlanner');
           const winning = ex.queryPlanner.winningPlan;
           const rejected = ex.queryPlanner.rejectedPlans ?? [];
-          // A rejected plan that sorts is allowed ONLY when it reads the `_id` index alone: the planner always enumerates an `_id`
-          // range scan for the tie find (`seq = s AND _id > x`), sorts it, and loses to the compound (probed on MongoDB 7). Any
-          // other plan that sorts is a plan the compound did not displace.
+          // A rejected plan that sorts is allowed ONLY when it reads indexes that do not lead with `seq`: the planner always
+          // enumerates an `_id` range scan for the tie find (`seq = s AND _id > x`), and, for a file page, a scan of the
+          // `{ parentFileId: 1 }` index for its `$exists: false` filter (production's own index, kept for the chunk-grouping
+          // reads); it sorts them and loses to the compound (probed on MongoDB 7, with the `parentFileId` index present — a
+          // `$nor` or `null` spelling of the filter is enumerated just the same, so the plan cannot be removed from the list).
+          // What must never appear is a sorting plan over an index that DOES lead with `seq`: a bare `{ seq: 1 }` the compound
+          // did not displace, which is the blocking sort this file exists to rule out.
           const sortsOver = (plan) => stagesOf(plan).some(st => st.startsWith('SORT'));
-          const idOnly = (plan) => indexScans(plan).every(k => k === '_id');
-          const sorts = [winning, ...rejected].filter(p => sortsOver(p) && (p === winning || !idOnly(p)));
+          const notSeqLed = (plan) => indexScans(plan).every(k => !k.startsWith('seq') && !k.includes(',seq'));
+          const sorts = [winning, ...rejected].filter(p => sortsOver(p) && (p === winning || !notSeqLed(p)));
           const scans = indexScans(winning);
           if (sorts.length > 0) wrong.push(`${JSON.stringify(filter)}: a plan sorts (${sorts.flatMap(p => stagesOf(p)).filter(st => st.startsWith('SORT')).join(', ')}) over ${sorts.flatMap(p => indexScans(p)).join(', ') || 'no index'}`);
           if (!scans.includes(keyName(reader.want))) wrong.push(`${JSON.stringify(filter)}: the winning plan scans ${scans.join(', ') || 'no index'}, not (${keyName(reader.want)})`);
