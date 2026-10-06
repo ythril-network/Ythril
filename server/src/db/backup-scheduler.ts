@@ -25,7 +25,7 @@ import { getMongoUri, getDataRoot } from '../config/loader.js';
 import { dumpDatabase, type DumpManifest } from './dump.js';
 import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js';
 import { loadBackupConfig } from './backup-config.js';
-import { log } from '../util/log.js';
+import { log, outsideRequest } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { runExclusive } from '../util/single-flight.js';
 
@@ -165,9 +165,10 @@ export function startBackupScheduler(): void {
 
   // node-cron fires on schedule whether or not the last dump finished: one that outlasts its period is skipped, not overlapped.
   // `runExclusive` never throws; a failed dump is logged as "Scheduled backup failed: …".
-  _task = schedule(cfg.schedule, () => {
+  // `outsideRequest`: the backup route re-arms this task, and a tick must not run (and log) under that request's id.
+  _task = schedule(cfg.schedule, () => outsideRequest(() => {
     void runExclusive('Scheduled backup', () => runBackupNow());
-  });
+  }));
   _armed.note(ARMED, cfg.schedule);
 
   log.info(`Scheduled backup enabled (cron: "${cfg.schedule}")`);

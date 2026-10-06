@@ -18,7 +18,7 @@
  */
 import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
 import { getConfig } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
+import { log, outsideRequest, peerText } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
@@ -82,7 +82,8 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
     return;
   }
 
-  const task = cronSchedule(cronExpr, () => { void runScheduledSync(networkId); });
+  // `outsideRequest`: a join or a reload request arms this task, and a tick must not run (and log) under that request's id.
+  const task = cronSchedule(cronExpr, () => outsideRequest(() => { void runScheduledSync(networkId); }));
 
   _scheduledTasks.set(networkId, task);
   _armed.note(networkId, cronExpr);

@@ -33,27 +33,36 @@ const LIFECYCLE = readFileSync('server/src/spaces/lifecycle.ts', 'utf8');
 const VECTOR = readFileSync('server/src/spaces/vector-index.ts', 'utf8');
 
 /**
- * The body of `initAllSpaces` ONLY — up to its own closing brace at column 0.
+ * The body of one top-level function — up to its own closing brace at column 0.
  *
  * Not "up to the next export": the background helper below it is not exported, so a looser slice
  * swallowed it, and its `await finalizeSpaceIndexReady(...)` — which is correct, being inside the
  * background worker — failed the very assertion that exists to keep that await OFF the boot path.
  */
-function initAllSpacesBody() {
+function topLevelBody(head) {
   const lines = LIFECYCLE.split('\n');
-  const start = lines.findIndex(l => l.startsWith('export async function initAllSpaces'));
-  assert.ok(start >= 0, 'initAllSpaces should exist');
+  const start = lines.findIndex(l => l.startsWith(head));
+  assert.ok(start >= 0, `${head} should exist`);
   const end = lines.findIndex((l, i) => i > start && l.replace(/\r$/, '') === '}');
-  assert.ok(end > start, 'initAllSpaces should be closed at column 0');
+  assert.ok(end > start, `${head} should be closed at column 0`);
   return lines.slice(start, end + 1).join('\n');
 }
 
 describe('startup does not block on index readiness', () => {
-  const body = initAllSpacesBody();
+  // The boot's init is `initAllSpaces` AND the walk it hands every space to (`initOwedSpaces`, shared with the reload, bundle-53 G32):
+  // what must not block is whatever the boot runs, so the question is asked of both.
+  const entry = topLevelBody('export async function initAllSpaces');
+  const walk = topLevelBody('async function initOwedSpaces');
+  const body = `${entry}\n${walk}`;
 
-  it('initAllSpaces defers the READY poll', () => {
+  it('initAllSpaces runs every space through the shared init walk, not a loop of its own', () => {
+    assert.match(entry, /await initOwedSpaces\(\)/, 'initAllSpaces no longer goes through initOwedSpaces: boot and reload have two init loops again');
+    assert.doesNotMatch(entry, /initSpace\(/, 'initAllSpaces calls initSpace itself: a bare loop that one failing space stops');
+  });
+
+  it('the init walk defers the READY poll', () => {
     assert.match(body, /initSpace\(spaceId,\s*\{\s*waitForVectorReady:\s*false\s*\}\)/,
-      'initAllSpaces must call initSpace with waitForVectorReady:false — the default is true, and the ' +
+      'the init walk must call initSpace with waitForVectorReady:false — the default is true, and the ' +
       'default is a ~65 minute startup on a 13-space upgrade');
   });
 

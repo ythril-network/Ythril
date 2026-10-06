@@ -35,6 +35,9 @@
  *   touches many spaces legitimately uses it once per operation. **What it cannot see:** a wait that is not a database operation
  *   (a model call, a DNS lookup) is the job's own to bound; the report names it, it does not end it.
  * - **A timer that does not hold the process.** `unref`.
+ * - **No request.** A timer inherits the `AsyncLocalStorage` context it was created in, and the logger stamps a line with the request
+ *   id found there: a job started by a request (the TTL sweep, by `/setup` on a first run) logged every tick under that request's id.
+ *   Each tick runs through `outsideRequest` (`util/log.ts`), so no caller has to remember it.
  *
  * ## What it is not
  *
@@ -55,7 +58,7 @@
 import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js';
 import { withWalkBudget } from './housekeeping-walk.js';
 import { declareJob, signalHousekeeping } from './housekeeping-signals.js';
-import { log, peerText } from './log.js';
+import { log, outsideRequest, peerText } from './log.js';
 import { singleFlight, SKIP_WARNING_WINDOW_MS } from './single-flight.js';
 import { warnOnce } from './warn-once.js';
 
@@ -150,7 +153,11 @@ export function intervalJob(
       if (timer !== null) return;
       const ms = intervalFor();
       intervalMs = ms;
-      const handle = arm(() => { void tick().catch(() => { /* tick does not reject; a failing logger must not become an unhandled rejection */ }); }, ms);
+      // Every tick, not only the arm: a timer inherits the context it was created in, so a job started inside a request would
+      // run (and log) under that request's id for as long as it lives. A seam's `arm` may call back from any context too.
+      const handle = arm(() => {
+        outsideRequest(() => { void tick().catch(() => { /* tick does not reject; a failing logger must not become an unhandled rejection */ }); });
+      }, ms);
       handle.unref();
       timer = handle;
     },

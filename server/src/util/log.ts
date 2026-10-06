@@ -62,6 +62,28 @@ export function runWithRequestId<T>(requestId: string, fn: () => T): T {
   return requestContext.run({ requestId }, fn);
 }
 
+/**
+ * Run `fn` with NO request id: what a tick of background work is run through, so that it never carries the id of whoever started it.
+ *
+ * ## What it prevents
+ *
+ * Node timers (and `node-cron`'s, which are built on them) inherit the `AsyncLocalStorage` context they were created in. A job armed
+ * while a request was being handled ran every tick inside that request's context: on a first-run instance the TTL sweep is started from
+ * the `/setup` request and its failure line carried the setup request's id for the life of the process, and the cron schedulers a config
+ * reload re-arms did the same under the reload's id. A line stamped with another request's id is worse than one with none: a search for
+ * that request finds work that has nothing to do with it.
+ *
+ * `intervalJob` (`util/interval-job.ts`) goes through here for every interval job, so no caller can forget. A cron registration is a
+ * library call that cannot have the guard put inside it, so its callback goes through here and a gate holds every registration to that
+ * (`a-background-tick-carries-no-request-id`). Work a REQUEST starts and awaits (a manual scan from a route) keeps the request's id on
+ * purpose: it is the request's own work, which is why `runExclusive` does not use this.
+ *
+ * `fn`'s continuations are outside the request too. The caller's own context is untouched.
+ */
+export function outsideRequest<T>(fn: () => T): T {
+  return requestContext.exit(fn);
+}
+
 /** The current request's id, or undefined outside a request. Exported for the audit path and for tests. */
 export function currentRequestId(): string | undefined {
   return requestContext.getStore()?.requestId;

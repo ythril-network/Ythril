@@ -334,7 +334,7 @@ saying how much was left out; a long list of ids shows the first ones and `…(+
 this server's own is one, and a peer sending a megabyte id cannot fill the log. An error's stack trace stays on its
 line, escaped, after the message.
 
-**Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them.
+**Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them. That holds for a job a request happened to start, too: the auto-delete sweep begun by the first-run setup, or a scheduled scan a configuration reload re-arms, never logs under that request's id.
 
 **`seq horizon held …` names a write that held up replication.** While a write is being stored it holds a place
 in its space's sequence, and every peer pulling that space is served nothing past that place until the write
@@ -433,11 +433,14 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   keeps its last value while any space could not be read, rather than showing a count that is too low.
 - `Link conversion failed for space '<id>': … — retried next boot` and `Link array drop failed for space '<id>' (…): …
   — retried next boot`.
-- `space init failed for space '<id>': … — retried next reload`, `index confirmation` and `query indexes` after a
-  **configuration reload**. The server reloads `config.json` a couple of seconds after it changes. A space the reload
+- `space init failed for space '<id>': … — retried next reload`, `index confirmation` and `query indexes` at **start-up**
+  and after a **configuration reload**. At start-up every space is set up in turn: one that cannot be set up is named by
+  this line and the server starts anyway, with every other space set up and its search indexes confirmed; the next reload
+  sets it up again. The server reloads `config.json` a couple of seconds after it changes. A space the reload
   added whose set-up fails is audited with its real outcome, not as applied, and is set up again by the next
   reload; the reload itself is answered as failed (`ythril_config_reload_failed_total` moves, and
-  `ythril_config_reload_pending` stays `1` until a reload succeeds).
+  `ythril_config_reload_pending` stays `1` until a reload succeeds). A space set up by a reload, first time or on a
+  retry, has its search indexes confirmed in the background exactly as at start-up: it shows as building, then ready or failed.
 
 **A repeating job that runs longer than its schedule is skipped, not stacked.** Each background timer runs one pass at a
 time. A tick that finds the previous pass still running does not start a second one; it says `<job>: skipping this tick —

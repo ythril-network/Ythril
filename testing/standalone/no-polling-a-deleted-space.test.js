@@ -120,18 +120,21 @@ describe('the creation ordering this check depends on', () => {
     const callers = [lifecycle, app]
       .flatMap(src => [...src.matchAll(/initSpace\((?![^)]*waitForVectorReady)[^)]*\)/g)].map(m => m[0]))
       .filter(m => !m.includes('\n'));
-    assert.deepEqual(callers.sort(), ["initSpace('general')", 'initSpace(spaceId)'],
+    assert.deepEqual(callers.sort(), ["initSpace('general')"],
       'a new initSpace caller relies on the default (waitForVectorReady: true) and therefore POLLS — confirm its '
       + 'space is in config first, then add it here');
 
     // `initSpace('general')` sits after the built-in space is pushed and saved.
     assert.ok(lifecycle.indexOf("await initSpace('general');") > lifecycle.indexOf("id: 'general',"));
-    // The reload's caller is `initAddedSpaces` (`spaces/lifecycle.ts`, bundle-53 G21; it was a loop in `app.ts`). Its spaces are
-    // committed by construction: it drops from what it is owed every id the live config does not hold, and walks only the
-    // concrete spaces among the rest (`concreteSpaceIds()` reads the live config, the concrete-space walk since `Q-98`).
-    const body = bodyOf(lifecycle, 'initAddedSpaces');
+    // The reload's and the boot's caller is `initOwedSpaces` (`spaces/lifecycle.ts`, bundle-53 G21 and G32; it was a loop in `app.ts`).
+    // It no longer polls (it defers the readiness poll to the confirmation, `waitForVectorReady: false`), so it is not among the
+    // callers above; but its spaces are still committed by construction: it drops from what it is owed every id the live config does
+    // not hold, and walks only the concrete spaces among the rest (`concreteSpaceIds()` reads the live config, the concrete-space walk
+    // since `Q-98`). Held anyway, so that a change that makes it poll again finds the precondition already stated.
+    const body = bodyOf(lifecycle, 'initOwedSpaces');
     const committed = body.indexOf('getConfig().spaces');
-    assert.ok(committed > -1 && body.indexOf('concreteSpaceIds()') > committed && body.indexOf('await initSpace(spaceId)') > committed,
-      'the reload caller no longer restricts itself to spaces read from the live config before it initialises them');
+    assert.ok(committed > -1 && body.indexOf('concreteSpaceIds()') > committed
+      && body.indexOf('await initSpace(spaceId, { waitForVectorReady: false })') > committed,
+    'the shared init walk no longer restricts itself to spaces read from the live config before it initialises them');
   });
 });
