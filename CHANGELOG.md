@@ -1280,429 +1280,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.6.5] — 2026-10-06
 
-**A patch release with two fixes for defects in 5.6.4, and nothing else.** Paging through a recall answer no longer
-shows some matches twice and others never, and links between the pages of a guide in the in-app Help work.
-
-| What changes on upgrade | What to do |
-|---|---|
-| Two identical recalls over an unchanged space return their matches in the same order | Nothing. A caller that pages with `skip` / `nextSkip` now sees every match exactly once |
-| A link from one page of a guide to another opens that page in Help | Nothing |
-
-Documents changed in this release: `docs/dependencies.md` and `docs/contribution-guide.md`; their references to files
-outside the guides are now shown as file names rather than links, because Help can open only the guides themselves.
+**A patch release for two defects in 5.6.4: take it if you page through `recall` answers or read the guides in Help.**
 
 ### Fixed
 
-- **Recall: paging no longer repeats or skips matches.** When several records matched a query's words equally well
-  (typical for records written from one template), they came back in a different order on every call. A caller paging
-  through the answer with `skip` / `nextSkip` could therefore see some records twice and miss others. Equal matches are
-  now always returned in the same order. This applies to the MCP `recall` tool and to `POST /api/brain/recall` alike.
-- **Help: links between the pages of a guide work.** A link from one page of a guide to another opened an empty
-  browser tab; it now opens the page in Help, scrolls to it and moves keyboard focus there. The page you are on is kept
-  in the address, so reloading or going Back returns to it, and a link into another guide focuses that guide's first
-  heading. Links to a section whose title contains `&`, or is titled `Links`, now land on that section.
+- **Search:** Records that match a `recall` query equally well now come back in a stable order, so paging with `skip` /
+  `nextSkip` shows every match exactly once. MCP `recall` and `POST /api/brain/recall` alike.
+- **Help:** A link from one page of a guide to another now opens that page in Help, scrolls to it and focuses it; the
+  page stays in the address, so reload and Back return to it. Links to a section titled with `&` or `Links` now land.
 
 ## [5.6.4] — 2026-10-05
 
-**A patch release: every fix PR #1483 made on `main` for a defect present in 5.6.3, and nothing else.** It follows
-the owner's decision that a patch on the 5.6 line carries fixes only: what `main` changed in behaviour, wire or
-defaults alongside them stays on `main` and is named at the end. The ones to take first are the Security fixes: a
-duplicate merge could delete a record in a space where the token could only read data quality, a store failure was
-answered in the driver's own words (its host, its port, its collection), and a value a peer or a caller chose reached
-a log line or a refusal at any length and across lines. It also makes the suppression sweep reach files and run at
-every start, keeps both texts of two divergent same-seq pushes, and makes an entity cascade that is going to be
-refused remove nothing.
+**A patch release of fixes for defects in 5.6.3; take it first for the security fixes: duplicate merge rights, store
+errors no longer exposing the database, and bounded one-line log values.**
 
-| What changes on upgrade | What to do |
+| Changes on upgrade | Action |
 |---|---|
-| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses — records, files and file chunks — one space at a time; a space with no `meta` is swept by its records' own flags | Nothing; expect one scan per record kind per space at each start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed anything (for files N counts rows, chunks and passages included) |
-| Every log line is one line: a stack is written on one line with its breaks as `\n`; an `Error` passed to the log is rendered by its message and frames, without the `Error:` prefix; a string passed as the extra argument is no longer JSON-quoted | Match a stack on the single line, not across lines |
-| A value in a log line is cut at 4096 characters, a list at 100 items, and the line says how much was left out (`…(+N chars)`, `…(+N more)`) | Nothing; a value that fits is written exactly as before |
-| A store failure's `error` text is one of our own sentences, at the status the failure already had; the driver's message is in the server log under the operation that failed | Read `retryable`, not the prose; an operator greps the log for the operation named in the failure line |
-| Two statuses move with that text: an error of ours that merely names the store (a path such as `notes/mongot-setup.md`) answers as the refusal it is, no longer as a retryable `503`; and a failure underneath a space rename or create that used to read as a `404` or `409` because the driver's words matched now answers `500` | Nothing; a pooled connection cleared under a command keeps its `400`, now with `The store is not available right now.` |
-| A refusal that lists references or unknown keys cuts each at 256 characters and ends `…(+N more)` where it read `(+N more)` | Nothing for a client that reads the list; a client matching the old tail text must match the new one |
-| A search right after a space's first write answers `200` and empty, not `503` | Nothing; retry logic that waited on that `503` can stop |
-| A duplicate merge needs `knowledge` write, and `dataQuality` write, in the space where the pair lives; a pair elsewhere answers `404` | Grant the rights to a token that merges, or merge with one that has them |
-| A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a fork already stored keeps the stamps it has | Nothing; on a network of mixed versions the same fork differs in its timestamps until every member runs 5.6.4 |
-| A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, and the twin announces `link_violation.created` once | Nothing; dismiss the older row if you do not want both |
-| A duplicate pair stored with a seq of `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge that keeps the older record now keeps it whichever end the scan started from |
-| A pull names, once per page, a document it kept its own copy over (same seq, other text) and a document it stored that does not match its schema | Nothing; the lines are in the receiver's log |
-| The reindex INFO line gains a field: `Reindex completed for space '<id>': reindexed=N, suppressed=N, superseded=N, errors=N` | A script reading that line reads the new field; the others keep their place |
-| A failed sync cycle's entry in the sync history reads the error's message, without the error class in front of it | Nothing |
-
-Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-guide/02-hosting.md`,
-`docs/integration-guide/03-auth-and-limits.md`, `docs/integration-guide/04b-graph-api.md`,
-`docs/integration-guide/06a-schema-api.md`, `docs/integration-guide/09-sync-api.md`,
-`docs/integration-guide/10-mfa-and-conflicts.md`, `docs/integration-guide/14-duplicates-and-webhooks.md`,
-`docs/integration-guide/15-about-and-embedding.md`, `docs/integration-guide/16-mcp.md`,
-`docs/userguide/02-brain.md`, `docs/userguide/04-settings.md` and `docs/userguide/05-storage-data-and-audit.md`,
-and `CLAUDE.md`, whose claims about what a pull validates and what file metadata unsets now match the code.
-
-### Security
-
-- **A duplicate merge needs the merge rights where the pair lives (`Q-304`).** `POST /api/duplicates/:id/merge` looked
-  its candidate up in every space the token could READ data quality in, and the guard in front of it asks only whether
-  the token may write anywhere — so a token with `dataQuality` read in one space and write in another merged a pair in
-  the first, deleting an entity where it could only read. The lookup now walks only the spaces where the token holds
-  `dataQuality` write (the rung its rights row names), and a merge, which deletes a record, also needs `knowledge` write
-  in the pair's space, as the entity merge and `graph_merge` do. A candidate in a space where the token lacks either
-  answers `404`, as dismiss and reopen do. Contradictions and conflicts keep the rungs they had (a resolve there still
-  acts on `dataQuality` write alone); the three copies of the space list each router wrote are gone.
-- **A store failure is answered in our words, never the driver's.** A driver's own message names the host, the port and
-  the collection it failed on, and the doors that answered it handed it to whoever asked. Every door that answered an
-  error's own text — the read routes, the MCP dispatcher, the admin, data, file and space routes, the sync triggers, the
-  join and rename acts — now answers a fixed sentence of ours when the failure is on the driver's side, at the status it
-  already had; what the server refused in its own words (a malformed regular expression) and what this server refused
-  keep their text, and so does the `$vectorSearch is not supported` sentence that tells an operator to upgrade
-  MongoDB. The driver's message goes to the server log, once, under the operation that failed. An embed or media job
-  that failed on the store stores that sentence and the error's class in the `lastError` a read token is served, and a
-  sync cycle's failure list says it the same way, without the class in front of the message. A driver-side failure
-  underneath a space rename or create, which a mapping read as `404` or `409` when the driver's words matched, answers
-  `500`. A pooled connection cleared under a command keeps its `400` and says `The store is not available right
-  now.`, with no "try again", since `retryable` is `false` there; `main` answers that case `503`, which stays on
-  `main`.
-- **A refusal or a log line no longer carries a megabyte a peer or caller chose, or a line break.** 5.6.2's notes said
-  every value a peer sends that reaches a log line was written with its control characters escaped. It was escaped, but
-  not bounded, and some slots were raw: a value a request, a peer or a backup could reach was interpolated as it came,
-  and a stack ran across lines. Every value already escaped for a log line is now also cut at 4096 characters, the line
-  saying how much (`…(+N chars)`), and a list at 100 items; every log line is one line — a value's line breaks, and a
-  stack's, are written as escapes; an `Error` is rendered by its message and frames; and every raw interpolation of an
-  outside value a request, a peer or a backup can reach into a log line goes through the one renderer, which a
-  structural gate now derives from the mounted routes and the start-up code. The refusals that quoted a caller's
-  reference, an unknown key or a fork-capped `_id` cut each at 256 characters and name the rest with `…(+N more)`
-  (it read `(+N more)`); `unrecognized_keys` keeps every key, each cut at 256. A model server's own error text is
-  quoted at 200.
-- **Credentials in a URL are redacted in linear time.** The URL pattern backtracked over a run of scheme characters, so
-  a long run of letters in a peer's id took seconds of event loop to log. It is now linear and redacts exactly what it
-  did, including a scheme that follows digits (`9https://u:pw@h`).
-
-### Fixed
-
-- **A search right after a space's first write answers `200` and empty, not `503` (`Q-325`).** The vector index is built
-  after the first record and mongot refuses a query against it with `Index <name> not initialized`, a wording recall did
-  not know. One recogniser now knows every wording the store uses.
-- **A search is no longer reported as out of time because its error names `maxTimeMS`.** The store names the option
-  whenever it refuses a misplaced one, which is a defect in the bound, not a deadline.
-- **An error of ours that mentions the store is no longer a retryable store failure.** A refusal quoting a path such as
-  `notes/mongot-setup.md` answered `503` and told the client to retry it for ever; the message patterns are now read
-  only from errors the driver raised, and our own `$vectorSearch is not supported` sentence is a typed error that stays
-  `503`. The refusal answers with its own text at `400`, where it answered `503`.
-- **Two peers pushing different text for one fact at one seq could lose one of the texts (`Q-232`).** Each push is
-  planned against what is stored; when neither is stored yet, both plan an insert, the first write lands, and the
-  second write's read-back compared only the seq — so it counted itself landed with its text stored nowhere, and the
-  sender was told it had been delivered. The writer now compares the text too. A copy that finds another at its own seq
-  with different text is a divergence on every push door, forked by the same rules as a planned one (the fork already
-  made, and the fork caps), never `inserted`. A **pull** does not fork on 5.6.x: it keeps the local copy, advances past
-  the document, and names its id once per window in one line per page — `kept the local copy; N document(s) arrived at
-  the same seq with different text` — where it used to say nothing. The pulled text of such a document is not stored.
-- **A fork carried the moment this instance made it instead of the moment its text was written.** It now keeps the
-  divergent copy's `createdAt` and `updatedAt`: stamped "now" it was a record whose age was this instance's sync
-  schedule — a fresh retention window however old the text — and two receivers forking one divergence on different days
-  stored two different documents under one id. Forks written from now on keep them; forks already stored keep theirs.
-- **An older copy of a file's metadata could overwrite a newer one.** The merge's write filtered on the id alone, so a
-  copy stored between the accept read and the write was overwritten, with a `200` on the way back. The write now
-  carries the seq condition every other family's does, in the filter, with no extra read.
-- **An embed job could write a vector onto a newer copy of its record (`Q-230`).** The job reads a record, calls the
-  model — the slow step — and wrote the vector, the model and the matched text by id alone, so a peer's newer copy
-  that landed inside the model call got the old text's vector, or a vector this instance suppresses. Every write the job
-  makes now lands only on the version it read; one that matched nothing ends as the new outcome `superseded`, which is
-  done, never retried, and counted by a reindex as done. The media and pipeline derived-vector writers are not changed.
-- **Suppression did not reach files, network layers, or vectors stored before it was set (`Q-230`).** The
-  stored-vector sweep ran after a PATCH of a space and nowhere else, covered four record kinds, removed the vector and
-  left its model name, stopped at the first kind the store refused, and removed its queued jobs with one delete over
-  every id. A network's schema layer, a schema route on a space no network carries, and the schema library's apply swept
-  nothing; and a peer's file metadata, which is merged rather than replaced, kept this instance's vector on a file
-  it suppresses (and its chunks theirs). The sweep now runs after every write of a space's meta, however it was made,
-  coalesced per space; covers files and their chunk and passage rows; removes the vector and its model, never the matched
-  text; isolates each kind, naming the ones that failed in one warning; and works in pages, so a large space is never
-  one delete. It runs again at every start, once the server listens, one space at a time. A file arrival this instance
-  suppresses — by its own flag, the stored one, or the space — now lands with no vector, model or matched text, and its
-  chunks lose theirs before the row is written. 5.6.2's notes said an arrival this instance suppresses keeps no
-  vector; that held for records and not for files. A schema layer that turns suppression on removes this instance's local
-  vectors: that is the receiver applying its own effective suppression.
-- **A refused entity cascade had already removed every blocking edge.** A fact, chrono entry or file that names the
-  entity blocks the delete, and a cascade does not remove those; it refused after it had deleted the edges, written
-  their tombstones and spread those removals to every peer. The refusal is now decided on the preview before anything is
-  removed, and answers with the list it decided on.
-- **An edge delete could leave the edge gone here and alive on every peer.** The edge was deleted first and its
-  tombstone written after, so a tombstone that failed to write (a refusal, a step-down, a dropped socket) left nothing for
-  a peer to learn the deletion from, and the next pull brought the edge back. The tombstone is now written first, then
-  the edge deleted — with no transaction and no hold on the seq horizon. A failure between the two leaves a tombstone
-  beside a live edge, which a retry completes; the retirement of the edge's embed job and the webhook follow both and
-  cannot fail the delete. The edge is read for its seq, tombstoned and deleted by id, the same window every other delete
-  has. This is the edge delete only: an entity, a fact, a chrono entry and a link still delete before they tombstone.
-- **Merge and link tombstones named no seq (`originalSeq`).** The duplicate edge a merge drops, the link it moves off the
-  absorbed entity, the absorbed entity, and a link a reconcile removes were tombstoned without the seq of the record they
-  delete, so a peer that never held the record was offered the deletion. Each carries it now.
-- **The duplicate scanner read one end of a pair at seq 0.** The seed of a pair was read without its seq, so which
-  record counted as older depended on which end started the scan: an automerge kept the newer record under
-  `dupeMergeSurvivor: 'older'`, a pair was stored with a `0` for the seed, a pair the space refuses (a strict schema)
-  was merged and refused again from each end on every scan, and the manual merge door followed the ids. Both records
-  are read at their real seq. The survivor is now the configured one — the older record by default, which is what the
-  setting is documented to do — whichever end started the merge. A stored seq of `0` or none is unknown, not changed, so
-  a pair a 5.6.3 scan stored is not re-fired or re-opened by it, and its real seqs are stored as it is next scanned;
-  the manual merge reads both records' current seqs while a stored one is unknown. The seq is never in the answer of
-  `similar`.
-- **A strict-linkage violation was recorded again on every delivery.** Each record had a fresh random id, and the
-  single `POST /api/sync/edges` checks an arriving edge on every delivery, so one dangling end became one more
-  record — and one more `link_violation.created` — each time its edge was re-sent or edited. The id is now derived from the
-  document type, the document, the field and the target, the record is written once, and the announcement fires only
-  for one that was inserted. Two different dangling ends stay two records. A record 5.6.3 stored under a random id gets one
-  derived twin on the next delivery of its document, with one announcement, and no more after it. What is stored of the
-  reason, which quotes the target a peer sent, is now bounded.
-- **A pull stored a document whatever its shape (`Q-225`, the 5.6.x half).** It now parses each document against the
-  schema a push holds it to — through one table and one parse shared with the push doors — and refuses only a shape that
-  would corrupt the receiver: a `parentFileId` that is present and not a string (it turns a file into a half-derived
-  row), and the id and seq refusals the writer already made. Everything else is stored as received, as 5.6.3 stored
-  it, and each stored document that fails its schema is named, once per page, with its reason (`stored N document(s)
-  that do not match their schema`). Refusing them, as a push does, stays on `main`: a pull cannot tell its sender from what the
-  sender's own copy was.
+| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses (records, files, chunks), one space at a time | Nothing; expect one scan per record kind per space at start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed any |
+| Every log line is one line: a stack's breaks are written as `\n`, an `Error` renders as message and frames without the `Error:` prefix, a string extra argument is no longer JSON-quoted | Match a stack on its single line |
+| A log value is cut at 4096 characters and a list at 100 items, and the line says how much (`…(+N chars)`, `…(+N more)`) | Nothing; a value that fits is written as before |
+| A store failure's `error` text is a fixed sentence of ours at the status it already had; the driver's message is in the server log under the failed operation | Read `retryable`, not the prose; grep the log for the operation named in the failure line |
+| An error of ours that only names the store (a path such as `notes/mongot-setup.md`) answers `400`, not a retryable `503`; a driver failure under a space rename or create answers `500`, not `404` or `409` | Nothing; a pooled connection cleared under a command keeps `400` |
+| A refusal listing references or unknown keys cuts each at 256 characters and ends `…(+N more)`, where it read `(+N more)` | A client matching the old tail text must match the new one |
+| A search right after a space's first write answers `200` and empty, not `503` | Retry logic that waited on that `503` can stop |
+| A duplicate merge needs `knowledge` write and `dataQuality` write in the space where the pair lives; a pair elsewhere answers `404` | Grant both rights to the token that merges |
+| A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a stored fork keeps its stamps | Nothing; on a mixed-version network the same fork differs in its timestamps until every member runs 5.6.4 |
+| A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, announcing `link_violation.created` once | Nothing; dismiss the older row if you do not want both |
+| A duplicate pair stored with seq `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge that keeps the older record keeps it whichever end the scan started from |
+| The reindex INFO line gains a field: `Reindex completed for space '<id>': reindexed=N, suppressed=N, superseded=N, errors=N` | A script reading that line reads the new field |
 
 ### Changed
 
-- **`delete_entity` no longer says "There is no cascade."** Its description named the cascade nowhere while its own
-  `cascadeToken` parameter offered one. It now says `cascadeToken` turns the call into a cascade, and that a refused
-  cascade removes nothing; `delete_entity_preview` says the same of a refusal.
+- **Sync:** A failed cycle's sync-history entry reads the error's message, without the error class.
+- **MCP:** `delete_entity` says that `cascadeToken` turns the call into a cascade and that a refused cascade removes
+  nothing; `delete_entity_preview` says the same of a refusal.
 
-### Not carried — stays on `main`
+### Fixed
 
-Each of these shipped beside the fixes above in PR #1483 and changes behaviour, a wire shape or a default, so it waits
-for the next minor.
+- **Sync:** Two pushes of different text for one fact at one seq no longer lose one text while the sender is told it was
+  delivered: every push door forks the divergence (`forked`), never `inserted`.
+- **Sync:** A pull that finds a copy at the same seq with different text keeps the local copy, advances past it and logs
+  once per page `kept the local copy; N document(s) arrived at the same seq with different text`; it does not fork.
+- **Sync:** A fork keeps the divergent copy's `createdAt` and `updatedAt` instead of the time this instance made it, so
+  its retention window is right and receivers forking one divergence store the same document.
+- **Sync:** An older copy of a file's metadata can no longer overwrite a newer one stored between the read and the
+  write; the write carries the seq condition.
+- **Sync:** An edge delete writes its tombstone before deleting the edge, so a failed tombstone write no longer leaves
+  the edge gone here and back from every peer on the next pull; a failure between the two is completed by a retry.
+- **Sync:** Tombstones for a duplicate edge a merge drops, a link it moves, the absorbed entity and a link a reconcile
+  removes now carry `originalSeq`, so a peer that never held the record is not offered the deletion.
+- **Sync:** A strict-linkage violation is recorded once, not on every delivery of its edge (`POST /api/sync/edges`):
+  `link_violation.created` fires only for an inserted record, and two different dangling ends stay two.
+- **Sync:** A pull refuses only a document that would corrupt the receiver (a `parentFileId` that is not a string, an id
+  or seq refusal) and logs per page `stored N document(s) that do not match their schema` for the rest it stores.
+- **Embedding:** An embed job writes its vector only onto the version of the record it read, so a peer's newer copy no
+  longer gets the old text's vector; a job that matched nothing ends as the new outcome `superseded` (done, no retry).
+- **Embedding:** Suppression now reaches files with their chunks, network schema layers and vectors stored before it
+  was set; the sweep runs after every write of a space's meta and at every start, removing vector and model.
+- **Embedding:** A file arrival this instance suppresses lands with no vector, model or matched text, and a peer's file
+  metadata no longer leaves this instance's vector on it; a schema layer turning suppression on removes local vectors.
+- **Records:** A refused entity cascade (a fact, chrono entry or file names the entity) now removes nothing and answers
+  with the list it decided on; it used to delete the blocking edges and spread their tombstones to peers first.
+- **Records:** The duplicate scanner reads both records at their real seq, so the survivor is the configured
+  `dupeMergeSurvivor` (the older record by default) whichever end started the merge, and a refused pair is not retried.
+- **Search:** A search right after a space's first write answers `200` and empty, not `503`, whatever wording the store
+  uses for an index not yet initialised.
+- **Search:** A search is no longer reported as out of time because the store's error names `maxTimeMS`.
+- **Errors:** An error of ours that mentions the store (a path like `notes/mongot-setup.md`) answers `400`, not a
+  retryable `503`; `$vectorSearch is not supported` stays `503`. A cleared pooled connection keeps `400`.
 
-- **The write bound and its environment defaults:** a bound on each write and on how long the seq horizon is held, set
-  by environment variables, whose expiry answers `503`.
-- **The seq-horizon gauge:** the per-space metric and warning that make a stalled hold visible.
-- **The pull's tombstone and fork semantics (`Q-204`):** a pull here keeps the local copy at a same-seq divergence and does not fork.
-- **The merkle hash change:** the space hash keeps the fields it hashes in 5.6.3.
-- **The file-tombstone pending model:** a file tombstone reaches peers only once its act happened, with the `404` and `503` answers that come with it.
-- **The merge cap of 2500 records:** a merge that would relink more answers `422`.
-- **The strict-merge refusal status:** a refused strict merge keeps the status it has.
-- **The push family order and the timing of linkage checks:** a push applies its families in the order 5.6.3 does.
-- **The pool-cleared `400` becoming `503`:** the status of that failure stays `400`, with `retryable` `false`.
-- **`Retry-After` on every `503`:** it stays on the brain read routes that carry it today.
+### Security
+
+- **Tokens:** `POST /api/duplicates/:id/merge` could merge, and so delete an entity, in a space where the token only
+  read `dataQuality`. It now needs `dataQuality` and `knowledge` write where the pair lives, else `404`.
+- **Errors:** A store failure is answered with a fixed sentence of ours (a cleared pool connection: `The store is not
+  available right now.`), not the driver's message with its host, port and collection; that goes to the server log.
+- **Server:** A value a request, a peer or a backup chooses can no longer flood or forge a log line: it is cut at 4096
+  characters and a list at 100 items, and line breaks and stacks are escaped so every log line is one line.
+- **Server:** A refusal quoting a caller's reference, an unknown key (`unrecognized_keys` keeps every key) or a
+  fork-capped `_id` cuts each at 256 characters (`…(+N more)`); a model server's error text is quoted at 200.
+- **Server:** Credentials in a URL are redacted in linear time: a long run of scheme characters in a peer's id could
+  stall the event loop for seconds when logged. Redaction is otherwise unchanged.
 
 ## [5.6.3] — 2026-10-03
 
-**A patch release: sync's tombstone and file-metadata fixes from `main`, and five defects found in 5.6.2, and
-nothing else.** The one to take first is a security fix: a peer's tombstone was applied to whatever space it named,
-so a peer admitted to one space could delete its own records in another, and under a `spaceMap` every deletion an
-honest peer sent was lost. It also makes a peer with many deletions pass on all of them, makes the stray
-file-metadata recovery 5.6.2 shipped actually recover the descriptions, and corrects three things 5.6.2's notes
-said that were only partly true.
+**A patch release for sync's tombstone and file-metadata defects; take it first for the security fix that stops a peer's
+tombstone deleting records in a space it was not admitted to.**
 
-| What changes on upgrade | What to do |
+| Changes on upgrade | Action |
 |---|---|
 | The first boot builds one index per space on its tombstones (`type`, `seq`) | Nothing |
-| A stray `<space>_filemeta` collection 5.6.2 had not dropped yet is now recovered at most 2,000 records per space per cycle; a record whose file has not arrived waits up to 30 days | Nothing; where 5.6.2 already dropped the collection there is nothing left to recover |
-| `POST /api/sync/tombstones` answers `{ applied, refused }` and takes at most 5000 tombstones per request | Nothing for a Ythril peer (it sends 500); an integrator reading `applied` keeps its meaning |
-| The first pulls after a long absence carry up to 5000 deletions per kind per request, 200 requests per cycle | Nothing; a peer still on 5.6.2 or earlier pulls at most 1000 per kind until it upgrades |
-| A record its author pushes is no longer refused by a tombstone another instance issued for its id | Takes effect for pushes received by an instance on 5.6.3 |
-
-Documents changed in this release: `docs/sync-protocol.md`, `docs/network-types.md`,
-`docs/integration-guide/02-hosting.md`, `docs/integration-guide/09-sync-api.md`,
-`docs/integration-guide/12-admin-api.md`, `docs/integration-guide/13-audit-log-api.md`,
-`docs/userguide/04-settings.md` and `docs/userguide/05-storage-data-and-audit.md`.
-
-### Security
-
-- **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
-  (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
-  written inside it. So a peer admitted to one space could delete records it authored in any other space this
-  instance holds, and store tombstones there or in a space this instance does not have. And under a `spaceMap`
-  (a space joined under another name) every deletion an honest peer sent was stored under the network's name and
-  **never reached the local space**: those deletions were silently lost. Every tombstone is now applied to the
-  local space the door admitted.
-- **A tombstone is authorised before it is stored.** One whose issuer is not the peer delivering it, or whose
-  record here another instance wrote, is refused and no longer stored — stored, it refused every later copy of that
-  record from its real author.
-- **A tombstone no longer blocks another author's record.** A record its author pushes with its own peer token is
-  no longer refused as `tombstoned` by a tombstone another instance issued for the id, so a tombstone one peer
-  planted cannot keep another instance's record out. A claimed author is not enough: pushed by an admin token or by
-  a peer that is not the author, a record with a deleted id is still refused, so a forged author cannot bring a
-  deleted record back. This takes effect for pushes an instance on 5.6.3 receives.
-- **What stays as it was, named:** a record with no author (data older than authorship) stays deletable by an
-  admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
-  are, because they cannot be told apart from legitimate ones.
-
-### Fixed
-
-- **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
-  tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
-  was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that
-  straddled a page (equal seqs are normal for deletions relayed from several instances). Both now page by a
-  cursor that re-reads a full page's last seq, and a transfer that cannot finish — a refused request, a page of one
-  seq it cannot page past, its per-cycle bound — holds the watermark where it stopped and says so, naming the
-  space, the peer and the seq.
-- **A tombstone with an impossible seq no longer reaches the counter by pull (`Q-221`).** The push refused it; the
-  pull checked nothing, so a peer could drag this instance's seq counter into its ceiling reserve with one
-  tombstone. Both doors now refuse it on its own, log it, and do not move the counter to it — and a refused
-  tombstone no longer moves the pull's cursor past the real deletions after it.
-- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now actually recovered (`Q-219`).** 5.6.2's notes
-  said the drain merged it "never over a newer copy"; but a receiver before 5.6.0 had stamped its OWN seq on the
-  file rows of peers' files it pulled, so most stray descriptions counted as older than the stored copy and were
-  dropped with the collection. The drain now FILLS a row this instance made itself with the keys it lacks — never
-  over a description or tags it has (an automatic caption gives way to the sender's wording), never changing its
-  seq, author or update time — and gives a row another instance wrote the usual newer-wins rule. It never creates a
-  row: a record whose file is missing waits up to 30 days for the file's bytes, or is discarded when a file
-  tombstone says the file was deleted. It works a bounded amount per cycle (2,000 records per space) and resumes;
-  a page whose counter could not be moved is kept for the next cycle; a failing space no longer stops the others
-  and is named in the log; and the drop of an emptied collection writes an audit entry,
-  `file.stray_filemeta.drain`. The server's own audit entries (sweeps, alias heals, creator grants) now carry a
-  request id of their own instead of reading as older than the field.
-- **A file whose metadata arrived before its bytes never expired (`Q-250`).** 5.6.2's notes said a file new on
-  this instance is given its file retention window; that held only when the bytes arrived first. When a peer's
-  metadata arrived first — by push or by pull — it created the row with no expiry, and the bytes then found the
-  row and never stamped it. The row the metadata creates now takes this instance's file window too, once; a later
-  copy or the bytes never re-slide it, and a space with no window stores none.
-- **A stale push could delete a deletion written meanwhile (`Q-253`).** 5.6.2's notes said a stale tombstone is
-  deleted only once the record that supersedes it has landed; that held for a record that landed. For a record
-  older than the stored copy the cleanup deleted the id's tombstone by id alone, after reading it — so a tombstone
-  written for the id in between, at a higher seq, was deleted with it, and the record it was meant to remove lived
-  on. That cleanup is now bounded by the stored copy's seq in the delete itself.
-- **A record rewritten while it was being embedded could keep its old vector (`Q-249`).** The rewrite re-queued
-  the record's embed job, and the worker's late finish then matched the job by its id alone: a success deleted the
-  new job, so the new text was never embedded, and a failure wrote the old attempt's backoff over it. A finish now
-  names the claim it holds and matches nothing once that claim is gone.
-- **A restore left a file with chunks the backup does not hold (`Q-251`).** The import replaces one row per id, so
-  a file stored with more chunks than the backup has kept the extras — text the restored file no longer has, still
-  matched by recall. A file whose row the restore carried and wrote is now left with exactly the backup's derived
-  rows (chunks and face records). A file the backup does not carry, or carries without any derived rows, is left
-  alone, and the import's log line counts what was removed.
-- **A restore that stopped part-way could report records as restored while the counter was behind them
-  (`Q-252`).** When the writer stopped on a later chunk after an earlier chunk's counter move had failed, the
-  family reported the earlier chunk as restored, though the next local write could take a seq below it. The family
-  is now answered as errors, as a clean write with the counter behind already was, and the log says re-running the
-  import repairs it.
+| A stray `<space>_filemeta` collection 5.6.2 had not dropped is recovered at most 2,000 records per space per cycle; a record whose file has not arrived waits up to 30 days | Nothing; where 5.6.2 already dropped it, nothing is left to recover |
+| `POST /api/sync/tombstones` answers `{ applied, refused }` and takes at most 5000 tombstones per request (more is `400`) | Nothing for a Ythril peer (it sends 500); `applied` keeps its meaning |
+| First pulls after a long absence carry up to 5000 deletions per kind per request, 200 requests per cycle | Nothing; a peer on 5.6.2 or earlier pulls at most 1000 per kind |
+| A tombstone whose issuer is not the delivering peer, or whose record here another instance wrote, is refused and not stored | Nothing for an honest peer |
+| A record its author pushes is no longer refused by a tombstone another instance issued for its id | Nothing; applies to pushes received by an instance on 5.6.3 |
 
 ### Changed
 
-- **`POST /api/sync/tombstones` checks each tombstone on its own, answers `refused`, and takes at most 5000 per
-  request.** A malformed tombstone, or one whose seq the counter cannot carry, is refused alone and the rest of the
-  page applies; the answer is `{ applied, refused }`, where `applied` keeps its meaning (the tombstones admitted by
-  shape and seq) and `refused` is new and additive. A malformed page used to be refused whole with a `400`, which
-  held the sender's watermark and stopped every deletion from it. A tombstone of a type the receiver does not know
-  still answers `400`, so the sender re-sends it after the receiver upgrades. More than 5000 tombstones in one
-  request is a `400`; this instance sends 500. A tombstone page also costs the same handful of database commands
-  whatever its size, on both doors, instead of several per tombstone.
-
-## [5.6.2] — 2026-10-02
-
-**A patch release: every fix on `main` for a defect present in 5.6.1, and nothing else.** The ones to take first
-are sync's: a record pulled from a peer was never queued for embedding, so meaning-ranked search on the receiver
-could not find it; a push could leave this instance's counter below a record it had received, so a peer could
-miss the next local write; and a publisher's file descriptions and tags could fail to reach a subscriber, which
-this release also recovers for files synced before it. It also makes the space export carry links, makes the
-import restore what the export wrote, and stops a peer from forging a line in this instance's log. Breaking changes
-and features already on `main` are not part of it; they ship in the next minor.
-
-| What changes on upgrade | What to do |
-|---|---|
-| Records pulled from a peer by 5.6.1 or earlier have no vector here and stay out of meaning-ranked search | Run `POST /api/spaces/:id/reembed` (Settings → Spaces → the space's Danger Zone tab → **Backfill missing embeddings**) once per synced space. Pace a large space with `limit`: embedding runs on the server's main thread in 5.6, so it answers more slowly while the backlog drains, and your own new records wait behind it |
-| A subscriber's first pull now queues every record it receives for embedding, in the same queue as local writes | Nothing to run; expect embedding of your own edits to lag until a large first pull has drained |
-| A space export now carries the space's links | Take a fresh export: one made by 5.6.1 or earlier restores without its links |
-| An import now moves this instance's counter past the records it restored | Nothing |
-| A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that was re-sending that page for ever now moves on |
-| A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
-| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files, and the collection dropped | Nothing; one log line per space says how many records were merged |
-
-Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-guide/09-sync-api.md`,
-`docs/integration-guide/12-admin-api.md` and `docs/userguide/04-settings.md`.
+- **Sync:** `POST /api/sync/tombstones` checks each tombstone on its own: a malformed one, or one whose seq the counter
+  cannot carry, is refused alone and the rest applies, where a malformed page was refused whole with `400`.
+- **Sync:** A tombstone of a type the receiver does not know still answers `400`, so the sender re-sends it after the
+  receiver upgrades. A page costs the same few database commands whatever its size, on both doors.
 
 ### Fixed
 
-#### Sync
+- **Sync:** A peer with more than 1000 deletions of one kind now passes on all of them: push and pull page by a
+  cursor that re-reads a full page's last seq, and a transfer that cannot finish holds the watermark and logs why.
+- **Sync:** A tombstone with an impossible seq no longer reaches the counter by pull: both doors refuse it alone, log it
+  and do not move the counter, and a refused tombstone no longer moves the pull's cursor past real deletions.
+- **Sync:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now actually recovered: a row this instance
+  made is filled with the keys it lacks (never over its own description or tags), others follow newer-wins.
+- **Sync:** The recovery works 2,000 records per space per cycle; a record whose file is missing waits up to 30 days.
+  A failing space no longer stops the others; the drop writes audit `file.stray_filemeta.drain`.
+- **Sync:** A file whose metadata arrived before its bytes now takes this instance's file retention window, once; it
+  never expired before. A later copy or the bytes never re-slide it, and a space with no window stores none.
+- **Sync:** A stale push can no longer delete a tombstone written for the id meanwhile at a higher seq; the cleanup is
+  bounded by the stored copy's seq.
+- **Embedding:** A record rewritten while it was being embedded no longer keeps its old vector: a worker's late finish
+  matches only the claim it holds, so it can no longer delete the new job or overwrite its backoff.
+- **Import/Export:** A restore leaves a file with exactly the backup's derived rows (chunks, face records), so extra
+  chunks no longer stay matched by recall; a file the backup lacks or carries without derived rows is untouched.
+- **Import/Export:** A restore that stopped part-way after a failed counter move now reports the family as errors, not
+  as restored; the log says re-running the import repairs it.
+- **Housekeeping:** The server's own audit entries (sweeps, alias heals, creator grants) now carry a request id of
+  their own.
 
-- **A record pulled from a peer was never queued for embedding (`Q-203`).** It was stored and absent from every
-  meaning-ranked search on this instance until somebody ran a reindex. Pulled records are now queued by this
-  instance's suppression rules, like pushed ones. Records pulled before this release need the reembed above.
+### Security
 
-- **A new entity pushed through the single `POST /api/sync/entities` route was never embedded.** It was inserted
-  by a write that never reached the embed queue.
+- **Sync:** A peer's tombstone is applied to the space its sync admitted, never the space it names: a peer admitted to
+  one space could delete records it authored in any other, and under a `spaceMap` every honest deletion was lost.
+- **Sync:** A tombstone is authorised before it is stored: one whose issuer is not the delivering peer, or whose record
+  another instance wrote, is refused, so it can no longer block that record's real author.
+- **Sync:** A record its author pushes with its own peer token is no longer refused as `tombstoned` by a tombstone
+  another instance planted; a deleted id pushed by an admin token or non-author peer is still refused.
+- **Sync:** Unchanged: a record with no author stays deletable by an admitted peer's tombstone, and tombstones a peer
+  already planted in a space it was not admitted to stay, being indistinguishable from legitimate ones.
 
-- **A push could leave this instance's seq counter below what it had received (`Q-198`).** The single push routes
-  never moved it, `batch-upsert` left out links and file metadata and moved it only after answering, and
-  `POST /api/sync/tombstones` did not wait for it. Every push door now moves the counter past every seq it received
-  before it answers, and a pulled page moves it as it lands, so the next local write never takes a seq below a
-  record a peer already holds. A fork is written with a seq above the arrival that caused it.
+## [5.6.2] — 2026-10-02
 
-- **File metadata pulled from a peer never reached this instance's files.** Since 4.0 a pulled page of file
-  metadata was written to a collection nothing reads, so a subscriber that pulls (rather than being pushed to)
-  never received a publisher's file descriptions and tags. It is now merged into the files the same way a pushed
-  page is. Metadata pulled before this release is recovered on upgrade (`Q-219`): the next housekeeping cycle
-  (within five minutes of start) merges each space's stray `<space>_filemeta` collection into its files, never over
-  a newer copy and never over this instance's own size and hash, then drops the collection and logs one line per
-  space. A description that lands this way is re-embedded once this instance holds the file's bytes.
+**A patch release of fixes for defects in 5.6.1, chiefly in sync: pulled records were never queued for embedding,
+pushes could leave the counter behind, and file descriptions could miss subscribers; take it if you sync.**
 
-- **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags.** The pushed
-  bytes reached the subscriber's upload door, which stored them as the subscriber's own upload: its own next seq,
-  itself as the author of a new file, and a description it derived itself. That copy then tied or outranked the
-  publisher's next description or tag edit, which was skipped on arrival for good. Bytes a peer pushes are now
-  recorded as the publisher's, as downloaded bytes already were (`Q-239`). Arriving bytes, pushed or pulled, also
-  make a soft-deleted path live again. A file new on this instance is now given its file retention window: a pushed
-  file had that before, a pulled one did not.
+| Changes on upgrade | Action |
+|---|---|
+| Records pulled from a peer by 5.6.1 or earlier have no vector here and stay out of meaning-ranked search | Run `POST /api/spaces/:id/reembed` (Settings → Spaces → Danger Zone → **Backfill missing embeddings**) once per synced space; pace a large one with `limit` |
+| A subscriber's first pull queues every record it receives for embedding, in the queue local writes use | Nothing; embedding of your own edits lags until a large first pull has drained |
+| A space export now carries the space's links | Take a fresh export: one made by 5.6.1 or earlier restores without its links |
+| An import now moves this instance's counter past the records it restored | Nothing |
+| A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that re-sent that page for ever now moves on |
+| A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
+| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files and the collection dropped | Nothing; one log line per space says how many records were merged |
 
-- **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
-  whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
-  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
-  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
-  schema or the space) keeps no vector, model or matched text, as 5.6.1 left it.
+### Fixed
 
-- **A record pushed in a batch under a `spaceMap` alias kept the sender's space id**, so every list and lookup on
-  this instance missed it. It is now stored under the local space id, as the single routes and the pull already did.
+- **Sync:** Every push door (single routes, `batch-upsert`) moves the seq counter past every seq it received before
+  answering, and a pulled page as it lands, so the next local write never takes a seq below a peer's record.
+- **Sync:** File metadata pulled from a peer is now merged into this instance's files like a pushed page; since 4.0 it
+  went to a collection nothing reads, so descriptions and tags never reached a subscriber that pulls.
+- **Sync:** Metadata pulled before 5.6.2 is recovered within five minutes of start: each space's stray
+  `<space>_filemeta` is merged (never over a newer copy) and dropped, and a recovered description is re-embedded.
+- **Sync:** Bytes a peer pushes are recorded as the publisher's, so they no longer freeze the subscriber's copy of the
+  file's description and tags; arriving bytes revive a soft-deleted path, and a new file gets the retention window.
+- **Sync:** A record pushed in a batch under a `spaceMap` alias is stored under the local space id, not the sender's.
+- **Sync:** A stale tombstone is deleted only once the record that supersedes it has landed, so a failed write no
+  longer loses both.
+- **Sync:** A page holding one id twice stores the highest seq (the first at equal seq), on push, pull and import.
+- **Sync:** A push re-sent after a lost answer finds the fork it already made (id derived from the record and the
+  arrival) and answers `forked` with its id, writing nothing, even if the parent has since reached a fork cap.
+- **Sync:** `POST /api/sync/tombstones` refuses a tombstone with a seq inside the protocol's ceiling reserve on its own
+  and logs it, instead of accepting any number and dragging the counter towards the ceiling.
+- **Sync:** A duplicate link in a push is counted `skipped` instead of answering `500`, so the sender stops re-sending.
+- **Sync:** A database fault while writing a pulled page holds that family's position, logs a record-write failure
+  naming the space and family and refetches next cycle, where it was reported as an unreachable peer.
+- **Sync:** A document a push or pull did not store is named: one warning per page lists ids and reason, where
+  duplicate-key warnings said `(unknown)`.
+- **Sync:** A failure to queue a record for embedding or to move the counter is now a warning, and one no longer skips
+  the other; a counter not moved past a pulled page holds that family's position, and a push answers `500`.
+- **Embedding:** A record pulled from a peer, and a new entity pushed through the single `POST /api/sync/entities`, were
+  never queued for embedding and stayed out of meaning-ranked search; both are now queued by this instance's rules.
+- **Embedding:** A peer's pushed or pulled edit no longer erases this instance's own vector and retention stamps; the
+  vector is kept only while this instance embeds the record; a suppressed arrival keeps no vector, model or matched text.
+- **Import/Export:** The space export now streams every replicated family, links included, so a restore keeps its links.
+- **Import/Export:** An import no longer stores the export's vector model and matched text, restores retention stamps as
+  dates (the sweep ignored them as text), and moves the counter past every plausible restored seq.
+- **Import/Export:** A restored record holds exactly the stamps and file sync bases its backup carried; a family whose
+  counter could not be moved reports every document in `errors` though stored, so run the import again.
 
-- **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
-  lost both. It is deleted only once the record has landed.
+### Security
 
-- **A page holding the same id twice could store the older copy**, on push, pull and import. The highest seq now
-  wins, and of two copies at the same seq the first is kept.
-
-- **A push re-sent after a lost answer forked a divergent fact again.** A fork's id is now derived from the record
-  and the arrival that caused it, so the re-sent push finds the fork it already made and is answered `forked` with
-  its id, writing nothing — also when the parent has reached a fork cap since, where it used to be refused.
-
-- **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's
-  ceiling reserve is now refused on its own and logged; it used to refuse every later copy of its record and drag
-  the counter towards the ceiling.
-
-- **A duplicate link in a push answered `500`**, so the sender re-sent that page for ever. It is now `skipped`.
-
-- **A database fault while writing a pulled page was reported as an unreachable peer.** It now holds that family's
-  position, logs a record-write failure naming the space and family, and the page is fetched again next cycle.
-
-- **A document a push or pull did not store is named.** One warning per page names the ids and the reason, where
-  duplicate-key warnings used to list `(unknown)`.
-
-- **A queueing failure after an arrival was silent.** If the record could not be queued for embedding, or the
-  counter could not be moved, nothing was logged; both are now warnings, and one failing no longer skips the other.
-  A counter that could not be moved past a pulled page also holds that family's position, so the page is fetched
-  again next cycle; a push answers `500` for it, as it does for any failed write.
-
-#### Security
-
-- **A peer could forge a line in this instance's log.** A document id, a file path or a peer label containing a
-  line break was written into the log as it arrived, so a peer could add a line that read exactly like this
-  server's own. Every value a peer sends that reaches a log line on the push, pull and import paths — and in the
-  rest of sync: gossip, votes, members, change notes, file sync and the sync triggers — is now written with its
-  control characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
-
-#### Export and import
-
-- **The space export left out links (`Q-206`)**, so restoring it lost every link between records. It now streams
-  every replicated family.
-
-- **The import kept what this instance derives, and never moved the counter (`Q-205`).** An import stored the
-  export's vector model and matched text, kept the retention stamps as text (so the retention sweep never acted on
-  them), and left this instance's counter below the restored records. It now leaves out what this instance derives,
-  restores the stamps as dates, and moves the counter past every plausible seq it restored. A restored record holds
-  exactly the stamps and file sync bases its backup carried, never the replaced copy's. A family whose counter
-  could not be moved is answered with every document counted in `errors`, though it is stored; run the import
-  again.
-
-### Internal
-
-- **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
-  connection open when a setup step threw after connecting, so one such file held `test:standalone` for as long as
-  the CI job lived. The harness now closes what it opened, and the CI job has a 90-minute ceiling.
+- **Sync:** A peer could forge a log line with a line break in a document id, file path or peer label. Every peer-sent
+  value reaching a log line (sync, import, gossip, votes, members) now has `\r`, `\n` and `\u001b` escaped.
 
 ## [5.6.1] — 2026-10-01
 
