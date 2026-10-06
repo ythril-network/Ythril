@@ -48,7 +48,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { balancedFrom } from './_structural-window.mjs';
+import { balancedFrom, statementUpTo } from './_structural-window.mjs';
 
 const OWNER = 'server/src/util/interval-job.ts';
 const KEEPALIVE = 'server/src/util/sse-stream.ts';
@@ -70,10 +70,12 @@ export function keepaliveExemption(src) {
   const unpaired = [];
   const tokens = timerTokens(src);
   for (const at of tokens) {
-    const handle = /([A-Za-z_$][\w$]*)\s*(?::[^=\n]*)?=\s*$/.exec(src.slice(Math.max(0, at - 80), at))?.[1];
+    // What the token is assigned to is read off the STATEMENT it begins in, up to the token — not a count of characters before it.
+    const statementBefore = statementUpTo(src, at, 'the statement a setInterval sits in');
+    const handle = /([A-Za-z_$][\w$]*)\s*(?::[^=\n]*)?=\s*$/.exec(statementBefore)?.[1];
     const cleared = handle !== undefined
       && finallies.some(block => new RegExp(String.raw`\bclearInterval\(\s*${handle.replace(/\$/g, '\\$')}\s*\)`).test(block));
-    if (!cleared) unpaired.push(src.slice(Math.max(0, at - 40), at + 40).replace(/\s+/g, ' '));
+    if (!cleared) unpaired.push(`${statementBefore}setInterval`.replace(/\s+/g, ' ').trim());
   }
   return { count: tokens.length, unpaired };
 }

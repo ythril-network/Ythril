@@ -30,6 +30,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { waitFor } from '../_shared/wait-for.mjs';
 import { moduleIndex } from './_call-graph.mjs';
 import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
 
@@ -43,13 +44,7 @@ before(async () => {
 });
 after(() => { unsubscribe?.(); });
 
-const until = async (predicate, ms = 5000) => {
-  const end = Date.now() + ms;
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error('timed out');
-    await new Promise(r => setTimeout(r, 10));
-  }
-};
+const until = (predicate, ms = 5000) => waitFor(predicate, ms, 10);
 
 describe('a job armed inside a request does not run inside it', () => {
   it('control: the logger really stamps a line written inside a request', () => {

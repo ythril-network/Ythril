@@ -48,6 +48,7 @@ import { moduleIndex, indexSources, callsIn, intervalJobRuns } from './_call-gra
 import { walkEntryNames, walkCallsIn } from './_housekeeping-walks.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { statementUpTo } from './_structural-window.mjs';
 import { posix } from 'node:path';
 
 const VERDICT_FILE = 'server/src/util/space-failure.ts';
@@ -102,7 +103,7 @@ function verdictCalls(sources) {
   for (const { file, text } of sources) {
     const code = stripComments(text);
     for (const m of code.matchAll(/(?<![\w$.])walkVerdict\s*\(/g)) {
-      const before = code.slice(Math.max(0, m.index - 40), m.index);
+      const before = statementUpTo(code, m.index, 'the statement a walkVerdict call sits in');
       if (/\bfunction\s*\*?\s*$/.test(before)) continue;   // the declaration
       out.push({ file, awaited: /\bawait\s*$/.test(before) || /\bawait\s*\(\s*$/.test(before), line: code.slice(0, m.index).split('\n').length, at: m.index });
     }
