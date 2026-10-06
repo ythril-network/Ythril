@@ -35,6 +35,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { statementAround } from './_structural-window.mjs';
 
 const KEYSET = 'server/src/util/seq-keyset.ts';
 const SEQ_UTIL = 'server/src/util/seq.ts';
@@ -55,29 +56,25 @@ const DETECTORS = [
 const sources = readTrackedSources('server/src', { specs: false }).map(s => ({ file: s.file, text: stripComments(s.text) }));
 const byFile = new Map(sources.map(s => [s.file, s]));
 
-/** Every site, with the statement it sits in. */
+/** Every site: where it is, which detector found it, and the object a sort names. */
 function sitesOf({ file, text }) {
   const out = [];
   for (const d of DETECTORS) {
-    for (const m of text.matchAll(d.re)) {
-      out.push({
-        file, detector: d.name, index: m.index, object: m[1],
-        around: text.slice(Math.max(0, m.index - 80), m.index + 160),
-        after: text.slice(m.index + m[0].length, m.index + m[0].length + 60),
-      });
-    }
+    for (const m of text.matchAll(d.re)) out.push({ file, detector: d.name, index: m.index, object: m[1] });
   }
   return out;
 }
 
-/** The reason a site is exempt, or `null`. */
+/** The reason a site is exempt, or `null`. The statements it asks about are bounded structurally (`_structural-window.mjs`). */
 function exemption(site, importsKeyset) {
+  const text = byFile.get(site.file).text;
   // Newest first and capped: `highestStoredSeq` (`.sort({ seq: -1 }).limit(1)`) and the fresh-writes window
   // (`$sort: { seq: -1 }, $limit`). There is no next page, so a tie at the cut cannot lose what a later page would serve.
-  if (/\bseq\s*:\s*-1\b/.test(site.object) && /^\W{0,12}\$?limit\b/.test(site.after.replace(/^[\s)\],}]*/, ''))) {
+  if (/\bseq\s*:\s*-1\b/.test(site.object)
+    && /\$?\blimit\b/.test(statementAround(text, site.index, `${site.file} newest-first read`))) {
     return 'a newest-first read capped by a limit (highestStoredSeq, the fresh-writes window): a maximum, not a position, so a tie cannot lose a record a later page would serve';
   }
-  if (site.file === SEQ_UTIL && site.detector === 'the settled-seq horizon' && /function\s+settledSeqRange\b/.test(site.around)) {
+  if (site.file === SEQ_UTIL && site.detector === 'the settled-seq horizon' && /function\s+$/.test(text.slice(0, site.index))) {
     return 'the definition of the horizon; the keyset module is its only caller';
   }
   if (site.detector.startsWith('a sort') && !importsKeyset) {
@@ -174,10 +171,14 @@ describe('every seq-ordered reader goes through it', () => {
     assert.deepEqual(own, [], 'a sort on seq alone orders a tie by whatever the storage engine likes, so the next page cannot continue it');
   });
 
-  it('every file that asks the module for a filter also sorts with SEQ_KEYSET_SORT', () => {
-    const askers = readers.filter(r => /\bseqKeysetFilters\b/.test(r.text));
-    assert.ok(askers.length >= 1, 'no reader calls seqKeysetFilters yet');
-    for (const r of askers) assert.match(r.text, /\bSEQ_KEYSET_SORT\b/, `${r.file} asks for the keyset filter and does not use its sort`);
+  it('every file that asks the module for a filter also sorts with SEQ_KEYSET_SORT; one that asks for the READ gets the sort inside it', () => {
+    // `readAfterSeq` is the module's read: both finds, the horizon, the readiness fallback and the sort live inside it, so a caller
+    // of it cannot drop the sort. A file that builds its own finds from `seqKeysetFilters` has to bring the sort itself.
+    const askers = readers.filter(r => /\b(?:seqKeysetFilters|readAfterSeq)\b/.test(r.text));
+    assert.ok(askers.length >= 1, 'no reader calls seqKeysetFilters or readAfterSeq yet');
+    for (const r of askers.filter(a => /\bseqKeysetFilters\b/.test(a.text))) {
+      assert.match(r.text, /\bSEQ_KEYSET_SORT\b/, `${r.file} asks for the keyset filter and does not use its sort`);
+    }
   });
 
   it('at least five files import the keyset module (floor), so the rules above are over something', () => {

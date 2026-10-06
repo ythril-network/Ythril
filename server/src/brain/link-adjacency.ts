@@ -180,9 +180,12 @@ export const LINK_CLASSES: readonly LinkClass[] =
  * ## What each is for
  *
  * Both directions are asked. From a record: what does this concern. From an entity: what concerns this —
- * the backlink scan that blocks a delete, once per candidate. `seq` is the sync page, exactly as every
- * other replicated collection has it: `pageBySeq` orders on it, and without the index every page a peer
- * asks for sorts the whole collection.
+ * the backlink scan that blocks a delete, once per candidate.
+ *
+ * **The sync page's index is NOT here.** The links collection pages by `(seq, _id)` like every other replicated
+ * collection, and its `{ seq: 1, _id: 1 }` is declared once for all of them in `SEQ_KEYSET_INDEXES`
+ * (`util/seq-keyset.ts`), created by `spaces/keyset-indexes.ts` — a row here would be the second declaration of an index
+ * that has to be built in the background on an existing space and never before the server listens.
  *
  * The first is UNIQUE, and that is what lets the ingest path drop fork resolution: a link is
  * `(from, fromKind, to, toKind)` and nothing else, so two peers that notice the same connection have
@@ -193,7 +196,6 @@ export const LINK_INDEXES: readonly { keys: Record<string, 1>; unique?: boolean 
 >([
   { keys: { from: 1, fromKind: 1, to: 1, toKind: 1 }, unique: true },
   { keys: { to: 1, toKind: 1 } },
-  { keys: { seq: 1 } },
 ]);
 
 /**

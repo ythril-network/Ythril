@@ -108,7 +108,7 @@ Spaces without an entry in `spaceMap` pass through unchanged (identity mapping).
 ## Pull phase
 
 ```http
-GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq={cursor}&limit=5000  (paged, tie-safe — see below)
+GET /api/sync/tombstones?spaceId=&networkId=&cursor={cursor}&limit=5000   (paged by position, tie-safe — see below)
 GET /api/sync/facts?spaceId=&...&full=true&limit=200                     (ceil(N/200) requests)
 GET /api/sync/entities?...                                                  (ceil(N/200) requests)
 GET /api/sync/edges?...                                                     (ceil(N/200) requests)
@@ -127,6 +127,16 @@ Pagination is additionally capped at **50 pages per type per cycle** (~10,000 do
 
 Hitting that cap counts as a transfer stopping early (see [watermarks](#watermarks)), so it limits how far the shared watermark may advance — to exactly what this type delivered. That is also why the rule is a *limit* rather than "do not advance at all": a capped type has more to give, and refusing to advance would make it re-fetch the same pages every cycle and never catch up.
 
+### A page continues from a position, and the cursor is opaque
+
+A record keeps its author's `seq` when it replicates, so records relayed from several authors **share** seqs, and a page can end in the middle of a run of equal ones. Every list route therefore reads in `(seq, _id)` order and its `nextCursor` names a **position in that order** — the last record served — so the next page continues the run instead of skipping what is left of it. `sinceSeq` is the other way to start: a bare seq, strictly above it.
+
+- **The cursor is opaque.** Echo `nextCursor` back as `cursor` and never build, decode or compare one: its format is the server's, it has already changed once (an earlier server's was the bare seq, this one's is a pair), and a build that cannot read one answers `400` rather than guess. A cursor the server cannot name (a file path longer than 1024 characters as the last item of a page) degrades to the bare-seq form, which every build reads.
+- **`cursor` wins over `sinceSeq`** when both are sent. A client that keeps its `sinceSeq` constant beside the cursor it echoes — which a 5.6 client does — pages correctly.
+- **Settled seqs only.** Neither a page nor a cursor ever names a seq at or above one that is allocated and not yet written, so a record that commits a moment later is not stepped over.
+- **A listing carries no riders.** The tombstone stubs that ride in a list response (items with a `deletedAt`) are appended to a page of whole documents (`full=true`) only; `full=false` is ids and seqs and pays for no tombstone read.
+- **Until a collection's `(seq, _id)` index exists** (it is built in the background after an upgrade, [upgrading](integration-guide/02b-upgrading.md)) its pages read as a 5.6 server's did: by seq alone, strictly above. Sync is unchanged, not broken, in that window — and a run of equal seqs is not yet tie-safe.
+
 **Impact at 100 ms WAN latency:**
 
 | Documents changed | Per-document fetch | `?full=true` |
@@ -139,7 +149,10 @@ Hitting that cap counts as a transfer stopping early (see [watermarks](#watermar
 
 Tombstones are fetched before documents so that a deletion that arrived at the peer applies before the engine could accidentally re-insert the same document that was just deleted. After tombstones are applied, items appearing in the list with a `deletedAt` field are skipped (they're stubs that the tombstone phase already handled — the riders are served but ignored).
 
-**The tombstone pull is paged, and it delivers everything up to the horizon or says where it stopped.** One `sinceSeq` — the member's one `lastSeqReceived` — covers tombstones and records alike. Each request asks for `limit=5000` per type from a cursor. A type that comes back full may hold more at its last seq, so the next cursor is the lowest last seq among the full types **minus one**: that seq is served again, whole, and what was already applied is skipped by `(type, _id)`. Equal seqs are legitimate — a peer relays tombstones from several issuers, each with its own clock — and this is what keeps a run of them across a page boundary from being lost. The cursor moves only over elements the receiver admitted, so a refused element at the top of a page cannot page past the real deletions after it. A full type that is all one seq cannot be paged past; the transfer then stops, warns naming the space, the peer and the seq, and holds the watermark below it. So does the 200-request bound per cycle; the next cycle resumes. The cost, accepted: the types that were not full are served again from the new cursor. A peer older than this one serves at most `limit` per type and is paged the same way.
+**The tombstone pull is paged, and it delivers everything up to the horizon or says where it stopped.** One start — the member's one `lastSeqReceived` — covers tombstones and records alike. The route has two modes, and the mode is the request's:
+
+- **Cursor mode (`cursor` present).** One read of every type: `limit` rows (default 1000, at most 5000, the page's total and not per type) in `(seq, _id)` order after the cursor's position, grouped by type in the answer under the same keys as ever, with **`nextCursor` beside them** — a position to echo back, `null` on the last page. A first request carries the bare-seq cursor of the watermark beside `sinceSeq` (an older server ignores the cursor, reads `sinceSeq` and answers no `nextCursor`, which tells the puller to page it the older way). It pages through a run of tombstones at ONE seq, which is what it exists for: a peer relays tombstones from several issuers, each with its own clock, and any member's token may name any seq for what it issues, so a run of more than `limit` at one seq is a thing a hostile or merely busy peer can make. Everything the answer says is the SERVER's position; an element the receiver refuses does not move it, and a refused element at the top of a page cannot page past the real deletions after it.
+- **`sinceSeq` alone (legacy mode)** is unchanged: `seq > sinceSeq`, per type, at most `limit` of each, no `nextCursor`. An older puller reads a full group as "more may follow", pages from the group's last seq minus one and skips what it already applied by `(type, _id)`; a group that is full and all one seq cannot be paged past by it, so it stops, warns naming the space, the peer and the seq, and holds its watermark below it — **until that member upgrades**. The same 200-request bound per cycle stops a puller of either kind; the next cycle resumes. A run longer than one cycle's page budget (200 pages of at most 5000) still stops, logged, at that seq minus one every cycle.
 
 ### Tombstone deletion authorisation
 
@@ -173,13 +186,17 @@ The local seq counter is bumped past every seq the page carried before the next 
 
 ### `lastSeqReceived` update
 
-After all five document types (facts, entities, edges, chrono, links) are pulled, `lastSeqReceived[spaceId]` is advanced to the highest `seq` seen **among documents authored by the peer** (`doc.author.instanceId === member.instanceId`) and written to config. On the next cycle the watermark is passed as `sinceSeq` so the peer returns only documents newer than that point.
+After all six document types are pulled, `lastSeqReceived[spaceId]` is advanced to the highest `seq` seen **among documents authored by the peer** (`doc.author.instanceId === member.instanceId`) and written to config. On the next cycle the watermark is passed as `sinceSeq` so the peer returns only documents newer than that point.
+
+**"The highest seq" is claimed only for a pull that FINISHED** (`nextCursor` came back `null`). Several records can share one seq, so a pull that stops partway — an error, the page cap, a peer that went away — may have taken part of the run at its last seq and not the rest, and a watermark AT that seq would put the rest behind it for good. A stop therefore claims that seq **minus one**: everything below it was delivered whole, and the next cycle re-reads the run (what it already holds comes back `skipped`). The author guard and the relay qualifier below apply to either: the number is taken among the peer's own documents, and never past the point every transfer in the cycle is complete through ([watermarks](#watermarks)).
+
+*Not claimed:* a record that ARRIVES at the peer later with a seq at or below a watermark already moved past it. The watermark is one number over clocks that are not one clock (a relayed record keeps its author's seq), and that is a different defect from the one the cursor closes.
 
 Docs that originate from a third instance but were relayed through the peer (e.g. during braintree or pubsub fanout) deliberately do not advance the watermark. Those relayed docs may carry a `seq` assigned by their true author's counter, which can be much higher than the peer's own counter. Allowing them to advance `lastSeqReceived` would cause the engine to skip the peer's locally-written documents on the next pull.
 
 ### `lastSeqServed` — the mirror watermark, and why tombstone retention needs it
 
-`lastSeqReceived` and `lastSeqPushed` are **our** position in a peer's data. `lastSeqServed[spaceId]` is the opposite: the highest `sinceSeq` that peer has pulled **our** tombstones from, i.e. the position it has confirmed applying. It is recorded on the serving side by `GET /api/sync/tombstones`, keyed by the authenticated peer, after the read.
+`lastSeqReceived` and `lastSeqPushed` are **our** position in a peer's data. `lastSeqServed[spaceId]` is the opposite: the highest `sinceSeq` that peer has pulled **our** tombstones from, i.e. the position it has confirmed applying. It is recorded on the serving side by `GET /api/sync/tombstones`, keyed by the authenticated peer, after the read. A request in **cursor mode** records the cursor's seq **minus one**: everything below it was delivered, and part of the run at it may not have been, so a prune must keep that run.
 
 It exists because tombstone retention cannot be time-based. Tombstones are served by `seq > sinceSeq`, so a peer that was offline longer than any expiry window comes back, never sees the deletion, and pushes its live copy — the deleted record returns. A floor built from `min(lastSeqServed)` across every member of every network carrying the space has no such hole: below it, every peer has already applied the deletion.
 
@@ -484,7 +501,7 @@ The seven **data-write endpoints accept only peer or admin tokens** — see [Dir
 | `GET` | `/api/sync/links/:id` | `spaceId`, `networkId` | Full `LinkDoc` |
 | `GET` | `/api/sync/filemeta` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/filemeta/:id` | `spaceId`, `networkId` | Full `FileMetaDoc` |
-| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000 — PER TYPE) | `{ facts[], entities[], edges[], chrono[], links[] }`, each ascending by seq and at most `limit` long. A full array may have more at its last seq: page with the [tie-safe cursor](#tombstones-pulled-first), never by moving to the last seq |
+| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `cursor`, `sinceSeq`, `limit` (default 1000, max 5000 — PER TYPE with `sinceSeq` alone, the page's TOTAL with `cursor`) | `{ facts[], entities[], edges[], chrono[], links[] }`, each ascending by seq. With `cursor`, plus `nextCursor` (echo it; `null` on the last page); with `sinceSeq` alone, each array at most `limit` long and no `nextCursor` — a full array may have more at its last seq, so page by [position](#tombstones-pulled-first), never by moving to the last seq |
 | `GET` | `/api/sync/file-tombstones` | `spaceId`, `networkId`, `since` | `{ tombstones[] }` |
 | `GET` | `/api/sync/manifest` | `spaceId`, `networkId`, `since` | `{ manifest[{ path, sha256, size, modifiedAt }], spaceId }` (`spaceId`: the responder's local id) |
 | `GET` | `/api/sync/merkle` | `spaceId`, `networkId` | `{ spaceId, root, leafCount, computedAt, networkId }` (only used when `network.merkle: true`) |
@@ -492,7 +509,7 @@ The seven **data-write endpoints accept only peer or admin tokens** — see [Dir
 
 There is no dedicated identity endpoint — a peer that needs the instance's identity calls the regular authenticated `GET /api/about` (`{ instanceId, instanceLabel, version, … }`), and identity also arrives on every cycle via the gossip `self` record.
 
-`?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. `limit` runs from 1 to 500 (to 5000 per type on tombstones): below 1 reads as 1, above the maximum as the maximum, not a number as the default. A `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400`. A document read by id (`/:id`) carries the same fields a page would, and one no page serves (a file chunk) is `404`. Tombstone stubs (items with `deletedAt`) are always appended to list responses regardless of `full` mode.
+`?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. `limit` runs from 1 to 500 (to 5000 per type on tombstones): below 1 reads as 1, above the maximum as the maximum, not a number as the default. A `sinceSeq` that is not a whole number of 0 or more, or a `cursor` that does not decode, answers `400`. A document read by id (`/:id`) carries the same fields a page would, and one no page serves (a file chunk) is `404`. Tombstone stubs (items with `deletedAt`) are appended to a list response of whole documents (`full=true`) and to none other: a listing of ids and seqs reads no tombstones. The `cursor` is [opaque and wins over `sinceSeq`](#a-page-continues-from-a-position-and-the-cursor-is-opaque).
 
 **A peer must serve all six families, and `tombstones` must carry `links[]`.** A peer that serves neither `links` nor `filemeta` drops both on the way in and never propagates a link deletion — and because `merkle` hashes all six collections, its root then diverges permanently on data that is not actually different. The check is advisory, so nothing contradicts the warning, and an operator learns to ignore the one signal that means data really is missing.
 
