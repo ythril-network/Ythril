@@ -318,6 +318,21 @@ async function main(): Promise<void> {
     stopBrainEmbeddingWorker();
     const { stopRetryWorker } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
+    // Every other timer job (`the-shutdown-handler-stops-every-timer-job` derives the set): a tick that starts while the HTTP drain
+    // runs reaches into a database the shutdown is about to close, and a tick that lands late is a write racing `closeMongo`. The
+    // TTL sweep, the candidate and tombstone prunes, the contradiction scanner and the change-retention sweep each exported a stop
+    // that nothing called, and the stale-chunk cleanup is cleared through the handle it was started with.
+    clearInterval(chunkCleanupInterval);
+    const { stopTtlSweep } = await import('./brain/ttl-sweep.js');
+    stopTtlSweep();
+    const { stopCandidatePrune } = await import('./brain/candidate-prune.js');
+    stopCandidatePrune();
+    const { stopTombstonePrune } = await import('./brain/tombstone-prune.js');
+    stopTombstonePrune();
+    const { stopContradictionScanner } = await import('./brain/contradiction-scanner.js');
+    stopContradictionScanner();
+    const { stopAuditChangeRetention } = await import('./audit/change-retention.js');
+    stopAuditChangeRetention();
 
     await new Promise<void>(resolve => {
       const forced = setTimeout(() => {

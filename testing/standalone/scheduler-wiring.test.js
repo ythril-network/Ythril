@@ -104,15 +104,21 @@ describe('a schedule that is captured at start time is re-armed when it changes'
   });
 
   it('the reload path calls the re-arm helper', () => {
-    // Position matters as much as presence: re-arming before `initSpace` could fire a scan against a space
-    // that does not exist yet, so the call belongs at the END of the reload.
+    // Position matters as much as presence: re-arming before the spaces are initialised could fire a scan against a space
+    // that does not exist yet, so the call belongs at the END of the reload. The reload hands the helper to
+    // `initAddedSpaces` (`spaces/lifecycle.ts`), which initialises each added space on its own, THEN re-arms, whether or not
+    // every space landed, and only then reports the ones that did not.
     const app = read('server/src/app.ts');
-    assert.match(app, /await rearmCronSchedulers\(\)/,
+    assert.match(app, /await initAddedSpaces\(\{ added, rearm: rearmCronSchedulers \}\)/,
       'applyConfigFromDisk must re-arm, or POST /api/admin/reload-config reports success without applying');
-    const rearmAt = app.indexOf('await rearmCronSchedulers()');
-    const initAt = app.lastIndexOf('await initSpace(');
+    const lifecycle = read('server/src/spaces/lifecycle.ts');
+    const fn = lifecycle.slice(lifecycle.indexOf('export async function initAddedSpaces'));
+    const initAt = fn.indexOf('await initOwedSpaces(');
+    const rearmAt = fn.indexOf('await rearm()');
+    const throwAt = fn.indexOf('throw new Error(');
     assert.ok(initAt > -1 && rearmAt > initAt,
-      're-arming before initSpace can schedule work against a space that does not exist yet');
+      're-arming before the spaces are initialised can schedule work against a space that does not exist yet');
+    assert.ok(throwAt > rearmAt, 'a space that failed must not stop the re-arm: the throw that names it comes after');
   });
 
   it('the backup route re-arms its own scheduler, because its schedule is not in config.json', () => {

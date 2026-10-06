@@ -118,15 +118,18 @@ describe('the creation ordering this check depends on', () => {
     const callers = [lifecycle, app]
       .flatMap(src => [...src.matchAll(/initSpace\((?![^)]*waitForVectorReady)[^)]*\)/g)].map(m => m[0]))
       .filter(m => !m.includes('\n'));
-    assert.deepEqual(callers.sort(), ["initSpace('general')", 'initSpace(space.id)'],
+    assert.deepEqual(callers.sort(), ["initSpace('general')", 'initSpace(spaceId)'],
       'a new initSpace caller relies on the default (waitForVectorReady: true) and therefore POLLS — confirm its '
       + 'space is in config first, then add it here');
 
     // `initSpace('general')` sits after the built-in space is pushed and saved.
     assert.ok(lifecycle.indexOf("await initSpace('general');") > lifecycle.indexOf("id: 'general',"));
-    // `app.ts` iterates the RELOADED config, so its space is committed by construction.
-    const iterates = app.indexOf('for (const space of newCfg.spaces)');
-    assert.ok(iterates > -1 && app.indexOf('await initSpace(space.id);') > iterates,
-      'the app.ts caller must still be iterating spaces read from config');
+    // The reload path's walk (`initOwedSpaces`, which `app.ts` reaches through `initAddedSpaces`) drops every owed id the
+    // config no longer holds BEFORE it initialises any, so the space it polls for is committed by construction.
+    const walk = bodyOf(lifecycle, 'initOwedSpaces');
+    const drops = walk.indexOf('if (!concrete.has(id)) owedInit.delete(id);');
+    assert.ok(drops > -1 && walk.indexOf('initSpace(spaceId)') > drops,
+      'the reload path must still drop the spaces the config does not hold before it initialises one');
+    assert.equal(app.includes('initSpace('), false, 'app.ts calls initSpace again: confirm its space is in config first, then list it above');
   });
 });

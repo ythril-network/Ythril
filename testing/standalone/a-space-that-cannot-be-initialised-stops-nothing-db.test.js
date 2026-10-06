@@ -35,6 +35,9 @@ import { openPushDoor } from './_push-door.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
+// The boot's background index confirmation polls for a search index the harness Mongo never reports ready, for ten minutes by default,
+// and holds this process open for as long. Read once, when `spaces/lifecycle.js` is first imported (by the door, below).
+process.env['INDEX_READY_TIMEOUT_MS'] = '2000';
 const BOOT_BAD = 'initbad';
 const BOOT_OK = 'initok';
 const RELOAD_BAD = 'reloadbad';

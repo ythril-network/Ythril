@@ -40,7 +40,11 @@ Two ways to set it, both usable together:
 
 The expiry surfaces as `_expireAt` (an ISO timestamp) on the record — **not `expiresAt`**, which is a different field on different things (a token, a recall graph download, a file-meta thumbnail) and is never present on a brain record. Reading back the wrong one returns nothing whether the expiry was set or not, so a working `ttlDays` looks broken. The sweep runs periodically on every
 instance; expiry is eventual (granularity is days), not to-the-second. A `ttlDays`-only update (no other
-fields) is a valid write — use it to set, extend, or clear an existing record's expiry.
+fields) is a valid write — use it to set, extend, or clear an existing record's expiry. Each cycle deletes at most 500 expired
+records per collection and per space and attempts at most 2 000, so a large backlog drains over several cycles. A record whose delete
+fails is passed over for that cycle and **does not hold back the expired records behind it**; the Server Log names the collection and
+how many could not be deleted, once per cycle (`TTL sweep: N expired facts record(s) in '<space>' could not be deleted …`), and the
+next cycle tries them again.
 
 `ttlDays` is accepted on the **MCP** write tools as well (`save_fact`, `update_fact`, `save_entity`,
 `update_entity`, `save_edge`, `update_edge`, `save_chrono`, `update_chrono`, `write_file`) and per item in

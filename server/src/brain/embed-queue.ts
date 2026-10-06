@@ -45,6 +45,7 @@ import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js'
 import { RECORD_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { inChunks } from '../util/chunks.js';
+import { runSpaceStep } from '../spaces/space-step.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */
 export const MAX_EMBED_ATTEMPTS = 5;
@@ -175,7 +176,9 @@ export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJ
   const now = new Date().toISOString();
   // Consumes the full-scan slot, so it is called exactly once per claim.
   for (const spaceId of _signal.spacesToProbe(spaceIds)) {
-    const claimed = await jobs(spaceId).findOneAndUpdate(
+    // Each space is its own step: one whose queue cannot be read is said once and skipped, and the spaces after it are still
+    // probed. A throw here used to end the claim for every space behind it, so one bad space starved all the others of embedding.
+    const step = await runSpaceStep('Embed claim', spaceId, () => jobs(spaceId).findOneAndUpdate(
       asFilter<BrainEmbedJobDoc>({
         status: 'pending',
         $or: [
@@ -192,7 +195,9 @@ export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJ
         $inc: { attempts: 1 },
       }),
       { returnDocument: 'after', sort: { createdAt: 1 } },
-    ) as BrainEmbedJobDoc | null;
+    ) as Promise<BrainEmbedJobDoc | null>);
+    if (!step.ok) continue;
+    const claimed = step.value;
 
     if (claimed) {
       _signal.noteClaimed(spaceId);
@@ -431,7 +436,8 @@ export async function failEmbedJob(
 export async function reviveFailedEmbedJobs(spaceIds: string[], version: string): Promise<number> {
   let revived = 0;
   for (const spaceId of spaceIds) {
-    const res = await jobs(spaceId).updateMany(
+    // One step per space, as in the claim: a space that cannot be written is said once and the spaces after it are still revived.
+    const step = await runSpaceStep('Embed revive', spaceId, () => jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'failed', revivedForVersion: { $ne: version } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
@@ -440,7 +446,9 @@ export async function reviveFailedEmbedJobs(spaceIds: string[], version: string)
           revivedForVersion: version, updatedAt: new Date().toISOString(),
         },
       }),
-    );
+    ));
+    if (!step.ok) continue;
+    const res = step.value;
     if (res.modifiedCount > 0) {
       revived += res.modifiedCount;
       _signal.markSpaceMayHaveWork(spaceId);
@@ -460,7 +468,8 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
   const cutoff = new Date(Date.now() - timeoutMs).toISOString();
   let reset = 0;
   for (const spaceId of spaceIds) {
-    const res = await jobs(spaceId).updateMany(
+    // One step per space, as in the claim: a space that cannot be written is said once and the spaces after it are still reset.
+    const step = await runSpaceStep('Embed stall reset', spaceId, () => jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'processing', progressAt: { $lt: cutoff } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
@@ -468,7 +477,9 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
           updatedAt: new Date().toISOString(),
         },
       }),
-    );
+    ));
+    if (!step.ok) continue;
+    const res = step.value;
     if (res.modifiedCount > 0) {
       reset += res.modifiedCount;
       _signal.markSpaceMayHaveWork(spaceId);

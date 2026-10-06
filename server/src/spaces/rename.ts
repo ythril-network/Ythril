@@ -17,6 +17,32 @@ import { repairStaleSpaceIds, beginSpaceOp, endSpaceOp } from './_shared.js';
 import { RenameSpaceBody } from './body-schemas.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { caughtFailureText } from '../brain/store-failure.js';
+import { errorChain } from '../db/error-chain.js';
+
+/** Node's file-system error: an `Error` with a string `syscall` and `code` (`ENOENT`, `EACCES`, …). */
+function isFileSystemError(e: unknown): e is Error & { code: string; syscall: string } {
+  return e instanceof Error && typeof (e as { syscall?: unknown }).syscall === 'string' && typeof (e as { code?: unknown }).code === 'string';
+}
+
+/**
+ * What a rename says about a failed step, in a text an ANSWER may carry.
+ *
+ * `caughtFailureText` keeps an error that is not the driver's by its own message, which for a Node file-system error is the runtime's:
+ * `EPERM: operation not permitted, rename '/data/files/old' -> '/data/files/new'`. A rename's step messages and its act's catch are
+ * answered as the `500` body of `PATCH /api/spaces/:id/rename` and of `space_rename`, so that put the instance's absolute data path in
+ * the hands of whoever asked. A file-system error is answered by its CODE in our words; the runtime's message, path and all, goes to the
+ * log under `operation`, where an operator reads it. Anything else is `caughtFailureText`'s, unchanged. Never throws: it runs in a `catch`.
+ */
+function renameFailureText(err: unknown, operation: string): string {
+  try {
+    const fsError = errorChain(err).find(isFileSystemError);
+    if (fsError) {
+      log.warn(`Rename: ${peerText(operation)} failed on the file system: ${peerText(fsError.message)}`);
+      return `the file system refused this step (${/^[A-Z0-9_]{1,32}$/.test(fsError.code) ? fsError.code : 'unknown'}); the reason is in the server log`;
+    }
+  } catch { /* fall through to the general text */ }
+  return caughtFailureText(err, operation);
+}
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -142,7 +168,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') {
-      const msg = `Could not move files directory: ${peerText(caughtFailureText(err, `move the files directory of space '${peerText(oldId)}'`))}`;
+      const msg = `Could not move files directory: ${peerText(renameFailureText(err, `move the files directory of space '${peerText(oldId)}'`))}`;
       log.warn(msg);
       errors.push(msg);
     }
@@ -315,7 +341,7 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
   try {
     return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
   } catch (err) {
-    const msg = caughtFailureText(err, 'rename a space');
+    const msg = renameFailureText(err, 'rename a space');
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
     if (err instanceof SpaceNameInUseError) return { status: 409, error: msg, code: err.code };
     if (msg.includes('not found')) return { status: 404, error: msg };

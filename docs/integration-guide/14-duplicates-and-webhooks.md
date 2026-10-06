@@ -65,7 +65,7 @@ Base path: `/api/duplicates`.
 | `POST` | `/api/duplicates/:id/dismiss` | `dataQuality` write | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
 | `POST` | `/api/duplicates/:id/reopen` | `dataQuality` write | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
 | `POST` | `/api/duplicates/:id/merge` | `dataQuality` write **and** `knowledge` write, in the pair's space | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. A merge deletes the absorbed entity, so it needs the same `knowledge` write as the entity merge and `graph_merge`. A candidate in a space where the token lacks either answers `404`, so the refusal does not reveal that the candidate exists. |
-| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
+| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. Answers `{ scannedSpaces, scanned, pairs, failedSpaces }` — see [a scan that could not scan a space](#a-scan-that-could-not-scan-a-space). |
 
 These routes name no space: each one looks the candidate up only in the spaces where the token holds the rung in
 the Auth column, so a candidate in any other space is `404`, never `403`.
@@ -99,6 +99,26 @@ has looked" license opposite actions:
 > *asymmetric* rather than merely present. Use it to decide what a human or a model should look at; use
 > `contradiction` to decide what not to merge.
 
+#### A scan that could not scan a space
+
+`POST /api/duplicates/scan` and `POST /api/contradictions/scan` answer alike when a space fails. A space whose scan fails does not
+end the request: every other space is still scanned, the answer is `200`, and **`failedSpaces`** names the ones that failed.
+
+```json
+{ "scannedSpaces": 3, "scanned": 412, "pairs": 7,
+  "failedSpaces": [ { "spaceId": "notes", "reason": "A store-side failure stopped this operation. …" } ] }
+```
+
+- `failedSpaces` is **always present**, `[]` when every space was scanned, so read its length without a guard. Each entry is
+  `{ spaceId, reason }`.
+- `reason` is in Ythril's words and never the database driver's: the driver's text, which can name collections and values, is in
+  the Server Log (`Dupe scan failed for space '<id>': …`, `Contradiction scan failed for space '<id>': …`).
+- `scannedSpaces` counts the spaces that were **scanned**, so it is the number asked less `failedSpaces.length`.
+  `scanned` and the rest of the counts are over those spaces only.
+- A database that is not answering at all fails every space the request asks for, so each is listed; the request is not cut short.
+- There is no MCP tool for either scan (a scan is an operator action, started from the Brain's Review tab or this API), so this
+  field has no MCP twin.
+
 ### Contradictions API
 
 Base path: `/api/contradictions`. Mirrors the duplicates API — same space scoping, same content-gated
@@ -110,7 +130,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |
-| `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Returns `nliStalled: true` if it stopped because the judge was unavailable. |
+| `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, basis, confidence, fields?, truncated?,
 status, resolution?, supersededId?, resolvedBy?, detectedAt, updatedAt }`.

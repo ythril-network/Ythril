@@ -9,7 +9,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { TTL_COLLECTIONS, ensureTtlIndex } from './ttl.js';
 import { deleteFact } from './fact.js';
@@ -24,6 +24,14 @@ import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 
 const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min
 const SWEEP_BATCH = 500;              // max deletions per collection per cycle
+/**
+ * The most delete attempts per collection per cycle, failed ones included. A cycle that reads past the records it already
+ * tried (below) needs a ceiling of its own, or a collection of records that cannot be deleted costs a pass over all of them
+ * every five minutes.
+ */
+const SWEEP_MAX_ATTEMPTS = 2000;
+/** How many ids of the records a cycle could not delete the one line about them names. */
+const SWEEP_FAILED_NAMED = 5;
 
 /** Actor recorded on TTL-driven deletions (tombstone author + webhook attribution). */
 const TTL_ACTOR: WebhookActor = { tokenLabel: 'ttl-sweep' };
@@ -51,19 +59,43 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   for (const space of cfg.spaces) {
     if (space.proxyFor?.length) continue; // proxy spaces own no collections
     for (const c of TTL_COLLECTIONS) {
-      let expired;
-      try {
-        expired = await col(`${space.id}_${c}`)
-          .find(asFilter({ _expireAt: { $lte: now }, ...(SWEEP_FILTER[c] ?? {}) }), { projection: { _id: 1 } })
-          .limit(SWEEP_BATCH)
-          .toArray() as unknown as Array<{ _id: string }>;
-      } catch { continue; } // collection may not exist yet
-      for (const { _id } of expired) {
+      /*
+       * Read PAST what this cycle already attempted. The read used to be the first `SWEEP_BATCH` expired ids, tried once: a record
+       * whose delete threw stayed expired and was in that first page again next cycle, so with a page of them at the head nothing
+       * behind them was ever deleted — retention an operator configured, kept past its window, and a line per record per cycle.
+       * Now each read excludes the ids already tried, and the cycle ends at `SWEEP_BATCH` deletions or `SWEEP_MAX_ATTEMPTS` attempts.
+       */
+      const attempted: string[] = [];
+      const failed: string[] = [];
+      let firstFailure: unknown;
+      let deleted = 0;
+      while (deleted < SWEEP_BATCH && attempted.length < SWEEP_MAX_ATTEMPTS) {
+        let expired;
         try {
-          if (await DELETERS[c](space.id, _id, TTL_ACTOR)) total++;
-        } catch (err) {
-          log.warn(`TTL sweep: delete ${c} ${peerText(_id)} in ${peerText(space.id)}: ${peerText(err)}`);
+          expired = await col(`${space.id}_${c}`)
+            .find(asFilter({
+              _expireAt: { $lte: now }, ...(SWEEP_FILTER[c] ?? {}),
+              ...(attempted.length > 0 ? { _id: { $nin: attempted } } : {}),
+            }), { projection: { _id: 1 } })
+            .limit(Math.min(SWEEP_BATCH - deleted, SWEEP_MAX_ATTEMPTS - attempted.length))
+            .toArray() as unknown as Array<{ _id: string }>;
+        } catch { break; } // collection may not exist yet
+        if (expired.length === 0) break;
+        for (const { _id } of expired) {
+          attempted.push(_id);
+          try {
+            if (await DELETERS[c](space.id, _id, TTL_ACTOR)) deleted++;
+          } catch (err) {
+            if (failed.length === 0) firstFailure = err;
+            failed.push(_id);
+          }
         }
+      }
+      total += deleted;
+      // Said once for the collection and cycle, with the count and the first cause: one line per record is a line per record per cycle.
+      if (failed.length > 0) {
+        log.warn(`TTL sweep: ${failed.length} expired ${c} record(s) in ${peerText(space.id)} could not be deleted and were passed over `
+          + `this cycle (${peerList(failed, ', ', { count: SWEEP_FAILED_NAMED })}): ${peerText(firstFailure)}`);
       }
     }
   }

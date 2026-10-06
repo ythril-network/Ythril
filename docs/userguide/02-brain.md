@@ -707,7 +707,9 @@ values as well as the record summaries, so "the one about `port`" finds it), a *
 **Scan now** button. The status filter matters more here than on Duplicates, because there are three piles
 rather than two — **open**, **dismissed** and **resolved** — and dismissing or resolving a pair moves it out
 of the default view. Switch the filter to find it again. If a scan finishes while the entailment model is
-unreachable, it says so: nothing was judged, which is not the same answer as nothing disagreeing.
+unreachable, it says so: nothing was judged, which is not the same answer as nothing disagreeing. **Scan now** over every space you may
+scan does not stop at a space it cannot scan: the others are scanned, and the one that failed is named in the Server Log (Settings →
+Logs) as `Contradiction scan failed for space '<id>'`. Integrators read the same list as `failedSpaces` in the scan's answer.
 
 An empty list tells you *which* empty it is. With no entailment model configured it says so and names what
 still ran — the deterministic field check runs regardless, so contradiction detection is never simply off.
@@ -729,7 +731,7 @@ findings to see the rest.
 
 **Duplicates** surfaces near-duplicate records found by the background semantic-duplicate scanner, **for that space**. A duplicate pair only ever means something *inside* one space, so it lives beside that space's data. (The `/settings/duplicates` link redirects to the Brain.)
 
-A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept — the one written first, whichever of the two the scan started from); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
+A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept — the one written first, whichever of the two the scan started from); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list. **Scan now** over every space you may scan does not stop at a space it cannot scan: the others are scanned, and the one that failed is named in the Server Log (Settings → Logs) as `Dupe scan failed for space '<id>'`. Integrators read the same list as `failedSpaces` in the scan's answer.
 
 **Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild does not drag them back onto the list. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
 

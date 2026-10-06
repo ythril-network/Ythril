@@ -38,11 +38,13 @@ describe('a record whose delete fails does not stop the retention cycle behind i
   let door; let sweepExpired; let proto; let realDeleteOne;
   let attempts = 0;
 
+  // The healthy ids sort AFTER the stuck ones (`well-` after `stuck-`) as well as expiring later, so the stuck ones head the read
+  // whether the store walks the `_expireAt` index or the `_id` one.
   const expired = (id, year) => build.fact(SPACE, id, 1, { _expireAt: new Date(`${year}-01-01T00:00:00.000Z`) });
   const seed = async (stuck, healthy) => {
     const rows = [];
     for (let i = 0; i < stuck; i++) rows.push(expired(`stuck-${String(i).padStart(5, '0')}`, 2019));
-    for (let i = 0; i < healthy; i++) rows.push(expired(`ok-${String(i).padStart(5, '0')}`, 2020));
+    for (let i = 0; i < healthy; i++) rows.push(expired(`well-${String(i).padStart(5, '0')}`, 2020));
     if (rows.length > 0) await door.coll(SPACE, 'facts').insertMany(rows);
   };
   const remaining = (prefix) => door.coll(SPACE, 'facts').countDocuments({ _id: { $regex: `^${prefix}-` } });
@@ -73,7 +75,7 @@ describe('a record whose delete fails does not stop the retention cycle behind i
     await seed(520, 5);
     const { result: deleted } = await logLinesDuring(() => sweepExpired(NOW));
     assert.equal(deleted, 5, 'the five healthy expired records behind 520 stuck ones were not deleted');
-    assert.equal(await remaining('ok'), 0, 'expired records are still held past their window');
+    assert.equal(await remaining('well'), 0, 'expired records are still held past their window');
     assert.equal(await remaining('stuck'), 520, 'a record whose delete failed is left as it was');
   });
 
@@ -92,7 +94,7 @@ describe('a record whose delete fails does not stop the retention cycle behind i
     await seed(0, 600);
     const { result: deleted } = await logLinesDuring(() => sweepExpired(NOW));
     assert.equal(deleted, 500);
-    assert.equal(await remaining('ok'), 100, 'the rest waits for the next cycle');
+    assert.equal(await remaining('well'), 100, 'the rest waits for the next cycle');
   });
 
   it('stops a cycle of stuck records at 2000 attempts, having read past the first page', { timeout: 120_000 }, async () => {
