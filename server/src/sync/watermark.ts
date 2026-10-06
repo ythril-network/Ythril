@@ -31,9 +31,19 @@
  * ## The rule
  *
  * A transfer that RAN TO COMPLETION vouches for everything above the old watermark, so it places no ceiling. A
- * transfer that stopped early vouches only up to the last position it actually delivered. The watermark may
- * advance to the lowest such ceiling — every transfer is complete up to there, so nothing is skipped, and a
+ * transfer that stopped early vouches only up to the seq it is COMPLETE through (`TransferOutcome`): every record at or
+ * below it is delivered, and a stop inside a run of records that share a seq reports the seq BEFORE the run. The
+ * watermark may advance to the lowest such ceiling — every transfer is complete up to there, so nothing is skipped, and a
  * capped transfer still makes a full page-set of progress each cycle.
+ *
+ * ## What the rule does not claim: the author guard, and relayed records
+ *
+ * The advance is the highest seq among records AUTHORED by the sender (the pull) or by us (the push), so a record relayed
+ * from a third author never raises it — but a relayed record's seq is that author's clock, and it can arrive in a later
+ * cycle at a seq at or below a watermark a finished cycle already moved. The ceiling above is exact WITHIN a cycle: no
+ * transfer is credited with a seq whose run it has not read to its end. It is not exact ACROSS cycles for a record that
+ * arrives late at an old seq; one scalar over several clocks cannot be, and that is the owner's open decision (`D-12`,
+ * `Q-278`), not a property this module has.
  */
 
 import { peerText, peerList } from '../util/log.js';
@@ -43,8 +53,14 @@ export interface TransferOutcome {
   /**
    * The highest seq this transfer is COMPLETE through.
    *
-   * Only consulted when `truncated`. Transfers page in ascending seq order, so the last position they delivered
-   * is also the position they are complete up to.
+   * Only consulted when `truncated`. It is the last seq whose RECORDS are all delivered — which is not "the last seq
+   * delivered". Records relayed from several authors keep their author's seq, so several share one, and a transfer that
+   * stopped inside such a run (a page or batch boundary, a refused request, a throw) has delivered that seq WITHOUT
+   * finishing it: it reports the seq BEFORE it. A watermark at the run's seq would put the rest of the run behind it for
+   * good. A transfer that ran to the end reports its highest seq, and is not consulted at all.
+   *
+   * The position is computed in two places, once each: `pageSeqRuns` (`sync/seq-run-pager.ts`) for a pull and
+   * `pushSeqRuns` (`sync/push-seq-runs.ts`) for a push. A transfer must take it from there and never from a seq it read.
    */
   deliveredThrough: number;
   /** True when it stopped before exhausting what the peer had: a non-`ok` response, a throw, or a page cap. */

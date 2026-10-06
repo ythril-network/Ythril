@@ -48,7 +48,9 @@ describe('both ends are wired', () => {
   });
   it('the engine subtracts the refused count and makes the cycle partial — without failing the member', () => {
     const src = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
-    assert.match(src, /pushed \+= batch\.length - r;/);
+    // The per-batch subtraction moved with the family push (bundle-52: `pushCollection` -> `pushFamily`, `sync/push-family.ts`).
+    const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
+    assert.match(family, /pushed \+= batch\.length - r;/);
     assert.match(src, /const refused = refusedTransfers\(pushed\)/);
     assert.doesNotMatch(src, /stoppedEarly\.push\(\.\.\.refusedTransfers/, 'a refusal in the incomplete list fails the member and raises its failure count');
     assert.match(src, /errors === 0 && refusals === 0 \? 'success'/);

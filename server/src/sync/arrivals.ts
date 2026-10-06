@@ -218,9 +218,10 @@ export class ArrivalWriteError extends Error {
 
 /**
  * Why a document cannot be stored as it arrived, or `null` when it can. The one shape rule for every door. A
- * restore asks the id half only (`seq: 'any'`, cut `C7`).
+ * restore asks the id half only (`seq: 'any'`, cut `C7`). Exported for the pull's pager (`sync/pull-family.ts`), which
+ * admits an element to a position only when the writer would not refuse it for its shape — the rule is the writer's, once.
  */
-function arrivalRefusal(
+export function arrivalRefusal(
   doc: unknown, { seq, fileRow = false }: { seq: 'required' | 'optional' | 'any'; fileRow?: boolean },
 ): string | null {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return 'not a document';

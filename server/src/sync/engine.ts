@@ -16,20 +16,21 @@
  */
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
-import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
-import { fileMetaForWire } from '../api/sync/_shared.js';
+import { BRAIN_COLLECTIONS } from '../config/types.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
-import { deliverChangeNotes } from './change-notes.js';
 import { col, asFilter } from '../db/mongo.js';
+import { refusedTransfers } from './push-refusals.js';
+import { deliverChangeNotes } from './change-notes.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
 import { log, logSafe } from '../util/log.js';
 import { caughtFailureText } from '../brain/store-failure.js';
-import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
+import { resolveWatermark, type TransferOutcome } from './watermark.js';
+import { pullFamily, type PullResult } from './pull-family.js';
+import { pushFamily } from './push-family.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { TombstoneCounterError } from './tombstone-apply.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
-import { bumpSeq, settledSeqRange } from '../util/seq.js';
+import { bumpSeq } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
@@ -41,8 +42,6 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { writeArrivals, type ArrivalOutcome } from './arrivals.js';
-import { settlePulledPage, refusalIsNews } from './pull-page.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -61,10 +60,9 @@ import type {
   VoteCast,
 } from '../config/types.js';
 import { resolveSafePath } from '../files/sandbox.js';
-import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Timeout for every outbound fetch to a peer.
@@ -75,9 +73,6 @@ const FETCH_TIMEOUT_MS = 10_000;
 // Longer timeout for batch push/pull payloads: 200 docs × a few KB each can be
 // several hundred KB over a slow WAN link.
 const BATCH_FETCH_TIMEOUT_MS = 60_000;
-
-// Docs pushed per batch-upsert request (caps per-request payload size).
-const PUSH_BATCH_SIZE = 200;
 
 // After this many consecutive sync failures for a single member, we emit a
 // prominent warning. The member is NOT auto-removed — that is a human decision.
@@ -794,118 +789,27 @@ async function pullFromPeer(
   // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
   const tombstones = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
 
-  // Pull facts — use full=true to return complete docs in a single pass,
-  // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
   let overallMaxSeq = 0; // the pulled tombstones' highest seq — the records are bumped by the writer
 
-  type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
-   * One transfer per REPLICATED family: the five record collections and file metadata, which is the `files`
-   * collection pulled from the `filemeta` route. The family is passed whole because the URL suffix and the
+   * One transfer per REPLICATED family (`sync/pull-family.ts`): the five record collections and file metadata, which is the
+   * `files` collection pulled from the `filemeta` route. The family is passed whole because the URL suffix and the
    * collection differ for that one (`F15`): the page write named its collection after the suffix, so a pulled
    * file-metadata page went to a `<space>_filemeta` collection nothing reads. A family missing here is one a peer
    * never sends us, and nothing reports that, because a peer holding none of it hashes none either.
-   */
-  async function pullType<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
-    family: ReplicatedFamily,
-  ): Promise<PullResult> {
-    const urlSuffix = family.payloadKey;
-    let count = 0, highSeq = sinceSeq, maxSeq = 0;
-    let cur: string | null = null;
-    let pg = 0;
-    // Complete THROUGH here. Pages arrive in ascending seq order, so the highest seq applied is also the
-    // position this transfer is complete up to — which is what a shared watermark needs when it stops early.
-    let deliveredThrough = sinceSeq;
-    let truncated = false;
-    do {
-      const params = new URLSearchParams({
-        spaceId: remoteSpaceId, networkId, sinceSeq: String(sinceSeq), limit: '200', full: 'true',
-        ...(cur ? { cursor: cur } : {}),
-      });
-      const resp = await peerSafeFetch(`${member.url}/api/sync/${urlSuffix}?${params}`, batchOpts());
-      if (!resp.ok) {
-        truncated = true;
-        log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, resp.status, deliveredThrough));
-        break;
-      }
-      const { items, nextCursor } = await boundedJson<{
-        items: (T | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null;
-      }>(resp, 'sync peer');
-      // The page's documents; the tombstones riding in it were applied by `pullTombstones` above.
-      const pageDocs = items.filter(item => !('deletedAt' in item && (item as { deletedAt?: string }).deletedAt)) as T[];
-      /*
-       * THE RECEIVER DECIDES WHAT IT STORES, through the one arrival writer (`sync/arrivals.ts`): a malformed id
-       * or an implausible seq refused per document (warned, and the position advances past it as 5.6.1's "skipped
-       * doc" did), the retag to the local space, a repeated id collapsed to its highest seq, the sender's
-       * local-only fields dropped and this instance's own carried across the replace, the guard against a newer
-       * stored copy, the counter bumped per landed chunk, and every landed record queued for embedding by THIS
-       * instance's rules (`Q-203` — a pulled record used to be stored and never queued at all). A bump that failed
-       * is reported (`counterBehind`) and holds the position like a failed write (`Q-218` R3).
-       *
-       * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer (`F10`): the transfer
-       * stops, holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
-       * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else. A
-       * document the STORE refuses holds the position the same way (cut `C3`: never counted as delivered).
-       */
-      let written: ArrivalOutcome;
-      try {
-        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
-          { from: member.label ?? member.instanceId, namedOnce: id => refusalIsNews(spaceId, family.collection, id) });
-      } catch (err) {
-        truncated = true;
-        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: `
-          + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
-          + `This is this instance's database, not the peer: the transfer holds at ${logSafe(deliveredThrough)} and the page `
-          + 'is fetched again next cycle.');
-        break;
-      }
-      if (written.counterBehind) {
-        // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
-        truncated = true;
-        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: the seq counter could not be moved `
-          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${logSafe(deliveredThrough)} `
-          + 'and the page is fetched again next cycle.');
-        break;
-      }
-      if (written.storeRefused.length > 0) {
-        truncated = true;
-        // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
-        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: the store refused `
-          + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
-          + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
-        break;
-      }
-      // What the page said about itself (`sync/pull-page.ts`): the reports an operator reads and what it adds to the
-      // transfer's totals and position — a refused or kept-local document is counted in nothing and still moves the position.
-      const seen = settlePulledPage(spaceId, family, pageDocs, written, member);
-      count += seen.count;
-      maxSeq = Math.max(maxSeq, seen.maxSeq);
-      highSeq = Math.max(highSeq, seen.highSeq);
-      // Only after the page is APPLIED. Recording it before the write would vouch for records that a throw
-      // between the two would have lost.
-      if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;
-      cur = nextCursor; pg++;
-    } while (cur && pg < 50);
-    // The page cap is a truncation too, and it is the one that made "never advance on truncation" the wrong
-    // fix: this transfer genuinely has more to give, so it must keep the ceiling AND keep making progress.
-    // The page cap is a truncation too, and it is why "never advance on truncation" was the wrong fix: this
-    // transfer has more to give, so it must cap the watermark AND keep making progress.
-    if (cur) {
-      truncated = true;
-      log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, `${logSafe(pg)}-page cap`, deliveredThrough));
-    }
-    return { count, highSeq, maxSeq, deliveredThrough, truncated };
-  }
-
-  /*
+   *
    * SEQUENTIAL, not `Promise.all`. Each transfer pages against the same peer and applies as it goes, so
    * running them together multiplies the concurrent load on the side of the cycle that is already slow,
    * and interleaves the writes a truncated transfer's watermark has to reason about.
+   *
+   * NOT ALL BRAIN COLLECTIONS: `files` is absent from the list because a file arrives as blob plus manifest, not as a
+   * document on this path. `links` is present — a collection missing here is one a peer never sends us, and nothing
+   * reports that, because a peer holding no links hashes none either.
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
   for (const family of REPLICATED_FAMILIES) {
-    pulled[family.payloadKey] = await pullType(family);
+    pulled[family.payloadKey] = await pullFamily({ family, member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: batchOpts });
   }
 
   pulledMemories = pulled.facts.count;
@@ -991,10 +895,8 @@ async function pushToPeer(
   // Tombstones first — paged, with no hard cap, since one would silently drop deletions after a long absence.
   const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts });
 
-  // Fetch only docs changed since the last push — read and send in PUSH_BATCH_SIZE
-  // chunks directly from MongoDB without loading the whole result set into fact first.
-  // This makes push O(changed) instead of O(total), and keeps heap usage flat regardless
-  // of how many documents have accumulated since the last sync.
+  // Only docs changed since the last push, read and sent in batches (`sync/push-family.ts`) straight from MongoDB, so the
+  // push is O(changed) and its heap is flat however much has accumulated since the last sync.
   // Braintree nodes relay docs from all peers; other topologies only push their own authored docs
   // to prevent foreign docs (e.g. received from a third instance) from polluting peers' watermarks.
   const isDirectionalType = freshNet?.type === 'braintree' || freshNet?.type === 'pubsub';
@@ -1002,91 +904,22 @@ async function pushToPeer(
 
   let maxSeqPushed = lastSeqPushed;
 
-  // Send in PUSH_BATCH_SIZE slices; stop early on persistent failure
-  const batchEndpoint = `${member.url}/api/sync/batch-upsert?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`;
-
-  // Helper: stream one collection type to the peer in cursor-paginated batches.
   /*
-   * NOT ALL BRAIN COLLECTIONS — `files` is absent because a file crosses the wire as blob plus manifest,
-   * not as a document in this batch. Every other collection is here, `links` included: a collection missing
-   * from this union is written locally and never offered to a peer, which for a record type whose entire
-   * purpose is to be shared ships the feature and none of it.
+   * Sequential for the same reason as the pull, and the parents-only filter comes from the row rather than from a
+   * special case here — see `REPLICATED_FAMILIES`.
    *
-   * And it would not even be reported. `brain/merkle.ts` hashes the links collection, so the two roots would
-   * differ for ever — except that a peer which never RECEIVES a link has nothing to hash either, so both
+   * NOT ALL BRAIN COLLECTIONS — `files` is absent because a file crosses the wire as blob plus manifest, not as a
+   * document in this batch. Every other collection is here, `links` included: a collection missing from this union is
+   * written locally and never offered to a peer, which for a record type whose entire purpose is to be shared ships the
+   * feature and none of it. And it would not even be reported: `brain/merkle.ts` hashes the links collection, so the two
+   * roots would differ for ever — except that a peer which never RECEIVES a link has nothing to hash either, so both
    * sides agree on a root computed from data only one of them holds.
    */
-  /**
-   * @param extraFilter narrows what is SENT. Files use it for parents only: a chunk is derived from the
-   *   blob and the receiver makes its own, so sending one would ship passage text and a vector from a
-   *   model the receiver may not run.
-   */
-  async function pushCollection<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
-    collName: string,
-    payloadKey: PayloadKey,
-    extraFilter: Record<string, unknown> = {},
-  ): Promise<{ pushed: number; maxSeq: number; refused: number } & TransferOutcome> {
-    let pushed = 0; let refused = 0;
-    let localMaxSeq = lastSeqPushed;
-    let seqCursor = lastSeqPushed;
-    let truncated = false;
-    while (true) {
-      // Settled seqs only (Q-196): `lastSeqPushed` moves to the last seq sent, so sending one above an
-      // unsettled write would step the watermark past a record this instance has not finished writing.
-      const batch = await col<T>(collName)
-        .find(asFilter<T>({ seq: await settledSeqRange(spaceId, seqCursor), ...ownedFilter, ...extraFilter }))
-        .sort({ seq: 1 })
-        .limit(PUSH_BATCH_SIZE)
-        .toArray() as T[];
-      /*
-       * X-20 instrumentation. The stall this exists to name has one recorded symptom and it is this loop:
-       * `A's cycles ran every 3 s in 19 ms each` — the signature of a cycle that FOUND NOTHING, not of a slow
-       * sender. Nothing in the log could tell "found nothing because there is nothing" from "found nothing
-       * because the cursor is already past it", and those are a healthy cycle and a permanent data loss.
-       *
-       * So the cursor and the count are logged on every pass, empty ones included. Gated on `DEBUG`, so it is
-       * free unless somebody is looking — and it is the one line that would have made six failed reproduction
-       * attempts conclusive instead of inconclusive.
-       */
-      log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${logSafe(spaceId)}': `
-        + `${batch.length} doc(s) with seq > ${logSafe(seqCursor)}`
-        + (batch.length ? ` (through ${logSafe((batch[batch.length - 1] as FactDoc).seq)})` : ''));
-      if (batch.length === 0) break;
-      const resp = await peerSafeFetch(batchEndpoint, {
-        ...batchOpts(), method: 'POST',
-        body: JSON.stringify({ [payloadKey]: payloadKey === 'filemeta' ? batch.map(fileMetaForWire) : batch }), // Q-69
-      });
-      if (!resp.ok) {
-        truncated = true;
-        log.warn(truncationWarn(`Batch push ${payloadKey} to`, logSafe(member.label ?? ''), spaceId, resp.status, seqCursor));
-        break;
-      }
-      // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
-      // cap and still answer 200. `sync/push-refusals.ts` says what that costs and why the watermark still
-      // advances anyway.
-      const r = await reportPushRefusals(resp, payloadKey, member.label ?? member.instanceId, spaceId, batch.length);
-      pushed += batch.length - r; refused += r; // Q-59: what the peer refused was not pushed
-      for (const doc of batch) {
-        const d = doc as FactDoc;
-        if (d.author?.instanceId === cfg.instanceId && d.seq > localMaxSeq) localMaxSeq = d.seq;
-      }
-      seqCursor = (batch[batch.length - 1] as FactDoc).seq;
-      if (batch.length < PUSH_BATCH_SIZE) break;
-    }
-    // `deliveredThrough` is `seqCursor` — the last seq the peer ACCEPTED — and not `localMaxSeq`, which is
-    // author-guarded. The two answer different questions: `localMaxSeq` is how far our own records reached,
-    // `seqCursor` is how far this transfer got at all. Capping with the author-guarded number would let the
-    // watermark advance past a foreign doc that was never accepted, which on a pubsub or braintree network
-    // (where `ownedFilter` is empty and we relay everything) is a record only we were going to send.
-    return { pushed, maxSeq: localMaxSeq, deliveredThrough: seqCursor, truncated, refused };
-  }
-
-  // Sequential for the same reason as the pull, and the parents-only filter comes from the row rather
-  // than from a special case here — see `REPLICATED_FAMILIES`.
   const pushed = {} as Record<PayloadKey, { pushed: number; maxSeq: number; refused: number } & TransferOutcome>;
   for (const family of REPLICATED_FAMILIES) {
-    pushed[family.payloadKey] = await pushCollection(
-      `${spaceId}_${family.collection}`, family.payloadKey, family.pushFilter ?? {});
+    pushed[family.payloadKey] = await pushFamily({
+      family, member, spaceId, remoteSpaceId, networkId, lastSeqPushed, owned: ownedFilter, instanceId: cfg.instanceId, requestInit: batchOpts,
+    });
   }
 
   pushedMemories = pushed.facts.pushed;

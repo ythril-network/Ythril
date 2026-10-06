@@ -47,12 +47,17 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { statementAround, bodyOf } from './_structural-window.mjs';
+import { statementAround, statementFrom, bodyOf } from './_structural-window.mjs';
 
 const ARRIVALS = 'server/src/sync/arrivals.ts';
 const ENGINE = 'server/src/sync/engine.ts';
+/** Where a pulled family's page is accepted and its failure caught (bundle-52: out of the engine, into the per-family pull). */
+const PULL = 'server/src/sync/pull-family.ts';
+const PAGER = 'server/src/sync/seq-run-pager.ts';
 const writerSrc = stripComments(readFileSync(ARRIVALS, 'utf8'));
 const engine = stripComments(readFileSync(ENGINE, 'utf8'));
+const pull = stripComments(readFileSync(PULL, 'utf8'));
+const pager = stripComments(readFileSync(PAGER, 'utf8'));
 
 /** The writer's whole body, closures included — where every arriving page is written. */
 function writer() {
@@ -118,16 +123,28 @@ describe('one duplicate key does not wedge a member', () => {
   });
 
   it('the pull holds its watermark on a failed page write — and on a store refusal — instead of escalating it', () => {
-    const write = engine.search(/=\s*await writeArrivals\(/);
-    assert.ok(write > 0, `${ENGINE} no longer writes a pulled page through writeArrivals — re-point this gate`);
-    const after = engine.slice(write, engine.indexOf('deliveredThrough = maxSeq', write));
-    assert.match(after, /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?log\.warn\([\s\S]*?break;/,
-      'a failed page write must be caught in the transfer — logged as a record write, the transfer stopped — and '
+    // Re-pointed for bundle-52: the page write is in `pullFamily` (`sync/pull-family.ts`), which hands the pager a reason
+    // instead of breaking, and the pager (`sync/seq-run-pager.ts`) stops the transfer as truncated on any reason it is
+    // handed. Both halves, each anchor found first.
+    const write = pull.search(/=\s*await writeArrivals\(/);
+    assert.ok(write > 0, `${PULL} no longer writes a pulled page through writeArrivals — re-point this gate`);
+    const end = pull.indexOf('const seen = settlePulledPage(', write);
+    assert.ok(end > write, `${PULL}: the settle after the page write is gone — re-point this gate`);
+    const after = pull.slice(write, end);
+    assert.match(after, /catch \(err\) \{\s*\n\s*return `sync pull[\s\S]*?record write failed/,
+      'a failed page write must be caught in the transfer — and handed back as a record-write failure that stops it, '
       + 'not rethrown into the member-level catch, which counts it toward PEER UNREACHABLE');
-    assert.doesNotMatch(after.slice(0, after.indexOf('break;')), /\bthrow\b/, 'the page-write catch rethrows');
+    assert.doesNotMatch(after, /\bthrow\b/, 'the page-write catch rethrows');
     // Cut `C3`: a document the store refused is never counted as delivered — the transfer holds the same way.
-    assert.match(after, /if \(written\.storeRefused\.length > 0\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,
+    assert.match(after, /if \(written\.storeRefused\.length > 0\) \{[\s\S]*?return `/,
       'a store refusal on a pulled page lets the watermark pass the refused record, which is then never offered again');
+    const refusal = pager.search(/const refusal = await o\.deliver\(fresh\);/);
+    assert.notEqual(refusal, -1, `${PAGER} no longer asks \`deliver\` for a refusal — re-point this gate`);
+    const refusalAt = pager.indexOf('if (refusal !== null)', refusal);
+    assert.notEqual(refusalAt, -1, `${PAGER} no longer checks what \`deliver\` handed back — re-point this gate`);
+    assert.match(statementFrom(pager, refusalAt, 'the refusal branch'), /stop\(refusal\); return;/,
+      'a reason handed back by the page write must stop the transfer');
+    assert.match(pager, /const stop = \(why: string\): void => \{ outcome\.truncated = true;/, 'a stop must mark the transfer truncated');
   });
 
   it('the member-level escalation still exists for real failures', () => {
