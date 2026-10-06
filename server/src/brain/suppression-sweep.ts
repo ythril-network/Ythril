@@ -60,6 +60,12 @@ import { retireEmbedJobs } from './embed-queue.js';
 import { MAX_ANCESTRY } from './embed-record.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+
+/** The step a failed sweep is reported and counted under (`ythril_housekeeping_space_failures_total{step}`). */
+const STEP = declareStep('Suppression sweep');
 
 /**
  * The collection of each record kind: the shared map (`COLLECTION_SUFFIX`, derived from the knowledge map), never a
@@ -231,7 +237,15 @@ async function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<void
 const nextSweep = new Map<string, SpaceMeta>();
 const metaSweeps = createCoalescingRunner<void>();
 
-/** One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once. */
+/**
+ * One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once.
+ *
+ * **It keeps its own catch, and says the failure itself**, through `reportSpaceFailure` (synchronous, never throws: the shared
+ * words and counter of every housekeeping step). Two callers reach it without a walk above them to catch for it —
+ * `sweepAfterMetaWrite`, and the coalescing runner, which re-runs this job for a write that landed mid-sweep with nobody
+ * awaiting the rerun — so a throw here would be an unhandled rejection. The boot walk's failure is said here too, once per
+ * actual sweep, rather than by the walk: a failure thrown past the runner would be lost on a rerun and said twice on a join.
+ */
 async function sweepLatestMeta(id: string): Promise<void> {
   await new Promise<void>(resolve => setImmediate(resolve));
   const meta = nextSweep.get(id);
@@ -241,7 +255,8 @@ async function sweepLatestMeta(id: string): Promise<void> {
   try {
     await sweepSuppressedVectors(id, meta);
   } catch (err) {
-    log.warn(`Suppression sweep failed for ${peerText(id)}: ${peerText(err)}`);
+    // The next meta write repeats the sweep (idempotent), and so does the next boot.
+    reportSpaceFailure(STEP, id, err, { when: 'with the next meta write' });
   }
 }
 
@@ -252,10 +267,14 @@ async function sweepLatestMeta(id: string): Promise<void> {
  *
  * **One space at a time** (bundle-30 I8): each sweep is an unindexed scan per record kind, and starting every space's
  * at once put all of them in flight together on a large instance. Each is awaited before the next; a failure is the
- * sweep's own warning (`sweepLatestMeta`) and never stops the walk. The bootstrap starts it once the server listens.
+ * sweep's own report (`sweepLatestMeta`) and never stops the walk. The bootstrap starts it once the server listens.
+ *
+ * **Walked through `eachSpace`** (`Q-274`): one space at a time (the walk's default; never a `limit`), each inside the
+ * housekeeping bound, so a space whose read hangs ends at the figure instead of holding the boot sweep for as long as the driver
+ * waits — the bound reaches the sweep through the walk's scope, which the job inherits when this call starts it.
  */
 export async function sweepEverySpaceAtBoot(): Promise<void> {
-  for (const space of concreteSpaces()) {
+  await eachSpace(STEP, concreteSpaces(), async (space) => {
     await queueSweep(space.id, space.meta);
-  }
+  }, { when: 'with the next meta write' });
 }

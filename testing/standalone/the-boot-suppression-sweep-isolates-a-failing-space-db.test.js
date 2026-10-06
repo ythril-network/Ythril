@@ -17,7 +17,7 @@
  *
  * A VIEW named like the space's facts collection, over a source document whose pipeline stage cannot convert a string: every read
  * of it is refused by the server (code 241) while the store answers every other call. A space that fails and a store that does
- * not. The stalled space is `withStalledReads`, ended by the housekeeping bound at one second.
+ * not. The stalled space is `withStalledReads`, ended by the housekeeping bound at under a second.
  *
  * Mutations seen red (restored by hand): the boot loop put back to a bare `for`, the report put back to a bare `log.warn`, the
  * step undeclared, the walk's bound removed (the stall runs to its end).
@@ -40,8 +40,8 @@ const SUPPRESSING = { suppressEmbeddings: true };
 const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
 const HEALTHY = ['bravo', 'charlie'];
 const VECTOR = { embedding: [0.1, 0.2, 0.3], embeddingModel: 'test-model' };
-const STALL_MS = 6000;
-const BOUND_MS = 1000;
+const STALL_MS = 3000;
+const BOUND_MS = 800;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-g18-'));
 // The loader reads CONFIG_PATH when it is first imported: set before any import below.
@@ -138,15 +138,22 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
     const db = mongo.getDb();
     let ms;
+    // The sweep reads with a filter, and the server may test the filter before the stalling stage: documents the sweep's filter
+    // MATCHES are what must reach the stage, so the source holds as many of them as the fixture seeds stalling ones.
+    const matching = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
+    await db.collection('g18_stall_src').insertMany(matching);
     try {
       await withStalledReads(db, 'echo_facts', 'g18_stall_src', { ms: STALL_MS }, async () => {
         const started = Date.now();
         await sweep.sweepEverySpaceAtBoot();
         ms = Date.now() - started;
       });
-    } finally { restore(); }
+    } finally {
+      restore();
+      await db.collection('g18_stall_src').deleteMany({ _id: { $in: matching.map(d => d._id) } });
+    }
 
-    assert.ok(ms < STALL_MS - 1500, `the boot sweep took ${ms} ms: the hung read ran to its end (${STALL_MS} ms) instead of the ${BOUND_MS} ms bound`);
+    assert.ok(ms < STALL_MS - 1000, `the boot sweep took ${ms} ms: the hung read ran to its end (${STALL_MS} ms) instead of the ${BOUND_MS} ms bound`);
     assert.equal(warnsFor('echo').length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
     for (const space of HEALTHY) assert.equal(await hasVector(space), false, `'${space}' was not swept after the hung space`);
     assert.equal(failures.length, 1, 'the hung space was not counted exactly once');
