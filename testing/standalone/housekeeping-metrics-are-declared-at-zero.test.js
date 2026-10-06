@@ -12,7 +12,8 @@
  * A counter that does not exist until its first event cannot be told from a counter that is not wired: `rate()` over a series
  * that appears at the first failure shows nothing for the whole healthy period, and an alert on it never evaluates until it is
  * too late. So every STEP a site has declared (`declareStep`, `util/housekeeping-signals.ts`) starts every series it can move
- * at 0 — the steps declared before the registry was built, and the ones declared after.
+ * at 0, and so does every JOB (`declareJob`, which `intervalJob` calls at construction) for the skipped-tick series — the ones
+ * declared before the registry was built, and the ones declared after. A step is not a job: no job series is invented for it.
  *
  * ## What this holds, and the shape of each case
  *
@@ -38,11 +39,15 @@ import { join } from 'node:path';
 
 const signals = await import('../../server/dist/util/housekeeping-signals.js');
 
-// One step declared BEFORE the registry is built: it is read from `declaredSteps()` at build.
+// One step and one job declared BEFORE the registry is built: they are read from `declaredSteps()` / `declaredJobs()` at build.
 const BEFORE = signals.declareStep('G22 step declared before the registry');
+const JOB_BEFORE = 'G22 job declared before the registry';
+signals.declareJob(JOB_BEFORE);
 const registry = await import('../../server/dist/metrics/registry.js');
-// And one AFTER: it arrives as a `step-declared` signal.
+// And one of each AFTER: they arrive as `step-declared` / `job-declared` signals.
 const AFTER = signals.declareStep('G22 step declared after the registry');
+const JOB_AFTER = 'G22 job declared after the registry';
+signals.declareJob(JOB_AFTER);
 
 const FAILURE = 'ythril_housekeeping_space_failures_total';
 const RECORDS = 'ythril_housekeeping_records_failed_total';
@@ -92,19 +97,34 @@ describe('the housekeeping counters are declared at zero', () => {
     assert.ok(steps.length >= 2, `only ${steps.length} declared steps: an empty derivation passes every loop over it`);
   });
 
-  it('holds all four series at 0 for every declared step, before and after the registry was built', async () => {
+  it('derives its jobs from the declared jobs, with a floor', () => {
+    const jobs = signals.declaredJobs();
+    assert.ok(jobs.includes(JOB_BEFORE) && jobs.includes(JOB_AFTER), 'the two jobs this file declared are not listed');
+    assert.ok(jobs.length >= 2, `only ${jobs.length} declared jobs: an empty derivation passes every loop over it`);
+  });
+
+  it('holds the step series at 0 for every declared step, before and after the registry was built', async () => {
     const text = await registry.register.metrics();
     const failures = samples(text, FAILURE);
     const records = samples(text, RECORDS);
-    const skipped = samples(text, SKIPPED);
     for (const step of signals.declaredSteps()) {
       for (const kind of KINDS) {
         assert.equal(failures.get(`kind=${kind},step=${step}`), 0, `${FAILURE}{step="${step}",kind="${kind}"} is not at 0 on a scrape`);
       }
       assert.equal(records.get(`step=${step}`), 0, `${RECORDS}{step="${step}"} is not at 0 on a scrape`);
-      assert.equal(skipped.get(`job=${step}`), 0, `${SKIPPED}{job="${step}"} is not at 0 on a scrape`);
     }
     assert.equal(samples(text, QUARANTINED).get(''), 0, `${QUARANTINED} is not at 0 on a scrape`);
+  });
+
+  it('holds the skipped-tick series at 0 for every declared job, and invents none for a step that is not a job', async () => {
+    const skipped = samples(await registry.register.metrics(), SKIPPED);
+    for (const job of signals.declaredJobs()) {
+      assert.equal(skipped.get(`job=${job}`), 0, `${SKIPPED}{job="${job}"} is not at 0 on a scrape`);
+    }
+    const jobs = new Set(signals.declaredJobs());
+    for (const step of signals.declaredSteps().filter(s => !jobs.has(s))) {
+      assert.ok(!skipped.has(`job=${step}`), `${SKIPPED}{job="${step}"} exists, but "${step}" is a step and no job of that name was declared`);
+    }
   });
 
   it('the kinds it pre-declares are the kinds a signal can carry', () => {
@@ -127,13 +147,13 @@ describe('the housekeeping counters are declared at zero', () => {
     assert.deepEqual(moved(before, after), { [`${RECORDS}{step=${AFTER}}`]: 7 });
   });
 
-  it('a tick-skipped signal moves its job, and a job that is not a declared step appears at its first skip', async () => {
+  it('a tick-skipped signal moves its job, and a job nobody declared appears at its first skip', async () => {
     const before = await snapshot();
-    signals.signalHousekeeping({ type: 'tick-skipped', job: BEFORE });
+    signals.signalHousekeeping({ type: 'tick-skipped', job: JOB_BEFORE });
     signals.signalHousekeeping({ type: 'tick-skipped', job: 'a job nobody declared' });
     const after = await snapshot();
     assert.deepEqual(moved(before, after), {
-      [`${SKIPPED}{job=${BEFORE}}`]: 1,
+      [`${SKIPPED}{job=${JOB_BEFORE}}`]: 1,
       [`${SKIPPED}{job=a job nobody declared}`]: 1,
     });
   });
