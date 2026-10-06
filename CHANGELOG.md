@@ -1162,9 +1162,8 @@ and a member can no longer be named proposer to have its vote ignored; roll it o
 
 ### Security
 
-- **Networks:** A `space_deletion` or `space_wipe` round now acts only once passed, only on a space its network
-  carries, and once. An expired round, or one naming an unshared (even private) space, let any member delete it;
-  restore from backup if so.
+- **Networks:** A `space_deletion` or `space_wipe` round now acts only once passed, on a space its network carries, and
+  once; before, an expired round or one naming an unshared space let any member delete it (restore from backup).
 - **Networks:** A member can no longer be named as another round's proposer to drop its vote: the subject is left out of the
   voters only on a join or removal, and the real proposer's signed yes is cast when it opens the round.
 
@@ -1200,9 +1199,8 @@ A patch for the web interface: open network votes are listed and can be cast fro
 
 ### Fixed
 
-- **UI:** Settings → Networks (under **Open votes**) and the Brain overview's Governance panel list open vote rounds
-  again, and Yes and Veto reach the round, so a stuck join, removal or space-settings change can be decided there.
-  API, MCP and peer votes were unaffected.
+- **UI:** Settings → Networks (**Open votes**) and the Brain Governance panel list open vote rounds again, and Yes and
+  Veto reach the round, so a stuck join, removal or settings change can be decided there.
 
 ## [5.1.3] — 2026-09-25
 
@@ -1226,16 +1224,14 @@ nothing no longer reports success, and your own passing vote applies at once.
 
 ### Fixed
 
-- **Networks:** Joining a second network with the same peer no longer cuts off the first, whose pushes and pulls
-  answered `403` both ways with nothing logged. Each request is still admitted only to spaces of networks the peer
-  belongs to, so leaving one withdraws its spaces.
+- **Networks:** Joining a second network with the same peer no longer cuts off the first (pushes and pulls answered
+  `403` both ways, unlogged). A request is still admitted only to spaces of networks the peer belongs to.
 - **Networks:** A joining side no longer hands over an all-spaces token when the network carries no spaces; the token
   reaches none.
 - **Networks:** A space-settings change that your own vote already passes (one yes on a club or pub/sub network) now
   concludes when it opens; it used to wait for the same yes to be cast again or the vote to expire a day later.
-- **Sync:** A cycle whose transfers were refused is no longer recorded as `success`. The history's `errors` names the
-  space, direction and transfers that stopped, and the member's consecutive-failure count rises; a member with no peer
-  token is reported the same way.
+- **Sync:** A cycle whose transfers were refused is no longer recorded as `success`: the history's `errors` names the
+  space, direction and transfers, and the member's consecutive-failure count rises (also for a member with no peer token).
 
 ## [5.1.1] — 2026-09-24
 
@@ -1247,9 +1243,8 @@ A security patch: a network invite that was applied and never finalized no longe
 
 ### Security
 
-- **Networks:** An invite applied but never finalized (joiner crashed, was refused, lost the connection, or a restart
-  in between) left a peer token to the network's spaces that never expired and belonged to no member. It now expires
-  with its handshake; finalize clears the expiry.
+- **Networks:** An invite applied but never finalized (joiner crashed, refused, disconnected) left a peer token to the
+  network's spaces that never expired and belonged to no member; it now expires with its handshake.
 
 ## [5.1.0] — 2026-09-23
 
@@ -1280,9 +1275,8 @@ a reranker refusal no longer pass silently.
   API) under one deadline; if any batch fails the pass is abandoned and the vector order stands.
 - **Sync:** A file's links are now checked, so a file linked to an entity this instance lacks is reported as a link
   violation; `docType` can be `file`, with `docId` the file's path.
-- **UI:** Deleting an entity that has edges in the Brain UI now opens a confirmation counting what goes by kind (an
-  edge is removed, the record at its other end stays); confirming repeats the delete with the preview token. An entity
-  nothing points at deletes in one click.
+- **UI:** Deleting an entity that has edges in the Brain UI opens a confirmation counting what goes by kind (the record
+  at an edge's other end stays); an entity nothing points at deletes in one click.
 - **UI:** A failed delete of a fact, chrono entry, edge or entity now shows its reason above the list, not nothing.
 
 ## [5.0.1] — 2026-09-22
@@ -1292,15 +1286,13 @@ default); take it if your agents call them.
 
 ### Changed
 
-- **Docs:** The audit guide now lists every operation the log can contain (it lacked `conflict.*`, `contradiction.*`,
-  `data.*`, `schema_library.*`, `token.update`, `token.regenerate`, `link.create`, `link.delete`) and drops five that
-  nothing records: `brain.query`, `brain.er_model`, `brain.find_similar`, `brain.recall_global`, `brain.bulk_write`.
+- **Docs:** The audit guide lists every operation the log can contain (added `conflict.*`, `contradiction.*`, `data.*`,
+  `schema_library.*`, `token.update`, `token.regenerate`, `link.create`, `link.delete`; removed five nothing records).
 
 ### Fixed
 
-- **Audit:** MCP `filter` and `similar` (`brain.filter`, `brain.similar`) no longer appear as writes when
-  `audit.logReads` is `false`; an MCP tool's read or write class now comes from its REST route, so
-  `entity.cascade_preview` is a read too. Existing rows stay as written.
+- **Audit:** MCP `filter` and `similar` (`brain.filter`, `brain.similar`) no longer log as writes when `audit.logReads`
+  is `false`; a tool's read/write class now follows its REST route (`entity.cascade_preview` is a read). Old rows stay.
 - **Audit:** MCP `network_sync` with a `peerId` now records `peer.sync_trigger`, as
   `POST /api/networks/peers/:peerId/sync` does, not `network.sync_trigger`; a filter on it now sees an agent's syncs.
 
@@ -1367,8 +1359,7 @@ default); take it if your agents call them.
 - **Records:** The knowledge type `memory` is now `fact`, and the old word is not accepted: `remember` / `update_memory` /
   `delete_memory` → `save_fact` / `update_fact` / `delete_fact`; `POST /api/brain/spaces/:id/memories` → `…/facts`.
 - **Records:** `<space>_memories` → `<space>_facts`; `recordTtlDays: { memory }` → `{ fact }`; webhook `memory.created` →
-  `fact.created`; `ythril_memories_total` → `ythril_facts_total`; link edge label `memory.entityIds` → `fact.entityIds`.
-  `includeMemories` keeps its name.
+  `fact.created`; `ythril_memories_total` → `ythril_facts_total`; edge label `memory.entityIds` → `fact.entityIds`.
 - **Records:** Boot migrations rename `<space>_memories` collections and `memory.*` webhooks, rewrite `recordTtlDays` and
   re-key edge and link ids, tombstones and embed jobs. A conflict is logged at `WARN` and left: read the first 5.0 boot log.
 - **Records:** Audit entries for fact, chrono and file updates carry the before/after link sets under `linkEntities`,
