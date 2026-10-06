@@ -48,9 +48,13 @@ export const SKIP_WARNING_WINDOW_MS = 10 * 60_000;
 export interface SingleFlightDeps {
   /** The clock, for a test. */
   now?: () => number;
-  /** Where the skip warning goes. Default the process log. */
+  /**
+   * Where the skip warning goes INSTEAD of the process log — a test seam. The default is a direct `log.warn(<the bounded text>)`
+   * and not a forwarder, so the gate that holds a log line's slots bounded (`a-steerable-value-reaches-a-log-line-only-bounded`)
+   * reads the text itself.
+   */
   warn?: (message: string) => void;
-  /** Where a pass's failure goes. Default the process log. */
+  /** Where a pass's failure goes instead of the process log: a test seam, for the same reason. */
   error?: (message: string) => void;
 }
 
@@ -71,8 +75,6 @@ export interface SingleFlight {
 /** A lock of its own. Two instances made with one label do NOT share it. */
 export function singleFlight(label: string, deps: SingleFlightDeps = {}): SingleFlight {
   const now = deps.now ?? Date.now;
-  const warn = deps.warn ?? ((message: string) => log.warn(message));
-  const error = deps.error ?? ((message: string) => log.error(message));
   const said = warnOnce<string>({ max: 1, every: SKIP_WARNING_WINDOW_MS, now });
   let startedAt: number | undefined;
 
@@ -81,8 +83,11 @@ export function singleFlight(label: string, deps: SingleFlightDeps = {}): Single
     async run(fn) {
       if (startedAt !== undefined) {
         const seconds = Math.round((now() - startedAt) / 1000);
-        said(label, () => warn(`${peerText(label)}: skipping this tick — the previous pass has been running for ${seconds}s. `
-          + `The sweep is slower than its schedule; overlapping passes would duplicate its work.`));
+        said(label, () => {
+          const text = `${peerText(label)}: skipping this tick — the previous pass has been running for ${seconds}s. `
+            + `The sweep is slower than its schedule; overlapping passes would duplicate its work.`;
+          if (deps.warn) deps.warn(text); else log.warn(text);
+        });
         return false;
       }
 
@@ -91,7 +96,8 @@ export function singleFlight(label: string, deps: SingleFlightDeps = {}): Single
         await fn();
         return true;
       } catch (err) {
-        error(`${peerText(label)} failed: ${peerText(err)}`);
+        const text = `${peerText(label)} failed: ${peerText(err)}`;
+        if (deps.error) deps.error(text); else log.error(text);
         return true;   // it ran; it simply did not succeed
       } finally {
         // A `finally` and not a trailing statement: a throw that escaped the catch above (an error thrown while
