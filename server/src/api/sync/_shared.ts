@@ -227,6 +227,33 @@ export function decodeCursor(token: string): number {
   catch { return 0; }
 }
 
+/** The one refusal text for a start a sync read cannot read. Fixed, so it never repeats what the caller sent. */
+export const BAD_SYNC_START = 'sinceSeq and cursor must each be a whole number of 0 or more';
+
+/** A seq written as a whole decimal number of 0 or more, within what a record may carry; `undefined` otherwise. */
+function seqFromText(text: string): number | undefined {
+  if (!/^\d{1,16}$/.test(text)) return undefined;
+  const n = Number(text);
+  return Number.isSafeInteger(n) && n <= MAX_SYNC_SEQ ? n : undefined;
+}
+
+/**
+ * Where a sync read starts: the `cursor` a previous page handed back when there is one, else `sinceSeq`.
+ *
+ * `undefined` means the start cannot be read, and the route answers `400` with {@link BAD_SYNC_START}. It is
+ * a refusal and not a default because both defaults are wrong in a way nothing reports: `sinceSeq=abc` used to
+ * become `NaN`, which matches no record, so the page came back empty with `nextCursor: null` — and every client
+ * reads that as "nothing left" (`Q-388`). A cursor that did not decode read as 0 and silently started over.
+ */
+export function syncReadStart(sinceSeq: unknown, cursor: unknown): number | undefined {
+  if (cursor !== undefined && cursor !== '') {
+    if (typeof cursor !== 'string') return undefined;
+    return seqFromText(Buffer.from(cursor, 'base64url').toString());
+  }
+  if (sinceSeq === undefined) return 0;
+  return typeof sinceSeq === 'string' ? seqFromText(sinceSeq) : undefined;
+}
+
 // ── Space access guard ─────────────────────────────────────────────────────
 
 /** The peer identity bound to a production peer PAT (set by the invite handshake). */

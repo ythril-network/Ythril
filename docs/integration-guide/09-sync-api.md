@@ -306,9 +306,9 @@ tombstone rather than a brain one, so the metadata page carries no tombstones of
 |---|---|
 | `spaceId` | Required on space-scoped sync routes. With `networkId`, give the NETWORK's id for the space: an instance that mapped it under another name at join translates it (Q-51) |
 | `networkId` | Optional on many pulls, used for policy checks and directional sync |
-| `sinceSeq` | Start sequence for incremental pulls |
-| `cursor` | Encoded continuation cursor for paged pulls |
-| `limit` | Page size (typically max 500; endpoint-specific caps apply) |
+| `sinceSeq` | Start sequence for incremental pulls: a whole number of 0 or more. Anything else answers `400` |
+| `cursor` | Continuation cursor for paged pulls: send back the `nextCursor` a page returned, unchanged. One that does not decode answers `400`; when present it wins over `sinceSeq` |
+| `limit` | Page size, from 1 up to the route's maximum (500 on the record routes, 5000 per type on tombstones). A value below 1 reads as 1, a value above the maximum as the maximum, and one that is not a number as the route's default |
 | `full=true` | Return full docs instead of `_id`/`seq` stubs on list routes |
 
 ### Incremental Collection Pull Example
@@ -325,7 +325,8 @@ Returns `{ items, nextCursor }`. Use `nextCursor` as `cursor` on the next reques
 GET /api/sync/entities/:id?spaceId=general
 ```
 
-Returns `404` when missing.
+Returns `404` when missing. A document read by id carries the same fields as the same document in a page, and a
+document no page serves (a file's chunk) is `404` here too.
 
 ### Bulk Push Example
 
