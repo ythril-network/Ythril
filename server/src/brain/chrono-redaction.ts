@@ -183,34 +183,32 @@ export async function redactLapsedChronoContent(spaceId: string, now: Date): Pro
 /** The step the sweep's failures are said and counted under. */
 const CHRONO_RETENTION_STEP = declareStep('Chrono retention');
 
-/** The two halves of one space's pass, named as a failure line quotes them. */
-const BACKFILL_UNIT = 'backfill';
-const REDACTION_UNIT = 'redaction';
+/** A unit of one space's pass: one half applied to one collection, named as a failure line quotes it (`backfill: fact`). */
+interface RetentionUnit { name: string; run: () => Promise<void> }
 
 /**
  * Both passes across every real space, through the housekeeping walk (`util/housekeeping-walk.ts`): a space that fails is
  * reported once and the next is swept, and a read that hangs ends at the housekeeping figure, not at the driver's patience.
  *
- * The two halves are two UNITS of a space, so a backfill that fails does not stop the same space's redaction (they share no
- * data: one stamps what is missing, the other drops what has lapsed) and neither is lost to the other's failure. The backfill
- * is bounded by `housekeepingOpMs()` and not by the write figure on purpose: its `_expireAt: { $exists: false }` scan can be slow
- * and healthy, and the bound is for "hung", not "slow".
+ * A space's pass is one UNIT per half AND collection (`backfill: entity`, `backfill: fact`, ..., `redaction: chrono`), so a
+ * failure is reported naming the collection that failed and neither starves the collections or the half after it in the same
+ * space that cycle. The backfill is bounded by `housekeepingOpMs()` and not by the write figure on purpose: its
+ * `_expireAt: { $exists: false }` scan can be slow and healthy, and the bound is for "hung", not "slow".
  */
 export async function sweepChronoRetention(now: Date = new Date()): Promise<ChronoRetentionResult> {
   const result: ChronoRetentionResult = { stamped: 0, redacted: 0 };
   await eachSpace(CHRONO_RETENTION_STEP, concreteSpaces(), async (s) => {
     const space: RetentionSpace = { recordTtlDays: s.recordTtlDays, meta: s.meta };
-    await eachUnit([BACKFILL_UNIT, REDACTION_UNIT], async (unit) => {
-      if (unit === BACKFILL_UNIT) {
-        // All four typed collections, not just chrono. The schema tier is documented as reaching every one of
-        // them, and for three of them nothing had ever stamped a record.
-        for (const collection of TYPED_COLLECTIONS) {
-          result.stamped += await backfillTypedExpiry(s.id, space, collection);
-        }
-      } else {
-        result.redacted += await redactLapsedChronoContent(s.id, now);
-      }
-    });
+    const units: RetentionUnit[] = [
+      // All four typed collections, not just chrono. The schema tier is documented as reaching every one of
+      // them, and for three of them nothing had ever stamped a record.
+      ...TYPED_COLLECTIONS.map((collection): RetentionUnit => ({
+        name: `backfill: ${collection}`,
+        run: async () => { result.stamped += await backfillTypedExpiry(s.id, space, collection); },
+      })),
+      { name: 'redaction: chrono', run: async () => { result.redacted += await redactLapsedChronoContent(s.id, now); } },
+    ];
+    await eachUnit(units, unit => unit.run());
   });
 
   if (result.redacted > 0) {

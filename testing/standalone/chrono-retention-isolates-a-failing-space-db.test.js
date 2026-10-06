@@ -111,7 +111,7 @@ describe('the chrono retention sweep isolates a failing space and each half of i
   describe('a half that fails', () => {
     const SPACES = [
       // The BACKFILL fails (the fact collection cannot be read); its redaction must still run.
-      { id: 'g13backfailing', kinds: ['fact'] },
+      { id: 'g13backfailing', kinds: ['fact', 'chrono'] },
       // The REDACTION fails (the chrono collection cannot be read); its backfill must still have run.
       { id: 'g13redactfailing', kinds: ['entity'] },
       { id: 'g13healthy', kinds: ['entity'] },
@@ -131,6 +131,13 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       await failingView('g13redactfailing_chrono', SOURCE);
 
       await db.collection('g13backfailing_chrono').insertOne(lapsedChrono('g13backfailing', 'b-c'));
+      // A chrono event with no stamp yet and a content window still open: only the chrono BACKFILL of the same space, which comes
+      // AFTER the failing facts backfill in the walk's order, can stamp it.
+      const fresh = ago(5).toISOString();
+      const unstamped = { ...lapsedChrono('g13backfailing', 'b-n'), createdAt: fresh, updatedAt: fresh, startsAt: fresh };
+      delete unstamped._expireAt;
+      delete unstamped._contentExpireAt;
+      await db.collection('g13backfailing_chrono').insertOne(unstamped);
       await db.collection('g13redactfailing_entities').insertOne(entity('g13redactfailing', 'r-e'));
       await db.collection('g13healthy_entities').insertOne(entity('g13healthy', 'h-e'));
       await db.collection('g13healthy_chrono').insertOne(lapsedChrono('g13healthy', 'h-c'));
@@ -148,6 +155,12 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       assert.equal(doc.description, undefined);
     });
 
+    it('a collection whose backfill failed does not starve the backfill of the next collection in the same space', async () => {
+      const doc = await mongo.getDb().collection('g13backfailing_chrono').findOne({ _id: 'b-n' });
+      assert.ok(doc._expireAt instanceof Date,
+        'the facts backfill failed and the chrono backfill after it never ran: the collections share one unit');
+    });
+
     it('the backfill of a space whose redaction failed still ran', async () => {
       const doc = await mongo.getDb().collection('g13redactfailing_entities').findOne({ _id: 'r-e' });
       assert.ok(doc._expireAt instanceof Date, 'the half before the failing one did not run');
@@ -157,7 +170,7 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       const db = mongo.getDb();
       assert.ok((await db.collection('g13healthy_entities').findOne({ _id: 'h-e' }))._expireAt instanceof Date);
       assert.equal((await db.collection('g13healthy_chrono').findOne({ _id: 'h-c' })).contentRedacted, true);
-      assert.deepEqual(first, { stamped: 2, redacted: 2 });
+      assert.deepEqual(first, { stamped: 3, redacted: 2 });
     });
 
     it('each failure is said ONCE, in the walk\'s words, naming the half; the healthy space is not named', () => {
@@ -165,8 +178,9 @@ describe('the chrono retention sweep isolates a failing space and each half of i
       const redact = sweepLines('g13redactfailing', firstLines);
       assert.equal(back.length, 1, `expected one line for the failed backfill, got:\n${back.join('\n')}`);
       assert.equal(redact.length, 1, `expected one line for the failed redaction, got:\n${redact.join('\n')}`);
-      assert.match(back[0], /Chrono retention failed for space 'g13backfailing' \(backfill\): .* — retried next cycle/);
-      assert.match(redact[0], /Chrono retention failed for space 'g13redactfailing' \(redaction\): .* — retried next cycle/);
+      assert.match(back[0], /Chrono retention failed for space 'g13backfailing' \(backfill: fact\): .* — retried next cycle/);
+      assert.doesNotMatch(back[0], /backfill: (entity|edge|chrono)/, 'the line names a collection that did not fail');
+      assert.match(redact[0], /Chrono retention failed for space 'g13redactfailing' \(redaction: chrono\): .* — retried next cycle/);
       assert.deepEqual(sweepLines('g13healthy', firstLines), []);
     });
 
