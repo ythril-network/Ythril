@@ -12,10 +12,12 @@
  *
  * ## The rule
  *
- * **A write the bound ended never lands, and the answer is given only after the SERVER's deadline has passed.** A
- * hold is released, and a door answers `503`, when the server can no longer apply the write — never while the write
- * is alive and could still land (a hold released under a write that lands later is `Q-196`, the defect the hold
- * exists for; found again by main's CI run 37231507558 as a fork that landed after the next case's wipe, `Q-372`).
+ * **A write the bound ended never lands, and the answer is given only once the SERVER operation is gone** — ended by
+ * its own deadline, or killed by the backstop and seen gone. A hold is released, and a door answers `503`, when the
+ * server can no longer apply the write — never while the write is alive and could still land (a hold released under a write
+ * that lands later is `Q-196`, the defect the hold exists for; found again by main's CI run 37231507558 as a fork that landed
+ * after the next case's wipe, `Q-372`; and again, with the command reaching the server later than the backstop's margin,
+ * `Q-380`).
  *
  * ### The order the bound ends a write in
  *
@@ -33,11 +35,30 @@
  *     SERVER_FIRST_MARGIN_MS`, and the driver call is aborted (`signal`): a command not yet sent is dropped, one in
  *     flight loses its connection. This is for a server that cannot answer — and there is one: an UPSERT blocked
  *     by another session's uncommitted insert of the same `_id` is not interrupted by `maxTimeMS` or `killOp`
- *     until the blocker ends (measured, bundle-56). By the backstop the server's deadline has passed, and a
- *     write whose deadline passed answers `MaxTimeMSExpired` when its blocker goes instead of applying — it
- *     cannot land. The margin must exceed how late a command reaches the server; it is below the 1 s the hold
- *     deadline's ceiling keeps under what a sender waits (`config/env-num.ts`), so the `503` still precedes the
- *     sender's give-up.
+ *     until the blocker ends (measured, bundle-56). When the command reached the server less than the margin
+ *     late, its deadline has passed by the backstop, and a write whose deadline passed answers `MaxTimeMSExpired`
+ *     when its blocker goes instead of applying — it cannot land. **That is not always so** (`Q-380`): the server's
+ *     clock starts on ARRIVAL and the backstop's at the CALL, so a command that arrives later than the margin (a
+ *     starved client process, a mongod taking it late, a full pool) is still alive at the backstop, and answering
+ *     then would release the hold under a write that lands the moment its blocker goes (measured: with the command
+ *     held 600 ms, 53 of 63 repetitions landed). So the backstop does not answer first. It aborts the driver call,
+ *     then ENDS THE SERVER OPERATION: every plain write carries a unique driver `comment` (`planBound`), the operation
+ *     is found by it in `$currentOp`, `killOp`'d, and `$currentOp` is asked again until TWICE in a row nothing is found
+ *     (`endServerOperation`, at most `KILL_WAIT_MS`). Only then is the caller answered `StoreTimeout`. The margin plus
+ *     `KILL_WAIT_MS` is below the 1 s the hold deadline's ceiling keeps under what a sender waits (`config/env-num.ts`), so
+ *     the `503` still precedes the sender's give-up (`a-write-bound-answers-before-the-sender-gives-up`).
+ *
+ *     **If the operation cannot be confirmed gone in `KILL_WAIT_MS`** (the server refuses the question, does not answer, or
+ *     the operation is one `killOp` does not end — the upsert behind an uncommitted insert) the caller is answered anyway: it
+ *     must be. The one backstop line is then an ERROR that names the method, collection and space and says the write may
+ *     still be alive. A killed operation is also marked killed, so it is interrupted when its blocker goes.
+ *
+ *     **The residual, stated and not closed.** A command still IN FLIGHT to the server when the kill's second look is made
+ *     arrives after it and runs alone. The driver abort drops the connection it travels on, which drops most of those, and
+ *     the second look catches one that arrives a round trip late; what remains is a command delayed past both. Closing it
+ *     needs the write itself to carry a token the hold can invalidate, which a plain write cannot (a separate design
+ *     question). The guarantee is therefore: the answer is never given while a server operation of that write is known
+ *     to be alive without the line above saying so, and never before the operation was looked for twice.
  *
  * ### What "cannot land" covers: ONE wire command
  *
@@ -90,6 +111,7 @@
  * has ended, so an ended scope is ignored.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { envInt } from '../config/env-num.js';
 import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { log, peerText } from '../util/log.js';
@@ -356,6 +378,88 @@ export const PLAIN_DB_WRITE_METHODS: ReadonlySet<string> = new Set(['dropCollect
 export const SERVER_FIRST_MARGIN_MS = 500;
 
 /**
+ * How long, once the backstop has fired, the bound spends ending the SERVER operation and seeing it gone before the caller is
+ * answered anyway (`Q-380`). The answer, and the hold's release behind it, follow the kill — so this is added to how long a
+ * hold can last, and `a-write-bound-answers-before-the-sender-gives-up` holds `ceiling + SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS`
+ * under what a sender waits: the ceiling keeps one second below that wait, so this figure and the margin together stay under it.
+ * Enough for a handful of round trips to a server that is answering; a server that is not is the case it gives up on, loudly.
+ */
+export const KILL_WAIT_MS = 400;
+/** The pause between a `killOp` and the next look at `$currentOp`: long enough for the interrupt to be taken, short of a spin. */
+const KILL_POLL_MS = 20;
+/** What every plain write's driver `comment` starts with, so an operator reading `currentOp` knows whose it is. */
+const WRITE_COMMENT_PREFIX = 'ythril-write-bound:';
+
+/**
+ * The means to ask the server about its own operations and end one: a driver `Admin` has it (`db.admin()`). Stated on the
+ * call's target (`BoundTarget`), so the one door every collection is reached through (`db/record-write-observer.ts`) hands it to
+ * every plain write and a fake in a test hands in its own.
+ */
+export interface ServerOperations {
+  command(command: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+/** What ending a server operation came to. `unable`: the call carried no `ServerOperations`; `unconfirmed`: it was still there or could not be asked. */
+interface EndedOperation {
+  readonly outcome: 'gone' | 'unconfirmed' | 'unable';
+  readonly killed: number;
+  readonly why?: string;
+}
+
+/** `p`, or a rejection when `ms` have passed first: the kill is bounded however the server answers. */
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`no answer within ${KILL_WAIT_MS} ms`)), Math.max(1, ms));
+    p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+  });
+}
+
+/**
+ * End the server operation a plain write started, found by the `comment` it carried, and answer whether it is gone.
+ *
+ * It is asked what is running under that comment (`$currentOp`, this connection's user's own operations), each one found is
+ * `killOp`'d, and the question is asked again until TWICE in a row nothing is found: the second quiet look is the one that
+ * catches a command that was still on its way when the first was made. Done inside `KILL_WAIT_MS`, whatever the server does with
+ * the questions. NEVER throws: a server that cannot be asked (no right to ask, a dead socket, a slow answer) is `unconfirmed`,
+ * which the caller turns into an answer and one loud line — never into a hold released in silence.
+ *
+ * The residual, stated and not closed: a command that has not reached the server when the second look is made arrives after it
+ * and runs alone. The driver abort drops the connection it was on, which drops most of them. A hard fence needs the write itself
+ * to carry a token the hold can invalidate, which a plain write cannot.
+ */
+async function endServerOperation(ops: ServerOperations | undefined, comment: string): Promise<EndedOperation> {
+  if (!ops) return { outcome: 'unable', killed: 0 };
+  const until = Date.now() + KILL_WAIT_MS;
+  const left = (): number => until - Date.now();
+  let killed = 0;
+  let quiet = 0;
+  try {
+    while (left() > 0) {
+      const reply = await within(ops.command({
+        aggregate: 1,
+        pipeline: [{ $currentOp: { allUsers: false } }, { $match: { 'command.comment': comment } }, { $project: { opid: 1 } }],
+        cursor: {},
+      }), left());
+      const found = ((reply['cursor'] as { firstBatch?: Array<{ opid?: unknown }> } | undefined)?.firstBatch ?? [])
+        .map(o => o.opid).filter((id): id is number | string => id !== undefined);
+      if (found.length === 0) {
+        if (++quiet >= 2) return { outcome: 'gone', killed };
+        continue;
+      }
+      quiet = 0;
+      for (const op of found) {
+        await within(ops.command({ killOp: 1, op }), left());
+        killed += 1;
+      }
+      await new Promise<void>(r => setTimeout(r, Math.min(KILL_POLL_MS, Math.max(1, left()))));
+    }
+    return { outcome: 'unconfirmed', killed, why: `still running after ${KILL_WAIT_MS} ms` };
+  } catch (err) {
+    return { outcome: 'unconfirmed', killed, why: peerText(err instanceof Error ? err.message : err) };
+  }
+}
+
+/**
  * Where a bounded call is going and what the database it goes through carries — stated at EVERY call of `callBounded`,
  * never defaulted.
  *
@@ -370,6 +474,12 @@ export type BoundTarget = CollectionTarget | DatabaseTarget;
 /** What both levels state: the client's own `timeoutMS`, `undefined` when it carries none. */
 interface InheritedTimeout {
   readonly inheritedTimeoutMs: number | undefined;
+  /**
+   * The means to end the SERVER's operation when the backstop fires (`endServerOperation`). Every production call states it
+   * (`record-write-observer.ts` is the one door); it is optional only so a fake driver call in a test can leave it out, and
+   * a backstop that fires without it says so in its line.
+   */
+  readonly serverOperations?: ServerOperations;
 }
 
 /** A call on a `Collection`: it goes through `BOUNDED_OPTIONS_ARGUMENT` and `PLAIN_WRITE_METHODS`. */
@@ -405,6 +515,8 @@ interface BoundedCall {
   backstopMs?: number;
   /** The bound is ours alone: the caller set no deadline of its own, so the server's answer to it is `StoreTimeout`. */
   ourDeadline?: boolean;
+  /** The `comment` the plain write carries, which is how the backstop finds its operation in `$currentOp`. */
+  comment?: string;
 }
 
 /**
@@ -448,9 +560,13 @@ function planBound(method: string, args: unknown[], target: BoundTarget): Bounde
     if (inheritedTimeoutMs !== undefined && inheritedTimeoutMs > 0) amended['timeoutMS'] = 0;
     const serverMs = Math.min(bound, ...carried);
     amended['maxTimeMS'] = serverMs;
+    if (!isPlainWrite(method, target)) { out[at] = amended; return { args: out, options: amended, at }; }
+    // The write's own name in the server's operation list: the backstop finds the operation by it and ends it before it answers
+    // (`endServerOperation`). Unique per call, so one kill can never end another write; the bound owns this option of a plain write.
+    const comment = `${WRITE_COMMENT_PREFIX}${randomUUID()}`;
+    amended['comment'] = comment;
     out[at] = amended;
-    if (!isPlainWrite(method, target)) return { args: out, options: amended, at };
-    return { args: out, options: amended, at, backstopMs: serverMs + SERVER_FIRST_MARGIN_MS, ourDeadline: carried.length === 0 };
+    return { args: out, options: amended, at, backstopMs: serverMs + SERVER_FIRST_MARGIN_MS, ourDeadline: carried.length === 0, comment };
   }
   if (typeof options['maxTimeMS'] === 'number') {
     amended['maxTimeMS'] = Math.min(options['maxTimeMS'], bound);
@@ -467,8 +583,9 @@ function planBound(method: string, args: unknown[], target: BoundTarget): Bounde
  * in. `call` is the driver call, handed the bounded arguments. Outside a scope it is called with `args` untouched.
  *
  * For a plain write the result is a promise that settles with the driver's, or rejects `StoreTimeout` once the server's
- * deadline plus `SERVER_FIRST_MARGIN_MS` has passed — and then aborts the driver call, so a command not yet sent is
- * dropped. A result that arrives after that is ignored; it cannot be a landing, because the server's deadline is past.
+ * deadline plus `SERVER_FIRST_MARGIN_MS` has passed — it first aborts the driver call, so a command not yet sent is
+ * dropped, then ends the server operation (`endServerOperation`, at most `KILL_WAIT_MS`), and only then rejects. A result
+ * the driver delivers after the backstop fired is ignored: the caller is answered by the backstop alone.
  * THROWS `StoreTimeout` when the scope's deadline has passed: the operation is not sent.
  */
 export function callBounded(
@@ -477,35 +594,52 @@ export function callBounded(
   const plan = planBound(method, args, target);
   if (!plan) return call(args);
   if (plan.backstopMs === undefined) return call(plan.args);
-  const { backstopMs, options, at } = plan;
+  const { backstopMs, options, at, comment } = plan;
   const abort = new AbortController();
   const given = options['signal'] as AbortSignal | undefined;
   const bounded = [...plan.args];
   bounded[at] = { ...options, signal: given ? AbortSignal.any([given, abort.signal]) : abort.signal };
   return new Promise((resolve, reject) => {
+    /** The backstop has fired: the driver's own settling (the abort's rejection, or a late reply) is no longer the answer. */
+    let backstopped = false;
     const timer = setTimeout(() => {
+      backstopped = true;
       // A plain `Error` as the reason: the driver wraps a bulk write's failure in a `MongoBulkWriteError`, whose
       // constructor copies every ENUMERABLE property of the reason with `for…in` — and `name` is a getter-only there.
       // The default reason (a `DOMException`, whose `name` is an enumerable accessor) and our `StoreTimeout` (which sets
       // its own `name`) both make the abandoned call fail with a `TypeError` about that instead of the abort.
       abort.abort(new Error('the write bound\'s backstop fired'));
-      // Said once, here, and only here: the server's own answer (code 50) is an ordinary timeout and says nothing. The
-      // backstop is the other state — the server could not answer by its own deadline (an upsert behind another
-      // session's uncommitted insert is the one measured) — and the caller's 503 does not tell an operator which.
-      const space = isDatabaseTarget(target) ? undefined : parseSpaceCollection(target.collection)?.spaceId;
-      const where = `${peerText(placeOf(target))}${space === undefined ? '' : ` (space ${peerText(space)})`}`;
-      log.warn(`Write bound: the server did not answer ${peerText(method)} on ${where} by its own deadline (${backstopMs - SERVER_FIRST_MARGIN_MS} ms); the client backstop `
-        + `ended it ${SERVER_FIRST_MARGIN_MS} ms later, answered the caller a retryable timeout and aborted the driver call. A write blocked behind another session's uncommitted insert does this.`);
-      reject(new StoreTimeout());
+      // The caller is answered only once the SERVER operation is gone: the server's deadline starts when the command ARRIVES,
+      // so a late one is still alive here, and answering now would release the hold under a write that can land (`Q-380`).
+      void endServerOperation(target.serverOperations, comment ?? '').then((ended) => {
+        // Said once, here, and only here: the server's own answer (code 50) is an ordinary timeout and says nothing. The
+        // backstop is the other state — the server could not answer by its own deadline (an upsert behind another
+        // session's uncommitted insert is the one measured, a command that reached it late the other) — and the caller's 503
+        // does not tell an operator which. An operation left alive is the one failure here that is an ERROR.
+        const space = isDatabaseTarget(target) ? undefined : parseSpaceCollection(target.collection)?.spaceId;
+        const where = `${peerText(placeOf(target))}${space === undefined ? '' : ` (space ${peerText(space)})`}`;
+        const head = `Write bound: the server did not answer ${peerText(method)} on ${where} by its own deadline (${backstopMs - SERVER_FIRST_MARGIN_MS} ms); the client backstop `
+          + `ended it ${SERVER_FIRST_MARGIN_MS} ms later and aborted the driver call`;
+        if (ended.outcome === 'gone') {
+          log.warn(`${head}; ${ended.killed === 0 ? 'the server operation was already gone' : `the server operation was killed (${ended.killed}) and is gone`}, and the caller was answered a retryable timeout. `
+            + 'A write blocked behind another session\'s uncommitted insert, or a command that reached the server late, does this.');
+        } else if (ended.outcome === 'unable') {
+          log.warn(`${head} and answered the caller a retryable timeout; this call carried no means to end a server operation, so nothing could be killed.`);
+        } else {
+          log.error(`${head}; the server operation could not be confirmed gone (${ended.why ?? 'unknown'}${ended.killed > 0 ? `, killed ${ended.killed}` : ''}) within ${KILL_WAIT_MS} ms. `
+            + 'The caller was answered a retryable timeout anyway, so the write may still be alive in the server and may land after the answer and after the seq hold was released.');
+        }
+        reject(new StoreTimeout());
+      });
     }, backstopMs);
     timer.unref();
     let driverCall: Promise<unknown>;
     try { driverCall = Promise.resolve(call(bounded)); } catch (err) { clearTimeout(timer); reject(err); return; }
     driverCall.then(
-      (value) => { clearTimeout(timer); resolve(value); },
+      (value) => { clearTimeout(timer); if (!backstopped) resolve(value); },
       // The server answering first is the bound ending the write, as the backstop is: one error for both, so a caller
       // never has to know which clock won. The driver's own error stays reachable as the cause.
-      (err: unknown) => { clearTimeout(timer); reject(plan.ourDeadline && isWriteTimeout(err) ? new StoreTimeout(undefined, { cause: err }) : err); },
+      (err: unknown) => { clearTimeout(timer); if (!backstopped) reject(plan.ourDeadline && isWriteTimeout(err) ? new StoreTimeout(undefined, { cause: err }) : err); },
     );
   });
 }

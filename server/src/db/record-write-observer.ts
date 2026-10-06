@@ -45,7 +45,7 @@
 import type { Collection, Db } from 'mongodb';
 import {
   BOUNDED_OPTIONS_ARGUMENT, BOUNDED_DB_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, PLAIN_DB_WRITE_METHODS, RETURNS_CURSOR, callBounded,
-  type CollectionTarget,
+  type CollectionTarget, type ServerOperations,
 } from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
@@ -233,6 +233,9 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
  * unchanged, so an unobserved collection pays a closure per method call and nothing else.
  */
 export function observeRecordWrites(db: Db, isObserved: (name: string) => boolean, listener: RecordWriteListener): Db {
+  // What a plain write's backstop ends the server's operation with (`Q-380`): the database's own `Admin`, one for every call
+  // this door bounds. A `Db` that has none (a test's fake) states `undefined`, and the backstop's line says so.
+  const serverOperations: ServerOperations | undefined = typeof db.admin === 'function' ? db.admin() : undefined;
   return new Proxy(db, {
     get(target, prop, receiver) {
       // The Db's own bounded calls (`listCollections`, `dropCollection`): the same bound, at the same door, through the Db
@@ -241,7 +244,7 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
         const method = Reflect.get(target, prop, receiver) as (...a: unknown[]) => unknown;
         return (...given: unknown[]) => {
           try {
-            return callBounded(prop, given, (a) => method.apply(target, a), { database: target.databaseName, inheritedTimeoutMs: target.timeoutMS });
+            return callBounded(prop, given, (a) => method.apply(target, a), { database: target.databaseName, inheritedTimeoutMs: target.timeoutMS, serverOperations });
           } catch (err) {
             // A hold whose time is spent refuses the call unsent: THROWN for the call that returns a cursor, as a collection's
             // `find` does, and a rejection for the one that returns a promise.
@@ -255,7 +258,7 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
         // `target.timeoutMS` is the `timeoutMS` every operation of this database inherits (the client's, from `MONGO_URI`), which
         // a bounded plain write has to neutralise (`db/write-bound.ts`).
         observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null,
-          { collection: name, inheritedTimeoutMs: target.timeoutMS });
+          { collection: name, inheritedTimeoutMs: target.timeoutMS, serverOperations });
     },
   });
 }

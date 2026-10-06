@@ -19,6 +19,14 @@
  * - `suite`: the harness database slug (unique per FILE: `a-db-harness-name-is-unique`);
  * - `query`: extra `MONGO_URI` options for the server's client (`'&timeoutMS=600'`), `''` for the harness's own;
  * - `reps`: how many times each lane is run;
+ * - `minReps`: the fewest `reps` may be (default 5). A variant that runs the SAME lanes at a second lateness and is red or
+ *   green at a handful of repetitions says so here, instead of lowering the floor for every file;
+ * - `lateByMs`: how late the relay makes a bounded write reach the server (default `LATE_BY_MS`, 80). A variant that holds
+ *   the rule at a lateness DERIVED from the product (`SERVER_FIRST_MARGIN_MS` + a margin, `Q-380`) passes it, and asserts
+ *   its own floor over the product's figure — this module does not know which figure it was derived from;
+ * - `laneIndexes`: run only these lanes of the full table (default all), by index. A narrow run has fewer lanes than
+ *   workers, which is the shape that exposed `runAll` starting a lane's next repetition while the last one's settle window was
+ *   still open (`Q-380`); the full table is still derived and floored whatever is run;
  * - `boundMs`: the write bound and the hold deadline (default 1000). The client-timeout variant runs a longer bound so the
  *   client's clock, which every OTHER operation of the lane inherits too (reads, seeds, the door's own lookups), can sit
  *   well above how long those take under load and still below the bound;
@@ -156,20 +164,27 @@ async function finishOnce(lane, rep, ran) {
  * Every repetition of every lane, `WORKERS` stalls at a time. A lane's repetitions are in order, and its settle window
  * is waited out in the BACKGROUND of the next lanes' stalls — only the next repetition of the same lane waits for it.
  */
-async function runAll(results, reps) {
+async function runAll(lanes, results, reps) {
   const tasks = [];
-  for (let rep = 0; rep < reps; rep++) LANES.forEach((lane, i) => tasks.push({ lane, i, rep }));
-  const previous = LANES.map(() => Promise.resolve());
+  for (let rep = 0; rep < reps; rep++) lanes.forEach((lane, i) => tasks.push({ lane, i, rep }));
+  const previous = lanes.map(() => Promise.resolve());
   const watching = [];
   let next = 0;
   async function worker() {
     for (let t = tasks[next++]; t; t = tasks[next++]) {
-      await previous[t.i];
+      // The lane's NEXT repetition waits for THIS one's settle window, and is told so the moment this one is TAKEN — not after
+      // its stall has run: a worker that pulls the lane's next repetition while this one is still stalling must find this one's
+      // `done`, or it seeds the lane (wipe, insert, counter) under an open settle window, and the experiment reports its own
+      // seed as a landing (`Q-380`).
+      const before = previous[t.i];
+      let done = () => {};
+      previous[t.i] = new Promise(resolve => { done = resolve; });
+      await before;
       const ran = await t.lane.seed().then(() => stallAndRelease(t.lane)).catch(error => ({ error }));
       const finished = finishOnce(t.lane, t.rep, ran)
         .catch(error => ({ rep: t.rep, fixtureError: String(error?.stack ?? error), landed: [] }))
         .then(r => { results[t.i].push(r); });
-      previous[t.i] = finished;
+      finished.then(done);
       watching.push(finished);
     }
   }
@@ -197,18 +212,23 @@ async function runAll(results, reps) {
  *   `boundMs`: the write bound the experiment sets (default 1000, the least it may be); `holdMs`: the hold deadline (default
  *   the same). A variant that asserts WHEN an answer came gives the hold more than the bound: an operation late in a hold is
  *   bounded by what is left of the hold, which is less than the bound, and would read as an early answer
- * @returns {{ title: string, skip: string | false | undefined, timeout: number, before: () => Promise<void>, after: () => Promise<void>, cases: Array<{ name: string, fn: () => void }> }}
+ * @returns {{ title: string, skip: string | false | undefined, lateByMs: number, laneCount: number, timeout: number, before: () => Promise<void>, after: () => Promise<void>, cases: Array<{ name: string, fn: () => void }> }}
  */
-export function landingExperiment({ title, suite, query, reps, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
+export function landingExperiment({ title, suite, query, reps, minReps = 5, lateByMs = LATE_BY_MS, laneIndexes, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
   const REPS = reps;
   BOUND = { writeTimeoutMs: boundMs, holdDeadlineMs: holdMs };
   CAP_MS = holdMs + 2500;
+  if (laneIndexes !== undefined && !laneIndexes.every(i => Number.isInteger(i) && i >= 0 && i < LANES.length)) {
+    throw new Error(`landingExperiment: laneIndexes [${laneIndexes}] names a lane outside the table of ${LANES.length}`);
+  }
+  /** The lanes this run walks: the whole table unless it was narrowed. Its spaces are the only ones opened. */
+  const lanes = laneIndexes === undefined ? LANES : laneIndexes.map(i => LANES[i]);
   let doors;
   let relay;
   let seamError = null;
   let restoreBound = () => {};
   /** `results[laneIndex]` — one entry per repetition. */
-  const results = LANES.map(() => []);
+  const results = lanes.map(() => []);
   const cases = [];
   const it = (name, fn) => cases.push({ name, fn });
 
@@ -223,7 +243,8 @@ export function landingExperiment({ title, suite, query, reps, clientTimeoutMs, 
       assert.ok(holderCaseCount >= 15, `only ${holderCaseCount} holder case(s) in _seq-hold-cases.mjs — the table or its import is broken`);
       assert.equal(LANES.length, DOOR_COUNT + holderCaseCount);
       assert.equal(new Set(LANES.map(l => l.space)).size, LANES.length, 'two lanes share a space, so one lane would read the other\'s writes');
-      assert.ok(REPS >= 5 && SETTLE_MS >= 3000 && BOUND.holdDeadlineMs >= 1000, 'the repetition, settle window and bound are what the rule is held at');
+      assert.ok(REPS >= minReps && SETTLE_MS >= 3000 && BOUND.holdDeadlineMs >= 1000, 'the repetition, settle window and bound are what the rule is held at');
+      assert.ok(lanes.length >= 1 && lanes.every(l => LANES.includes(l)), 'the narrowed run walks a lane the table does not have');
     });
 
     if (clientTimeoutMs !== undefined) {
@@ -235,11 +256,11 @@ export function landingExperiment({ title, suite, query, reps, clientTimeoutMs, 
 
     it('the relay held writes back, so the server\'s deadline really was later than the client\'s', () => {
       assert.ok(relay.delayedWrites() > 0,
-        `the relay held back no bounded write in ${REPS * LANES.length} lane-repetitions — the lateness this file depends on was not produced`);
+        `the relay held back no bounded write in ${REPS * lanes.length} lane-repetitions — the lateness this file depends on was not produced`);
     });
 
 
-    for (const [i, lane] of LANES.entries()) {
+    for (const [i, lane] of lanes.entries()) {
       it(`${lane.name}: nothing it would have written lands after the answer (${REPS} repetitions)`, () => {
         const rs = results[i];
         assert.equal(rs.length, REPS, `only ${rs.length} of ${REPS} repetitions ran — ${seamError ? 'no seam' : 'the experiment stopped'}`);
@@ -278,15 +299,17 @@ export function landingExperiment({ title, suite, query, reps, clientTimeoutMs, 
   return {
     title,
     skip,
-    timeout: 120_000 + REPS * LANES.length * (CAP_MS + SETTLE_MS) / WORKERS,
+    lateByMs,
+    laneCount: lanes.length,
+    timeout: 120_000 + REPS * lanes.length * (CAP_MS + SETTLE_MS) / WORKERS,
     async before() {
       relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
-      doors = await openStalledWriteDoors({ suite, spaces: LANES.map(l => l.space), mongoPort: relay.port, mongoQuery: query });
+      doors = await openStalledWriteDoors({ suite, spaces: lanes.map(l => l.space), mongoPort: relay.port, mongoQuery: query });
       Object.assign(env, doors.env);
       Object.assign(ctx, { door: env.door, mods: await loadHolderModules() });
       try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
-      relay.setDelay(LATE_BY_MS);
-      await runAll(results, REPS);
+      relay.setDelay(lateByMs);
+      await runAll(lanes, results, REPS);
     },
     async after() {
       restoreBound();

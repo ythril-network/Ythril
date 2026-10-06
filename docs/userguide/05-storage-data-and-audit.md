@@ -333,6 +333,14 @@ One such line now and then is a slow moment; the same space appearing repeatedly
 database connection to look into. The gauge `ythril_seq_horizon_oldest_hold_seconds` shows the same thing as a
 number per space.
 
+**`Write bound: the server did not answer … by its own deadline` names a write the database had to be told to drop.**
+A write that is stopped (`ended=timeout`) is stopped by the database at its limit; if the database has not
+answered half a second after that — it is blocked behind another session's uncommitted insert, or the request reached it
+late — the server stops waiting, ends the database's operation itself (finds it by a tag it put on the write, kills it, and
+checks that it is gone, for at most 0.4 s) and only then tells the caller to retry. The line says which: *killed and gone*
+(a warning, nothing to do) or *could not be confirmed gone* (an error: the write may still be running in the database and
+could land after the caller was told it timed out — look at the database server and at who holds the lock).
+
 ---
 
 ---
