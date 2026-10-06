@@ -120,16 +120,18 @@ describe('the creation ordering this check depends on', () => {
     const callers = [lifecycle, app]
       .flatMap(src => [...src.matchAll(/initSpace\((?![^)]*waitForVectorReady)[^)]*\)/g)].map(m => m[0]))
       .filter(m => !m.includes('\n'));
-    assert.deepEqual(callers.sort(), ["initSpace('general')", 'initSpace(space.id)'],
+    assert.deepEqual(callers.sort(), ["initSpace('general')", 'initSpace(spaceId)'],
       'a new initSpace caller relies on the default (waitForVectorReady: true) and therefore POLLS — confirm its '
       + 'space is in config first, then add it here');
 
     // `initSpace('general')` sits after the built-in space is pushed and saved.
     assert.ok(lifecycle.indexOf("await initSpace('general');") > lifecycle.indexOf("id: 'general',"));
-    // `app.ts` iterates the RELOADED config, so its space is committed by construction — `concreteSpaces()` reads
-    // the live config, and is the concrete-space walk since `Q-98`.
-    const iterates = app.indexOf('for (const space of concreteSpaces())');
-    assert.ok(iterates > -1 && app.indexOf('await initSpace(space.id);') > iterates,
-      'the app.ts caller must still be iterating spaces read from config');
+    // The reload's caller is `initAddedSpaces` (`spaces/lifecycle.ts`, bundle-53 G21; it was a loop in `app.ts`). Its spaces are
+    // committed by construction: it drops from what it is owed every id the live config does not hold, and walks only the
+    // concrete spaces among the rest (`concreteSpaceIds()` reads the live config, the concrete-space walk since `Q-98`).
+    const body = bodyOf(lifecycle, 'initAddedSpaces');
+    const committed = body.indexOf('getConfig().spaces');
+    assert.ok(committed > -1 && body.indexOf('concreteSpaceIds()') > committed && body.indexOf('await initSpace(spaceId)') > committed,
+      'the reload caller no longer restricts itself to spaces read from the live config before it initialises them');
   });
 });
