@@ -31,8 +31,9 @@
  *
  * {@link singleFlight} makes a lock that belongs to the OBJECT. {@link runExclusive} — the original API, unchanged for its callers — is
  * the process-global registry of instances keyed by label. The two exist because a lock keyed by a string alone made two owners of
- * one label share a lock by accident (a second watcher, a test's copy), and the cure was a hand-invented unique label
- * (`Search readiness #2`). A repeating timer (`util/interval-job.ts`) holds an instance of its own, so it is never in the registry
+ * one label share a lock by accident (a second watcher, a test's copy), and the cure was a hand-invented unique label (a numbered
+ * suffix on the name). Search readiness used to do that and holds an instance of its own now; nothing should invent a label for this
+ * again. A repeating timer (`util/interval-job.ts`) holds an instance of its own, so it is never in the registry
  * and no other caller can block it by borrowing its name.
  *
  * **The skip warning is throttled per instance** (`warnOnce`, one line per {@link SKIP_WARNING_WINDOW_MS}). It used to be said on

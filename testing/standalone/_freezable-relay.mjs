@@ -97,8 +97,9 @@ export async function assertRelayFreezes(relay, { recoveryMs = RECOVERY_MS } = {
  * @param {{ query?: string }} [o]  `query` is extra URI options as an operator would put them in `MONGO_URI`
  *   (`'&connectTimeoutMS=1000&heartbeatFrequencyMS=500'`): the way a test builds a client whose liveness options differ
  *   from the harness's, through the relay
- * @returns {Promise<{ uri: string, address: string, freeze: () => void, thaw: () => void, flow: () => Record<string, number>,
- *   close: () => Promise<void> }>} `uri` points a client at the relay; `flow()` is the bytes carried and dropped so far
+ * @returns {Promise<{ uri: string, address: string, port: number, freeze: () => void, thaw: () => void, flow: () => Record<string, number>,
+ *   close: () => Promise<void> }>} `uri` points a client at the relay; `port` is the port it listens on, for a caller that builds its
+ *   own URI (`openTestMongo(suffix, { port })`) and used to parse `address` for it; `flow()` is the bytes carried and dropped so far
  */
 export async function startFreezableRelay(dbName, { query = '' } = {}) {
   let frozen = false;
@@ -120,6 +121,7 @@ export async function startFreezableRelay(dbName, { query = '' } = {}) {
   const handle = {
     uri: testMongoUri(dbName, { port: relay.port, query }),
     address: relay.address,
+    port: relay.port,
     freeze() { frozen = true; },
     thaw() { frozen = false; },
     flow: () => ({ ...flow }),
