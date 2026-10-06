@@ -417,8 +417,12 @@ describe('a store failure answers alike on every door', { skip }, () => {
     for (const { d, a } of results) {
       if (SERVES_THE_LOG.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
       const leak = driverTextIn(a.raw);
-      // The text AROUND the match: a long body (a scrape) leaks somewhere past its first 200 characters.
-      if (leak) wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(Math.max(0, leak.index - 200), leak.index + 200)}`);
+      // The LINE holding the match: a long body (a scrape) leaks somewhere past its first 200 characters.
+      if (leak) {
+        const start = a.raw.lastIndexOf('\n', leak.index) + 1;
+        const end = a.raw.indexOf('\n', leak.index);
+        wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(start, end < 0 ? undefined : end)}`);
+      }
       // A stream that opened (a status line, then events) is a stream, not an answer that never came.
       if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
     }

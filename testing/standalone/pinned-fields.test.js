@@ -28,10 +28,11 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'url';
+import os from 'node:os';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEMP_CONFIG = path.join(__dirname, 'tmp-pinned-fields-test.json');
+// In the OS temp directory, never beside this file: a gate walking the tree's untracked files in parallel can list it
+// and find it deleted before it reads it (media-config.test.js did exactly that, bundle-53 preflight).
+const TEMP_CONFIG = path.join(os.tmpdir(), `ythril-pinned-fields-test-${process.pid}.json`);
 const BASE_CONFIG = {
   instanceId: 'test-instance', instanceName: 'Test', spaces: [], tokens: [], networks: [],
 };
