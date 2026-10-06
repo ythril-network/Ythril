@@ -117,6 +117,7 @@ report a conflict.
 | `400` | a `(fromKind, toKind)` pair outside the six — the error names the ones that are allowed |
 | `400` | under `strictLinkage`, either end failing to resolve |
 | `404` | the `from` record does not exist — a link hanging off nothing is the dangling half this refuses to create |
+| `503` | the database could not answer while the ends were being looked up. Retryable; **never** the `404` or `400` above, which are decided only after the database has answered ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 
 ---
 

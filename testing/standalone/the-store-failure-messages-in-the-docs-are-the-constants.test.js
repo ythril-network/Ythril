@@ -72,6 +72,38 @@ const ANSWERS = [
   },
 ];
 
+/**
+ * The three lines a background job says when a space fails or the store stops it, built by the REAL reporter with the
+ * placeholders the docs use: `<job>` for the step, `<id>` for the space, `<part>` for the unit, `<reason>`, `<when>` and
+ * `<n>`. Reworded in `util/space-failure.ts`, the lines the docs quote stop being the lines in the log, and an operator
+ * grepping for one finds nothing. `space-failure-reporter.test.js` calls these lines "the docs'" and reads no doc; this does.
+ */
+const { spaceFailureReporter } = await import('../../server/dist/util/space-failure.js');
+function reporterLines() {
+  const said = [];
+  const reporter = spaceFailureReporter({ warn: (line) => said.push(line) });
+  reporter.spaceFailure('<job>', '<id>', new Error('<reason>'), { unit: '<part>', when: '<when>' });
+  reporter.storeDown('<job>', new Error('<reason>'));
+  reporter.storeStalled('<job>', '<n>');
+  assert.equal(said.length, 3, 'the reporter said three lines for three conditions');
+  return said;
+}
+const LINES = reporterLines();
+/** The pages that quote the lines: the operator's Server Log and the integrator's reference to the same jobs. */
+const LINE_PAGES = ['docs/userguide/05-storage-data-and-audit.md', 'docs/integration-guide/11-setup-api.md'];
+
+describe('the three lines a background job says are the lines the docs quote', () => {
+  for (const page of LINE_PAGES) {
+    const text = words(readFileSync(page, 'utf8'));
+    for (const line of LINES) {
+      it(`${page} quotes \`${line}\``, () => {
+        assert.ok(text.includes(words(line)),
+          `${page} does not quote the line the reporter says:\n  ${line}\nA line an operator greps for must read the same in the guide as in the log.`);
+      });
+    }
+  }
+});
+
 describe('the sentences the docs quote as store-failure answers are the ones the server sends', () => {
   it('has the answers it should be holding the docs to (a floor)', () => {
     assert.ok(ANSWERS.length >= 5);
