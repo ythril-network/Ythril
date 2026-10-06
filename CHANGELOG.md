@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.5] — 2026-10-06
+
+**A patch release with two fixes for defects in 5.6.4, and nothing else.** Paging through a recall answer no longer
+shows some matches twice and others never, and links between the pages of a guide in the in-app Help work.
+
+| What changes on upgrade | What to do |
+|---|---|
+| Two identical recalls over an unchanged space return their matches in the same order | Nothing. A caller that pages with `skip` / `nextSkip` now sees every match exactly once |
+| A link from one page of a guide to another opens that page in Help | Nothing |
+
+Documents changed in this release: `docs/dependencies.md` and `docs/contribution-guide.md`; their references to files
+outside the guides are now shown as file names rather than links, because Help can open only the guides themselves.
+
+### Fixed
+
+- **Recall: paging no longer repeats or skips matches.** When several records matched a query's words equally well
+  (typical for records written from one template), they came back in a different order on every call. A caller paging
+  through the answer with `skip` / `nextSkip` could therefore see some records twice and miss others. Equal matches are
+  now always returned in the same order. This applies to the MCP `recall` tool and to `POST /api/brain/recall` alike.
+- **Help: links between the pages of a guide work.** A link from one page of a guide to another opened an empty
+  browser tab; it now opens the page in Help, scrolls to it and moves keyboard focus there. The page you are on is kept
+  in the address, so reloading or going Back returns to it, and a link into another guide focuses that guide's first
+  heading. Links to a section whose title contains `&`, or is titled `Links`, now land on that section.
+
 ## [5.6.4] — 2026-10-05
 
 **A patch release: every fix PR #1483 made on `main` for a defect present in 5.6.3, and nothing else.** It follows

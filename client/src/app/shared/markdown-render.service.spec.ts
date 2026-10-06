@@ -9,6 +9,24 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MarkdownRenderService, headingSlug } from './markdown-render.service';
+import { NAMED_PROP_PREFIX, elementIdsFor, headingIdFor } from './heading-slug';
+
+describe('headingIdFor / elementIdsFor — the id a heading gets, and the ids a fragment may be at', () => {
+  it('an id that shadows nothing is the slug; one the predicate says shadows is in the namespace', () => {
+    expect(headingIdFor('plain-words', () => false)).toBe('plain-words');
+    expect(headingIdFor('links', (id) => id === 'links')).toBe(`${NAMED_PROP_PREFIX}links`);
+  });
+
+  it('by default the question is asked of this browser\'s own `document` and form element, as the sanitizer asks it', () => {
+    expect(headingIdFor('links')).toBe('user-content-links');
+    expect(headingIdFor('title')).toBe('user-content-title');
+    expect(headingIdFor('hosting')).toBe('hosting');
+  });
+
+  it('a fragment may be at its own id or in the namespace', () => {
+    expect(elementIdsFor('links')).toEqual(['links', 'user-content-links']);
+  });
+});
 
 describe('headingSlug — GitHub-compatible, because the documents are', () => {
   it('lowercases and hyphenates', () => {
@@ -55,6 +73,34 @@ describe('MarkdownRenderService', () => {
     const html = await svc.render('## The `recall` tool\n');
     expect(html).toContain('id="the-recall-tool"');
     expect(html).toContain('<code>recall</code>');
+  });
+
+  it('slugs the heading as the reader sees it: an ampersand or an angle bracket is dropped like any punctuation, not spelled `amp`', async () => {
+    // `## Duplicate Scanner & Action Rules` is `#duplicate-scanner--action-rules` on GitHub, which is where every link in the
+    // guides was written. Slugged from the rendered HTML, the `&amp;` lost its `&` and `;` and left `amp`: the heading's id was
+    // `duplicate-scanner-amp-action-rules`, and the link to it (and every Help control that names one) scrolled nowhere.
+    const html = await svc.render('## Duplicate Scanner & Action Rules\n\n## 1 < 2 and "quoted" it\'s\n');
+    expect(html).toContain('id="duplicate-scanner--action-rules"');
+    expect(html).toContain('id="1--2-and-quoted-its"');
+    expect(html).not.toContain('-amp-');
+  });
+
+  it('a heading whose slug names a property of `document` keeps an id (round W): the sanitizer strips such an id, so it is DOMPurify\'s own `user-content-` form', async () => {
+    // `## Links` slugs to `links`, and `document.links` exists: DOMPurify removes an `id` that would shadow a property of
+    // `document` or of a form (DOM clobbering) and leaves `id=""` — the joined integration guide had an h2 with an EMPTY id,
+    // which no link could reach. The protection stays; the id takes the namespace that cannot shadow anything.
+    const html = await svc.render('## Links\n\n## Images\n\n## Plain words\n');
+    expect(html).not.toContain('id=""');
+    expect(html).toContain('id="user-content-links"');
+    expect(html).toContain('id="user-content-images"');
+    expect(html).toContain('id="plain-words"');
+    expect(html).not.toContain('id="links"');
+  });
+
+  it('a clobbering id stays out of the document even when the markdown itself asks for one', async () => {
+    const html = await svc.render('<a id="cookie">x</a>\n\n<form name="forms"></form>\n');
+    expect(html).not.toContain('id="cookie"');
+    expect(html).not.toContain('name="forms"');
   });
 
   it('disambiguates repeated headings the way GitHub does', async () => {
