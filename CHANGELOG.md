@@ -9,48 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.6.6] — 2026-10-06
 
-**A patch release with fixes for defects in 5.6.5, and nothing else.** A space that fails no longer stops the spaces behind
-it at startup, at a config reload, in the embedding queue or in a manual scan; a record that cannot be deleted no longer
-holds back the expired records behind it; a scheduled backup is no longer overlapped by the next; shutdown stops every
-background job; and a space rename that fails on the file system no longer answers with the instance's data path.
+Fixes only: one failing space no longer stops the others, and four background-job defects are gone.
 
-| What changes on upgrade | What to do |
+| Changes on upgrade | Action |
 |---|---|
-| `POST /api/duplicates/scan` and `POST /api/contradictions/scan` answer `200` with a new `failedSpaces` list when a space cannot be scanned (`[]` when none) | Nothing. A client that ignores unknown fields is unaffected; one that wants to know which space failed reads `failedSpaces` |
-| A config reload (and `POST /api/admin/reload-config`) that cannot initialise a space answers `500` naming it, after initialising the others | Nothing. The next reload initialises the space again |
+| `POST /api/duplicates/scan` and `/api/contradictions/scan` answer `200` with `failedSpaces` (`[]` when none) | None |
+| A config reload that cannot initialise a space answers `500` naming it, after initialising the rest | None |
 
 ### Fixed
 
-- **Shutdown stops every background job before it drains.** The TTL (auto-delete) sweep, the candidate and tombstone
-  prunes, the contradiction scanner, the audit change-retention sweep and the stale-upload cleanup were never stopped
-  when the server shut down, so a pass could start while requests were still finishing and reach into a database the
-  shutdown was about to close.
-- **A scheduled backup no longer overlaps the next.** A dump that took longer than its cron period was joined by a second
-  dump, then a third, each reading every collection and writing under `backups/`. The tick that finds the previous
-  backup still running is skipped, and the Server Log says so with how long it has been running.
-- **A record whose delete fails no longer stops retention behind it.** The auto-delete sweep read the first 500 expired
-  records of a collection and tried each once, so when 500 of them could not be deleted every cycle read the same 500,
-  deleted nothing, and kept every expired record behind them past its window. Each cycle now reads past the records it
-  already tried and ends at 500 deletions or 2 000 attempts per collection, and the records it could not delete are named
-  once per collection with their count, not once each.
-- **A space rename that fails on the file system no longer shows the instance's data path.** When moving the space's files
-  directory (or writing the config) failed, the `500` answer of `PATCH /api/spaces/:id/rename` and of the `space_rename`
-  tool carried the runtime's message, which holds the absolute path. It now carries the error code
-  (`the file system refused this step (EPERM); the reason is in the server log`); the path is in the Server Log.
-- **One space that cannot be initialised no longer stops the others.** At startup the first space whose initialisation
-  failed left every space after it uninitialised, unmarked and unconfirmed, and the line that said so named a driver
-  error and not the space. A config reload did the same and also skipped re-arming the schedulers, and nothing retried
-  the space afterwards. Each space is now initialised on its own, a failure is named once in the Server Log, the
-  schedulers are re-armed whatever happened, and a space that failed is initialised again by the next reload.
-- **One failing space no longer stops the background loops behind it.** The legacy read-spill sweep and the embedding
-  queue's claim, stall-reset and revive each ended at the first space that threw, so every space after it was skipped on
-  every pass — one bad space starved the embedding of all the others. Each space is now its own step and a failure is
-  named once per ten minutes.
-- **A manual scan over every space no longer fails as a whole when one space does.** `POST /api/duplicates/scan` and
-  `POST /api/contradictions/scan` answered `500 Internal error` with no word of which space, and never scanned the spaces
-  behind it. They now scan every space they can and answer `200` with `failedSpaces: [{ spaceId, reason }]` (present and
-  empty when nothing failed; the reason in Ythril's words, never the driver's). `scannedSpaces` counts the spaces that were
-  scanned.
+- **Spaces:** a space that fails at startup, a config reload, the embedding queue, the legacy spill sweep or a manual scan
+  no longer stops the spaces after it; it is named once in the Server Log and retried.
+- **Retention:** a record that cannot be deleted no longer blocks the expired records behind it (up to 500 deletions or
+  2 000 attempts per collection per cycle).
+- **Backups:** a scheduled backup no longer overlaps the next; the late tick is skipped and logged.
+- **Shutdown:** every background job is stopped before the drain.
+- **Rename:** a failed space rename names the file-system error code, not the instance's data path.
 
 ## [5.6.5] — 2026-10-06
 
