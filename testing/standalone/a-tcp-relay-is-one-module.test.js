@@ -15,7 +15,9 @@
  * - **`close()` that leaves connections open**, so the port is not free and the driver keeps a live connection.
  *
  * What differs between the two relays is only what happens to the client's bytes on their way to the server, and that is
- * the one hook: `clientToServer`.
+ * the one hook: `clientToServer`. A third use (`_freezable-relay.mjs`, bundle-53) must also stop the SERVER's bytes - a store
+ * that has frozen says nothing, with its sockets open - so there is a symmetrical, optional `serverToClient`. It is a hook
+ * on this module because the gate below refuses a second relay: the alternative was a second `net.createServer`.
  *
  * Run: node --test testing/standalone/a-tcp-relay-is-one-module.test.js
  */
@@ -92,6 +94,51 @@ describe('startTcpRelay', () => {
       a.send('one'); b.send('two');
       await until('both echoes', () => a.received() === 'ONE' && b.received() === 'TWO');
       assert.equal(connections, 2, 'the hook is per connection: state it keeps must not leak across clients');
+    } finally { await relay.close(); await echo.close(); }
+  });
+
+  it('lets the caller shape the server-to-client bytes too: built once per connection, sees every reply, and can drop one', async () => {
+    const { startTcpRelay } = await load();
+    const echo = await startEcho();
+    let connections = 0;
+    const seen = [];
+    const relay = await startTcpRelay({
+      host: '127.0.0.1',
+      port: echo.port,
+      // The reply hook is what lets a relay FREEZE a store: dropping what the server says while both sockets stay open.
+      serverToClient: (forward) => {
+        connections += 1;
+        return (chunk) => { seen.push(chunk.toString('utf8')); if (!chunk.toString('utf8').startsWith('drop')) forward(chunk); };
+      },
+    });
+    try {
+      const a = await connect(relay.port);
+      const b = await connect(relay.port);
+      a.send('keep-a');
+      await until('a reply to come back through the hook', () => a.received() === 'keep-a');
+      a.send('drop-this');
+      await until('the hook to see the reply it drops', () => seen.includes('drop-this'));
+      a.send('keep-again');
+      await until('a later reply to pass', () => a.received() === 'keep-akeep-again');
+      assert.ok(!a.received().includes('drop'), 'the reply the hook dropped reached the client');
+      assert.equal(a.socket.destroyed, false, 'dropping a reply must leave the connection open');
+      b.send('keep-b');
+      await until('the second connection to be served', () => b.received() === 'keep-b');
+      assert.equal(connections, 2, 'the reply hook is per connection: state it keeps must not leak across clients');
+    } finally { await relay.close(); await echo.close(); }
+  });
+
+  it('with no reply hook the server\'s bytes pass untouched and whole, and both ends still close together', async () => {
+    const { startTcpRelay } = await load();
+    const echo = await startEcho();
+    const relay = await startTcpRelay({ host: '127.0.0.1', port: echo.port, clientToServer: (forward) => forward });
+    try {
+      const client = await connect(relay.port);
+      const big = 'x'.repeat(200_000);
+      client.send(big);
+      await until('a payload larger than one chunk to come back whole', () => client.received() === big);
+      for (const s of echo.sockets) s.destroy();
+      await within(client.closed, 'the client to be closed when the service went');
     } finally { await relay.close(); await echo.close(); }
   });
 
