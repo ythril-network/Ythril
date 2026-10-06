@@ -27,7 +27,9 @@ const BASE = INSTANCES.d;
 const TOKEN_FILE_D = path.join(__dirname, '..', 'sync', 'configs', 'd', 'token.txt');
 
 // A syntactically valid external URI — the infra-managed guard must fire before
-// any URI validation or connection attempt.
+// any URI validation or connection attempt. If it failed open, the connection test would honour the URI's
+// serverSelectionTimeoutMS (500): testConnection builds its client through mongoClientOptions (b53 G6, Q-329), so an
+// option the URI names beats the 5 s default it used to impose over it.
 const EXTERNAL_MONGO_URI = 'mongodb://8.8.8.8:27017/exfil?serverSelectionTimeoutMS=500';
 // The instance's own URI — even migrating to the current URI must be blocked.
 const CURRENT_MONGO_URI = 'mongodb://ythril-mongo-d:27017/?directConnection=true';

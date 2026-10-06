@@ -29,7 +29,9 @@ const BASE = INSTANCES.b;
 const TOKEN_FILE_B = path.join(__dirname, '..', 'sync', 'configs', 'b', 'token.txt');
 
 // A syntactically valid external URI (SSRF-safe, public range) —
-// the feature-disabled guard must fire before any URI validation.
+// the feature-disabled guard must fire before any URI validation. The URI is never connected to; if the guard failed
+// open, the connection test would honour its serverSelectionTimeoutMS (500): testConnection builds its client through
+// mongoClientOptions (b53 G6, Q-329), so an option the URI names beats the 5 s default it used to impose over it.
 const EXTERNAL_MONGO_URI = 'mongodb://8.8.8.8:27017/exfil?serverSelectionTimeoutMS=500';
 
 let adminToken;

@@ -6,6 +6,8 @@ import { backoffDelayMs } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
 import { observeRecordWrites, EVERY_COLLECTION, type RecordWriteListener } from './record-write-observer.js';
 import { warnIfSocketTimeoutBelowWriteBound } from './write-bound.js';
+import { mongoClientOptions, effectiveClientOptions, describeClientOptions } from './client-options.js';
+import { isStoreUnreachable } from './store-condition.js';
 
 let _client: MongoClient | null = null;
 let _dbName = 'ythril';
@@ -18,64 +20,39 @@ let _vectorSearchDetails = '';
 const CONNECT_RETRY_BUDGET_MS = envInt('MONGO_CONNECT_RETRY_MS', 30_000);
 
 /**
- * Errors worth retrying: the database is there but not yet able to hold a connection.
- *
- * An **allowlist**, so anything unrecognised is thrown immediately rather than retried. That is the
- * safer default here: an authentication failure or a malformed URI will never succeed however long we
- * wait, and quietly retrying one for thirty seconds turns a clear immediate error into a boot that
- * appears to hang. `MongoServerError` (bad credentials) and `MongoParseError` (bad URI) are excluded by
- * simply not being on the list.
- *
- * An earlier version also carried an explicit `if (MongoServerError || MongoParseError) return false`
- * line. Mutation testing showed deleting it changed nothing — the allowlist already excluded them — so
- * it was a line that read like a safeguard and did no work. Removed rather than left to be trusted.
+ * The words that say WHICH failure a boot retry is waiting on: the driver's class, and the server's code and name for it
+ * when it gave them. `MongoServerError 11600 InterruptedAtShutdown` tells an operator what the store is doing; `MongoServerError`
+ * alone does not. The server's name is the server's own text, so it goes through `peerText` like every value that came from
+ * outside.
  */
-const TRANSIENT_CONNECT_ERRORS = new Set([
-  'MongoNetworkError',          // ECONNRESET / ECONNREFUSED — the observed CI failure
-  'MongoNetworkTimeoutError',
-  'MongoServerSelectionError',  // nothing answering yet
-  'MongoTopologyClosedError',
-]);
-
-/**
- * Transient `MongoServerError` **codes** — because the name alone cannot decide this one.
- *
- * The allowlist above excludes `MongoServerError` on purpose: bad credentials carry that name, and retrying
- * them for thirty seconds turns a clear error into a boot that appears to hang. But so does this, observed in
- * CI on #774 with the container dying at startup:
- *
- *     Fatal startup error: MongoServerError: interrupted at shutdown
- *         at async continueScramConversation (…/cmap/auth/scram.js:131:15)
- *
- * That is the same boot race the class comment above describes, one layer later. The replica-set entrypoint
- * restarts mongod after initiation, and a driver that opened a socket just before gets interrupted **mid-SCRAM**.
- * The healthcheck had already passed. Whichever instance loses the race dies, which is why it reads as a flake
- * and moves between containers.
- *
- * So the name bounds the *class* of failure and says nothing about its *transience* — the discriminator is the
- * server's error code. Retry these; anything else keeping the `MongoServerError` name, `AuthenticationFailed`
- * (18) above all, still fails immediately.
- */
-const TRANSIENT_SERVER_ERROR_CODES = new Set([
-  11600,  // InterruptedAtShutdown — the observed failure
-  91,     // ShutdownInProgress
-  11602,  // InterruptedDueToReplStateChange
-  189,    // PrimarySteppedDown
-  13436,  // NotPrimaryOrSecondary — stepping up during rs initiation
-]);
-
-function isTransientConnectError(err: unknown): boolean {
-  const name = (err as { name?: string } | null)?.name ?? '';
-  if (TRANSIENT_CONNECT_ERRORS.has(name)) return true;
-  // Narrow by code, and only for the one name where a code can mean "not up yet". Widening by code alone would
-  // re-admit every unrecognised failure the allowlist exists to reject.
-  if (name !== 'MongoServerError') return false;
-  const code = (err as { code?: unknown } | null)?.code;
-  return typeof code === 'number' && TRANSIENT_SERVER_ERROR_CODES.has(code);
+function describeConnectFailure(err: unknown): string {
+  const e = err as { name?: unknown; code?: unknown; codeName?: unknown } | null;
+  const name = typeof e?.name === 'string' && e.name ? e.name : 'Error';
+  if (typeof e?.code !== 'number') return peerText(name);
+  const codeName = typeof e.codeName === 'string' && e.codeName ? ` ${peerText(e.codeName)}` : '';
+  return `${peerText(name)} ${e.code}${codeName}`;
 }
 
 /**
- * Connect, retrying while the failure looks like "not up yet".
+ * Connect, retrying while the store cannot answer YET, and only then.
+ *
+ * ## What is retried: one predicate
+ *
+ * `isStoreUnreachable` (`db/store-condition.ts`), the same question the request path and the housekeeping walk ask. It
+ * used to be a list of four class names and five server codes here. A name list cannot see a subclass (a pool cleared by a
+ * network failure is `MongoPoolClearedError`, a class the driver does not export), and the list had already diverged from
+ * the other two answers. What it accepts is the store being unreachable: a network error or timeout, a server that cannot
+ * be selected, a closed or exhausted pool, a closed client, a primary stepping down or a host that cannot be reached by
+ * code, and anything the driver itself labels as one to try again. What stays fail-fast is what waiting cannot cure:
+ * `AuthenticationFailed` (18), a malformed URI, missing credentials, and a plain `Error` that merely carries a store-looking
+ * name. An authentication failure retried for thirty seconds turns a clear immediate error into a boot that appears to hang.
+ *
+ * ## How long one attempt may take: `mongoClientOptions`
+ *
+ * The client is built from `db/client-options.ts`, the one place its liveness options live: an option the connection string
+ * names is the operator's and wins, and the rest are the module's defaults. The effective figures are logged once, before
+ * the first attempt, so a boot that never connects still says what it was waiting under. `serverSelectionTimeoutMS` is
+ * therefore operator-overridable here; it used to be an inline 10 s that beat the URI's.
  *
  * ## Why this is not over-engineering
  *
@@ -92,7 +69,7 @@ function isTransientConnectError(err: unknown): boolean {
  * It is not only a CI concern. The same shape is a Mongo restart or failover underneath a running
  * deployment: the pod dies on a blip that would have cleared in under a second.
  *
- * `serverSelectionTimeoutMS` does not cover it — that governs *selecting* a server, while this is the
+ * The selection timeout does not cover it — that governs *selecting* a server, while this is the
  * socket being reset mid-handshake, which rejects immediately.
  */
 export async function connectMongo(): Promise<MongoClient> {
@@ -101,9 +78,12 @@ export async function connectMongo(): Promise<MongoClient> {
   const safeUri = uri.replace(/\/\/[^@]*@/, '//[credentials]@');
   log.debug(`Connecting to MongoDB at ${peerText(safeUri)} (database: ${peerText(_dbName)})`);
 
+  // Once per boot and before the first attempt: what the client will wait under, and which figures are the operator's.
+  log.info(describeClientOptions(effectiveClientOptions(uri)));
+
   const deadline = Date.now() + CONNECT_RETRY_BUDGET_MS;
   for (let attempt = 1; ; attempt++) {
-    _client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
+    _client = new MongoClient(uri, mongoClientOptions(uri));
     try {
       await _client.connect();
       if (attempt > 1) log.info(`MongoDB connected after ${attempt} attempts.`);
@@ -114,11 +94,10 @@ export async function connectMongo(): Promise<MongoClient> {
     } catch (err) {
       // Close the failed client before making another, or each retry leaks its topology and its timers.
       await _client.close().catch(() => { /* it never opened */ });
-      const name = (err as { name?: string } | null)?.name ?? 'Error';
-      if (!isTransientConnectError(err) || Date.now() >= deadline) throw err;
+      if (!isStoreUnreachable(err) || Date.now() >= deadline) throw err;
       // 250 ms doubling to 4 s, equal-jittered: attempt 1 of the loop is the helper's attempt 0.
       const wait = backoffDelayMs(attempt - 1, 250, 4_000);
-      log.warn(`MongoDB not ready yet (${peerText(name)}, attempt ${attempt}); retrying in ${wait}ms.`);
+      log.warn(`MongoDB not ready yet (${describeConnectFailure(err)}, attempt ${attempt}); retrying in ${wait}ms.`);
       await new Promise(r => setTimeout(r, wait));
     }
   }

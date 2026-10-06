@@ -282,3 +282,21 @@ describe('ONE boot line states the effective client options (O-4)', () => {
     await ok.client?.close();
   });
 });
+
+describe('the connection test is built by the same module, and the URI wins over its short defaults (INT-6a)', () => {
+  it('a URI that names serverSelectionTimeoutMS is tested at THAT figure, not the 5 s the test used to impose over it', async () => {
+    const { testConnection } = await import('../../server/dist/db/conn-test.js');
+    const port = await closedLoopbackPort();
+    const started = Date.now();
+    const result = await testConnection(`mongodb://127.0.0.1:${port}/?directConnection=true&serverSelectionTimeoutMS=300`);
+    const tookMs = Date.now() - started;
+    assert.equal(result.ok, false);
+    assert.ok(tookMs < 2_500, `the test of an unreachable URI naming serverSelectionTimeoutMS=300 took ${tookMs}ms: the URI's figure was overridden`);
+  });
+
+  it('builds its client through mongoClientOptions, with the short figures as caller defaults and socketTimeoutMS only when the URI is silent on it', () => {
+    const src = readFileSync('server/src/db/conn-test.ts', 'utf8');
+    assert.match(src, /mongoClientOptions\(uri, \{ connectTimeoutMS: TEST_TIMEOUT_MS, serverSelectionTimeoutMS: TEST_TIMEOUT_MS \}\)/);
+    assert.match(src, /uriQueryOptions\(uri\)\.has\('sockettimeoutms'\)/);
+  });
+});

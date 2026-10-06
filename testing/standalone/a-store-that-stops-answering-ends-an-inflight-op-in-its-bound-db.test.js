@@ -90,7 +90,7 @@ describe('a store that stops answering ends an in-flight operation in its bound'
   });
 
   for (const fraction of OFFSETS) {
-    it(`frozen ${fraction} heartbeats after the monitor's last one: a read in flight ends inside the bound, with the store's error`, async () => {
+    it(`frozen ${fraction} heartbeats after the monitor's last one: a read in flight ends inside the bound, with the store's error`, async (t) => {
       const effective = clientOptions.effectiveClientOptions(relay.uri);
       const bound = clientOptions.inFlightBoundMs(effective);
       // One more monitor round and a flat 500 ms for timers and a busy machine: derived from the constants, not a second figure.
@@ -111,6 +111,8 @@ describe('a store that stops answering ends an in-flight operation in its bound'
         relay.thaw();
         await mongo.closeMongo().catch(() => {});
       }
+      // The measurement, reported with the run: what the figures buy, so a later change to a default is read against it.
+      t.diagnostic(`frozen at ${fraction} x heartbeat: the in-flight read ended after ${outcome.elapsedMs}ms with ${outcome.error?.name} (bound ${bound}ms, slack ${slack}ms)`);
       assert.ok(outcome.settled,
         `the read was still unanswered after ${outcome.elapsedMs}ms; the stated bound is ${bound}ms (+ ${slack}ms slack) for connect ${effective.connectTimeoutMS} + heartbeat ${effective.heartbeatFrequencyMS} + selection ${effective.serverSelectionTimeoutMS}`);
       assert.equal(outcome.ok, false, 'a read on a frozen store cannot have answered');
