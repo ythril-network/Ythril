@@ -318,7 +318,10 @@ export interface StoreFailureAnswer {
  * - a failure on the store's side is rethrown (`throwIfStoreSide`: the door answers it as every door does);
  * - our own error's message is returned as it is — it is the act's refusal in the act's words;
  * - anything the DRIVER raised that is not on the store's side (a server refusal) returns ONE generic sentence, and its
- *   text goes to the log, where an operator reads it and no caller does.
+ *   text goes to the log, where an operator reads it and no caller does;
+ * - a FILE-SYSTEM error (Node's, with a `syscall`) answers our sentence with its code and nothing else: the runtime puts
+ *   the absolute data path in its message, and a space rename's directory move put that path in its 500 body (bundle-53
+ *   lens sweep). The message goes to the log the same way.
  */
 export function refusalText(err: unknown): string {
   throwIfStoreSide(err);
@@ -326,7 +329,22 @@ export function refusalText(err: unknown): string {
     log.warn(`A database refusal was answered in our words: ${logSafe(storeFailureDetail(err))}`);
     return DRIVER_REFUSAL_MESSAGE;
   }
+  const fsError = errorChain(err).find(isFileSystemError);
+  if (fsError) {
+    log.warn(`A file-system refusal was answered in our words: ${logSafe(fsError.message)}`);
+    return fileSystemRefusalMessage(fsError.code);
+  }
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Node's file-system error: an `Error` with a string `syscall` and `code` (`ENOENT`, `EACCES`, …). */
+function isFileSystemError(e: unknown): e is Error & { code: string; syscall: string } {
+  return e instanceof Error && typeof (e as { syscall?: unknown }).syscall === 'string' && typeof (e as { code?: unknown }).code === 'string';
+}
+
+/** Our sentence for a file-system refusal: its code (it names no path), and where the detail is. */
+function fileSystemRefusalMessage(code: string): string {
+  return `The file system refused this step (${/^[A-Z0-9_]{1,32}$/.test(code) ? code : 'unknown'}); the reason is in the server log.`;
 }
 
 /**
