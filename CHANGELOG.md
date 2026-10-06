@@ -236,6 +236,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A record pushed with its author's own peer token is no longer refused as `tombstoned` by a tombstone another instance
   planted; pushed by anyone else, a record with a deleted id is still refused.
 
+## [5.6.6] — 2026-10-06
+
+Fixes only: one failing space no longer stops the others, and four background-job defects are gone.
+
+| Changes on upgrade | Action |
+|---|---|
+| `POST /api/duplicates/scan` and `/api/contradictions/scan` answer `200` with `failedSpaces` (`[]` when none) | None |
+| A config reload that cannot initialise a space answers `500` naming it, after initialising the rest | None |
+
+### Fixed
+
+- **Spaces:** a space that fails at startup, a config reload, the embedding queue, the legacy spill sweep or a manual scan
+  no longer stops the spaces after it; it is named once in the Server Log and retried.
+- **Retention:** a record that cannot be deleted no longer blocks the expired records behind it (up to 500 deletions or
+  2 000 attempts per collection per cycle).
+- **Backups:** a scheduled backup no longer overlaps the next; the late tick is skipped and logged.
+- **Shutdown:** every background job is stopped before the drain.
+- **Rename:** a failed space rename names the file-system error code, not the instance's data path.
+
 ## [5.6.5] — 2026-10-06
 
 **A patch release for two defects in 5.6.4: take it if you page through `recall` answers or read the guides in Help.**
