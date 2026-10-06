@@ -33,7 +33,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadCompose } from '../_shared/compose-file.mjs';
-import { TEST_MONGO_PORT } from './_mongo-harness.mjs';
+import { TEST_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
 
 const IMAGE = 'mongodb-atlas-local';
 const IMAGE_OWN_CHECK = /\/usr\/local\/bin\/runner\s+healthcheck\b/;

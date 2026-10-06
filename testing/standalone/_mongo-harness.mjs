@@ -35,10 +35,10 @@
 
 import net from 'node:net';
 import { absentInputReason } from '../_shared/absent-input.mjs';
+import { TEST_MONGO_HOST, TEST_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
 
-/** Host/port of the published test Mongo. Override for a non-default stack. */
-export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
-export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
+/** Host/port of the published test Mongo (`_shared/test-mongo-address.mjs`, so a pure test can read it too). */
+export { TEST_MONGO_HOST, TEST_MONGO_PORT };
 
 /**
  * `user:password` for the test Mongo. Set `YTHRIL_TEST_MONGO_CREDS=` (empty) to run the DB-backed files against a
