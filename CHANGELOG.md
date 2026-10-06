@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.8] — 2026-10-07
+
+Sync no longer skips records that share a sequence number at a page or batch boundary.
+
+| Changes on upgrade | Action |
+|---|---|
+| A sync page's `nextCursor` names a seq and a record; a client that builds or parses one breaks | Treat the cursor as opaque: send it back unchanged |
+| Records an earlier version skipped at a page boundary stay missing on a peer until edited; nothing re-sends them | None, or edit a record to send it again |
+| The first start builds a `(seq, _id)` index per record collection in the background, then drops the old `seq` one; a rollback to 5.6.7 rebuilds it before listening | None |
+
+### Changed
+
+- **Sync:** `GET /api/sync/tombstones` takes the same `cursor` as the record pages; without one it answers as before. A page asked for
+  without `full=true` no longer carries deletion stubs. The push no longer sends a record's vector or retention stamps.
+
+### Fixed
+
+- **Sync:** Records that share a sequence number are no longer skipped at a page or batch boundary, on pull, push and the duplicate and
+  contradiction scans, while the new index builds too. The scanners re-read one run once after the upgrade.
+- **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
+  refused element's seq can no longer move the position.
+
+### Security
+
+- **Sync:** A peer can no longer stop other members' deletions by planting more than 5000 tombstones at one seq, for pullers on
+  this release; a puller on an older release stays stuck there until it upgrades.
+
 ## [5.6.7] — 2026-10-06
 
 A security patch: the sync read routes no longer return a whole collection, or a record's internal fields, to a caller that asks.
