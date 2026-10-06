@@ -16,6 +16,8 @@
  * 2. **Our own error's message is returned.** It is the act's refusal in the act's words.
  * 3. **A driver-raised error that is not store-side returns ONE generic sentence**, whatever its text says; the
  *    driver's text goes to the log, once, where an operator reads it and no caller does.
+ * 4. **A file-system error answers our sentence with its code** (`ENOENT`, `EACCES`), never its message: the runtime
+ *    puts the absolute data path in it. The path goes to the log, the same way.
  *
  * Run: node --test testing/standalone/refusal-text-never-answers-a-drivers-words.test.js   (after `npm run build:server`)
  */
@@ -74,6 +76,32 @@ describe('refusalText', () => {
     const wrapped = new Error(`could not create: ${LEAKY}`, { cause: new MongoServerError({ errmsg: LEAKY, code: 11000 }) });
     const { result } = await refusal(wrapped);
     assert.equal(result, sf.DRIVER_REFUSAL_MESSAGE);
+  });
+
+  // A file-system error carries the absolute data path in its message (`ENOENT: no such file or directory, rename
+  // 'C:\data\files\notes' -> ...`), and a space rename's directory move answered it in the 500 body (bundle-53 lens
+  // sweep, security). Real errors from `fs`, so the shape is the runtime's, not a fixture's guess.
+  const fsError = async () => {
+    const missing = path.join(path.resolve('server'), 'no-such-dir-for-refusal-text', 'inner');
+    try { await (await import('node:fs/promises')).rename(missing, `${missing}-moved`); } catch (err) { return { err, missing }; }
+    throw new Error('the fixture rename did not fail');
+  };
+
+  it('a file-system error answers our sentence with its code, never its path; the detail is logged once', async () => {
+    const { err, missing } = await fsError();
+    assert.match(err.message, /no-such-dir-for-refusal-text/, 'the fixture is not the shape under test: the runtime error names its path');
+    const { result, lines } = await refusal(err);
+    assert.doesNotMatch(String(result), /no-such-dir-for-refusal-text|[A-Za-z]:\\|\/server\//, `a path reached the caller: ${result}`);
+    assert.match(String(result), /ENOENT/, 'the error code is the useful part and carries no path');
+    assert.equal(lines.join('\n').split('no-such-dir-for-refusal-text').length - 1 >= 1, true, `the path did not reach the log: ${JSON.stringify(lines)}`);
+    assert.ok(missing.length > 0);
+  });
+
+  it('a file-system error wrapped by one of ours is still a file-system error: the wrapper\'s message is not the answer', async () => {
+    const { err } = await fsError();
+    const wrapped = new Error(`move failed: ${err.message}`, { cause: err });
+    const { result } = await refusal(wrapped);
+    assert.doesNotMatch(String(result), /no-such-dir-for-refusal-text/, `a path reached the caller: ${result}`);
   });
 
   it('a store-side error is rethrown, as the same object', () => {
