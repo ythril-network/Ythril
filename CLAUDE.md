@@ -166,6 +166,36 @@ it: the four were not identical, and the two real differences became parameters 
 apart — entities run an `afterDelete` for the face-label cascade, memories need a `sort`. **A difference that small is
 exactly what argues for four copies and against extracting them**, which is why the count keeps climbing.
 
+**A walk over the spaces was this defect written once per timer, and every copy lacked a different half of its guard
+(`Q-274`, `Q-358`, `Q-359`, `Q-317`).** A background job or a boot step that visits the spaces one after another was a
+`for` over `concreteSpaces()` with a `try` around its body, or none: an error in the first space ended the pass for every
+space behind it, and a space whose read hung ended it as well, after a driver wait nobody had chosen. Each site said its
+failure in its own words, or not at all, so a space simply stopped being housekept and nothing a reader could act on said
+so. **The rule now is one path.** A per-space walk goes through `eachSpace` / `walkSpaces` (`util/housekeeping-walk.ts`)
+and a queue claim through `claimAcross`; the bound on each database operation sits INSIDE them, so a caller cannot leave
+it out, and a space's sub-units (a collection, one half of a pass) go through `eachUnit`, so a hung space costs one bound
+and not one per unit. **The verdict on a failure is one function.** `walkVerdict` (store down, space timeout or space
+failure) is called by the walk helpers and by nothing else, and always awaited; code with no walk above it, such as a
+request that scans one space or a sweep a meta write starts, asks the one question `storeIsNotAnswering`, and a
+hand-spelled `isWriteTimeout(err) || isStoreUnreachable(err)` is the second implementation this section is about. A
+failure is said through the shared reporter, which keeps one line per step, space and unit per window and counts every
+one, never through a `log.warn` of the site's own. **What it promises, and no more:** an error or a hang in one space
+does not stop the others. Two things do stop a walk, each reported as such — the store is not answering, and the store
+is stalled (K spaces in a row timing out in one tick) — and a space that timed out is passed over until its quarantine
+ends or new work for it lifts it. **What it does not cover, on purpose:** index builds, the bulk link conversion, the
+scrape-time collectors (they have their own budget), file-system walks and model calls, none of which is a database
+operation the bound can end. **The timers follow the same shape.** A repeating timer is an `intervalJob`, which holds the
+single flight (a tick that finds the last one running is skipped and counted, never stacked), the bound, the budget and
+the `<label> failed:` line; the one bare `setInterval` left is the per-connection SSE keepalive, with its
+`clearInterval` in a `finally`. A once-only warning is a `warnOnce`, never a boolean latch, so it is said again after
+what it warned about has ended. The gates that hold this derive their subjects and carry floors:
+`every-housekeeping-space-walk-is-isolated` (every per-space loop reachable from a start form is inside a walk helper
+or a reasoned exemption), `one-verdict-for-a-walks-failure`,
+`no-housekeeping-catch-logs-a-space-failure-except-through-the-reporter`, `every-repeating-timer-is-an-interval-job`,
+`a-once-only-warning-is-a-warn-once` and `every-started-job-is-stopped-at-shutdown` (a job that is started is stopped
+before the drain, or a tick starts over a closing connection). A new timer or boot walk that passes none of them is not "a small loop"; it is
+the next copy.
+
 ## A gate concludes about MORE than it checks, and its title is where the gap hides
 
 Promoted to its own section by `Q-5`, 2026-09-05, after the same failure turned up **four times in one sweep,
