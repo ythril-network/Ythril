@@ -393,7 +393,15 @@ describe('writeInOneCommands', () => {
  *   `maxTimeMS` (checked: the call passes `session`);
  * - `own-client`: the file writes through a client of its own, not `getDb()`, so no bound applies to it (checked);
  * - `request-capped`: the quantity is what a request caps (see the docblock: a stated limit, not a proof);
+ *
+ * **`sites` is a number, or `EVERY`** (bundle-71, Q-352). A number is the file's count of bulk calls, so a call added or
+ * removed there is looked at. `EVERY` is for a `sliced` file whose RULE is the whole accounting: every bulk call in it sits in
+ * what the slicer hands it (checked below, per call, over the syntax tree), so the number of calls says nothing the rule does
+ * not — and a number kept beside a rule is a second copy of a fact the tree holds, which `files/tombstones.ts` outgrew the
+ * day its publish and its prune began to slice by path and by page. `EVERY` is refused for any other kind: there the count
+ * is the only thing standing for "somebody looked".
  */
+const EVERY = 'every';
 const SITES = [
   { file: 'server/src/sync/arrivals.ts', sites: 1, kind: 'sliced', reason: 'a peer\'s page, sliced by bytes and by count' },
   { file: 'server/src/sync/tombstone-apply.ts', sites: 1, kind: 'sliced', reason: 'a peer\'s tombstone page: 5000 counted, each op carries an unbounded id twice' },
@@ -409,7 +417,7 @@ const SITES = [
   { file: 'server/src/files/file-meta.ts', sites: 1, kind: 'sliced', reason: 'every file under a moved directory: the count is the store\'s' },
   { file: 'server/src/files/move-cascade.ts', sites: 1, kind: 'sliced', reason: 'every derived row of a moved file: the count is the store\'s' },
   { file: 'server/src/files/media/job-queue.ts', sites: 1, kind: 'sliced', reason: 'every media job under a moved path: the count is the store\'s' },
-  { file: 'server/src/files/tombstones.ts', sites: 4, kind: 'sliced', reason: 'one tombstone per path of a deleted or moved directory, one per tombstone a peer delivered that is kept to pass on, one delete per path a newer arriving version supersedes (a peer\'s page: the count is the store\'s)' },
+  { file: 'server/src/files/tombstones.ts', sites: EVERY, kind: 'sliced', reason: 'one tombstone per path of a deleted or moved directory, one per tombstone a peer delivered that is kept to pass on, one delete per path a newer arriving version supersedes (a peer\'s page: the count is the store\'s)' },
   { file: 'server/src/files/manifest.ts', sites: 1, kind: 'sliced', reason: 'one cache row per file hashed in a round: the count is the store\'s; small rows' },
   { file: 'server/src/metrics/space-activity-store.ts', sites: 2, kind: 'sliced', reason: 'one row per bucket of a space\'s activity: the count is the store\'s; small rows' },
 ];
@@ -533,7 +541,7 @@ describe('every bulk call site in the server is accounted for', () => {
     assert.equal(rows.size, SITES.length, 'a file has two rows');
     const unaccounted = [...byFile].filter(([f]) => !rows.has(f)).map(([f, n]) => `${f} (${n})`);
     assert.deepEqual(unaccounted, [], 'a bulkWrite/insertMany call is in a file with no row: slice it with inOneCommandChunks, or add a row saying why not');
-    const wrongCount = SITES.filter(r => byFile.has(r.file) && byFile.get(r.file) !== r.sites).map(r => `${r.file}: ${byFile.get(r.file)} call(s), row says ${r.sites}`);
+    const wrongCount = SITES.filter(r => byFile.has(r.file) && r.sites !== EVERY && byFile.get(r.file) !== r.sites).map(r => `${r.file}: ${byFile.get(r.file)} call(s), row says ${r.sites}`);
     assert.deepEqual(wrongCount, [], 'a file gained or lost a bulk call its row does not describe');
     const stale = SITES.filter(r => !byFile.has(r.file)).map(r => r.file);
     assert.deepEqual(stale, [], 'a row is about a file with no bulk call');
@@ -543,6 +551,7 @@ describe('every bulk call site in the server is accounted for', () => {
     for (const r of SITES) {
       assert.ok(KINDS.has(r.kind), `${r.file}: unknown kind ${r.kind}`);
       assert.ok(typeof r.reason === 'string' && r.reason.length >= 20, `${r.file}: no reason`);
+      assert.ok(Number.isInteger(r.sites) || (r.sites === EVERY && r.kind === 'sliced'), `${r.file}: \`sites\` is a count, or EVERY on a sliced row (got ${r.sites} on a ${r.kind} row)`);
     }
   });
 
@@ -551,7 +560,8 @@ describe('every bulk call site in the server is accounted for', () => {
       it(`${r.file}: EVERY bulk call sits inside what the slicer hands it (its callback, or the loop over its chunks)`, () => {
         const sf = parsed(r.file);
         const bulks = bulkCallsIn(sf);
-        assert.equal(bulks.length, r.sites, `${r.file}: ${bulks.length} bulk call(s) in the tree, the row says ${r.sites}`);
+        if (r.sites === EVERY) assert.ok(bulks.length >= 1, `${r.file}: the row says every bulk call is sliced, and the tree has none`);
+        else assert.equal(bulks.length, r.sites, `${r.file}: ${bulks.length} bulk call(s) in the tree, the row says ${r.sites}`);
         const scopes = slicedScopes(sf);
         assert.ok(scopes.length >= 1, `${r.file} calls neither writeInOneCommands (with a callback) nor loops over inOneCommandChunks`);
         const bare = bulks.filter(b => !scopes.some(sc => holds(sc, b))).map(b => `line ${lineOf(sf, b)}`);

@@ -15,6 +15,12 @@
  * clock restarts at the cycle that tried it, so it is tried again only once it is stale again, behind every tombstone
  * that went stale before. A batch of unresolvable paths delays the rest by one cycle, never for ever.
  *
+ * ## How its rows are made
+ *
+ * By `writePendingFileTombstones`, as an act writes them, with the module's clock moved for the write (`SkewedDate`): the
+ * settle orders and bumps by the clock the module stamps, and a row inserted by hand carries only the fields its author
+ * remembered (bundle-71 moved that clock from `deletedAt` to `settleAt`; a hand-built row has one and not the other).
+ *
  * ## How "cannot look" is reached
  *
  * `lstat` refuses every path under `locked/` with `EACCES` for the whole test — a permission refused, which is a
@@ -34,6 +40,13 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'settleall';
 
 let acts, tombstones;
+const RealDate = Date;
+/** How far the module's clock (`new Date()`, `Date.now()`) is moved while a pending row is written. */
+let skewMs = 0;
+class SkewedDate extends RealDate {
+  constructor(...args) { if (args.length === 0) super(RealDate.now() + skewMs); else super(...args); }
+  static now() { return RealDate.now() + skewMs; }
+}
 const realLstat = fsp.lstat;
 const looked = [];
 const LOCKED = `${path.sep}locked${path.sep}`;
@@ -42,6 +55,7 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
   before(async () => {
     acts = await openFileActDoors({ suite: 'settleall', space: S });
     tombstones = await import('../../server/dist/files/tombstones.js');
+    globalThis.Date = SkewedDate;
     fsp.lstat = function (p, ...rest) {
       if (String(p).includes(LOCKED)) {
         looked.push(String(p));
@@ -51,6 +65,7 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
     };
   });
   after(async () => {
+    globalThis.Date = RealDate;
     fsp.lstat = realLstat;
     await acts?.close();
   });
@@ -60,13 +75,25 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
     // The batch as the code counts it — read from the module, not written here again.
     const batch = tombstones.FILE_TOMBSTONE_SETTLE_BATCH ?? 500;
     const now = Date.now();
-    const at = (ms) => new Date(now + ms).toISOString();
-    // A full batch it cannot look at, all older than the one it can: stored first, so an unordered read meets them first.
-    await acts.door.coll(S, 'file_tombstones').insertMany(Array.from({ length: batch }, (_, i) => (
-      { _id: `locked-${i}`, spaceId: S, path: `locked/${i}.txt`, deletedAt: at(-3_600_000 + i), pending: true })));
-    await acts.door.coll(S, 'file_tombstones').insertOne({ _id: 'gone', spaceId: S, path: 'gone.txt', deletedAt: at(-1_800_000), pending: true });
-    // Older than all of them and stored last: oldest first reaches it in the first cycle; stored order never does.
-    await acts.door.coll(S, 'file_tombstones').insertOne({ _id: 'oldest', spaceId: S, path: 'oldest.txt', deletedAt: at(-7_200_000), pending: true });
+    // Every pending row is WRITTEN by the module (`writePendingFileTombstones`), at a clock of the test's choosing — never
+    // inserted by hand (bundle-71, vet S7): a hand-built row carries only the fields its author remembered, and the settle
+    // selects and orders by the clock the module stamps (`settleAt`, written beside `deletedAt`), so rows inserted with
+    // `deletedAt` alone tie on, or lack, the field the settle reads. The writes go oldest first, one stamp per row, so the
+    // module's own clock (which never goes backwards) and the ages below agree.
+    const written = {};
+    const writeAt = async (key, p, offsetMs) => {
+      skewMs = offsetMs;
+      try { written[key] = (await tombstones.writePendingFileTombstones(S, [p])).docs[0]; } finally { skewMs = 0; }
+    };
+    // Older than all of them: oldest first reaches it in the first cycle; any other order never does.
+    await writeAt('oldest', 'oldest.txt', -7_200_000);
+    // A full batch it cannot look at, all older than the one it can.
+    for (let i = 0; i < batch; i++) await writeAt(`locked-${i}`, `locked/${i}.txt`, -3_600_000 + i * 1_000);
+    await writeAt('gone', 'gone.txt', -1_800_000);
+    assert.equal(await acts.door.coll(S, 'file_tombstones').countDocuments({ pending: true }), batch + 2,
+      'the pending rows were not all written — the case is not reached');
+    assert.ok(written['oldest'].deletedAt < written['locked-0'].deletedAt && written['locked-0'].deletedAt < written['gone'].deletedAt,
+      'the clock the rows were written at did not order them oldest first');
 
     await tombstones.settleStalePendingFileTombstones(S, new Date(now));
     assert.deepEqual((await acts.served()).map(t => t.path), ['oldest.txt'],
