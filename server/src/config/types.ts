@@ -1781,7 +1781,7 @@ export interface TombstoneDoc {
 /**
  * A file tombstone as it crosses the wire — served by `GET /api/sync/file-tombstones`, pushed by a sync cycle, and
  * stored by a receiver's `POST`. This instance also stores fields that never leave it (whether the act is still
- * `pending`, and a move's marker), declared beside the one module that reads and writes the collection,
+ * `pending`, a move's marker, its own position `positionAt`, and the clock stamps that order its own writes), declared beside the one module that reads and writes the collection,
  * `files/tombstones.ts` (bundle-30 I15).
  */
 export interface FileTombstoneDoc {
@@ -1790,9 +1790,11 @@ export interface FileTombstoneDoc {
   /** Relative path (same convention as ManifestEntry.path). A path is often personal in itself, so this record
    *  outliving the file means the file's NAME survives its deletion — which is why its retention is bounded. */
   path: string;
-  /** ISO8601. What pruning keys on: a file tombstone goes once every peer has acknowledged deletions up to it
-   *  (`sync/file-tombstone-ack.ts`, applied by `brain/tombstone-prune.ts`). File tombstones carry no seq, so
-   *  the acknowledgement is by this timestamp rather than the served-seq floor record tombstones use. */
+  /** ISO8601, when the delete was published (the sender's clock; a receiver keeps it as sent). It is NOT what pruning keys on:
+   *  File tombstones carry no seq, so a file tombstone goes once every peer has acknowledged this instance's own POSITION for it
+   *  (`positionAt`, local to the instance that stores it and never on the wire; `sync/file-tombstone-ack.ts`, applied by
+   *  `brain/tombstone-prune.ts`), rather than by the served-seq floor record tombstones use. Only a row stored before positions
+   *  existed is judged by this. */
   deletedAt: string;
   /** The instance whose act deleted the file — what the deletion authority (`sync/deletion-authority.ts`) matches
    *  against the delivering peer and the file's author. Absent from a tombstone an older peer issued: such a one is

@@ -61,6 +61,20 @@
  * `deletedAt` for a row stored before positions existed). A relayed tombstone keyed by its sender's `deletedAt` was pruned
  * before it was ever served when that was old, and a far-future one sat above every acknowledgement for ever.
  *
+ * **A position is never handed out while an earlier one is uncommitted** (Q-346): a stamp is taken from this instance's
+ * monotonic per-space clock and held until its write ends ({@link withPositionHeld}, the position instance of
+ * `util/horizon-holds.ts`), and every page and the prune read strictly below the lowest open stamp
+ * ({@link settledPositionCap}). Without it a later tombstone's acknowledgement covered an earlier one whose write had not
+ * landed, and the prune took it unsent.
+ *
+ * **One per path, by this instance's own order** (Q-352): a pending row carries `writtenAt` (the clock above, set by the
+ * act) and `settleAt` (what the settle selects and bumps); a published row carries `origin` (`own`, or `relayed`). Only an
+ * own publication can cover a pending delete ({@link publishOnePerPath}), the publishers of a space run one at a time, and
+ * the prune keeps a published tombstone whose path still holds a pending one.
+ *
+ * **A wipe is not undone** (Q-406): {@link forgetFileTombstonesOf} is the one way the collection is emptied, and a publish or
+ * settle that began before it drops instead of re-creating a row.
+ *
  * A held tombstone is also a statement about a VERSION of a path, not about the path for ever: `rowSeq` is the version it
  * erased and `contentHash` the hash of the content (this instance's own row, never read from bytes). An arriving file is
  * compared with them in one place, {@link shadowedArrivals} — by version for metadata, by content for bytes — so a peer that
@@ -86,7 +100,9 @@ import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
-import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
+import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
+import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
+import { keyedLock } from '../util/keyed-lock.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
 import { heldTombstoneRefuses } from '../sync/upsert-plan.js';
@@ -106,6 +122,16 @@ interface StoredFileTombstone extends FileTombstoneDoc {
   /** This instance's own position for the tombstone, for paging, acknowledgement and pruning: the publish time of an
    *  own one, the RECEIVE time of a relayed one — a foreign clock never enters a local position. */
   positionAt?: string;
+  /** When the act that wrote it PUT it: a stamp of this instance's monotonic clock ({@link PositionClock}), so any two rows
+   *  of one space order by it. What the one-per-path rule compares; `deletedAt` is the same instant while pending and the
+   *  publish time after, and a foreign or settled clock never decides. Absent on a row stored before it existed. */
+  writtenAt?: string;
+  /** What the settle selects and orders by, while pending: `writtenAt` until the settle cannot look at the path, then the
+   *  settle's own `now` — never `deletedAt` or `writtenAt`, which the one-per-path rule reads. */
+  settleAt?: string;
+  /** Who made the published row: `own` (this instance published it) or `relayed` (a peer's, kept to be passed on). A row
+   *  with neither stamp is never taken for one this instance published, so it never suppresses an own tombstone. */
+  origin?: 'own' | 'relayed';
 }
 
 /**
@@ -130,8 +156,10 @@ const tombstonesOf = (spaceId: string) => col<StoredFileTombstone>(spaceCollecti
  * Without them both were collection scans, on a collection a space with an offline peer never prunes.
  */
 export const FILE_TOMBSTONE_INDEXES = [
-  // The settle: `{ pending: true, deletedAt <= t }` sorted by `deletedAt`. Partial, so it holds only the pending few.
-  { keys: { pending: 1, deletedAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } } },
+  // The settle: `{ pending: true, settleAt <= t }` sorted by `settleAt` (bundle-71, Q-352: the clock the settle moves, which
+  // is not the clock the one-per-path rule reads). Partial, so it holds only the pending few. It replaces `{ pending, deletedAt }`,
+  // which `ensureFileTombstoneIndexes` drops ({@link REPLACED_FILE_TOMBSTONE_INDEXES}).
+  { keys: { pending: 1, settleAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } } },
   // A move's marker: `moveWasBegun`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
   // move's tombstones carry it, and only until the move is finished.
   { keys: { 'move.from': 1, 'move.to': 1 }, options: { sparse: true } },
@@ -152,7 +180,21 @@ export const FILE_TOMBSTONE_INDEXES = [
  */
 export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void> {
   for (const ix of FILE_TOMBSTONE_INDEXES) await tombstonesOf(spaceId).createIndex(ix.keys, ix.options);
+  // Local state, so there is nothing to migrate but the index: the one a question no longer asks is maintained on every
+  // pending write for nothing. An index that is already gone is the state wanted.
+  for (const name of REPLACED_FILE_TOMBSTONE_INDEXES) {
+    await tombstonesOf(spaceId).dropIndex(name).catch((err: unknown) => {
+      const code = (err as { code?: number }).code;
+      if (code !== INDEX_NOT_FOUND && code !== NAMESPACE_NOT_FOUND) throw err;
+    });
+  }
 }
+
+/** The indexes a later release replaced, by name: dropped by {@link ensureFileTombstoneIndexes}. */
+const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
+/** The server's `IndexNotFound` and `NamespaceNotFound`: a drop of what is not there. */
+const INDEX_NOT_FOUND = 27;
+const NAMESPACE_NOT_FOUND = 26;
 
 /**
  * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
@@ -174,25 +216,213 @@ export const fileTombstonePosition = (t: { positionAt?: unknown; deletedAt?: unk
  * acknowledges only what it sent, so the gap is a delay and never a loss.
  */
 export async function positionLegacyFileTombstones(spaceId: string): Promise<number> {
-  const res = await tombstonesOf(spaceId).updateMany(
-    asFilter<StoredFileTombstone>({ ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $type: 'string' } }),
-    asUpdate<StoredFileTombstone>({ $set: { positionAt: new Date().toISOString() } }));
-  return res.modifiedCount;
+  // Its stamp is a position like any other, so it is held like any other: a page read between the stamp and the write's
+  // commit would hand a peer a position above a row that has not landed.
+  return withPositionHeld(spaceId, async (stamp) => {
+    const res = await tombstonesOf(spaceId).updateMany(
+      asFilter<StoredFileTombstone>({ ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $type: 'string' } }),
+      asUpdate<StoredFileTombstone>({ $set: { positionAt: stamp } }));
+    return res.modifiedCount;
+  }, 'file.tombstone.legacy');
+}
+
+// ── A position is never handed out while an earlier one is uncommitted (Q-346) ─────────────────────────────────────
+
+/*
+ * A tombstone's position (`positionAt`) is stamped BEFORE its write commits, and a push acknowledges the highest position it
+ * SENT, and the prune removes everything at or below the acknowledgement. So a later tombstone that committed and was pushed
+ * while an earlier stamp's write was still in flight carried the acknowledgement over a row no peer had been sent, and the
+ * prune took it: the deleted file came back from the one peer that held it.
+ *
+ * It is the seq horizon's defect for an instant, and it has the seq horizon's cure (`util/horizon-holds.ts`): the stamp and
+ * its hold are taken in ONE step ({@link withPositionHeld}), the write runs inside the hold, and every reader that compares a
+ * position — a page, the prune — is capped below the lowest open one ({@link settledPositionCap}).
+ */
+
+/** The position hold: open stamps, per space. Its lines and its gauge (`ythril_file_tombstone_oldest_hold_seconds`) say so. */
+const positionHolds: HorizonHolds<string> = new HorizonHolds<string>({
+  noun: 'file tombstone position', floorKey: 'at', floorName: 'position', readers: 'every page and prune of the space\'s file tombstones',
+});
+
+/** The lowest stamp of an open position hold of `spaceId`, or undefined when none is open: what a page is capped below. For tests. */
+export function lowestUncommittedPosition(spaceId: string): string | undefined {
+  return positionHolds.lowest(spaceId);
+}
+
+/** How long the oldest open position hold of `spaceId` has been held, in seconds — 0 when none. For the gauge. */
+export function oldestPositionHoldAgeSeconds(spaceId: string): number {
+  return positionHolds.oldestAgeSeconds(spaceId);
+}
+
+/** This instance's clock for one space: the last instant it handed out, in epoch milliseconds. */
+interface PositionClock { last: number }
+const clocks = new Map<string, Promise<PositionClock>>();
+
+/**
+ * The space's clock, seeded ONCE from the highest position stored (the `{ positionAt, _id }` index, read backwards) — as the seq
+ * horizon seeds `maxSeen` from what is stored — so a restart with the wall clock behind what an earlier run handed out cannot stamp
+ * below a position a peer has acknowledged. A seed that fails is not remembered: the next caller reads again.
+ */
+function clockOf(spaceId: string): Promise<PositionClock> {
+  let clock = clocks.get(spaceId);
+  if (!clock) {
+    clock = tombstonesOf(spaceId)
+      .find(asFilter<StoredFileTombstone>({ positionAt: { $exists: true } }), { projection: { positionAt: 1 } })
+      .sort({ positionAt: -1, _id: -1 }).limit(1).toArray()
+      .then(([top]) => ({ last: Math.max(0, Date.parse(top?.positionAt ?? '') || 0) }));
+    clocks.set(spaceId, clock);
+    clock.catch(() => { if (clocks.get(spaceId) === clock) clocks.delete(spaceId); });
+  }
+  return clock;
 }
 
 /**
- * What publishing a tombstone writes: `pending` gone, and `deletedAt` and `positionAt` stamped NOW — the real time, never a
- * caller's clock — because the position is what peers acknowledge, and a tombstone published under an older stamp could
- * fall below a position acknowledged while it was pending and be pruned unsent. Written only by {@link publishOnePerPath},
- * the one way a tombstone is published.
+ * The clock for a WRITE. A seed that could not be read is never the write's failure: it puts a READ before the write, and the
+ * failure the doors answer for a store that is down is the write's (`a-store-failure-answers-alike-on-every-door-db`, as for
+ * {@link readFileRows}). The write that follows meets the same fault. The stamp then comes from the wall clock alone — the
+ * restart guarantee is the seed's, and a store that answers the write but not the seed a moment before is the stated limit of it
+ * — and the seed is not remembered, so the next caller reads it again.
  */
-const publishedNow = () => {
-  const now = new Date().toISOString();
-  return { $set: { deletedAt: now, positionAt: now }, $unset: { pending: '' as const } };
-};
+async function clockForWrite(spaceId: string): Promise<PositionClock> {
+  try {
+    return await clockOf(spaceId);
+  } catch (err) {
+    if (classifyReadFailure(err).status < 500) {
+      log.warn(`file tombstone clock for ${peerText(spaceId)} could not be seeded from the stored positions: ${peerText(err)}`);
+    }
+    return { last: 0 };
+  }
+}
+
+/**
+ * The next instant of the space's clock: the wall clock, or one millisecond past the last handed out when the wall clock has not
+ * moved (or went back). Never equal to an earlier one, so two stamps of one space always order. Synchronous: a hold is
+ * registered in the same tick that takes the stamp.
+ */
+function tick(clock: PositionClock): string {
+  clock.last = Math.max(Date.now(), clock.last + 1);
+  return new Date(clock.last).toISOString();
+}
+
+/**
+ * Take a stamp from the space's clock and run `write` holding it — registered in the same tick, so no reader can be handed a
+ * position above `stamp` between the two — and release when the write ENDS, whichever way, inside the write bound
+ * ({@link heldWhile}). ONE stamp per call: a slice of rows shares it, so positions never run ahead of the wall clock by more
+ * than a few milliseconds however many rows are written.
+ *
+ * `write` should be the position-writing operation and nothing else: everything awaited inside it holds every page and prune of
+ * the space below the stamp.
+ */
+async function withPositionHeld<T>(spaceId: string, write: (stamp: string) => Promise<T>, holder: string): Promise<T> {
+  positionHolds.requireHolder(holder);
+  const clock = await clockForWrite(spaceId);
+  const stamp = tick(clock);
+  const hold = positionHolds.enter(spaceId, stamp, holder);
+  return heldWhile(positionHolds, spaceId, hold, () => write(stamp));
+}
+
+/**
+ * The position strictly below which a page or a prune of the space may read: the lowest stamp whose write has not settled, or —
+ * with none open — the next instant the clock would hand out, COMPUTED and never stored (a read must not move the clock, and any
+ * stamp taken later is at or above this). THE one way a reader of `positionAt` is capped: a reader that bounds itself by a clock
+ * read of its own reads straight through an open hold (`a-file-tombstone-position-is-read-through-one-cap` holds every reader to it).
+ * Async because the clock is seeded from the store once, so a restart cannot cap below a position already handed out.
+ */
+export async function settledPositionCap(spaceId: string): Promise<string> {
+  const clock = await clockOf(spaceId);
+  // Read after the await, in one tick with the hold registry: a hold entered while the seed was out is below this answer or equal to it.
+  return positionHolds.lowest(spaceId) ?? new Date(Math.max(Date.now(), clock.last + 1)).toISOString();
+}
+
+/** The cap as an `extra` for the iso keyset: the rows strictly below it. */
+const belowCap = (cap: string) => ({ positionAt: { $lt: cap } });
+/** The prune's bound: acknowledged (at or below `upTo`) and settled (below the cap). */
+const prunable = (upTo: string, cap: string) => ({ ...PUBLISHED, positionAt: { $lte: upTo, $lt: cap } });
+
+// ── The questions asked of the collection ──────────────────────────────────────────────────────────────────────────
+
+/** What a builder of {@link FILE_TOMBSTONE_QUERIES} is asked with; each reads the parts it needs. */
+export interface FileTombstoneQuerySample {
+  spaceId: string; now: Date; before: string; paths: readonly string[]; after: IsoPosition; cap: string; upTo: string; limit: number;
+}
+/** A question as the store is asked it. */
+export interface FileTombstoneQuery { filter: Record<string, unknown>; sort?: Record<string, 1>; limit?: number }
+
+/**
+ * THE questions the module asks of its collection that an index must answer, each a function of one sample bag. The module runs
+ * every one of its own reads through its entry (the settle, the by-path reader, the pages, the prune), and
+ * `file-tombstones-are-indexed-db` explains these same objects, so the plan it checks is the plan the module runs and not a copy
+ * of it. The two page questions are the RANGE half of a keyset read (the tie half is the same shape one instant narrower).
+ */
+export const FILE_TOMBSTONE_QUERIES = {
+  /** The settle's batch: pending rows written (or last looked at) before `before`, oldest first. */
+  settle: ({ before, limit }: Pick<FileTombstoneQuerySample, 'before' | 'limit'>): FileTombstoneQuery =>
+    ({ filter: { pending: true, settleAt: { $lte: before } }, sort: { settleAt: 1 }, limit }),
+  /** The same for a pending row written before `settleAt` existed, which the first never meets. Served by the null end of the same index. */
+  settleLegacy: ({ before, limit }: Pick<FileTombstoneQuerySample, 'before' | 'limit'>): FileTombstoneQuery =>
+    ({ filter: { pending: true, settleAt: { $exists: false }, deletedAt: { $lte: before } }, sort: { deletedAt: 1 }, limit }),
+  /** The pending rows among some paths: what a prune must not leave a path without, and what an act's leftovers are. */
+  pendingByPath: ({ paths }: Pick<FileTombstoneQuerySample, 'paths'>): FileTombstoneQuery =>
+    ({ filter: { path: { $in: [...paths] }, pending: true } }),
+  /** A page of published tombstones after `after`, below the cap, in `(positionAt, _id)` order. */
+  cappedPage: ({ spaceId, after, cap, limit }: Pick<FileTombstoneQuerySample, 'spaceId' | 'after' | 'cap' | 'limit'>): FileTombstoneQuery =>
+    ({ filter: { spaceId, ...PUBLISHED, ...isoKeysetFilters('positionAt', after, belowCap(cap)).range }, sort: { ...isoKeysetSort('positionAt') }, limit }),
+  /** A page of the tombstones the prune may take: published, acknowledged, settled. */
+  prunePage: ({ after, cap, upTo, limit }: Pick<FileTombstoneQuerySample, 'after' | 'cap' | 'upTo' | 'limit'>): FileTombstoneQuery =>
+    ({ filter: isoKeysetFilters('positionAt', after, prunable(upTo, cap)).range, sort: { ...isoKeysetSort('positionAt') }, limit }),
+} as const;
+
+/** Run one of {@link FILE_TOMBSTONE_QUERIES}' questions. */
+async function ask<T>(spaceId: string, q: FileTombstoneQuery, projection: Record<string, 1>): Promise<T[]> {
+  let cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(q.filter as never), { projection });
+  if (q.sort) cursor = cursor.sort(q.sort);
+  if (q.limit !== undefined) cursor = cursor.limit(q.limit);
+  return await cursor.toArray() as unknown as T[];
+}
+
+/**
+ * The tombstones of some paths — one `$in` per chunk, by the `path` index — narrowed by `filterFor`, with the fields the
+ * caller needs. THE chunked by-path read: the published ones an arriving file is compared with ({@link heldFileTombstones}),
+ * the rows a publish decides over, the pending ones a prune must not leave a path without.
+ */
+async function tombstonesAtPaths<T>(
+  spaceId: string, paths: readonly string[], filterFor: (chunk: string[]) => Record<string, unknown>, projection: Record<string, 1>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (const chunk of inChunks([...new Set(paths)], READ_CHUNK)) {
+    out.push(...await tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(filterFor(chunk) as never), { projection }).toArray() as unknown as T[]);
+  }
+  return out;
+}
+
+// ── A wipe is not undone by a publish in flight (Q-406) ────────────────────────────────────────────────────────────
+
+/**
+ * How many times each space's file tombstones have been wiped in this process. A pending handle carries the generation it was
+ * written under, and a publish or a settle that read its rows under another one drops instead of upserting: its upsert exists to
+ * write again a row a stale settle dropped, and after a wipe it would re-create a tombstone in a space that was just emptied —
+ * published, served, and applied by every peer to a path of the NEW space.
+ */
+const wipeGenerations = new Map<string, number>();
+const wipeGenerationOf = (spaceId: string): number => wipeGenerations.get(spaceId) ?? 0;
+
+/**
+ * Forget every file tombstone of a space (`wipeSpace` with `files`), and mark the wipe: under the space's publish lock, so a
+ * publish that is running finishes first and one that starts after sees the new generation. The wipe's delete and the generation
+ * are one step on purpose — the delete alone is what a publish in flight undoes.
+ */
+export async function forgetFileTombstonesOf(spaceId: string): Promise<void> {
+  await publishLock.run(spaceId, async () => {
+    wipeGenerations.set(spaceId, wipeGenerationOf(spaceId) + 1);
+    await tombstonesOf(spaceId).deleteMany({});
+  });
+}
+
+/** One publisher per space at a time, from its read of a path's rows to its last write ({@link publishOnePerPath}). */
+const publishLock = keyedLock();
 
 /** A pending tombstone about to be published: while pending, `deletedAt` is when it was written. */
-type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move' | 'issuer' | 'rowSeq' | 'contentHash'>;
+type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move' | 'issuer' | 'rowSeq' | 'contentHash' | 'writtenAt'>;
 
 /**
  * THE one way a tombstone is published — confirmed by its act, settled from the disk by a failed step, a retried
@@ -209,61 +439,144 @@ type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move'
  * So, per path:
  * - **One already published** (an act confirmed it meanwhile) is left exactly as it is: re-stamped, it would be pushed
  *   again.
- * - **One written no later than a tombstone already published for its path is not published**, and is dropped: that
+ * - **One written no later than a tombstone THIS INSTANCE published for its path is not published**, and is dropped: that
  *   publication was made after this act began, so it already told every peer — this one is the leftover of an
- *   attempt the publication finished, or a failed write the store applied late.
- * - Otherwise the newest-written is published — upserted, so one the stale settle dropped while its act was still
- *   running is written again — and every other pending tombstone for that path is removed.
+ *   attempt the publication finished, or a failed write the store applied late. Only an own publication counts, by this
+ *   instance's own clock (`writtenAt`, never `deletedAt`, which a settle's retry once moved), and when both name a version of
+ *   the file the publication's must not be below the candidate's: a later delete of a newer version is a different delete
+ *   (Q-352). A tombstone a peer relayed never covers one of ours.
+ * - Otherwise the latest-written is published — upserted, so one the stale settle dropped while its act was still
+ *   running is written again — and every other pending tombstone written no later than it is removed. One written after it
+ *   is another act's, and stays.
+ *
+ * It runs under a per-space lock from its read to its last write, in slices of whole paths, each slice's position-writing
+ * operations inside one position hold ({@link withPositionHeld}). `generation` is the wipe generation the rows were written or
+ * read under: a publish whose space was wiped since drops instead of re-creating a tombstone ({@link forgetFileTombstonesOf}).
  *
  * Its failures are thrown; every caller decides what a store failure means for its act.
  */
-async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): Promise<{ published: number; dropped: number }> {
+async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], generation: number): Promise<{ published: number; dropped: number }> {
   if (docs.length === 0) return { published: 0, dropped: 0 };
-  const tombstones = tombstonesOf(spaceId);
-  const paths = [...new Set(docs.map(d => d.path))];
-  const stored = await tombstones.find(asFilter<StoredFileTombstone>({ path: { $in: paths } }),
-    { projection: { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1 } }).toArray();
+  // One publisher per space, from its read of the rows to its last write: two that each read before the other wrote published
+  // the path twice, the older delete stamped after the newer (Q-352). The wipe takes the same lock, so a publish that begins
+  // after a wipe sees the new generation and one in flight finishes before the delete (Q-406).
+  return publishLock.run(spaceId, async () => {
+    if (wipeGenerationOf(spaceId) !== generation) return { published: 0, dropped: docs.length };
+    const byPath = new Map<string, ToPublish[]>();
+    for (const d of docs) byPath.set(d.path, [...(byPath.get(d.path) ?? []), d]);
+    let published = 0;
+    let dropped = 0;
+    // A slice is whole paths (a path's candidates are never split), and holds ONE stamp: its rows share the position, so the
+    // run of equal positions a page can end inside is no longer than a page.
+    for (const paths of inChunks([...byPath.keys()], FILE_TOMBSTONE_PAGE)) {
+      const done = await publishSlice(spaceId, paths, byPath);
+      published += done.published;
+      dropped += done.dropped;
+    }
+    return { published, dropped };
+  });
+}
+
+/** What {@link publishSlice} reads of the rows already stored for its paths. */
+const STORED_FOR_PUBLISH = { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1, rowSeq: 1, writtenAt: 1, origin: 1, storedVia: 1, move: 1 } as const;
+/** When a pending row was put: its `writtenAt`, or — for one written before it existed — its `deletedAt`. */
+const writtenOf = (t: { writtenAt?: string | undefined; deletedAt: string }): string => t.writtenAt ?? t.deletedAt;
+
+/**
+ * Whether the published tombstone `p` COVERS the pending one `c`: this instance published it itself, after `c` was written (both
+ * by this instance's own clock), and — when both name a version of the file — at a version `c` does not exceed. Only an own
+ * publication can cover: a relayed tombstone says a PEER deleted the path, which tells nobody that this instance's own delete
+ * happened, and its position is its receive time.
+ */
+function covers(p: StoredFileTombstone, c: ToPublish): boolean {
+  if (p.pending || p.origin !== 'own' || p.storedVia !== undefined) return false;
+  const at = fileTombstonePosition(p);
+  if (at === undefined || at <= writtenOf(c)) return false;
+  const versioned = typeof p.rowSeq === 'number' && p.rowSeq > 0 && typeof c.rowSeq === 'number' && c.rowSeq > 0;
+  return !versioned || (p.rowSeq as number) >= (c.rowSeq as number);
+}
+
+/**
+ * One slice of {@link publishOnePerPath}, under its lock: read the rows stored for `paths`, decide per path, publish the winners
+ * at one held stamp, and only then remove what they replace. Only the position-writing operations run inside the hold; the read
+ * before it and the deletes after it hold nothing.
+ *
+ * Per path: a pending tombstone a published OWN one covers is dropped ({@link covers}); of the rest the latest written
+ * ({@link writtenOf}) is published and every pending row written no later than it (and every one written before `writtenAt`
+ * existed) is removed — never one written after it, which is another act's. A move's marker on a row that goes is handed to the
+ * row that covers it, when that row has none: it is the only thing that tells a retried move it is owed.
+ */
+async function publishSlice(
+  spaceId: string, paths: readonly string[], byPath: ReadonlyMap<string, readonly ToPublish[]>,
+): Promise<{ published: number; dropped: number }> {
+  const stored = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk } }), STORED_FOR_PUBLISH);
   const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
-  const { $set, $unset } = publishedNow();
-  const ops: object[] = [];
-  /** Pending tombstones a newer publication for their path already covers: dropped, not published. */
+  const newestFirst = (a: ToPublish, b: ToPublish): number =>
+    Number(b.writtenAt !== undefined) - Number(a.writtenAt !== undefined) || writtenOf(b).localeCompare(writtenOf(a));
+  const winners: ToPublish[] = [];
+  const afterOps: object[] = [];
   const superseded: string[] = [];
-  let published = 0;
   let dropped = 0;
   for (const path of paths) {
-    // The newest PUBLISHED position for the path (a relayed tombstone's is its receive time): the one clock every stored
-    // tombstone shares, where `deletedAt` of a relayed one is the sender's.
-    const newestPublished = stored.filter(t => t.path === path && !t.pending).reduce((m, t) => {
-      const at = fileTombstonePosition(t) ?? '';
-      return at > m ? at : m;
-    }, '');
-    const candidates = docs.filter(d => d.path === path && !alreadyPublished.has(d._id));
-    const winner = candidates.filter(d => d.deletedAt > newestPublished).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))[0];
-    if (winner) {
-      // What the act knew of the version it erased travels with it, so an upsert (a tombstone the stale settle dropped
-      // while its act was still running) writes it again rather than publishing a bare one.
-      const knew = {
-        ...(winner.issuer !== undefined ? { issuer: winner.issuer } : {}),
-        ...(winner.rowSeq !== undefined ? { rowSeq: winner.rowSeq } : {}),
-        ...(winner.contentHash !== undefined ? { contentHash: winner.contentHash } : {}),
-      };
-      ops.push({ updateOne: {
-        filter: asFilter<StoredFileTombstone>({ _id: winner._id }),
-        update: asUpdate<StoredFileTombstone>({ $set: { ...$set, spaceId, path, ...knew, ...(winner.move ? { move: winner.move } : {}) }, $unset }),
-        upsert: true,
-      } });
-      ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ path, pending: true, _id: { $ne: winner._id } }) } });
-      published += 1;
-      dropped += candidates.length - 1;
-    } else {
-      superseded.push(...candidates.map(d => d._id));
+    const rows = stored.filter(t => t.path === path);
+    const candidates = (byPath.get(path) ?? []).filter(d => !alreadyPublished.has(d._id)).sort(newestFirst);
+    const covering = new Map(candidates.map(c => [c._id, rows.find(p => covers(p, c))] as const));
+    const live = candidates.filter(c => covering.get(c._id) === undefined);
+    for (const c of candidates) {
+      const cover = covering.get(c._id);
+      if (cover === undefined) continue;
+      superseded.push(c._id);
+      if (c.move && !cover.move) {
+        cover.move = c.move;
+        afterOps.push({ updateOne: { filter: asFilter<StoredFileTombstone>({ _id: cover._id, move: { $exists: false } }), update: asUpdate<StoredFileTombstone>({ $set: { move: c.move } }) } });
+      }
     }
+    const winner = live[0];
+    if (!winner) { dropped += candidates.length; continue; }
+    // What goes with the winner, and the marker it may carry on: the other live candidates (their rows may be gone, so the doc
+    // is read) and the pending rows the delete below takes.
+    const goes = winner.writtenAt !== undefined
+      ? (t: StoredFileTombstone) => t.writtenAt === undefined || t.writtenAt <= (winner.writtenAt as string)
+      : (t: StoredFileTombstone) => t.writtenAt === undefined && t.deletedAt <= winner.deletedAt;
+    const removed = [...live.slice(1), ...rows.filter(t => t.pending && t._id !== winner._id && goes(t))];
+    const move = winner.move ?? removed.find(r => r.move)?.move;
+    winners.push(move && !winner.move ? { ...winner, move } : winner);
+    afterOps.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({
+      path, pending: true, _id: { $ne: winner._id },
+      ...(winner.writtenAt !== undefined
+        ? { $or: [{ writtenAt: { $lte: winner.writtenAt } }, { writtenAt: { $exists: false } }] }
+        : { writtenAt: { $exists: false }, deletedAt: { $lte: winner.deletedAt } }),
+    }) } });
+    dropped += candidates.length - 1;
   }
+  if (winners.length > 0) {
+    await withPositionHeld(spaceId, (stamp) => {
+      const ops = winners.map(w => ({ updateOne: {
+        filter: asFilter<StoredFileTombstone>({ _id: w._id }),
+        // What the act knew of the version it erased travels with it, so an upsert (a tombstone the stale settle dropped
+        // while its act was still running) writes it again rather than publishing a bare one.
+        update: asUpdate<StoredFileTombstone>({
+          $set: {
+            deletedAt: stamp, positionAt: stamp, origin: 'own', spaceId, path: w.path,
+            ...(w.issuer !== undefined ? { issuer: w.issuer } : {}),
+            ...(w.rowSeq !== undefined ? { rowSeq: w.rowSeq } : {}),
+            ...(w.contentHash !== undefined ? { contentHash: w.contentHash } : {}),
+            ...(w.writtenAt !== undefined ? { writtenAt: w.writtenAt } : {}),
+            ...(w.move ? { move: w.move } : {}),
+          },
+          $unset: { pending: '' as const, settleAt: '' as const },
+        }),
+        upsert: true,
+      } }));
+      return writeInOneCommands(ops, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
+        { ordered: false, commandKindOf: bulkCommandOf });
+    }, 'file.tombstone.publish');
+  }
+  for (const ids of inChunks(superseded, READ_CHUNK)) afterOps.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ _id: { $in: ids }, pending: true }) } });
   // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
-  await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
+  await writeInOneCommands(afterOps, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
     { ordered: false, commandKindOf: bulkCommandOf });
-  if (superseded.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: superseded }, pending: true }));
-  return { published, dropped: dropped + superseded.length };
+  return { published: winners.length, dropped };
 }
 
 /** The file rows of `ids` (a row's id is its path), with what a tombstone records of the version it erases. */
@@ -294,7 +607,13 @@ const drops = new DetachedWork('dropPendingFileTombstones');
 export interface PendingFileTombstones {
   readonly spaceId: string;
   readonly docs: readonly StoredFileTombstone[];
+  /** The space's wipe generation when they were written: a publish or settle that finds another one drops them
+   *  ({@link forgetFileTombstonesOf}), because the wipe already removed what they stand for. */
+  readonly generation?: number;
 }
+
+/** The generation a handle is judged by: the one it was written under, or — for a handle built without one — the space's now. */
+const generationOfHandle = (pending: PendingFileTombstones): number => pending.generation ?? wipeGenerationOf(pending.spaceId);
 
 /**
  * Write a PENDING tombstone for each of `paths` (normalised, deduped), before the act's irreversible step — and, for a
@@ -306,7 +625,10 @@ export async function writePendingFileTombstones(
   spaceId: string, paths: string[], move?: { from: string; to: string },
 ): Promise<PendingFileTombstones> {
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
-  const now = new Date().toISOString();
+  const generation = wipeGenerationOf(spaceId);
+  // One stamp of the space's clock for the act: `writtenAt` is what the one-per-path rule orders by, `settleAt` what the settle
+  // does, and `deletedAt` — while pending — is the same instant. Not held: a pending row has no position.
+  const now = tick(await clockForWrite(spaceId));
   const marker = move ? { move: { from: toDocId(move.from), to: toDocId(move.to) } } : {};
   // What the act knows of what it is about to erase, read ONCE for every path (one `$in` per chunk): who is acting, and the
   // version and content hash of each file ROW. The hash is the row's, never the bytes' — the bytes may be the next thing
@@ -314,10 +636,10 @@ export async function writePendingFileTombstones(
   // alone: a version and a hash it does not have are not guessed.
   const rows = await readFileRows(spaceId, unique);
   const issuer = authorRef().instanceId;
-  const pending = { spaceId, docs: unique.map((p): StoredFileTombstone => {
+  const pending: PendingFileTombstones = { spaceId, generation, docs: unique.map((p): StoredFileTombstone => {
     const row = rows.get(p);
     return {
-      _id: uuidv4(), spaceId, path: p, deletedAt: now, pending: true as const, ...marker,
+      _id: uuidv4(), spaceId, path: p, deletedAt: now, writtenAt: now, settleAt: now, pending: true as const, ...marker,
       ...(issuer ? { issuer } : {}),
       ...(typeof row?.seq === 'number' ? { rowSeq: row.seq } : {}),
       ...(typeof row?.sha256 === 'string' && row.sha256 !== '' ? { contentHash: row.sha256 } : {}),
@@ -333,7 +655,7 @@ export async function writePendingFileTombstones(
     dropPendingFileTombstones(pending);
     throwIfStoreSide(err);
     log.warn(`writePendingFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${peerText(err)}`);
-    return { spaceId, docs: [] };
+    return { spaceId, docs: [], generation };
   }
 }
 
@@ -345,13 +667,13 @@ export async function writePendingFileTombstones(
 export async function confirmFileTombstones(pending: PendingFileTombstones): Promise<void> {
   if (pending.docs.length === 0) return;
   await unlessTheStoreFailed(`confirmFileTombstones for space ${peerText(pending.spaceId)} (${pending.docs.length})`,
-    () => publishOnePerPath(pending.spaceId, pending.docs));
+    () => publishOnePerPath(pending.spaceId, pending.docs, generationOfHandle(pending)));
 }
 
 /** The part of an act's pending tombstones that names one of `paths` — those one step of the act removes. */
 export function pendingAmong(pending: PendingFileTombstones, paths: readonly string[]): PendingFileTombstones {
   const wanted = new Set(paths.map(toDocId));
-  return { spaceId: pending.spaceId, docs: pending.docs.filter(d => wanted.has(d.path)) };
+  return { spaceId: pending.spaceId, generation: generationOfHandle(pending), docs: pending.docs.filter(d => wanted.has(d.path)) };
 }
 
 /**
@@ -418,7 +740,7 @@ interface Settled {
 }
 
 /** The fields a settle reads of a pending tombstone: what {@link publishOnePerPath} needs to publish it. */
-const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1 } as const;
+const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1 } as const;
 
 /**
  * THE settle rule, one copy for every caller: the disk decides each pending tombstone. Its path still has bytes, so
@@ -427,7 +749,7 @@ const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1 } as const;
  * to nobody, and is returned as `unresolved` for the caller to decide when to ask again. Only tombstones still
  * pending are dropped, and one an act published meanwhile is left as it is. A store failure is thrown.
  */
-async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[]): Promise<Settled> {
+async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], generation: number): Promise<Settled> {
   const here: string[] = [];
   const gone: ToPublish[] = [];
   const unresolved: string[] = [];
@@ -440,7 +762,7 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[]): P
     }
   }
   if (here.length > 0) await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: here }, pending: true }));
-  const { published, dropped } = await publishOnePerPath(spaceId, gone);
+  const { published, dropped } = await publishOnePerPath(spaceId, gone, generation);
   return { dropped: here.length, confirmed: published, superseded: dropped, unresolved };
 }
 
@@ -452,7 +774,7 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[]): P
 export async function settlePendingFileTombstones(pending: PendingFileTombstones): Promise<void> {
   if (pending.docs.length === 0) return;
   await unlessTheStoreFailed(`settlePendingFileTombstones for space ${peerText(pending.spaceId)} (${pending.docs.length})`,
-    () => settleFromTheDisk(pending.spaceId, pending.docs));
+    () => settleFromTheDisk(pending.spaceId, pending.docs, generationOfHandle(pending)));
 }
 
 /**
@@ -460,32 +782,77 @@ export async function settlePendingFileTombstones(pending: PendingFileTombstones
  * sweep cycle, per space, at most {@link FILE_TOMBSTONE_SETTLE_BATCH} at a time.
  *
  * **Oldest first, and one it cannot look at goes to the back** (bundle-30 I16, preship-4 P4-1): its staleness clock
- * restarts at this cycle (`deletedAt` set to `now` — while pending, `deletedAt` is only that clock; publishing stamps
- * it afresh), so it is asked again only once it is stale again, behind every tombstone that went stale before it.
- * Unordered and left where it was, a batch's worth of paths it could not look at came back first every cycle and
- * starved the rest of the space for ever.
+ * restarts at this cycle (`settleAt` set to `now` — never `deletedAt` or `writtenAt`, which the one-per-path rule reads, and
+ * which a bump once lifted above the tombstone that covers the path), so it is asked again only once it is stale again, behind
+ * every tombstone that went stale before it. Unordered and left where it was, a batch's worth of paths it could not look at
+ * came back first every cycle and starved the rest of the space for ever. A row written before `settleAt` existed is read by
+ * its `deletedAt` until it settles.
  *
- * **A leftover whose path already has a newer published tombstone is dropped, not published** (bundle-30 I17,
- * verify-drive-5 F1): the act's retry published that one, or the failed write landed after it did. Published, it was
- * a second tombstone for one removal, stamped minutes later — see {@link publishOnePerPath}.
+ * **It goes on while the batches come back full and clean**: a backlog (a space whose settle was behind) is settled in one cycle
+ * and not 500 rows per sweep. A batch that held a path it could not look at, or that settled nothing, ends it — the rest waits
+ * one cycle, as above — so the loop ends, and every pass it makes removes what it read from the pending set.
+ *
+ * **A leftover whose path already has a published tombstone of this instance's own, written after it, is dropped, not
+ * published** (bundle-30 I17, verify-drive-5 F1): the act's retry published that one, or the failed write landed after it did.
+ * Published, it was a second tombstone for one removal, stamped minutes later — see {@link publishOnePerPath}.
  */
 export async function settleStalePendingFileTombstones(
   spaceId: string, now: Date = new Date(),
 ): Promise<{ dropped: number; confirmed: number; superseded: number }> {
+  // Before the first read: a wipe that lands while a batch is out must find a settle it can stop (`forgetFileTombstonesOf`).
+  const generation = wipeGenerationOf(spaceId);
   const before = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
-  const stale = await tombstonesOf(spaceId)
-    .find(asFilter<StoredFileTombstone>({ pending: true, deletedAt: { $lte: before } }), { projection: TO_PUBLISH })
-    .sort({ deletedAt: 1 }).limit(FILE_TOMBSTONE_SETTLE_BATCH).toArray();
-  const { dropped, confirmed, superseded, unresolved } = await settleFromTheDisk(spaceId, stale);
-  if (unresolved.length > 0) {
-    await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ _id: { $in: unresolved }, pending: true }),
-      asUpdate<StoredFileTombstone>({ $set: { deletedAt: now.toISOString() } }));
+  const total = { dropped: 0, confirmed: 0, superseded: 0 };
+  for (;;) {
+    const sample = { before, limit: FILE_TOMBSTONE_SETTLE_BATCH };
+    const stale = await ask<ToPublish>(spaceId, FILE_TOMBSTONE_QUERIES.settle(sample), TO_PUBLISH);
+    if (stale.length < FILE_TOMBSTONE_SETTLE_BATCH) {
+      stale.push(...await ask<ToPublish>(spaceId, FILE_TOMBSTONE_QUERIES.settleLegacy({ before, limit: FILE_TOMBSTONE_SETTLE_BATCH - stale.length }), TO_PUBLISH));
+    }
+    const { dropped, confirmed, superseded, unresolved } = await settleFromTheDisk(spaceId, stale, generation);
+    if (unresolved.length > 0) {
+      await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ _id: { $in: unresolved }, pending: true }),
+        asUpdate<StoredFileTombstone>({ $set: { settleAt: now.toISOString() } }));
+    }
+    total.dropped += dropped; total.confirmed += confirmed; total.superseded += superseded;
+    if (stale.length < FILE_TOMBSTONE_SETTLE_BATCH || unresolved.length > 0 || dropped + confirmed + superseded === 0) break;
   }
-  if (dropped + confirmed + superseded > 0) {
-    log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${confirmed} published (the path is gone), `
-      + `${dropped} dropped (the path still has its file), ${superseded} dropped (the path already has its published tombstone)`);
+  if (total.dropped + total.confirmed + total.superseded > 0) {
+    log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${total.confirmed} published (the path is gone), `
+      + `${total.dropped} dropped (the path still has its file), ${total.superseded} dropped (the path already has its published tombstone)`);
   }
-  return { dropped, confirmed, superseded };
+  await clearFinishedMoveMarkers(spaceId, before);
+  return total;
+}
+
+/**
+ * Forget the marker of a move that is finished — its bytes are at `to` and none at `from` — on any row old enough to be past
+ * its act. The move that finished clears its own (`forgetFinishedMove`); this is for the one whose clearing failed, or that a
+ * restart came between, so that no row is kept for ever on the strength of a marker nobody will look for. Best effort, and a
+ * path it cannot look at is left alone: a marker kept is only ever a delay.
+ */
+async function clearFinishedMoveMarkers(spaceId: string, before: string): Promise<void> {
+  try {
+    const marked = await tombstonesOf(spaceId)
+      .find(asFilter<StoredFileTombstone>({ 'move.from': { $exists: true }, deletedAt: { $lte: before } }), { projection: { move: 1 } })
+      .limit(FILE_TOMBSTONE_SETTLE_BATCH).toArray();
+    const seen = new Set<string>();
+    for (const t of marked) {
+      if (!t.move) continue;
+      const key = `${t.move.from}\u0000${t.move.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        if (await bytesPresent(await resolveSafePathChecked(spaceId, t.move.to)) && !await bytesPresent(await resolveSafePathChecked(spaceId, t.move.from))) {
+          await forgetFinishedMove(spaceId, t.move.from, t.move.to);
+        }
+      } catch { /* cannot look: the marker stays, and the next sweep asks again */ }
+    }
+  } catch (err) {
+    // The marker read is the sweep's own housekeeping: its store failure is the settle's to say, and the next sweep repeats it.
+    throwIfStoreSide(err);
+    log.warn(`File tombstone move markers of ${peerText(spaceId)} not cleared: ${peerText(err)}`);
+  }
 }
 
 // ── The move's marker ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -505,9 +872,11 @@ export async function moveWasBegun(spaceId: string, from: string, to: string): P
  */
 export async function settleBegunMove(spaceId: string, from: string, to: string): Promise<void> {
   await unlessTheStoreFailed(`settleBegunMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}`, async () => {
+    // The generation BEFORE the read: a wipe that lands between the read and the publish must find a settle it can stop.
+    const generation = wipeGenerationOf(spaceId);
     const left = await tombstonesOf(spaceId)
       .find(asFilter<StoredFileTombstone>({ ...moveMarker(from, to), pending: true }), { projection: TO_PUBLISH }).toArray();
-    await settleFromTheDisk(spaceId, left);
+    await settleFromTheDisk(spaceId, left, generation);
   });
 }
 
@@ -559,7 +928,10 @@ export async function publishedFileTombstones(
     const cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ spaceId, ...PUBLISHED, ...filter } as never), { projection }).sort({ ...sort });
     return (n !== undefined ? cursor.limit(n) : cursor).toArray() as Promise<PositionedFileTombstone[]>;
   };
-  const { tie, range } = isoKeysetFilters('positionAt', after ?? { at: since ?? '' });
+  // Below the cap, whichever way the read starts (a cursor, or the older `since`): an open position hold stops the page
+  // short of its stamp, so nothing it hands out can be acknowledged above a row that has not landed.
+  const cap = await settledPositionCap(spaceId);
+  const { tie, range } = isoKeysetFilters('positionAt', after ?? { at: since ?? '' }, belowCap(cap));
   return tieThenRange(find, tie, range, limit);
 }
 
@@ -601,14 +973,12 @@ export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?:
  */
 export async function heldFileTombstones(spaceId: string, paths: readonly string[]): Promise<Map<string, HeldFileTombstone[]>> {
   const out = new Map<string, HeldFileTombstone[]>();
-  for (const chunk of inChunks([...new Set(paths)], READ_CHUNK)) {
-    const rows = await tombstonesOf(spaceId)
-      .find(asFilter<StoredFileTombstone>({ path: { $in: chunk }, ...PUBLISHED }), { projection: { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 } }).toArray();
-    for (const t of rows) {
-      if (!out.has(t.path)) out.set(t.path, []);
-      out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
-        ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
-    }
+  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk }, ...PUBLISHED }),
+    { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 });
+  for (const t of rows) {
+    if (!out.has(t.path)) out.set(t.path, []);
+    out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
+      ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
   }
   return out;
 }
@@ -619,18 +989,71 @@ export async function heldFileTombstoneIds(spaceId: string, ids: readonly string
   return new Set(rows.keys());
 }
 
+/** How long a published tombstone that carries a move's marker is kept whatever was acknowledged: the marker is the only record that the move is owed. */
+const MOVE_MARKER_KEEP_MS = 24 * 3_600_000;
+
 /**
- * Remove the published tombstones at or below an acknowledged push position (`brain/tombstone-prune.ts` decides it).
- * A pending one is never removed here: no peer was sent it, so no acknowledgement covers it. A tombstone stored before
- * positions existed is judged by its `deletedAt`, which was its position; one with neither is never removed — it cannot be
- * proven delivered.
+ * Remove the published tombstones at or below an acknowledged push position (`brain/tombstone-prune.ts` decides it), and
+ * below the position cap ({@link settledPositionCap}): a position an open hold stamped has not landed, so no acknowledgement
+ * covers it however it was read. A pending one is never removed here: no peer was sent it, so no acknowledgement covers it.
+ * A tombstone stored before positions existed is judged by its `deletedAt`, which was its position; one with neither is never
+ * removed — it cannot be proven delivered.
+ *
+ * Read in pages and removed by id, because two kinds of row are KEPT whatever was acknowledged ({@link keepsAfterPrune}): a
+ * published tombstone whose path holds a pending one (the pending one is published next, and with nothing at the path to
+ * cover it, it would be a second tombstone below a position every peer acknowledged), and one that carries a move's marker
+ * until it is a day old. A page that fails is thrown to the walk, which says it once and tries again next cycle.
  */
 export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Promise<number> {
-  const res = await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({
-    ...PUBLISHED,
-    $or: [{ positionAt: { $lte: upTo } }, { positionAt: { $exists: false }, deletedAt: { $lte: upTo } }],
-  }));
-  return res.deletedCount ?? 0;
+  const cap = await settledPositionCap(spaceId);
+  let removed = 0;
+  let after: IsoPosition = ISO_READ_START;
+  for (;;) {
+    const { tie, range } = isoKeysetFilters('positionAt', after, prunable(upTo, cap));
+    const page = await tieThenRange(
+      (filter, n: number) => ask<PrunableRow>(spaceId, { filter, sort: { ...isoKeysetSort('positionAt') }, limit: n }, PRUNABLE),
+      tie, range, FILE_TOMBSTONE_PAGE);
+    removed += await removeUnlessKept(spaceId, page);
+    const last = page[page.length - 1];
+    if (page.length < FILE_TOMBSTONE_PAGE || !last?.positionAt) break;
+    after = { at: last.positionAt, id: last._id };
+  }
+  // Stored before positions existed (the boot pass, which runs before any prune, gives each its own): judged by `deletedAt`, as it
+  // always was. One delete and not a page loop: a row here is a leftover of the upgrade, and neither of the two reasons to keep a
+  // row applies to it (a pending tombstone beside it was written by an act that began after the upgrade, which published it with
+  // an `origin`; a move marker on it is older than a day by the time anything is acknowledged).
+  removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({
+    ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $lte: upTo },
+  }))).deletedCount ?? 0;
+  return removed;
+}
+
+/** What the prune reads of a row. */
+interface PrunableRow { _id: string; path: string; positionAt?: string; move?: { from: string; to: string } }
+const PRUNABLE = { _id: 1, path: 1, positionAt: 1, move: 1 } as const;
+
+/** Remove the rows of one prune page that may go, by id, and count them. */
+async function removeUnlessKept(spaceId: string, page: readonly PrunableRow[]): Promise<number> {
+  if (page.length === 0) return 0;
+  const pendingPaths = new Set((await tombstonesAtPaths<{ path: string }>(spaceId, page.map(r => r.path),
+    chunk => FILE_TOMBSTONE_QUERIES.pendingByPath({ paths: chunk }).filter, { path: 1 })).map(p => p.path));
+  const keepMarkersAfter = new Date(Date.now() - MOVE_MARKER_KEEP_MS).toISOString();
+  const ids = page.filter(r => !keepsAfterPrune(r, pendingPaths, keepMarkersAfter)).map(r => r._id);
+  let removed = 0;
+  for (const chunk of inChunks(ids, READ_CHUNK)) {
+    removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, ...PUBLISHED }))).deletedCount ?? 0;
+  }
+  return removed;
+}
+
+/**
+ * Whether the prune keeps this row though it was acknowledged: its path holds a pending tombstone, or it carries a move's
+ * marker and is younger than {@link MOVE_MARKER_KEEP_MS} (`keepMarkersAfter` is the instant that long ago). A marker row older
+ * than that goes: no row is unprunable for ever, and the TTL settle clears the marker of a move that is finished.
+ */
+function keepsAfterPrune(row: PrunableRow, pendingPaths: ReadonlySet<string>, keepMarkersAfter: string): boolean {
+  if (pendingPaths.has(row.path)) return true;
+  return row.move !== undefined && (row.positionAt ?? '') >= keepMarkersAfter;
 }
 
 /**
@@ -753,22 +1176,26 @@ export interface RelayedFileTombstone {
  * Keep tombstones a peer delivered, to pass them on: the wire fields — with the ISSUER that signed the deletion, so the next
  * hop judges it as that issuer's — and this instance's own: the position (the RECEIVE time, never the sender's clock), the
  * hash of what was erased here, and the upstream it stood on. Inserted once by id (`$setOnInsert`), in the space the door
- * ADMITTED, one bulk write for the page.
+ * ADMITTED, in slices of one page each: a slice shares ONE receive time, taken and held with its write
+ * ({@link withPositionHeld}), so a page of any length is never acknowledged above a row that has not landed. A relayed row is
+ * marked `origin: 'relayed'`: it says a PEER deleted the path, and never covers a delete this instance made itself.
  */
 export async function storeRelayedFileTombstones(spaceId: string, docs: readonly RelayedFileTombstone[]): Promise<void> {
-  if (docs.length === 0) return;
-  const receivedAt = new Date().toISOString();
-  const ops = docs.map(d => ({ updateOne: {
-    filter: asFilter<StoredFileTombstone>({ _id: d._id }),
-    update: asUpdate<StoredFileTombstone>({ $setOnInsert: {
-      _id: d._id, spaceId, path: d.path, deletedAt: d.deletedAt, positionAt: receivedAt,
-      ...(d.issuer !== undefined ? { issuer: d.issuer } : {}),
-      ...(d.rowSeq !== undefined ? { rowSeq: d.rowSeq } : {}),
-      ...(d.contentHash !== undefined ? { contentHash: d.contentHash } : {}),
-      ...(d.storedVia !== undefined ? { storedVia: d.storedVia } : {}),
-    } }),
-    upsert: true,
-  } }));
-  await writeInOneCommands(ops, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
-    { ordered: false, commandKindOf: bulkCommandOf });
+  for (const slice of inChunks(docs, FILE_TOMBSTONE_PAGE)) {
+    await withPositionHeld(spaceId, (receivedAt) => {
+      const ops = slice.map(d => ({ updateOne: {
+        filter: asFilter<StoredFileTombstone>({ _id: d._id }),
+        update: asUpdate<StoredFileTombstone>({ $setOnInsert: {
+          _id: d._id, spaceId, path: d.path, deletedAt: d.deletedAt, positionAt: receivedAt, origin: 'relayed' as const,
+          ...(d.issuer !== undefined ? { issuer: d.issuer } : {}),
+          ...(d.rowSeq !== undefined ? { rowSeq: d.rowSeq } : {}),
+          ...(d.contentHash !== undefined ? { contentHash: d.contentHash } : {}),
+          ...(d.storedVia !== undefined ? { storedVia: d.storedVia } : {}),
+        } }),
+        upsert: true,
+      } }));
+      return writeInOneCommands(ops, (part, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(part), { ordered }),
+        { ordered: false, commandKindOf: bulkCommandOf });
+    }, 'file.tombstone.relayed');
+  }
 }

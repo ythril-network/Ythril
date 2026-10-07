@@ -4,10 +4,7 @@ import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { withinWriteBound, holdWarnMs } from '../db/write-bound.js';
-import { isWriteTimeout } from '../db/write-timeout.js';
-import { warnOnce } from './warn-once.js';
-import { intervalJob } from './interval-job.js';
+import { HorizonHolds, heldWhile, startHorizonHoldWatchdog, stopHorizonHoldWatchdog } from './horizon-holds.js';
 
 /*
  * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
@@ -33,86 +30,38 @@ import { intervalJob } from './interval-job.js';
  * starts after the reader computed its range, and a later one that commits before the reader's query runs,
  * would otherwise slip a committed seq past an uncommitted one in exactly the same way.
  *
+ * The hold itself — the registry, the holder check, the write bound, the release in a `finally`, the release line, the
+ * watchdog — is `util/horizon-holds.ts`, one primitive with two instances: this one (a floor is a seq), and the file
+ * tombstones' position (`files/tombstones.ts`, a floor is an ISO instant; a tombstone has no seq, so its pages are paged
+ * and capped by `positionAt` and never by this horizon). What is THIS module's is how a floor is chosen: `maxSeen + 1`, then
+ * the block's first seq once the allocation answers.
+ *
  * In-process, and that is sufficient: one server process owns a space's counter. `maxSeen` is seeded from the
  * counter document on first use, and `bumpSeq` (an ingest moving the counter) advances it, so a record that
  * arrived from a peer is not hidden behind a stale bound. The bump is the ONLY way an arrival becomes visible
  * (`Q-107`): the arrival writer bumps after each landed chunk and never notes a seq on its own, because a note
  * without the counter would let a local write take a seq below a record a reader has already been handed.
  */
-/**
- * One hold on a space's horizon: the floor it registered (raised to its block's first seq once the allocation
- * answers), when it was registered, and WHO holds it (`Q-200`). The registry kept counts only, so nothing could say
- * how old a hold was or what held it, and a stalled hold stopped a space's replication with nothing naming it.
- */
-interface Hold {
-  seq: number;
-  readonly since: number;
-  readonly holder: string;
-}
-
 interface SeqState {
   /** The highest seq this process has seen allocated or bumped to; undefined until seeded. */
   maxSeen: number | undefined;
-  /** Holds registered and not yet released: allocations sent and not yet answered, and blocks not yet settled. */
-  holds: Set<Hold>;
 }
 const seqState = new Map<string, SeqState>();
 
 function stateOf(spaceId: string): SeqState {
   let s = seqState.get(spaceId);
-  if (!s) { s = { maxSeen: undefined, holds: new Set() }; seqState.set(spaceId, s); }
+  if (!s) { s = { maxSeen: undefined }; seqState.set(spaceId, s); }
   return s;
 }
 
-function hold(s: SeqState, seq: number, holder: string): Hold {
-  const h: Hold = { seq, since: Date.now(), holder };
-  s.holds.add(h);
-  return h;
-}
-
-/** How a hold ended, for its release line: its write succeeded, a bound ended it, or it failed otherwise. */
-type HoldEnd = 'ok' | 'timeout' | 'error';
-const endOf = (err: unknown): HoldEnd => (isWriteTimeout(err) ? 'timeout' : 'error');
-
 /**
- * Release a hold, and say so when it was held past `holdWarnMs()` — EVERY such hold, whichever way it ended, so a
- * slow write that eventually succeeded is as visible as one the bound ended. One line per hold, never per write.
+ * The seq instance of the hold (`util/horizon-holds.ts`): holds registered and not yet released — allocations sent and not
+ * yet answered, and blocks not yet settled. The registry, the holder check, the bound, the release line and the watchdog scan
+ * are the primitive's; this module owns what a floor IS (a seq) and how it is chosen.
  */
-function release(spaceId: string, s: SeqState, h: Hold, ended: HoldEnd): void {
-  s.holds.delete(h);
-  holdWarnings.forget(h);
-  const age = Date.now() - h.since;
-  if (age >= holdWarnMs()) {
-    log.warn(`seq horizon held ${peerText((age / 1000).toFixed(1))}s space=${peerText(spaceId)} seq=${h.seq} holder=${peerText(h.holder)} ended=${ended}`
-      + ' — every seq-paged reader of the space was held below this seq for that long');
-  }
-}
-
-/** A hold must say who holds it: the release line and the watchdog name it, and an unnamed stall is the defect. */
-function requireHolder(holder: unknown): asserts holder is string {
-  if (typeof holder !== 'string' || !/^\S+$/.test(holder)) {
-    throw new Error(`a seq hold must name its holder (one word, no spaces), got ${JSON.stringify(holder)}`);
-  }
-}
-
-/**
- * Run `fn` holding `h`, inside a write-bound scope so every operation it issues ends within the bound (`Q-213`),
- * and release the hold when it ENDS — whichever way. The scope opens at the hold's registration (`B1`), so an
- * allocation's own `$inc` is bounded too: it runs with the floor already registered.
- */
-async function heldWhile<T>(spaceId: string, s: SeqState, h: Hold, fn: () => Promise<T>): Promise<T> {
-  let ended: HoldEnd = 'error';
-  try {
-    const out = await withinWriteBound(fn);
-    ended = 'ok';
-    return out;
-  } catch (err) {
-    ended = endOf(err);
-    throw err;
-  } finally {
-    release(spaceId, s, h, ended);
-  }
-}
+const seqHolds: HorizonHolds<number> = new HorizonHolds<number>({
+  noun: 'seq horizon', floorKey: 'seq', floorName: 'seq', readers: 'every seq-paged reader of the space',
+});
 
 /**
  * The collections whose records carry a space seq and are paged by it. The seeding below reads the highest seq
@@ -170,10 +119,10 @@ export async function withAllocatedSeqs<T>(
   spaceId: string, n: number, write: (first: number) => Promise<T>, holder: string,
 ): Promise<T> {
   if (!Number.isInteger(n) || n < 1) throw new Error(`withAllocatedSeqs: n must be a positive integer, got ${n}`);
-  requireHolder(holder);
+  seqHolds.requireHolder(holder);
   const s = await seededState(spaceId);
-  const h = hold(s, (s.maxSeen ?? 0) + 1, holder);
-  return heldWhile(spaceId, s, h, async () => {
+  const h = seqHolds.enter(spaceId, (s.maxSeen ?? 0) + 1, holder);
+  return heldWhile(seqHolds, spaceId, h, async () => {
     const result = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
       { _id: spaceId },
       { $inc: { seq: n } },
@@ -182,9 +131,9 @@ export async function withAllocatedSeqs<T>(
     if (!result) throw new Error(`Failed to increment sequence counter for space ${spaceId}`);
     // The floor moves up to the block. Every seq Mongo hands this allocation is above every seq this process had
     // seen when it asked, so the block's first is at or above the floor: the horizon never moves down here.
-    h.seq = result.seq - n + 1;
+    h.floor = result.seq - n + 1;
     if (result.seq > (s.maxSeen ?? 0)) s.maxSeen = result.seq;
-    return write(h.seq);
+    return write(h.floor);
   });
 }
 
@@ -198,9 +147,9 @@ export async function withAllocatedSeqs<T>(
  * gives the transaction's session the hold's deadline.
  */
 export async function withSeqHorizonHeld<T>(spaceId: string, fn: () => Promise<T>, holder: string): Promise<T> {
-  requireHolder(holder);
+  seqHolds.requireHolder(holder);
   const s = await seededState(spaceId);
-  return heldWhile(spaceId, s, hold(s, (s.maxSeen ?? 0) + 1, holder), fn);
+  return heldWhile(seqHolds, spaceId, seqHolds.enter(spaceId, (s.maxSeen ?? 0) + 1, holder), fn);
 }
 
 /** One seq: `withAllocatedSeqs(spaceId, 1, write, holder)`. */
@@ -210,59 +159,25 @@ export function withSeq<T>(spaceId: string, write: (seq: number) => Promise<T>, 
 
 /** The lowest seq allocated (or being allocated) and not yet settled, or undefined when none is. */
 export function lowestUncommittedSeq(spaceId: string): number | undefined {
-  const s = seqState.get(spaceId);
-  if (!s || s.holds.size === 0) return undefined;
-  let lowest = Infinity;
-  for (const h of s.holds) if (h.seq < lowest) lowest = h.seq;
-  return lowest;
+  return seqHolds.lowest(spaceId);
 }
 
 /** How long the oldest hold on `spaceId` has been held, in seconds — 0 when it holds nothing. For the gauge. */
 export function oldestHoldAgeSeconds(spaceId: string): number {
-  const s = seqState.get(spaceId);
-  if (!s || s.holds.size === 0) return 0;
-  let oldest = Infinity;
-  for (const h of s.holds) if (h.since < oldest) oldest = h.since;
-  return Math.max(0, (Date.now() - oldest) / 1000);
-}
-
-/*
- * ── The watchdog (`Q-200`) ────────────────────────────────────────────────────────────────────────────────────
- *
- * The release line speaks when a hold ENDS. A hold that has not ended yet — the one stopping replication right
- * now — is named by the watchdog, once per hold, as soon as it is older than `holdWarnMs()`. Started with the
- * background services, unref'd so it never keeps the process alive, and stopped on shutdown.
- */
-const holdWarnings = warnOnce<Hold>();
-
-/** Check every open hold now: warn once for each older than `holdWarnMs()`. Exported for the watchdog's test. */
-function warnStalledHolds(now = Date.now()): void {
-  for (const [spaceId, s] of seqState) {
-    for (const h of s.holds) {
-      const age = now - h.since;
-      if (age < holdWarnMs()) continue;
-      // The space id and the holder through `peerText`, as the release line names them (bundle-30 I6, C8).
-      holdWarnings(h, () => log.warn(`seq horizon held ${(age / 1000).toFixed(1)}s and still open: space=${peerText(spaceId)} `
-        + `seq=${h.seq} holder=${peerText(h.holder)} — every seq-paged reader of the space is held below it until it ends`));
-    }
-  }
+  return seqHolds.oldestAgeSeconds(spaceId);
 }
 
 /**
- * The watchdog is an interval job (`Q-317`) whose interval is a FUNCTION: a quarter of the hold warning, at least 250 ms, read when
- * the job starts (`intervalJob` reads it once per start). `startSeqHoldWatchdog` is a restart (`stop(); start()`), so a hold figure
- * changed since the last start is the one in force for the next. The tick is synchronous and touches no database, so it never
- * overlaps and the bound it runs inside has nothing to end.
+ * The hold watchdog (`Q-200`) is the primitive's, and ONE for every instance of the hold (`util/horizon-holds.ts`): it
+ * keeps its label, "Seq hold watchdog", and its start and stop wiring (`bootstrap.ts`, `index.ts`), and it now scans the
+ * file-tombstone position's holds as well.
  */
-const watchdog = intervalJob('Seq hold watchdog', () => Math.max(250, Math.floor(holdWarnMs() / 4)), () => warnStalledHolds());
-
 export function startSeqHoldWatchdog(): void {
-  watchdog.stop();
-  watchdog.start();
+  startHorizonHoldWatchdog();
 }
 
 export function stopSeqHoldWatchdog(): void {
-  watchdog.stop();
+  stopHorizonHoldWatchdog();
 }
 
 /**

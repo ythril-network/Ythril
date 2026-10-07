@@ -50,7 +50,7 @@
  *
  * ## The interval is read at start
  *
- * `everyMs` is a number, or a function that is called at `start()` (the watchdog on `util/seq.ts` derives its figure from the hold
+ * `everyMs` is a number, or a function that is called at `start()` (the watchdog of `util/horizon-holds.ts` derives its figure from the hold
  * warning, `holdWarnMs() / 4`). A change to what the function reads does not move a RUNNING job; a restart (`stop(); start()`) takes
  * the new figure. That is also why the overrun threshold is a fixed figure for the job's run: it is derived from the interval the
  * timer was armed with.

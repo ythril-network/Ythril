@@ -38,8 +38,8 @@ const OWNER = 'server/src/files/tombstones.ts';
 const NOT_READERS = {
   // The registry: the name, built once. Opens nothing.
   'server/src/db/space-collection.ts': /fileTombstones:\s*'file_tombstones'/,
-  // A files wipe drops every tombstone of the space, pending or not; it reads none (`wipe-space-says-it-is-local`).
-  'server/src/spaces/lifecycle.ts': /col\(spaceCollection\(spaceId, 'fileTombstones'\)\)\.deleteMany\(\{\}\)/,
+  // (A files wipe used to be here: it dropped every tombstone from `spaces/lifecycle.ts` by hand. It is the module's now,
+  // `forgetFileTombstonesOf`, which marks the wipe so a publish in flight cannot re-create a row — bundle-71, Q-406.)
 };
 
 const NAMES_IT = () => /\bfileTombstones\b|file_tombstones/g;

@@ -26,6 +26,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
+import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
@@ -659,6 +660,23 @@ export const seqHorizonOldestHoldSeconds = new Gauge({
   collect() {
     this.reset();
     for (const space of concreteSpaces()) this.set({ space: space.id }, oldestHoldAgeSeconds(space.id));
+  },
+});
+
+/**
+ * The same for the file tombstones' position hold (`Q-346`): how long each space's oldest open position stamp has been held.
+ * A hold that does not end stops every page and prune of the space's file tombstones below its stamp — a peer is sent no
+ * deletion above it while each cycle reports success — and, as with the seq hold, nothing measured it. 0 for a space holding
+ * nothing; built like the seq gauge, so a deleted space's series goes with the space.
+ */
+export const fileTombstoneOldestHoldSeconds = new Gauge({
+  name: 'ythril_file_tombstone_oldest_hold_seconds',
+  help: 'Age in seconds of the oldest open file-tombstone position hold per space (0 when none); a growing value means deletions of the space are not reaching peers',
+  labelNames: ['space'] as const,
+  registers: [register],
+  collect() {
+    this.reset();
+    for (const space of concreteSpaces()) this.set({ space: space.id }, oldestPositionHoldAgeSeconds(space.id));
   },
 });
 

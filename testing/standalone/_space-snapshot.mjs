@@ -33,10 +33,11 @@ export async function snapshotParts(mongo, space, parts) {
 
 /** The keys of two snapshots whose contents differ, but for `ignore` — named, so a failure says WHAT changed. */
 /**
- * The record parts a refusal or a push test seeds and clears: the knowledge collections, the tombstones and the embed
- * jobs. One list for the snapshot and the wipe, so a part seeded is a part compared and cleared.
+ * The record parts a refusal or a push test seeds and clears: the knowledge collections, the tombstones (the records', and
+ * the files' — a file tombstone a write the bound ended would land is a landing like any other, bundle-71 Q-346) and the
+ * embed jobs. One list for the snapshot and the wipe, so a part seeded is a part compared and cleared.
  */
-export const RECORD_PARTS = Object.freeze(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']);
+export const RECORD_PARTS = Object.freeze(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'file_tombstones', 'embed_jobs']);
 
 /**
  * Empty `parts` of `space` — the push door's wipe and a refusal test's, one loop (bundle-30 I6, T4). Throws on no

@@ -20,7 +20,8 @@
  *
  * ## The holders — derived, never listed
  *
- * Every top-level function in `server/src` (outside `util/seq.ts`) that calls `withAllocatedSeqs`,
+ * Every top-level function in `server/src` (outside `util/seq.ts`) that calls `withPositionHeld` (the file tombstones'
+ * position instance of the same primitive, `util/horizon-holds.ts`; bundle-71) or `withAllocatedSeqs`,
  * `withSeqHorizonHeld` or `withSeq`. Each derived holder needs a case below; a holder added next year without one
  * fails the coverage test instead of going unchecked. A call outside any top-level function is reported as such,
  * so it cannot be missed either.
@@ -71,7 +72,11 @@ const CAP_MS = BOUND.holdDeadlineMs + SLACK_MS;
 const ENTER_MS = 5000;
 
 // ── The derivation: every holder of a seq hold ───────────────────────────────────────────────────────────────
-const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeq)\s*\(/g;
+// The entry points of the shared hold primitive (`util/horizon-holds.ts`'s `heldWhile`): the seq instance's three and the
+// file-tombstone position instance's one (bundle-71, Q-346). A function that calls one of them holds a horizon, and is owed a case.
+const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeq|withPositionHeld)\s*\(/g;
+/** A match that is the DEFINITION of the entry point (`function withPositionHeld(`), which holds nothing itself. */
+const isDefinition = (src, index) => /function\s+$/.test(src.slice(Math.max(0, index - 20), index));
 function holders() {
   const out = new Map();
   for (const file of trackedSources('server/src', { floor: 100 })) {
@@ -79,6 +84,7 @@ function holders() {
     const src = stripComments(readFileSync(file, 'utf8'));
     const spans = [...topLevelFunctionSpans(src)];
     for (const m of src.matchAll(new RegExp(PRIMITIVE.source, 'g'))) {
+      if (isDefinition(src, m.index)) continue;
       const enclosing = spans.find(([, s]) => m.index >= s.start && m.index < s.start + s.body.length);
       const key = `${file.replace(/\\/g, '/')}:${enclosing ? enclosing[0] : '(not inside a top-level function)'}`;
       out.set(key, [...(out.get(key) ?? []), m[1]]);
@@ -98,18 +104,21 @@ const CASES = holderCases(ctx, S);
  * hold was entered, whether the run settled within the cap, and whether the hold was released by then. The lock is
  * then released and the run allowed to finish, so a hang on the unchanged code cannot leak into the next case.
  */
-async function stalled(space, { lock, run }) {
+async function stalled(space, c) {
+  const { lock, run } = c;
   const held = lock === 'counter' ? await holdCounterLock(door.mongo, space) : await lock();
   let report;
   try {
     let done = false;
     const op = Promise.resolve().then(run).finally(() => { done = true; });
-    const entered = await eventually(() => done || seq.lowestUncommittedSeq(space) !== undefined, ENTER_MS);
+    // Which instance of the hold the case is about: the file tombstones' position (`positionHold`), or the seq horizon.
+    const lowest = c.positionHold ? () => mods.fileTombstones.lowestUncommittedPosition(space) : () => seq.lowestUncommittedSeq(space);
+    const entered = await eventually(() => done || lowest() !== undefined, ENTER_MS);
     // The floor, not an allocated seq, and that is enough: `heldAt` only goes into a message here, and most of these locks
     // are on the counter row itself, so the allocation is exactly what never answers (`heldSeqAllocated` is for a case that ACTS on the seq).
-    const heldAt = seq.lowestUncommittedSeq(space);
+    const heldAt = lowest();
     const res = await settleWithin(op, CAP_MS);
-    report = { entered: entered && heldAt !== undefined, heldAt, res, after: seq.lowestUncommittedSeq(space) };
+    report = { entered: entered && heldAt !== undefined, heldAt, res, after: lowest() };
   } finally {
     await held.release();
   }

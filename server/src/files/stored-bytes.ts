@@ -40,6 +40,7 @@ import {
 } from '../config/secretbox.js';
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
+import { keyedLock } from '../util/keyed-lock.js';
 
 /** A stored file that exists but cannot be read back: a foreign or missing key, or altered bytes. */
 export class StoredFileUnreadable extends Error {
@@ -75,24 +76,14 @@ export function resetStoredKeyCacheForTests(): void { writer = null; resetChunke
 /** Where temporary files are written before the rename: same filesystem as the tree, never inside it. */
 export function storedTmpDir(): string { return path.join(getDataRoot(), '.stored-tmp'); }
 
-const locks = new Map<string, Promise<unknown>>();
+const pathLocks = keyedLock();
 
 /**
  * Run `fn` while no other writer in this process holds `abs`. Writers, the sync pull and the migration job all
  * take it, so a rewrite in place can re-check the file under the lock and never clobber a newer write.
  */
-export async function withPathLock<T>(abs: string, fn: () => Promise<T>): Promise<T> {
-  const key = path.resolve(abs);
-  const prior = locks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const held = new Promise<void>(r => { release = r; });
-  const chained = prior.then(() => held);
-  locks.set(key, chained);
-  await prior.catch(() => undefined);
-  try { return await fn(); } finally {
-    release();
-    if (locks.get(key) === chained) locks.delete(key);
-  }
+export function withPathLock<T>(abs: string, fn: () => Promise<T>): Promise<T> {
+  return pathLocks.run(path.resolve(abs), fn);
 }
 
 async function tmpPathFor(abs: string): Promise<string> {

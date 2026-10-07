@@ -142,9 +142,10 @@ export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
  * Delete this space's FILE tombstones at or below an acknowledged position.
  *
  * Split from the config read for the same reason as the record version, and it needs its own query because the
- * key is a `deletedAt` string rather than a `seq`: ISO8601 UTC timestamps compare lexically in MongoDB, and a
- * document whose `deletedAt` is missing or malformed does not match `$lte` at all — which is the behaviour
- * relied on here, since an unparseable timestamp cannot be proven delivered.
+ * key is a `positionAt` string (an instant this instance stamped), not a `seq`: ISO8601 UTC timestamps compare lexically
+ * in MongoDB, and a document whose position is missing or malformed does not match `$lte` at all — which is the behaviour
+ * relied on here, since an unparseable timestamp cannot be proven delivered. The read is capped below any position whose write
+ * has not landed, and keeps a tombstone whose path holds a pending one (`pruneFileTombstonesUpTo`).
  */
 export async function pruneFileTombstonesToFloor(spaceId: string, floor: FileTombstoneFloor): Promise<number> {
   if (!floor.prune) return -1;
