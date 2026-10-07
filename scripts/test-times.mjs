@@ -59,6 +59,12 @@
  *   recorded what it found, said "recorded 0 record(s)" and exited 0. Every `--record-ci` pass prints the newest run it listed with its
  *   start, so a stale page is visible. Nothing is compared with the records already held: no key for "older than held"
  *   survives a re-run, a backfill or a deleted run.
+ * - **A listing that lags** (Q-403): the listing is built a little behind the run it lists, so a run seen finishing a moment ago
+ *   may not be in it yet. A pass that NAMES a run reads the listing again, every `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` (default
+ *   20000) for up to `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` (default 180000), until the run is in it, through the repo's one
+ *   condition wait; then it refuses as above, and the refusal says the listing was read again for that long. A run the listing
+ *   holds but `trustedRuns` refuses is not waited for (it will never be trusted). The bare pass and `--rewrite` read once.
+ *   Both variables are positive integers, refused before any request otherwise.
  * - **The client is a suite like the others** (`suite: client`): `--record` reads `test-results/client.json` beside the node
  *   `*.jsonl`, `--record-ci` reads it from the client job's own artifact (`test-results-client-tests-<attempt>`, the entry
  *   named `client.json` and no other), both through `scripts/_shared/client-results.mjs`. Each suite is its own problem: a
@@ -84,7 +90,7 @@ import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
-import { holdsWithin } from '../testing/_shared/wait-for.mjs';
+import { holdsWithin, waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
@@ -954,12 +960,37 @@ async function ciPayloads(gh, run, have = new Set()) {
  * @param {Set<number>} listedIds every run id the pages held, trusted or not
  * @param {object[]} trusted the trusted runs, newest first
  * @param {string} outcome what the pass did not do ('recorded', 'rewritten')
+ * @param {{ ms: number, intervalMs: number } | null} [waited] the bound the listing was read again within, when it was
  */
-function unlistedRunRefusal(runId, listedIds, trusted, outcome) {
+function unlistedRunRefusal(runId, listedIds, trusted, outcome, waited = null) {
   if (listedIds.has(runId)) return `test-times: run ${runId} is in the listing but is not a trusted run (not a push to main of ${REPO} from ci.yml, or not completed); nothing ${outcome}`;
   const newest = trusted[0];
   const newestSaid = newest ? `the newest run it listed is ${describeRun(newest)}` : 'it listed no trusted run';
-  return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml: the listing may be stale (${newestSaid}), or the run is not a trusted one; nothing ${outcome}`;
+  const waitedSaid = waited ? `; the listing was read again for ${waited.ms}ms (every ${waited.intervalMs}ms) and never held it` : '';
+  return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml: the listing may be stale (${newestSaid}), or the run is not a trusted one${waitedSaid}; nothing ${outcome}`;
+}
+
+const LISTING_WAIT_ENV = 'YTHRIL_TEST_RUNS_LISTING_WAIT_MS';
+const LISTING_INTERVAL_ENV = 'YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS';
+const DEFAULT_LISTING_WAIT_MS = 180_000;
+const DEFAULT_LISTING_INTERVAL_MS = 20_000;
+
+/**
+ * How long a pass that names a run reads the listing again for it, and the pause between two reads: the two variables, each a
+ * positive integer, or the reason one is not (said before any request, naming the variable). One reading of the two so the
+ * bound and the interval are held to one rule and a bad value cannot reach a wait that would run for as long as it says.
+ *
+ * @returns {{ ms: number, intervalMs: number } | { refusal: string }}
+ */
+function listingWaitFromEnv() {
+  const read = (name, fallback) => {
+    const text = process.env[name];
+    if (text === undefined) return fallback;
+    return positiveInteger(text) ?? { refusal: `test-times: ${name} must be a positive integer (digits only), not ${JSON.stringify(text)}` };
+  };
+  const ms = read(LISTING_WAIT_ENV, DEFAULT_LISTING_WAIT_MS);
+  const intervalMs = read(LISTING_INTERVAL_ENV, DEFAULT_LISTING_INTERVAL_MS);
+  return ms.refusal ? ms : intervalMs.refusal ? intervalMs : { ms, intervalMs };
 }
 
 /**
@@ -971,6 +1002,9 @@ function unlistedRunRefusal(runId, listedIds, trusted, outcome) {
 async function recordCi({ rewriteKey, runId } = {}) {
   const refused = refuseUnderCi(rewriteKey ? '--rewrite' : '--record-ci');
   if (refused) return refused;
+  // Only a pass that names a run waits for it, and its bound is held to its rule before the first request.
+  const wait = runId && !rewriteKey ? listingWaitFromEnv() : null;
+  if (wait?.refusal) { console.error(wait.refusal); return 1; }
   let gh;
   try { gh = githubClient(); } catch (err) { console.error(`test-times: ${err.message}`); return 1; }
   const dest = destination();
@@ -983,21 +1017,37 @@ async function recordCi({ rewriteKey, runId } = {}) {
     const parts = rewriteKey ? parseRecordKey(rewriteKey) : null;
     const rewriteId = parts ? positiveInteger(parts.runId) : null;
     if (rewriteKey && (!parts || parts.source !== 'ci' || !rewriteId)) { console.error('test-times: --rewrite needs a ci record key (ci:<runId>:<attempt>:<job>:<suite>)'); exit = 1; return; }
-    const collected = [];
-    const listedIds = new Set();
-    for (let page = 1; page <= LISTING_PAGES; page++) {
-      const listed = await gh.json(completedPushesPath(page));
-      const held = listed?.workflow_runs ?? [];
-      if (!held.length) break;
-      for (const r of held) { const id = runIdOf(r); if (id) listedIds.add(id); }
-      collected.push(...trustedRuns(held).filter(r => r.status === 'completed'));
-      if (rewriteKey ? collected.some(isRun(rewriteId)) : collected.length >= BACKFILL_RUNS) break;
-    }
-    const newest = collected.sort(newestRunFirst);
+    const readListing = async () => {
+      const collected = [];
+      const listedIds = new Set();
+      for (let page = 1; page <= LISTING_PAGES; page++) {
+        const listed = await gh.json(completedPushesPath(page));
+        const held = listed?.workflow_runs ?? [];
+        if (!held.length) break;
+        for (const r of held) { const id = runIdOf(r); if (id) listedIds.add(id); }
+        collected.push(...trustedRuns(held).filter(r => r.status === 'completed'));
+        if (rewriteKey ? collected.some(isRun(rewriteId)) : collected.length >= BACKFILL_RUNS) break;
+      }
+      return { collected, listedIds };
+    };
+    // A named run is read for until the listing holds it (trusted or not: a run it holds and will not trust is never going to
+    // be trusted, so it is not waited for) or the bound ends; every other pass reads once.
+    let listing;
+    let waited = null;
+    if (wait) {
+      let last;
+      try { listing = await waitForReading(async () => (last = await readListing()), (l) => l.listedIds.has(runId), wait.ms, wait.intervalMs); } catch (err) {
+        if (!(err instanceof WaitTimeout) || !last) throw err;
+        listing = last;
+        waited = wait;
+      }
+    } else listing = await readListing();
+    const { listedIds } = listing;
+    const newest = listing.collected.sort(newestRunFirst);
     const runs = rewriteKey ? newest.filter(isRun(rewriteId)) : newest.slice(0, BACKFILL_RUNS);
     // The refusal comes BEFORE the first write, so a pass that failed leaves no record of some other run behind.
     const waitedFor = rewriteKey ? rewriteId : runId;
-    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded')); exit = 1; return; }
+    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded', waited)); exit = 1; return; }
     if (!rewriteKey) console.log(newest[0] ? `test-times: newest listed run: ${describeRun(newest[0])}` : 'test-times: the listing held no trusted completed run');
 
     let recorded = 0;
@@ -1360,7 +1410,9 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            completely recorded run or after ${BACKFILL_RUNS} runs, and says the newest run it listed.
                            With <runId> (a positive integer: the run you are waiting for) the pass FAILS, writing
                            nothing, when that run is not in the listing of completed pushes to main (a stale page) or
-                           is listed but not a trusted run, instead of reporting a quiet success. Run by hand
+                           is listed but not a trusted run, instead of reporting a quiet success; a run the listing does
+                           not hold yet is waited for first (the listing is read again, see the two variables below)
+                           Run by hand
   --type-schema            print the schema_update arguments that declare the Test-Run chrono type on the instance
                            (generated from the recorder's own field list, with its one-year retention)
   --rewrite <recordKey>    record one run again from its own results (ci:<runId>:<attempt>:<job>:<suite>
@@ -1380,6 +1432,11 @@ environment (read, never printed):
   YTHRIL_TEST_RUNS_TOKEN   a token that may write chrono entries in ${SPACE}
   GH_TOKEN                 a token that may read ${REPO}'s Actions runs and artifacts (--record-ci, --rewrite)
   GITHUB_API_URL           the Actions API base; default https://api.github.com
+  ${LISTING_WAIT_ENV}
+                           --record-ci <runId>: how long, in ms, the listing is read again for a run it does not hold
+                           yet before the pass fails; a positive integer, default ${DEFAULT_LISTING_WAIT_MS}
+  ${LISTING_INTERVAL_ENV}
+                           the pause, in ms, between two of those reads; a positive integer, default ${DEFAULT_LISTING_INTERVAL_MS}
 
 Recording is refused when GITHUB_ACTIONS or CI is set: CI never holds the write token.
 `;

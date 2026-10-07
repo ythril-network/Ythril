@@ -203,6 +203,8 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 | `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the script records to. Never printed, never stored, never in a payload. |
 | `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
 | `GITHUB_API_URL` | The Actions API base. Defaults to the public GitHub API. |
+| `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` | For `--record-ci <runId>`: how long, in milliseconds, the listing is read again for a run it does not hold yet before the pass fails. A positive integer; default `180000`. |
+| `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` | The pause between two of those reads, in milliseconds. A positive integer; default `20000`. |
 
 What the recorder guarantees, and why each is there:
 
@@ -230,7 +232,10 @@ What the recorder guarantees, and why each is there:
   listing of completed pushes to main**, with the reasons it may be absent (a stale listing, or a run that is not a trusted
   one); a run the listing holds but the trust function refuses (a full run, a pull request's) is refused as **not a trusted
   run**, and its artifacts are never requested. An id that is not a positive integer is refused as such before any request is
-  made. The bare form keeps its stopping rule, and every pass prints the newest run it listed, so a stale page is visible.
+  made. The listing lags a run that has only just finished, so a pass that names a run which the listing does not yet hold
+  reads the listing again, every `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` (default 20000) for up to
+  `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` (default 180000), before it refuses, and the refusal says the listing was read again for that
+  long; the bare form and `--rewrite` read it once. The bare form keeps its stopping rule, and every pass prints the newest run it listed, so a stale page is visible.
 - **Incomplete is not passed.** A results set without its closing line, with a wrong count or a torn last line is recorded
   as `incomplete`. The client's report is `incomplete` when a test never reached a verdict, when the test command's own
   result (`runnerOutcome`, written into the report by CI's mask step and by preflight) says it did not succeed and no

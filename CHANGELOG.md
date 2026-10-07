@@ -229,7 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected record card).
   The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s; German and Polish labels say the action.
 - **Help:** Links in the in-app Help no longer open dead tabs (between parts of a split guide, to headings such as `#links`, to repository files); they keep their place in the URL and move focus to the target.
-- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails (exit 1, nothing written) when its listing of completed pushes to `main` lacks that run; a pass that recorded nothing reported success.
+- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails (exit 1, nothing written) when its listing of completed pushes to `main` still lacks that run after being read again for up to three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); a pass that recorded nothing reported success.
 
 ### Security
 
