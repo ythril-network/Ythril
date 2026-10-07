@@ -17,14 +17,17 @@
  * - `failureDetails` (objects carrying the stack) is dropped;
  * - a spec's `name` becomes its repo-relative path (an absolute path outside the checkout is masked as text);
  * - every other string (test titles) goes through `maskSecrets`;
- * - numbers, booleans and structure are kept, so `readClientResults` (`scripts/unexpected-skips.mjs`) reads the same
- *   totals and statuses from the masked file.
+ * - numbers, booleans and structure are kept, so `parseClientReport` (`scripts/_shared/client-results.mjs`, behind the gate
+ *   readers and the recorder) reads the same totals, statuses and times from the masked file;
+ * - when `CLIENT_TEST_OUTCOME` is set (CI passes the test step's own result), the masked report is stamped with it as its
+ *   top-level `runnerOutcome` ({@link stampRunnerOutcome}), so the recorder can tell a run that failed outside the assertions
+ *   from one that passed.
  *
  * ## The guard a hand-written copy would drop
  *
  * **A report it cannot read is REMOVED, not left.** The step runs `if: always()` between the tests and the upload; a
  * step that failed to parse and left the raw file in place would publish exactly what it exists to stop. The aggregator
- * then fails on the missing report (`readClientResults` throws), which is the loud version. A report that is simply not
+ * then fails on the missing report (the reader throws), which is the loud version. A report that is simply not
  * there (vitest never wrote one) is not an error here, for the same reason: the aggregator is the one that says so.
  *
  * `a-client-report-is-masked-before-upload.test.js` holds the function, the script and the workflow step.
@@ -72,6 +75,32 @@ export function maskClientReport(report, root = process.cwd()) {
   return maskNode(report, undefined, undefined, root);
 }
 
+/** The results of a test step a runner may stamp into the report: GitHub's `steps.<id>.outcome`, and what preflight derives from an exit code. */
+const RUNNER_OUTCOMES = ['success', 'failure', 'cancelled', 'skipped'];
+
+/**
+ * Write the runner's own result into the report, as its top-level `runnerOutcome`, in place.
+ *
+ * Vitest's `success` ignores an unhandled error (it fails the process and never reaches the report) and a test that was
+ * still running when the run was cut off, so a report can say it passed for a run that did not. The producer knows how the
+ * test command ended; this is the one place that records it, for CI's mask step and for preflight, and the recorder reads it
+ * (`scripts/_shared/client-results.mjs`).
+ *
+ * @param {string} file  the report
+ * @param {string} outcome  one of `success`, `failure`, `cancelled`, `skipped`
+ * @returns {boolean} false, and the file untouched, when the report is not there or does not parse
+ * @throws when `outcome` is not one of those
+ */
+export function stampRunnerOutcome(file, outcome) {
+  if (!RUNNER_OUTCOMES.includes(outcome)) throw new Error(`stampRunnerOutcome: the outcome must be one of ${RUNNER_OUTCOMES.join(', ')}`);
+  if (!existsSync(file)) return false;
+  let report;
+  try { report = JSON.parse(readFileSync(file, 'utf8')); } catch { return false; }
+  if (report === null || typeof report !== 'object' || Array.isArray(report)) return false;
+  writeFileSync(file, JSON.stringify({ ...report, runnerOutcome: outcome }));
+  return true;
+}
+
 function main(argv) {
   if (argv.length !== 1) {
     console.error('usage: node scripts/mask-client-report.mjs <path to client.json>');
@@ -93,6 +122,14 @@ function main(argv) {
   }
   writeFileSync(file, JSON.stringify(maskClientReport(report)));
   console.log(`mask-client-report: ${argv[0]} masked in place`);
+  const outcome = process.env.CLIENT_TEST_OUTCOME;
+  if (outcome) {
+    try { stampRunnerOutcome(file, outcome); } catch {
+      console.error(`mask-client-report: CLIENT_TEST_OUTCOME is not one of ${RUNNER_OUTCOMES.join(', ')}; the report was masked and not stamped`);
+      return 1;
+    }
+    console.log('mask-client-report: stamped the runner\'s outcome');
+  }
   return 0;
 }
 
