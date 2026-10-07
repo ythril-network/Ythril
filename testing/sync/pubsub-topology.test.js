@@ -262,10 +262,21 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     });
 
     it('P deletes a record X authored that P relayed: it is gone on S after a cycle, and S\'s own record survives', async () => {
-      const xw = await postRetry429(INSTANCES.c, tokenC, `/api/brain/spaces/${testSpaceId}/facts`, {
-        fact: 'Fact authored on X, relayed by the publisher', tags: ['pubsub-relay'],
-      });
-      assert.equal(xw.status, 201, `write on X: ${JSON.stringify(xw.body)}`);
+      // A relay pushes by seq after its own push position, and a relayed record keeps its author's seq, so a record X
+      // writes at a seq the publisher has already pushed past is never relayed (the ordering limit bundle-81 owns,
+      // Q-278). This test is about who may DELETE a relayed record, not about that ordering, so X's record is written
+      // above the publisher's push position for S: X writes fillers until its counter is past it.
+      const netA = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}`);
+      const pushedToS = Math.max(0, ...(netA.body?.members ?? []).map(m => m.lastSeqPushed?.[testSpaceId] ?? 0));
+      let xw;
+      for (let i = 0; i <= pushedToS + 1; i++) {
+        xw = await postRetry429(INSTANCES.c, tokenC, `/api/brain/spaces/${testSpaceId}/facts`, {
+          fact: 'Fact authored on X, relayed by the publisher', tags: ['pubsub-relay'],
+        });
+        assert.equal(xw.status, 201, `write on X: ${JSON.stringify(xw.body)}`);
+        if ((xw.body.seq ?? 0) > pushedToS) break;
+      }
+      assert.ok((xw.body.seq ?? 0) > pushedToS, `X's record must land above the publisher's push position ${pushedToS}, got seq ${xw.body.seq}`);
       const xId = xw.body._id ?? xw.body.id;
       const sw = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts`, {
         fact: 'Subscriber own fact, written beside a relayed one', tags: ['pubsub-relay-survivor'],
