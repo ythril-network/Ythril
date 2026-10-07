@@ -5,6 +5,17 @@
  *  1. Publisher writes propagate down to subscribers
  *  2. Subscriber writes do NOT propagate up to the publisher
  *  3. Publisher tombstones only delete publisher-authored docs on subscriber
+ *  4. A record the publisher RELAYED (authored by a third instance, reaching the publisher through a club) is
+ *     deleted on the subscriber when the publisher deletes it, and the subscriber's own record is not (D-14 C)
+ *
+ * ## The members carry the instances' REAL ids (bundle-51)
+ *
+ * This file used to register the members as `instance-a` / `instance-b`, ids no instance has. A subscriber decides who
+ * its publisher IS by comparing the instance id of the peer that delivered a page with the member it pulls from, so a
+ * test that invents the member id can never see a rule about "the publisher": the peer token was bound to the real id
+ * and the member said something else. Both ends now name each other by `getInstanceId`, and every token is bound to
+ * the instance that presents it, as the invite flow binds them.
+ *
  * Run: node --test testing/sync/pubsub-topology.test.js
  * Pre-requisite: docker compose -f docker-compose.test.yml up && node testing/sync/setup.js
  */
@@ -14,22 +25,15 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord } from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord, getInstanceId } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
-/** Read a container's real instanceId (a uuid) from its config. */
-function getInstanceId(container) {
-  return dockerExec(
-    `docker exec ${container} node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('/config/config.json','utf8'));process.stdout.write(c.instanceId)"`,
-  ).toString().trim();
-}
-
 let tokenA, tokenB;
 let networkId;
 let testSpaceId;
-let instanceIdA;
+let instanceIdA, instanceIdB;
 
 /**
  * Wait for a memory to reach (or leave) B, re-triggering A's sync while waiting. See `syncUntil`.
@@ -84,11 +88,12 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     // subscriber authorises publisher tombstones by matching this identity against
     // the tombstone issuer.
     instanceIdA = getInstanceId('ythril-a');
+    instanceIdB = getInstanceId('ythril-b');
     const bPeer = await postRetry429(INSTANCES.b, tokenB, '/api/tokens', { name: 'pubsub-peer-a', peerInstanceId: instanceIdA });
     assert.equal(bPeer.status, 201, `Create peer token on B: ${JSON.stringify(bPeer.body)}`);
 
     const addB = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
-      instanceId: 'instance-b',
+      instanceId: instanceIdB,
       label: 'Instance B (Subscriber)',
       url: 'http://ythril-b:3200',
       token: bPeer.body.plaintext,
@@ -105,13 +110,13 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     });
     assert.equal(regB.status, 201, `Register pubsub network on B: ${JSON.stringify(regB.body)}`);
 
-    // Create a peer token on A for B to use when pulling
-    const aPeer = await postRetry429(INSTANCES.a, tokenA, '/api/tokens', { name: 'pubsub-peer-b' });
+    // Create a peer token on A for B to use when pulling — bound to B's real id, as the other one is bound to A's
+    const aPeer = await postRetry429(INSTANCES.a, tokenA, '/api/tokens', { name: 'pubsub-peer-b', peerInstanceId: instanceIdB });
     assert.equal(aPeer.status, 201, `Create peer token on A: ${JSON.stringify(aPeer.body)}`);
 
     // Add A as the publisher member on B's side (direction=pull: B pulls from A)
     const addA = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/members`, {
-      instanceId: 'instance-a',
+      instanceId: instanceIdA,
       label: 'Instance A (Publisher)',
       url: 'http://ythril-a:3200',
       token: aPeer.body.plaintext,
@@ -121,7 +126,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
 
     // Verify direction was preserved as 'pull' (not forced to 'push')
     const netB = await get(INSTANCES.b, tokenB, `/api/networks/${networkId}`);
-    const pubMember = netB.body.members?.find(m => m.instanceId === 'instance-a');
+    const pubMember = netB.body.members?.find(m => m.instanceId === instanceIdA);
     assert.equal(pubMember?.direction, 'pull', 'Publisher stored as pull on subscriber side');
 
     console.log(`Created pubsub network: ${networkId}`);
@@ -208,5 +213,85 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     const subCheck = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', subMemId);
     assert.equal(subCheck.status, 200, 'Subscriber local fact must survive publisher tombstone');
     console.log(`  Subscriber local fact survived publisher tombstone ✓`);
+  });
+
+  /**
+   * ## A record the publisher RELAYED is the publisher's to take back (D-14 C, bundle-51)
+   *
+   * X is a third instance (C) that shares the space with the publisher P (A) through a CLUB network, so X's record
+   * reaches P by the club and P relays it to the subscriber S (B) over the pub/sub network. The record on S is X's by
+   * authorship and P's by delivery. When P deletes it, P issues the tombstone, and S — whose only upstream is P —
+   * must apply it even though X, not P, wrote the record. S's own record, written beside it, is S's and survives.
+   *
+   * Only the CLUB's cycle is driven until the record reaches P, and only P's pub/sub cycle afterwards: no step runs
+   * the club after the deletion, so P cannot re-pull the record from X and the deletion has one path to S.
+   *
+   * X sits on instance C, which has no SKIP_*_RATE_LIMIT, so every call made TO C rides out a 429 (`postRetry429`);
+   * every sync trigger is sent to A, which has them.
+   */
+  describe('a record the publisher relayed from a third instance', () => {
+    let tokenC, idC, clubId;
+
+    before(async () => {
+      tokenC = fs.readFileSync(path.join(CONFIGS, 'c', 'token.txt'), 'utf8').trim();
+      idC = getInstanceId('ythril-c');
+      const club = await post(INSTANCES.a, tokenA, '/api/networks', {
+        label: `PubSub relay club ${Date.now()}`, type: 'club', spaces: [testSpaceId],
+      });
+      assert.equal(club.status, 201, `Create club on A: ${JSON.stringify(club.body)}`);
+      clubId = club.body.id;
+      const inv = await post(INSTANCES.a, tokenA, '/api/invite/generate', { networkId: clubId });
+      assert.equal(inv.status, 201, `Invite to the club: ${JSON.stringify(inv.body)}`);
+      // The join is the real handshake: A mints a token bound to C's id and C one bound to A's. `syncSchedule: ''` keeps
+      // C on manual sync, so nothing here moves unless a step of the test asks it to. C creates the space it lacks.
+      const join = await postRetry429(INSTANCES.c, tokenC, '/api/networks/join-remote', {
+        handshakeId: inv.body.handshakeId, inviteUrl: 'http://ythril-a:3200/api/invite/apply',
+        rsaPublicKeyPem: inv.body.rsaPublicKeyPem, networkId: clubId, myUrl: 'http://ythril-c:3200', syncSchedule: '',
+      });
+      assert.equal(join.status, 200, `C joins the club: ${JSON.stringify(join.body)}`);
+      const members = (await get(INSTANCES.a, tokenA, `/api/networks/${clubId}`)).body?.members ?? [];
+      assert.ok(members.some(m => m.instanceId === idC), `the club on A does not list C by its real id: ${JSON.stringify(members.map(m => m.instanceId))}`);
+    });
+
+    after(async () => {
+      if (clubId) {
+        await del(INSTANCES.c, tokenC, `/api/networks/${clubId}`).catch(() => {});
+        await del(INSTANCES.a, tokenA, `/api/networks/${clubId}`).catch(() => {});
+      }
+      await delWithBody(INSTANCES.c, tokenC, `/api/spaces/${testSpaceId}`, { confirm: true }).catch(() => {});
+    });
+
+    it('P deletes a record X authored that P relayed: it is gone on S after a cycle, and S\'s own record survives', async () => {
+      const xw = await postRetry429(INSTANCES.c, tokenC, `/api/brain/spaces/${testSpaceId}/facts`, {
+        fact: 'Fact authored on X, relayed by the publisher', tags: ['pubsub-relay'],
+      });
+      assert.equal(xw.status, 201, `write on X: ${JSON.stringify(xw.body)}`);
+      const xId = xw.body._id ?? xw.body.id;
+      const sw = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${testSpaceId}/facts`, {
+        fact: 'Subscriber own fact, written beside a relayed one', tags: ['pubsub-relay-survivor'],
+      });
+      assert.equal(sw.status, 201, `write on S: ${JSON.stringify(sw.body)}`);
+      const sId = sw.body._id ?? sw.body.id;
+
+      // X -> P, over the club: the record is on P, and P's copy is X's.
+      await syncUntil(INSTANCES.a, tokenA, clubId,
+        async () => (await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', xId)).status === 200,
+        `X's record ${xId} to reach the publisher through the club`, { label: 'A (club)' });
+      const onP = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', xId);
+      assert.equal(onP.body.author?.instanceId, idC, 'the publisher holds the record under X\'s authorship');
+
+      // P -> S, over the pub/sub network: the record is on S, and it is still X's.
+      await awaitOnB(xId, 200, 'the relayed record to reach the subscriber');
+      const onS = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', xId);
+      assert.equal(onS.body.author?.instanceId, idC, 'the subscriber holds the relayed record under X\'s authorship, not P\'s');
+
+      // P takes it back. Nothing runs the club from here, so the record cannot return from X.
+      const delR = await del(INSTANCES.a, tokenA, `/api/brain/spaces/${testSpaceId}/facts/${xId}`);
+      assert.equal(delR.status, 204, `Delete on P: expected 204, got ${delR.status}`);
+      await awaitOnB(xId, 404, 'the publisher\'s deletion of a record it relayed to reach the subscriber');
+      assert.equal((await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', sId)).status, 200,
+        'the subscriber\'s own record must survive the publisher\'s deletion of a relayed one');
+      console.log(`  Relayed fact deleted on S by its publisher; S's own fact survived ✓`);
+    });
   });
 });
