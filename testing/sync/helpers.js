@@ -168,12 +168,17 @@ export function injectPeerToken(container, instanceId, token) {
  * conclusion of every round — the only shape in which a rule about what a member decides for ITSELF can be seen.
  * A network held by A alone never gives B a round to conclude. The spaces must already exist on both.
  *
- * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string }} opts  `[baseUrl, token]` each
+ * `containers` names the two instances' containers when they are not A and B (`['ythril-b', 'ythril-c']` makes the pair B and C,
+ * so a CHAIN A-B-C is two mirrored networks sharing B): the container is where an instance id is read and a peer token injected,
+ * and its name is the host the other instance reaches it by.
+ *
+ * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string, containers?: [string, string] }} opts  `[baseUrl, token]` each
  * @returns {Promise<{ networkId: string, remove: () => Promise<void> }>}
  */
-export async function mirroredNetwork({ label, spaces, a, b, type = 'closed' }) {
+export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', containers = ['ythril-a', 'ythril-b'] }) {
   const [baseA, tokenA] = a, [baseB, tokenB] = b;
-  const idA = getInstanceId('ythril-a'), idB = getInstanceId('ythril-b');
+  const [hostA, hostB] = containers;
+  const idA = getInstanceId(hostA), idB = getInstanceId(hostB);
   const must = (r, what) => { if (r.status >= 300) throw new Error(`${what}: ${r.status} ${JSON.stringify(r.body)}`); return r; };
   const forA = must(await post(baseB, tokenB, '/api/tokens', { name: `${label}-a-${Date.now()}`, peerInstanceId: idA }), 'peer token for A');
   const forB = must(await post(baseA, tokenA, '/api/tokens', { name: `${label}-b-${Date.now()}`, peerInstanceId: idB }), 'peer token for B');
@@ -183,12 +188,12 @@ export async function mirroredNetwork({ label, spaces, a, b, type = 'closed' }) 
     const r = must(await post(base, token, `/api/networks/${networkId}/members`, { instanceId, label: memberLabel, url, token: peerToken, direction: 'both' }), `member ${memberLabel}`);
     if (r.status === 202) await post(base, token, `/api/networks/${networkId}/votes/${r.body.roundId}`, { vote: 'yes' });
   };
-  await add(baseA, tokenA, idB, `${label} B`, 'http://ythril-b:3200', forA.body.plaintext);
+  await add(baseA, tokenA, idB, `${label} B`, `http://${hostB}:3200`, forA.body.plaintext);
   const onB = await post(baseB, tokenB, '/api/networks', { id: networkId, label, type, spaces, votingDeadlineHours: 1 });
   if (onB.status !== 201 && onB.status !== 409) throw new Error(`network on B: ${onB.status} ${JSON.stringify(onB.body)}`);
-  await add(baseB, tokenB, idA, `${label} A`, 'http://ythril-a:3200', forB.body.plaintext);
-  injectPeerToken('ythril-a', idB, forA.body.plaintext);
-  injectPeerToken('ythril-b', idA, forB.body.plaintext);
+  await add(baseB, tokenB, idA, `${label} A`, `http://${hostA}:3200`, forB.body.plaintext);
+  injectPeerToken(hostA, idB, forA.body.plaintext);
+  injectPeerToken(hostB, idA, forB.body.plaintext);
   await post(baseA, tokenA, '/api/admin/reload-config', {});
   await post(baseB, tokenB, '/api/admin/reload-config', {});
   const remove = async () => {
