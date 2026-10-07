@@ -24,6 +24,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, reqJson, waitFor, createTestSpace } from './helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -197,7 +198,7 @@ describe('Governed space deletion', () => {
 
     // Brief wait to confirm no async side-effect fires.
     // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await new Promise(r => setTimeout(r, 500));
+    await sleep(500);
 
     const listR = await get(INSTANCES.a, tokenA, '/api/spaces');
     assert.ok(listR.body?.spaces?.some(s => s.id === spaceId), 'Space must survive a veto');

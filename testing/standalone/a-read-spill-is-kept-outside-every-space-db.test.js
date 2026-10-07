@@ -45,6 +45,7 @@ import { createRequire } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { MUTATORS } from './_document-mutators.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 // Before ANY import of the store: a module that reads its caps at load time must see these.
 process.env['READ_SPILL_TOKEN_MAX_MB'] = '1';
@@ -91,8 +92,6 @@ async function putOk(over) {
 }
 
 /** The ordering a spill must not be able to lose: headers are created after their pages, even in a burst. */
-const tick = () => new Promise(res => setTimeout(res, 5));
-
 const decode = (page) => JSON.parse(gunzipSync(Buffer.from(page.body.buffer ?? page.body)).toString('utf8'));
 
 async function assertNothingStored(label) {
@@ -362,11 +361,11 @@ describe('a read spill lives in the instance store, never in a space', { skip },
   describe('caps: a token pays for its own spills, never for somebody else\'s', () => {
     it('past its byte share a token evicts its OWN oldest spill, which then answers 410 to it alone', async () => {
       const theirs = await putOk({ issuedTo: TOKEN_B, items: records(1, 400_000) });
-      await tick();
+      await sleep(5);
       const first = await putOk({ items: records(1, 400_000) });
-      await tick();
+      await sleep(5);
       const second = await putOk({ items: records(1, 400_000) });
-      await tick();
+      await sleep(5);
       const third = await putOk({ items: records(1, 400_000) });   // 1.2 MB against a 1 MB share
 
       assert.equal((await read(first.id)).status, 410, 'the owner learns its spill was evicted');
@@ -379,7 +378,7 @@ describe('a read spill lives in the instance store, never in a space', { skip },
 
     it('past its count share a token evicts its own oldest', async () => {
       const ids = [];
-      for (let i = 0; i < 4; i++) { ids.push((await putOk({ items: [record(i)] })).id); await tick(); }
+      for (let i = 0; i < 4; i++) { ids.push((await putOk({ items: [record(i)] })).id); await sleep(5); }
       assert.equal((await read(ids[0])).status, 410, 'the fourth spill against a count of three evicts the first');
       for (const id of ids.slice(1)) assert.equal((await read(id)).status, 200);
     });

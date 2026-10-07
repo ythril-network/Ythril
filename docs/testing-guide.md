@@ -245,6 +245,8 @@ and whether a timer is left armed. They are made once, in
 | The same wait, answering the value the condition held with | `waitForValue(…)` |
 | Wait until a state was read that you accept, and get that reading back (the timeout names the last one read) | `waitForReading(read, accept, timeout, interval, options)` |
 | Wait for one operation for at most a time, without abandoning it, and learn whether it finished | `settleWithin(promise, ms)` in `testing/standalone/_write-faults.mjs` |
+| A fixed delay: time itself is the subject (a window that must elapse in full before something is asserted absent, a fixture that must take a measurable while). Anything else is a guess that wants a condition | `sleep(ms)` from `testing/_shared/sleep.mjs` |
+| A throwaway server on loopback, ended without waiting for a client that never leaves | `const local = await listenOnLoopback(http.createServer(app))` from `testing/_shared/local-server.mjs`; it gives `{ port, url, close }`, binds `127.0.0.1` only, and `close()` is safe twice |
 
 Use `holdsWithin` in a `before` hook that lets the tests decide: a throw there cancels the whole file, where a verdict
 reaches `requireEmbedding` and a skip. Use `tolerate` for a server that is restarting and refuses connections; a probe
@@ -252,11 +254,26 @@ that throws anything else propagates at once. `diagnose` may be a function that 
 awaited. `waitFor` from `testing/sync/helpers.js` is this module with the thin-margin warning on, because a stack wait that
 passes with little budget left is one slow runner from a timeout; a poll of something in-process leaves it off.
 
-**A loop that asks a different question stays, with a marker** in the comment block directly above it:
-`// waits-differently: <reason>`. The reason must say something (two words at least); a bare marker is the loop without
-one. The client cannot import the `.mjs`, so a client spec is the usual case. The gate, `a-poll-is-written-once`, reads
-the syntax tree for a loop that has a deadline read from the clock, an awaited sleep and a condition, outside the module
-and without the marker, and refuses it.
+**A site that asks a different question stays, with a marker** in the comment block directly above it. Which marker
+depends on the site:
+
+| The site | Marker | Gate |
+|---|---|---|
+| A hand-written poll loop (a deadline read from the clock, an awaited sleep and a condition) | `// waits-differently: <reason>` above the loop | `a-poll-is-written-once` |
+| A fixed delay (`await new Promise(r => setTimeout(r, ms))`, `timers/promises`' `setTimeout`, or a local helper that is only that promise) | `// waits-differently: <reason>` above the delay, or above the loop it sits in | `a-test-waits-and-listens-through-one-helper` |
+| A hand-bound server (any `.listen(...)`: no host, a host variable, `localhost`, `0.0.0.0`, a LAN address, or `127.0.0.1` spelled by hand) | `// own-listener: <reason>` above the statement, or above the `new Promise` statement that holds it | `a-test-waits-and-listens-through-one-helper` |
+
+The reason must say something: two words at least, and a bare marker or a one-word one is the site without one. A marker
+above a function covers nothing inside it. A listener keeps its own when it reads `server.address()` beyond the port,
+closes with timing that matters, tests connection lifetime, or has to bind a LAN address or every interface (the SSRF
+guards block loopback); a server that is only there to answer a request goes through `listenOnLoopback`. Both gates read
+the comment through one reader (`markerReason` in `testing/_shared/timer-sites.mjs`), and what counts as a sleep is
+decided once, there, for the poll gate and the delay gate alike. The client cannot import the `.mjs`, so a client spec is
+the usual case for a marker on a poll.
+
+**What the gates do not read:** `benchmarks/` (product-facing, with no dependency on the test tree, so it imports nothing
+from `testing/_shared`) and the client's `*.spec.ts` (Vitest's own, run with fake timers and its own conventions). The
+gates read every other tracked `.js` and `.mjs` under `testing/` and `scripts/`.
 
 ## How a new test file reaches CI
 

@@ -37,6 +37,7 @@ import { startFreezableRelay } from './_freezable-relay.mjs';
 import { holdDocumentLock, settleWithin } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -223,7 +224,7 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
     relay.freeze();
     try {
       // Let the monitor notice and clear the pool, as a paused store does after its first beat: the ping then waits its own bound.
-      await new Promise((r) => setTimeout(r, 2_500));
+      await sleep(2_500);
       let timing;
       const { lines } = await logLinesDuring(async () => { timing = await timed(() => queue.claimNextEmbedJob(ids)); });
       assert.equal(timing.value, null, 'a store that does not answer claims nothing');

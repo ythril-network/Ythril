@@ -42,6 +42,7 @@ import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollecti
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -56,8 +57,6 @@ async function rawGet(url) {
   const r = await fetch(url);
   return r.status;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Probe embedding readiness at USE time, not once. Readiness is defined by a full round-trip: a

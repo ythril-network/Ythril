@@ -84,6 +84,7 @@ export async function openFileActDoors({ suite, space: S }) {
   app.get('/api/sync/manifest', (_req, res) => res.json({ manifest: [], spaceId: S }));
   app.use((_req, res) => res.json({}));
   const host = privateHostAddress();
+  // own-listener: binds the private LAN address, because the SSRF guards block loopback
   const peer = await new Promise(r => { const s = app.listen(0, host, () => r(s)); });
   const peerUrl = `http://${host}:${peer.address().port}`;
 

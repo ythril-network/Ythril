@@ -42,7 +42,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -125,13 +127,12 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    base = `http://127.0.0.1:${server.address().port}`;
+    server = await listenOnLoopback(http.createServer(createApp()));
+    base = server.url;
   });
 
   after(async () => {
-    await new Promise(r => server?.close(r));
+    await server?.close();
     await closeTestMongo();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });

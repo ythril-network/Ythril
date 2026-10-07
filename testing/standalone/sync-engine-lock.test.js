@@ -33,6 +33,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { sleep } from '../_shared/sleep.mjs';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-sync-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
@@ -124,7 +125,7 @@ describe('sync engine — space id mapping', () => {
 describe('sync engine — the per-network dedup lock', () => {
   beforeEach(async () => {
     // Let any queued rerun from a previous test drain, so each starts from an idle lock.
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
   });
 
   it('reports a network as not syncing when idle', () => {
@@ -137,7 +138,7 @@ describe('sync engine — the per-network dedup lock', () => {
     const p = engine.runSyncForNetwork('net-empty');
     assert.equal(engine.isNetworkSyncing('net-empty'), true, 'lock should be held while in flight');
     await p;
-    await new Promise(r => setTimeout(r, 50));   // let the one queued rerun (if any) finish
+    await sleep(50);   // let the one queued rerun (if any) finish
     assert.equal(engine.isNetworkSyncing('net-empty'), false, 'lock should be released after');
   });
 
@@ -148,7 +149,7 @@ describe('sync engine — the per-network dedup lock', () => {
       Array.from({ length: 6 }, () => engine.runSyncForNetwork('net-empty')),
     );
     for (const r of results) assert.deepEqual(r, results[0]);
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
   });
 
   /*
@@ -200,13 +201,13 @@ describe('sync engine — the per-network dedup lock', () => {
     assert.equal(engine.isNetworkSyncing('net-empty'), true);
     assert.equal(engine.isNetworkSyncing('some-other-network'), false);
     await p;
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
   });
 
   it('completes a members-less cycle as a success, not an error', async () => {
     const result = await engine.runSyncForNetwork('net-empty');
     assert.deepEqual(result, { synced: 0, errors: 0 });
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
   });
 });
 

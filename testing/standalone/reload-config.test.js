@@ -28,6 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,7 +72,7 @@ async function applyConfig(cfg) {
   // Wait for Docker Desktop bind-mount propagation before triggering reload.
   // Without this delay the container may still read the pre-write file and
   // saveConfig() will write the stale version back, overwriting our change.
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await sleep(600);
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
   assert.equal(r.body.ok, true);
@@ -155,15 +156,15 @@ describe('POST /api/admin/reload-config — quota changes take effect', () => {
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
         writeConfig(originalConfig);
-        await new Promise(resolve => setTimeout(resolve, 600));
+        await sleep(600);
         const reloadR = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-        if (reloadR.status !== 200) { await new Promise(resolve => setTimeout(resolve, 400)); continue; }
+        if (reloadR.status !== 200) { await sleep(400); continue; }
         const probe = await post(INSTANCES.a, token, '/api/brain/spaces/general/facts', {
           fact: `__quota-cleanup-probe-${Date.now()}__`,
         });
         if (probe.status === 201) break;
       } catch { /* ignore, keep retrying */ }
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await sleep(400);
     }
   });
 
@@ -205,9 +206,9 @@ describe('POST /api/admin/reload-config — quota changes take effect', () => {
       body = r.body;
       if (status !== 201) {
         writeConfig(originalConfig);
-        await new Promise(resolve => setTimeout(resolve, 600));
+        await sleep(600);
         await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-        await new Promise(resolve => setTimeout(resolve, 400));
+        await sleep(400);
       }
     }
     assert.equal(status, 201,
@@ -238,9 +239,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
       if (probe.status === 201) break;
       // Server still has quota active — write the no-storage config and reload.
       writeConfig(originalConfig);
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await sleep(600);
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await sleep(400);
     }
   });
 
@@ -271,9 +272,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         break;
       }
       writeConfig(withNewSpace);
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await sleep(600);
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await sleep(400);
     }
     assert.ok(spaceVisible, `Space '${NEW_SPACE_ID}' should appear in /api/spaces after reload`);
 
@@ -288,7 +289,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // NEW_SPACE_ID is still in config from the previous test. A file that simply lacks it used to remove it with no
     // trace; now the running instance keeps it, and only an explicit removal takes it out.
     await applyConfig(originalConfig);
-    await new Promise(resolve => setTimeout(resolve, 400));
+    await sleep(400);
     const check = await fetch(`${INSTANCES.a}/api/spaces`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await check.json();
     assert.ok(data.spaces?.find(s => s.id === NEW_SPACE_ID), `'${NEW_SPACE_ID}' must survive a reload that only leaves it out`);
@@ -313,9 +314,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         break;
       }
       writeConfig(removal);
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await sleep(600);
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await sleep(400);
     }
     assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after a reload that lists it in removeSpaces`);
 

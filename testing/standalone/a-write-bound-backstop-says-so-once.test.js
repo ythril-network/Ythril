@@ -28,11 +28,11 @@ import { logLinesDuring } from './_log-lines.mjs';
 import { callBounded, withinWriteBound, setWriteBoundForTest, SERVER_FIRST_MARGIN_MS } from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 /** The bound the cases run at: small, so the backstop (bound + the margin) is a fraction of a second away. */
 const BOUND_MS = 40;
 const BOUND = { writeTimeoutMs: BOUND_MS, holdDeadlineMs: 5000 };
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** Where the calls go: a space's collection (the space is read from its name), and what the client inherits (nothing here). */
 const TARGET = { collection: 'sp1_facts', inheritedTimeoutMs: undefined };

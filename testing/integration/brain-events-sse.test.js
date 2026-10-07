@@ -17,6 +17,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, del } from '../sync/helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -60,8 +61,6 @@ function nextEvent(res) {
   });
 }
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
 describe('brain events SSE (F12)', () => {
   before(() => { tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim(); });
 
@@ -73,12 +72,12 @@ describe('brain events SSE (F12)', () => {
       assert.match(res.headers['content-type'] ?? '', /text\/event-stream/);
 
       const eventP = nextEvent(res);
-      await delay(300); // ensure the server-side subscription is active before we write
+      await sleep(300); // ensure the server-side subscription is active before we write
 
       const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `sse-probe-${Date.now()}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
 
-      const ev = await Promise.race([eventP, delay(10_000).then(() => { throw new Error('no SSE event within 10s'); })]);
+      const ev = await Promise.race([eventP, sleep(10_000).then(() => { throw new Error('no SSE event within 10s'); })]);
       assert.equal(ev.event, 'fact.created', `unexpected event: ${JSON.stringify(ev)}`);
       assert.equal(ev.id, w.body._id, 'event should carry the new record id');
 

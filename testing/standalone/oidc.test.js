@@ -338,6 +338,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -401,6 +402,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       } else { res.writeHead(404); res.end(); }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -484,6 +486,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -528,6 +531,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       } else { res.writeHead(404); res.end(); }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -590,6 +594,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       } else { res.writeHead(404); res.end(); }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -652,6 +657,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       } else { res.writeHead(404); res.end(); }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -714,6 +720,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       } else { res.writeHead(404); res.end(); }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();
@@ -771,6 +778,7 @@ describe('OIDC server module (compiled)', { skip: privateAddressSkipReason() }, 
       }
     });
 
+    // own-listener: binds the private LAN address in MOCK_IDP_HOST, because the issuer guard blocks loopback
     await new Promise(resolve => server.listen(0, MOCK_IDP_HOST, () => {
       serverPort = server.address().port;
       resolve();

@@ -35,8 +35,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-waiting-'));
@@ -73,13 +75,12 @@ describe('GET /api/spaces — indexWaiting', { skip }, () => {
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     scopedKey = (await tokens.createToken({ name: 'scoped', spaces: ['iw-wait', 'iw-ready', 'iw-failed'] })).plaintext;
     const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    base = `http://127.0.0.1:${server.address().port}`;
+    server = await listenOnLoopback(http.createServer(createApp()));
+    base = server.url;
   });
 
   after(async () => {
-    await new Promise(r => server?.close(r));
+    await server?.close();
     outage?.restore();
     readiness?.resetSearchReadyProbe();
     await closeTestMongo();

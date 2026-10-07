@@ -302,6 +302,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     res.json({ items: req.query.cursor ? [] : items, nextCursor: null });
   });
   app.use((_req, res) => { res.status(404).json({ error: 'not served by the fake peer' }); });
+  // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
   const server = await new Promise(resolve => { const s = app.listen(0, '0.0.0.0', () => resolve(s)); });
   const url = `http://${host}:${server.address().port}`;
 

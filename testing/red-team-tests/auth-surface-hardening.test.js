@@ -34,6 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, dockerExec } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -362,7 +363,7 @@ describe('M8 — a TOTP code cannot be replayed inside its validity window', () 
         const r = await fetch(`${INSTANCES.a}/health`);
         if (r.ok) return;
       } catch { /* stale socket / still booting */ }
-      await new Promise(res => setTimeout(res, 500));
+      await sleep(500);
     }
     throw new Error('instance A did not come back after restart');
   }

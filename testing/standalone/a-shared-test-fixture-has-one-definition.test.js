@@ -20,10 +20,14 @@
  * ## What it does not claim
  *
  * Its title says "has one definition", and the body checks the rows below, not every helper in the suite. A row is
- * added when a second copy is extracted, which is exactly when the spelling is known; the older test files that still
- * define their own `sleep` are not rows because they would fail today. What IS held: `sleep` in the timing fixtures
- * (`_fixtures/`) and in every helper module (the files other tests import), and a helper's loopback server. A copy spelled so differently that no row's pattern sees it is
- * not caught — the patterns are the shape each copy had, not a proof about every possible one.
+ * added when a second copy is extracted, which is exactly when the spelling is known. What IS held here: the timing
+ * fixtures (`_fixtures/`) take their `sleep` from the one export. A copy spelled so differently that no row's pattern
+ * sees it is not caught — the patterns are the shape each copy had, not a proof about every possible one.
+ *
+ * What is NOT held here any more, because one gate per rule: a hand-written fixed delay and a hand-bound test server,
+ * in a helper or in a test. Those two had regex rows in this file, over helper modules only; they are read out of the
+ * syntax tree, over every tracked test and script, by `a-test-waits-and-listens-through-one-helper` (the classifier is
+ * `testing/_shared/timer-sites.mjs`).
  *
  * Run: node --test testing/standalone/a-shared-test-fixture-has-one-definition.test.js
  */
@@ -110,19 +114,6 @@ describe('a shared fixture or helper is defined in one module', () => {
     assert.deepEqual(notImporting, [], 'these fixtures call sleep and do not import it from testing/_shared/sleep.mjs');
   });
 
-  it('a helper module (not a test) delays through the one sleep, never an inline timer promise', () => {
-    // The helpers are the modules other tests IMPORT: a copy in one is a copy for every file that uses it. The one other
-    // home is the wait's own poll interval, which is clamped to the deadline and is not a fixed delay.
-    const HOMES = ['testing/_shared/sleep.mjs', 'testing/_shared/wait-for.mjs'];
-    const helpers = sources.filter(s => /^(?:testing\/_shared\/|testing\/standalone\/_|scripts\/)/.test(s.file) && !s.file.endsWith('.test.js'));
-    assert.ok(helpers.length >= 40, `only ${helpers.length} helper module(s) scanned — the scan is not looking at the helpers`);
-    const inlineSleep = (code) => /new Promise\(\s*\(?\s*\w+\s*\)?\s*=>\s*setTimeout\(/.test(code);
-    const spelling = helpers.filter(s => inlineSleep(s.code)).map(s => s.file).sort();
-    assert.deepEqual(spelling, HOMES, 'a helper module types `new Promise(r => setTimeout(r, ms))` itself: import `sleep` from testing/_shared/sleep.mjs');
-    assert.ok(inlineSleep('await new Promise(r => setTimeout(r, 50));') && inlineSleep('new Promise((resolve) => setTimeout(resolve, ms))'), 'the pattern does not see its own subject');
-    assert.ok(!inlineSleep('await sleep(50);'), 'the pattern fires on the import it is meant to allow');
-  });
-
   it('the timing helpers and the skips reader take the repository root from _sources.mjs', () => {
     // Not a row over the whole tree: older files re-derive it from `import.meta.url` and would fail today. These two were
     // each handed the root by the module that owns it and re-derived it anyway, which is the copy this holds out. The skips
@@ -134,16 +125,6 @@ describe('a shared fixture or helper is defined in one module', () => {
       assert.match(code, /\bREPO_ROOT\b[^;]*from\s+'[^']*_sources\.mjs'/, `${file} does not import REPO_ROOT from _sources.mjs`);
       assert.doesNotMatch(code, /dirname\(fileURLToPath\(import\.meta\.url\)\)/, `${file} derives the repository root from its own location again`);
     }
-  });
-
-  it('a helper that starts a server on loopback ends it through listenOnLoopback, not its own listen-and-close', () => {
-    const helpers = sources.filter(s => /^(?:testing\/_shared\/|testing\/standalone\/_)/.test(s.file) && !s.file.endsWith('.test.js'));
-    const HOME = 'testing/_shared/local-server.mjs';
-    // `app.listen(0, '127.0.0.1')` / `server.listen(0, ...)`: a port picked by the OS, which a fixture then has to close.
-    const binds = (code) => /\.listen\(\s*0\s*,\s*['"]127\.0\.0\.1['"]/.test(code);
-    const spelling = helpers.filter(s => binds(s.code)).map(s => s.file).sort();
-    assert.deepEqual(spelling, [HOME], 'a helper binds a loopback port itself: hand its server to listenOnLoopback (it ends the sockets a client left open)');
-    assert.ok(binds("server = createApp().listen(0, '127.0.0.1');") && !binds('server.listen(port)'), 'the pattern does not see its own subject');
   });
 
   it('the patterns see a copy: each row finds a file it was written for, and ignores one that is not a copy', () => {

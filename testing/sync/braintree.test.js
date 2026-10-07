@@ -35,6 +35,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe, readRecord, createTestSpace } from './helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -226,7 +227,7 @@ describe('Braintree topology (A -> B -> C)', () => {
     // Wait a short time and verify this specific memory is NOT on B.
     // Negative assertion — a fixed wait is correct here; do NOT convert to waitFor (Q3), which would
     // return instantly on the absent record and prove nothing.
-    await new Promise(r => setTimeout(r, 3000));
+    await sleep(3000);
     const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', leafMemId);
     assert.equal(r.status, 404, 'Leaf fact should NOT have propagated to B');
     console.log(`  Leaf fact correctly absent from B ✓`);
@@ -244,7 +245,7 @@ describe('Braintree topology (A -> B -> C)', () => {
     await triggerSync(INSTANCES.a, tokenA, networkId);
 
     // Negative assertion (see above) — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await new Promise(r => setTimeout(r, 3000));
+    await sleep(3000);
     const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', nodeMemId);
     assert.equal(r.status, 404, 'Node fact should NOT have propagated to A');
     console.log(`  Node fact correctly absent from A ✓`);

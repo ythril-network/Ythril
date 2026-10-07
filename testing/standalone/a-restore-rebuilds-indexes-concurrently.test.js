@@ -22,6 +22,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blankComments } from './_strip-comments.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 let mapLimit;
 before(async () => { ({ mapLimit } = await import('../../server/dist/util/map-limit.js')); });
@@ -31,7 +32,7 @@ describe('mapLimit, the one bounded-concurrency helper', () => {
     let inFlight = 0, peak = 0;
     const out = await mapLimit([30, 5, 20, 1, 10, 15], 3, async (ms, i) => {
       inFlight++; peak = Math.max(peak, inFlight);
-      await new Promise(r => setTimeout(r, ms));
+      await sleep(ms);
       inFlight--;
       return i;
     });
@@ -41,7 +42,7 @@ describe('mapLimit, the one bounded-concurrency helper', () => {
 
   it('runs concurrently: six 50 ms items at limit 3 finish in about two rounds, not six', async () => {
     const t0 = Date.now();
-    await mapLimit([1, 2, 3, 4, 5, 6], 3, () => new Promise(r => setTimeout(r, 50)));
+    await mapLimit([1, 2, 3, 4, 5, 6], 3, () => sleep(50));
     const took = Date.now() - t0;
     assert.ok(took < 250, `took ${took} ms — the items ran one after another`);
   });

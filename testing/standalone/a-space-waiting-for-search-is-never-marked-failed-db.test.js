@@ -42,6 +42,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -67,7 +68,6 @@ const rec = (spaceId, id, extra = {}) => {
   return { _id: id, spaceId, name: id, type: 'thing', tags: [], properties: {}, embedding: unitAt(5, DIMS),
     embeddingModel: 'stub', seq: ++seq, createdAt: now, updatedAt: now, ...extra };
 };
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const statusOf = (id) => loader.getConfig().spaces.find(s => s.id === id)?.indexStatus;
 const spaceDef = (id) => ({ id, label: id, folders: [], completeLinkage: true });
 

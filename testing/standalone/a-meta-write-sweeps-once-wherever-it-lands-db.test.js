@@ -38,6 +38,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { eventually } from './_write-faults.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'metasweep';
@@ -68,7 +69,7 @@ describe('a meta write sweeps once, wherever it lands', { skip }, () => {
   beforeEach(async () => {
     await door.wipe(S);
     spaces.updateSpace(S, { meta: {} });
-    await new Promise(r => setTimeout(r, 200));
+    await sleep(200);
   });
 
   it('two meta writes in one turn sweep once, against the later meta', async () => {
@@ -79,7 +80,7 @@ describe('a meta write sweeps once, wherever it lands', { skip }, () => {
       await until(async () => !(await hasVector('fa')) && !(await hasVector('fb')),
         'the sweep did not remove both vectors');
       // Room for a second sweep to show itself, had one started.
-      await new Promise(r => setTimeout(r, 500));
+      await sleep(500);
     });
     const updates = commands.filter(c => c === `update ${S}_facts`);
     assert.equal(updates.length, 1,

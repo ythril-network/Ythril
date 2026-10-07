@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -44,7 +45,7 @@ process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = tmpDir;
 process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
-let server, mongo, cascade, pipeline, lease;
+let server, local, mongo, cascade, pipeline, lease;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const jobs = () => mongo.col(`${SPACE}_media_jobs`);
@@ -86,8 +87,8 @@ describe('a moved file leaves nothing at its old path (real MongoDB)', { skip },
         res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: DIMS }, (_, i) => i / DIMS) }] }));
       });
     });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify(
       { spaces: [{ id: SPACE, label: 'General' }], networks: [], tokens: [] }, null, 2,
     ));
@@ -100,7 +101,7 @@ describe('a moved file leaves nothing at its old path (real MongoDB)', { skip },
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(resolve => server.close(resolve));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

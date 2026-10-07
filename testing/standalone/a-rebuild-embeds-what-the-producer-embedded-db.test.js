@@ -38,6 +38,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -54,7 +55,7 @@ let seen = [];
 /** 'ok' answers; '503' is a transient refusal; '400' is a per-record one. */
 let mode = 'ok';
 
-let server, mongo, embedRecord, embedText, loader, fact, entities, edges, chrono, fileMeta, worker, queue;
+let server, local, mongo, embedRecord, embedText, loader, fact, entities, edges, chrono, fileMeta, worker, queue;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const vectorFor = (text) => Array.from({ length: DIMS }, (_, i) => ((text.length + i) % 10) / 10 + 0.05);
@@ -85,8 +86,8 @@ describe('a rebuild embeds what the producer embedded (real MongoDB, real embed(
         res.end(JSON.stringify({ data: [{ embedding: vectorFor(input) }] }));
       });
     });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(
       { spaces: [{ id: SPACE, label: 'General' }], networks: [], tokens: [] }, null, 2,
@@ -107,7 +108,7 @@ describe('a rebuild embeds what the producer embedded (real MongoDB, real embed(
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(resolve => server.close(resolve));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
