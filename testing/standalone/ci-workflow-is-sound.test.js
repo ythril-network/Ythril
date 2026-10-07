@@ -50,10 +50,12 @@ import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 import {
-  MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, isCommitPinned, stepsUsing,
-  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue,
+  MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, shellCommands, usesOf, isCommitPinned, stepsUsing,
+  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf,
+  workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction,
 } from '../_shared/ci-workflow.mjs';
-import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
+import { parseSource, ts } from '../_shared/syntax-tree.mjs';
+import { GOOD_CI, GOOD_PREFLIGHT, CLIENT_COMMAND } from '../_shared/ci-workflow-fixture.mjs';
 
 const REAL = loadCi();
 const GOOD = parseWorkflow(GOOD_CI, 'the conforming fixture');
@@ -501,10 +503,18 @@ function gateEvidenceViolations(doc) {
 
 /** The client's unit tests write the JSON report the aggregator reads (`client.json`), beside the node ones. */
 const CLIENT_REPORT = 'test-results/client.json';
+
+/**
+ * What a command that runs the client's unit tests looks like. THE finder: `clientReportViolations` reads the CI job with
+ * it and `preflightClientParityViolations` reads `scripts/preflight.mjs` with it, so the two cannot disagree about which
+ * line is "the client run" (the parity rule would otherwise hold a command equal to a different one).
+ */
+const CLIENT_RUN = /\btest:client\b|\bvitest\b|\bnpm run test\b[^\n]*--workspace[ =]client/;
+
 function clientReportViolations(doc) {
   const job = doc.jobs?.['client-tests'];
   if (!job) return ['no client-tests job'];
-  const runs = stepsOf(job).filter((s) => /\btest:client\b|\bvitest\b|\bnpm run test\b[^\n]*--workspace[ =]client/.test(shellOf(s)));
+  const runs = stepsOf(job).filter((s) => CLIENT_RUN.test(shellOf(s)));
   if (runs.length !== 1) return [`${runs.length} step(s) run the client's unit tests; exactly one`];
   const text = shellOf(runs[0]);
   const v = [];
@@ -652,9 +662,227 @@ function stackInstanceViolations(doc, scripts = packageScripts()) {
   return v;
 }
 
+// ───────────────────────────────────────── the job's name is the record's key ─────────────────────────────────────────
+
+/** `test-results-<X>-${{ github.run_attempt }}` gives `<X>`; any other spelling gives null. */
+const resultsNameJob = (name) => /^test-results-(.+?)-\$\{\{\s*github\.run_attempt\s*\}\}$/.exec(String(name))?.[1] ?? null;
+
+/**
+ * The recorder (`scripts/test-times.mjs`) reads the JOB of a CI record from its results artifact's name, the
+ * `test-results-<X>-` segment, and keys the record by it. An upload named for a display name, a renamed job or another
+ * job's id puts a record under a job that does not exist (or over another job's record), and nothing complains: the
+ * record is written, the run counts as recorded. So the segment is the id of the job the upload sits in, read from the
+ * workflow and not from a table of names kept beside it.
+ */
+function uploadNameViolations(doc) {
+  const v = [];
+  let seen = 0;
+  for (const { id, job } of jobEntries(doc)) {
+    for (const s of stepsUsing(job, 'actions/upload-artifact')) {
+      const name = String(s.with?.name ?? '');
+      if (!/^test-results/.test(name)) continue;
+      seen++;
+      const named = resultsNameJob(name);
+      if (named == null) {
+        v.push(`${id}: the results artifact "${name}" is not test-results-<job id>-\${{ github.run_attempt }}; the recorder reads the job from that segment`);
+      } else if (named !== id) {
+        v.push(`${id}: the results artifact "${name}" names \`${named}\`, not \`${id}\`; the recorder keys the job's record by that segment, so the record would carry another name than the job's id`);
+      }
+    }
+  }
+  if (seen < RESULTS_JOB_FLOOR) v.push(`only ${seen} results upload(s) (floor ${RESULTS_JOB_FLOOR}): the derivation is broken, or the results are not kept`);
+  return v;
+}
+
+// ───────────────────────────────────────── no credential reaches repository code ─────────────────────────────────────────
+
+const CHECKOUT = 'actions/checkout';
+
+/**
+ * Every step of a parsed document that runs steps: a workflow's jobs, or a composite action's `runs.steps`, each with a
+ * label and the job it sits in (null for an action).
+ */
+function stepEntries(doc) {
+  if (doc.jobs && typeof doc.jobs === 'object') {
+    return jobEntries(doc).flatMap(({ id, job }) => stepsOf(job).map((step, i) => ({ where: `${id} step ${i + 1}`, job, step })));
+  }
+  return stepsOf(doc.runs ?? {}).map((step, i) => ({ where: `action step ${i + 1}`, job: null, step }));
+}
+
+/**
+ * Does the checkout leave its token in `.git/config` for every later step. The action's default is yes, so a missing input
+ * persists; only a literal false turns it off, read in the two spellings YAML gives it (the boolean, the string) and any
+ * case. An expression, an empty string or anything `isTrue` reads as on persists. `isTrue` is the shared reading of "on".
+ */
+const persistsCredentials = (step) => {
+  const v = step.with?.['persist-credentials'];
+  return v === undefined || isTrue(v) || !/^false$/i.test(String(v).trim());
+};
+
+/**
+ * The persisted token is the credential every step after a checkout can read from disk — the tests, every dependency a
+ * test imports, and the job log's `git remote -v`. A job that runs repository code needs none of it (it reads the
+ * checkout, it does not push), so each checkout declares `persist-credentials: false`.
+ */
+function checkoutCredentialViolations(doc) {
+  const v = [];
+  for (const { where, step } of stepEntries(doc)) {
+    if (usesOf(step)?.action !== CHECKOUT || !persistsCredentials(step)) continue;
+    const given = step.with?.['persist-credentials'];
+    v.push(`${where}: actions/checkout has persist-credentials ${given === undefined ? 'unset (the default keeps the token)' : `\`${given}\``}; set \`persist-credentials: false\`, or the token stays in .git/config for every step after it`);
+  }
+  return v;
+}
+
+/** `'...'` literals out of an expression, so a word inside a string (`contains(body, 'secrets')`) is not read as a context. */
+const withoutStrings = (expr) => expr.replace(/'(?:[^']|'')*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+
+/**
+ * What an expression names that is, or holds, a credential — or null. Every spelling of the same credential, because a rule
+ * that read only `secrets.X` was satisfied by `github.token`, `github['token']`, `toJSON(github)` and `toJSON(secrets)`.
+ */
+function credentialIn(expr) {
+  if (/\bgithub\s*\[\s*(['"])token\1\s*\]/.test(expr)) return "github['token']";
+  const bare = withoutStrings(expr);
+  if (/\bsecrets\b/.test(bare)) return 'the secrets context';
+  if (/\bgithub\s*\.\s*token\b/.test(bare)) return 'github.token';
+  if (/\bgithub\b(?!\s*[.[])/.test(bare)) return 'the whole github context (it holds the token)';
+  return null;
+}
+
+/** The `${{ … }}` expressions of a string; for an `if:` value the whole string when it carries no braces. */
+function* expressionsIn(text, key) {
+  let braced = false;
+  for (const m of text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) { braced = true; yield m[1]; }
+  if (!braced && key === 'if') yield text;
+}
+
+/**
+ * The one credential a job may be handed: `github.token` as the advisory job's `GH_TOKEN` (the baseline read of the last
+ * runs of main), at a step of a job `isAdvisory` calls advisory. The runtime cache token (`ACTIONS_RUNTIME_TOKEN`) is set by
+ * an action's own code and never appears as an expression; `runtimeTokenViolations` governs where that action sits.
+ */
+function isAdvisoryGhToken(doc, path, value) {
+  const [top, id, steps, , env, name] = path;
+  if (top !== 'jobs' || steps !== 'steps' || env !== 'env' || name !== 'GH_TOKEN' || path.length !== 6) return false;
+  return isAdvisory(doc.jobs[id]) && /^\$\{\{\s*github\.token\s*\}\}$/.test(String(value).trim());
+}
+
+/**
+ * No credential expression anywhere in the PARSED document — env, with:, if:, run, a job's `name`, every value — beyond the
+ * advisory job's `GH_TOKEN`. The job log is public and the console is not masked, so a credential that reaches repository
+ * code reaches the log; the gate holds the cause (nothing is handed over) and not the symptom.
+ */
+function credentialExpressionViolations(doc) {
+  const v = [];
+  const walk = (node, path) => {
+    if (typeof node === 'string') {
+      for (const expr of expressionsIn(node, path.at(-1))) {
+        const what = credentialIn(expr);
+        if (what && !isAdvisoryGhToken(doc, path, node)) {
+          v.push(`${path.join('.')}: \`${expr.trim()}\` reads ${what}; nothing in this file may hand a credential to a step (only github.token as the advisory job's GH_TOKEN)`);
+        }
+      }
+    } else if (Array.isArray(node)) {
+      node.forEach((x, i) => walk(x, [...path, i]));
+    } else if (node && typeof node === 'object') {
+      for (const [k, x] of Object.entries(node)) walk(x, [...path, k]);
+    }
+  };
+  walk(doc, []);
+  return v;
+}
+
+/**
+ * The documents the two rules above are NOT run over, each with the reason and a check that the reason still holds. A
+ * file added to this table is a decision about a credential reaching a job, so it states why, and the reason is a
+ * property of the file that is read back — a reason nobody re-reads is how a "tag-only" workflow gains a pull_request.
+ */
+const CREDENTIAL_ALLOWLIST = {
+  '.github/workflows/publish.yml': {
+    reason: 'runs on a version tag or a manual dispatch only, and writes the image and the release, so it holds the registry secrets and a write token on purpose',
+    holds(doc) {
+      const on = doc.on ?? doc[true];
+      const events = [...triggersOf(doc)];
+      const v = events.filter((e) => !['push', 'workflow_dispatch'].includes(e)).map((e) => `the \`${e}\` trigger can run it for code nobody released`);
+      if (events.includes('push') && (!on.push?.tags?.length || on.push.branches)) v.push('its push trigger is not tags-only');
+      return v;
+    },
+  },
+  '.github/workflows/cla.yml': {
+    reason: 'runs on pull_request_target with the base repository secrets and executes no repository code: it has no checkout and no local action',
+    holds: (doc) => stepEntries(doc)
+      .filter(({ step }) => usesOf(step)?.action === CHECKOUT || (typeof step.uses === 'string' && step.uses.startsWith('./')))
+      .map(({ where }) => `${where} brings repository code into a job that holds the base repository's secrets`),
+  },
+};
+
+/** The floor on checkouts the real scan must meet: ci.yml's jobs and image-pin-check's, at the least. */
+const CHECKOUT_FLOOR = 8;
+
+/** Every tracked document the rules read, `[{ file, doc }]`: workflows, then local actions. */
+const trackedDocuments = () => [
+  ...workflowFiles().map((file) => ({ file, doc: loadWorkflow(file) })),
+  ...actionFiles().map((file) => ({ file, doc: loadAction(file) })),
+];
+
+/** Files that are neither run through the rules nor on the allowlist: a document the rules never read. */
+const unaccountedFor = (files, scanned, allowlist) => files.filter((f) => !scanned.includes(f) && !(f in allowlist));
+
+// ───────────────────────────────────────── preflight runs what CI runs ─────────────────────────────────────────
+
+/** The client commands in a script: its simple commands that the finder reads as the client's unit-test run. */
+const clientCommandsIn = (script) => shellCommands(script).filter((c) => CLIENT_RUN.test(c));
+
+/** One command, whitespace collapsed: two spellings of the same line are one command. */
+const normalised = (c) => c.trim().replace(/\s+/g, ' ');
+
+/**
+ * The client commands a source file hands to a call as a string literal (`run('npm run test:client')`). A literal that is
+ * not an argument (a gate's name in an object, a heading) is not a command, and a comment is not read at all.
+ */
+function clientCommandsInSource(file, text) {
+  const found = [];
+  const visit = (n) => {
+    if (ts.isCallExpression(n)) {
+      for (const a of n.arguments) {
+        if (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) found.push(...clientCommandsIn(a.text));
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(parseSource(file, text));
+  return found;
+}
+
+/**
+ * The local pre-push run must run the client's tests the way CI does, or a green preflight says nothing about the run CI
+ * will make (and its report, the one `test-times --record` reads, is a different report): `npm run test:client` runs a
+ * different command from the workflow's, which names the reporters and the output file. One command is found on each side,
+ * by the same finder, and the two are equal.
+ */
+function preflightClientParityViolations(doc, preflightText, file = 'scripts/preflight.mjs') {
+  const job = doc.jobs?.['client-tests'];
+  if (!job) return ['no client-tests job'];
+  const inCi = stepsOf(job).flatMap((s) => clientCommandsIn(shellOf(s)));
+  const inPreflight = clientCommandsInSource(file, preflightText);
+  const v = [];
+  if (inCi.length !== 1) v.push(`ci.yml's client-tests job runs the client's unit tests ${inCi.length} time(s); exactly one command`);
+  if (inPreflight.length !== 1) {
+    v.push(`${file} hands ${inPreflight.length} client unit-test command(s) to a call (${inPreflight.map((c) => `\`${c}\``).join('; ') || 'none'}); exactly one, as one string literal`);
+  }
+  if (inCi.length === 1 && inPreflight.length === 1 && normalised(inCi[0]) !== normalised(inPreflight[0])) {
+    v.push(`preflight runs \`${normalised(inPreflight[0])}\` but ci.yml runs \`${normalised(inCi[0])}\`: run the same command, so the local run makes the report CI makes`);
+  }
+  return v;
+}
+
 // ───────────────────────────────────────── the rules, and how each is held ─────────────────────────────────────────
 
 const RULES = {
+  'checkout credentials': checkoutCredentialViolations,
+  'credential expressions': credentialExpressionViolations,
+  'results upload names': uploadNameViolations,
   'advisory summary': advisorySummaryViolations,
   'gate evidence': gateEvidenceViolations,
   'client report': clientReportViolations,
@@ -920,6 +1148,62 @@ const BREAKAGES = [
     d.jobs.redteam = clone(job(d, 'sync'));
     stepWhere(job(d, 'redteam'), (x) => /compose/.test(x.run ?? '')).run = 'docker compose -f testing/docker-compose.test.yml up -d --wait';
   }, 'stack jobs', /redteam: .*--no-build/],
+
+  ...[
+    ['loses its persist-credentials input (the default keeps the token)', (s) => { delete s.with['persist-credentials']; }, /unset/],
+    ['has no `with` at all', (s) => { delete s.with; }, /unset/],
+    ['sets persist-credentials: true', (s) => { s.with['persist-credentials'] = true; }, /`true`/],
+    ['sets persist-credentials to the string true', (s) => { s.with['persist-credentials'] = 'true'; }, /`true`/],
+    ['leaves persist-credentials to an expression', (s) => { s.with['persist-credentials'] = '${{ vars.PERSIST }}'; }, /vars\.PERSIST/],
+    ['sets persist-credentials to an empty string', (s) => { s.with['persist-credentials'] = ''; }, /persist-credentials/],
+  ].map(([what, mutate, expected]) => [`a stack job's checkout ${what}`, (d) => {
+    mutate(stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/checkout'));
+  }, 'checkout credentials', expected]),
+  ['the gate job\'s checkout keeps the token', (d) => {
+    delete stepWhere(job(d, 'test'), (x) => usesOf(x)?.action === 'actions/checkout').with;
+  }, 'checkout credentials', /test step \d+: actions\/checkout/],
+  ['the advisory job\'s checkout keeps the token', (d) => {
+    delete stepWhere(job(d, 'ci-advisory'), (x) => usesOf(x)?.action === 'actions/checkout').with;
+  }, 'checkout credentials', /ci-advisory step \d+: actions\/checkout/],
+
+  ...[
+    ['a secret in a step env', (d) => { job(d, 'sync').steps[0].env = { TOKEN: '${{ secrets.NPM_TOKEN }}' }; }, /secrets/],
+    ['a secret read by index', (d) => { job(d, 'sync').steps[0].env = { TOKEN: "${{ secrets['NPM_TOKEN'] }}" }; }, /secrets/],
+    ['the workflow token as a secret', (d) => {
+      job(d, 'sync').steps[0].with = { ...job(d, 'sync').steps[0].with, token: '${{ secrets.GITHUB_TOKEN }}' };
+    }, /secrets/],
+    ['the workflow token as github.token in a stack job', (d) => { job(d, 'sync').steps[0].env = { GH_TOKEN: '${{ github.token }}' }; }, /github\.token/],
+    ['the workflow token as github[\'token\']', (d) => { job(d, 'sync').steps[0].env = { T: "${{ github['token'] }}" }; }, /github\['token'\]/],
+    ['the workflow token as github["token"]', (d) => { job(d, 'sync').steps[0].env = { T: '${{ github["token"] }}' }; }, /github\['token'\]/],
+    ['the whole github context', (d) => { job(d, 'sync').steps[0].env = { CTX: '${{ toJSON(github) }}' }; }, /whole github context/],
+    ['every secret at once', (d) => { job(d, 'sync').steps[0].env = { CTX: '${{ toJSON(secrets) }}' }; }, /secrets/],
+    ['a secret in a condition', (d) => { job(d, 'sync').steps[0].if = "secrets.NPM_TOKEN != ''"; }, /secrets/],
+    ['a secret in the script text', (d) => { stepWhere(job(d, 'sync'), (x) => /build:server/.test(x.run ?? '')).run = 'echo ${{ secrets.NPM_TOKEN }} | npm login'; }, /secrets/],
+    ['the workflow token in the script text', (d) => { stepWhere(job(d, 'sync'), (x) => /build:server/.test(x.run ?? '')).run = 'echo ${{ github.token }}'; }, /github\.token/],
+    ['the workflow token in the advisory job under another name', (d) => {
+      stepWhere(job(d, 'ci-advisory'), (x) => x.env?.GH_TOKEN).env.OTHER = '${{ github.token }}';
+    }, /github\.token/],
+    ['the workflow token in the advisory job\'s own env, not a step\'s', (d) => {
+      job(d, 'ci-advisory').env = { GH_TOKEN: '${{ github.token }}' };
+    }, /jobs\.ci-advisory\.env\.GH_TOKEN/],
+    ['the advisory job\'s token once the job is not advisory', (d) => { delete job(d, 'ci-advisory')['continue-on-error']; }, /github\.token/],
+    ['the advisory token in the gate', (d) => { stepsOf(job(d, 'test'))[0].env = { GH_TOKEN: '${{ github.token }}' }; }, /jobs\.test\./],
+  ].map(([what, mutate, expected]) => [`a credential: ${what}`, mutate, 'credential expressions', expected]),
+
+  ['an upload is named for the job\'s display name', (d) => {
+    stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-Sync-${{ github.run_attempt }}';
+  }, 'results upload names', /names `Sync`, not `sync`/],
+  ['an upload is named for another job', (d) => {
+    stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-integration-${{ github.run_attempt }}';
+  }, 'results upload names', /names `integration`, not `sync`/],
+  ['a job is renamed and its upload is not', (d) => {
+    d.jobs['sync-2'] = d.jobs.sync;
+    delete d.jobs.sync;
+    d.jobs.test.needs = d.jobs.test.needs.map((n) => (n === 'sync' ? 'sync-2' : n));
+  }, 'results upload names', /sync-2: .*names `sync`, not `sync-2`/],
+  ['an upload name has no job segment', (d) => {
+    stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-${{ github.run_attempt }}';
+  }, 'results upload names', /is not test-results-<job id>/],
 ];
 
 describe('ci.yml — the rules, held against the real workflow', () => {
@@ -1066,4 +1350,153 @@ describe('ci.yml — other ways of writing the same rule are accepted, so the ga
     stepsOf(gate.job)[0]['continue-on-error'] = 'true';
     assert.ok(mergeGateViolations(d).some((m) => /continue-on-error/.test(m)), "a step with continue-on-error: 'true' still cannot be allowed on the gate");
   });
+});
+
+// ───────────────────────────────────────── every tracked workflow and composite action ─────────────────────────────────────────
+
+describe('every tracked workflow and composite action — no credential reaches repository code', () => {
+  /** The documents the rules run over: every tracked one the allowlist does not name. */
+  const covered = () => trackedDocuments().filter(({ file }) => !(file in CREDENTIAL_ALLOWLIST));
+
+  it('derives the documents from git: workflows and local actions, ci.yml among them', () => {
+    const files = trackedDocuments().map((d) => d.file);
+    assert.ok(files.includes('.github/workflows/ci.yml'), 'ci.yml is not among the tracked documents');
+    assert.ok(files.some((f) => f.startsWith('.github/actions/')), 'no local action was read: a composite action is a place a checkout or a credential hides');
+    assert.ok(files.length >= 4, `only ${files.length} document(s) read: the derivation is broken`);
+  });
+
+  it('every checkout of a covered document sets persist-credentials: false', () => {
+    const found = covered().flatMap(({ file, doc }) => checkoutCredentialViolations(doc).map((m) => `${file}: ${m}`));
+    assert.deepEqual(found, [], `a checkout that keeps its token leaves it on disk for the tests and every dependency they import:\n  ${found.join('\n  ')}`);
+  });
+
+  it('no covered document hands a credential to a step, beyond the advisory job\'s GH_TOKEN', () => {
+    const found = covered().flatMap(({ file, doc }) => credentialExpressionViolations(doc).map((m) => `${file}: ${m}`));
+    assert.deepEqual(found, [], `the job log is public and not masked:\n  ${found.join('\n  ')}`);
+  });
+
+  it('the scan sees enough checkouts for "every checkout" to mean something', () => {
+    const seen = covered().reduce((n, { doc }) => n + stepEntries(doc).filter(({ step }) => usesOf(step)?.action === CHECKOUT).length, 0);
+    assert.ok(seen >= CHECKOUT_FLOOR, `only ${seen} checkout(s) scanned (floor ${CHECKOUT_FLOOR}): the derivation of the documents or of their steps is broken`);
+  });
+
+  it('every tracked document is covered by the rules or on the allowlist, and the allowlist names only tracked files', () => {
+    const files = trackedDocuments().map((d) => d.file);
+    const scanned = covered().map((d) => d.file);
+    assert.deepEqual(unaccountedFor(files, scanned, CREDENTIAL_ALLOWLIST), [], 'a document the rules never read');
+    assert.deepEqual(Object.keys(CREDENTIAL_ALLOWLIST).filter((f) => !files.includes(f)), [], 'an allowlist entry names a file that is not tracked: remove it, or it excuses a file that returns');
+  });
+
+  it('each allowlist entry states its reason, and the reason still holds of the file', () => {
+    for (const [file, { reason, holds }] of Object.entries(CREDENTIAL_ALLOWLIST)) {
+      assert.ok(reason.split(/\s+/).length >= 8, `${file}: the reason is a label, not a reason`);
+      const broken = holds(loadWorkflow(file));
+      assert.deepEqual(broken, [], `${file} is allowed because: ${reason}. It no longer holds:\n  ${broken.join('\n  ')}`);
+    }
+  });
+});
+
+describe('the credential rules, held against their own truth tables', () => {
+  it('names a credential in every spelling, and none in an expression that only reads the run', () => {
+    for (const expr of [
+      'secrets.NPM_TOKEN', " secrets['NPM_TOKEN'] ", 'secrets', 'toJSON(secrets)', 'github.token', 'github . token', "github['token']", 'github["token"]',
+      'toJSON(github)', "format('{0}', github)", "github.event_name == 'push' && github.token", "inputs.x || secrets.GITHUB_TOKEN",
+    ]) assert.ok(credentialIn(expr), `\`${expr}\` holds a credential and was not found`);
+    for (const expr of [
+      'github.event_name', "github.event_name == 'push' && github.ref == 'refs/heads/main'", 'github.run_attempt', 'github.actor', 'github.token_name',
+      'needs.sync.result', 'steps.meta.outputs.tags', "contains(github.event.comment.body, 'secrets')", "github['ref']", 'vars.TOKEN', 'env.GH_TOKEN', 'matrix.os',
+    ]) assert.equal(credentialIn(expr), null, `\`${expr}\` names no credential and was refused`);
+  });
+
+  it('reads persist-credentials as off only when it is a literal false', () => {
+    const checkout = (w) => ({ uses: 'actions/checkout@v4', ...(w === undefined ? {} : { with: w }) });
+    for (const [what, step, persists] of [
+      ['absent', checkout(), true], ['no value', checkout({ 'fetch-depth': 0 }), true], ['true', checkout({ 'persist-credentials': true }), true],
+      ["'true'", checkout({ 'persist-credentials': 'true' }), true], ["'TRUE'", checkout({ 'persist-credentials': 'TRUE' }), true],
+      ['an expression', checkout({ 'persist-credentials': '${{ vars.P }}' }), true], ['empty', checkout({ 'persist-credentials': '' }), true],
+      ['null', checkout({ 'persist-credentials': null }), true],
+      ['false', checkout({ 'persist-credentials': false }), false], ["'false'", checkout({ 'persist-credentials': 'false' }), false],
+      ["'False'", checkout({ 'persist-credentials': 'False' }), false],
+    ]) assert.equal(persistsCredentials(step), persists, `persist-credentials ${what}`);
+  });
+
+  it('reads a composite action as it reads a workflow: a checkout and a credential inside it are found', () => {
+    const action = (steps) => parseAction(`name: x\nruns:\n  using: composite\n  steps:\n${steps}\n`, 'a synthetic action');
+    const clean = action("    - uses: actions/checkout@v4\n      with:\n        persist-credentials: false\n    - shell: bash\n      run: echo hi");
+    assert.deepEqual([...checkoutCredentialViolations(clean), ...credentialExpressionViolations(clean)], []);
+    const leaky = action("    - uses: actions/checkout@v4\n    - shell: bash\n      run: echo ${{ github.token }}\n      env:\n        T: ${{ secrets.X }}");
+    assert.equal(checkoutCredentialViolations(leaky).length, 1);
+    assert.equal(credentialExpressionViolations(leaky).length, 2);
+  });
+
+  it('a document the rules neither read nor the allowlist names is found; one of either is not', () => {
+    const allow = { 'a.yml': {} };
+    assert.deepEqual(unaccountedFor(['a.yml', 'b.yml', 'c.yml'], ['b.yml'], allow), ['c.yml']);
+    assert.deepEqual(unaccountedFor(['a.yml', 'b.yml'], ['b.yml'], allow), []);
+    assert.deepEqual(unaccountedFor([], [], allow), []);
+  });
+
+  it('an allowlist reason that stopped being true is found, and one that holds is not', () => {
+    const wf = (text) => parseWorkflow(text, 'a synthetic workflow');
+    const job = '\njobs:\n  j:\n    runs-on: x\n    steps:\n      - run: echo hi\n';
+    const publish = CREDENTIAL_ALLOWLIST['.github/workflows/publish.yml'].holds;
+    assert.deepEqual(publish(wf("on:\n  push:\n    tags: ['v*']\n  workflow_dispatch:" + job)), []);
+    assert.ok(publish(wf('on:\n  pull_request:' + job)).some((m) => /pull_request/.test(m)), 'a pull_request trigger on the release workflow was not found');
+    assert.ok(publish(wf("on:\n  push:\n    branches: [main]" + job)).some((m) => /tags-only/.test(m)), 'a branch push on the release workflow was not found');
+    assert.ok(publish(wf("on:\n  pull_request_target:" + job)).length > 0);
+    const cla = CREDENTIAL_ALLOWLIST['.github/workflows/cla.yml'].holds;
+    assert.deepEqual(cla(wf('on:\n  pull_request_target:' + job)), []);
+    assert.equal(cla(wf('on:\n  pull_request_target:' + job.replace('- run: echo hi', '- uses: actions/checkout@v4'))).length, 1, 'a checkout in the secret-holding workflow was not found');
+    assert.equal(cla(wf('on:\n  pull_request_target:' + job.replace('- run: echo hi', '- uses: ./.github/actions/x'))).length, 1, 'a local action in the secret-holding workflow was not found');
+  });
+});
+
+// ───────────────────────────────────────── preflight runs what CI runs ─────────────────────────────────────────
+
+describe('preflight runs the client\'s unit tests the way ci.yml does', () => {
+  const REAL_PREFLIGHT = readFileSync(join(REPO_ROOT, 'scripts/preflight.mjs'), 'utf8');
+  const parity = (doc, text) => preflightClientParityViolations(doc, text);
+  const withCommand = (command) => GOOD_PREFLIGHT.replace(CLIENT_COMMAND, command);
+
+  it('the real preflight and the real ci.yml run one and the same client command', () => {
+    const found = parity(REAL, REAL_PREFLIGHT);
+    assert.deepEqual(found, [], `preflight and ci.yml disagree about the client run:\n  ${found.join('\n  ')}`);
+  });
+
+  it('the conforming miniatures agree', () => {
+    assert.deepEqual(parity(GOOD, GOOD_PREFLIGHT), []);
+  });
+
+  for (const [what, make, expected] of [
+    ['preflight runs the plain npm script', (d, p) => [d, withCommand('npm run test:client')], /preflight runs `npm run test:client` but ci\.yml runs/],
+    ['preflight drops the json reporter', (d, p) => [d, withCommand(CLIENT_COMMAND.replace(' --reporter=json', ''))], /but ci\.yml runs/],
+    ['preflight points the report elsewhere', (d, p) => [d, withCommand(CLIENT_COMMAND.replace('../test-results/client.json', '../client.json'))], /but ci\.yml runs/],
+    ['ci.yml changes a flag and preflight does not', (d, p) => {
+      const s = stepWhere(job(d, 'client-tests'), (x) => /npm run test/.test(x.run ?? ''));
+      s.run = s.run.replace('--reporter=default', '--reporter=verbose');
+      return [d, p];
+    }, /but ci\.yml runs/],
+    ['preflight runs no client command', (d, p) => [d, p.replace(`run('${CLIENT_COMMAND}')`, "run('echo skipped')")], /hands 0 client unit-test command/],
+    ['preflight runs the client twice', (d, p) => [d, `${p}\ntry { run('npm run test:client'); } catch {}\n`], /hands 2 client unit-test command/],
+    ['preflight builds the command with a substitution, which no one reads', (d, p) => [d, p.replace(`run('${CLIENT_COMMAND}')`, 'run(`npm run test --workspace=${"client"}`)')], /hands 0 client unit-test command/],
+    ['ci.yml runs the client twice', (d, p) => {
+      job(d, 'client-tests').steps.splice(-1, 0, { name: 'Again', run: 'npm run test:client' });
+      return [d, p];
+    }, /runs the client's unit tests 2 time\(s\)/],
+    ['ci.yml has no client job', (d, p) => { delete d.jobs['client-tests']; return [d, p]; }, /no client-tests job/],
+  ]) {
+    it(`red: ${what}`, () => {
+      const [d, p] = make(clone(GOOD), GOOD_PREFLIGHT);
+      const found = parity(d, p);
+      assert.ok(found.some((m) => expected.test(m)), `wanted ${expected}; the rule returned ${JSON.stringify(found)}`);
+    });
+  }
+
+  for (const [what, make] of [
+    ['a different spacing of the same command', () => withCommand(CLIENT_COMMAND.replace(' -- ', '   --   '))],
+    ['the command written as a template without substitution', () => GOOD_PREFLIGHT.replace(`'${CLIENT_COMMAND}'`, `\`${CLIENT_COMMAND}\``)],
+    ['a gate named test:client in an object, and a comment naming npm run test:client', () => `${GOOD_PREFLIGHT}\n// npm run test:client is the old spelling\nconst failures = [{ name: 'test:client' }];\n`],
+  ]) {
+    it(`green: ${what}`, () => assert.deepEqual(parity(GOOD, make()), []));
+  }
 });
