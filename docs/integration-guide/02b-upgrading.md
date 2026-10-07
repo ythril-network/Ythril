@@ -70,7 +70,7 @@ below it, everything it relayed.** Clubs, closed and democratic networks are unc
   set finishes over several cycles from where it stopped; if the upstream cannot answer it stays owed and is
   said once in the log.
 - **Watch it.** The gauge `ythril_sync_tombstone_rereads_owed` is the number still owed and falls to `0`; each
-  space says so in one info line when its re-read finishes, naming the upstream and how many records it deleted;
+  space says so in one info line when its re-read finishes (even when it deleted none), naming the upstream and how many records it deleted;
   `ythril_sync_tombstones_applied_total{ground="upstream"}` carries those deletions; and a deletion that is
   declined is counted in `ythril_sync_tombstones_declined_total{kind,reason}` and said once per peer, space and
   reason (see [Prometheus Metrics](11-setup-api.md#prometheus-metrics)). An instance that joined after the upgrade has nothing to re-read.

@@ -152,6 +152,20 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
       assert.equal(await here(R, 'rep-equal'), null, 'the re-read kept a record that is not newer than the tombstone');
     });
 
+    it('the repair says what it deleted ONCE, in its completion line, not also per page by the apply', async () => {
+      await declinedEarlier('rep-said');
+      const { log } = await import('../../server/dist/util/log.js');
+      const lines = [];
+      const orig = log.info;
+      log.info = (...a) => { lines.push(a.join(' ')); };
+      try { await door.sync(); } finally { log.info = orig; }
+      assert.equal(await here(R, 'rep-said'), null, 'fixture: the repair did not delete the record');
+      const perPage = lines.filter(l => /on the upstream's say-so/.test(l) && l.includes(`'${R}'`));
+      const completion = lines.filter(l => /finished \(one time/.test(l) && l.includes(`'${R}'`));
+      assert.equal(completion.length, 1, `the repair's completion line was said ${completion.length} times:\n${lines.join('\n')}`);
+      assert.deepEqual(perPage, [], `the apply said the same deletions per page as well, so the repair states them twice:\n${perPage.join('\n')}`);
+    });
+
     it('2. it is once: a second cycle reads nothing from 0', async () => {
       await declinedEarlier('rep-once');
       await door.sync();

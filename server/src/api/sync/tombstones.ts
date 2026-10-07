@@ -23,7 +23,7 @@ import { spaceAllowed, pushAllowed, callerPeerId, deliveryFromToken, syncReadSta
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
-import { encodeSeqCursor, isoReadStart } from '../../util/seq-keyset.js';
+import { encodeSeqCursor, isoReadStart, BAD_ISO_CURSOR } from '../../util/seq-keyset.js';
 
 export const syncTombstonesRouter = Router();
 
@@ -176,7 +176,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
 
     if (cursor !== undefined && cursor !== '') {
       const after = isoReadStart(cursor);
-      if (after === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
+      if (after === undefined) { res.status(400).json({ error: BAD_ISO_CURSOR }); return; }
       const page = await publishedFileTombstonePage(spaceId, after, FILE_TOMBSTONE_PAGE);
       res.json({ tombstones: page.rows.map(fileTombstoneOnTheWire), nextCursor: page.next });
       return;

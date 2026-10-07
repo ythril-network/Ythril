@@ -365,13 +365,13 @@ may. Below a publisher it is the line to read: it means a deletion your publishe
 reason says whether you wrote that record, whether it arrived by another route, or whether it was not the publisher's.
 
 **A deletion your publisher or parent made, applied here, is said once per sync page**: one info line naming the upstream,
-the space and how many records it deleted; `ythril_sync_tombstones_applied_total{ground="upstream"}` counts them. It is
+the space and how many records it deleted (the one-time re-read below says it once per space instead, when it finishes); `ythril_sync_tombstones_applied_total{ground="upstream"}` counts them. It is
 the line to look for when a record you did not touch has gone: it was deleted above you, whoever wrote it.
 
 **After an upgrade, each space re-reads its publisher's deletions once, and says when it has finished.** The first sync
 cycles of a space after the upgrade stamp the records stored before it (which peer delivered each one) and then read the
-upstream's deletions from the beginning, applying the ones an older version declined. A space that finishes logs one info
-line naming the space, the upstream and how many records it deleted, and `ythril_sync_tombstone_rereads_owed` falls as spaces
+upstream's deletions from the beginning, applying the ones an older version declined. A space whose re-read finishes logs one info
+line naming the space, the upstream and how many records it deleted (even none), and `ythril_sync_tombstone_rereads_owed` falls as spaces
 finish; a re-read that cannot proceed (the upstream refuses, or answers an error) is named once and stays owed, so a gauge
 that does not reach `0` is a stopped re-read, not a slow one. No audit entry is written for it. **What it cannot recover:** a
 deletion the upstream no longer holds, because it had pruned it once every member counted as past it. The record that

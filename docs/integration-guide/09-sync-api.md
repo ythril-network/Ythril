@@ -291,7 +291,7 @@ its own copies are swept locally, so a mixed network converges without anyone up
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own. A metadata
 arrival that a held file tombstone covers (its `rowSeq` is at or above the arriving `seq`) is counted in the
 batch answer's `filemeta.tombstoned`, not stored, and not `rejected`: the sender reads it as delivered. The
-counter is additive; an older receiver omits it, so read a missing one as zero. See
+counter is additive and appears only when it is above zero; an older receiver never sends it, so read a missing one as zero. See
 [File Sync Artifacts](#file-sync-artifacts).
 
 > **Metadata written before 4.0 has no `seq`, and the page cursor is `seq > n`.** So it does not reach a
@@ -360,8 +360,10 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
   "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "duplicateTriplets": 0, "rejected": 0 },
   "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "unknownType": 0, "rejected": 0 },
   "links":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
-  "filemeta": { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 } }
+  "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
+
+`filemeta.tombstoned` is the one counter that is **absent when it is zero** (above, a held file tombstone covered that many arrivals): read a missing one as zero.
 
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
@@ -581,9 +583,11 @@ answer is lost is read back while the hold is still held. On the serving instanc
   `rowSeq` the seq of the file record that act deleted, the version it erased (neither carries content, and an older
   server sends neither). **With `cursor` it pages**: one page in order of this server's own position for each
   tombstone, and `{ tombstones, nextCursor }` where `nextCursor` is opaque, echoed back as `cursor`, and `null` on
-  the last page; a `cursor` it cannot read answers `400`, and an empty one reads as none. A client does not build a
-  cursor beyond the opening one its first request carries (the sync engine's own is the reference); after that it
-  only echoes `nextCursor` ([why it is a position](../sync-protocol.md#lastfiletombstoneackedat--the-same-bound-for-file-tombstones-from-acknowledgement)).
+  the last page; a `cursor` it cannot read answers `400` (`cursor must be a cursor a previous page of this route
+  returned`), and an empty one reads as none. A client does not build a cursor beyond the opening one its first
+  request carries: the sync engine opens with the start of time, `1970-01-01T00:00:00.000Z`, in the encoded form
+  `MTk3MC0wMS0wMVQwMDowMDowMC4wMDBa`, which a server with the paged mode reads as "from the beginning" (an empty
+  `cursor` is NOT that, it reads as none and answers the legacy way). After that a client only echoes `nextCursor` ([why it is a position](../sync-protocol.md#lastfiletombstoneackedat--the-same-bound-for-file-tombstones-from-acknowledgement)).
   **Without `cursor` it answers as it always did**, in one answer cut at a fixed ceiling, with no `nextCursor`;
   a client that never sends one cannot read past that ceiling, and a client that gets a full answer with no
   `nextCursor` from an older server should treat it as possibly cut. **The sync engine deliberately omits `since`**: a file tombstone

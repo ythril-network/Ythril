@@ -962,7 +962,7 @@ export function setRereadsOwedProvider(fn: () => number): void {
 }
 export const syncTombstoneRereadsOwed = new Gauge({
   name: 'ythril_sync_tombstone_rereads_owed',
-  help: 'Upstream tombstone re-reads (per upstream and space) not yet completed — the one-time repair of deletions declined before D-14',
+  help: 'Upstream tombstone re-reads (per upstream and space) not yet completed — the one-time repair, after an upgrade, of deletions an upstream sent that this instance declined',
   registers: [register],
   collect() {
     try {

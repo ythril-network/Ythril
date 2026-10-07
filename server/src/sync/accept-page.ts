@@ -156,7 +156,7 @@ export async function acceptArrivingPage(
         // The winners, then — for any whose write failed — the version accepted before it, until each id lands
         // or runs out of versions.
         let pending = [...plan.accepts.values()].map(list => [...list]);
-        const cleanups: Array<{ id: string; below: number }> = [];
+        const cleanups: Array<{ id: string; below: number; via?: string }> = [];
         const diverged: Array<{ index: number; doc: Arrived }> = [];
         while (pending.length > 0) {
           const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer, deliveredBy });
@@ -188,7 +188,7 @@ export async function acceptArrivingPage(
               continue;
             }
             const clean = plan.tombstoneCleanups.get(id);
-            if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq });
+            if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq, ...(clean.via !== undefined ? { via: clean.via } : {}) });
             landed.push({ key, doc: top.doc });
           }
           pending = next;

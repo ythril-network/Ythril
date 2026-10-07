@@ -251,6 +251,35 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
         'the upstream\'s own later version was refused by the tombstone the upstream sent');
     });
 
+    // The deletion the upstream superseded is not served on: a child whose copy this node delivered would otherwise be
+    // handed a tombstone for an id whose newer version this node holds, and delete it there.
+    const servedFacts = async () => (await door.pull('/tombstones', { spaceId: S, sinceSeq: '0' })).facts.map(t => t._id);
+
+    it('pull: the held tombstone is REMOVED when the upstream\'s newer version lands, and is no longer served', async () => {
+      await door.coll(S, 'tombstones').insertOne(heldViaUpstream('gone-pull'));
+      assert.ok((await servedFacts()).includes('gone-pull'), 'fixture: the held tombstone is not served before the version lands');
+      door.state.records[S] = { facts: [later('gone-pull')] };
+      await door.sync();
+      assert.ok(await stored('facts', 'gone-pull'), 'fixture: the later version did not land');
+      assert.equal(await stored('tombstones', 'gone-pull'), null,
+        'the tombstone the upstream superseded is still held, so this node serves it to its own children');
+      assert.ok(!(await servedFacts()).includes('gone-pull'), 'GET /api/sync/tombstones still serves the superseded tombstone');
+    });
+
+    it('push: the same on the push door', async () => {
+      await door.coll(S, 'tombstones').insertOne(heldViaUpstream('gone-push'));
+      const r = await door.push('/batch-upsert', { facts: [later('gone-push')] }, { spaceId: S, token: peerToken(PEER) });
+      assert.equal(r.body.facts.inserted, 1, JSON.stringify(r.body.facts));
+      assert.equal(await stored('tombstones', 'gone-push'), null, 'the superseded tombstone is still held after the push door landed the version');
+    });
+
+    it('PIN: a tombstone NOT stored via the upstream is kept when the upstream\'s version is refused or lands over another issuer\'s', async () => {
+      await door.coll(S, 'tombstones').insertOne(heldPlain('kept-plain'));
+      door.state.records[S] = { facts: [later('kept-plain')] };
+      await door.sync();
+      assert.ok(await stored('tombstones', 'kept-plain'), 'a tombstone this instance did not store for the upstream was removed');
+    });
+
     it('PIN push: still refuses the same version delivered by a LATERAL peer that did not write it', async () => {
       await door.coll(S, 'tombstones').insertOne(heldViaUpstream('late-lateral'));
       const r = await door.push('/batch-upsert', { facts: [later('late-lateral')] }, { spaceId: S, token: peerToken(LATERAL) });

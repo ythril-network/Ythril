@@ -308,6 +308,18 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     assert.equal(p.tombstoneCleanups.has('a'), false);
   });
 
+  it('a tombstone stored for the delivering upstream is cleaned up whatever its seq when that upstream\'s version lands', () => {
+    // Held as a relayed deletion: issued by X with a seq of X's clock, stored for the upstream U (`storedVia`).
+    const tombstones = new Map([['a', { seq: 90, issuer: 'X', storedVia: 'U' }], ['b', { seq: 90, issuer: 'X', storedVia: 'U' }]]);
+    const p = plan('entities', [doc('a', 4), doc('b', 4)], { tombstones, deliveredBy: 'U' });
+    assert.deepEqual(p.verdicts, ['upserted', 'upserted']);
+    assert.deepEqual(p.tombstoneCleanups.get('a'), { below: 4, onLanding: true, via: 'U' });
+    // Delivered by anybody else it is refused and kept, exactly as before.
+    const other = plan('entities', [doc('a', 4)], { tombstones, deliveredBy: 'L' });
+    assert.deepEqual(other.verdicts, ['tombstoned']);
+    assert.equal(other.tombstoneCleanups.has('a'), false);
+  });
+
   it('another issuer\'s tombstone does not refuse a record its PROVEN author pushes; unproven, it still does', () => {
     const tombstones = new Map([['a', { seq: 9, issuer: 'X' }], ['b', { seq: 9, issuer: 'X' }], ['c', { seq: 9, issuer: 'X' }]]);
     const docs = [doc('a', 4, { author: { instanceId: 'Y' } }), doc('b', 4, { author: { instanceId: 'X' } }), doc('c', 4)];

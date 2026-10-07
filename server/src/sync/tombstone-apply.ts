@@ -136,6 +136,7 @@ export interface TombstoneApplyOptions {
    * A re-read tombstone deletes a record only if the record's seq is not above the tombstone's: it was issued long ago,
    * and a record re-created since carries a higher seq. A live apply has no such bound (a tombstone is issued after its
    * issuer received the version it deletes). A record kept this way is not a decline, and its tombstone is not stored.
+   * The re-read also leaves the per-page info line to its own completion line, so a deletion is stated once.
    */
   repair?: boolean;
 }
@@ -264,7 +265,9 @@ export async function applyPeerTombstones(
       if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground }).inc(deleted);
       if (d.type === 'entity') await unlabelRemoved(localSpaceId, d.rows.map(t => t._id), deleted);
     }
-    if (out.deleted.upstream > 0) {
+    // The re-read says what it deleted once, in its own completion line over every page (`sync/tombstone-reread.ts`): a line
+    // per page here would state the same deletions a second time.
+    if (out.deleted.upstream > 0 && !opts.repair) {
       log.info(`${logSafe(where)}: deleted ${out.deleted.upstream} record(s) in space '${peerText(localSpaceId)}' on the upstream's say-so `
         + `(its own deletions of what it relayed here); ${out.deleted.issuer} more on the issuer's own authority`);
     }

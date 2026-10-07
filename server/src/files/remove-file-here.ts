@@ -20,7 +20,8 @@
  * ## The one parameter: what a step's failure means
  *
  * - `'throw'` — the caller's act must fail with the store's failure so its door answers `503` and the retry completes it
- *   (the cascade, a peer's tombstone: the apply stores the tombstone first and a retry re-applies). A failure that is not
+ *   (the cascade, a peer's tombstone: the apply stores the tombstone only AFTER the removal, so the sender's re-send of a page
+ *   that failed re-applies it). A failure that is not
  *   the store's is logged and survived: the row is still removed last.
  * - `'swallow'` — a best-effort reconcile that has nothing to retry with (the media worker, finding its source gone):
  *   every failure is logged and the next step still runs.

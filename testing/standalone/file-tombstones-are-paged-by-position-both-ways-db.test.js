@@ -46,7 +46,7 @@ const PAGE = 500;
 const LEGACY_LIMIT = 5000;
 const POSITIONS = ['2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.001Z', '2026-08-01T00:00:00.002Z'];
 
-let door, BAD_SYNC_START;
+let door, BAD_ISO_CURSOR;
 
 /** `n` own, published tombstones in three heavily tied positions: the case a position-only keyset skips rows in. */
 const manyTombs = (n, spaceId = S, prefix = 'p') => Array.from({ length: n }, (_, i) => {
@@ -77,7 +77,7 @@ async function openingCursor() {
 describe('file tombstones are served, pulled and pushed in pages by a position', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'ftpaging', spaces: [S], files: true });
-    ({ BAD_SYNC_START } = await import('../../server/dist/api/sync/_shared.js'));
+    ({ BAD_ISO_CURSOR } = await import('../../server/dist/util/seq-keyset.js'));
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.reset(); });
@@ -129,12 +129,12 @@ describe('file tombstones are served, pulled and pushed in pages by a position',
       assert.deepEqual(Object.keys(body), ['tombstones']);
     });
 
-    it('a bad cursor is a 400 with the sync refusal, never an empty page', async () => {
+    it('a bad cursor is a 400 with the position cursor\'s own fixed text, never an empty page', async () => {
       await door.coll(S, 'file_tombstones').insertMany(manyTombs(3).map(t => ({ ...t })));
       for (const cursor of ['not-a-cursor', '!!!', 'eyJ4IjoxfQ', 'a'.repeat(5000)]) {
         const { code, body } = await get({ spaceId: S, cursor });
         assert.equal(code, 400, `cursor ${JSON.stringify(cursor.slice(0, 20))} answered ${code}: ${JSON.stringify(body).slice(0, 100)}`);
-        assert.equal(body.error, BAD_SYNC_START);
+        assert.equal(body.error, BAD_ISO_CURSOR);
       }
     });
 

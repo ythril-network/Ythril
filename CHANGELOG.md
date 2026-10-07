@@ -100,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on the first start; paging stays
   tie-safe meanwhile, only slower. Rolling back to 5.6.x rebuilds the old `seq` index before the server listens.
 - **Sync:** Each record stores which peer delivered it (`deliveredBy`: local, never sent, not shown by REST or MCP); records stored earlier are stamped once, at their space's first sync.
-- **Sync:** New `ythril_sync_tombstones_applied_total{kind,ground}`, `ythril_sync_tombstones_declined_total{kind,reason}` and gauge `ythril_sync_tombstone_rereads_owed`; a declined deletion is said once per peer, space and reason, and a page that applies upstream deletions logs one line.
+- **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`; a declined deletion is said once per peer, space and reason; a page applying upstream deletions logs one line, the re-read one per space.
 - **Embedding:** The bundled model runs in a supervised child process, so embedding no longer blocks the server (`/health` stays fast
   in bulk imports) and a native fault no longer takes it down; it exits after ten idle minutes (next embed pays a 1-2 s load).
 - **Embedding:** `mem_limit` or a pod memory limit now counts both processes. The child gets a minimal environment (never the Mongo

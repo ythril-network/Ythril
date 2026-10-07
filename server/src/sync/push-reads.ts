@@ -92,15 +92,21 @@ export async function readForkContext(
 }
 
 /**
- * Delete the stale tombstones a push superseded — each bounded by the seq that superseded it, so a tombstone
+ * Delete the stale tombstones an arrival superseded — each bounded by the seq that superseded it, so a tombstone
  * written meanwhile at a higher seq is never the one removed. Called only for records that LANDED, or whose
  * stored copy is already above the tombstone.
+ *
+ * An item carrying `via` is the other kind: a tombstone stored for the upstream that delivered the version
+ * (`storedVia`, `upsert-plan.ts`). Its seq is the issuer's clock and proves nothing against this version, so it is
+ * bounded by WHO it was stored for instead — a tombstone this instance issued meanwhile, or stored for someone else,
+ * carries another `storedVia` (or none) and is never the one removed. Without it the tombstone stays served: a child
+ * whose copy this node delivered would apply it and lose the newer version this node holds.
  */
 export async function deleteSupersededTombstones(
-  spaceId: string, type: TombstoneType, items: ReadonlyArray<{ id: string; below: number }>,
+  spaceId: string, type: TombstoneType, items: ReadonlyArray<{ id: string; below: number; via?: string }>,
 ): Promise<void> {
   if (items.length === 0) return;
   await col(spaceCollection(spaceId, 'tombstones')).deleteMany(asFilter({
-    type, $or: items.map(i => ({ _id: i.id, seq: { $lt: i.below } })),
+    type, $or: items.map(i => (i.via !== undefined ? { _id: i.id, storedVia: i.via } : { _id: i.id, seq: { $lt: i.below } })),
   }));
 }
