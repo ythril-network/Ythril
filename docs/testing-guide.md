@@ -88,8 +88,8 @@ files a run uploads, not the console. A secret that reaches the console is publi
 repository code in `ci.yml` at all, and the answer is short:
 
 - **A read-only job token, only where a step declares it.** The `CI advisory` job's timings step sets `GH_TOKEN` from the
-  job token, to read the last runs of main from the Actions API. No other step sets it, and the workflow's own
-  permissions are `contents: read` and nothing wider.
+  job token, to read the last runs of main from the Actions API. No other step sets it; the workflow-level permissions
+  are `contents: read`, and that job alone adds `actions: read`.
 - **The cache token, in `prepare`.** The step that exposes the Actions cache to Buildx puts the runtime token and cache
   URL in the environment of the steps after it in that job, so the image build can read the layer cache; the cache is
   written on a push to main only.
@@ -99,8 +99,10 @@ repository code in `ci.yml` at all, and the answer is short:
   its write token, and every test child's environment has the recorder's variables stripped
   (`testing/_shared/test-child-env.mjs`).
 
-Every checkout sets `persist-credentials: false`, so the token a checkout would leave in `.git/config` is not on disk for
-the tests and dependencies that follow. The dump of the stack's container logs on a failed job is the same channel: it
+Every checkout in `ci.yml` and the image-pin check sets `persist-credentials: false`, so the token a checkout would leave in
+`.git/config` is not on disk for the tests and dependencies that follow. The release workflow (`publish.yml`) is the stated
+exception: it runs only on a version tag or by hand, never for a pull request, and it holds the registry secret because it
+publishes the image. The dump of the stack's container logs on a failed job is the same channel: it
 prints to this public log, so what a container prints is as public as what a test prints. `ci-workflow-is-sound` holds
 the checkouts and every place the workflows hand a credential to repository code, and
 `a-test-child-environment-is-one-module` holds the stripped environment, so a credential added to a job fails a gate
