@@ -32,10 +32,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
 import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { makeWorkdir, runTimes, everything, SHA, T, githubRun as run, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
+import { makeWorkdir, runTimes, everything, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
 
 const spec = (suite, batch, file) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }] });
-const jobs = (...names) => names.map(name => ({ name, status: 'completed', conclusion: 'success', started_at: '2026-10-05T10:00:00Z', completed_at: '2026-10-05T10:15:00Z' }));
+// The jobs as the API lists them: by display name (`Prepare`, `Standalone (no services)`), not by the workflow's job id.
+const jobs = (...ids) => githubJobs(...ids);
 const NOT_A_ZIP = Buffer.from('this is not a zip archive, whatever its name says');
 
 /** Run 2001 is the newest; 2000 is older. Each has two jobs, each with a results artifact. */
