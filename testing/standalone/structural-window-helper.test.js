@@ -38,6 +38,7 @@ import {
   lineBefore,
   markdownSectionAround,
   markdownSectionFrom,
+  markdownSectionWithSubsections,
   openTagAt,
   statementAround,
   statementFrom,
@@ -531,6 +532,50 @@ describe('markdownSectionAround — the section a MENTION belongs to', () => {
   it('does not leak the PREVIOUS section in', () => {
     const got = markdownSectionAround(notice, notice.indexOf('No licence here'));
     assert.ok(!/Licen[cs]e: MIT/.test(got), 'a licence from another section would be read as this one\'s');
+  });
+});
+
+describe('markdownSectionWithSubsections — the section a heading names, its subsections included', () => {
+  const doc = '# Guide\n\n## Rolling Back Someday\n\nWrong one.\n\n## Rolling Back\n\nIntro.\n\n### Detail\n\nUnder the detail.\n\n#### Deeper\n\nDeepest.\n\n## Next\n\nOther.\n';
+
+  it('runs through its own subsections and stops at the next heading of its level', () => {
+    const got = markdownSectionWithSubsections(doc, 'Rolling Back');
+    assert.ok(got.startsWith('## Rolling Back\n'), 'it did not start at the heading line');
+    assert.ok(got.includes('Under the detail') && got.includes('Deepest'), 'a subsection is outside the window');
+    assert.ok(!got.includes('Other.') && !got.includes('Wrong one'), 'the window left its section');
+  });
+
+  it('matches the WHOLE heading line, so a longer title does not stand in for it', () => {
+    // "## Rolling Back Someday" is still in the document; with the real heading renamed away, nothing is found.
+    assert.equal(markdownSectionWithSubsections(doc.replace('## Rolling Back\n', '## Rolling Forward\n'), 'Rolling Back'), null);
+  });
+
+  it('is null when the heading is absent, never an empty section', () => {
+    assert.equal(markdownSectionWithSubsections(doc, 'Nothing'), null);
+    assert.equal(markdownSectionWithSubsections(doc, 'Detail'), null, 'a ### heading is not a level-2 one');
+  });
+
+  it('reads a level-3 section, which ends at the next ### or ##', () => {
+    const got = markdownSectionWithSubsections(doc, 'Detail', 3);
+    assert.ok(got.includes('Deepest') && !got.includes('Other.'));
+  });
+
+  it('tolerates CRLF and a section at the end of the document', () => {
+    const crlf = doc.replace(/\n/g, '\r\n');
+    assert.ok(markdownSectionWithSubsections(crlf, 'Rolling Back').includes('Deepest'));
+    assert.ok(markdownSectionWithSubsections(crlf, 'Next').includes('Other.'));
+  });
+
+  it('reads the title as text, not as a pattern', () => {
+    assert.equal(markdownSectionWithSubsections('## A (b)\n\nx\n', 'A (b)'), '## A (b)\n\nx\n');
+    assert.equal(markdownSectionWithSubsections('## Ab\n\nx\n', 'A.'), null);
+  });
+
+  it('a `# comment` inside a fenced code block neither ends the section nor stands in for a heading', () => {
+    const withFence = '## Rolling Back\n\n```bash\n# restore the copy\ncp a b\n```\n\nAfter the fence.\n\n## Next\n\nOther.\n';
+    const got = markdownSectionWithSubsections(withFence, 'Rolling Back');
+    assert.ok(got.includes('After the fence.') && !got.includes('Other.'), 'the section ended at a comment line in the fence');
+    assert.equal(markdownSectionWithSubsections('```\n## Hidden\n```\n', 'Hidden'), null, 'a heading inside a fence was found');
   });
 });
 

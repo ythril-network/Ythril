@@ -805,17 +805,23 @@ function githubClient() {
 
 const outcomeOfConclusion = (c) => (c === 'success' ? 'passed' : c === 'failure' || c === 'timed_out' ? 'failed' : c === 'cancelled' ? 'cancelled' : 'incomplete');
 /**
- * The text of a positive integer as that number, or null: digits only (no sign, no space, no exponent, no hex, no
- * fraction) and a safe integer above zero. ONE answer for every place an id or a count is read from text or from the API,
- * because a run id that is `1e3`, `0x10` or past 2^53 compares equal to nothing and fails later, far from its cause.
+ * An id or a count GIVEN AS TEXT (a command-line argument, a record key's part) as that number, or null: digits only (no
+ * sign, no space, no exponent, no hex, no fraction) and a safe integer above zero. A run id that is `1e3`, `0x10` or past
+ * 2^53 compares equal to nothing and fails later, far from its cause. It answers for text only: an id the API or the
+ * environment hands over as a NUMBER (an artifact id, `run_attempt`, `GITHUB_RUN_ID`) is checked where it is read, and
+ * `runIdOf` is the way a listed run's own number is held to the same rule.
  */
-const positiveInteger =(text) => {
+const positiveInteger = (text) => {
   if (typeof text !== 'string' || !/^\d+$/.test(text)) return null;
   const n = Number(text);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 };
 const runIdOf = (run) => (Number.isSafeInteger(run.id) ? positiveInteger(String(run.id)) : null);
 const startedOf = (run) => isoOrNull(run.run_started_at) ?? isoOrNull(run.created_at);
+/** A run as a person reads it in a refusal or a log line: its id and when it started, or that the start is unknown. */
+const describeRun = (run) => `${runIdOf(run)} (started ${startedOf(run) ?? 'at an unknown time'})`;
+/** The predicate "this is run `id`", for the one question asked of a listing three ways: is it among them, which one, and is the named one there. */
+const isRun = (id) => (run) => runIdOf(run) === id;
 
 /**
  * The client's report among the entries of the client job's artifact, or undefined. Found by its exact entry name and
@@ -952,7 +958,7 @@ async function ciPayloads(gh, run, have = new Set()) {
 function unlistedRunRefusal(runId, listedIds, trusted, outcome) {
   if (listedIds.has(runId)) return `test-times: run ${runId} is in the listing but is not a trusted run (not a push to main of ${REPO} from ci.yml, or not completed); nothing ${outcome}`;
   const newest = trusted[0];
-  const newestSaid = newest ? `the newest run it listed is ${runIdOf(newest)} (started ${startedOf(newest) ?? 'at an unknown time'})` : 'it listed no trusted run';
+  const newestSaid = newest ? `the newest run it listed is ${describeRun(newest)}` : 'it listed no trusted run';
   return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml: the listing may be stale (${newestSaid}), or the run is not a trusted one; nothing ${outcome}`;
 }
 
@@ -985,14 +991,14 @@ async function recordCi({ rewriteKey, runId } = {}) {
       if (!held.length) break;
       for (const r of held) { const id = runIdOf(r); if (id) listedIds.add(id); }
       collected.push(...trustedRuns(held).filter(r => r.status === 'completed'));
-      if (rewriteKey ? collected.some(r => runIdOf(r) === rewriteId) : collected.length >= BACKFILL_RUNS) break;
+      if (rewriteKey ? collected.some(isRun(rewriteId)) : collected.length >= BACKFILL_RUNS) break;
     }
     const newest = collected.sort(newestRunFirst);
-    const runs = rewriteKey ? newest.filter(r => runIdOf(r) === rewriteId) : newest.slice(0, BACKFILL_RUNS);
+    const runs = rewriteKey ? newest.filter(isRun(rewriteId)) : newest.slice(0, BACKFILL_RUNS);
     // The refusal comes BEFORE the first write, so a pass that failed leaves no record of some other run behind.
     const waitedFor = rewriteKey ? rewriteId : runId;
-    if (waitedFor && !newest.some(r => runIdOf(r) === waitedFor)) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded')); exit = 1; return; }
-    if (!rewriteKey) console.log(newest[0] ? `test-times: newest listed run: ${runIdOf(newest[0])} (started ${startedOf(newest[0]) ?? 'at an unknown time'})` : 'test-times: the listing held no trusted completed run');
+    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded')); exit = 1; return; }
+    if (!rewriteKey) console.log(newest[0] ? `test-times: newest listed run: ${describeRun(newest[0])}` : 'test-times: the listing held no trusted completed run');
 
     let recorded = 0;
     let stoppedAtRecorded = false;

@@ -15,16 +15,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCi, parseWorkflow, triggersOf, onOf } from '../_shared/ci-workflow.mjs';
-// `branchesOf` is read off the namespace, so a module that lacks it fails these tests and does not stop the file loading.
-import * as CW from '../_shared/ci-workflow.mjs';
+import { loadCi, parseWorkflow, triggersOf, onOf, branchesOf } from '../_shared/ci-workflow.mjs';
 
 const CI = loadCi();
 
-/** The branch list under one trigger of ci.yml's `on:`; the trigger must be there and must filter by branch. */
-function branchesOf(trigger) {
+/** The branch list under one trigger of ci.yml's `on:`; the trigger must be there and must filter by branch — unlike the shared `branchesOf`, which answers `null` for no filter. */
+function ciBranchesOf(trigger) {
   assert.ok(triggersOf(CI).has(trigger), `ci.yml has no ${trigger} trigger — this gate is reading the wrong file`);
-  const branches = CW.branchesOf(onOf(CI), trigger);
+  const branches = branchesOf(onOf(CI), trigger);
   assert.ok(branches !== null, `the ${trigger} trigger has no branch filter`);
   assert.ok(branches.length > 0, `the ${trigger} trigger lists no branches`);
   return branches;
@@ -32,19 +30,19 @@ function branchesOf(trigger) {
 
 describe('Build & Test runs where a release is prepared', () => {
   it('on pull requests into main', () => {
-    assert.ok(branchesOf('pull_request').includes('main'));
+    assert.ok(ciBranchesOf('pull_request').includes('main'));
   });
 
   it('and on pull requests into a release branch', () => {
-    assert.ok(branchesOf('pull_request').some(b => b === 'release/**' || b === 'release/*'),
-      `pull_request branches are ${JSON.stringify(branchesOf('pull_request'))} — a patch PR would have no merge gate`);
+    assert.ok(ciBranchesOf('pull_request').some(b => b === 'release/**' || b === 'release/*'),
+      `pull_request branches are ${JSON.stringify(ciBranchesOf('pull_request'))} — a patch PR would have no merge gate`);
   });
 });
 
 describe('branchesOf — a trigger\'s branch filter, read from the parsed workflow in whichever way it is written', () => {
   /** A workflow with the given `on:` text, parsed. */
   const workflow = (onText) => parseWorkflow(`name: x\n${onText}\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`, 'a synthetic workflow');
-  const read = (onText, event) => CW.branchesOf(onOf(workflow(onText)), event);
+  const read = (onText, event) => branchesOf(onOf(workflow(onText)), event);
 
   const LISTS = [
     ['a flow-style list on one line', "on:\n  pull_request:\n    branches: [main, 'release/**']"],

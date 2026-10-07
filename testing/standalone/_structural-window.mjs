@@ -651,3 +651,41 @@ export function markdownSectionAround(src, at, label = 'markdownSectionAround') 
   const next = /\n#{1,6} /.exec(rest);
   return src.slice(start, next ? at + next.index : src.length);
 }
+
+/**
+ * The section whose heading line is exactly `title` at `level`, its subsections INCLUDED — from the heading to the next
+ * heading of the same or a higher level, or the end of the document. `null` when no such heading exists, so each caller
+ * says in its own words what the missing section means.
+ *
+ * What it prevents. The other section helpers stop at ANY heading, so a claim made under a `###` inside the section
+ * is outside their window and a gate reports it missing. And a heading found by `indexOf('## Title')` also matches
+ * "## Title Someday", so renaming the section away left the gate green: the heading is matched as a WHOLE line,
+ * tolerant of CRLF, and a deeper heading never ends the section. A `# comment` line inside a fenced code block is not a
+ * heading either: a shell example under the heading would otherwise end the section where its first comment starts.
+ * `title` is literal text, never a pattern.
+ */
+export function markdownSectionWithSubsections(src, title, level = 2) {
+  assert.ok(Number.isInteger(level) && level >= 1 && level <= 6, `markdownSectionWithSubsections: heading level ${level} is not 1 to 6`);
+  const wanted = `${'#'.repeat(level)} ${title}`;
+  let start = -1;
+  let fence = null;
+  let offset = 0;
+  for (const raw of src.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+    } else if (marker) {
+      fence = marker;
+    } else {
+      const depth = /^(#{1,6}) /.exec(line)?.[1].length;
+      if (start < 0) {
+        if (line === wanted) start = offset;
+      } else if (depth && depth <= level) {
+        return src.slice(start, offset);
+      }
+    }
+    offset += raw.length + 1;
+  }
+  return start < 0 ? null : src.slice(start);
+}

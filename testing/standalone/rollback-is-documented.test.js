@@ -31,6 +31,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { markdownSectionWithSubsections } from './_structural-window.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
 const LOADER = read('server/src/config/loader.ts');
@@ -56,13 +57,9 @@ function bootMigrations() {
 
 /** The rollback section of the hosting guide. */
 function rollbackSection() {
-  // Matched as a WHOLE heading line. `indexOf('### Rolling Back')` also matched "### Rolling Back Someday",
-  // so renaming the section away left the gate green.
-  const m = /^## Rolling Back\r?$/m.exec(DOC);
-  assert.ok(m, 'the Rolling Back section is gone — a one-way upgrade with no documented way back');
-  const at = m.index;
-  const end = DOC.indexOf('\n## ', at + 10);
-  return DOC.slice(at, end < 0 ? DOC.length : end);
+  const section = markdownSectionWithSubsections(DOC, 'Rolling Back');
+  assert.ok(section, 'the Rolling Back section is gone — a one-way upgrade with no documented way back');
+  return section;
 }
 
 /*
