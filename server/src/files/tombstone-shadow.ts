@@ -65,9 +65,10 @@ export interface ArrivalVerdicts {
  *    another instance issued does not refuse the version its proven author delivers, and one stored for an upstream
  *    does not refuse that upstream's later version. Without it a peer could store a deletion of a path nobody held, at
  *    a high version, and refuse every later file at that path.
- *  - **bytes** are shadowed when some held tombstone's own `contentHash` equals the arriving hash and no live row at the
- *    path is newer than it (`liveRowNewer`: identical bytes re-created as a newer version arrive with their metadata
- *    first and pass). A tombstone with no hash shadows no bytes.
+ *  - **bytes** are shadowed when some held tombstone's own `contentHash` equals the arriving hash and the path has not been
+ *    re-created since it (`liveRowNewer`, read through {@link recreatedSince}: a live row with other bytes, or a newer version
+ *    by the tombstone's issuer — identical bytes re-created by their issuer as a newer version arrive with their metadata
+ *    first and pass; another author's higher seq never counts). A tombstone with no hash shadows no bytes.
  *
  * What it prevents: without the version half a deleted file's path is poisoned for ever, every later upload of it
  * refused; without the content half a peer's still-live copy of the deleted bytes comes back on every cycle.
@@ -107,16 +108,30 @@ export function pathsDecidingArrivals(paths: readonly string[]): string[] {
   return [...asked];
 }
 
-/** What the verdict reads of a parent's row: its version, the hash of its bytes, whether a soft delete flagged it, who wrote and delivered it. */
-export interface ParentRow { seq?: number; sha256?: string; deletedAt?: string; author?: { instanceId?: string }; deliveredBy?: string }
+/**
+ * What a verdict reads of the stored row at a path: its version, the hash of its bytes, whether a soft delete flagged it, who wrote
+ * and delivered it. The projection to read it with is {@link STORED_ROW_PROJECTION}.
+ */
+export interface StoredFileRow { seq?: number; sha256?: string; deletedAt?: string; author?: { instanceId?: string }; deliveredBy?: string }
+
+/** The fields of a stored file row that {@link recreatedSince} and {@link parentShadows} read — one projection, so a read cannot ask for less than the verdict needs. */
+export const STORED_ROW_PROJECTION = { seq: 1, sha256: 1, deletedAt: 1, author: 1, deliveredBy: 1 } as const;
 
 /**
- * Has the path a tombstone erased been RE-CREATED since? A live row whose bytes hash differently from the content the tombstone
- * erased, or one at a newer version by the SAME author. Never the version alone across authors: two instances' counters are not
- * one clock, and a peer's low-seq row would otherwise be outranked by this instance's high one for ever.
+ * Has the path a tombstone erased been RE-CREATED since? THE one answer, for the file's own bytes and for its sidecars alike.
+ *
+ * A LIVE row at the path (a soft-deleted one is the deletion itself, never a re-creation) whose bytes hash differently from the
+ * content the tombstone erased, or one at a newer version by the tombstone's ISSUER (`isNewerVersionByTheIssuer`, which compares
+ * seq only through `isNewerCopy`). Never the version alone across authors: two instances' counters are not one clock, so another
+ * author's high number says nothing about whether the deleted content came back, and a peer's low-seq re-creation would otherwise
+ * be outranked by this instance's high one for ever.
+ *
+ * What it prevents: the file's byte decision compared seq across authors while the sidecar rule did not, so the same path under the
+ * same tombstone was "re-created" for one and "not" for the other (Q-407). Only meaningful for a tombstone that erased real content
+ * ({@link erasedContent}): one with no hash has nothing to compare a row's bytes with.
  */
-function parentRecreated(t: HeldFileTombstone, row: ParentRow | undefined): boolean {
-  if (row === undefined) return false;
+export function recreatedSince(t: Pick<HeldFileTombstone, 'contentHash' | 'issuer' | 'rowSeq'>, row: StoredFileRow | undefined): boolean {
+  if (row === undefined || row.deletedAt !== undefined) return false;
   if (typeof row.sha256 === 'string' && row.sha256 !== t.contentHash) return true;
   return isNewerVersionByTheIssuer(t, row);
 }
@@ -128,9 +143,9 @@ function parentRecreated(t: HeldFileTombstone, row: ParentRow | undefined): bool
  * It speaks against the parent when it **erased real content here** (the caller passes only those: {@link erasedContent}), the
  * who-half the parent's own arrival gets (`heldTombstoneRefuses`) judged by the PARENT row's author and deliverer where a live
  * one exists — never the sidecar row's, whose author is whoever delivered it, which would let every sidecar through, including
- * for a tombstone this instance issued itself — and the parent has not been **re-created** ({@link parentRecreated}).
+ * for a tombstone this instance issued itself — and the parent has not been **re-created** ({@link recreatedSince}).
  */
-export function parentShadows(here: readonly HeldFileTombstone[], stored: ParentRow | undefined): boolean {
+export function parentShadows(here: readonly HeldFileTombstone[], stored: StoredFileRow | undefined): boolean {
   const live = stored !== undefined && stored.deletedAt === undefined ? stored : undefined;
-  return here.some(t => !parentRecreated(t, live) && heldTombstoneRefuses(t, live?.author?.instanceId, live?.deliveredBy));
+  return here.some(t => !recreatedSince(t, live) && heldTombstoneRefuses(t, live?.author?.instanceId, live?.deliveredBy));
 }

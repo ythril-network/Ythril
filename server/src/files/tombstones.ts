@@ -113,8 +113,8 @@ import { keyedLock } from '../util/keyed-lock.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { parentOfSidecar } from './moved-paths.js';
 import {
-  heldByPath, erasedContent, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows,
-  type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type ParentRow,
+  heldByPath, erasedContent, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
+  type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
 } from './tombstone-shadow.js';
 
 // The arrival decision lives in `tombstone-shadow.ts` (pure, over rows already read); these are its public names, here, where every caller reads them.
@@ -1136,8 +1136,10 @@ function keepsAfterPrune(row: PrunableRow, pendingPaths: ReadonlySet<string>, ke
  * `_extracted/<p>/` include the ones held for `<p>`, and {@link shadowedByParent} decides whether they shadow it — the same two
  * pending states (acted, not looked at) apply to the parent's.
  *
- * For BYTES it also reads whether a LIVE row at the path is newer than the tombstone (`liveRowNewer`): identical bytes
- * re-created as a newer version arrive with their metadata first, and pass. That read happens only for an arrival some
+ * For BYTES it also reads the LIVE row at the path and asks whether the path was re-created since the tombstone
+ * (`recreatedSince`, the question the sidecar rule asks too — Q-407): a live row with other bytes, or a newer version by the
+ * tombstone's issuer, so identical bytes re-created by their issuer as a newer version arrive with their metadata first, and pass.
+ * Another author's higher seq is not a re-creation. That read happens only for an arrival some
  * held tombstone could shadow by content, so a path nobody deleted costs no more than the tombstone reads.
  */
 export async function decideArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
@@ -1192,8 +1194,8 @@ async function shadowedAgainst(
 ): Promise<Set<string>> {
   const shadowed = new Set<string>();
   const needRows = arrivals.filter(a => a.kind === 'bytes' && (held.get(a.path) ?? []).some(t => t.contentHash === a.sha256));
-  const live = needRows.length === 0 ? new Map<string, { seq?: number; deletedAt?: string }>()
-    : await readStoredById<{ seq?: number; deletedAt?: string }>(spaceCollection(spaceId, 'files'), needRows.map(a => a.path), { seq: 1, deletedAt: 1 });
+  const live = needRows.length === 0 ? new Map<string, StoredFileRow>()
+    : await readStoredById<StoredFileRow>(spaceCollection(spaceId, 'files'), needRows.map(a => a.path), STORED_ROW_PROJECTION);
   for (const a of arrivals) {
     const here = held.get(a.path) ?? [];
     if (here.length === 0) continue;
@@ -1201,9 +1203,10 @@ async function shadowedAgainst(
       if (shadowDecision(here, a)) shadowed.add(a.id);
       continue;
     }
+    // Re-created against every tombstone whose erased content these bytes are — by the one question the sidecar rule asks too (Q-407).
     const row = live.get(a.path);
-    const erased = Math.max(-1, ...here.map(t => t.rowSeq ?? -1));
-    const liveRowNewer = row !== undefined && row.deletedAt === undefined && typeof row.seq === 'number' && row.seq > erased;
+    const erasedByThese = here.filter(t => erasedContent(t) && t.contentHash === a.sha256);
+    const liveRowNewer = erasedByThese.length > 0 && erasedByThese.every(t => recreatedSince(t, row));
     if (shadowDecision(here, { kind: 'bytes', sha256: a.sha256, liveRowNewer })) shadowed.add(a.id);
   }
   for (const id of await shadowedByParent(spaceId, held, arrivals.filter(a => !shadowed.has(a.id)))) shadowed.add(id);
@@ -1246,8 +1249,8 @@ async function shadowedByParent(
   });
   const shadowed = new Set<string>();
   if (asked.length === 0) return shadowed;
-  const rows = await readStoredById<ParentRow>(spaceCollection(spaceId, 'files'), [...new Set(asked.map(x => x.parent))],
-    { seq: 1, sha256: 1, deletedAt: 1, author: 1, deliveredBy: 1 });
+  const rows = await readStoredById<StoredFileRow>(spaceCollection(spaceId, 'files'), [...new Set(asked.map(x => x.parent))],
+    STORED_ROW_PROJECTION);
   for (const { id, parent, here } of asked) if (parentShadows(here, rows.get(parent))) shadowed.add(id);
   return shadowed;
 }
