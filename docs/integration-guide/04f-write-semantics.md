@@ -19,7 +19,8 @@ endpoints themselves are in
 Any record — fact, entity, edge, or chrono entry — can be given an expiry after which it is
 **deleted automatically**. Deletion runs through the normal delete path, so it writes a tombstone that
 propagates over sync: an expired record cannot resurrect from a peer (which a raw MongoDB TTL index,
-deleting below the application, would allow).
+deleting below the application, would allow). A peer applies it under the sync deletion rule: to the records the
+sweeping instance wrote, and, below an upstream, to the records that upstream relayed ([details](../sync-protocol.md#tombstone-deletion-authorisation)).
 
 Two ways to set it, both usable together:
 

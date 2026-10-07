@@ -431,7 +431,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'IT IS NEVER REFUSED FOR BEING REFERENCED, and unlike facts and chrono entries that did not change '
     + 'in 4.0: nothing can point AT an edge. Links run from a fact, chrono entry or file to what it is '
     + 'about, and an edge is never the target of one.\n\n'
-    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync and the edge is '
+    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer. The edge is '
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it. Use a new id.\n\n'
     + 'PARAMETERS:\n'
