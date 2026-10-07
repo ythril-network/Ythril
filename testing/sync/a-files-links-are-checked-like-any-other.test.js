@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { INSTANCES, post, get, waitFor, createTestSpace } from './helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -116,7 +117,7 @@ describe('a link arriving FROM a file is checked like any other', () => {
      * run yet rather than because it found nothing. The positive case above establishes that ten seconds is
      * long enough for one to land; this waits the same way and then requires the list to be clean.
      */
-    await new Promise(resolve => setTimeout(resolve, 3_000));
+    await sleep(3_000);
     const list = await get(INSTANCES.a, token, '/api/conflicts/link-violations');
     assert.equal(list.status, 200);
     const v = (list.body.violations ?? []).find(x => x.docId === filePath);

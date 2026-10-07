@@ -30,12 +30,9 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { makeWorkdir, runTimes, everything, SHA, T, githubRun as run, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
+import { withRecordingWorld, keysOf, zipRequests, everything, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
 
 const spec = (suite, batch, file) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }] });
-const jobs = (...names) => names.map(name => ({ name, status: 'completed', conclusion: 'success', started_at: '2026-10-05T10:00:00Z', completed_at: '2026-10-05T10:15:00Z' }));
 const NOT_A_ZIP = Buffer.from('this is not a zip archive, whatever its name says');
 
 /** Run 2001 is the newest; 2000 is older. Each has two jobs, each with a results artifact. */
@@ -50,32 +47,18 @@ function world({ garbage = false } = {}) {
     : artifact(id, 'test-results-integration-1', ['integration-all.jsonl', spec('integration', 'all', 'testing/integration/i.test.js')]));
   return {
     runs,
-    jobsByRun: { 2001: jobs('prepare', 'standalone-pure', 'integration'), 2000: jobs('prepare', 'standalone-pure', 'integration') },
+    jobsByRun: { 2001: githubJobs('prepare', 'standalone-pure', 'integration'), 2000: githubJobs('prepare', 'standalone-pure', 'integration') },
     artifactsByRun: { 2001: [pure(6001), integration(6002)], 2000: [pure(6003), artifact(6004, 'test-results-integration-1', ['integration-all.jsonl', spec('integration', 'all', 'testing/integration/i.test.js')])] },
   };
 }
 
-async function withWorld(opts, body) {
-  const github = await startFakeGithub(world(opts));
-  const ythril = await startFakeYthril();
-  const work = makeWorkdir();
-  const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-  const pass = () => runTimes(['--record-ci'], { cwd: work.dir, env });
-  try { return await body({ github, ythril, pass }); } finally { await github.close(); await ythril.close(); work.cleanup(); }
-}
-
-const keysOf = (ythril) => ythril.store.map(e => e.properties.recordKey).sort();
-const zipRequests = (github, from) => github.requests.slice(from).filter(q => q.path.startsWith('/blob/') || /\/actions\/artifacts\/\d+\/zip$/.test(q.path));
+const withWorld = (opts, body) => withRecordingWorld(world(opts), body);
 
 describe('--record-ci: where the walk stops', () => {
   it('a run recorded completely whose artifacts have EXPIRED is recorded: no `none` row is written for it, and the walk stops there', async () => {
     const w = world();
-    const github = await startFakeGithub(w);
-    const ythril = await startFakeYthril();
-    const work = makeWorkdir();
-    const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-    try {
-      const first = await runTimes(['--record-ci'], { cwd: work.dir, env });
+    await withRecordingWorld(w, async ({ ythril, pass }) => {
+      const first = await pass();
       assert.equal(first.code, 0, everything(first));
       const recorded = keysOf(ythril);
       assert.deepEqual(recorded, [
@@ -86,26 +69,22 @@ describe('--record-ci: where the walk stops', () => {
       for (const a of w.artifactsByRun[2001]) a.expired = true;
       // The older run's records are gone from the instance, which a walk that stopped at 2001 never notices.
       ythril.store.splice(0, ythril.store.length, ...ythril.store.filter(e => e.properties.runId === '2001'));
-      const second = await runTimes(['--record-ci'], { cwd: work.dir, env });
+      const second = await pass();
       assert.equal(second.code, 0, everything(second));
       assert.deepEqual(keysOf(ythril), ['ci:2001:1:integration:integration', 'ci:2001:1:standalone-pure:standalone'],
         'a record was written for a run that was already recorded (a `workflow` row for its expired artifacts, or one of the run before it)');
       assert.ok(!keysOf(ythril).some(k => k.includes(':workflow:')), 'a measurements-none row was written for a recorded run');
-    } finally { await github.close(); await ythril.close(); work.cleanup(); }
+    });
   });
 
   it('a run with NOTHING recorded and nothing left to read is still written once as `none`, so it is not fetched again', async () => {
     const w = world();
     for (const a of w.artifactsByRun[2001]) a.expired = true;
-    const github = await startFakeGithub(w);
-    const ythril = await startFakeYthril();
-    const work = makeWorkdir();
-    const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-    try {
-      const r = await runTimes(['--record-ci'], { cwd: work.dir, env });
+    await withRecordingWorld(w, async ({ ythril, pass }) => {
+      const r = await pass();
       assert.equal(r.code, 0, everything(r));
       assert.ok(keysOf(ythril).includes('ci:2001:1:workflow:ci'), `the run that left nothing measurable was not recorded as that: ${keysOf(ythril)}`);
-    } finally { await github.close(); await ythril.close(); work.cleanup(); }
+    });
   });
 
   it('a recorded run with an artifact that can never be read is the stop, and the pass does not fail for it, now or ever', async () => {

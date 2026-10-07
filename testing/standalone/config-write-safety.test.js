@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, delWithBody } from '../sync/helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_CONFIGS = [
@@ -100,7 +101,7 @@ describe('config.json write safety', () => {
     // Let the bind-mount propagate AND the config watcher's stat poll (2s) notice.
     // Without this the request below would race the watcher and the test would be
     // asserting the old behaviour half the time.
-    await new Promise(r => setTimeout(r, 4000));
+    await sleep(4000);
 
     // Now make the server persist config from its own copy, via an unrelated change.
     // No `confirm` — the rename route never accepted one, and since `RenameSpaceBody` became `.strict()` a
@@ -108,7 +109,7 @@ describe('config.json write safety', () => {
     // body, which does require it) and was passing on the strength of the leniency that change removed.
     const renameR = await patch(INSTANCES.a, token, `/api/spaces/${victim}/rename`, { newId: renamed });
     assert.equal(renameR.status, 200, JSON.stringify(renameR.body));
-    await new Promise(r => setTimeout(r, 600));
+    await sleep(600);
 
     const after = readConfig();
     assert.equal(
@@ -137,7 +138,7 @@ describe('config.json write safety', () => {
     const waitReady = async (spaceId) => {
       for (let i = 0; i < 60; i++) {
         if (readConfig().spaces.find(s => s.id === spaceId)?.indexStatus === 'ready') return true;
-        await new Promise(r => setTimeout(r, 1000));
+        await sleep(1000);
       }
       return false;
     };
@@ -154,7 +155,7 @@ describe('config.json write safety', () => {
     // The same window the first case waits out: the bind mount propagates and the config watcher's 2 s stat poll
     // reloads the edit. A server write inside that window is the documented gap the watcher narrows, not this
     // case's subject, which is the readiness write holding a stale snapshot.
-    await new Promise(r => setTimeout(r, 4000));
+    await sleep(4000);
 
     const createT = await post(INSTANCES.a, token, '/api/spaces', { id: t, label: 'Later Space' });
     assert.equal(createT.status, 201, JSON.stringify(createT.body));

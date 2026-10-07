@@ -27,24 +27,39 @@
  */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { testChildEnv } from './test-child-env.mjs';
 import { TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
 import { makeScratchRepo } from './scratch-git-repo.mjs';
 import { buildZip } from './zip-builder.mjs';
+import { jobEntries, loadCi } from './ci-workflow.mjs';
+import { maskClientReport } from '../../scripts/mask-client-report.mjs';
+import { startFakeGithub, FAKE_GH_TOKEN } from './fake-github-actions.mjs';
+import { startFakeYthril } from './fake-ythril-tool-server.mjs';
 
 export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs');
 
-/** A scratch git repository with one commit on `main`, `test-results/` ignored, as the real tree has it. */
-export function makeWorkdir({ dirty = false, untracked = false, branch = 'main' } = {}) {
+/**
+ * A scratch git repository with one commit on `main`, `test-results/` ignored, as the real tree has it.
+ *
+ * `tracked` names further files (repo-relative, forward slashes) committed in that one commit, each holding a line of text:
+ * the client's spec files, when a test needs "every spec tracked at the record commit" to be a particular set.
+ * `commitMs` is that commit's own time (git keeps seconds), for a test that places a run before or after it.
+ */
+export function makeWorkdir({ dirty = false, untracked = false, branch = 'main', tracked = [] } = {}) {
   const { dir, git, cleanup } = makeScratchRepo({ prefix: 'test-times-', branch });
   writeFileSync(join(dir, '.gitignore'), `${TIMING_RESULTS_FOLDER}/\n`);
   writeFileSync(join(dir, 'a.txt'), 'one\n');
+  for (const file of tracked) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(join(dir, file), `// ${file}\n`);
+  }
   git('add', '-A');
   git('commit', '-q', '-m', 'initial');
   if (dirty) writeFileSync(join(dir, 'a.txt'), 'two\n');
   if (untracked) writeFileSync(join(dir, 'b.txt'), 'new\n');
-  return { dir, commit: git('rev-parse', 'HEAD').trim(), branch, cleanup };
+  return { dir, commit: git('rev-parse', 'HEAD').trim(), commitMs: Number(git('log', '-1', '--format=%ct').trim()) * 1000, branch, cleanup };
 }
 
 /**
@@ -138,9 +153,9 @@ export function cleanEnv(extra = {}) {
  * A child that outlives `timeoutMs` is killed and the promise rejects — a recorder that wedges is a failure,
  * not a slow pass.
  */
-export function runTimes(args, { cwd, env = {}, timeoutMs = 60_000 } = {}) {
+export function runTimes(args, { cwd, env = {}, timeoutMs = 60_000, nodeArgs = [] } = {}) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [SCRIPT, ...args], { cwd, env: cleanEnv(env), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [...nodeArgs, SCRIPT, ...args], { cwd, env: cleanEnv(env), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', d => { stdout += d; });
@@ -150,6 +165,12 @@ export function runTimes(args, { cwd, env = {}, timeoutMs = 60_000 } = {}) {
     child.on('close', code => { clearTimeout(timer); resolveRun({ code, stdout, stderr, child }); });
   });
 }
+
+/**
+ * `runTimes` in the condition of CI's advisory job, which runs `--summary` without an `npm ci`: no package can be imported
+ * (`no-packages.mjs`), so a module the script reaches that needs one fails the run as it would there.
+ */
+export const runTimesWithoutPackages = (args, options = {}) => runTimes(args, { ...options, nodeArgs: ['--import', pathToFileURL(resolve(import.meta.dirname, 'no-packages.mjs')).href] });
 
 /** Start the recorder without waiting for it — for the tests that kill it or run two at once. */
 export function spawnTimes(args, { cwd, env = {} } = {}) {
@@ -200,3 +221,103 @@ export const githubRun = (id, over = {}) => ({
 export const resultsArtifact = (id, name, ...files) => ({
   id, name, zip: buildZip(files.map(([file, spec]) => ({ name: file, data: jsonlFor(spec) }))),
 });
+
+/**
+ * The jobs of a run as the Actions API lists them: each one's `name` is its DISPLAY name (`Prepare`, `Client tests`,
+ * `Standalone (no services)`), never the workflow's job id. The API's job objects carry no id of the workflow's own, which is
+ * why a recorder that looks a job up by the id it read from an artifact name finds nothing.
+ *
+ * `ids` are job ids of the committed `ci.yml`, their display names read from it (not written here, so a rename there is the
+ * name this serves); an entry `{ name, ... }` is a job the workflow does not have (an older run's), served as given. A job's
+ * own span is `startedAt` .. `completedAt`, and is deliberately different from the spans the results of its jobs record, so a
+ * wall taken from the wrong place is a different number and not an equal one.
+ *
+ * @param {Array<string | { name: string, startedAt?: string, completedAt?: string }>} jobs
+ */
+export function githubJobs(...jobs) {
+  const names = new Map(jobEntries(loadCi()).map(e => [e.id, e.name]));
+  return jobs.map((j, i) => {
+    const given = typeof j === 'string' ? { id: j } : j;
+    const name = given.name ?? names.get(given.id);
+    if (name === undefined) throw new Error(`githubJobs: ci.yml has no job ${given.id}`);
+    return {
+      id: 7_000_000 + i, name, status: 'completed', conclusion: 'success',
+      started_at: given.startedAt ?? '2026-10-05T09:59:00Z', completed_at: given.completedAt ?? '2026-10-05T10:19:00Z',
+    };
+  });
+}
+
+/**
+ * The client job's result artifact: the folder `test-results/` it uploads, whose one entry is `client.json`, produced the
+ * way CI produces it — by running the real `maskClientReport` (`scripts/mask-client-report.mjs`) over the raw report, with
+ * `root` the checkout the specs lie under. `masked: false` leaves the report as vitest wrote it, for a test that holds the
+ * recorder to masking on its own.
+ *
+ * @param {number} id
+ * @param {object} report  a raw vitest report (`clientReport(...)` of `client-report-fixtures.mjs`)
+ * @param {{ root: string, attempt?: number, masked?: boolean, entry?: string, extra?: Array<{ name: string, data: string }> }} o
+ */
+export function clientArtifact(id, report, { root, attempt = 1, masked = true, entry = 'client.json', extra = [] } = {}) {
+  const body = masked ? maskClientReport(report, root) : report;
+  return clientArtifactFromEntries(id, [{ name: entry, data: JSON.stringify(body) }, ...extra], { attempt });
+}
+
+/**
+ * The client job's artifact made of raw zip entries (`{ name, data }`), for a test that is about what the recorder does with
+ * an artifact that holds no report, a misplaced one, or one that is not a report. The artifact's name (the job id the
+ * recorder reads from it) is spelled here and in {@link clientArtifact}, which builds on this.
+ */
+export const clientArtifactFromEntries = (id, entries, { attempt = 1 } = {}) => ({ id, name: `test-results-client-tests-${attempt}`, zip: buildZip(entries) });
+
+// ── A scratch world for a test that runs the recorder against the fake Actions API ───────────────────────────────
+
+/**
+ * Stand up the fake Actions API serving `world` (`{ runs, jobsByRun, artifactsByRun }`), a scratch working directory and
+ * the environment that points the script at both, run `body`, and close all of it.
+ *
+ * `body` gets `{ github, work, dir, env }`; `env` carries `extraEnv` too (the run id a `--summary` judges against, say).
+ * `world` may be mutated by the test after this has started it — the fake serves the object it was given.
+ */
+export async function withGithubWorld(world, body, extraEnv = {}) {
+  const github = await startFakeGithub(world);
+  const work = makeWorkdir();
+  const env = { GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN, ...extraEnv };
+  try { return await body({ github, work, dir: work.dir, env }); } finally { await github.close(); work.cleanup(); }
+}
+
+/**
+ * {@link withGithubWorld} with a fake Ythril instance beside it, for a test that records: `env` also holds its URL and
+ * token, and `body` also gets `ythril` and `pass(args = ['--record-ci'])`, one run of the script in the scratch directory.
+ */
+export function withRecordingWorld(world, body) {
+  return withGithubWorld(world, async (ctx) => {
+    const ythril = await startFakeYthril();
+    const env = { ...ctx.env, YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token };
+    const pass = (args = ['--record-ci']) => runTimes(args, { cwd: ctx.dir, env });
+    try { return await body({ ...ctx, env, ythril, pass }); } finally { await ythril.close(); }
+  });
+}
+
+/** The record keys the fake instance holds, sorted. */
+export const keysOf = (ythril) => ythril.store.map(e => e.properties.recordKey).sort();
+
+/** The properties of every record the fake instance holds, by record key. */
+export const propertiesByKey = (ythril) => Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e.properties]));
+
+/** The whole entries the fake instance holds, by suite (a local run holds one entry per suite). */
+export const entriesBySuite = (server) => Object.fromEntries(server.store.map(e => [e.properties.suite, e]));
+
+/** A record's `measurements` text, parsed. */
+export const measurementsOf = (entry) => JSON.parse(entry.properties.measurements);
+
+/** The requests of the fake Actions API, from request `from` on, that fetched an artifact's bytes. */
+export const zipRequests = (github, from) => github.requests.slice(from).filter(q => q.path.startsWith('/blob/') || /\/actions\/artifacts\/\d+\/zip$/.test(q.path));
+
+/** Write `<dir>/test-results/client.json`, where a local run leaves the client's report, and return its path. */
+export function writeClientReport(dir, report) {
+  const out = join(dir, TIMING_RESULTS_FOLDER);
+  mkdirSync(out, { recursive: true });
+  const path = join(out, 'client.json');
+  writeFileSync(path, typeof report === 'string' ? report : JSON.stringify(report));
+  return path;
+}

@@ -13,14 +13,7 @@
  * A reader that unwraps parentheses and forgets `await` or `as` stops seeing a call the moment someone writes it the
  * other way, and the gate built on it reports clean. One list of wrappers, so a new one (`satisfies`) is added once.
  */
-import { ts } from '../_shared/syntax-tree.mjs';
-
-/** The expression under any parentheses, `!`, `as`, `satisfies` and `await`. */
-export function unwrapExpression(e) {
-  while (e && (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
-    || ts.isSatisfiesExpression(e) || ts.isAwaitExpression(e))) e = e.expression;
-  return e;
-}
+import { ts, unwrapExpression } from '../_shared/syntax-tree.mjs';
 
 /** The last name of an identifier or property access (`a.b.c` is `c`), or `undefined` for anything else. */
 export function lastName(e) {

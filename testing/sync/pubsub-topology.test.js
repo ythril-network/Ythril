@@ -26,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord, getInstanceId } from './helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -170,7 +171,7 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
 
     // Wait and verify the subscriber-local fact is NOT on A.
     // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await new Promise(r => setTimeout(r, 3_000));
+    await sleep(3_000);
     const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', subMemId);
     assert.equal(r.status, 404, 'Subscriber fact should NOT appear on publisher');
     console.log(`  Subscriber fact correctly absent from A ✓`);

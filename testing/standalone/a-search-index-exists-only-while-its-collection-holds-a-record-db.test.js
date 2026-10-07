@@ -40,6 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -64,7 +65,6 @@ const rec = (id, extra = {}) => {
     embeddingModel: 'stub', seq: ++seq, createdAt: now, updatedAt: now, ...extra };
 };
 const names = async (coll) => (await mongo.col(coll).listSearchIndexes().toArray()).map(i => i.name).sort();
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** mongot's catalogue lags a drop by a moment, so absence is polled for rather than read once. */
 const eventually = (what, fn, timeoutMs = 60_000) => waitUntilTrue(what, fn, timeoutMs, 500);

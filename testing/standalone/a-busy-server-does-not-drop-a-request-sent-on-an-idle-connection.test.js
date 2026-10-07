@@ -21,6 +21,7 @@ import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const MODULE = pathToFileURL(join(REPO_ROOT, 'server', 'dist', 'http-connections.js')).href;
 const CHILD = `
@@ -51,7 +52,6 @@ const request = (agent, path) => new Promise((resolve) => {
   });
   req.on('error', err => resolve({ ok: false, error: err.code ?? err.message }));
 });
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 describe('a request on an idle keep-alive connection survives a stall', () => {
   it('connection 1 is reused during a 7 s stall and still answered', { timeout: 30_000 }, async () => {

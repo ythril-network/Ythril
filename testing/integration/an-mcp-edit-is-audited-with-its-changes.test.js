@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, get, del } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -41,7 +42,7 @@ async function entry(method, since) {
     const r = await get(INSTANCES.a, admin, `/api/admin/audit-log?operation=fact.update&spaceId=general&after=${encodeURIComponent(since)}&limit=50`);
     const hit = (r.body.entries ?? []).find(e => e.method === method && e.entryId === factId);
     if (hit) return hit;
-    await new Promise(res => setTimeout(res, 250));
+    await sleep(250);
   }
   return null;
 }

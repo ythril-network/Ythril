@@ -11,6 +11,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const DIMS = 4;
@@ -27,7 +28,7 @@ async function waitQueryable(coll, name) {
   for (let i = 0; i < 120; i++) {
     const idx = await coll.listSearchIndexes(name).toArray();
     if (idx[0]?.queryable) return;
-    await new Promise(r => setTimeout(r, 500));
+    await sleep(500);
   }
   throw new Error(`search index ${name} never became queryable`);
 }

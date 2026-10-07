@@ -13,7 +13,10 @@
  *  - **The slowest files and tests**: where the minutes went.
  *  - **Every skip with its reason**, the ones CI did not expect marked `UNEXPECTED` — the same verdict the aggregator
  *    gives, so the page and the gate cannot tell two stories.
- *  - **The failures** with the first line of their message.
+ *  - **The failures** with the first line of their message, as inline code with its backticks replaced: the message is text
+ *    from a test, and none of it may read as markdown.
+ *  - **The client as a suite**: its row has the same columns as a node suite's, and its skips and failures are listed with
+ *    theirs. A client report that could not be read is one line, `Client results: <why>`.
  *  - **The baseline**: files and suites slower than the last runs of main, or one line saying why there is no baseline.
  *    A baseline that could not be read is a line here, never a missing page.
  */
@@ -24,6 +27,7 @@ export const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 const cell = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
 const row = (...cells) => `| ${cells.map(cell).join(' | ')} |`;
 const table = (head, rows) => [row(...head), row(...head.map(() => '---')), ...rows.map(r => row(...r))].join('\n');
+/** Text from a test or a file as inline code, its backticks replaced: none of it can be read as markdown or end the span. */
 const code = (v) => `\`${String(v).replace(/`/g, "'")}\``;
 
 /**
@@ -36,26 +40,24 @@ const code = (v) => `\`${String(v).replace(/`/g, "'")}\``;
 
 /**
  * @param {object} p
- * @param {SuiteFigures[]} p.suites
- * @param {{ passed: number, failed: number, tests: number, skips: Skip[] }|null} [p.client] null when there is no client report
- * @param {string} [p.clientNote] why there is none
+ * @param {SuiteFigures[]} p.suites every suite of the run, the client's (suite `client`) among them
+ * @param {string} [p.clientNote] why the client has no row, when its report could not be read
  * @param {string[]} p.baseline lines about the baseline: flags, or why there is none
  * @param {number} [p.top] how many of the slowest to list
  */
-export function renderRunSummary({ suites, client = null, clientNote = '', baseline, top = 10 }) {
+export function renderRunSummary({ suites, clientNote = '', baseline, top = 10 }) {
   const out = ['## Test run summary', ''];
   const rows = suites.map(s => [s.suite, s.tests, s.passed, s.failed, s.skipped, s.files, seconds(s.ms),
     s.wallMs === undefined ? '' : seconds(s.wallMs), s.outcome]);
-  if (client) rows.push(['client', client.tests, client.passed, client.failed, client.skips.length, '', '', '', client.failed ? 'failed' : 'passed']);
   out.push(table(['suite', 'tests', 'passed', 'failed', 'skipped', 'files', 'test time', 'wall', 'outcome'], rows));
-  if (!client && clientNote) out.push('', `Client results: ${clientNote}`);
+  if (clientNote) out.push('', `Client results: ${clientNote}`);
 
   const files = suites.flatMap(s => s.fileTimes.map(f => ({ suite: s.suite, ...f }))).sort((a, b) => b.ms - a.ms).slice(0, top);
   if (files.length) out.push('', '### Slowest files', '', table(['file', 'suite', 'time'], files.map(f => [code(f.file), f.suite, seconds(f.ms)])));
   const tests = suites.flatMap(s => s.slowestTests.map(t => ({ suite: s.suite, ...t }))).sort((a, b) => b.ms - a.ms).slice(0, top);
   if (tests.length) out.push('', '### Slowest tests', '', table(['test', 'file', 'suite', 'time'], tests.map(t => [t.test, code(t.file), t.suite, seconds(t.ms)])));
 
-  const skips = [...suites.flatMap(s => s.skips), ...(client?.skips ?? [])];
+  const skips = suites.flatMap(s => s.skips);
   out.push('', '### Skips', '');
   if (!skips.length) out.push('None.');
   for (const k of skips) {
@@ -65,7 +67,7 @@ export function renderRunSummary({ suites, client = null, clientNote = '', basel
   const failures = suites.flatMap(s => s.failures);
   if (failures.length) {
     out.push('', '### Failures', '');
-    for (const f of failures) out.push(`- ${code(f.file)} — ${JSON.stringify(f.test)}${f.message ? `: ${f.message}` : ''}`);
+    for (const f of failures) out.push(`- ${code(f.file)} — ${JSON.stringify(f.test)}${f.message ? `: ${code(f.message)}` : ''}`);
   }
 
   out.push('', '### Against the last runs of main', '', ...baseline.map(l => `- ${l}`));

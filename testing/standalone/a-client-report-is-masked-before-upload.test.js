@@ -162,6 +162,38 @@ describe('scripts/mask-client-report.mjs', () => {
   it('refuses a call with no file', () => {
     assert.equal(runScript(SCRIPT, []).status, 2);
   });
+
+  // The producer half of the runner stamp: the recorder trusts `runnerOutcome` to call a run vitest reported green
+  // incomplete when its runner failed, so the step that writes it is held here, not only the reader that reads it.
+  for (const outcome of ['success', 'failure', 'cancelled', 'skipped']) {
+    it(`stamps the test step's outcome it is handed (CLIENT_TEST_OUTCOME=${outcome}) into the masked report`, () => {
+      const file = join(dir, `stamp-${outcome}.json`);
+      writeFileSync(file, JSON.stringify(report()));
+      const r = runScript(SCRIPT, [file], { env: { CLIENT_TEST_OUTCOME: outcome } });
+      assert.equal(r.status, 0, r.out);
+      const written = JSON.parse(readFileSync(file, 'utf8'));
+      assert.equal(written.runnerOutcome, outcome, 'the report does not carry the runner\'s outcome it was handed');
+      assert.ok(!JSON.stringify(written).includes(TOKEN), 'the stamped report is not masked');
+    });
+  }
+
+  it('without CLIENT_TEST_OUTCOME it masks and writes no stamp', () => {
+    const file = join(dir, 'unstamped.json');
+    writeFileSync(file, JSON.stringify(report()));
+    const r = runScript(SCRIPT, [file], { env: { CLIENT_TEST_OUTCOME: '' } });
+    assert.equal(r.status, 0, r.out);
+    assert.equal('runnerOutcome' in JSON.parse(readFileSync(file, 'utf8')), false, 'a stamp appeared that nobody handed the script');
+  });
+
+  it('a word that is not a runner outcome fails the step, and the report stays masked and unstamped', () => {
+    const file = join(dir, 'bad-stamp.json');
+    writeFileSync(file, JSON.stringify(report()));
+    const r = runScript(SCRIPT, [file], { env: { CLIENT_TEST_OUTCOME: 'win' } });
+    assert.notEqual(r.status, 0, 'an unknown outcome was accepted');
+    const written = JSON.parse(readFileSync(file, 'utf8'));
+    assert.equal('runnerOutcome' in written, false, 'an unknown outcome became a stamp');
+    assert.ok(!JSON.stringify(written).includes(TOKEN), 'the report was left unmasked');
+  });
 });
 
 describe('the client job masks the report between the tests and the upload', () => {
@@ -178,5 +210,31 @@ describe('the client job masks the report between the tests and the upload', () 
     assert.ok(tests < mask && mask < upload, `the masking step must come after the tests (${tests}) and before the upload (${upload}); it is at ${mask}`);
     assert.match(String(steps[mask].if ?? ''), /always\(\)/, 'the masking step must run when the tests failed — that is when the report holds a failure');
     assert.match(shellOf(steps[mask]), /test-results\/client\.json/, 'the step masks a different file from the one the tests write');
+  });
+
+  it('the masking step is handed the test step\'s own outcome, by that step\'s id', () => {
+    const steps = stepsOf(job());
+    const tests = steps.find(s => /--outputFile(?:\.json)?[ =]\S*client\.json/.test(shellOf(s)));
+    const mask = steps.find(s => /scripts\/mask-client-report\.mjs/.test(shellOf(s)));
+    assert.ok(tests && mask, 'the client job lost its test step or its masking step — re-anchor this gate');
+    assert.ok(typeof tests.id === 'string' && tests.id !== '', 'the client test step has no id, so no later step can read its outcome');
+    const handed = String(mask.env?.CLIENT_TEST_OUTCOME ?? '');
+    assert.match(handed, new RegExp(`^\\$\\{\\{\\s*steps\\.${tests.id.replace(/[-.]/g, '\\$&')}\\.outcome\\s*\\}\\}$`),
+      `the masking step must get CLIENT_TEST_OUTCOME: \${{ steps.${tests.id}.outcome }}; it gets ${JSON.stringify(handed)}`);
+  });
+});
+
+describe('preflight produces the client report the way CI does, and stamps it', () => {
+  const src = () => readFileSync(join(REPO_ROOT, 'scripts', 'preflight.mjs'), 'utf8');
+
+  it('deletes the old report, runs the client tests, then stamps the outcome through the one stamper', () => {
+    const text = src();
+    const run = text.search(/--outputFile(?:\.json)?[ =]\.\.\/test-results\/client\.json/);
+    const clear = text.search(/rmSync\(\s*CLIENT_REPORT\b/);
+    const stamp = text.search(/stampRunnerOutcome\(\s*CLIENT_REPORT\b/);
+    assert.ok(run >= 0, 'preflight no longer runs the client tests with the json report — re-anchor this gate');
+    assert.ok(clear >= 0 && clear < run, 'preflight does not delete the old client report before the run, so a stale report could be recorded as this one');
+    assert.ok(stamp > run, 'preflight does not stamp the runner\'s outcome after the client run (through stampRunnerOutcome)');
+    assert.match(text, /import\s*\{[^}]*\bstampRunnerOutcome\b[^}]*\}\s*from\s*'\.\/mask-client-report\.mjs'/, 'preflight stamps through something other than the one stamper');
   });
 });

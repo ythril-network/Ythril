@@ -40,6 +40,11 @@
  *
  * ## What it is not
  *
+ * Not a console filter: it masks the FILES a run writes and uploads (the timing records, the client report, a recorded
+ * `Test-Run`), never what a process prints. A CI job's own log is public and unmasked, so a secret a test prints is
+ * published whatever this list holds; what may reach repository code in CI is held by `ci-workflow-is-sound`, and
+ * `docs/testing-guide.md` ("Reading durations") says which credentials those are.
+ *
  * Not the server's `redactSecrets` (`server/src/util/log.ts`): that answers "what must not reach a server log line"
  * (URL userinfo, credential query parameters, a `Bearer` value), runs linear-time over untrusted peer text, and ships
  * in the server image, which holds no `testing/`. And not a home-path scrub (`scripts/_shared/mask-text.mjs` keeps that: it

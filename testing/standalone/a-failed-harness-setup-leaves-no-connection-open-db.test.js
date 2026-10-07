@@ -23,6 +23,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -39,7 +40,7 @@ describe('a failed harness setup leaves no connection open', { skip }, () => {
       'fixture check: the setup did not fail, so this case proves nothing',
     );
     // The driver releases sockets asynchronously after close; give it a moment, then look.
-    for (let i = 0; i < 20 && mongoSockets().length > 0; i++) await new Promise(r => setTimeout(r, 100));
+    for (let i = 0; i < 20 && mongoSockets().length > 0; i++) await sleep(100);
     assert.deepEqual(mongoSockets().map(s => `${s.remoteAddress}:${s.remotePort}`), [],
       'the harness left its Mongo connection open after a failed setup, so this process would never exit');
   });

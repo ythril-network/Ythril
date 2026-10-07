@@ -29,11 +29,13 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { failWrites } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -96,15 +98,14 @@ describe('a store failure is not read as a refusal', { skip }, () => {
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    base = `http://127.0.0.1:${server.address().port}`;
+    server = await listenOnLoopback(http.createServer(createApp()));
+    base = server.url;
     faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')),
       ['rename', 'createIndex', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'bulkWrite', 'replaceOne']);
   });
   after(async () => {
     faults?.restore();
-    await new Promise(r => server?.close(r));
+    await server?.close();
     await door?.close();
   });
   beforeEach(() => faults.clear());

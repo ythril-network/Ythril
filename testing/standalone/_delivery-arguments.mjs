@@ -15,8 +15,8 @@
  * Reading the tree means a comment, a string or the function's own definition is never a call, and a call through a
  * namespace import is still one. Matching call text would have missed the second and tripped on the first.
  */
-import { parseSource, lineOf, ts } from '../_shared/syntax-tree.mjs';
-import { unwrapExpression, calleeNameOf } from './_expression-names.mjs';
+import { parseSource, lineOf, ts, unwrapExpression } from '../_shared/syntax-tree.mjs';
+import { calleeNameOf } from './_expression-names.mjs';
 
 export const APPLIES = Object.freeze(['applyPeerTombstones', 'applyPeerFileTombstones']);
 

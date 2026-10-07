@@ -39,6 +39,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every later step.
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         # `docker buildx imagetools inspect` resolves a remote manifest via the registry's

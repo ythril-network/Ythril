@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { INSTANCES, post, get, del, reqJson, waitFor, getInstanceId, createTestSpace } from './helpers.js';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -338,7 +339,7 @@ describe('GET /api/sync/manifest', () => {
 
   it('manifest ?since= filters to only recently modified files', async () => {
     const before = new Date().toISOString();
-    await new Promise(r => setTimeout(r, 100));  // ensure timestamp difference
+    await sleep(100);  // ensure timestamp difference
 
     const newPath = `manifest-since-${RUN}.txt`;
     await uploadFile(INSTANCES.a, tokenA2, SPACE, newPath, `since-${RUN}`);

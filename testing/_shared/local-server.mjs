@@ -3,9 +3,12 @@
  *
  * ## The question it answers
  *
- * "How does a test start a throwaway server on loopback and reliably stop it?" - asked by the two fakes
- * (`fake-ythril-tool-server.mjs`, `fake-github-actions.mjs`), by the TCP relay (`standalone/_tcp-relay.mjs`) and by the
- * closed-port helper (`closed-port.mjs`). Each had written the same shell.
+ * "How does a test start a throwaway server on loopback and reliably stop it?" - asked by every test, fake and fixture
+ * that starts one, and each had written the same shell. The callers are not listed here: a list of them is a copy that
+ * goes stale. They are whatever `a-test-waits-and-listens-through-one-helper` finds, which is every tracked test and
+ * script that does not say why it keeps its own listener (`// own-listener: <reason of two words or more>`: it reads
+ * `server.address()` beyond the port, closes with timing that matters, tests connection lifetime, or binds a LAN
+ * address or every interface).
  *
  * ## What it prevents
  *

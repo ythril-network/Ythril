@@ -25,6 +25,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
 import { waitForReading } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -415,7 +416,7 @@ describe('File metadata (MongoDB)', () => {
     const doc1 = q1.results[0];
 
     // Small delay to ensure timestamp differs
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
     await uploadFile(tokenA, 'general', filePath, 'version 2 content is longer');
 
     const q2 = await listFileMeta({ path: filePath });

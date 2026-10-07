@@ -22,6 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, get, post, del, reqJson, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -91,7 +92,7 @@ async function ensureMaintenanceOff() {
       last = err instanceof Error ? err.message : String(err);
     }
     // The instance may be saturated rather than broken; give it a moment before asking again.
-    await new Promise(r => setTimeout(r, 250 * attempt));
+    await sleep(250 * attempt);
   }
   throw new Error(
     `Could not turn maintenance mode off after 4 attempts (${last}). Refusing to exit quietly: this instance `

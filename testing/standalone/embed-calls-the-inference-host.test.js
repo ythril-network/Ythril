@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createScriptedHost, gate } from './_scripted-inference-host.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-embed-host-'));
 process.env.CONFIG_PATH = path.join(tmp, 'config.json');
@@ -95,7 +96,7 @@ describe('embed() over the inference host', () => {
 
   it('records the histogram from the child\'s inferenceMs, not from how long the caller waited', async () => {
     host.behaviour = async () => {
-      await new Promise(r => setTimeout(r, 200));      // the caller waits 200 ms...
+      await sleep(200);      // the caller waits 200 ms...
       return { vector: [0.5, 0.5], modelId: 'm', inferenceMs: 7 };   // ...for an inference the child timed at 7
     };
     const before = await histogramSum();

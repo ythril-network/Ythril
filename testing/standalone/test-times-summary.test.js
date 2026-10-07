@@ -10,7 +10,10 @@
  *
  * 1. **It reads the results, not the help.** Every figure comes from the timing reporter's JSONL through the one
  *    counting rule the recorder uses (`summariseSuite`): a failure is counted once, a skipped suite is a skip, a file
- *    without its sentinel is `incomplete` and never `passed`. The client's vitest report is one more row.
+ *    without its sentinel is `incomplete` and never `passed`. The client's vitest report is one more suite, read by the
+ *    recorder's own client rule (bundle-73, Q-378): the same row as a node suite's (files, time, wall, outcome), its failures
+ *    listed with their reason, a file that never collected counted once, and a report that cannot be read a line that never
+ *    quotes it. Failure messages are text from a test: shown as inline code, so none of it is markdown.
  * 2. **Every skip is shown with its reason, and an unexpected one is marked** (the same list the aggregator reads,
  *    `testing/_shared/expected-in-ci.mjs`), so the page that reports the run says what the gate would say.
  * 3. **The baseline is bounded and never costs the summary.** At most ten trusted successful runs of main are read, the
@@ -31,8 +34,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { jsonlFor, makeWorkdir, runTimes, everything, T, githubRun, resultsArtifact } from '../_shared/test-times-harness.mjs';
+import { jsonlFor, makeWorkdir, withGithubWorld, runTimes, runTimesWithoutPackages, everything, T, githubRun, resultsArtifact, clientArtifact } from '../_shared/test-times-harness.mjs';
+import { buildZip } from '../_shared/zip-builder.mjs';
+import { clientReport } from '../_shared/client-report-fixtures.mjs';
 
 const LISTED = 'testing/standalone/the-extractor-finds-its-mentions.test.js';
 const A = 'testing/standalone/a.test.js';
@@ -190,11 +194,9 @@ function world({ corrupt = [] } = {}) {
   return { runs, jobsByRun: {}, artifactsByRun };
 }
 
-async function withGithub(opts, body) {
-  const github = await startFakeGithub(world(opts));
-  const work = makeWorkdir();
-  try { return await body({ github, work, env: { GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN, GITHUB_RUN_ID: '2012' } }); } finally { await github.close(); work.cleanup(); }
-}
+/** The judged run is 2012: the baseline must leave it out of its own history. */
+const withJudgedRun = (fake, body) => withGithubWorld(fake, body, { GITHUB_RUN_ID: '2012' });
+const withGithub = (opts, body) => withJudgedRun(world(opts), body);
 
 describe('--summary: the baseline', () => {
   it('flags a file slower than the last ten runs of main, naming file, suite, time and limit', async () => {
@@ -254,3 +256,177 @@ describe('--summary: the baseline', () => {
     });
   });
 });
+
+// ── the client, read by the recorder's own rule (bundle-73, Q-378) ──
+
+const CLIENT_START = Date.UTC(2026, 9, 5, 10, 0, 0);
+const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+/** A REAL vitest report (see `_fixtures/client-reports/README.md`), its specs under this work directory. */
+const clientIn = (work, name, mutate = () => {}) => { const r = clientReport(name, { root: work.dir, startMs: CLIENT_START }); mutate(r); return r; };
+const setFileMs = (report, ms) => { for (const f of report.testResults) f.endTime = f.startTime + ms; return report; };
+
+describe('--summary: the client is a suite like the others', () => {
+  it('has the same row as a node suite — tests, passed, failed, skipped, FILES, test time, wall and outcome', async () => {
+    await withWork(async (work) => {
+      const r = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'failed') })], work);
+      assert.equal(r.code, 0, everything(r));
+      const client = cells(rowOf(r.stdout, 'client') ?? '');
+      assert.deepEqual(client.slice(0, 6), ['client', '2', '1', '1', '0', '1'], `client row: ${client}`);
+      assert.match(client[6], /^\d+\.\d s$/, 'the client row has no test time');
+      assert.match(client[7], /^\d+\.\d s$/, 'the client row has no wall');
+      assert.equal(client[8], 'failed');
+    });
+  });
+
+  it('lists the client\'s failures with the first line of their reason, like a node failure', async () => {
+    await withWork(async (work) => {
+      const r = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'failed') })], work);
+      assert.ok(linesWith(r.stdout, 'fail.spec.ts', 'AssertionError: expected 2 to be 3').length >= 1, `the client failure is not listed with its reason:\n${r.stdout}`);
+    });
+  });
+
+  it('counts a file that never collected once, with its reason, and a run of nothing but such files is failed — not a note that the report holds no test', async () => {
+    await withWork(async (work) => {
+      const some = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'collection-failure') })], work);
+      assert.deepEqual(cells(rowOf(some.stdout, 'client') ?? '').slice(0, 6), ['client', '2', '1', '1', '0', '2'], some.stdout);
+      assert.ok(linesWith(some.stdout, 'collection-failure.spec.ts', 'Failed to resolve import').length >= 1, `the failed collection is not listed:\n${some.stdout}`);
+      const all = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'all-collection-failure') })], work);
+      assert.equal(all.code, 0, everything(all));
+      assert.equal(cells(rowOf(all.stdout, 'client') ?? '').at(-1), 'failed', `every file failing at collection is a failed client, not a missing one:\n${all.stdout}`);
+      assert.doesNotMatch(all.stdout, /Client results:/);
+    });
+  });
+
+  it('a hook that threw is one failure with `(no message)`, and its skipped tests are skips', async () => {
+    await withWork(async (work) => {
+      const r = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'beforeall-failure') })], work);
+      assert.deepEqual(cells(rowOf(r.stdout, 'client') ?? '').slice(0, 5), ['client', '3', '0', '1', '2'], r.stdout);
+      assert.ok(linesWith(r.stdout, 'beforeall-failure.spec.ts', '(no message)').length >= 1, `the failed hook is not listed:\n${r.stdout}`);
+    });
+  });
+
+  it('a test still pending, or a runner that stamped failure, makes the client `incomplete`', async () => {
+    await withWork(async (work) => {
+      for (const mutate of [(r) => { r.testResults[0].assertionResults[0].status = 'pending'; }, (r) => { r.runnerOutcome = 'failure'; }]) {
+        const r = await summary(['--results', results(work, [STANDALONE], { client: clientIn(work, 'passed', mutate) })], work);
+        assert.equal(cells(rowOf(r.stdout, 'client') ?? '').at(-1), 'incomplete', r.stdout);
+      }
+    });
+  });
+
+  it('a report that cannot be read is one line naming the reason, never the report — and the node suites still print', async () => {
+    await withWork(async (work) => {
+      for (const body of [`{"testResults": [ ${TOKEN} `, JSON.stringify({ secret: TOKEN })]) {
+        const dir = results(work, [STANDALONE]);
+        writeFileSync(join(dir, 'client.json'), body);
+        const r = await summary(['--results', dir], work);
+        assert.equal(r.code, 0, everything(r));
+        assert.ok(rowOf(r.stdout, 'standalone'), 'the node rows were lost with the client');
+        assert.match(r.stdout, /Client results:/);
+        assert.ok(!everything(r).includes(TOKEN), 'the summary quotes the report');
+        assert.doesNotMatch(everything(r), /Unexpected token|is not valid JSON|position \d+/);
+      }
+    });
+  });
+
+  it('shows a failure message as inline code with its backticks removed, for a node suite and for the client alike', async () => {
+    await withWork(async (work) => {
+      const message = 'boom: `rm -rf /` **bold** [link](http://example.invalid) <b>x</b>';
+      const loud = { ...STANDALONE, files: [{ file: A, ms: 1000, tests: [T('broken one', 5, { status: 'fail', message })] }] };
+      const r = await summary(['--results', results(work, [loud], { client: clientIn(work, 'failed', (c) => { c.testResults[0].assertionResults[1].failureMessages = [message]; }) })], work);
+      assert.equal(r.code, 0, everything(r));
+      const failures = r.stdout.split('\n').filter(l => /^- /.test(l) && /rm -rf/.test(l));
+      assert.equal(failures.length, 2, `one failure line per suite:\n${r.stdout}`);
+      for (const line of failures) {
+        const shown = /: `([^`]*)`$/.exec(line);
+        assert.ok(shown, `the message is not one inline code span at the end of the line: ${line}`);
+        assert.ok(shown[1].includes('rm -rf /') && shown[1].includes('**bold**'), `the message is not kept whole inside the span: ${line}`);
+      }
+    });
+  });
+
+  it('runs where nothing is installed, as the advisory job does: no package is imported, and the client row and failures still print', async () => {
+    await withWork(async (work) => {
+      const dir = results(work, [STANDALONE], { client: clientIn(work, 'failed') });
+      const r = await runTimesWithoutPackages(['--summary', '--results', dir], { cwd: work.dir });
+      assert.equal(r.code, 0, everything(r));
+      assert.doesNotMatch(everything(r), /no-packages:/, `the summary reaches a package: ${everything(r).split('\n').find(l => /no-packages:/.test(l))}`);
+      assert.ok(rowOf(r.stdout, 'standalone') && rowOf(r.stdout, 'client'));
+      assert.ok(linesWith(r.stdout, 'fail.spec.ts', 'AssertionError: expected 2 to be 3').length >= 1, `the client failure is not listed:\n${r.stdout}`);
+    });
+  });
+});
+
+// ── the baseline reads the client through the same parser, each suite on its own ──
+
+const CI_ROOT = '/home/runner/work/Ythril/Ythril';
+const usualClient = () => setFileMs(clientReport('passed', { root: CI_ROOT, startMs: CLIENT_START }), 5000);
+const INTEGRATION_USUAL = { suite: 'integration', batch: '1', files: [{ file: 'testing/integration/i.test.js', ms: 5000, tests: [T('one', 10)] }] };
+
+/**
+ * Twelve trusted runs of main whose artifacts hold the node jobs' results and (per `client`) the client job's.
+ * `client(id)` is the client job's artifact for run `id`, or null; `node(id)` the node artifacts.
+ */
+function worldOf({ client = (id) => clientArtifact(9500 + id, usualClient(), { root: CI_ROOT }), node = (id) => [artifact(9000 + id, usual)] } = {}) {
+  const runs = Array.from({ length: 12 }, (_, i) => run(2001 + i));
+  const artifactsByRun = Object.fromEntries(runs.map(r => [r.id, [...node(r.id), ...(client(r.id) ? [client(r.id)] : [])]]));
+  return { runs, jobsByRun: {}, artifactsByRun };
+}
+
+const withBaseline = (opts, body) => withJudgedRun(worldOf(opts), body);
+
+describe('--summary: the baseline reads the client like any suite', () => {
+  it('flags a client file and suite slower than the last runs of main, naming the suite', async () => {
+    await withBaseline({}, async ({ work, env }) => {
+      const dir = results(work, [{ ...STANDALONE, files: [{ file: A, ms: 5200, tests: [T('fast one', 10)] }] }], { client: setFileMs(clientIn(work, 'passed'), 60_000) });
+      const r = await summary(['--results', dir], work, env);
+      assert.equal(r.code, 0, everything(r));
+      assert.ok(r.stdout.split('\n').some(l => /slow file/.test(l) && l.includes('pass-one.spec.ts') && /\bclient\b/.test(l)), `the slow client file is not flagged:\n${r.stdout}`);
+      assert.ok(r.stdout.split('\n').some(l => /slow suite/.test(l) && /\bclient\b/.test(l)), `the slow client suite is not flagged:\n${r.stdout}`);
+    });
+  });
+
+  it('a history that never had a client report is not a problem: silent, and the node suites still judge', async () => {
+    await withBaseline({ client: () => null }, async ({ work, env }) => {
+      const dir = results(work, [STANDALONE], { client: setFileMs(clientIn(work, 'passed'), 60_000) });
+      const r = await summary(['--results', dir], work, env);
+      assert.equal(r.code, 0, everything(r));
+      assert.ok(r.stdout.split('\n').some(l => /slow file/.test(l) && l.includes(A)), `the node baseline was lost:\n${r.stdout}`);
+      assert.doesNotMatch(r.stdout, /::warning[^\n]*client/i, 'a run without a client report is not a warning');
+    });
+  });
+
+  it('one earlier run\'s unreadable client report costs only the client of THAT run: a fixed line names the run, the node suites of it still count', async () => {
+    const unreadable = (id) => (id === 2005
+      ? { id: 9900 + id, name: 'test-results-client-tests-1', zip: buildBadClientZip() }
+      : clientArtifact(9500 + id, usualClient(), { root: CI_ROOT }));
+    await withBaseline({ client: unreadable }, async ({ work, env }) => {
+      const dir = results(work, [STANDALONE], { client: setFileMs(clientIn(work, 'passed'), 60_000) });
+      const r = await summary(['--results', dir], work, env);
+      assert.equal(r.code, 0, everything(r));
+      assert.ok(r.stdout.split('\n').some(l => /2005/.test(l) && /client/i.test(l)), `the run whose client report is unreadable is not named:\n${r.stdout}`);
+      assert.ok(!everything(r).includes(TOKEN), 'the earlier run\'s report was quoted');
+      assert.doesNotMatch(everything(r), /Unexpected token|is not valid JSON|position \d+/);
+      assert.match(r.stdout, /compared with 10 run\(s\)/, 'the unreadable client report cost its run\'s node suites too');
+      assert.ok(r.stdout.split('\n').some(l => /slow file/.test(l) && l.includes('pass-one.spec.ts')), `the other runs no longer judge the client:\n${r.stdout}`);
+    });
+  });
+
+  it('a run\'s scope is judged per suite: a node suite that covered a subset in every earlier run does not take the others\' baselines with it', async () => {
+    const node = (id) => [
+      resultsArtifact(9000 + id, 'test-results-standalone-pure-1', ['standalone-pure-1.jsonl', { ...usual, scope: 'files' }]),
+      resultsArtifact(9300 + id, 'test-results-integration-1', ['integration-1.jsonl', INTEGRATION_USUAL]),
+    ];
+    await withBaseline({ node, client: () => null }, async ({ work, env }) => {
+      const slow = { ...INTEGRATION_USUAL, files: [{ file: 'testing/integration/i.test.js', ms: 60_000, tests: [T('one', 10)] }] };
+      const r = await summary(['--results', results(work, [{ ...usual }, slow])], work, env);
+      assert.equal(r.code, 0, everything(r));
+      assert.ok(r.stdout.split('\n').some(l => /slow file/.test(l) && l.includes('testing/integration/i.test.js')), `the integration suite has no baseline because another suite's earlier runs covered a subset:\n${r.stdout}`);
+    });
+  });
+});
+
+/** An artifact whose `client.json` is cut off with a token in it. */
+function buildBadClientZip() {
+  return buildZip([{ name: 'client.json', data: `{"testResults": [ ${TOKEN} ` }]);
+}

@@ -234,6 +234,32 @@ describe('--trend', () => {
     } finally { await t.close(); }
   });
 
+  it('limits the rows per suite: `--last N` draws the newest N of EACH suite, so the suite recorded most recently does not push the others off the page (the client joins the node suites, bundle-73)', async () => {
+    const server = await startFakeYthril();
+    const work = makeWorkdir();
+    try {
+      const SUITES = [['standalone', 'standalone-pure', 1], ['client', 'client-tests', 6]]; // [suite, job, first day]: the client's runs are the newer ones
+      for (const [suite, job, firstDay] of SUITES) {
+        for (let n = 0; n < 5; n++) {
+          const day = `2026-09-${String(firstDay + n).padStart(2, '0')}`;
+          server.seed({
+            title: suite, startsAt: `${day}T10:00:00.000Z`, endsAt: `${day}T10:08:00.000Z`,
+            properties: {
+              recordKey: `ci:${firstDay + n}:1:${job}:${suite}`, source: 'ci', commit: `${suite === 'client' ? 'c' : 'a'}${String(n).padStart(6, '0')}`.padEnd(40, 'f'),
+              branch: 'main', runId: String(firstDay + n), attempt: 1, job, suite, outcome: 'passed', scope: 'full', layout: 'ci-parallel-v2', formatVersion: 1,
+              ms: 100_000 + n, files: 3, tests: 30, passed: 30, failed: 0, cancelled: 0, skipped: 0, todo: 0, dirty: false, measurements: '{"files":[]}',
+            },
+          });
+        }
+      }
+      const r = await runTimes(['--trend', '--last', '3'], { cwd: work.dir, env: { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token } });
+      assert.equal(r.code, 0, everything(r));
+      const rows = (suite) => r.stdout.split('\n').filter(l => new RegExp(`^${suite}\\s`).test(l));
+      assert.equal(rows('standalone').length, 3, `the newest 3 standalone runs are drawn:\n${r.stdout}`);
+      assert.equal(rows('client').length, 3, `the newest 3 client runs are drawn:\n${r.stdout}`);
+    } finally { await server.close(); work.cleanup(); }
+  });
+
   it('does not trust the server\'s predicate: a subset, failed or feature-branch row that comes back anyway is not drawn', async () => {
     const t = await trend();
     // A server that ignores the predicate and answers with every row (measurements still stripped, as asked).

@@ -43,6 +43,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { driverTextIn } from './_driver-text.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -266,9 +267,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const schemas = toolSchemasFor([S]);
     schemaOf = name => materialisedSchema(tools.TOOLS_BY_NAME.get(name), schemas, [S, 'other']);
     const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    base = `http://127.0.0.1:${server.address().port}`;
+    server = await listenOnLoopback(http.createServer(createApp()));
+    base = server.url;
 
     http.ServerResponse.prototype.writeHead = function answeredHere(...args) {
       const id = log.currentRequestId();
@@ -309,7 +309,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
     BulkOperationBase.prototype.execute = realBulkExecute;
     http.ServerResponse.prototype.writeHead = realWriteHead;
     failing = false;
-    await new Promise(r => server?.close(r));
+    await server?.close();
     await door?.close();
   });
 

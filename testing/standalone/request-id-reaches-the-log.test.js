@@ -22,6 +22,7 @@ import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 let log, runWithRequestId, currentRequestId, subscribe;
 
@@ -80,11 +81,11 @@ describe('the id is ambient for the duration of a request', () => {
      */
     const seen = [];
     const one = runWithRequestId('req-one', async () => {
-      await new Promise(r => setTimeout(r, 5));
+      await sleep(5);
       seen.push(['one', currentRequestId()]);
     });
     const two = runWithRequestId('req-two', async () => {
-      await new Promise(r => setTimeout(r, 1));
+      await sleep(1);
       seen.push(['two', currentRequestId()]);
     });
     await Promise.all([one, two]);

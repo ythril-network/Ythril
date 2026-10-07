@@ -99,6 +99,7 @@ function startPeer() {
     const items = pages?.[at] ?? [];
     send(200, { items, nextCursor: pages && at + 1 < pages.length ? cursorOf(items) : null });
   });
+  // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
   return new Promise(resolve => server.listen(0, '0.0.0.0', () => resolve(server)));
 }
 

@@ -29,13 +29,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-ready-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({ spaces: [], networks: [], tokens: [] }));
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /** `getReadiness` caches for 2 s; a case that needs a fresh probe waits it out. */
 const CACHE_EXPIRY_MS = 2_300;
 

@@ -28,6 +28,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const { WhisperProvider } = await import('../../server/dist/files/media/providers.js');
 const { listUrlFor, normalizeOpenAiBase } = await import('../../server/dist/files/converters/vlm-endpoint.js');
@@ -35,7 +36,7 @@ const { listUrlFor, normalizeOpenAiBase } = await import('../../server/dist/file
 /** A minimal wav — the provider only needs bytes it can wrap in a Blob. */
 const WAV = Buffer.alloc(64);
 
-let server, base, requested;
+let server, local, base, requested;
 
 before(async () => {
   server = http.createServer((req, res) => {
@@ -46,11 +47,10 @@ before(async () => {
       res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"text":"ok","segments":[]}');
     });
   });
-  base = await new Promise(resolve => {
-    server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`));
-  });
+  local = await listenOnLoopback(server);
+  base = local.url;
 });
-after(() => new Promise(r => server.close(r)));
+after(() => local.close());
 
 describe('the transcription URL', () => {
   it('is /v1/audio/transcriptions for a bare host', async () => {

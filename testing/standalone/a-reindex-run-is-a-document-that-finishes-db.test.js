@@ -47,6 +47,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -59,7 +60,7 @@ process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
-let server, mongo, loader, reindex, queue, worker, shared, lifecycle, registry, spaceCollection;
+let server, local, mongo, loader, reindex, queue, worker, shared, lifecycle, registry, spaceCollection;
 
 /**
  * A run another process is sweeping, for the cases that HOLD a run in a state (no sweep is running) and read it. Since the tick
@@ -129,8 +130,8 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
         res.end(JSON.stringify({ data: [{ embedding: vectorFor(input) }] }));
       });
     });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
       instanceId: 'reindex-run', instanceLabel: 'test', tokens: [], networks: [],
@@ -150,7 +151,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(resolve => server.close(resolve));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

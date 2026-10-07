@@ -44,6 +44,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -68,7 +69,6 @@ const rec = (spaceId, id) => {
     embeddingModel: 'stub', seq: ++seq, createdAt: now, updatedAt: now };
 };
 const names = async (coll) => (await mongo.col(coll).listSearchIndexes().toArray()).map(i => i.name).sort();
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const eventually = (what, fn, timeoutMs = 90_000) => waitUntilTrue(what, fn, timeoutMs, 250);
 

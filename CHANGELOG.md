@@ -145,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   structured mode is called Filter, as in `POST /api/filter`; the Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`) as the knob for spaces of tens of thousands of records;
   `maxBytes` has no default or floor and `recall`'s `budget` cut is in characters. A testing guide in Help describes the CI jobs and caches.
+- **Docs:** The testing guide says the CI job log is public and unmasked and what can reach repository code in CI; test runs now record the client suite's timings too.
 
 ### Fixed
 

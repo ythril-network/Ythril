@@ -34,6 +34,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { blockAfter } from './_structural-window.mjs';
 
 const { ssrfSafeFetch } = await import('../../server/dist/util/ssrf.js');
@@ -56,7 +57,7 @@ const { fetch: undiciFetch } = await import('undici');
 // ── Bug 1: what actually reaches the wire ────────────────────────────────────
 
 describe('a FormData body arrives as multipart, not as text', () => {
-  let server, port, received;
+  let server, local, port, received;
 
   before(async () => {
     server = http.createServer((req, res) => {
@@ -71,11 +72,11 @@ describe('a FormData body arrives as multipart, not as text', () => {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"text":"ok"}');
       });
     });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    port = server.address().port;
+    local = await listenOnLoopback(server);
+    port = local.port;
   });
 
-  after(() => server.close());
+  after(() => local.close());
 
   /**
    * Loopback is a crown-jewel address and is refused BEFORE any transport runs — correctly, and not what

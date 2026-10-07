@@ -15,8 +15,9 @@
  * - the untrusted runs' jobs, artifacts and bytes were never requested (refused before parsing, not after);
  * - every record's `runId`, `commit` and `branch` are the run object's, whatever the artifact said;
  * - each (job, suite) of a trusted run is one record keyed `ci:<runId>:<attempt>:<job>:<suite>`, with `source: ci`,
- *   `dirty: false` and a `layout` derived from the run's jobs (`ci-parallel-v2` when a `prepare` job exists,
- *   `ci-serial-v1` when none does);
+ *   `dirty: false` and a `layout` derived from the run's results artifacts (`ci-parallel-v2` when more than one test job
+ *   left one, `ci-serial-v1` when one did; the Actions API's job list is not asked, so no job NAME is ever compared with
+ *   a job id: `test-times-record-ci-layout-and-wall.test.js` holds that, with the names the API really answers);
  * - a second `--record-ci` adds nothing;
  * - the GitHub token goes only to GitHub and the Ythril token only to Ythril, and the Actions API is read only for
  *   `ythril-network/Ythril`.
@@ -34,9 +35,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { makeWorkdir, runTimes, everything, REPO, SHA, T, githubRun as run, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
+import { FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
+import { withRecordingWorld, propertiesByKey as records, runTimes, everything, REPO, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
 
 const spec = (suite, batch, file, extra = {}) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }], ...extra });
 
@@ -58,12 +58,13 @@ function world() {
     run(1006, { status: 'in_progress', conclusion: null }),                            // trusted identity, not finished
     run(1007, { head_sha: SHA('7') }),                                                 // trusted, serial layout, artifact lies
   ];
-  const jobs = (...names) => names.map(name => ({ name, status: 'completed', conclusion: 'success', started_at: '2026-10-05T10:00:00Z', completed_at: '2026-10-05T10:15:00Z' }));
+  // The API names a job by its DISPLAY name (`Prepare`, `Standalone (no services)`), never by the workflow's job id; the ids are
+  // read from ci.yml and an older run's job (the one job of the serial workflow) is named as it was.
   const jobsByRun = {
-    1001: jobs('prepare', 'standalone-pure', 'integration', 'Build & Test'),
-    1002: jobs('prepare', 'standalone-pure'), 1003: jobs('prepare'), 1004: jobs('release'), 1005: jobs('Build & Test'),
-    1006: jobs('prepare', 'standalone-pure'),
-    1007: jobs('build-and-test'),
+    1001: githubJobs('prepare', 'standalone-pure', 'integration', 'test'),
+    1002: githubJobs('prepare', 'standalone-pure'), 1003: githubJobs('prepare'), 1004: [{ name: 'release' }], 1005: [{ name: 'Build & Test' }],
+    1006: githubJobs('prepare', 'standalone-pure'),
+    1007: githubJobs({ name: 'Build & Test' }),
   };
   const artifactsByRun = {
     1001: [
@@ -80,15 +81,7 @@ function world() {
   return { runs, jobsByRun, artifactsByRun };
 }
 
-async function withWorld(body) {
-  const github = await startFakeGithub(world());
-  const ythril = await startFakeYthril();
-  const work = makeWorkdir();
-  const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-  try { return await body({ github, ythril, dir: work.dir, env }); } finally { await github.close(); await ythril.close(); work.cleanup(); }
-}
-
-const records = (ythril) => Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e.properties]));
+const withWorld = (body) => withRecordingWorld(world(), body);
 
 describe('--record-ci', () => {
   it('records each (job, suite) of the trusted runs and nothing of the others', async () => {
@@ -151,7 +144,7 @@ describe('--record-ci', () => {
     });
   });
 
-  it('derives the layout from the run\'s jobs: a prepare job means parallel, none means serial', async () => {
+  it('derives the layout from the run\'s results artifacts: more than one test job means parallel, one means serial', async () => {
     await withWorld(async ({ ythril, dir, env }) => {
       await runTimes(['--record-ci'], { cwd: dir, env });
       const rec = records(ythril);

@@ -25,9 +25,13 @@
  *    `save_chrono` ignores one that names nothing. Two recorders at once would race the find and the insert, so
  *    there is one writer per machine (`test-results/.record.lock`), and every write collapses duplicates of its key
  *    to the newest.
- * 3. **A "passed" that was not.** `outcome`, `scope`, `layout`, `dirty` and `formatVersion` are derived from the
- *    JSONL set: a file without its sentinel, with a wrong event count or a last line cut mid-object is `incomplete`,
- *    never `passed`; a baseline is drawn only from `scope: full` + `outcome: passed` + branch `main`.
+ * 3. **A "passed" that was not.** `outcome` and `scope` are derived from what the run left: the JSONL set for a node
+ *    suite (a file without its sentinel, with a wrong event count or a last line cut mid-object is `incomplete`, never
+ *    `passed`), the vitest report for the client (a test still pending, a runner that stamped a failure the report does
+ *    not count, `success: false` with no failure counted: `incomplete` as well). `layout` is a LABEL of the workflow's
+ *    shape, derived from which jobs left results (`ci-parallel-v2` when more than one test job did, else `ci-serial-v1`;
+ *    never from a job's name), and is not a key to compare records by. A baseline is drawn only from `scope: full` +
+ *    `outcome: passed` + branch `main`, each suite on its own.
  * 4. **A lost record.** When the instance is unset, unreachable or refuses, the payload is kept in
  *    `test-results/unrecorded/`, one line says why, and the next `--record` that can reach the instance drains it.
  *    A recording problem is never a test failure: `--record` exits 0 whenever it could not record.
@@ -47,6 +51,11 @@
  *   never be read (not a zip, past the size cap) is the stop and is said without failing the pass; a download that
  *   failed is tried again. A recorded run whose artifacts have all expired is recorded, and gets no `none` row. An
  *   older run past the horizon that was never recorded is reported once and written as nothing.
+ * - **The client is a suite like the others** (`suite: client`): `--record` reads `test-results/client.json` beside the node
+ *   `*.jsonl`, `--record-ci` reads it from the client job's own artifact (`test-results-client-tests-<attempt>`, the entry
+ *   named `client.json` and no other), both through `scripts/_shared/client-results.mjs`. Each suite is its own problem: a
+ *   client report that is stale, unreadable or missing from its artifact is one line naming it and never costs the node
+ *   records. The recorder is run by hand (`--record` after a local run, `--record-ci` for CI); nothing runs it for you.
  * - **A trusted run with no usable artifact** (none uploaded, or expired) is recorded once with
  *   `measurements: 'none'`, job `workflow`, suite `ci`, scope `subset` (so no baseline is drawn from it), its
  *   `ms` the run's wall time, so the walk never fetches it again.
@@ -64,14 +73,14 @@ import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
-import { repoRelative } from './_shared/repo-path.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER, MESSAGE_CAP } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
-import { readClientResults } from './unexpected-skips.mjs';
+import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
+import { isCount, storedPath, measurementsText } from './_shared/measurements.mjs';
 import { renderRunSummary, seconds } from './_shared/run-summary.mjs';
 
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
@@ -98,8 +107,10 @@ const LOCK_FILE = join(RESULTS_DIR, '.record.lock');
  * list (a key outside it is a bug, not a property), and the chrono type declared on the instance is generated from
  * it, so the writer and the declaration cannot disagree about a field.
  *
- * `ms` is the sum of the files' own durations (module load inside each); `wallMs` is the clock time the run or job
- * took; the two differ whenever files overlap.
+ * `ms` is the sum of the files' own durations; `wallMs` is the clock time of the run or job (a node suite's span from its
+ * results' sentinel, the client's from its report: its start to the end of its last file); the two differ whenever files
+ * overlap. A node file's duration has its module load inside it; a CLIENT file's is vitest's own, from its start to its
+ * end, and leaves out collection and setup, so a client figure is not comparable with a node one.
  */
 export const TEST_RUN_SCHEMA = Object.freeze({
   recordKey: { type: 'string', required: true, doc: '`source:runId:attempt:job:suite`, `:` and `%` escaped inside a part. The identity: a second recording finds this one.' },
@@ -109,20 +120,20 @@ export const TEST_RUN_SCHEMA = Object.freeze({
   branch: { type: 'string', required: true, doc: 'The branch: the run object\'s for CI, git\'s for a local run.' },
   runId: { type: 'string', required: true, doc: 'The Actions run id as text, or `local-<start>-<commit7>`.' },
   attempt: { type: 'number', required: true, doc: 'The run attempt (1 for a local run).' },
-  job: { type: 'string', required: true, doc: 'The CI job that produced the results, or `local`.' },
-  suite: { type: 'string', required: true, doc: 'The suite the results belong to.' },
-  ms: { type: 'number', required: true, doc: 'The sum of the files\' own durations, in milliseconds.' },
-  wallMs: { type: 'number', required: false, doc: 'The clock time of the run or job, in milliseconds, when known.' },
+  job: { type: 'string', required: true, doc: 'The CI job that produced the results (the id its artifact name carries), or `local`.' },
+  suite: { type: 'string', required: true, doc: 'The suite the results belong to: a node suite\'s name, or `client` for the client\'s vitest run.' },
+  ms: { type: 'number', required: true, doc: 'The sum of the files\' own durations, in milliseconds. A node file\'s includes its module load; a client file\'s is vitest\'s own run time for it and excludes collection and setup.' },
+  wallMs: { type: 'number', required: false, doc: 'The clock time of the run or job, in milliseconds, when its own results say it: a node suite\'s sentinel span, the client report\'s start to the end of its last file. Absent when they do not.' },
   files: { type: 'number', required: true, doc: 'Test files that reported.' },
-  tests: { type: 'number', required: true, doc: 'Tests, skipped suites and failures attributed to a hook or a file.' },
+  tests: { type: 'number', required: true, doc: 'Tests, skipped suites and failures attributed to a hook or a file (for the client, a file that failed without a failed test, and a test that never reached a verdict, count here).' },
   passed: { type: 'number', required: true, doc: 'Tests that passed.' },
   failed: { type: 'number', required: true, doc: 'Failures, each counted once.' },
   cancelled: { type: 'number', required: true, doc: 'Tests cancelled by their parent.' },
   skipped: { type: 'number', required: true, doc: 'Tests and suites skipped.' },
   todo: { type: 'number', required: true, doc: 'Tests marked todo.' },
-  outcome: { type: 'string', required: true, values: ['passed', 'failed', 'cancelled', 'incomplete'], doc: '`incomplete` when the results cannot be vouched for (no sentinel, wrong count, cut line).' },
+  outcome: { type: 'string', required: true, values: ['passed', 'failed', 'cancelled', 'incomplete'], doc: '`incomplete` when the results cannot be vouched for (no sentinel, wrong count, cut line; for the client a test that never reached a verdict, or a runner that failed with no failure counted).' },
   scope: { type: 'string', required: true, values: ['full', 'subset', 'files'], doc: 'What the runner covered. Baselines are drawn from `full` only.' },
-  layout: { type: 'string', required: true, values: ['local', 'ci-serial-v1', 'ci-parallel-v2'], doc: 'The shape of the workflow or machine, so runs of different shapes are not compared.' },
+  layout: { type: 'string', required: true, values: ['local', 'ci-serial-v1', 'ci-parallel-v2'], doc: 'A label for the shape of the workflow or machine: `ci-parallel-v2` when the run left results of more than one test job, `ci-serial-v1` when it left one. Not a key to compare records by: records written before the label was derived this way all say `ci-serial-v1`.' },
   dirty: { type: 'boolean', required: true, doc: 'The working tree had uncommitted changes (always false for CI).' },
   measurements: { type: 'string', required: true, doc: 'JSON: every file\'s ms, tests, skips and failures, and the slowest tests; `none` when the run had no usable artifact.' },
   measurementsChars: { type: 'number', required: false, doc: 'The length of `measurements`, so a reader can ask for it whole.' },
@@ -154,9 +165,6 @@ export function testRunTypeDeclaration() {
   };
   return { space: SPACE, typeSchemas: { chrono }, typeSchemasMode: 'merge' };
 }
-
-/** The ceiling on `measurements`, in characters; a run past it keeps per-file figures and drops the detail. */
-const MAX_MEASUREMENTS_CHARS = 400_000;
 
 /** `maxChars` asked of `filter` for a page that excludes `measurements`. */
 const PAGE_MAX_CHARS = 1_000_000;
@@ -306,12 +314,6 @@ const SUITE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 const isoOrNull = (s) => (typeof s === 'string' && ISO.test(s) && Number.isFinite(Date.parse(s)) ? new Date(s).toISOString() : null);
 
-/** A test file's path as stored: repo-relative with forward slashes; an absolute path outside the repo is masked. */
-function storedPath(file, root) {
-  const rel = repoRelative(file, root);
-  return rel === null ? maskText(String(file ?? '')) : rel.slice(0, MESSAGE_CAP);
-}
-
 /** The suite a results file belongs to: what its lines say, else the part of its name before the first `-`. */
 export function suiteOf(text, fileName) {
   const { lines, end } = readTimingLog(text);
@@ -320,8 +322,6 @@ export function suiteOf(text, fileName) {
   const named = fileName.replace(/\.jsonl$/, '').split('-')[0];
   return SUITE_NAME.test(named) ? named : null;
 }
-
-const isCount = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
 /**
  * One suite's results (one text per batch) as the figures of a record.
@@ -358,15 +358,15 @@ export function summariseSuite({ texts, root }) {
     for (const l of lines) {
       if (l.type === 'test') {
         entry.tests++; c.tests++;
-        if (l.skip) { c.skipped++; entry.skips.push({ test: maskText(l.test), reason: maskText(l.reason) }); }
+        if (l.skip) { c.skipped++; entry.skips.push({ test: l.test, reason: l.reason }); }
         else if (l.todo) c.todo++;
-        else if (l.status === 'fail') { c.failed++; entry.failures.push({ test: maskText(l.test), message: maskText(l.message) }); }
+        else if (l.status === 'fail') { c.failed++; entry.failures.push({ test: l.test, message: l.message }); }
         else if (l.status === 'cancelled') c.cancelled++;
         else c.passed++;
-        slowest.push({ file, test: maskText(l.test), ms: l.ms });
+        slowest.push({ file, test: l.test, ms: l.ms });
       } else if (l.type === 'suite' && l.skip) {
         entry.tests++; c.tests++; c.skipped++;
-        entry.skips.push({ test: maskText(l.test), reason: maskText(l.reason) });
+        entry.skips.push({ test: l.test, reason: l.reason });
       }
     }
     const testFailed = lines.some(l => l.type === 'test' && l.status === 'fail' && !l.skip);
@@ -377,7 +377,7 @@ export function summariseSuite({ texts, root }) {
       if (!own.length) own = lines.filter(l => l.type === 'file' && l.status === 'fail');
       for (const l of own) {
         entry.tests++; c.tests++; c.failed++;
-        entry.failures.push({ test: maskText(l.test || file), message: maskText(l.message) });
+        entry.failures.push({ test: l.test || file, message: l.message });
       }
     }
     ms += entry.ms;
@@ -391,27 +391,77 @@ export function summariseSuite({ texts, root }) {
   const starts = logs.map(l => isoOrNull(l.end?.startedAt)).filter(Boolean).sort();
   const ends = logs.map(l => isoOrNull(l.end?.endedAt)).filter(Boolean).sort();
 
-  slowest.sort((a, b) => b.ms - a.ms);
-  const slim = (f) => ({ file: f.file, ms: f.ms, tests: f.tests, ...(f.skips.length ? { skips: f.skips } : {}), ...(f.failures.length ? { failures: f.failures } : {}) });
-  let measurements = JSON.stringify({ files: files.map(slim), slowest: slowest.slice(0, 20) });
-  if (measurements.length > MAX_MEASUREMENTS_CHARS) {
-    measurements = JSON.stringify({ truncated: true, files: files.map(f => ({ file: f.file, ms: f.ms, tests: f.tests })) });
-  }
+  const measurements = measurementsText(files, slowest);
   return { outcome, scope, ms: Math.round(ms), fileCount: files.length, ...c, startedAt: starts[0] ?? null, endedAt: ends.at(-1) ?? null, measurements };
 }
 
 /**
+ * The client's vitest run as the figures of a record, `summariseSuite`'s counterpart for the other kind of results.
+ *
+ * Counting rules are the reader's (`parseClientReport`): a skip is a `skipped` test, a file that failed without a failed test
+ * is one failure, a test that reached no verdict is counted a test and not a pass. What this adds is the verdict about the RUN:
+ * `failed` when any failure is counted; `incomplete` when a test never reached a verdict, when the runner's own stamp
+ * (`runnerOutcome`) says the test command did not succeed with no failure counted to explain it, or when the report says
+ * `success: false` with none; else `passed`. A report from before the stamp existed is read by the rule without it: that is
+ * the stated limit, and a test command that died outside the assertions leaves such a report looking clean.
+ *
+ * Both doors call this, so masking (inside `measurementsText`), the stored path of a file and the ceiling on `measurements`
+ * are the same whichever door the report came through. The report is read with `strictTimes`, so the figures here are
+ * finite and non-negative and the span is a span `Date` can hold.
+ *
+ * @param {{ report: ReturnType<typeof parseClientReport>, root: string, trackedSpecs?: string[]|null }} input
+ *   `trackedSpecs` is the `.spec.ts` files tracked at the commit a LOCAL run is recorded against: the run is `full` when every
+ *   one of them is an entry of the report (one that failed to collect is an entry: the claim is about what was run, not what
+ *   passed). `null` is CI, whose client job always runs the whole suite and cannot be narrowed by a filter: `full`.
+ */
+export function summariseClient({ report, root, trackedSpecs = null }) {
+  const files = [];
+  const timed = [];
+  for (const f of report.files) {
+    const file = storedPath(f.file, root);
+    const entry = { file, ms: f.ms, tests: f.tests.length, skips: [], failures: [] };
+    for (const t of f.tests) {
+      const name = t.whole ? file : t.name;
+      if (t.kind === 'skipped') entry.skips.push({ test: name, reason: `vitest status ${t.status}` });
+      else if (t.kind === 'failed') entry.failures.push({ test: name, message: t.message });
+      if (!t.whole) timed.push({ file, test: name, ms: t.ms });
+    }
+    files.push(entry);
+  }
+  const ran = new Set(files.map(f => f.file));
+  const scope = trackedSpecs === null || (trackedSpecs.length > 0 && trackedSpecs.every(s => ran.has(s))) ? 'full' : 'subset';
+  const runnerFailed = report.runnerOutcome !== null && report.runnerOutcome !== 'success';
+  const outcome = report.failed ? 'failed' : report.pending || runnerFailed || report.success === false ? 'incomplete' : 'passed';
+  const iso = (ms) => (ms === undefined ? null : new Date(ms).toISOString());
+  return {
+    outcome, scope, ms: Math.round(files.reduce((sum, f) => sum + f.ms, 0)), fileCount: files.length,
+    tests: report.tests, passed: report.passed, failed: report.failed, cancelled: 0, skipped: report.skipped, todo: report.todo,
+    startedAt: iso(report.startMs), endedAt: iso(report.endMs), measurements: measurementsText(files, timed),
+  };
+}
+
+/** The milliseconds from `start` to `end` (ISO texts), or `undefined` when either is missing: a span nobody recorded is not a span. */
+function wallBetween(start, end) {
+  const ms = start && end ? Date.parse(end) - Date.parse(start) : Number.NaN;
+  return Number.isFinite(ms) ? Math.max(0, ms) : undefined;
+}
+
+/** A suite's own span, from its own results (a node suite's sentinel, the client report's start and last file end). */
+const wallOf = (summary) => wallBetween(summary.startedAt, summary.endedAt);
+
+/**
  * One `save_chrono` payload from a suite's figures and the identity of the run.
- * `startsAt`/`endsAt` default to the results' own; the caller supplies the run object's for CI.
+ * `startsAt`/`endsAt` default to the results' own; the caller supplies the run object's for CI. `wallMs` is the caller's
+ * to give, from the results' own span ({@link wallOf}): it is never derived here from `startsAt`/`endsAt`, which for CI are
+ * the RUN's and would give every job the run's wall.
  */
 function buildPayload({ source, runId, attempt, job, suite, summary, commit, branch, layout, dirty, startsAt, endsAt, wallMs }) {
   const start = startsAt ?? summary.startedAt;
   const end = endsAt ?? summary.endedAt ?? start;
-  const wall = wallMs ?? (start && end ? Math.max(0, Date.parse(end) - Date.parse(start)) : undefined);
   const properties = assertConforms({
     recordKey: recordKey({ source, runId, attempt, job, suite }),
     formatVersion: FORMAT_VERSION, source, commit, branch, runId: String(runId), attempt: Number(attempt), job, suite,
-    ms: summary.ms, ...(Number.isFinite(wall) ? { wallMs: Math.round(wall) } : {}),
+    ms: summary.ms, ...(Number.isFinite(wallMs) ? { wallMs: Math.round(wallMs) } : {}),
     files: summary.fileCount, tests: summary.tests, passed: summary.passed, failed: summary.failed, cancelled: summary.cancelled,
     skipped: summary.skipped, todo: summary.todo, outcome: summary.outcome, scope: summary.scope, layout, dirty,
     measurements: summary.measurements, measurementsChars: summary.measurements.length,
@@ -421,7 +471,15 @@ function buildPayload({ source, runId, attempt, job, suite, summary, commit, bra
 
 // ---- writing to the instance --------------------------------------------------------------------------------------
 
-const newestFirst = (a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0);
+/**
+ * A comparator that puts the larger value of `field` first (ISO times compare as text). The one newest-first order of this
+ * script's rows: a record's `createdAt`, a run summary's `startsAt`. Its ascending twin is the same comparator with its
+ * arguments swapped, never a second spelling of the comparison.
+ */
+const newestBy = (field) => (a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0);
+
+const newestFirst = newestBy('createdAt');
+const newestStartFirst = newestBy('startsAt');
 
 /** The entries holding `key`, newest first. The server's predicate is not trusted: a row that lacks the key is not one. */
 async function findByKey(api, key) {
@@ -531,8 +589,15 @@ function destination() {
   try { return { api: createYthrilApi({ url, token }), shownUrl: url.replace(/\/+$/, '') }; } catch (err) { return { why: err.message }; }
 }
 
+/**
+ * The first line of what a thrown value says (or of a string): the one way this script puts a failure on a line. Not the
+ * timing reporter's `firstLine`, which takes a test's message and masks and caps it; this one reads a caught `err`, and its
+ * callers hand it errors this script built or a library's, never a test's text.
+ */
+const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
+
 /** The one-line reason a call failed, naming the status and the instance, never a secret. */
-const whyOf = (err, shownUrl) => (err instanceof YthrilApiError && err.status !== undefined ? `${err.status} from ${shownUrl}` : String(err?.message ?? err).split('\n')[0]);
+const whyOf = (err, shownUrl) => (err instanceof YthrilApiError && err.status !== undefined ? `${err.status} from ${shownUrl}` : firstLine(err));
 
 /** A failure that every later call would repeat: the instance is not there, or it refuses this token. */
 const stopsEverything = (err) => !(err instanceof YthrilApiError) || err.status === undefined || err.status === 401 || err.status === 403;
@@ -566,14 +631,41 @@ async function drainUnrecorded(api, shownUrl) {
   if (drained) console.log(`test-times: drained ${drained} unrecorded record(s)`);
 }
 
-/** The local run in `test-results/`, one payload per suite. */
+/** The `.spec.ts` files tracked at `commit`: what "the client's whole suite" is for a local run recorded against it. */
+function specsTrackedAt(commit) {
+  const NUL = String.fromCharCode(0);
+  const listed = execFileSync('git', ['ls-tree', '-r', '-z', '--full-tree', '--name-only', commit], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  return listed.split(NUL).filter(f => f.endsWith('.spec.ts'));
+}
+
+/**
+ * The client's report in `test-results/` as one payload, or the reason there is none. A report written before the commit being
+ * recorded is not that commit's run (the file outlives the run that wrote it), so it is a reason and not a record.
+ */
+function localClientPayload({ root, commit, branch, dirty }) {
+  const report = readClientReport(RESULTS_DIR, { strictTimes: true });
+  const committedAtMs = Number(git('log', '-1', '--format=%ct', commit)) * 1000;
+  if (report.startMs < committedAtMs) throw new Error('client report older than this commit: it is not this commit\'s run');
+  const summary = summariseClient({ report, root, trackedSpecs: specsTrackedAt(commit) });
+  const runId = `local-${summary.startedAt.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
+  return buildPayload({ source: 'local', runId, attempt: 1, job: 'local', suite: 'client', summary, commit, branch, layout: 'local', dirty, wallMs: wallOf(summary) });
+}
+
+/**
+ * The local run in `test-results/`, one payload per suite (the node suites' JSONL, and the client's `client.json`), and one
+ * problem per suite that could not be made into one: a suite's trouble is only that suite's.
+ *
+ * @returns {{ payloads: object[], problems: string[] }}
+ */
 function localPayloads() {
   const root = process.cwd();
   const results = timingResultFiles(RESULTS_DIR);
-  if (!results.length) return [];
+  const hasClient = existsSync(join(RESULTS_DIR, CLIENT_RESULTS));
+  if (!results.length && !hasClient) return { payloads: [], problems: [] };
   const commit = git('rev-parse', 'HEAD');
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
   const dirty = git('status', '--porcelain').length > 0;
+  const problems = [];
 
   const bySuite = new Map();
   for (const { name, path, text } of results) {
@@ -585,24 +677,33 @@ function localPayloads() {
 
   const payloads = [];
   for (const [suite, items] of bySuite) {
-    const summary = summariseSuite({ texts: items.map(i => i.text), root });
-    // A killed run has no sentinel; its files' own times stand in, so recording it twice names one run.
-    const mtimes = items.map(i => i.mtime.toISOString()).sort();
-    const start = summary.startedAt ?? mtimes[0];
-    const end = summary.endedAt ?? mtimes.at(-1);
-    const runId = `local-${start.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
-    payloads.push(buildPayload({ source: 'local', runId, attempt: 1, job: 'local', suite, summary, commit, branch, layout: 'local', dirty, startsAt: start, endsAt: end }));
+    try {
+      const summary = summariseSuite({ texts: items.map(i => i.text), root });
+      // A killed run has no sentinel; its files' own times stand in, so recording it twice names one run.
+      const mtimes = items.map(i => i.mtime.toISOString()).sort();
+      const start = summary.startedAt ?? mtimes[0];
+      const end = summary.endedAt ?? mtimes.at(-1);
+      const runId = `local-${start.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
+      payloads.push(buildPayload({ source: 'local', runId, attempt: 1, job: 'local', suite, summary, commit, branch, layout: 'local', dirty, startsAt: start, endsAt: end, wallMs: wallBetween(start, end) }));
+    } catch (err) { problems.push(`${suite}: ${firstLine(err)}`); }
   }
-  return payloads;
+  if (hasClient) {
+    try { payloads.push(localClientPayload({ root, commit, branch, dirty })); } catch (err) { problems.push(`client (${CLIENT_RESULTS}): ${firstLine(err)}`); }
+  }
+  return { payloads, problems };
 }
+
+/** Say each suite that could not be recorded, in one line each; a recording problem is never a failure. */
+const sayProblems = (problems) => { for (const p of problems) console.log(`test-times: not recorded: ${p}`); };
 
 async function recordLocal() {
   const refused = refuseUnderCi('--record');
   if (refused) return refused;
-  let payloads;
-  try { payloads = localPayloads(); } catch (err) { console.log(`test-times: not recorded: ${String(err.message).split('\n')[0]}`); return 0; }
-  if (!payloads.length) console.log('test-times: nothing to record: no test-results/*.jsonl');
-  return recordPayloads(payloads);
+  let found;
+  try { found = localPayloads(); } catch (err) { console.log(`test-times: not recorded: ${firstLine(err)}`); return 0; }
+  sayProblems(found.problems);
+  if (!found.payloads.length && !found.problems.length) console.log(`test-times: nothing to record: no test-results/*.jsonl or ${CLIENT_RESULTS}`);
+  return recordPayloads(found.payloads);
 }
 
 /** Record payloads under the lock (or keep them); a recording problem is never a failure. */
@@ -610,7 +711,7 @@ async function recordPayloads(payloads) {
   const dest = destination();
   let locked;
   try { locked = await recordUnderLock(payloads, dest); } catch (err) {
-    console.log(`test-times: not recorded: ${String(err?.message ?? err).split('\n')[0]}`);
+    console.log(`test-times: not recorded: ${firstLine(err)}`);
     return 0;
   }
   if (locked === null) for (const p of payloads) keepPayload(p, 'another recorder holds test-results/.record.lock');
@@ -644,6 +745,8 @@ const GITHUB_TIMEOUT_MS = 30_000;
 const GITHUB_JSON_CAP = 20_000_000;
 const GITHUB_ZIP_CAP = 100_000_000;
 const JOB_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** The id, in `ci.yml`, of the job that runs the client's tests: the one whose results artifact holds `client.json`. */
+const CLIENT_JOB = 'client-tests';
 
 /** The GitHub Actions API, for this repository only, with the guards the Ythril client has. */
 function githubClient() {
@@ -689,6 +792,16 @@ function githubClient() {
 const outcomeOfConclusion = (c) => (c === 'success' ? 'passed' : c === 'failure' || c === 'timed_out' ? 'failed' : c === 'cancelled' ? 'cancelled' : 'incomplete');
 const runIdOf = (run) => (Number.isSafeInteger(run.id) && run.id > 0 ? run.id : null);
 const startedOf = (run) => isoOrNull(run.run_started_at) ?? isoOrNull(run.created_at);
+
+/**
+ * The client's report among the entries of the client job's artifact, or undefined. Found by its exact entry name and
+ * nowhere else: a `client.json` in another job's artifact (a merged folder, a stranger's upload) is not a client run, and
+ * neither is one under a folder. The caller asks it of the client job's artifact only.
+ */
+const clientReportIn = (entries) => entries.find(e => e.name === CLIENT_RESULTS);
+
+/** Workflow runs, newest start first; two starting together, the higher run id first. */
+const newestRunFirst = (a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id);
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
 
 /**
@@ -700,22 +813,40 @@ const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
  */
 function latestResultArtifacts(artifacts, run) {
   const latest = new Map();
-  for (const a of artifacts) {
-    const m = /^test-results-(.+)-(\d+)$/.exec(a?.name ?? '');
-    if (!m || a.expired || !Number.isSafeInteger(a.id) || !JOB_NAME.test(m[1])) continue;
-    const attempt = Number(m[2]);
-    if (attempt < 1 || attempt > run.run_attempt) continue;
-    if (!latest.has(m[1]) || latest.get(m[1]).attempt < attempt) latest.set(m[1], { attempt, id: a.id, size: a.size_in_bytes });
+  for (const { job, attempt, artifact: a } of resultArtifacts(artifacts, run)) {
+    if (a.expired || !Number.isSafeInteger(a.id)) continue;
+    if (!latest.has(job) || latest.get(job).attempt < attempt) latest.set(job, { attempt, id: a.id, size: a.size_in_bytes });
   }
   return latest;
 }
+
+/** Every artifact of a run that is named as a job's results (`test-results-<job>-<attempt>`, the attempt not later than the run's), expired or not: the ONE reading of that name. */
+function resultArtifacts(artifacts, run) {
+  const named = [];
+  for (const a of artifacts) {
+    const m = /^test-results-(.+)-(\d+)$/.exec(a?.name ?? '');
+    if (!m || !JOB_NAME.test(m[1])) continue;
+    const attempt = Number(m[2]);
+    if (attempt >= 1 && attempt <= run.run_attempt) named.push({ job: m[1], attempt, artifact: a });
+  }
+  return named;
+}
+
+/**
+ * The label of a CI run's shape: `ci-parallel-v2` when results of more than one job exist, else `ci-serial-v1`. Read from the
+ * artifact names, which carry the job ids, and never from the Actions API's job list: that names a job by its DISPLAY name
+ * (`Prepare`, `Client tests`), so a comparison with a job id never matches. An expired artifact still names its job. A label,
+ * not a key: records written before this was derived this way all say `ci-serial-v1`.
+ */
+const layoutOfRun = (artifacts, run) => (new Set(resultArtifacts(artifacts, run).map(r => r.job)).size > 1 ? 'ci-parallel-v2' : 'ci-serial-v1');
 
 /** The `attempt` and `job` of each key of one run that the instance holds, as one string each: what "this job is recorded" compares. */
 const recordedJobsOf = (have) => new Set([...have].map(parseRecordKey).filter(Boolean).map(p => JSON.stringify([p.attempt, p.job])));
 
 /**
  * The payloads of one trusted, completed run. Identity (`runId`, `attempt`, `commit`, `branch`, `source`, `dirty`,
- * `layout`) is the run object's and the jobs' - the artifact supplies figures and a suite name, nothing else.
+ * `layout`) is the run object's and the artifact LIST's (which jobs left results, never a job's name) - the artifact supplies
+ * figures, a suite name and the span of its own run, nothing else.
  *
  * `have` is the record keys the instance already holds for this run. A job whose artifact the run still lists and that
  * has a record in `have` is NOT downloaded: the question this answers for the walk is "is the run recorded", decided from
@@ -734,10 +865,8 @@ async function ciPayloads(gh, run, have = new Set()) {
     throw new Error(`run ${String(run.id)}: the run object lacks an id, a start, a commit or an attempt`);
   }
   const base = `/repos/${REPO}/actions/runs/${runId}`;
-  const jobs = (await gh.json(`${base}/jobs?per_page=100`)).jobs ?? [];
   const artifacts = (await gh.json(`${base}/artifacts?per_page=100`)).artifacts ?? [];
-  const layout = jobs.some(j => j?.name === 'prepare') ? 'ci-parallel-v2' : 'ci-serial-v1';
-  const common = { source: 'ci', runId, commit: run.head_sha, branch: run.head_branch, layout, dirty: false, startsAt, endsAt };
+  const common = { source: 'ci', runId, commit: run.head_sha, branch: run.head_branch, layout: layoutOfRun(artifacts, run), dirty: false, startsAt, endsAt };
 
   const latest = latestResultArtifacts(artifacts, run);
 
@@ -759,11 +888,19 @@ async function ciPayloads(gh, run, have = new Set()) {
       if (!bySuite.has(suite)) bySuite.set(suite, []);
       bySuite.get(suite).push(text);
     }
-    const jobObject = jobs.find(j => j?.name === job);
-    const jobWall = jobObject && isoOrNull(jobObject.started_at) && isoOrNull(jobObject.completed_at)
-      ? Math.max(0, Date.parse(jobObject.completed_at) - Date.parse(jobObject.started_at)) : undefined;
+    // A job's wall is the span ITS OWN results recorded (a node suite's sentinel); a job whose results record none has no wall,
+    // never the run's and never another job's.
     for (const [suite, texts] of bySuite) {
-      payloads.push(buildPayload({ ...common, attempt: found.attempt, job, suite, summary: summariseSuite({ texts, root: process.cwd() }), wallMs: jobWall }));
+      const summary = summariseSuite({ texts, root: process.cwd() });
+      payloads.push(buildPayload({ ...common, attempt: found.attempt, job, suite, summary, wallMs: wallOf(summary) }));
+    }
+    if (job === CLIENT_JOB) {
+      const entry = clientReportIn(entries);
+      if (!entry) { problems.push({ text: `${job}: ${CLIENT_RESULTS} is not in the artifact, so the client's run is not recorded`, persistent: true }); continue; }
+      try {
+        const summary = summariseClient({ report: parseClientReport(entry.data.toString('utf8'), { strictTimes: true }), root: process.cwd() });
+        payloads.push(buildPayload({ ...common, attempt: found.attempt, job, suite: 'client', summary, wallMs: wallOf(summary) }));
+      } catch (err) { problems.push({ text: `${job}: ${CLIENT_RESULTS} cannot be read (${firstLine(err)}), so the client's run is not recorded`, persistent: true }); }
     }
   }
 
@@ -772,8 +909,8 @@ async function ciPayloads(gh, run, have = new Set()) {
   // would say it was never read.
   if (!latest.size && have.size === 0) {
     const summary = { outcome: outcomeOfConclusion(run.conclusion), scope: 'subset', ms: 0, fileCount: 0, tests: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0, todo: 0, measurements: 'none' };
-    const wall = Date.parse(endsAt) - Date.parse(startsAt);
-    payloads.push(buildPayload({ ...common, attempt: run.run_attempt, job: 'workflow', suite: 'ci', summary: { ...summary, ms: Math.max(0, wall) }, wallMs: Math.max(0, wall) }));
+    const wall = wallBetween(startsAt, endsAt) ?? 0;
+    payloads.push(buildPayload({ ...common, attempt: run.run_attempt, job: 'workflow', suite: 'ci', summary: { ...summary, ms: wall }, wallMs: wall }));
   }
   return { payloads, problems };
 }
@@ -801,7 +938,7 @@ async function recordCi({ rewriteKey } = {}) {
       collected.push(...batch);
       if (rewriteKey ? collected.some(r => String(r.id) === parts.runId) : collected.length >= BACKFILL_RUNS) break;
     }
-    const newest = collected.sort((a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id));
+    const newest = collected.sort(newestRunFirst);
     const runs = rewriteKey ? newest.filter(r => String(r.id) === parts.runId) : newest.slice(0, BACKFILL_RUNS);
     if (rewriteKey && !runs.length) { console.error(`test-times: run ${parts.runId} is not among the completed pushes to main of ${REPO} from ci.yml; nothing rewritten`); exit = 1; return; }
 
@@ -834,7 +971,7 @@ async function recordCi({ rewriteKey } = {}) {
       }
     }
     if (!rewriteKey && !stoppedAtRecorded && runs.length >= BACKFILL_RUNS) {
-      console.log(`test-times: walked ${BACKFILL_RUNS} runs without meeting a recorded one; older runs are not backfilled`);
+      console.log(`test-times: walked ${BACKFILL_RUNS} runs without meeting one recorded completely (a run recorded but missing a job's record is not complete: its missing records were written and the walk went on); older runs are not backfilled`);
     }
     console.log(`test-times: recorded ${recorded} record(s) from ${runs.length} run(s)`);
   });
@@ -848,9 +985,10 @@ async function rewriteLocal(key) {
   if (wanted.source === 'ci') return recordCi({ rewriteKey: key });
   const refused = refuseUnderCi('--rewrite');
   if (refused) return refused;
-  let payloads;
-  try { payloads = localPayloads(); } catch (err) { console.error(`test-times: ${String(err.message).split('\n')[0]}`); return 1; }
-  const mine = payloads.filter(p => p.properties.recordKey === key);
+  let found;
+  try { found = localPayloads(); } catch (err) { console.error(`test-times: ${firstLine(err)}`); return 1; }
+  sayProblems(found.problems);
+  const mine = found.payloads.filter(p => p.properties.recordKey === key);
   if (!mine.length) { console.error('test-times: no result in test-results/ has that record key'); return 1; }
   return recordPayloads(mine);
 }
@@ -858,12 +996,20 @@ async function rewriteLocal(key) {
 // ---- flags --------------------------------------------------------------------------------------------------------
 
 const BASELINE_RUNS = 10;
-const qualifies = (r) => r?.branch === 'main' && r?.scope === 'full' && r?.outcome === 'passed';
+/**
+ * A record or run summary is baseline material: branch main, scope full, outcome passed. Asked of a SUITE of a run summary
+ * (`suites[suite]` carrying its own `scope` and `outcome`) it is that suite's own scope and outcome that count, so the client
+ * covering a subset in one run does not take the node suites' baselines with it, nor the reverse.
+ */
+const qualifies = (r, suite) => {
+  const own = suite === undefined ? undefined : r?.suites?.[suite];
+  return r?.branch === 'main' && (own?.scope ?? r?.scope) === 'full' && (own?.outcome ?? r?.outcome) === 'passed';
+};
 
-/** The newest {@link BASELINE_RUNS} qualifying runs, the judged run left out of its own baseline. */
-function baselineOf(judged, history) {
-  return history.filter(qualifies).filter(r => r.runId !== judged.runId)
-    .sort((a, b) => (a.startsAt < b.startsAt ? 1 : a.startsAt > b.startsAt ? -1 : 0)).slice(0, BASELINE_RUNS);
+/** The newest {@link BASELINE_RUNS} runs that qualify for `suite`, the judged run left out of its own baseline. */
+function baselineOf(judged, history, suite) {
+  return history.filter(r => qualifies(r, suite)).filter(r => r.runId !== judged.runId)
+    .sort(newestStartFirst).slice(0, BASELINE_RUNS);
 }
 
 const p90 = (values) => { const s = [...values].sort((a, b) => a - b); return s[Math.ceil(0.9 * s.length) - 1]; };
@@ -872,15 +1018,17 @@ const median = (values) => { const s = [...values].sort((a, b) => a - b); return
 /**
  * Files slower than `max(p90 x 1.25, p90 + 30 s)` of their last 10 qualifying runs. The second term keeps a 2 s file
  * from flagging at 2.6 s, the first a 200 s file from flagging at 231 s. A file the history never saw is new, not slow.
+ * Each suite is judged against its own history. The client's files take a few seconds each, so a client FILE can never
+ * reach the 30 s term and its per-file flag cannot fire; the client SUITE's flag (`flagSuites`) can.
  *
  * @param {{ runId: string, suites: Record<string, { ms: number, files?: Record<string, number> }> }} judged
  * @param {object[]} history run summaries: `{runId, startsAt, branch, scope, outcome, suites}`
  * @returns {Array<{ suite: string, file: string, ms: number, limit: number }>}
  */
 export function flagFiles(judged, history) {
-  const baseline = baselineOf(judged, history);
   const out = [];
   for (const [suite, s] of Object.entries(judged.suites ?? {})) {
+    const baseline = baselineOf(judged, history, suite);
     for (const [file, ms] of Object.entries(s.files ?? {})) {
       const seen = baseline.map(r => r.suites?.[suite]?.files?.[file]).filter(v => typeof v === 'number');
       if (!seen.length) continue;
@@ -894,9 +1042,9 @@ export function flagFiles(judged, history) {
 
 /** Suites over the max of their last 10 qualifying runs AND at least 20 % above the usual (their median). */
 export function flagSuites(judged, history) {
-  const baseline = baselineOf(judged, history);
   const out = [];
   for (const [suite, s] of Object.entries(judged.suites ?? {})) {
+    const baseline = baselineOf(judged, history, suite);
     const seen = baseline.map(r => r.suites?.[suite]?.ms).filter(v => typeof v === 'number');
     if (!seen.length) continue;
     const limit = Math.max(Math.max(...seen), median(seen) * 1.2);
@@ -914,16 +1062,39 @@ const trendPredicate = { type: CHRONO_TYPE, 'properties.branch': 'main', 'proper
 const isTrendRow = (r) => r?.type === CHRONO_TYPE && qualifies(r.properties) && r.properties.formatVersion === FORMAT_VERSION
   && typeof r.properties.commit === 'string' && typeof r.properties.suite === 'string' && typeof r.startsAt === 'string' && typeof r.properties.ms === 'number';
 
-async function trendRows(api, { dir, limit }) {
+/** `suite` narrows to one suite, `except` leaves suites out; both are asked of the server and checked again here. */
+async function trendRows(api, { dir, limit, suite, except = [] }) {
+  const bySuite = suite !== undefined ? { 'properties.suite': suite } : except.length ? { 'properties.suite': { $nin: except } } : {};
   const answer = await api.call('filter', {
-    space: SPACE, collection: 'chrono', filter: trendPredicate, projection: { 'properties.measurements': 0 },
+    space: SPACE, collection: 'chrono', filter: { ...trendPredicate, ...bySuite }, projection: { 'properties.measurements': 0 },
     sort: 'startsAt', dir, limit, maxChars: PAGE_MAX_CHARS,
   });
   const rows = answer?.data?.results;
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
   // The server's order and page size are asked for and checked again, like its predicate.
-  const sign = dir === 'asc' ? 1 : -1;
-  return rows.filter(isTrendRow).sort((a, b) => sign * (a.startsAt < b.startsAt ? -1 : a.startsAt > b.startsAt ? 1 : 0)).slice(0, limit);
+  const order = dir === 'asc' ? (a, b) => newestStartFirst(b, a) : newestStartFirst;
+  return rows.filter(isTrendRow).filter(r => (suite === undefined || r.properties.suite === suite) && !except.includes(r.properties.suite))
+    .sort(order).slice(0, limit);
+}
+
+/** The most suites one `--trend` will discover: a bound on a walk whose server may ignore what it is asked. */
+const TREND_SUITES_CAP = 50;
+
+/**
+ * The newest `limit` rows of EACH suite, newest first within a suite. A limit over all rows would let the suite recorded most
+ * recently push the others off the page, so the suites are discovered (the newest row of any suite not yet seen) and each is
+ * asked for on its own.
+ */
+async function trendRowsPerSuite(api, limit) {
+  const seen = [];
+  const rows = [];
+  while (seen.length < TREND_SUITES_CAP) {
+    const [next] = await trendRows(api, { dir: 'desc', limit, except: seen });
+    if (!next) break;
+    seen.push(next.properties.suite);
+    rows.push(...await trendRows(api, { dir: 'desc', limit, suite: next.properties.suite }));
+  }
+  return rows.sort(newestStartFirst);
 }
 
 /** A record's per-file times, fetched on their own (the listing never carries `measurements`). */
@@ -944,12 +1115,12 @@ async function trend({ last, flags }) {
   let newest;
   let first;
   try {
-    newest = await trendRows(dest.api, { dir: 'desc', limit: last });
+    newest = await trendRowsPerSuite(dest.api, last);
     first = (await trendRows(dest.api, { dir: 'asc', limit: 1 }))[0] ?? newest.at(-1);
   } catch (err) { console.error(`test-times: ${whyOf(err, dest.shownUrl)}`); return 1; }
   if (!newest.length) { console.log('test-times: no recorded runs (branch main, scope full, outcome passed)'); return 0; }
 
-  console.log(`first recorded run: ${first.startsAt.slice(0, 10)} (${first.properties.commit.slice(0, 7)}); showing the newest ${newest.length} (branch main, scope full, outcome passed)`);
+  console.log(`first recorded run: ${first.startsAt.slice(0, 10)} (${first.properties.commit.slice(0, 7)}); showing the newest ${last} of each suite, ${newest.length} in all (branch main, scope full, outcome passed)`);
   for (const r of [...newest].reverse()) {
     const p = r.properties;
     console.log(`${p.suite}  ${r.startsAt.slice(0, 10)}  ${p.commit.slice(0, 7)}  ${seconds(p.ms)}  [${p.source} ${p.job}]`);
@@ -988,14 +1159,15 @@ const SUMMARY_BASELINE_RUNS = BASELINE_RUNS;
 const SUMMARY_BASELINE_BUDGET_MS = 120_000;
 const SUMMARY_ARTIFACT_CAP = 20_000_000;
 
-/** The figures of one suite as the summary shows them, from the recorder's own counting (`summariseSuite`). */
-function suiteFigures(suite, texts, root) {
-  const s = summariseSuite({ texts, root });
+/**
+ * The figures of one suite as the summary shows them, from the recorder's own counting: the summary `summariseSuite` or
+ * `summariseClient` returned, so a suite of either kind is one row with the same columns.
+ */
+function figuresOf(suite, s) {
   const m = JSON.parse(s.measurements);
   const files = Array.isArray(m.files) ? m.files : [];
-  const wall = s.startedAt && s.endedAt ? Math.max(0, Date.parse(s.endedAt) - Date.parse(s.startedAt)) : undefined;
   return {
-    suite, tests: s.tests, passed: s.passed, failed: s.failed, skipped: s.skipped, files: s.fileCount, ms: s.ms, wallMs: wall,
+    suite, tests: s.tests, passed: s.passed, failed: s.failed, skipped: s.skipped, files: s.fileCount, ms: s.ms, wallMs: wallOf(s),
     outcome: s.outcome, scope: s.scope,
     fileTimes: files.map(f => ({ file: f.file, ms: f.ms })),
     slowestTests: Array.isArray(m.slowest) ? m.slowest : [],
@@ -1012,11 +1184,20 @@ function suitesOf(results, root) {
     if (!bySuite.has(suite)) bySuite.set(suite, []);
     bySuite.get(suite).push(text);
   }
-  return [...bySuite].sort(([a], [b]) => a.localeCompare(b)).map(([suite, texts]) => suiteFigures(suite, texts, root));
+  return [...bySuite].sort(([a], [b]) => a.localeCompare(b)).map(([suite, texts]) => figuresOf(suite, summariseSuite({ texts, root })));
 }
 
+/**
+ * The client suite's figures from a report read the way a summary reads it (a timing anomaly is ignored, not a refusal: a
+ * summary never goes blank for one). `root` is the one root both suites use: the working directory.
+ */
+const clientFigures = (report, root) => figuresOf('client', summariseClient({ report, root }));
+
+/** A suite of a run as the baseline keeps it: its time, its files' times, and its own scope and outcome (a suite is judged on its own). */
+const baselineSuite = (s) => [s.suite, { ms: s.ms, scope: s.scope, outcome: s.outcome, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }];
+
 /** A GitHub Actions annotation: one line of its own, so the run page shows it. */
-const annotate = (what, message) => `::warning title=${what}::${String(message).split('\n')[0].replace(/[\r%]/g, ' ')}`;
+const annotate = (what, message) => `::warning title=${what}::${firstLine(message).replace(/[\r%]/g, ' ')}`;
 
 /**
  * Files and suites slower than the last {@link SUMMARY_BASELINE_RUNS} trusted, successful runs of main, read from their
@@ -1039,39 +1220,43 @@ async function summaryBaseline(figures) {
     const listed = await gh.json(`/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100`);
     const runs = trustedRuns(listed?.workflow_runs ?? [])
       .filter(r => r.status === 'completed' && r.conclusion === 'success' && String(r.id) !== currentId && runIdOf(r) && startedOf(r))
-      .sort((a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id))
+      .sort(newestRunFirst)
       .slice(0, SUMMARY_BASELINE_RUNS);
     for (const run of runs) {
       if (Date.now() > deadline) { warnings.push(annotate('baseline', `the time budget (${seconds(SUMMARY_BASELINE_BUDGET_MS)}) ended before run ${run.id}; the remaining runs were not read`)); break; }
       try {
         const artifacts = (await gh.json(`/repos/${REPO}/actions/runs/${runIdOf(run)}/artifacts?per_page=100`)).artifacts ?? [];
         const results = [];
+        let clientText = null;
         for (const [job, found] of latestResultArtifacts(artifacts, run)) {
           if (Number.isFinite(found.size) && found.size > SUMMARY_ARTIFACT_CAP) throw new Error(`${job}: the artifact is larger than ${SUMMARY_ARTIFACT_CAP} bytes`);
-          for (const e of parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`))) {
+          const entries = parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`));
+          for (const e of entries) {
             if (e.name.endsWith('.jsonl')) results.push({ name: e.name.split('/').at(-1), text: e.data.toString('utf8') });
           }
+          if (job === CLIENT_JOB) clientText = clientReportIn(entries)?.data.toString('utf8') ?? clientText;
         }
-        if (!results.length) continue;
         const suites = suitesOf(results, process.cwd());
-        history.push({
-          runId: String(run.id), startsAt: startedOf(run), branch: 'main', outcome: 'passed',
-          scope: suites.every(s => s.scope === 'full') ? 'full' : 'subset',
-          suites: Object.fromEntries(suites.map(s => [s.suite, { ms: s.ms, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }])),
-        });
+        // Each suite is read on its own: a run that never had a client report says nothing about it, and one whose report cannot
+        // be read costs only the client of THAT run, in a line that names the run and never the report.
+        if (clientText !== null) {
+          try { suites.push(clientFigures(parseClientReport(clientText), process.cwd())); } catch { warnings.push(annotate('baseline', `run ${run.id}: its client report was not read, so the client is not judged against it`)); }
+        }
+        if (!suites.length) continue;
+        history.push({ runId: String(run.id), startsAt: startedOf(run), branch: 'main', suites: Object.fromEntries(suites.map(baselineSuite)) });
       } catch (err) {
-        warnings.push(annotate('baseline', `run ${run.id} was not read: ${String(err?.message ?? err).split('\n')[0]}`));
+        warnings.push(annotate('baseline', `run ${run.id} was not read: ${firstLine(err)}`));
       }
     }
   } catch (err) {
-    warnings.push(annotate('baseline', `the last runs of main could not be listed: ${String(err?.message ?? err).split('\n')[0]}`));
+    warnings.push(annotate('baseline', `the last runs of main could not be listed: ${firstLine(err)}`));
     return { lines: ['baseline not read: GitHub could not be reached (see the warning), the figures above stand alone'], warnings };
   }
   if (!history.length) return { lines: ['no baseline: none of the last runs of main left results that could be read'], warnings };
 
   const judged = {
-    runId: currentId || 'this-run', startsAt: new Date().toISOString(), branch: 'main', scope: 'full', outcome: 'passed',
-    suites: Object.fromEntries(figures.map(s => [s.suite, { ms: s.ms, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }])),
+    runId: currentId || 'this-run', startsAt: new Date().toISOString(), branch: 'main',
+    suites: Object.fromEntries(figures.map(baselineSuite)),
   };
   const lines = [
     ...flagFiles(judged, history).map(f => `slow file: ${f.file} in ${f.suite} took ${seconds(f.ms)}, over ${seconds(f.limit)}`),
@@ -1088,15 +1273,14 @@ async function summarise({ results }) {
   if (!found.length) { console.error(`test-times: no results to summarise: ${dir} ${existsSync(dir) ? 'holds no *.jsonl' : 'does not exist'}`); return 1; }
   const figures = suitesOf(found, process.cwd());
 
-  let client = null;
+  // The client is one more suite, counted by the recorder's own rule; a report that cannot be read is a line, never the page.
   let clientNote = '';
   try {
-    const c = readClientResults(dir);
-    client = { ...c, skips: c.unexpected.map(u => ({ ...u, expected: false })) };
-  } catch (err) { clientNote = String(err?.message ?? err).split('\n')[0]; }
+    figures.push(clientFigures(readClientReport(dir), process.cwd()));
+  } catch (err) { clientNote = firstLine(err); }
 
   const { lines, warnings } = await summaryBaseline(figures);
-  const markdown = renderRunSummary({ suites: figures, client, clientNote, baseline: lines });
+  const markdown = renderRunSummary({ suites: figures, clientNote, baseline: lines });
   for (const w of warnings) console.log(w);
   console.log(markdown);
   const target = process.env.GITHUB_STEP_SUMMARY;
@@ -1110,20 +1294,22 @@ async function summarise({ results }) {
 
 export const HELP = `usage: node scripts/test-times.mjs <command>
 
-  --record                 record the run in test-results/ (one Test-Run entry per suite); exits 0 whenever it
-                           could not record, and keeps the payload in test-results/unrecorded/ for the next one
-  --record-ci              record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded;
-                           walks newest first and stops at the first completely recorded run or after ${BACKFILL_RUNS} runs
+  --record                 record the run in test-results/ (one Test-Run entry per suite: each node suite's *.jsonl,
+                           and the client's ${CLIENT_RESULTS}, which a preflight run writes); exits 0 whenever it could not
+                           record, and keeps the payload in test-results/unrecorded/ for the next one. Run by hand
+  --record-ci              record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded, the client
+                           job's included (its artifact's ${CLIENT_RESULTS}); walks newest first and stops at the first
+                           completely recorded run or after ${BACKFILL_RUNS} runs. Run by hand
   --type-schema            print the schema_update arguments that declare the Test-Run chrono type on the instance
                            (generated from the recorder's own field list, with its one-year retention)
   --rewrite <recordKey>    record one run again from its own results (ci:<runId>:<attempt>:<job>:<suite>
                            or the key of a local suite in test-results/)
   --trend [--last N] [--flags]
-                           print the recorded runs (branch main, scope full, outcome passed; default newest ${TREND_RUNS});
-                           --flags also judges the newest run of each suite against its last ${BASELINE_RUNS}
+                           print the recorded runs (branch main, scope full, outcome passed; default the newest ${TREND_RUNS} of
+                           each suite); --flags also judges the newest run of each suite against its last ${BASELINE_RUNS}
   --summary --results <dir>
                            print the run's page from the downloaded results of every job (a folder of *.jsonl and
-                           client.json): per-suite totals, the slowest files and tests, every skip with its reason,
+                           client.json): per-suite totals (the client a suite like the others), the slowest files and tests, every skip with its reason,
                            the failures, and (with GH_TOKEN) the files and suites slower than the last ${SUMMARY_BASELINE_RUNS}
                            runs of main. Markdown to $GITHUB_STEP_SUMMARY when set, and to stdout. Runs in CI's
                            advisory job; the baseline is read from artifacts, so it needs no Ythril instance
@@ -1160,5 +1346,5 @@ async function main(argv) {
 }
 
 if (isEntryPoint(import.meta.url)) {
-  process.exitCode = await main(process.argv.slice(2)).catch((err) => { console.error(`test-times: ${String(err?.message ?? err).split('\n')[0]}`); return 1; });
+  process.exitCode = await main(process.argv.slice(2)).catch((err) => { console.error(`test-times: ${firstLine(err)}`); return 1; });
 }

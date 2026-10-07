@@ -30,6 +30,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitFor } from '../sync/helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const never = async () => false;
 
@@ -37,7 +39,7 @@ describe('waitFor can be given a diagnostic that goes and looks', () => {
   it('awaits an async diagnose instead of interpolating a promise', async () => {
     await assert.rejects(
       () => waitFor(never, 30, 10, async () => {
-        await new Promise(r => setTimeout(r, 5));
+        await sleep(5);
         return 'the sender holds it at seq 42';
       }),
       (err) => {
@@ -108,14 +110,11 @@ describe('the failing test asks which side lost the record', () => {
     const { createServer } = await import('node:http');
     const { whichSideLostIt } = await import('../sync/helpers.js');
 
-    const serve = (routes) => new Promise((resolve) => {
-      const srv = createServer((req, res) => {
-        const hit = Object.entries(routes).find(([p]) => req.url.startsWith(p));
-        res.writeHead(hit ? 200 : 404, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(hit ? hit[1] : { error: 'not found' }));
-      });
-      srv.listen(0, '127.0.0.1', () => resolve({ srv, url: `http://127.0.0.1:${srv.address().port}` }));
-    });
+    const serve = (routes) => listenOnLoopback(createServer((req, res) => {
+      const hit = Object.entries(routes).find(([p]) => req.url.startsWith(p));
+      res.writeHead(hit ? 200 : 404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(hit ? hit[1] : { error: 'not found' }));
+    }));
 
     // 1. The sender does not hold the record at all. `filter` answers an empty page rather than a 404,
     // and `readRecord` is what turns that back into one — so this case also exercises that translation.
@@ -123,7 +122,7 @@ describe('the failing test asks which side lost the record', () => {
     try {
       assert.match(await whichSideLostIt(s.url, 't', 'net', 'sp', 'rec'),
         /the SENDER does not have rec either \(404\) — the write, not sync/);
-    } finally { s.srv.close(); }
+    } finally { await s.close(); }
 
     // 2. It holds it, and a watermark is already at or past its seq.
     s = await serve({
@@ -135,7 +134,7 @@ describe('the failing test asks which side lost the record', () => {
       assert.match(msg, /the SENDER HOLDS rec at seq 7/);
       assert.match(msg, /pushed=7 received=unset/);
       assert.match(msg, /AT OR PAST that seq/);
-    } finally { s.srv.close(); }
+    } finally { await s.close(); }
 
     // 3. It holds it and no watermark reached it — the loss is downstream.
     s = await serve({
@@ -146,14 +145,14 @@ describe('the failing test asks which side lost the record', () => {
       const msg = await whichSideLostIt(s.url, 't', 'net', 'sp', 'rec');
       assert.match(msg, /no watermark reached that seq/);
       assert.match(msg, /lost on the wire or discarded/);
-    } finally { s.srv.close(); }
+    } finally { await s.close(); }
 
     // 4. It holds it but the network cannot be read — informative, and it must not throw.
     s = await serve({ '/api/filter': { ok: true, data: { results: [{ _id: 'rec', seq: 3 }], total: 1 } } });
     try {
       assert.match(await whichSideLostIt(s.url, 't', 'net', 'sp', 'rec'),
         /sender holds rec at seq 3; could not read the network \(404\)/);
-    } finally { s.srv.close(); }
+    } finally { await s.close(); }
   });
 
   it('the ARRIVAL wait gets it and the TOMBSTONE wait does not', () => {
