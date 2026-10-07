@@ -164,7 +164,9 @@ These are grouped into one command because they share a property: **each catches
 
 Deciding *which* of those applies to a given change is exactly the judgement people get wrong at the end of a long task — a PR shipped a blank icon that way, past a green docs lint, a green client suite and a green production build. Run the lot; it's cheap.
 
-Preflight is not the whole run: the suites that need Docker (integration, sync, red-team) run in CI, and the ones your change reaches should run on your machine too. The next sections say how.
+Preflight is not the whole run: the suites that need Docker (integration, sync, red-team) run in CI, and the ones your change reaches should run on your machine too, if you can. The next sections say how.
+
+Your pull request's `Build & Test` runs every suite, so a suite you could not run locally is not skipped. You are not asked to run the whole graph before opening it, and you cannot push the `full-run/` branches the maintainers use for that to this repository; if you want the whole graph on your own work first, the `Full run` workflow (`.github/workflows/full-run.yml`) runs in your fork's Actions on a push to a `full-run/<name>` branch. A maintainer's bundle gets its one full run on CI the same way, before its pull request; [`docs/testing-guide.md`](testing-guide.md#the-full-run-of-a-bundle) says how it is named, read and re-run.
 
 ### Client unit tests (no Docker required)
 
@@ -512,7 +514,7 @@ Use conventional-commit-style prefixes:
 ## Pull Request Checklist
 
 - [ ] `npm run preflight` passes
-- [ ] The suites your change reaches pass ([`docs/testing-guide.md`](testing-guide.md) says how to run each; `npm run test:all:core` is the whole local run, and `npm run test:client` is not part of it)
+- [ ] The suites your change reaches pass, as far as you can run them ([`docs/testing-guide.md`](testing-guide.md) says how to run each; `npm run test:all:core` is the whole local run, and `npm run test:client` is not part of it). The pull request's `Build & Test` runs every suite, and no `full-run/` push is asked of you
 - [ ] If debugging failures, use `npm run test:all:keep` and clean up afterwards
 - [ ] New features have corresponding tests, tracked by git so a CI job reaches them
 - [ ] Red-team tests still pass after security-adjacent changes

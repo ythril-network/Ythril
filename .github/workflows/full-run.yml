@@ -1,0 +1,46 @@
+name: Full run
+
+# The bundle's one full run of every suite on CI, made on its branch BEFORE its pull request is opened (owner decision
+# D-15). A push to a `full-run/<bundle>` ref calls ci.yml, which runs the whole graph; nothing else triggers this file.
+#
+# A ref of its own, and not a push trigger on the pull request's branch: that would run the whole graph twice on every
+# later push (the push, then the pull_request synchronize) for as long as the pull request is open. The bundle's commits
+# are pushed to `full-run/<bundle>`; the branch the pull request is opened from carries the same commits afterwards.
+#
+# Its checks are reported as `Full run / <job>` (a called workflow's jobs carry the caller's job name), so the gate here is
+# `Full run / Build & Test`: never the exact context the ruleset requires, and never what the merge monitor reads. The pull
+# request's own `Build & Test` stays the only merge gate. The calling job is therefore never named `Build & Test`; that is
+# held by ci-workflow-is-sound, which reads both names from the two workflows and never from a sentence.
+#
+# A re-run of a full run is the WHOLE run (`gh run rerun <id>`, never `--failed`): the stack jobs read the image artifact
+# named by run attempt, only `prepare` uploads it, and the gate reads only this attempt's results, so a re-run of the
+# failed jobs alone cannot go green. A push of a SHA already pushed to the ref starts nothing.
+#
+# A job that calls a workflow carries no `timeout-minutes` of its own (GitHub does not allow one); each called job has its
+# own, which is what bounds the run.
+#
+# Held by ci-workflow-is-sound: exactly one job and it only calls ci.yml, handed no input and no secret; exactly one
+# trigger, a push filtered to the prefix; permissions no wider than ci.yml's jobs ask for.
+
+on:
+  push:
+    branches: ['full-run/**']
+
+# Exactly this and nothing wider. The job below adds only what ci.yml's own jobs ask for (`ci-advisory`: `actions: read`):
+# a caller that grants less rejects the whole run at startup.
+permissions:
+  contents: read
+
+# One run per ref. A newer push to the same `full-run/<bundle>` ref supersedes the older run: only the newest tip's full
+# run is evidence of the bundle. The group differs from ci.yml's, so the two never wait on each other.
+concurrency:
+  group: full-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    name: Full run
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci.yml

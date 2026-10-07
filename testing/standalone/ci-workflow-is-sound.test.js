@@ -39,6 +39,15 @@
  * The other direction (everything succeeded → exit 0) cannot be run here, because the steps after the verdict need
  * the repository and its artifacts, so the verdict step must mention `success` — the word a skip cannot satisfy.
  *
+ * ## The full run
+ *
+ * `full-run.yml` is a two-line caller that runs the whole of `ci.yml` on a push to `full-run/<bundle>`, before the pull
+ * request exists. Its rules sit in the same table, over the PAIR (the caller and the workflow it calls), because every one of
+ * them is a statement about how the two fit: a caller that is named like the merge gate, that is triggered wider than its
+ * prefix, that is handed a credential, or that grants less than a called job asks (GitHub then rejects the whole run) is a
+ * second gate, a run nobody asked for, or a run that never starts. The docs rule at the end derives the check's name from the
+ * two files, so the guide cannot name a check that does not exist.
+ *
  * Run: node --test testing/standalone/ci-workflow-is-sound.test.js
  */
 import { describe, it } from 'node:test';
@@ -48,17 +57,22 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { markdownSectionWithSubsections } from './_structural-window.mjs';
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, shellCommands, usesOf, isCommitPinned, stepsUsing,
-  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf,
-  workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction,
+  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf, onOf, mergeGateEntries,
+  workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction, CI_WORKFLOW,
 } from '../_shared/ci-workflow.mjs';
+// The full-run names (`FULL_RUN_WORKFLOW`, `FULL_RUN_PREFIX`, `loadFullRun`, `branchesOf`) are read off the namespace, so a
+// module that lacks one fails the tests that need it and not the whole file.
+import * as CW from '../_shared/ci-workflow.mjs';
 import { parseSource, ts } from '../_shared/syntax-tree.mjs';
-import { GOOD_CI, GOOD_PREFLIGHT, CLIENT_COMMAND } from '../_shared/ci-workflow-fixture.mjs';
+import { GOOD_CI, GOOD_FULL_RUN, GOOD_PREFLIGHT, CLIENT_COMMAND } from '../_shared/ci-workflow-fixture.mjs';
 
 const REAL = loadCi();
 const GOOD = parseWorkflow(GOOD_CI, 'the conforming fixture');
+const GOOD_FULL = parseWorkflow(GOOD_FULL_RUN, 'the conforming full-run fixture');
 const clone = (doc) => structuredClone(doc);
 
 // ───────────────────────────────────────── the merge gate ─────────────────────────────────────────
@@ -136,7 +150,7 @@ function verdictViolations(gate, needs) {
 function mergeGateViolations(doc) {
   const v = [];
   const jobs = jobEntries(doc);
-  const gates = jobs.filter((j) => j.name === MERGE_GATE_NAME);
+  const gates = mergeGateEntries(doc);
   if (gates.length !== 1) return [`${gates.length} jobs are named "${MERGE_GATE_NAME}"; the ruleset requires exactly one`];
   const gate = gates[0];
 
@@ -146,10 +160,10 @@ function mergeGateViolations(doc) {
   if (gate.job.strategy?.matrix) v.push('the gate has a matrix: the required check name would be several jobs');
 
   const advisory = jobs.filter((j) => isAdvisory(j.job));
-  if (advisory.includes(gate)) v.push('the gate itself is continue-on-error');
+  if (advisory.some((j) => j.id === gate.id)) v.push('the gate itself is continue-on-error');
   if (advisory.length > 1) v.push(`${advisory.length} advisory jobs (${advisory.map((a) => a.id)}): which of them may fail without failing the run?`);
 
-  const expected = jobs.filter((j) => j !== gate && !advisory.includes(j)).map((j) => j.id).sort();
+  const expected = jobs.filter((j) => j.id !== gate.id && !advisory.includes(j)).map((j) => j.id).sort();
   const needs = [].concat(gate.job.needs ?? []).sort();
   if (expected.length < NEEDED_FLOOR) {
     v.push(`only ${expected.length} job(s) besides the gate and the advisory one (floor ${NEEDED_FLOOR}): the pipeline is not split, or the derivation is broken`);
@@ -388,15 +402,31 @@ function runtimeTokenViolations(doc) {
 
 // ───────────────────────────────────────── permissions ─────────────────────────────────────────
 
+/**
+ * A workflow's own token is exactly `{contents: read}`, the one answer for ci.yml and for the caller of it. Absent is the
+ * repository default, which is wider; anything added is a grant every job inherits. One rule, so the two workflows cannot
+ * come to ask the question in two spellings.
+ */
+function topLevelPermissionViolations(doc) {
+  if (JSON.stringify(doc.permissions) === JSON.stringify({ contents: 'read' })) return [];
+  return [`top-level permissions are ${JSON.stringify(doc.permissions ?? '(none: the repository default)')}; exactly {contents: read}`];
+}
+
+/**
+ * A job's `permissions:` that is a word (`write-all`, `read-all`) rather than a mapping cannot be compared key by key, and
+ * is refused by name instead of read as granting nothing. The refusal, or null for a mapping; `wanted` ends the message.
+ */
+function permissionsNotAMapping(id, p, wanted = '') {
+  return typeof p === 'object' ? null : `${id}: permissions are \`${p}\`${wanted}`;
+}
+
 function permissionViolations(doc) {
-  const v = [];
-  if (JSON.stringify(doc.permissions) !== JSON.stringify({ contents: 'read' })) {
-    v.push(`top-level permissions are ${JSON.stringify(doc.permissions ?? '(none: the repository default)')}; exactly {contents: read}`);
-  }
+  const v = topLevelPermissionViolations(doc);
   for (const { id, job } of jobEntries(doc)) {
     const p = job.permissions;
     if (p == null) continue;
-    if (typeof p !== 'object') { v.push(`${id}: permissions are \`${p}\``); continue; }
+    const refusal = permissionsNotAMapping(id, p);
+    if (refusal) { v.push(refusal); continue; }
     for (const [k, val] of Object.entries(p)) {
       if (k === 'contents' && val === 'read') continue;
       if (k === 'actions' && val === 'read' && isAdvisory(job)) continue;
@@ -408,11 +438,23 @@ function permissionViolations(doc) {
 
 // ───────────────────────────────────────── concurrency ─────────────────────────────────────────
 
-function concurrencyViolations(doc) {
+/**
+ * A workflow has a top-level `concurrency:` whose group is per ref — the part ci.yml and its caller ask the same way. A
+ * workflow without one stacks another full run for every push of `pushOf`; a group not keyed by the ref lets one ref's run
+ * cancel or queue behind another's. Returns `{ c, v }`: `c` is the mapping, or null when there is none and `v` is its
+ * refusal; what each workflow says about CANCELLING is its own, so it is not asked here. `refNote` ends the per-ref message.
+ */
+function concurrencyPerRef(doc, pushOf, refNote = '') {
   const c = doc.concurrency;
-  if (!c || typeof c !== 'object') return ['no top-level concurrency: every push of a pull request stacks another full run'];
+  if (!c || typeof c !== 'object') return { c: null, v: [`no top-level concurrency: every push of ${pushOf} stacks another full run`] };
   const v = [];
-  if (!/github\.ref\b/.test(String(c.group ?? ''))) v.push(`the group \`${c.group}\` is not per ref`);
+  if (!/github\.ref\b/.test(String(c.group ?? ''))) v.push(`the group \`${c.group}\` is not per ref${refNote}`);
+  return { c, v };
+}
+
+function concurrencyViolations(doc) {
+  const { c, v } = concurrencyPerRef(doc, 'a pull request');
+  if (!c) return v;
   if (expressionOf(c['cancel-in-progress']) !== "github.event_name == 'pull_request'") {
     v.push(`cancel-in-progress is \`${c['cancel-in-progress']}\`; it cancels pull-request runs only — a main push must always finish and write its caches`);
   }
@@ -463,7 +505,7 @@ const runsOnlyOnSuccess = (s) => s.if == null || expressionOf(s.if) === 'success
  * run when a job failed prints a verdict about a partial results set; a check that cannot fail the job is a log line.
  */
 function gateEvidenceViolations(doc) {
-  const gate = jobEntries(doc).find((j) => j.name === MERGE_GATE_NAME);
+  const [gate] = mergeGateEntries(doc);
   if (!gate) return [`no job is named "${MERGE_GATE_NAME}"`];
   const steps = stepsOf(gate.job);
   const verdictAt = steps.findIndex((s) => !s.uses && /\bneeds\b/.test(`${s.run ?? ''}\n${JSON.stringify(s.env ?? {})}`));
@@ -804,7 +846,7 @@ const CREDENTIAL_ALLOWLIST = {
   '.github/workflows/publish.yml': {
     reason: 'runs on a version tag or a manual dispatch only, and writes the image and the release, so it holds the registry secrets and a write token on purpose',
     holds(doc) {
-      const on = doc.on ?? doc[true];
+      const on = onOf(doc);
       const events = [...triggersOf(doc)];
       const v = events.filter((e) => !['push', 'workflow_dispatch'].includes(e)).map((e) => `the \`${e}\` trigger can run it for code nobody released`);
       if (events.includes('push') && (!on.push?.tags?.length || on.push.branches)) v.push('its push trigger is not tags-only');
@@ -879,9 +921,155 @@ function preflightClientParityViolations(doc, preflightText, file = 'scripts/pre
   return v;
 }
 
+// ───────────────────────────────────────── the full run: a caller of ci.yml ─────────────────────────────────────────
+
+/** The one job of a caller carries these and nothing else of its own; `with` and `secrets` have a rule of their own. */
+const CALLER_KEYS = ['name', 'permissions', 'uses'];
+
+/** A permission level's rank, so "more than" and "less than" are comparisons and not string matches. */
+const LEVEL = { none: 0, read: 1, write: 2 };
+const levelOf = (level) => LEVEL[level] ?? 0;
+
+/**
+ * What the jobs of a workflow ask for on their own — `{ permission: highest level any job asks }`, read from the JOB-level
+ * `permissions:` mappings. A caller must grant at least this, or GitHub rejects the whole run; it must grant no more, or the
+ * called workflow runs with a token wider than any of its jobs wanted. Derived, never listed: the day another job asks for
+ * `checks: read` the rule asks the caller for it.
+ */
+function permissionsAskedBy(doc) {
+  const asked = {};
+  for (const { job } of jobEntries(doc)) {
+    if (!job.permissions || typeof job.permissions !== 'object') continue;
+    for (const [k, level] of Object.entries(job.permissions)) {
+      if (!(k in asked) || levelOf(level) > levelOf(asked[k])) asked[k] = level;
+    }
+  }
+  return asked;
+}
+
+/** Exactly one job, and it only calls `ci.yml`: no other workflow, repository or ref, and nothing a caller job cannot carry. */
+function fullRunCallsCiViolations({ fullRun }) {
+  const jobs = jobEntries(fullRun);
+  if (jobs.length !== 1) return [`${jobs.length} jobs in the full-run workflow; exactly one, the call of ci.yml (any other job is work that runs with no pull request's gate)`];
+  const [{ id, job }] = jobs;
+  const v = [];
+  if (job.uses !== `./${CI_WORKFLOW}`) {
+    v.push(`job ${id} uses ${JSON.stringify(job.uses)}; it must be exactly ./${CI_WORKFLOW} — no other workflow, no other repository, no @ref`);
+  }
+  const extra = Object.keys(job).filter((k) => ![...CALLER_KEYS, 'with', 'secrets'].includes(k));
+  if (extra.length) v.push(`job ${id} carries ${extra.join(', ')}; a caller job carries ${CALLER_KEYS.join(', ')} and nothing else`);
+  return v;
+}
+
+/** The call hands `ci.yml` nothing: ci.yml declares no input and no secret, and a run nobody opened a PR for is given no credential. */
+function fullRunHandsNothingViolations({ fullRun }) {
+  const jobs = jobEntries(fullRun);
+  const v = jobs.length ? [] : ['the full-run workflow has no job: there is no call to read'];
+  for (const { id, job } of jobs) {
+    for (const key of ['with', 'secrets']) {
+      if (key in job) v.push(`job ${id} has \`${key}:\`; ci.yml takes no input and no secret, and a full run is handed nothing`);
+    }
+  }
+  return v;
+}
+
+/** One trigger, a push, filtered to exactly the prefix — and the push object holds the filter and nothing that widens or narrows it. */
+function fullRunTriggerViolations({ fullRun }) {
+  const v = [];
+  const events = [...triggersOf(fullRun)];
+  if (events.length !== 1 || events[0] !== 'push') v.push(`the full-run triggers are ${events.join(', ') || '(none)'}; exactly push — anything else runs the whole graph for an event nobody asked for`);
+  const on = onOf(fullRun);
+  const push = on && typeof on === 'object' && !Array.isArray(on) ? on.push : undefined;
+  if (push == null || typeof push !== 'object' || Array.isArray(push)) {
+    v.push('the push trigger has no object with a `branches` filter: every branch would run the whole graph');
+    return v;
+  }
+  const keys = Object.keys(push).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(['branches'])) v.push(`the push object has the keys ${keys.join(', ') || '(none)'}; exactly branches — tags, paths and ignore lists change what the filter admits`);
+  const branches = CW.branchesOf(on, 'push');
+  const want = `${CW.FULL_RUN_PREFIX}**`;
+  if (branches === null) v.push('the push trigger has no branch filter: every branch would run the whole graph');
+  else if (branches.length !== 1 || branches[0] !== want) v.push(`the push filter is ${JSON.stringify(branches)}; exactly [${JSON.stringify(want)}]`);
+  return v;
+}
+
+/** `ci.yml` can be called, and asks its caller for nothing the caller does not pass. */
+function ciIsCallableViolations({ ci }) {
+  if (!triggersOf(ci).has('workflow_call')) return [`${CI_WORKFLOW} does not declare workflow_call: a job that uses it fails to start`];
+  const call = onOf(ci)?.workflow_call;
+  const v = [];
+  for (const kind of ['inputs', 'secrets']) {
+    for (const [name, def] of Object.entries(call?.[kind] ?? {})) {
+      if (isTrue(def?.required)) v.push(`workflow_call requires the ${kind.slice(0, -1)} ${name}; the full run passes nothing`);
+    }
+  }
+  return v;
+}
+
+/** The full run's check is never named like the merge gate: only the pull request's own job may carry the name the ruleset requires. */
+function fullRunNameViolations({ fullRun }) {
+  const v = jobEntries(fullRun).length ? [] : ['the full-run workflow has no job to name'];
+  for (const { id } of mergeGateEntries(fullRun)) {
+    v.push(`job ${id} is named "${MERGE_GATE_NAME}": its check would carry the name the ruleset requires, and the merge monitor would read it as the gate`);
+  }
+  return v;
+}
+
+/** The caller's token is `contents: read`; its job grants that and exactly what ci.yml's jobs ask for, no more and no less. */
+function fullRunPermissionViolations({ fullRun, ci }) {
+  const v = topLevelPermissionViolations(fullRun);
+  const asked = permissionsAskedBy(ci);
+  if (Object.keys(asked).length < 1) v.push('no job of ci.yml asks for a permission (floor 1): the derivation is broken, or the advisory job lost its `actions: read`');
+  const expected = { contents: 'read', ...asked };
+  for (const { id, job } of jobEntries(fullRun)) {
+    const p = job.permissions ?? fullRun.permissions ?? {};
+    const refusal = permissionsNotAMapping(id, p, `; a mapping of what ci.yml's jobs ask for`);
+    if (refusal) { v.push(refusal); continue; }
+    for (const [k, level] of Object.entries(p)) {
+      if (!(k in expected)) v.push(`${id}: grants ${k}: ${level}, which no job of ci.yml asks for`);
+      else if (levelOf(level) > levelOf(expected[k])) v.push(`${id}: grants ${k}: ${level}; the called jobs ask ${expected[k]} at most`);
+    }
+    for (const [k, level] of Object.entries(expected)) {
+      if (levelOf(p[k]) < levelOf(level)) v.push(`${id}: does not grant ${k}: ${level}, which a called job asks for — GitHub rejects the whole run when a called job asks for more than its caller grants`);
+    }
+  }
+  return v;
+}
+
+/** A newer full-run push supersedes the older one of its ref, in a group of its own that never queues behind or cancels ci.yml's. */
+function fullRunConcurrencyViolations({ fullRun, ci }) {
+  const { c, v } = concurrencyPerRef(fullRun, 'the full-run ref', `: one bundle's push would cancel another's`);
+  if (!c) return v;
+  if (!isTrue(c['cancel-in-progress'])) v.push(`cancel-in-progress is \`${c['cancel-in-progress']}\`; it must be true, so a newer full-run push supersedes the older run`);
+  if (c.group != null && expressionOf(c.group) === expressionOf(ci.concurrency?.group)) {
+    v.push(`the group \`${c.group}\` is ci.yml's own group: the two would queue behind and cancel each other`);
+  }
+  return v;
+}
+
 // ───────────────────────────────────────── the rules, and how each is held ─────────────────────────────────────────
 
+/**
+ * The rules over the PAIR `{ fullRun, ci }` — the caller and the workflow it calls — rather than over one workflow. Kept apart
+ * so the loops below can tell which subject a rule is run over; they are rules of the one table all the same, so each carries
+ * its breakage rows and none is held only by the real file.
+ */
+const FULL_RUN_RULES = {
+  'full run is one job that calls ci.yml': fullRunCallsCiViolations,
+  'full run hands ci.yml nothing': fullRunHandsNothingViolations,
+  'full run triggers on a push to its prefix and nothing else': fullRunTriggerViolations,
+  'ci.yml can be called by the full run': ciIsCallableViolations,
+  'full run is not named like the merge gate': fullRunNameViolations,
+  'full run permissions are what ci.yml asks for': fullRunPermissionViolations,
+  'full run cancels its older run and shares no group with ci.yml': fullRunConcurrencyViolations,
+};
+
+/** What a rule is run over: one workflow, or the pair for a full-run rule. The real pair reads the committed `full-run.yml`. */
+const realSubject = (name) => (name in FULL_RUN_RULES ? { fullRun: CW.loadFullRun(), ci: REAL } : REAL);
+const goodSubject = (name) => (name in FULL_RUN_RULES ? { fullRun: GOOD_FULL, ci: GOOD } : GOOD);
+
 const RULES = {
+  ...FULL_RUN_RULES,
   'checkout credentials': checkoutCredentialViolations,
   'credential expressions': credentialExpressionViolations,
   'results upload names': uploadNameViolations,
@@ -904,6 +1092,11 @@ const RULES = {
 
 const job = (doc, id) => doc.jobs[id];
 const stepWhere = (j, pred) => stepsOf(j).find(pred);
+
+/** The full-run rows mutate the PAIR: `p.fullRun` the caller, `p.ci` the workflow it calls. */
+const callJob = (p) => p.fullRun.jobs.full;
+const pushOf = (p) => onOf(p.fullRun).push;
+const setOn = (workflow, value) => { delete workflow[true]; workflow.on = value; };
 
 /** One deliberate breakage per row: [what is broken, how, the rule that must fire, what its message must say]. */
 const BREAKAGES = [
@@ -1206,6 +1399,63 @@ const BREAKAGES = [
   ['an upload name has no job segment', (d) => {
     stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-${{ github.run_attempt }}';
   }, 'results upload names', /is not test-results-<job id>/],
+
+  // ── the full run: one caller, one call, nothing handed over, one trigger, no second gate ──
+  ['the caller gets a second job', (p) => { p.fullRun.jobs.extra = clone(callJob(p)); }, 'full run is one job that calls ci.yml', /2 jobs.*exactly one/],
+  ['the caller has no job at all', (p) => { p.fullRun.jobs = {}; }, 'full run is one job that calls ci.yml', /0 jobs.*exactly one/],
+  ['the call names another workflow of this repository', (p) => { callJob(p).uses = './.github/workflows/publish.yml'; }, 'full run is one job that calls ci.yml', /must be exactly/],
+  ['the call pins a ref of ci.yml', (p) => { callJob(p).uses = './.github/workflows/ci.yml@main'; }, 'full run is one job that calls ci.yml', /must be exactly/],
+  ['the call names a workflow of another repository', (p) => { callJob(p).uses = 'some-org/some-repo/.github/workflows/ci.yml@main'; }, 'full run is one job that calls ci.yml', /must be exactly/],
+  ['the call job runs steps of its own', (p) => { callJob(p)['runs-on'] = 'ubuntu-latest'; callJob(p).steps = [{ run: 'echo hi' }]; }, 'full run is one job that calls ci.yml', /carries runs-on, steps/],
+  ['the call job is conditional', (p) => { callJob(p).if = "github.actor == 'someone'"; }, 'full run is one job that calls ci.yml', /carries if/],
+  ['the call job waits for another job', (p) => { callJob(p).needs = ['other']; }, 'full run is one job that calls ci.yml', /carries needs/],
+  ['the call passes an input', (p) => { callJob(p).with = { anything: 'x' }; }, 'full run hands ci.yml nothing', /`with:`/],
+  ['the call inherits the secrets', (p) => { callJob(p).secrets = 'inherit'; }, 'full run hands ci.yml nothing', /`secrets:`/],
+  ['the call passes one named secret', (p) => { callJob(p).secrets = { TOKEN: '${{ secrets.TOKEN }}' }; }, 'full run hands ci.yml nothing', /`secrets:`/],
+  ['the push filter is widened to every branch', (p) => { pushOf(p).branches = ['**']; }, 'full run triggers on a push to its prefix and nothing else', /the push filter is \["\*\*"\]/],
+  ['the push filter drops the slash', (p) => { pushOf(p).branches = ['full-run**']; }, 'full run triggers on a push to its prefix and nothing else', /the push filter is/],
+  ['the push filter is one level only', (p) => { pushOf(p).branches = ['full-run/*']; }, 'full run triggers on a push to its prefix and nothing else', /the push filter is/],
+  ['the push filter adds main', (p) => { pushOf(p).branches.push('main'); }, 'full run triggers on a push to its prefix and nothing else', /the push filter is/],
+  ['the push filter is an empty list (not the same as no filter)', (p) => { pushOf(p).branches = []; }, 'full run triggers on a push to its prefix and nothing else', /the push filter is \[\]/],
+  ['the push trigger has no filter at all', (p) => { onOf(p.fullRun).push = null; }, 'full run triggers on a push to its prefix and nothing else', /no object with a `branches` filter/],
+  ['the push object is empty', (p) => { onOf(p.fullRun).push = {}; }, 'full run triggers on a push to its prefix and nothing else', /no branch filter/],
+  ['the push object filters by tag only', (p) => { onOf(p.fullRun).push = { tags: ['v*'] }; }, 'full run triggers on a push to its prefix and nothing else', /no branch filter/],
+  ['the push object also takes tags', (p) => { pushOf(p).tags = ['v*']; }, 'full run triggers on a push to its prefix and nothing else', /the push object has the keys branches, tags/],
+  ['the push object also takes paths', (p) => { pushOf(p).paths = ['docs/**']; }, 'full run triggers on a push to its prefix and nothing else', /the push object has the keys branches, paths/],
+  ['the push object also ignores branches', (p) => { pushOf(p)['branches-ignore'] = ['full-run/skip']; }, 'full run triggers on a push to its prefix and nothing else', /the push object has the keys branches, branches-ignore/],
+  ['the trigger is the bare word push', (p) => { setOn(p.fullRun, 'push'); }, 'full run triggers on a push to its prefix and nothing else', /no object with a `branches` filter/],
+  ['the triggers are a list of push', (p) => { setOn(p.fullRun, ['push']); }, 'full run triggers on a push to its prefix and nothing else', /no object with a `branches` filter/],
+  ['a pull_request trigger is added', (p) => { onOf(p.fullRun).pull_request = { branches: ['main'] }; }, 'full run triggers on a push to its prefix and nothing else', /triggers are push, pull_request; exactly push/],
+  ['a manual dispatch is added', (p) => { onOf(p.fullRun).workflow_dispatch = null; }, 'full run triggers on a push to its prefix and nothing else', /triggers are push, workflow_dispatch; exactly push/],
+  ['a schedule is added', (p) => { onOf(p.fullRun).schedule = [{ cron: '0 3 * * *' }]; }, 'full run triggers on a push to its prefix and nothing else', /triggers are push, schedule; exactly push/],
+  ['the only trigger is not a push', (p) => { setOn(p.fullRun, { workflow_dispatch: null }); }, 'full run triggers on a push to its prefix and nothing else', /triggers are workflow_dispatch; exactly push/],
+  ['ci.yml stops declaring workflow_call', (p) => { delete onOf(p.ci).workflow_call; }, 'ci.yml can be called by the full run', /does not declare workflow_call/],
+  ['ci.yml\'s triggers become a plain list without workflow_call', (p) => { setOn(p.ci, ['pull_request', 'push']); }, 'ci.yml can be called by the full run', /does not declare workflow_call/],
+  ['workflow_call requires an input the caller does not pass', (p) => { onOf(p.ci).workflow_call = { inputs: { ref: { type: 'string', required: true } } }; }, 'ci.yml can be called by the full run', /requires the input ref/],
+  ['workflow_call requires a secret the caller does not pass', (p) => { onOf(p.ci).workflow_call = { secrets: { TOKEN: { required: true } } }; }, 'ci.yml can be called by the full run', /requires the secret TOKEN/],
+  ['the caller job is named Build & Test', (p) => { callJob(p).name = 'Build & Test'; }, 'full run is not named like the merge gate', /named "Build & Test"/],
+  ['the caller job has no name and is called by the gate\'s name', (p) => {
+    delete callJob(p).name;
+    p.fullRun.jobs['Build & Test'] = callJob(p);
+    delete p.fullRun.jobs.full;
+  }, 'full run is not named like the merge gate', /named "Build & Test"/],
+  ['the caller\'s top-level permissions widen', (p) => { p.fullRun.permissions = { contents: 'read', 'pull-requests': 'write' }; }, 'full run permissions are what ci.yml asks for', /top-level permissions are .*exactly/],
+  ['the caller\'s top-level permissions are absent', (p) => { delete p.fullRun.permissions; }, 'full run permissions are what ci.yml asks for', /top-level permissions are .*exactly/],
+  ['the caller\'s top-level permissions are write', (p) => { p.fullRun.permissions = { contents: 'write' }; }, 'full run permissions are what ci.yml asks for', /top-level permissions are .*exactly/],
+  ['the call job grants nothing of its own (it inherits contents: read, so the advisory job\'s actions: read is refused)', (p) => { delete callJob(p).permissions; }, 'full run permissions are what ci.yml asks for', /does not grant actions: read/],
+  ['the call job drops actions: read', (p) => { callJob(p).permissions = { contents: 'read' }; }, 'full run permissions are what ci.yml asks for', /does not grant actions: read/],
+  ['the call job drops contents: read', (p) => { callJob(p).permissions = { actions: 'read' }; }, 'full run permissions are what ci.yml asks for', /does not grant contents: read/],
+  ['the call job grants a write ci.yml\'s jobs do not ask for', (p) => { callJob(p).permissions['pull-requests'] = 'write'; }, 'full run permissions are what ci.yml asks for', /grants pull-requests: write, which no job of ci\.yml asks for/],
+  ['the call job grants more of a permission than the jobs ask', (p) => { callJob(p).permissions.actions = 'write'; }, 'full run permissions are what ci.yml asks for', /grants actions: write; the called jobs ask read at most/],
+  ['the call job takes write-all', (p) => { callJob(p).permissions = 'write-all'; }, 'full run permissions are what ci.yml asks for', /write-all/],
+  ['a job of ci.yml starts asking for another permission (the derivation reads ci.yml)', (p) => { job(p.ci, 'sync').permissions = { contents: 'read', checks: 'read' }; }, 'full run permissions are what ci.yml asks for', /does not grant checks: read/],
+  ['no job of ci.yml asks for any permission (the derived set is empty)', (p) => { delete job(p.ci, 'ci-advisory').permissions; }, 'full run permissions are what ci.yml asks for', /floor 1/],
+  ['the caller has no concurrency', (p) => { delete p.fullRun.concurrency; }, 'full run cancels its older run and shares no group with ci.yml', /no top-level concurrency/],
+  ['the caller does not cancel', (p) => { p.fullRun.concurrency['cancel-in-progress'] = false; }, 'full run cancels its older run and shares no group with ci.yml', /cancel-in-progress is `false`/],
+  ['the caller leaves cancel-in-progress out', (p) => { delete p.fullRun.concurrency['cancel-in-progress']; }, 'full run cancels its older run and shares no group with ci.yml', /cancel-in-progress is/],
+  ['the caller cancels by ci.yml\'s expression (a push never cancels)', (p) => { p.fullRun.concurrency['cancel-in-progress'] = "${{ github.event_name == 'pull_request' }}"; }, 'full run cancels its older run and shares no group with ci.yml', /cancel-in-progress is/],
+  ['the caller\'s group is ci.yml\'s', (p) => { p.fullRun.concurrency.group = p.ci.concurrency.group; }, 'full run cancels its older run and shares no group with ci.yml', /ci\.yml's own group/],
+  ['the caller\'s group is not per ref', (p) => { p.fullRun.concurrency.group = 'full-run'; }, 'full run cancels its older run and shares no group with ci.yml', /not per ref/],
 ];
 
 describe('ci.yml — the rules, held against the real workflow', () => {
@@ -1216,22 +1466,22 @@ describe('ci.yml — the rules, held against the real workflow', () => {
 
   for (const [name, rule] of Object.entries(RULES)) {
     it(`${name}`, () => {
-      const found = rule(REAL);
-      assert.equal(found.length, 0, `ci.yml breaks the ${name} rule:\n  ${found.join('\n  ')}`);
+      const found = rule(realSubject(name));
+      assert.equal(found.length, 0, `the committed workflows break the ${name} rule:\n  ${found.join('\n  ')}`);
     });
   }
 
   it('the client job writes the file the skips check reads, and the gate installs nothing the checks do not need', async () => {
     const { CLIENT_RESULTS } = await import('../../scripts/unexpected-skips.mjs');
     assert.equal(`test-results/${CLIENT_RESULTS}`, CLIENT_REPORT, 'ci.yml and scripts/unexpected-skips.mjs name different client report files');
-    const gate = jobEntries(REAL).find((j) => j.name === MERGE_GATE_NAME);
+    const [gate] = mergeGateEntries(REAL);
     assert.ok(!stepsOf(gate.job).some(runsNpmCi), 'the gate job runs npm ci; the checks import only node built-ins (held by unexpected-skips-fail-the-ci-gate), so it is an install for nothing');
   });
 
   it('the gate is a job of its own that nothing else waits for (a gate in the middle is not a gate)', () => {
-    const gate = jobEntries(REAL).find((j) => j.name === MERGE_GATE_NAME);
+    const [gate] = mergeGateEntries(REAL);
     assert.ok(gate, `no job is named "${MERGE_GATE_NAME}"`);
-    const waitedFor = jobEntries(REAL).filter((j) => j !== gate && transitiveNeeds(REAL, j.id).has(gate.id)).map((j) => j.id);
+    const waitedFor = jobEntries(REAL).filter((j) => j.id !== gate.id && transitiveNeeds(REAL, j.id).has(gate.id)).map((j) => j.id);
     assert.deepEqual(waitedFor, [], 'jobs wait for the gate, so it is not the last thing that runs');
   });
 });
@@ -1239,7 +1489,7 @@ describe('ci.yml — the rules, held against the real workflow', () => {
 describe('ci.yml — the rules, held against a conforming miniature and against each breakage of it', () => {
   for (const [name, rule] of Object.entries(RULES)) {
     it(`the conforming shape passes: ${name}`, () => {
-      assert.deepEqual(rule(GOOD), []);
+      assert.deepEqual(rule(goodSubject(name)), []);
     });
   }
 
@@ -1252,7 +1502,7 @@ describe('ci.yml — the rules, held against a conforming miniature and against 
 
   for (const [what, mutate, rule, expected] of BREAKAGES) {
     it(`${rule}: ${what}`, () => {
-      const doc = clone(GOOD);
+      const doc = clone(goodSubject(rule));
       mutate(doc);
       const found = RULES[rule](doc);
       assert.ok(found.some((m) => expected.test(m)),
@@ -1347,7 +1597,7 @@ describe('ci.yml — other ways of writing the same rule are accepted, so the ga
     for (const off of [false, 'false', undefined, null, 1, 'True', '', 'yes']) assert.equal(isTrue(off), false, `${JSON.stringify(off)} is not on`);
     // The gate step's `continue-on-error: 'true'` is the case the inline `=== true` could not see.
     const d = clone(GOOD);
-    const gate = jobEntries(d).find((j) => j.name === MERGE_GATE_NAME);
+    const [gate] = mergeGateEntries(d);
     assert.ok(gate, 'the merge gate job was not found in the conforming miniature');
     stepsOf(gate.job)[0]['continue-on-error'] = 'true';
     assert.ok(mergeGateViolations(d).some((m) => /continue-on-error/.test(m)), "a step with continue-on-error: 'true' still cannot be allowed on the gate");
@@ -1501,4 +1751,84 @@ describe('preflight runs the client\'s unit tests the way ci.yml does', () => {
   ]) {
     it(`green: ${what}`, () => assert.deepEqual(parity(GOOD, make()), []));
   }
+});
+
+// ───────────────────────────────────────── the full run: what the module names, and what the guide says ─────────────────────────────────────────
+
+describe('the full run — the module names it once, and the rules above read what it names', () => {
+  it('names the workflow file and the ref prefix', () => {
+    assert.equal(CW.FULL_RUN_WORKFLOW, '.github/workflows/full-run.yml');
+    assert.equal(CW.FULL_RUN_PREFIX, 'full-run/');
+  });
+
+  it('the workflow is a tracked file, and loadFullRun reads exactly it', () => {
+    assert.ok(workflowFiles().includes(CW.FULL_RUN_WORKFLOW), `${CW.FULL_RUN_WORKFLOW} is not among the tracked workflows`);
+    assert.deepEqual(CW.loadFullRun(), loadWorkflow(CW.FULL_RUN_WORKFLOW));
+  });
+
+  it('a root without the workflow is refused, never read as a workflow that runs nothing', () => {
+    assert.throws(() => CW.loadFullRun(join(REPO_ROOT, 'docs')), /does not exist/);
+  });
+
+  it('the caller grants what ci.yml\'s jobs ask for, so a job of ci.yml that asks for more is granted by a caller that follows it (the rule is derived, not pinned)', () => {
+    const pair = clone({ fullRun: GOOD_FULL, ci: GOOD });
+    job(pair.ci, 'sync').permissions = { contents: 'read', checks: 'read' };
+    assert.ok(fullRunPermissionViolations(pair).some((m) => /does not grant checks: read/.test(m)), 'a called job asks for checks: read and the caller does not grant it');
+    callJob(pair).permissions.checks = 'read';
+    assert.deepEqual(fullRunPermissionViolations(pair), []);
+  });
+});
+
+/**
+ * The testing guide's "The CI job graph" section names the full run's check the way GitHub reports it: `<the caller job's name>
+ * / <the name the called gate reports>`. Both halves are read from the two workflow files — a sentence that pinned
+ * "Full run / Build & Test" would survive a rename of either job and tell an operator to wait for a check that never comes.
+ * It lives here, beside the rules over the same two files, so the name is derived by the code that already reads them.
+ */
+function guideNamesFullRunCheck(guide, fullRun, ci) {
+  const callers = jobEntries(fullRun);
+  if (callers.length !== 1) return [`${callers.length} jobs in the full-run workflow: its check name is not one name`];
+  const [gate] = mergeGateEntries(ci);
+  if (!gate) return [`no job of ci.yml is named "${MERGE_GATE_NAME}", so the called gate has no name to derive`];
+  const want = `${callers[0].name} / ${gate.name}`;
+  const section = markdownSectionWithSubsections(guide, 'The CI job graph');
+  if (section === null) return ['the guide has no "The CI job graph" section'];
+  return section.includes(want) ? [] : [`"The CI job graph" does not name the full run's check as \`${want}\``];
+}
+
+describe('docs/testing-guide.md names the full run\'s check as the two workflows spell it', () => {
+  it('the guide\'s CI job graph section names `<the full-run job\'s name> / <the merge gate\'s name>`', () => {
+    const guide = readFileSync(join(REPO_ROOT, 'docs', 'testing-guide.md'), 'utf8');
+    const found = guideNamesFullRunCheck(guide, CW.loadFullRun(), REAL);
+    assert.deepEqual(found, []);
+  });
+
+  const guideWith = (sentence) => `# Guide\n\n## The CI job graph\n\nSome prose.\n\n${sentence}\n\n## What is cached\n\nOther prose.\n`;
+  const check = (guide) => guideNamesFullRunCheck(guide, GOOD_FULL, GOOD);
+
+  it('the miniatures derive the name, and a guide that says it passes', () => {
+    assert.deepEqual(check(guideWith('The check is `Full run / Build & Test`.')), []);
+  });
+
+  for (const [what, guide] of [
+    ['the guide names only the merge gate', guideWith('The check is `Build & Test`.')],
+    ['the guide names a stale spelling of the full run', guideWith('The check is `Full run / Build and Test`.')],
+    ['the guide names another job of the caller', guideWith('The check is `Full / Build & Test`.')],
+    ['the name stands in another section only', `${guideWith('Prose only.')}\nThe check is \`Full run / Build & Test\`.\n`],
+    ['the section is gone', '# Guide\n\n## What is cached\n\nFull run / Build & Test\n'],
+  ]) {
+    it(`refuses: ${what}`, () => {
+      assert.ok(check(guide).length > 0, `${what} was accepted`);
+    });
+  }
+
+  it('follows a rename of either workflow (the sentence is derived, not pinned)', () => {
+    const renamed = clone(GOOD_FULL);
+    callJob({ fullRun: renamed }).name = 'Bundle run';
+    assert.ok(guideNamesFullRunCheck(guideWith('The check is `Full run / Build & Test`.'), renamed, GOOD).length > 0);
+    assert.deepEqual(guideNamesFullRunCheck(guideWith('The check is `Bundle run / Build & Test`.'), renamed, GOOD), []);
+    const gateRenamed = clone(GOOD);
+    mergeGateEntries(gateRenamed)[0].job.name = 'Gate';
+    assert.ok(guideNamesFullRunCheck(guideWith('The check is `Full run / Build & Test`.'), GOOD_FULL, gateRenamed).length > 0, 'a gate that is no longer named Build & Test leaves nothing to derive');
+  });
 });

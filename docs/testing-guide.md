@@ -1,7 +1,7 @@
 # Testing guide
 
 How to run Ythril's tests, how to write one that CI will actually run, and how CI is put together. The
-[contribution guide](contribution-guide.md) says what to run before you push; this page is the reference behind it.
+[contribution guide](contribution-guide.md) says what to run before you push and where a maintainer's full run happens; this page is the reference behind it.
 
 Two rules run through everything below, because both were learned the expensive way:
 
@@ -12,7 +12,9 @@ Two rules run through everything below, because both were learned the expensive 
 ## Running the suites
 
 Run `npm run preflight` first, always. It runs every structural check that needs no Docker, in one command, and
-`scripts/preflight.mjs` is the list. Then run the suites your change reaches.
+`scripts/preflight.mjs` is the list. Then run the suites your change reaches. A maintainer's bundle then has its one full run on
+CI, before its pull request (see [The CI job graph](#the-ci-job-graph)), and a commit made after that run reruns locally only
+the test files its diff reaches.
 
 | Suite | Needs | Run |
 |---|---|---|
@@ -82,6 +84,9 @@ A suite that got slower is a defect nobody reports, so every run leaves a record
 2. **The `test-results-<job>-<attempt>` artifacts** of the run, kept for 30 days. Each holds the JSONL files below.
 3. **The step summary of the `CI advisory` job**, which downloads those artifacts and writes the run's timings. That job
    is not a required check and may fail without failing the run.
+
+**A full run is a third kind of run.** A maintainer's push to `full-run/<bundle>` (see [The CI job graph](#the-ci-job-graph))
+leaves the same three places, and its timings are read in that run's own step summary: the recorder below never records one.
 
 **The job's own log is public and unmasked.** Anyone can read it, and nothing rewrites it: the masking below covers the
 files a run uploads, not the console. A secret that reaches the console is published. So the question is what can reach
@@ -187,6 +192,7 @@ so a history has the gaps of the days nobody ran `--record` or `--record-ci`. It
 ```bash
 node scripts/test-times.mjs --record              # record the local run in test-results/
 node scripts/test-times.mjs --record-ci           # record the completed CI runs not yet recorded
+node scripts/test-times.mjs --record-ci <runId>   # the same, and fail unless that run is among the runs listed
 node scripts/test-times.mjs --rewrite <recordKey> # record one run again from its own results
 node scripts/test-times.mjs --help                # every flag and variable, printed
 ```
@@ -197,6 +203,8 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 | `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the script records to. Never printed, never stored, never in a payload. |
 | `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
 | `GITHUB_API_URL` | The Actions API base. Defaults to the public GitHub API. |
+| `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` | For `--record-ci <runId>`: how long, in milliseconds, the listing is read again for a run it does not hold yet before the pass fails. A positive integer; default `180000`. |
+| `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` | The pause between two of those reads, in milliseconds. A positive integer; default `20000`. |
 
 What the recorder guarantees, and why each is there:
 
@@ -214,8 +222,20 @@ What the recorder guarantees, and why each is there:
   says what it met: runs recorded but missing a job's record are completed and the walk goes on.
 - **Only trusted CI runs are read.** `--record-ci`, the baselines and `--trend` start from one function that admits a
   push to `main` of this repository through `ci.yml`, decided from the run object the Actions API returns and from nothing
-  an artifact says about itself. A pull request, a fork or another workflow is never recorded. Artifact bytes are read as
-  hostile input: size caps, no `..` or absolute names, nothing written to disk.
+  an artifact says about itself. A pull request, a fork or another workflow, a full run included, is never recorded.
+  Artifact bytes are read as hostile input: size caps, no `..` or absolute names, nothing written to disk.
+- **A caller that waits for a run names it, and a pass that did not list it fails.** The listing is a page of the completed
+  pushes to `main`, and a page older than the run just finished lists nothing of it: the pass used to record what it found,
+  print `recorded 0 record(s)` and exit 0, a success that recorded nothing of the run asked for. `--record-ci <runId>` takes
+  the id the Actions API gives the run and records as the bare form does, but looks for that run in the listing before it
+  writes anything, and a pass that does not find it exits 1. A run absent from the listing is refused as **not in the
+  listing of completed pushes to main**, with the reasons it may be absent (a stale listing, or a run that is not a trusted
+  one); a run the listing holds but the trust function refuses (a full run, a pull request's) is refused as **not a trusted
+  run**, and its artifacts are never requested. An id that is not a positive integer is refused as such before any request is
+  made. The listing lags a run that has only just finished, so a pass that names a run which the listing does not yet hold
+  reads the listing again, every `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` (default 20000) for up to
+  `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` (default 180000), before it refuses, and the refusal says the listing was read again for that
+  long; the bare form and `--rewrite` read it once. The bare form keeps its stopping rule, and every pass prints the newest run it listed, so a stale page is visible.
 - **Incomplete is not passed.** A results set without its closing line, with a wrong count or a torn last line is recorded
   as `incomplete`. The client's report is `incomplete` when a test never reached a verdict, when the test command's own
   result (`runnerOutcome`, written into the report by CI's mask step and by preflight) says it did not succeed and no
@@ -364,9 +384,39 @@ The authoritative description is the comment at the top of `.github/workflows/ci
   needs have finished, so while others still run there is no `Build & Test` yet, which means in progress and never passing.
 - **`CI advisory`** is not required and may fail: timings and trends.
 
-Every job has a `timeout-minutes` with its reason beside it. A concurrency group keeps one run per ref; a newer push to a
-pull request supersedes the older run, and a push to `main` is never cancelled, because it is the run that fills the
-caches. The workflow's token is `contents: read` and nothing wider; `CI advisory` alone adds `actions: read`.
+Every job of `ci.yml` has a `timeout-minutes` with its reason beside it. A concurrency group keeps one run per ref; a newer
+push to a pull request supersedes the older run, and a push to `main` is never cancelled, because it is the run that fills
+the caches. The workflow's token is `contents: read` and nothing wider; `CI advisory` alone adds `actions: read`.
+
+### The full run of a bundle
+
+A maintainer's bundle has its one full run on CI, before its pull request: after preflight, the bundle's commits are pushed
+to `full-run/<bundle>` (`git push origin HEAD:full-run/<bundle>`). That push runs every job of the graph above, through
+`.github/workflows/full-run.yml` (named `Full run`), which triggers on that ref pattern only and calls `ci.yml` as a reusable
+workflow. GitHub names a called job's check `<calling job> / <called job>`, so the gate of a full run is
+`Full run / Build & Test`. That is never the exact context the repository ruleset requires or the merge monitor waits for, so
+a full run can never satisfy the merge gate: **the pull request's `Build & Test` stays the only merge gate**, and it still
+covers what a full run does not, the pull request merged with `main` at its head. A commit made after the full run reruns
+locally only the test files its diff reaches.
+
+- **Why a ref of its own.** A push trigger on the pull request's branch would run the whole graph twice on every later push
+  while the pull request is open, once for the push and once for the pull request. The same commits reach the pull
+  request's branch afterwards.
+- **A newer push supersedes the older.** The calling workflow's concurrency group is per ref, so a second push to the same
+  `full-run/<bundle>` cancels the first run; a push to `main` is never cancelled. Overlapping runs of different refs queue for
+  runners rather than fail.
+- **A re-run is the whole run.** Use `gh run rerun <id>`, never `--failed`: the stack jobs read the test image archive,
+  which is named by the run attempt and uploaded only by `prepare`, and the gate reads only its own attempt's results, so a
+  partial rerun cannot go green. Pushing a SHA the ref already holds starts nothing; a rebased HEAD is pushed with `--force`.
+- **The calling job has no `timeout-minutes` of its own,** because every job it calls has one.
+- **Its timings are never recorded.** The recorder reads pushes to `main` from `ci.yml` only; read a full run's durations in
+  its own step summary (see [Reading durations](#reading-durations)).
+- **The cost is two full graphs per bundle, by design:** this run and the pull request's. A full run's result artifacts are
+  kept 30 days and nobody reads them. A full run also writes no image or sidecar cache (see
+  [What is cached](#what-is-cached-and-what-is-not)), so one after a bundle that changed image layers builds them cold.
+- **An outside contributor is not asked for one.** Only someone with push access to the repository can push a `full-run/` ref, and a
+  contributor's pull request runs every suite through its own `Build & Test`. A fork may run the same workflow in its own
+  Actions.
 
 **Release lines keep their single-job workflow.** A patch is cut from a `release/X.Y.x` branch whose `ci.yml` is one job
 named `Build & Test` running everything in order. Ports of tests to a release line are adapted to that shape, and a patch
@@ -376,10 +426,13 @@ keeps the full local run.
 
 Caches are writes to a shared store with a size limit, so the rule is about who may write:
 
-- **Only a push to `main` writes a cache, and only `prepare` does it.** Every run reads. A pull request that wrote would
-  evict the layers every other run needs, and could poison what `main` reads. The cost is stated: a pull request that
-  pushes again rebuilds layers its previous run built. A gate derives this from the workflow: cache writes carry the
+- **Only a push to `main` writes the image and sidecar layer caches, and only `prepare` does it.** Every run reads. A pull
+  request that wrote would evict the layers every other run needs, and could poison what `main` reads. The cost is stated: a
+  pull request that pushes again rebuilds layers its previous run built, and so does a full run after a bundle that changed
+  image layers, because its ref is not `main`. A gate derives this from the workflow: those cache writes carry the
   main-only condition.
+- **The one cache a run under any ref may write is `setup-node`'s npm download cache.** On a lockfile miss it saves under the
+  ref it ran for, a pull request's or a full run's, as it always did; it holds downloaded packages and no layer.
 - **What is cached:** the layers of the test image, and the layers of each document sidecar in a scope of its own, in the
   GitHub Actions layer cache; and npm's download cache, keyed on the lockfile, through `setup-node`. Keys are exact, with no
   fallback key.

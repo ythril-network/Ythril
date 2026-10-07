@@ -5,7 +5,8 @@
  * log (`Q-370`). The recorder reads what the reporter wrote (`test-results/*.jsonl`); it does not run tests.
  *
  *     node scripts/test-times.mjs --record            record the local run in test-results/
- *     node scripts/test-times.mjs --record-ci         record the trusted CI runs not yet recorded
+ *     node scripts/test-times.mjs --record-ci [<runId>]   record the trusted CI runs not yet recorded; with a run id,
+ *                                                     fail (writing nothing) when that run was not listed or is not trusted
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
@@ -51,6 +52,19 @@
  *   never be read (not a zip, past the size cap) is the stop and is said without failing the pass; a download that
  *   failed is tried again. A recorded run whose artifacts have all expired is recorded, and gets no `none` row. An
  *   older run past the horizon that was never recorded is reported once and written as nothing.
+ * - **A named run** (`--record-ci <runId>`, Q-402) is the run a caller has just seen finish. The walk is the same; what the
+ *   name adds is a failure: a run that is not among the trusted completed runs the listing held ends the pass with exit 1
+ *   BEFORE anything is written, saying whether the listing never held it (a page older than the run: wait and ask again) or
+ *   held it and `trustedRuns` refused it (it will never be recorded). Without the name that pass listed nothing of the run,
+ *   recorded what it found, said "recorded 0 record(s)" and exited 0. Every `--record-ci` pass prints the newest run it listed with its
+ *   start, so a stale page is visible. Nothing is compared with the records already held: no key for "older than held"
+ *   survives a re-run, a backfill or a deleted run.
+ * - **A listing that lags** (Q-403): the listing is built a little behind the run it lists, so a run seen finishing a moment ago
+ *   may not be in it yet. A pass that NAMES a run reads the listing again, every `YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS` (default
+ *   20000) for up to `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` (default 180000), until the run is in it, through the repo's one
+ *   condition wait; then it refuses as above, and the refusal says the listing was read again for that long. A run the listing
+ *   holds but `trustedRuns` refuses is not waited for (it will never be trusted). The bare pass and `--rewrite` read once.
+ *   Both variables are positive integers, refused before any request otherwise.
  * - **The client is a suite like the others** (`suite: client`): `--record` reads `test-results/client.json` beside the node
  *   `*.jsonl`, `--record-ci` reads it from the client job's own artifact (`test-results-client-tests-<attempt>`, the entry
  *   named `client.json` and no other), both through `scripts/_shared/client-results.mjs`. Each suite is its own problem: a
@@ -76,7 +90,7 @@ import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
-import { holdsWithin } from '../testing/_shared/wait-for.mjs';
+import { holdsWithin, waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
@@ -572,7 +586,10 @@ async function withRecordLock(fn) {
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-/** Under CI no recording is done: CI never holds the write token, and a token found there is a leak to refuse. */
+/**
+ * Under CI no recording is done: CI never holds the write token, and a token found there is a leak to refuse. The code is 2,
+ * not the 1 of an ordinary failure, so a caller can tell "refused for where it ran" from "it ran and failed".
+ */
 function refuseUnderCi(flag) {
   const named = ciSignal();
   if (!named) return null;
@@ -741,6 +758,12 @@ function recordUnderLock(payloads, dest) {
 
 /** Pages of 100 runs read from the listing; a run past them is older than its artifacts' retention. */
 const LISTING_PAGES = 5;
+/**
+ * The listing every reader of the CI runs asks for: completed pushes to main of `ci.yml`, newest first, a hundred to a
+ * page. One spelling, because the recorder, `--rewrite` and the summary's baseline each read it and a filter changed in
+ * one (the branch, the event, the status) would silently widen or narrow the others.
+ */
+const completedPushesPath = (page = 1) => `/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100&page=${page}`;
 const GITHUB_TIMEOUT_MS = 30_000;
 const GITHUB_JSON_CAP = 20_000_000;
 const GITHUB_ZIP_CAP = 100_000_000;
@@ -790,8 +813,24 @@ function githubClient() {
 }
 
 const outcomeOfConclusion = (c) => (c === 'success' ? 'passed' : c === 'failure' || c === 'timed_out' ? 'failed' : c === 'cancelled' ? 'cancelled' : 'incomplete');
-const runIdOf = (run) => (Number.isSafeInteger(run.id) && run.id > 0 ? run.id : null);
+/**
+ * An id or a count GIVEN AS TEXT (a command-line argument, a record key's part) as that number, or null: digits only (no
+ * sign, no space, no exponent, no hex, no fraction) and a safe integer above zero. A run id that is `1e3`, `0x10` or past
+ * 2^53 compares equal to nothing and fails later, far from its cause. It answers for text only: an id the API or the
+ * environment hands over as a NUMBER (an artifact id, `run_attempt`, `GITHUB_RUN_ID`) is checked where it is read, and
+ * `runIdOf` is the way a listed run's own number is held to the same rule.
+ */
+const positiveInteger = (text) => {
+  if (typeof text !== 'string' || !/^\d+$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+const runIdOf = (run) => (Number.isSafeInteger(run.id) ? positiveInteger(String(run.id)) : null);
 const startedOf = (run) => isoOrNull(run.run_started_at) ?? isoOrNull(run.created_at);
+/** A run as a person reads it in a refusal or a log line: its id and when it started, or that the start is unknown. */
+const describeRun = (run) => `${runIdOf(run)} (started ${startedOf(run) ?? 'at an unknown time'})`;
+/** The predicate "this is run `id`", for the one question asked of a listing three ways: is it among them, which one, and is the named one there. */
+const isRun = (id) => (run) => runIdOf(run) === id;
 
 /**
  * The client's report among the entries of the client job's artifact, or undefined. Found by its exact entry name and
@@ -915,10 +954,61 @@ async function ciPayloads(gh, run, have = new Set()) {
   return { payloads, problems };
 }
 
-/** Walk the trusted completed runs newest first; with `rewriteKey`, only the run that key names, and without the stop rule. */
-async function recordCi({ rewriteKey } = {}) {
+/**
+ * Why a run a caller NAMED is not among the trusted runs the listing held, in the words the caller can act on: a run the
+ * listing did hold but `trustedRuns` refused is a different answer from one the page did not hold at all (wait and ask
+ * again, versus never), and saying "not listed" for the first would send the caller to wait for a page that never has it.
+ *
+ * @param {number} runId
+ * @param {Set<number>} listedIds every run id the pages held, trusted or not
+ * @param {object[]} trusted the trusted runs, newest first
+ * @param {string} outcome what the pass did not do ('recorded', 'rewritten')
+ * @param {{ ms: number, intervalMs: number } | null} [waited] the bound the listing was read again within, when it was
+ */
+function unlistedRunRefusal(runId, listedIds, trusted, outcome, waited = null) {
+  if (listedIds.has(runId)) return `test-times: run ${runId} is in the listing but is not a trusted run (not a push to main of ${REPO} from ci.yml, or not completed); nothing ${outcome}`;
+  const newest = trusted[0];
+  const newestSaid = newest ? `the newest run it listed is ${describeRun(newest)}` : 'it listed no trusted run';
+  const waitedSaid = waited ? `; the listing was read again for ${waited.ms}ms (every ${waited.intervalMs}ms) and never held it` : '';
+  return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml: the listing may be stale (${newestSaid}), or the run is not a trusted one${waitedSaid}; nothing ${outcome}`;
+}
+
+const LISTING_WAIT_ENV = 'YTHRIL_TEST_RUNS_LISTING_WAIT_MS';
+const LISTING_INTERVAL_ENV = 'YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS';
+const DEFAULT_LISTING_WAIT_MS = 180_000;
+const DEFAULT_LISTING_INTERVAL_MS = 20_000;
+
+/**
+ * How long a pass that names a run reads the listing again for it, and the pause between two reads: the two variables, each a
+ * positive integer, or the reason one is not (said before any request, naming the variable). One reading of the two so the
+ * bound and the interval are held to one rule and a bad value cannot reach a wait that would run for as long as it says.
+ *
+ * @returns {{ ms: number, intervalMs: number } | { refusal: string }}
+ */
+function listingWaitFromEnv() {
+  const read = (name, fallback) => {
+    const text = process.env[name];
+    if (text === undefined) return fallback;
+    return positiveInteger(text) ?? { refusal: `test-times: ${name} must be a positive integer (digits only), not ${JSON.stringify(text)}` };
+  };
+  const ms = read(LISTING_WAIT_ENV, DEFAULT_LISTING_WAIT_MS);
+  const intervalMs = read(LISTING_INTERVAL_ENV, DEFAULT_LISTING_INTERVAL_MS);
+  return ms.refusal ? ms : intervalMs.refusal ? intervalMs : { ms, intervalMs };
+}
+
+/**
+ * Walk the trusted completed runs newest first; with `rewriteKey`, only the run that key names, and without the stop rule.
+ * With `runId` (the run a caller is waiting for) the walk is the same, and the pass FAILS, before it writes anything, when
+ * that run is not among the trusted runs it listed: a page older than the run lists nothing of it, and without the name the
+ * pass would say "recorded 0 record(s)" and exit 0 about a run it never saw. The same pass WALKS that run wherever it sits (behind
+ * a completely recorded run, past the newest {@link BACKFILL_RUNS}, on a page after them): being found is not being recorded.
+ */
+async function recordCi({ rewriteKey, runId } = {}) {
   const refused = refuseUnderCi(rewriteKey ? '--rewrite' : '--record-ci');
   if (refused) return refused;
+  // Only a pass that names a run waits for it, and its bound is held to its rule before the first request.
+  const wait = runId && !rewriteKey ? listingWaitFromEnv() : null;
+  if (wait?.refusal) { console.error(wait.refusal); return 1; }
   let gh;
   try { gh = githubClient(); } catch (err) { console.error(`test-times: ${err.message}`); return 1; }
   const dest = destination();
@@ -929,22 +1019,54 @@ async function recordCi({ rewriteKey } = {}) {
     // Both modes read the same listing, filtered by the API and by trustedRuns(): a run that is not in it is not
     // trusted. A rewrite looks for its run in it (a run older than the listing's pages has no artifacts left anyway).
     const parts = rewriteKey ? parseRecordKey(rewriteKey) : null;
-    if (rewriteKey && (!parts || parts.source !== 'ci' || !/^\d+$/.test(parts.runId))) { console.error('test-times: --rewrite needs a ci record key (ci:<runId>:<attempt>:<job>:<suite>)'); exit = 1; return; }
-    const collected = [];
-    for (let page = 1; page <= LISTING_PAGES; page++) {
-      const listed = await gh.json(`/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100&page=${page}`);
-      const batch = trustedRuns(listed?.workflow_runs ?? []).filter(r => r.status === 'completed');
-      if (!(listed?.workflow_runs ?? []).length) break;
-      collected.push(...batch);
-      if (rewriteKey ? collected.some(r => String(r.id) === parts.runId) : collected.length >= BACKFILL_RUNS) break;
-    }
-    const newest = collected.sort(newestRunFirst);
-    const runs = rewriteKey ? newest.filter(r => String(r.id) === parts.runId) : newest.slice(0, BACKFILL_RUNS);
-    if (rewriteKey && !runs.length) { console.error(`test-times: run ${parts.runId} is not among the completed pushes to main of ${REPO} from ci.yml; nothing rewritten`); exit = 1; return; }
+    const rewriteId = parts ? positiveInteger(parts.runId) : null;
+    if (rewriteKey && (!parts || parts.source !== 'ci' || !rewriteId)) { console.error('test-times: --rewrite needs a ci record key (ci:<runId>:<attempt>:<job>:<suite>)'); exit = 1; return; }
+    const readListing = async () => {
+      const collected = [];
+      const listedIds = new Set();
+      for (let page = 1; page <= LISTING_PAGES; page++) {
+        const listed = await gh.json(completedPushesPath(page));
+        const held = listed?.workflow_runs ?? [];
+        if (!held.length) break;
+        for (const r of held) { const id = runIdOf(r); if (id) listedIds.add(id); }
+        collected.push(...trustedRuns(held).filter(r => r.status === 'completed'));
+        // A pass stops paging when it holds what it walks: a rewrite, the run it names; a named run, the newest runs AND the
+        // page that lists it (it may lie past them); a bare pass, the newest runs.
+        if (rewriteKey ? collected.some(isRun(rewriteId)) : collected.length >= BACKFILL_RUNS && (!runId || listedIds.has(runId))) break;
+      }
+      return { collected, listedIds };
+    };
+    // A named run is read for until the listing holds it (trusted or not: a run it holds and will not trust is never going to
+    // be trusted, so it is not waited for) or the bound ends; every other pass reads once.
+    let listing;
+    let waited = null;
+    if (wait) {
+      let last;
+      try { listing = await waitForReading(async () => (last = await readListing()), (l) => l.listedIds.has(runId), wait.ms, wait.intervalMs); } catch (err) {
+        if (!(err instanceof WaitTimeout) || !last) throw err;
+        listing = last;
+        waited = wait;
+      }
+    } else listing = await readListing();
+    const { listedIds } = listing;
+    const newest = listing.collected.sort(newestRunFirst);
+    const runs = rewriteKey ? newest.filter(isRun(rewriteId)) : newest.slice(0, BACKFILL_RUNS);
+    // The refusal comes BEFORE the first write, so a pass that failed leaves no record of some other run behind.
+    const waitedFor = rewriteKey ? rewriteId : runId;
+    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded', waited)); exit = 1; return; }
+    if (!rewriteKey) console.log(newest[0] ? `test-times: newest listed run: ${describeRun(newest[0])}` : 'test-times: the listing held no trusted completed run');
 
     let recorded = 0;
     let stoppedAtRecorded = false;
-    for (const run of runs) {
+    const walked = new Set();
+    const STOP_RECORDED = 'recorded';
+    const STOP_DOWN = 'down';
+    /**
+     * Walk one run: STOP_RECORDED when it is completely recorded (the stop of a pass that stops there), STOP_DOWN when the
+     * instance is gone, nothing when the walk goes on. A failure of the run is said and sets the exit.
+     */
+    const walkRun = async (run) => {
+      walked.add(run.id);
       try {
         const have = rewriteKey ? new Set() : await recordedKeysOfRun(dest.api, run.id);
         const built = await ciPayloads(gh, run, have);
@@ -956,24 +1078,36 @@ async function recordCi({ rewriteKey } = {}) {
         const payloads = built.payloads.filter(p => !have.has(p.properties.recordKey));
         if (!rewriteKey && have.size > 0 && payloads.length === 0 && problems.every(p => p.persistent)) {
           for (const p of problems) console.log(`test-times: run ${run.id}: ${p.text} (recorded without it; nothing to read there)`);
-          stoppedAtRecorded = true;
-          break;
+          return STOP_RECORDED;
         }
         for (const p of problems) { console.log(`test-times: run ${run.id}: ${p.text}`); exit = 1; }
         if (rewriteKey && payloads.every(p => p.properties.measurements === 'none')) {
-          console.error(`test-times: run ${run.id} has no artifacts left; the record is not overwritten with nothing`); exit = 1; continue;
+          console.error(`test-times: run ${run.id} has no artifacts left; the record is not overwritten with nothing`); exit = 1; return undefined;
         }
         for (const p of payloads) { await recordPayload(dest.api, p); recorded++; console.log(`test-times: recorded ${p.properties.recordKey}`); }
       } catch (err) {
         console.error(`test-times: run ${run.id}: ${whyOf(err, dest.shownUrl)}`);
         exit = 1;
-        if (stopsEverything(err) && err instanceof YthrilApiError) break;
+        if (stopsEverything(err) && err instanceof YthrilApiError) return STOP_DOWN;
       }
+      return undefined;
+    };
+    let stop;
+    for (const run of runs) {
+      stop = await walkRun(run);
+      if (stop) break;
     }
+    stoppedAtRecorded = stop === STOP_RECORDED;
+    // A named run is walked wherever it sits: the stop rule and the newest-runs bound say where the walk of the NEWEST runs
+    // ends, not whether the run a caller asked for is looked at, and a pass that exits 0 about a run it never walked has said
+    // it recorded something it did not. Only a gone instance excuses it (the exit is already 1 then).
+    const named = runId && !rewriteKey ? newest.find(isRun(runId)) : null;
+    const walkedApart = Boolean(named) && !walked.has(named.id) && stop !== STOP_DOWN;
+    if (walkedApart) await walkRun(named);
     if (!rewriteKey && !stoppedAtRecorded && runs.length >= BACKFILL_RUNS) {
       console.log(`test-times: walked ${BACKFILL_RUNS} runs without meeting one recorded completely (a run recorded but missing a job's record is not complete: its missing records were written and the walk went on); older runs are not backfilled`);
     }
-    console.log(`test-times: recorded ${recorded} record(s) from ${runs.length} run(s)`);
+    console.log(`test-times: recorded ${recorded} record(s) from ${runs.length + (walkedApart ? 1 : 0)} run(s)`);
   });
   if (locked === null) { console.error('test-times: another recorder holds test-results/.record.lock'); return 1; }
   return exit;
@@ -1217,7 +1351,7 @@ async function summaryBaseline(figures) {
   const history = [];
   try {
     gh = githubClient();
-    const listed = await gh.json(`/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100`);
+    const listed = await gh.json(completedPushesPath());
     const runs = trustedRuns(listed?.workflow_runs ?? [])
       .filter(r => r.status === 'completed' && r.conclusion === 'success' && String(r.id) !== currentId && runIdOf(r) && startedOf(r))
       .sort(newestRunFirst)
@@ -1296,10 +1430,16 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
 
   --record                 record the run in test-results/ (one Test-Run entry per suite: each node suite's *.jsonl,
                            and the client's ${CLIENT_RESULTS}, which a preflight run writes); exits 0 whenever it could not
-                           record, and keeps the payload in test-results/unrecorded/ for the next one. Run by hand
-  --record-ci              record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded, the client
+                           record, and keeps the payload in test-results/unrecorded/ for the next one. Run by hand.
+  --record-ci [<runId>]    record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded, the client
                            job's included (its artifact's ${CLIENT_RESULTS}); walks newest first and stops at the first
-                           completely recorded run or after ${BACKFILL_RUNS} runs. Run by hand
+                           completely recorded run or after ${BACKFILL_RUNS} runs, and says the newest run it listed.
+                           With <runId> (a positive integer: the run you are waiting for) the pass FAILS, writing
+                           nothing, when that run is not in the listing of completed pushes to main (a stale page) or
+                           is listed but not a trusted run, instead of reporting a quiet success; a run the listing does
+                           not hold yet is waited for first (the listing is read again, see the two variables below);
+                           the named run is walked wherever it sits, past the stop and past the ${BACKFILL_RUNS} runs too.
+                           Run by hand.
   --type-schema            print the schema_update arguments that declare the Test-Run chrono type on the instance
                            (generated from the recorder's own field list, with its one-year retention)
   --rewrite <recordKey>    record one run again from its own results (ci:<runId>:<attempt>:<job>:<suite>
@@ -1319,6 +1459,11 @@ environment (read, never printed):
   YTHRIL_TEST_RUNS_TOKEN   a token that may write chrono entries in ${SPACE}
   GH_TOKEN                 a token that may read ${REPO}'s Actions runs and artifacts (--record-ci, --rewrite)
   GITHUB_API_URL           the Actions API base; default https://api.github.com
+  ${LISTING_WAIT_ENV}
+                           --record-ci <runId>: how long, in ms, the listing is read again for a run it does not hold
+                           yet before the pass fails; a positive integer, default ${DEFAULT_LISTING_WAIT_MS}
+  ${LISTING_INTERVAL_ENV}
+                           the pause, in ms, between two of those reads; a positive integer, default ${DEFAULT_LISTING_INTERVAL_MS}
 
 Recording is refused when GITHUB_ACTIONS or CI is set: CI never holds the write token.
 `;
@@ -1329,6 +1474,12 @@ async function main(argv) {
   if (command === '--type-schema' && !rest.length) { console.log(JSON.stringify(testRunTypeDeclaration(), null, 2)); return 0; }
   if (command === '--record' && !rest.length) return recordLocal();
   if (command === '--record-ci' && !rest.length) return recordCi();
+  if (command === '--record-ci' && rest.length === 1) {
+    // Validated before any request, to either server, and refused for what is wrong with the id, never as the usage text.
+    const runId = positiveInteger(rest[0]);
+    if (!runId) { console.error(`test-times: --record-ci <runId> needs the id of a run as a positive integer (digits only), not ${JSON.stringify(rest[0])}`); return 1; }
+    return recordCi({ runId });
+  }
   if (command === '--rewrite' && rest.length === 1) return rewriteLocal(rest[0]);
   if (command === '--summary' && rest.length === 2 && rest[0] === '--results') return summarise({ results: rest[1] });
   if (command === '--trend') {
@@ -1336,7 +1487,7 @@ async function main(argv) {
     let flags = false;
     for (let i = 0; i < rest.length; i++) {
       if (rest[i] === '--flags') flags = true;
-      else if (rest[i] === '--last' && /^\d+$/.test(rest[i + 1] ?? '') && Number(rest[i + 1]) > 0) last = Number(rest[++i]);
+      else if (rest[i] === '--last' && positiveInteger(rest[i + 1] ?? '')) last = positiveInteger(rest[++i]);
       else { console.error(HELP); return 1; }
     }
     return trend({ last, flags });

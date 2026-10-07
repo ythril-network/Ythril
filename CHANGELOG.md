@@ -146,6 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`) as the knob for spaces of tens of thousands of records;
   `maxBytes` has no default or floor and `recall`'s `budget` cut is in characters. A testing guide in Help describes the CI jobs and caches.
 - **Docs:** The testing guide says the CI job log is public and unmasked and what can reach repository code in CI; test runs now record the client suite's timings too.
+- **CI:** A push to `full-run/<bundle>` runs every job of `ci.yml` as checks named `Full run / <job>`, so a maintainer's bundle is tested before its pull request; `Build & Test` on the pull request stays the only merge gate.
 
 ### Fixed
 
@@ -183,8 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sidecars and links (`PATCH /api/files/:spaceId`, `move_file`). A retried move completes only a move it began; a directory delete needs `confirm: true`.
 - **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and the TTL sweep; `delete_file` no longer claims a missing path "succeeds quietly".
 - **Files:** A file a held deletion covers no longer returns from a peer by metadata, manifest download, byte push, the stray-metadata drain or a chunked upload; a deletion held from before the upgrade names no version and covers nothing.
-- **Search:** Records that match a `recall` query equally well come back in a stable order (ties break by id), so paging with `skip` /
-  `nextSkip` shows every match once. MCP `recall` and `POST /api/brain/recall` alike.
+- **Search:** Records matching a `recall` query equally well come back in a stable order (ties break by id), so paging with `skip`/`nextSkip` shows each once, on MCP and `POST /api/brain/recall`.
 - **Search:** `recall`, `similar` and the write-time duplicate check straight after a space's first write no longer answer `503`
   while its vector index initialises. `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, on REST and MCP.
 - **Records:** A small entity merges into a hub of any size (it failed with ~80 000 edges); a too-large refusal says *more than* the
@@ -229,6 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected record card).
   The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s; German and Polish labels say the action.
 - **Help:** Links in the in-app Help no longer open dead tabs (between parts of a split guide, to headings such as `#links`, to repository files); they keep their place in the URL and move focus to the target.
+- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails (exit 1, nothing written) when its listing of completed pushes to `main` still lacks that run after being read again for up to three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); a pass that recorded nothing reported success.
 
 ### Security
 

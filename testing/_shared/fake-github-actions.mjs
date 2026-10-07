@@ -33,10 +33,18 @@ export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
  * An artifact is `{ id, name, zip, expired? }`; `expired: true` is what the API says of an artifact past its retention (the list
  * still names it, and its bytes are gone). The lists are read live, so a test can expire one between two passes.
  *
- * @param {{ runs: object[], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
+ * `listings` (optional) is the listing as each successive READ of it sees it: read n answers `listings[n]` (the last one from
+ * there on), where `runs` answers every read alike. It is what a listing that lags behind a run that has just finished looks
+ * like: stale on the first read and holding the run on a later one. The page after the first is empty either way.
+ *
+ * `pages` (optional) is a listing of more than one page: page n answers `pages[n - 1]` (an empty list past the last), on every
+ * read, where `runs` answers page 1 alone. It is what a run older than the first page's runs looks like.
+ *
+ * @param {{ runs: object[], listings?: object[][], pages?: object[][], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
  */
-export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
+export async function startFakeGithub({ runs, listings, pages, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
+  let listingReads = 0;
   const artifactById = new Map();
   for (const list of Object.values(artifactsByRun)) for (const a of list) artifactById.set(String(a.id), a);
 
@@ -54,7 +62,15 @@ export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {
     const page = Number(u.searchParams.get('page') ?? '1');
     let m;
     if ((m = u.pathname.match(/^\/repos\/[^/]+\/[^/]+\/actions\/(?:runs|workflows\/[^/]+\/runs)$/))) {
-      return json(200, { total_count: runs.length, workflow_runs: page > 1 ? [] : runs });
+      if (pages) {
+        if (page === 1) listingReads++;
+        const here = pages[page - 1] ?? [];
+        return json(200, { total_count: here.length, workflow_runs: here });
+      }
+      if (page > 1) return json(200, { total_count: 0, workflow_runs: [] });
+      const held = listings ? listings[Math.min(listingReads, listings.length - 1)] : runs;
+      listingReads++;
+      return json(200, { total_count: held.length, workflow_runs: held });
     }
     if ((m = u.pathname.match(/\/actions\/runs\/(\d+)\/jobs$/))) {
       const list = jobsByRun[m[1]] ?? [];
@@ -77,6 +93,8 @@ export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {
     url,
     token,
     requests,
+    /** How many times the first page of the runs listing was read: a read of the listing is its page 1. */
+    listingReads: () => listingReads,
     /** Run ids whose jobs, artifacts or artifact bytes were ever requested. */
     askedAbout() {
       const ids = new Set();

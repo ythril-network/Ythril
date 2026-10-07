@@ -203,3 +203,325 @@ describe('--record-ci', () => {
     });
   });
 });
+
+// ── `--record-ci <runId>`: the run a caller waits for is NAMED, and a pass that did not list it fails (Q-402) ────────────
+//
+// What this prevents: a caller that has just seen run N finish asks the recorder to record it. The listing the recorder reads
+// is a page of completed pushes, and when that page is older than N (the real defect: its first page held only older runs)
+// the pass listed nothing of N, recorded what it found, said "recorded 0 record(s)" and exited 0 — a success that recorded
+// nothing of the run asked for. Naming the run turns "not listed" into a failure the caller sees, and the refusal comes
+// BEFORE the walk writes anything, so a failed pass leaves no half of a different run behind.
+
+/** A tool of the fake instance that changes what it holds. */
+const WRITE_TOOLS = ['save_chrono', 'update_chrono', 'delete_chrono'];
+const writesTo = (ythril) => ythril.calls.filter(c => WRITE_TOOLS.includes(c.tool));
+
+/**
+ * The bound on how long a pass that names a run reads the listing again, and the pause between two reads, in tens of
+ * milliseconds: the script is spawned, so the bound reaches it through its environment, and no test sleeps a real interval.
+ * Without these the script waits its default (three minutes) for a run that never comes.
+ */
+const WAIT_ENV = 'YTHRIL_TEST_RUNS_LISTING_WAIT_MS';
+const INTERVAL_ENV = 'YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS';
+const WAIT_MS = 400;
+const INTERVAL_MS = 40;
+const SHORT_WAIT = { [WAIT_ENV]: String(WAIT_MS), [INTERVAL_ENV]: String(INTERVAL_MS) };
+
+/** The ids of the runs `trustedRuns` admits and of the ones it must refuse (1008 is added by {@link worldWithFullRun}). */
+const TRUSTED_IDS = ['1001', '1007'];
+const UNTRUSTED_IDS = ['1002', '1003', '1004', '1005', '1008'];
+
+/** `world()` plus a full-run run (a push to `full-run/x` from `full-run.yml`: listed by the API, never trusted). */
+function worldWithFullRun() {
+  const w = world();
+  w.runs.push(run(1008, { path: '.github/workflows/full-run.yml', name: 'Full run', head_branch: 'full-run/x', head_sha: SHA('8') }));
+  w.artifactsByRun[1008] = [artifact(5009, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')])];
+  return w;
+}
+
+describe('--record-ci <runId>', () => {
+  for (const id of TRUSTED_IDS) {
+    it(`run ${id} is listed and trusted: the pass records as it does without a name, and exits 0`, async () => {
+      await withRecordingWorld(worldWithFullRun(), async ({ ythril, dir, env }) => {
+        const r = await runTimes(['--record-ci', id], { cwd: dir, env });
+        assert.equal(r.code, 0, everything(r));
+        assert.deepEqual(Object.keys(records(ythril)).sort(), [
+          'ci:1001:1:integration:integration',
+          'ci:1001:1:standalone-pure:standalone',
+          'ci:1007:1:build-and-test:standalone',
+        ], 'the named run, and the trusted run the walk records beside it, are recorded; nothing of an untrusted one');
+        assert.ok(Object.keys(records(ythril)).some(k => k.startsWith(`ci:${id}:`)), `a record of the named run ${id} exists`);
+      });
+    });
+  }
+
+  it('a run that is NOT in the listing fails the pass (exit 1), says so, and writes no record at all', async () => {
+    // The listing holds runs 1001..1008 and no 2000: the shape of the defect, a named run newer than everything the page listed.
+    await withRecordingWorld(worldWithFullRun(), async ({ github, ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', '2000'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 1, everything(r));
+      assert.match(everything(r), /not in the listing of completed pushes to main/, 'says the run was not listed');
+      assert.match(everything(r), /\b2000\b/, 'names the run it did not find');
+      assert.match(everything(r), /stale/i, 'says the listing may be stale');
+      assert.match(everything(r), /not (?:a )?trusted/i, 'says the run may not be a trusted one');
+      assert.ok(!/recorded 0 record/.test(everything(r)), 'a pass that did not list the run never reports a quiet "recorded 0"');
+      assert.deepEqual(writesTo(ythril), [], 'the trusted runs that WERE listed were written anyway: the refusal came after the walk, not before it');
+      assert.deepEqual(ythril.store.map(e => e._id), [], 'the instance holds a record from a pass that failed');
+      assert.deepEqual(Object.keys(records(ythril)), []);
+      assert.ok(github.requests.length > 0, 'the listing was fetched (the run is looked for in it)');
+    });
+  });
+
+  for (const id of UNTRUSTED_IDS) {
+    it(`run ${id} is listed but not trusted: exit 1 with its own message, nothing written, its artifacts never asked for`, async () => {
+      await withRecordingWorld(worldWithFullRun(), async ({ github, ythril, dir, env }) => {
+        const r = await runTimes(['--record-ci', id], { cwd: dir, env });
+        assert.equal(r.code, 1, everything(r));
+        assert.match(everything(r), /not a trusted run/, 'says it is not a trusted run');
+        assert.match(everything(r), new RegExp(`\\b${id}\\b`), 'names the run');
+        assert.ok(!/not in the listing/.test(everything(r)), 'it IS in the listing: "not listed" would send the caller to wait for a page that will never hold it');
+        assert.deepEqual(writesTo(ythril), [], 'a pass that refused the named run still wrote');
+        assert.deepEqual(ythril.store.map(e => e._id), []);
+        assert.ok(!github.askedAbout().has(id), `an untrusted run's artifacts were requested (${[...github.askedAbout()].join(', ')})`);
+      });
+    });
+  }
+
+  // Refused before the listing is fetched: not a request of any kind, to either server. Every one of these is
+  // refused by today's argument check too (it takes no extra argument), so the test holds what it SAYS — the
+  // reason is the id's, never the usage text — and not the exit code alone.
+  for (const bad of ['abc', '0', '12.5', '-5', '1e3', '0x10', '+7', '', ' 12', '99999999999999999999']) {
+    it(`the id ${JSON.stringify(bad)} is refused before any request, as not a positive integer`, async () => {
+      await withRecordingWorld(worldWithFullRun(), async ({ github, ythril, dir, env }) => {
+        const r = await runTimes(['--record-ci', bad], { cwd: dir, env });
+        assert.equal(r.code, 1, everything(r));
+        assert.match(r.stderr, /positive integer/i, `the refusal names what is wrong with the id:\n${r.stderr}`);
+        assert.ok(!r.stderr.includes('usage: node scripts/test-times.mjs'), 'an id that is not valid is not the usage text');
+        assert.deepEqual(github.requests, [], 'the Actions API was asked something before the id was validated');
+        assert.deepEqual(ythril.calls, [], 'the Ythril instance was asked something before the id was validated');
+      });
+    });
+  }
+
+  it('is still refused under CI before any request, like the bare form', async () => {
+    await withRecordingWorld(world(), async ({ github, ythril, dir, env }) => {
+      const underCi = { ...env, GITHUB_ACTIONS: 'true' };
+      const bare = await runTimes(['--record-ci'], { cwd: dir, env: underCi });
+      assert.notEqual(bare.code, 0, `the bare form is refused under CI:\n${everything(bare)}`);
+      const requestsOfBare = github.requests.length;
+      const r = await runTimes(['--record-ci', '1001'], { cwd: dir, env: underCi });
+      assert.equal(r.code, bare.code, `the named form exits with the code of the bare form:\n${everything(r)}`);
+      assert.match(r.stderr, /GITHUB_ACTIONS|\bCI\b/);
+      assert.equal(github.requests.length, requestsOfBare, 'the named form asked the Actions API something under CI');
+      assert.ok(!r.stderr.includes('usage: node scripts/test-times.mjs'), 'refused for CI, not as an unknown argument');
+      assert.deepEqual(github.requests, []);
+      assert.deepEqual(ythril.calls, []);
+    });
+  });
+});
+
+// ── A listing that lags behind the run that has just finished (Q-403) ──────────────────────────────────────────────────
+//
+// What this prevents: a caller that has just seen run N finish asks for it at once, and the listing is a page that GitHub
+// builds a little behind the run it lists. Refusing on the first read made a pass fail about a run that was seconds away
+// from being listed, and the caller's only recourse was to sleep and try again by hand. A pass that NAMES a run reads the
+// listing again, up to a bound, before it refuses; the passes that name nothing read once, as they always did.
+
+/** The run the lagging listing is late with, and the results it left. */
+const LATE_RUN = 2000;
+
+/**
+ * `worldWithFullRun()` whose listing lacks run {@link LATE_RUN} on its first `staleReads` reads and holds it from the next
+ * one on, which is how a listing catches up. `staleReads: Infinity` is a listing that never does.
+ */
+function laggingWorld(staleReads) {
+  const w = worldWithFullRun();
+  const stale = w.runs;
+  const fresh = [...stale, run(LATE_RUN, { head_sha: SHA('2') })];
+  w.artifactsByRun[LATE_RUN] = [artifact(5010, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')])];
+  w.listings = staleReads === Infinity ? [stale] : [...Array(staleReads).fill(stale), fresh];
+  return w;
+}
+
+describe('--record-ci <runId> against a listing that lags', () => {
+  it('reads the listing again until the named run is in it, then records it and exits 0', async () => {
+    await withRecordingWorld(laggingWorld(2), async ({ github, ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(github.listingReads(), 3, 'the listing was read once per answer it needed (two stale, then the one that held the run), and not again after it held it');
+      assert.ok(Object.keys(records(ythril)).includes(`ci:${LATE_RUN}:1:standalone-pure:standalone`), `the named run was recorded:\n${everything(r)}`);
+      assert.ok(github.askedAbout().has(String(LATE_RUN)), 'the named run\'s artifacts were read');
+      assert.ok(!/not in the listing/.test(everything(r)), 'a run that arrived in time is not refused');
+    });
+  });
+
+  it('a listing that is stale on every read refuses after the bound, says it read again for that long, and writes nothing', async () => {
+    await withRecordingWorld(laggingWorld(Infinity), async ({ github, ythril, dir, env }) => {
+      const started = Date.now();
+      const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      const elapsed = Date.now() - started;
+      assert.equal(r.code, 1, everything(r));
+      assert.ok(elapsed >= WAIT_MS, `the pass refused after ${elapsed}ms, before its ${WAIT_MS}ms bound`);
+      assert.match(everything(r), /not in the listing of completed pushes to main/, 'the refusal is the one a pass without a wait gives');
+      assert.match(everything(r), new RegExp(`\\b${LATE_RUN}\\b`), 'names the run it did not find');
+      assert.match(everything(r), new RegExp(`read again for ${WAIT_MS}ms`), `says how long the listing was read again:\n${everything(r)}`);
+      assert.ok(github.listingReads() >= 2, `the listing was read ${github.listingReads()} time(s): not again`);
+      assert.ok(github.listingReads() <= WAIT_MS / INTERVAL_MS + 3, `the listing was read ${github.listingReads()} times in ${WAIT_MS}ms: the interval of ${INTERVAL_MS}ms was not kept`);
+      assert.deepEqual(writesTo(ythril), [], 'a pass that refused the named run wrote');
+      assert.deepEqual(ythril.store.map(e => e._id), [], 'the instance holds a record from a pass that failed');
+      assert.ok(!github.askedAbout().has(String(LATE_RUN)));
+    });
+  });
+
+  it('a run that is listed but not trusted is not waited for: it is refused on the first read, with no mention of a wait', async () => {
+    await withRecordingWorld(laggingWorld(Infinity), async ({ github, ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', '1002'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 1, everything(r));
+      assert.match(everything(r), /not a trusted run/);
+      assert.equal(github.listingReads(), 1, 'a page that holds the run and will not trust it was read again');
+      assert.ok(!/read again/.test(everything(r)));
+      assert.deepEqual(writesTo(ythril), []);
+    });
+  });
+
+  it('a run already listed and trusted is taken on the first read', async () => {
+    await withRecordingWorld(laggingWorld(Infinity), async ({ github, dir, env }) => {
+      const r = await runTimes(['--record-ci', '1001'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(github.listingReads(), 1);
+    });
+  });
+
+  it('a pass that names nothing reads the listing once, whatever the bound says', async () => {
+    await withRecordingWorld(laggingWorld(Infinity), async ({ github, dir, env }) => {
+      const r = await runTimes(['--record-ci'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(github.listingReads(), 1);
+    });
+  });
+
+  it('--rewrite of a run the listing lacks reads the listing once and refuses as it did', async () => {
+    await withRecordingWorld(laggingWorld(Infinity), async ({ github, ythril, dir, env }) => {
+      const r = await runTimes(['--rewrite', `ci:${LATE_RUN}:1:standalone-pure:standalone`], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 1, everything(r));
+      assert.match(everything(r), /not in the listing of completed pushes to main/);
+      assert.equal(github.listingReads(), 1, 'a rewrite waited for a run');
+      assert.ok(!/read again/.test(everything(r)));
+      assert.deepEqual(writesTo(ythril), []);
+    });
+  });
+
+  for (const [name, bad] of [[WAIT_ENV, 'abc'], [WAIT_ENV, '0'], [WAIT_ENV, '-5'], [WAIT_ENV, '1.5'], [WAIT_ENV, '1e3'], [INTERVAL_ENV, 'abc'], [INTERVAL_ENV, '0'], [INTERVAL_ENV, '-20'], [INTERVAL_ENV, '0x10']]) {
+    it(`${name}=${JSON.stringify(bad)} is refused before any request, as not a positive integer`, async () => {
+      await withRecordingWorld(laggingWorld(1), async ({ github, ythril, dir, env }) => {
+        const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...SHORT_WAIT, [name]: bad } });
+        assert.equal(r.code, 1, everything(r));
+        assert.ok(r.stderr.includes(name), `the refusal names the variable:\n${r.stderr}`);
+        assert.match(r.stderr, /positive integer/i);
+        assert.ok(!r.stderr.includes('usage: node scripts/test-times.mjs'), 'refused for the value, not as the usage text');
+        assert.deepEqual(github.requests, [], 'the Actions API was asked something before the value was validated');
+        assert.deepEqual(ythril.calls, [], 'the Ythril instance was asked something before the value was validated');
+      });
+    });
+  }
+
+  it('the help names both variables', async () => {
+    await withRecordingWorld(world(), async ({ dir, env }) => {
+      const r = await runTimes(['--help'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      for (const name of [WAIT_ENV, INTERVAL_ENV]) assert.ok(r.stdout.includes(name), `--help does not name ${name}`);
+    });
+  });
+});
+
+// ── A named run is walked wherever it sits in the listing (Q-402) ──────────────────────────────────────────────────────
+//
+// What this prevents: the check that a named run is among the trusted runs the listing held is not the walk. The walk keeps
+// the newest runs only and stops at the first run that is completely recorded, and the paging stops once it holds that many,
+// so a named run behind a recorded newer run, or past the newest thirty, or on a page the paging never read, was "found" (or
+// refused after the whole wait) and then never recorded: the pass said it had done what the caller asked and had not. A pass
+// that names a run exits 0 only when that run was walked and every record it should have is on the instance.
+
+/**
+ * `count` trusted runs, ids `firstId` upward (the higher the id, the newer the run), each with a results artifact of its own
+ * registered in `w`. The runs are returned, not listed: the caller says where in the listing each one sits.
+ */
+function trustedRuns(w, count, firstId, firstArtifactId) {
+  return Array.from({ length: count }, (_, i) => {
+    w.artifactsByRun[firstId + i] = [artifact(firstArtifactId + i, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')])];
+    return run(firstId + i, { head_sha: SHA('3') });
+  });
+}
+
+describe('--record-ci <runId> walks the run it names', () => {
+  it('a named run behind a completely recorded newer run is recorded, and exits 0', async () => {
+    const w = { runs: [], jobsByRun: {}, artifactsByRun: {} };
+    const [older] = trustedRuns(w, 1, 4001, 6001);
+    w.runs = trustedRuns(w, 1, 4002, 6002);
+    await withRecordingWorld(w, async ({ ythril, dir, env }) => {
+      const first = await runTimes(['--record-ci'], { cwd: dir, env });
+      assert.equal(first.code, 0, everything(first));
+      assert.deepEqual(Object.keys(records(ythril)), ['ci:4002:1:standalone-pure:standalone'], 'the first pass saw only the newer run');
+      w.runs.push(older);
+      const r = await runTimes(['--record-ci', '4001'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(Object.keys(records(ythril)).sort(), ['ci:4001:1:standalone-pure:standalone', 'ci:4002:1:standalone-pure:standalone'], `the named run was found and never walked:\n${everything(r)}`);
+    });
+  });
+
+  it('a named run that is the 31st trusted run is recorded, beside the thirty newest', async () => {
+    const w = { runs: [], jobsByRun: {}, artifactsByRun: {} };
+    w.runs = trustedRuns(w, 31, 5001, 7001);
+    await withRecordingWorld(w, async ({ ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', '5001'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      const keys = Object.keys(records(ythril));
+      assert.ok(keys.includes('ci:5001:1:standalone-pure:standalone'), `the oldest of 31 trusted runs was named and not recorded:\n${everything(r)}`);
+      assert.ok(keys.includes('ci:5031:1:standalone-pure:standalone'), 'the normal walk of the newest runs still happened');
+      assert.equal(keys.length, 31, 'the thirty newest and the named run, each once');
+    });
+  });
+
+  it('a named run on a page the paging would not have read is paged for, recorded, and exits 0', async () => {
+    const w = { runs: [], jobsByRun: {}, artifactsByRun: {} };
+    const newest = trustedRuns(w, 30, 6101, 8001);
+    const [late] = trustedRuns(w, 1, 6001, 8101);
+    w.pages = [newest, [late]];
+    await withRecordingWorld(w, async ({ ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', '6001'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 0, everything(r));
+      assert.ok(!/not in the listing/.test(everything(r)), `a run on the second page was refused as not listed:\n${everything(r)}`);
+      assert.ok(Object.keys(records(ythril)).includes('ci:6001:1:standalone-pure:standalone'), `the named run was not recorded:\n${everything(r)}`);
+    });
+  });
+
+  it('a named run that is already completely recorded exits 0 and writes nothing', async () => {
+    await withRecordingWorld(world(), async ({ ythril, dir, env }) => {
+      const first = await runTimes(['--record-ci'], { cwd: dir, env });
+      assert.equal(first.code, 0, everything(first));
+      const before = ythril.store.map(e => e._id).sort();
+      const writesBefore = writesTo(ythril).length;
+      const r = await runTimes(['--record-ci', '1001'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(writesTo(ythril).length, writesBefore, 'a record the run already had was written again');
+      assert.deepEqual(ythril.store.map(e => e._id).sort(), before);
+    });
+  });
+});
+
+describe('--record-ci with no name', () => {
+  it('still records the trusted runs and prints the newest run it listed, with its id and start, so a stale page shows', async () => {
+    const w = world();
+    // Distinct starts: run 1007 is the newest trusted run, 1001 the oldest of them. The untrusted runs keep their own start, in between.
+    w.runs.find(x => x.id === 1001).run_started_at = '2026-10-04T10:00:00Z';
+    w.runs.find(x => x.id === 1007).run_started_at = '2026-10-06T08:30:00Z';
+    await withRecordingWorld(w, async ({ ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(Object.keys(records(ythril)).length, 3, 'the bare form records as before');
+      const lines = everything(r).split(/\r?\n/);
+      assert.ok(lines.some(l => l.includes('1007') && l.includes('2026-10-06T08:30:00')), `no line names the newest listed run (1007) with its start:\n${everything(r)}`);
+      assert.ok(!lines.some(l => l.includes('1001') && l.includes('2026-10-04T10:00:00')), 'the OLDEST listed run was named as the newest');
+    });
+  });
+});

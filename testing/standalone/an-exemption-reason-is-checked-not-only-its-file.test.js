@@ -71,7 +71,7 @@ describe('a count stated in a reason is extracted', () => {
       'owner DECISIONS, not work — no verify line, not in the ordered index (see rule 5)',
       'a removal checklist keyed to a future major, not the current queue',
       'setup instructions',
-      'the working plan for the PR in flight; cleared on push',
+      'the working plan for the next pull request; cleared when its branch is pushed',
     ]) assert.equal(statedStructureCount(reason), null, reason);
   });
 
