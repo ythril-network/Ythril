@@ -24,7 +24,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCi, loadWorkflow, workflowFiles, parseWorkflow, triggersOf } from '../_shared/ci-workflow.mjs';
+import { loadCi, loadWorkflow, workflowFiles, parseWorkflow, triggersOf, onOf } from '../_shared/ci-workflow.mjs';
 import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
 
 /** Every scalar a workflow holds, `{ path, key, value }` (value as a string), read from the parsed document: a comment is not one. */
@@ -58,8 +58,8 @@ describe('every workflow would start', () => {
   it('each one parses, and declares a trigger and a job', () => {
     for (const f of files) {
       const doc = loadWorkflow(f); // throws, naming the file, for a document that is not a mapping with jobs
-      // `on:` is YAML 1.1 truthy, so js-yaml gives the key back as boolean true. Accept either.
-      const triggers = doc.on ?? doc[true];
+      // `on:` is YAML 1.1 truthy, so js-yaml gives the key back as boolean true; `onOf` accepts either.
+      const triggers = onOf(doc);
       assert.ok(triggers, `${f}: no 'on:' trigger`);
       assert.ok(Object.keys(doc.jobs).length > 0, `${f}: no jobs`);
       for (const [name, job] of Object.entries(doc.jobs)) {

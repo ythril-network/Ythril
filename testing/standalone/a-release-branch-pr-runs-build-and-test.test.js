@@ -15,12 +15,11 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCi, parseWorkflow, triggersOf } from '../_shared/ci-workflow.mjs';
+import { loadCi, parseWorkflow, triggersOf, onOf } from '../_shared/ci-workflow.mjs';
 // `branchesOf` is read off the namespace, so a module that lacks it fails these tests and does not stop the file loading.
 import * as CW from '../_shared/ci-workflow.mjs';
 
 const CI = loadCi();
-const onOf = (doc) => doc.on ?? doc[true];
 
 /** The branch list under one trigger of ci.yml's `on:`; the trigger must be there and must filter by branch. */
 function branchesOf(trigger) {

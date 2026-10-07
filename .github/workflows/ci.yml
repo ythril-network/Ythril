@@ -6,6 +6,10 @@ on:
     branches: [main, 'release/**']
   push:
     branches: [main]
+  # Called by full-run.yml, which runs this whole graph for a push to a `full-run/<bundle>` ref: the bundle's one full run
+  # on CI before its pull request is opened (D-15). It takes no input and no secret, so a caller has nothing to pass; the
+  # called jobs see the caller's event (a push) and ref, so the cache writes below stay main-only.
+  workflow_call:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -16,7 +20,9 @@ permissions:
   contents: read
 
 # One run per ref. A newer push to a PULL REQUEST supersedes the older run; a push to main (or a release branch) is
-# never cancelled, because it is the run that writes the layer caches every later run reads.
+# never cancelled, because it is the run that writes the layer caches every later run reads. A FULL RUN is called by
+# full-run.yml: its caller's own concurrency group supersedes the older run of the same `full-run/<bundle>` ref, and a
+# main push is never cancelled by it (the caller's group is per ref, and no main push comes through the caller).
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

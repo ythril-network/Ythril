@@ -60,7 +60,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, shellCommands, usesOf, isCommitPinned, stepsUsing,
-  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf,
+  runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf, onOf, mergeGateEntries,
   workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction, CI_WORKFLOW,
 } from '../_shared/ci-workflow.mjs';
 // The full-run names (`FULL_RUN_WORKFLOW`, `FULL_RUN_PREFIX`, `loadFullRun`, `branchesOf`) are read off the namespace, so a
@@ -149,7 +149,7 @@ function verdictViolations(gate, needs) {
 function mergeGateViolations(doc) {
   const v = [];
   const jobs = jobEntries(doc);
-  const gates = jobs.filter((j) => j.name === MERGE_GATE_NAME);
+  const gates = mergeGateEntries(doc);
   if (gates.length !== 1) return [`${gates.length} jobs are named "${MERGE_GATE_NAME}"; the ruleset requires exactly one`];
   const gate = gates[0];
 
@@ -159,10 +159,10 @@ function mergeGateViolations(doc) {
   if (gate.job.strategy?.matrix) v.push('the gate has a matrix: the required check name would be several jobs');
 
   const advisory = jobs.filter((j) => isAdvisory(j.job));
-  if (advisory.includes(gate)) v.push('the gate itself is continue-on-error');
+  if (advisory.some((j) => j.id === gate.id)) v.push('the gate itself is continue-on-error');
   if (advisory.length > 1) v.push(`${advisory.length} advisory jobs (${advisory.map((a) => a.id)}): which of them may fail without failing the run?`);
 
-  const expected = jobs.filter((j) => j !== gate && !advisory.includes(j)).map((j) => j.id).sort();
+  const expected = jobs.filter((j) => j.id !== gate.id && !advisory.includes(j)).map((j) => j.id).sort();
   const needs = [].concat(gate.job.needs ?? []).sort();
   if (expected.length < NEEDED_FLOOR) {
     v.push(`only ${expected.length} job(s) besides the gate and the advisory one (floor ${NEEDED_FLOOR}): the pipeline is not split, or the derivation is broken`);
@@ -476,7 +476,7 @@ const runsOnlyOnSuccess = (s) => s.if == null || expressionOf(s.if) === 'success
  * run when a job failed prints a verdict about a partial results set; a check that cannot fail the job is a log line.
  */
 function gateEvidenceViolations(doc) {
-  const gate = jobEntries(doc).find((j) => j.name === MERGE_GATE_NAME);
+  const [gate] = mergeGateEntries(doc);
   if (!gate) return [`no job is named "${MERGE_GATE_NAME}"`];
   const steps = stepsOf(gate.job);
   const verdictAt = steps.findIndex((s) => !s.uses && /\bneeds\b/.test(`${s.run ?? ''}\n${JSON.stringify(s.env ?? {})}`));
@@ -817,7 +817,7 @@ const CREDENTIAL_ALLOWLIST = {
   '.github/workflows/publish.yml': {
     reason: 'runs on a version tag or a manual dispatch only, and writes the image and the release, so it holds the registry secrets and a write token on purpose',
     holds(doc) {
-      const on = doc.on ?? doc[true];
+      const on = onOf(doc);
       const events = [...triggersOf(doc)];
       const v = events.filter((e) => !['push', 'workflow_dispatch'].includes(e)).map((e) => `the \`${e}\` trigger can run it for code nobody released`);
       if (events.includes('push') && (!on.push?.tags?.length || on.push.branches)) v.push('its push trigger is not tags-only');
@@ -893,9 +893,6 @@ function preflightClientParityViolations(doc, preflightText, file = 'scripts/pre
 }
 
 // ───────────────────────────────────────── the full run: a caller of ci.yml ─────────────────────────────────────────
-
-/** A workflow's `on:` value, whichever way the parser keyed it (`on` is a string key in YAML 1.2 and `true` in 1.1). */
-const onOf = (doc) => doc.on ?? doc[true];
 
 /** The one job of a caller carries these and nothing else of its own; `with` and `secrets` have a rule of their own. */
 const CALLER_KEYS = ['name', 'permissions', 'uses'];
@@ -1453,13 +1450,13 @@ describe('ci.yml — the rules, held against the real workflow', () => {
   it('the client job writes the file the skips check reads, and the gate installs nothing the checks do not need', async () => {
     const { CLIENT_RESULTS } = await import('../../scripts/unexpected-skips.mjs');
     assert.equal(`test-results/${CLIENT_RESULTS}`, CLIENT_REPORT, 'ci.yml and scripts/unexpected-skips.mjs name different client report files');
-    const gate = jobEntries(REAL).find((j) => j.name === MERGE_GATE_NAME);
+    const [gate] = mergeGateEntries(REAL);
     assert.ok(!stepsOf(gate.job).some(runsNpmCi), 'the gate job runs npm ci; the checks import only node built-ins (held by unexpected-skips-fail-the-ci-gate), so it is an install for nothing');
   });
 
   it('the gate is a job of its own that nothing else waits for (a gate in the middle is not a gate)', () => {
-    const gate = jobEntries(REAL).find((j) => j.name === MERGE_GATE_NAME);
-    assert.ok(gate, `no job is named "${MERGE_GATE_NAME}"`);
+    const [gate] = mergeGateEntries(REAL);
+    assert.ok(gate,`no job is named "${MERGE_GATE_NAME}"`);
     const waitedFor = jobEntries(REAL).filter((j) => j !== gate && transitiveNeeds(REAL, j.id).has(gate.id)).map((j) => j.id);
     assert.deepEqual(waitedFor, [], 'jobs wait for the gate, so it is not the last thing that runs');
   });
@@ -1576,7 +1573,7 @@ describe('ci.yml — other ways of writing the same rule are accepted, so the ga
     for (const off of [false, 'false', undefined, null, 1, 'True', '', 'yes']) assert.equal(isTrue(off), false, `${JSON.stringify(off)} is not on`);
     // The gate step's `continue-on-error: 'true'` is the case the inline `=== true` could not see.
     const d = clone(GOOD);
-    const gate = jobEntries(d).find((j) => j.name === MERGE_GATE_NAME);
+    const [gate] = mergeGateEntries(d);
     assert.ok(gate, 'the merge gate job was not found in the conforming miniature');
     stepsOf(gate.job)[0]['continue-on-error'] = 'true';
     assert.ok(mergeGateViolations(d).some((m) => /continue-on-error/.test(m)), "a step with continue-on-error: 'true' still cannot be allowed on the gate");
@@ -1767,7 +1764,7 @@ describe('the full run — the module names it once, and the rules above read wh
 function guideNamesFullRunCheck(guide, fullRun, ci) {
   const callers = jobEntries(fullRun);
   if (callers.length !== 1) return [`${callers.length} jobs in the full-run workflow: its check name is not one name`];
-  const gate = jobEntries(ci).find((j) => j.name === MERGE_GATE_NAME);
+  const [gate] = mergeGateEntries(ci);
   if (!gate) return [`no job of ci.yml is named "${MERGE_GATE_NAME}", so the called gate has no name to derive`];
   const want = `${callers[0].name} / ${gate.name}`;
   const heading = /^## The CI job graph\r?$/m.exec(guide);
@@ -1810,7 +1807,7 @@ describe('docs/testing-guide.md names the full run\'s check as the two workflows
     assert.ok(guideNamesFullRunCheck(guideWith('The check is `Full run / Build & Test`.'), renamed, GOOD).length > 0);
     assert.deepEqual(guideNamesFullRunCheck(guideWith('The check is `Bundle run / Build & Test`.'), renamed, GOOD), []);
     const gateRenamed = clone(GOOD);
-    jobEntries(gateRenamed).find((j) => j.name === MERGE_GATE_NAME).job.name = 'Gate';
+    mergeGateEntries(gateRenamed)[0].job.name = 'Gate';
     assert.ok(guideNamesFullRunCheck(guideWith('The check is `Full run / Build & Test`.'), GOOD_FULL, gateRenamed).length > 0, 'a gate that is no longer named Build & Test leaves nothing to derive');
   });
 });

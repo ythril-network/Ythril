@@ -34,7 +34,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { blockAfter } from './_structural-window.mjs';
 import {
-  MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, expressionOf, transitiveNeeds,
+  MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, mergeGateEntries, stepsOf, shellOf, usesOf, expressionOf, transitiveNeeds,
 } from '../_shared/ci-workflow.mjs';
 import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
 
@@ -94,7 +94,7 @@ function changelogWiringViolations(doc) {
       v.push(`a checkout before the check has fetch-depth ${c.with?.['fetch-depth'] ?? '(default 1)'}: base...HEAD then has no merge base and the check silently no-ops`);
     }
   }
-  const gate = jobEntries(doc).find((j) => j.name === MERGE_GATE_NAME);
+  const [gate] = mergeGateEntries(doc);
   if (!gate) v.push(`no job is named "${MERGE_GATE_NAME}"`);
   else if (id !== gate.id && !transitiveNeeds(doc, gate.id).has(id)) {
     v.push(`job ${id} runs the check but "${MERGE_GATE_NAME}" does not wait for it: a missing entry fails nothing that blocks a merge`);
