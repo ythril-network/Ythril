@@ -7,19 +7,17 @@ import { Router } from 'express';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { z } from 'zod';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
-import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
-import { deliveryOf } from '../../sync/deletion-authority.js';
 import {
   publishedFileTombstones, publishedFileTombstonePage, fileTombstoneOnTheWire, FILE_TOMBSTONE_PAGE, LEGACY_FILE_TOMBSTONE_LIMIT,
 } from '../../files/tombstones.js';
 import { applyPeerFileTombstones } from '../../files/peer-tombstone-apply.js';
 
-import { spaceAllowed, pushAllowed, callerPeerId, deliveryFromToken, syncReadStart, BAD_SYNC_START } from './_shared.js';
+import { spaceAllowed, pushAllowed, callerPeerId, deliveryOfRequest, syncReadStart, BAD_SYNC_START } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
@@ -130,7 +128,7 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      * on a pub/sub or tree network — what it relayed here (`sync/deletion-authority.ts`); a trusted local/admin token (no
      * peerInstanceId) may relay any tombstone. The delivery is resolved ONCE for the page, from the admitted space.
      */
-    const delivery = deliveryOf(getConfig(), spaceId, deliveryFromToken(req.authToken as Record<string, unknown>));
+    const delivery = deliveryOfRequest(spaceId, req);
     // Bounded like every push door (bundle-30 `B2`): a stalled lock answers a retryable 503, never a hung request.
     const out = await withinWriteBound(async () => await applyPeerTombstones(spaceId, tombstones,
       delivery, `sync POST tombstones from ${delivery.peerInstanceId ?? 'a local token'}`));
@@ -216,7 +214,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
     }
 
     // Resolved ONCE for the page, from the admitted space and the authenticated token (`sync/deletion-authority.ts`).
-    const delivery = deliveryOf(getConfig(), spaceId, deliveryFromToken(req.authToken as Record<string, unknown>));
+    const delivery = deliveryOfRequest(spaceId, req);
     // Bounded like every push door (bundle-30 `B2`): a stalled lock answers a retryable 503, never a hung request.
     const out = await withinWriteBound(async () => await applyPeerFileTombstones(spaceId, tombstones, delivery,
       `sync POST file-tombstones from ${delivery.peerInstanceId ?? 'a local token'}`));

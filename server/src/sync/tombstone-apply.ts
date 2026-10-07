@@ -65,12 +65,12 @@ import type { TombstoneDoc } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { advanceCounterPast } from './counter-after-page.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
-import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
-import { declineText, sayDeclines } from './decline-report.js';
+import { seqRefusal, arrivalId, refusedFieldsOf, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
+import { recordDecline, sayDeclines, saidDeletions } from './decline-report.js';
 import { retagToLocalSpace } from './upsert-plan.js';
-import { authorises, deleteBound, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
+import { authorises, deleteBound, MAX_ISSUER, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
 import { unlabelFacesForEntities } from '../brain/entities.js';
-import { syncTombstonesAppliedTotal, syncTombstonesDeclinedTotal } from '../metrics/registry.js';
+import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
 
 /**
  * The most tombstones one push request may carry. An honest sender pages at 500 (`pushTombstones`) and retries a
@@ -85,7 +85,7 @@ const TombstoneShape = z.object({
   type: z.enum(TOMBSTONE_TYPES),
   spaceId: z.string(),
   deletedAt: z.string(),
-  instanceId: z.string(),
+  instanceId: z.string().max(MAX_ISSUER),
   seq: z.number(),
   originalSeq: z.number().optional(),
 });
@@ -104,11 +104,7 @@ export function admitTombstone(raw: unknown): TombstoneAdmission {
   const type = (raw as { type?: unknown } | null)?.type;
   if (typeof type === 'string' && !(TOMBSTONE_TYPES as readonly string[]).includes(type)) return { unknownType: type };
   const parsed = TombstoneShape.safeParse(raw);
-  if (!parsed.success) {
-    // A path names a peer's keys: bounded where the reason is built (`Q-270`).
-    const fields = peerList(new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)')), ', ');
-    return { refused: { _id: arrivalId(raw), reason: `not a tombstone (${fields})` } };
-  }
+  if (!parsed.success) return { refused: { _id: arrivalId(raw), reason: `not a tombstone (${refusedFieldsOf(parsed.error)})` } };
   const t = parsed.data as TombstoneDoc;
   const why = seqRefusal(t.seq, { optional: false });
   return why ? { refused: { _id: t._id, reason: why } } : { tombstone: t };
@@ -179,7 +175,7 @@ export async function applyPeerTombstones(
   const admitted = [...page.values()];
   retagToLocalSpace(admitted, localSpaceId);
   const selfId = getConfig().instanceId;
-  const declinedBy = new Map<string, ArrivalRefusal[]>();
+  const ledger = { declined: out.declined, declinedBy: new Map<string, ArrivalRefusal[]>() };
 
   let failed = false;
   let failure: unknown;
@@ -208,11 +204,7 @@ export async function applyPeerTombstones(
         // `t.instanceId` is the sender's text: the authority decides what it is worth, never this loop.
         const verdict = authorises(delivery, t.instanceId, target ?? null, selfId);
         if (!verdict.ok) {
-          const reason = declineText(verdict.reason, 'record', { issuer: t.instanceId, delivery, target });
-          out.declined.push({ _id: t._id, reason });
-          if (!declinedBy.has(verdict.reason)) declinedBy.set(verdict.reason, []);
-          declinedBy.get(verdict.reason)!.push({ _id: t._id, reason });
-          syncTombstonesDeclinedTotal.labels({ kind: type, reason: verdict.reason }).inc();
+          recordDecline(ledger, { id: t._id, reason: verdict.reason, kind: type, what: 'record', issuer: t.instanceId, delivery, target });
           continue;
         }
         if (verdict.ground === 'absent') { store.push({ t }); continue; }
@@ -267,10 +259,7 @@ export async function applyPeerTombstones(
     }
     // The re-read says what it deleted once, in its own completion line over every page (`sync/tombstone-reread.ts`): a line
     // per page here would state the same deletions a second time.
-    if (out.deleted.upstream > 0 && !opts.repair) {
-      log.info(`${logSafe(where)}: deleted ${out.deleted.upstream} record(s) in space '${peerText(localSpaceId)}' on the upstream's say-so `
-        + `(its own deletions of what it relayed here); ${out.deleted.issuer} more on the issuer's own authority`);
-    }
+    if (!opts.repair) saidDeletions(where, 'record', localSpaceId, out.deleted);
   } catch (err) {
     failed = true;
     failure = err;
@@ -281,7 +270,7 @@ export async function applyPeerTombstones(
   const behind = await advanceCounterPast(localSpaceId, out.maxSeq, where);
   warnArrivalsNotStored(where, localSpaceId, 'tombstone', 'refused', out.refused);
   // A standing decline is the same ones every cycle: said once per (peer, space, reason) window, counted every time.
-  sayDeclines(where, localSpaceId, 'tombstone', delivery, declinedBy);
+  sayDeclines(where, localSpaceId, 'tombstone', delivery, ledger.declinedBy);
   if (failed) throw failure;
   if (behind) throw behind;
   return out;

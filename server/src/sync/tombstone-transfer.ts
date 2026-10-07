@@ -46,11 +46,11 @@ import { pushSeqRuns } from './push-seq-runs.js';
 import { encodeSeqCursor } from '../util/seq-keyset.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
-import { getConfig } from '../config/loader.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { NetworkMember } from '../config/types.js';
 import { MAX_TRANSFER_PAGES, type TransferOutcome } from './watermark.js';
-import { deliveryOf } from './deletion-authority.js';
+import { deliveryOfMember } from './deletion-authority.js';
+import { SAID_AGAIN_MS, declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
 
 /** What a push asks for per request. */
 const PUSH_PAGE = 500;
@@ -60,8 +60,7 @@ const PUSH_PAGE = 500;
  * per window: the repair stays owed and is tried every cycle, so a line per try would be the same line for ever. The
  * ordinary pull says each stop each cycle, as it always has.
  */
-const REREAD_SAID_AGAIN_MS = 60 * 60_000;
-const rereadSaid = warnOnce<string>({ every: REREAD_SAID_AGAIN_MS });
+const rereadSaid = warnOnce<string>({ every: SAID_AGAIN_MS });
 
 /**
  * Fetch the peer's tombstones since `sinceSeq` and apply them to the LOCAL space `spaceId`.
@@ -92,7 +91,7 @@ export async function pullTombstones(opts: {
   const where = `sync ${repair ? 're-read' : 'pull'} tombstones from ${member.label ?? member.instanceId}`;
   // Resolved once for the page's door: the peer pulled from is the authenticated source, and whether it is this space's
   // upstream is this instance's own knowledge (`sync/deletion-authority.ts`), never the peer's say-so.
-  const delivery = deliveryOf(getConfig(), spaceId, { peerInstanceId: member.instanceId });
+  const delivery = deliveryOfMember(spaceId, member);
   /** One line, said as the mode says it: every time for the ordinary pull, once per window for the re-read. */
   const say = (kind: string, report: () => void): void => {
     if (!repair) { report(); return; }
@@ -182,20 +181,14 @@ export async function pushTombstones(opts: {
       // declined again, so the push advances past them as well, and the line below is what tells an operator.
       const body = await boundedJson<{ refused?: unknown; declined?: unknown }>(resp, 'sync peer')
         .catch(() => ({}) as { refused?: unknown; declined?: unknown });
-      if (typeof body.refused === 'number' && body.refused > 0) refused += body.refused;
-      if (typeof body.declined === 'number' && body.declined > 0) declined += body.declined;
+      refused += refusedCountOf(body);
+      declined += declinedCountOf(body);
       return null;
     },
     stopped: (why, heldAt) => log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}' `
       + `stopped: ${logSafe(why)} — delivered through seq ${heldAt}, so the push watermark is held there.`),
   });
-  if (refused > 0) {
-    log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}': the peer refused ${refused} tombstone(s) by shape or `
-      + 'seq; its own log names them.');
-  }
-  if (declined > 0) {
-    log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}': the peer declined ${declined} tombstone(s) on `
-      + 'authority (it holds those records as another peer\'s, or no stamp of this instance); its own log names them.');
-  }
+  sayPeerRefused('tombstones', peer, spaceId, refused);
+  sayPeerDeclined('tombstones', peer, spaceId, declined);
   return outcome;
 }

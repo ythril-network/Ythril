@@ -57,7 +57,7 @@
  * ## Positions, and what an arrival is compared with (bundle-51)
  *
  * A tombstone has no seq, so paging, acknowledgement and pruning key on a LOCAL position, `positionAt`: the publish time of
- * an own tombstone, the RECEIVE time of a relayed one ({@link positionOf} is the one reading of it, falling back to
+ * an own tombstone, the RECEIVE time of a relayed one ({@link fileTombstonePosition} is the one reading of it, falling back to
  * `deletedAt` for a row stored before positions existed). A relayed tombstone keyed by its sender's `deletedAt` was pruned
  * before it was ever served when that was old, and a far-future one sat above every acknowledgement for ever.
  *
@@ -86,7 +86,7 @@ import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
-import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, type IsoPosition } from '../util/seq-keyset.js';
+import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
 
@@ -155,9 +155,10 @@ export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void>
 
 /**
  * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
- * was the position then. What an acknowledgement, a prune and a page compare, and nothing else is. Pure.
+ * was the position then. What an acknowledgement, a prune and a page compare, and nothing else is. Pure. Named for the
+ * tombstone because `util/seq-keyset.ts` and `sync/seq-run-pager.ts` each read a position of their own kind.
  */
-export const positionOf = (t: { positionAt?: unknown; deletedAt?: unknown }): string | undefined =>
+export const fileTombstonePosition = (t: { positionAt?: unknown; deletedAt?: unknown }): string | undefined =>
   typeof t.positionAt === 'string' ? t.positionAt : typeof t.deletedAt === 'string' ? t.deletedAt : undefined;
 
 /**
@@ -232,7 +233,7 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
     // The newest PUBLISHED position for the path (a relayed tombstone's is its receive time): the one clock every stored
     // tombstone shares, where `deletedAt` of a relayed one is the sender's.
     const newestPublished = stored.filter(t => t.path === path && !t.pending).reduce((m, t) => {
-      const at = positionOf(t) ?? '';
+      const at = fileTombstonePosition(t) ?? '';
       return at > m ? at : m;
     }, '');
     const candidates = docs.filter(d => d.path === path && !alreadyPublished.has(d._id));
@@ -558,22 +559,22 @@ export async function publishedFileTombstones(
     return (n !== undefined ? cursor.limit(n) : cursor).toArray() as Promise<PositionedFileTombstone[]>;
   };
   const { tie, range } = isoKeysetFilters('positionAt', after ?? { at: since ?? '' });
-  const first = tie ? await find(tie, limit) : [];
-  if (limit !== undefined && first.length >= limit) return first;
-  return [...first, ...await find(range, limit === undefined ? undefined : limit - first.length)];
+  return tieThenRange(find, tie, range, limit);
 }
 
 /**
  * One page of {@link publishedFileTombstones} and where it ends: `next` is the position to resume from, or `null` when the
- * page reached the end. One more row than the page is read, which decides it without a second query.
+ * page reached the end, and `peek` is the first row past the page (`undefined` at the end) — what {@link settledFileTombstones}
+ * needs to know whether the page ends inside a run of rows at one position. One more row than the page is read, which decides
+ * both without a second query.
  */
 export async function publishedFileTombstonePage(
   spaceId: string, after: IsoPosition, limit: number = FILE_TOMBSTONE_PAGE,
-): Promise<{ rows: PositionedFileTombstone[]; next: string | null }> {
+): Promise<{ rows: PositionedFileTombstone[]; next: string | null; peek: PositionedFileTombstone | undefined }> {
   const read = await publishedFileTombstones(spaceId, { after, limit: limit + 1 });
   const rows = read.slice(0, limit);
   const last = rows[rows.length - 1];
-  return { rows, next: read.length > limit && last ? encodeIsoCursor({ at: last.positionAt, id: last._id }) : null };
+  return { rows, next: read.length > limit && last ? encodeIsoCursor({ at: last.positionAt, id: last._id }) : null, peek: read[limit] };
 }
 
 /**

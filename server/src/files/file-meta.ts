@@ -25,7 +25,7 @@ import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/file-meta-write.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
-import { rekeyedRow } from '../sync/local-only-fields.js';
+import { rekeyedRow, stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 
 /**
@@ -181,7 +181,8 @@ export async function recordArrivedFile(
         // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
         // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
         // that another peer delivered, gains nothing over it.
-        deliveredBy: from.instanceId,
+        // Never an absent key (`stampOfArrival`): a row stamped with nothing is a row nobody can say who delivered.
+        deliveredBy: stampOfArrival({ restore: false, doc: {}, deliveredBy: from.instanceId }),
         ...(expireAt ? { _expireAt: expireAt } : {}),
       },
     } as never),

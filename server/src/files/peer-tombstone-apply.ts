@@ -51,31 +51,27 @@
  * What it does not do: the row's delete does not carry `deleteBound` as a record's does — a file's bytes go first and cannot
  * be bound by a predicate, so a row replaced between the read and the delete is judged by the page's own read.
  */
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { MAX_CURSOR_ID_LENGTH } from '../util/seq-keyset.js';
 import { toDocId } from '../util/paths.js';
-import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
-import { authorises, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
-import { declineText, sayDeclines } from '../sync/decline-report.js';
+import { seqRefusal, arrivalId, refusedFieldsOf, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
+import { authorises, MAX_ISSUER, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
+import { recordDecline, sayDeclines, saidDeletions } from '../sync/decline-report.js';
 import { servesOnward } from '../sync/served-watermark.js';
-import { syncTombstonesAppliedTotal, syncTombstonesDeclinedTotal } from '../metrics/registry.js';
+import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
-import { deleteStored, isMissingPath } from './stored-bytes.js';
+import { deleteStoredIfPresent } from './stored-bytes.js';
 import { removeFileHere } from './remove-file-here.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
 
 /** The longest path a tombstone may name. A path is a peer's text, and it reaches the file system and the database. */
 const MAX_TOMBSTONE_PATH = 4096;
-/** The longest instance id an `issuer` may be. */
-const MAX_ISSUER = 256;
 
 /** The wire shape of one file tombstone. Unknown keys are stripped, so what is stored is only what is declared here. */
 const FileTombstoneShape = z.object({
@@ -116,11 +112,7 @@ type HeldFile = Pick<FileMetaDoc, 'author' | 'seq' | 'sha256' | 'deletedAt'> & {
  */
 async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{ ok: Admitted } | { refused: ArrivalRefusal }> {
   const parsed = FileTombstoneShape.safeParse(raw);
-  if (!parsed.success) {
-    // A path names a peer's keys: bounded where the reason is built (`Q-270`).
-    const fields = peerList(new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)')), ', ');
-    return { refused: { _id: arrivalId(raw), reason: `not a file tombstone (${fields})` } };
-  }
+  if (!parsed.success) return { refused: { _id: arrivalId(raw), reason: `not a file tombstone (${refusedFieldsOf(parsed.error)})` } };
   const t = parsed.data;
   const why = seqRefusal(t.rowSeq, { optional: true });
   if (why) return { refused: { _id: t._id, reason: `rowSeq: ${why}` } };
@@ -135,16 +127,6 @@ async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{
   const key = toDocId(path.relative(spaceRoot(localSpaceId), abs));
   if (key === '' || key === '.') return { refused: { _id: t._id, reason: 'its path names the space itself' } };
   return { ok: { id: t._id, key, abs, deletedAt: t.deletedAt > now ? now : t.deletedAt, issuer: t.issuer, rowSeq: t.rowSeq } };
-}
-
-/**
- * Remove the bytes at `abs`, when there are some and they are a FILE: a missing path is an answer (the file is already gone),
- * and a directory is not a file's bytes — a peer's tombstone is for ONE path and never takes a tree with it.
- */
-async function removeBytes(abs: string): Promise<void> {
-  const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
-  if (stat === null || stat.isDirectory()) return;
-  await deleteStored(abs).catch((err: unknown) => { if (!isMissingPath(err)) throw err; });
 }
 
 /**
@@ -182,7 +164,7 @@ export async function applyPeerFileTombstones(
   const cfg = getConfig();
   const selfId = cfg.instanceId;
   const relay = servesOnward(cfg, localSpaceId, delivery.peerInstanceId);
-  const declinedBy = new Map<string, ArrivalRefusal[]>();
+  const ledger = { declined: out.declined, declinedBy: new Map<string, ArrivalRefusal[]>() };
   const keep: RelayedFileTombstone[] = [];
   const removed: Record<DeletionGround, number> = { issuer: 0, upstream: 0 };
   let failure: unknown;
@@ -196,11 +178,7 @@ export async function applyPeerFileTombstones(
       const target = row !== undefined && row.deletedAt === undefined ? row : null;
       const verdict = authorises(delivery, issuer, target, selfId);
       if (!verdict.ok) {
-        const reason = declineText(verdict.reason, 'file', { issuer, delivery, target: target ?? undefined });
-        out.declined.push({ _id: a.id, reason });
-        if (!declinedBy.has(verdict.reason)) declinedBy.set(verdict.reason, []);
-        declinedBy.get(verdict.reason)!.push({ _id: a.id, reason });
-        syncTombstonesDeclinedTotal.labels({ kind: 'file', reason: verdict.reason }).inc();
+        recordDecline(ledger, { id: a.id, reason: verdict.reason, kind: 'file', what: 'file', issuer, delivery, target: target ?? undefined });
         continue;
       }
       const kept: RelayedFileTombstone = { _id: a.id, path: a.key, deletedAt: a.deletedAt, ...(issuer !== undefined ? { issuer } : {}), ...(a.rowSeq !== undefined ? { rowSeq: a.rowSeq } : {}) };
@@ -210,7 +188,8 @@ export async function applyPeerFileTombstones(
         keep.push(kept);
         continue;
       }
-      await removeBytes(a.abs);
+      // The bytes when there are some and they are a FILE: a peer's tombstone is for ONE path and never takes a tree with it.
+      await deleteStoredIfPresent(a.abs, { skipDirectory: true });
       await removeFileHere(localSpaceId, a.key, { failure: 'throw' });
       rows.delete(a.key); // a second tombstone for the path in this page finds it gone
       removed[verdict.ground] += 1;
@@ -220,15 +199,12 @@ export async function applyPeerFileTombstones(
     }
     // After the removals, never before (see the module docblock); and only where there is someone to pass them on to.
     if (relay) await storeRelayedFileTombstones(localSpaceId, keep);
-    if (removed.upstream > 0) {
-      log.info(`${logSafe(where)}: deleted ${removed.upstream} file(s) in space '${peerText(localSpaceId)}' on the upstream's say-so `
-        + `(its own deletions of what it relayed here); ${removed.issuer} more on the issuer's own authority`);
-    }
+    saidDeletions(where, 'file', localSpaceId, removed);
   } catch (err) {
     failed = true;
     failure = err;
   }
-  sayDeclines(where, localSpaceId, 'file tombstone', delivery, declinedBy);
+  sayDeclines(where, localSpaceId, 'file tombstone', delivery, ledger.declinedBy);
   if (failed) throw failure;
   return out;
 }

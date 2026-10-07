@@ -27,7 +27,7 @@ import { getConfig, saveConfigSoon } from '../config/loader.js';
 import { membersServing, peerTokensReaching, peersOutside } from './served-watermark.js';
 import { setMemberSpaceMark } from './member-space-mark.js';
 import { isComparableIso } from '../util/comparable-iso.js';
-import { positionOf } from '../files/tombstones.js';
+import { fileTombstonePosition } from '../files/tombstones.js';
 
 /** The subset of a member this decision needs — keeps the pure part testable without a config. */
 export interface AckedMember {
@@ -94,7 +94,7 @@ export function fileTombstoneFloorForSpace(cfg: Config, spaceId: string): FileTo
  * body and reading the response was never in the payload, and treating it as delivered would drop a tombstone
  * no peer has seen. The position of a row is its `positionAt` — this instance's own clock, the publish time of an own
  * tombstone and the receive time of a relayed one — or, for a row that carries none, its `deletedAt`, which was the
- * position before positions existed (`positionOf`). Malformed or missing positions are skipped, so one bad row cannot
+ * position before positions existed (`fileTombstonePosition`). Malformed or missing positions are skipped, so one bad row cannot
  * vouch for the rest — and if none of them is comparable the answer is `null`, meaning "this push proves nothing".
  *
  * The caller hands it what the answer PROVES delivered, which is not always everything it sent: a page that ends inside a
@@ -104,7 +104,7 @@ export function fileTombstoneFloorForSpace(cfg: Config, spaceId: string): FileTo
 export function ackedPositionFrom(pushed: Array<{ positionAt?: unknown; deletedAt?: unknown }>): string | null {
   let max: string | null = null;
   for (const t of pushed) {
-    const at = positionOf(t);
+    const at = fileTombstonePosition(t);
     if (!isComparableIso(at)) continue;
     if (max === null || at > max) max = at;
   }

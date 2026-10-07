@@ -101,7 +101,9 @@ describe('delete_file describes the cascade it really performs', () => {
       'delete_file decides something itself before the cascade — the description describes the cascade');
     const notFound = CASCADE.indexOf('throw new NotFoundError(');
     const tombstone = CASCADE.indexOf('writePendingFileTombstones(');
-    const unlink = CASCADE.indexOf('deleteStored(');
+    // The unlink is `deleteStoredIfPresent` (bundle-51 round 4): the one deleter that reads a missing path as done and nothing
+    // else as done, where the cascade used to spell that tolerance by hand around `deleteStored`.
+    const unlink = CASCADE.indexOf('deleteStoredIfPresent(');
     assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
     assert.ok(notFound < tombstone && tombstone < unlink,
       'the cascade must refuse a path that is not there, then write the tombstone, then remove the bytes — in that order');

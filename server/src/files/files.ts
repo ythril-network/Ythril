@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { createHash } from 'crypto';
+import { sha256Hex } from '../util/sha256-hex.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { readStored, writeStored, statStored, moveStored } from './stored-bytes.js';
@@ -53,7 +53,7 @@ export async function writeFile(spaceId: string, filePath: string, content: stri
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
   // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history.
   await writeStored(abs, content);
-  const sha256 = createHash('sha256').update(content, 'utf8').digest('hex');
+  const sha256 = sha256Hex(content);
   return { sha256 };
 }
 
@@ -66,7 +66,7 @@ export async function writeFileBytes(
   assertSpaceTakesWrites(spaceId);   // see `writeFile` above
   const abs = await resolveSafePathChecked(spaceId, filePath);
   await writeStored(abs, data);   // see the note in `writeFile` above
-  const sha256 = createHash('sha256').update(data).digest('hex');
+  const sha256 = sha256Hex(data);
   return { sha256 };
 }
 

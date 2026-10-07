@@ -91,7 +91,7 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields, stampOfArrival } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -215,6 +215,16 @@ export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): s
 export function arrivalId(doc: unknown): string {
   const id = (doc as { _id?: unknown } | null)?._id;
   return typeof id === 'string' && id.length > 0 ? id : `(${id === undefined ? 'no' : typeof id} _id)`;
+}
+
+/**
+ * The fields a wire schema refused an element for, as text for a refusal's reason: each issue's path, `(element)` for the
+ * element itself, named once and bounded. A path names a peer's keys, so it is bounded where the reason is built (`Q-270`) —
+ * the one spelling for every apply that refuses an element by shape (a record's tombstone, a file's), so a refusal reads
+ * the same from each and none of them says a peer's key unbounded.
+ */
+export function refusedFieldsOf(error: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> }> }): string {
+  return peerList(new Set(error.issues.map(i => i.path.join('.') || '(element)')), ', ');
 }
 
 /**
@@ -374,7 +384,7 @@ export async function writeArrivals(
     return family === 'files'
       ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' })
       : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }),
-        restore ? (typeof d.deliveredBy === 'string' ? d.deliveredBy : '') : (opts.deliveredBy ?? ''));
+        stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }));
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
   // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.

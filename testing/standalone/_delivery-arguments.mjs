@@ -4,7 +4,8 @@
  * ## The question it answers
  *
  * For every call of `applyPeerTombstones` / `applyPeerFileTombstones` in a source file: is its third argument a call to
- * `deliveryOf`, or an identifier every declaration of which (in that file) is initialised from one? An object literal,
+ * a builder of a delivery ({@link DELIVERY_BUILDERS}: `deliveryOf`, or the two doors' one-line wrappers of it), or an
+ * identifier every declaration of which (in that file) is initialised from one? An object literal,
  * a spread, a missing argument, a variable assigned by hand and a PARAMETER are all "not from deliveryOf" — a
  * parameter because the gate cannot see where it came from, so the answer has to be given at the door that admits the
  * page.
@@ -22,7 +23,16 @@ export const APPLIES = Object.freeze(['applyPeerTombstones', 'applyPeerFileTombs
 /** The delivery is the third parameter of both: `(localSpaceId, raw, delivery, where)`. */
 export const DELIVERY_PARAM = 2;
 
-const isDeliveryOf = (expr) => { const e = unwrapExpression(expr); return !!e && ts.isCallExpression(e) && calleeNameOf(e) === 'deliveryOf'; };
+/**
+ * The functions a caller may take a delivery from: `deliveryOf` itself, and the wrapper each kind of door has — the pull side
+ * `deliveryOfMember` (`sync/deletion-authority.ts`: the member pulled from, against the live config) and the push side
+ * `deliveryOfRequest` (`api/sync/_shared.ts`: the request's authenticated token). A wrapper earns its place here only while
+ * its own definition returns a `deliveryOf(…)` call, which the gate holds beside the callers (`the builders` block): a wrapper
+ * that built the delivery by hand would be the object literal this module exists to refuse, one call deeper.
+ */
+export const DELIVERY_BUILDERS = Object.freeze(['deliveryOf', 'deliveryOfMember', 'deliveryOfRequest']);
+
+const isDeliveryOf = (expr) => { const e = unwrapExpression(expr); return !!e && ts.isCallExpression(e) && DELIVERY_BUILDERS.includes(calleeNameOf(e)); };
 
 /**
  * Every call of one of `names` in `text`, each with a verdict on its delivery argument: `{ name, line, ok, why }`.

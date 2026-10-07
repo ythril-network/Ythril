@@ -10,7 +10,7 @@
  *
  * A quota refusal is thrown as `QuotaError` for the door to map (REST answers 507, MCP an error result).
  */
-import { createHash } from 'node:crypto';
+import { sha256Hex } from '../util/sha256-hex.js';
 import { writeFileBytes } from './files.js';
 import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
 import { bytesShadowed } from './tombstones.js';
@@ -32,7 +32,7 @@ import { emitWebhookEvent } from '../webhooks/dispatcher.js';
  * back through the one door the manifest pull and the metadata writer do not guard.
  */
 export async function peerBytesShadowed(spaceId: string, filePath: string, content: Buffer | { sha256: string }): Promise<boolean> {
-  return bytesShadowed(spaceId, toDocId(filePath), () => (Buffer.isBuffer(content) ? createHash('sha256').update(content).digest('hex') : content.sha256));
+  return bytesShadowed(spaceId, toDocId(filePath), () => (Buffer.isBuffer(content) ? sha256Hex(content) : content.sha256));
 }
 
 export interface StoreFileMeta {

@@ -309,6 +309,32 @@ const keysetReady = (collName: string): Promise<boolean> =>
 // ── The read ───────────────────────────────────────────────────────────────────
 
 /**
+ * Run the two finds of a keyset read in their order — `tie` (the rest of the run at the cursor's own position, `null` when
+ * there is none) and then, only when the page is not yet full, `range` (everything after) — and join their answers.
+ *
+ * ## What it prevents
+ *
+ * The same four lines stood in every keyset reader (the seq reader, its fallback while the compound index builds, the file
+ * tombstones' page): `first` read, `first.length >= limit` to stop, the rest asked for `limit - first.length`. The line a copy
+ * drops is the middle one, which makes a full tie page cost a second find that is then thrown away, or hands back a page longer
+ * than asked. `limit` is `undefined` for a read with no bound (a whole collection of tombstones), which asks both finds for
+ * everything.
+ *
+ * `find` reads for both; `readRange` replaces it for the range alone, for a reader whose range read has a step of its own (the
+ * fallback re-reads the run its last row ends in). Both are handed the filter and the number of rows still wanted.
+ */
+export async function tieThenRange<T, N extends number | undefined>(
+  find: (filter: Record<string, unknown>, n: N) => Promise<T[]>,
+  tie: Record<string, unknown> | null, range: Record<string, unknown>, limit: N,
+  readRange: (filter: Record<string, unknown>, n: N) => Promise<T[]> = find,
+): Promise<T[]> {
+  const first = tie ? await find(tie, limit) : [];
+  if (limit !== undefined && first.length >= limit) return first;
+  // `N` is `undefined` exactly when `limit` is, so what is still wanted is too.
+  return [...first, ...await readRange(range, (limit === undefined ? undefined : limit - first.length) as N)];
+}
+
+/**
  * Up to `limit` records of one space collection that come after `after`, settled ones only, in `(seq, _id)` order.
  *
  * `extra` narrows what is read (composed with `$and`); `projection` is the caller's. The horizon is taken here, once,
@@ -327,9 +353,7 @@ export async function readAfterSeq<T extends Document>(
   const { tie, range } = await settledSeqKeysetFilters(spaceId, after, extra);
   // `lastSeq` in the fallback comes from `range`, so it is below the horizon too: the run re-read needs no bound of its own.
   if (!(await keysetReady(collName))) return readWithoutCompound(find, tie, range, extra, limit);
-  const first = tie ? await find(tie, SEQ_KEYSET_SORT, limit) : [];
-  if (first.length >= limit) return first;
-  return [...first, ...await find(range, SEQ_KEYSET_SORT, limit - first.length)];
+  return tieThenRange((filter, n: number) => find(filter, SEQ_KEYSET_SORT, n), tie, range, limit);
 }
 
 /**
@@ -347,19 +371,19 @@ async function readWithoutCompound<T extends Document>(
   tie: Record<string, unknown> | null, range: Record<string, unknown>,
   extra: Readonly<Record<string, unknown>> | undefined, limit: number,
 ): Promise<T[]> {
-  const first = tie ? await find(tie, ID_SORT, limit) : [];
-  if (first.length >= limit) return first;
-  const want = limit - first.length;
-  const page = await find(range, SEQ_ONLY_SORT, want);
-  if (page.length === 0) return first;
   const positionOf = (d: T): SeqPosition => {
     const r = d as unknown as { seq: number; _id: string };
     return { seq: r.seq, id: r._id };
   };
-  const lastSeq = positionOf(page[page.length - 1]!).seq;
-  // The runs before the last one are complete in this page; their order is fixed here, a page at most, so the answer is
-  // `(seq, _id)` throughout, as with the compound.
-  const head = page.filter(d => positionOf(d).seq < lastSeq).sort((a, b) => compareSeqPositions(positionOf(a), positionOf(b)));
-  const run = await find(composed({ seq: lastSeq }, extra), ID_SORT, want - head.length);
-  return [...first, ...head, ...run];
+  const rangeInRuns = async (filter: Record<string, unknown>, want: number): Promise<T[]> => {
+    const page = await find(filter, SEQ_ONLY_SORT, want);
+    if (page.length === 0) return [];
+    const lastSeq = positionOf(page[page.length - 1]!).seq;
+    // The runs before the last one are complete in this page; their order is fixed here, a page at most, so the answer is
+    // `(seq, _id)` throughout, as with the compound.
+    const head = page.filter(d => positionOf(d).seq < lastSeq).sort((a, b) => compareSeqPositions(positionOf(a), positionOf(b)));
+    const run = await find(composed({ seq: lastSeq }, extra), ID_SORT, want - head.length);
+    return [...head, ...run];
+  };
+  return tieThenRange((filter, n: number) => find(filter, ID_SORT, n), tie, range, limit, rangeInRuns);
 }

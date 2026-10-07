@@ -24,6 +24,8 @@ import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-by
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
+import { toDocId } from '../util/paths.js';
+import { escapeRegex } from '../util/redos.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -183,6 +185,21 @@ export async function forgetFileHashes(spaceId: string, ids: readonly string[]):
   for (const chunk of inChunks([...new Set(ids)], ROWS_PER_BULK_COMMAND)) {
     await cache.deleteMany(asFilter<HashCacheDoc>({ _id: { $in: chunk } }));
   }
+}
+
+/**
+ * {@link forgetFileHashes} for every path under the directory `dirPath` — what a directory delete does for the tree it took
+ * (`files/delete-cascade.ts`), as a single file's delete does for its path. Without it the cache keeps advertising every file
+ * of a tree nothing holds until a full manifest walk happens to prune it, which an incremental one never does.
+ *
+ * The prefix is the directory's path and a `/`, regex-escaped, so `my.dir` never forgets `myXdir/` nor `my.dir2/`; an empty
+ * path matches nothing here rather than everything.
+ */
+export async function forgetFileHashesByPrefix(spaceId: string, dirPath: string): Promise<void> {
+  const norm = toDocId(dirPath).replace(/\/?$/, '');
+  if (!norm) return;
+  await col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes')).deleteMany(
+    asFilter<HashCacheDoc>({ _id: { $regex: `^${escapeRegex(norm + '/')}` } }));
 }
 
 /**

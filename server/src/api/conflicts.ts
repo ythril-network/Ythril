@@ -7,7 +7,7 @@ import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
-import { deleteStored, isMissingPath, moveStored } from '../files/stored-bytes.js';
+import { deleteStoredIfPresent, moveStored } from '../files/stored-bytes.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
@@ -35,12 +35,8 @@ async function executeResolve(
   switch (action) {
     case 'keep-local': {
       // Delete the conflict copy, keep the original
-      try {
-        const abs = resolveSafePath(spaceId, doc.conflictPath);
-        await deleteStored(abs);
-      } catch (err: unknown) {
-        if (!isMissingPath(err)) throw err; // already gone is fine
-      }
+      // Already gone is fine.
+      await deleteStoredIfPresent(resolveSafePath(spaceId, doc.conflictPath));
       break;
     }
     case 'keep-incoming': {

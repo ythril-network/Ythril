@@ -38,16 +38,20 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkMember } from '../config/types.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { log, peerText } from '../util/log.js';
-import { deliveryOf, nextRereadState } from './deletion-authority.js';
+import { parseSeqText } from '../util/seq-keyset.js';
+import { deliveryOfMember, nextRereadState } from './deletion-authority.js';
 import { setMemberSpaceMark } from './member-space-mark.js';
 import { pullTombstones } from './tombstone-transfer.js';
 import type { TransferOutcome } from './watermark.js';
 
 const STEP = 'sync tombstone re-read';
 
-/** Where a state says to start: a decimal seq is a cursor, anything else (absent included) is the start. */
+/**
+ * Where a state says to start: a decimal seq a cursor can carry (`parseSeqText`, the one reading of a seq written as text) is
+ * the position, anything else (absent included, and a number past what a seq may be) is the start — read again, never skipped.
+ */
 function startOf(state: string | undefined): number {
-  return state !== undefined && /^\d+$/.test(state) ? Number(state) : 0;
+  return (state === undefined ? undefined : parseSeqText(state)) ?? 0;
 }
 
 /** The state this member row holds for the space, read from the LIVE config. */
@@ -80,7 +84,7 @@ export async function rereadUpstreamTombstones(o: {
   ordinary: { sinceSeq: number; outcome: TransferOutcome };
 }): Promise<void> {
   const { member, spaceId, remoteSpaceId, networkId, requestInit, ordinary } = o;
-  if (!deliveryOf(getConfig(), spaceId, { peerInstanceId: member.instanceId }).upstream) return;
+  if (!deliveryOfMember(spaceId, member).upstream) return;
   const current = stateOf(networkId, member.instanceId, spaceId);
   if (current === 'done') return;
 

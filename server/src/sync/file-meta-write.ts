@@ -39,7 +39,7 @@ import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { carriedFields, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
+import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
 export interface FileMetaUpdateOptions {
@@ -84,8 +84,8 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
     }
   }
   // Who delivered THIS version: its own step, after the loop above, so no carried value can stand in for it.
-  if (restore) set['deliveredBy'] = { $literal: typeof doc['deliveredBy'] === 'string' ? doc['deliveredBy'] : '' };
-  else if (opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: opts.deliveredBy };
+  // Absent for a caller that is not an arrival from a peer (the stray drain's fill): the stored stamp is left alone.
+  if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
   return [{ $set: set }];
 }
 

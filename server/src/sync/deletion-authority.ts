@@ -41,13 +41,22 @@
  *  - `nextRereadState` folds one cycle's outcome into the state of the one-time re-read of an upstream's tombstones
  *    (absent = owed from the start, a cursor = owed from there, `'done'` = finished and never asked again).
  *
- * Pure, and importing no database: every branch is decidable from a config and the arguments.
+ * Pure, and importing no database: every branch is decidable from a config and the arguments. (`deliveryOfMember` is the one
+ * that reads the live config for its caller, and only to hand it to `deliveryOf`.)
  */
 import type { Config } from '../config/types.js';
+import { getConfig } from '../config/loader.js';
 import { isDirectionalNetwork, isUpstreamPeer, upstreamOf } from '../networks/network-spaces.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { peersReachingOnlyByToken } from './served-watermark.js';
 import { tombstoneGoverns } from './upsert-plan.js';
+
+/**
+ * The longest instance id a tombstone's issuer may be named by. The issuer is a peer's text that is compared with the
+ * deliverer and the record's author, stored on a relayed tombstone and written into log lines, so both wire shapes of a
+ * tombstone (a record's, `sync/tombstone-apply.ts`, and a file's, `files/peer-tombstone-apply.ts`) bound it by this one number.
+ */
+export const MAX_ISSUER = 256;
 
 /** What a door knows about who delivered a page, before this instance's config says what that is worth. */
 export interface DeliveryAuth {
@@ -90,6 +99,16 @@ export function deliveryOf(cfg: Config, localSpaceId: string, auth: DeliveryAuth
   const upstream = peerInstanceId !== undefined
     && networksHolding(localSpaceId, cfg).some(net => isDirectionalNetwork(net) && isUpstreamPeer(net, peerInstanceId));
   return { peerInstanceId, trustedRelay: auth.trustedRelay === true, upstream };
+}
+
+/**
+ * The delivery of a page THIS instance pulled from `member`, against the live config: the peer pulled from is the
+ * authenticated source, so its id is the deliverer and nothing it says is read. The one spelling for the pull side (the record
+ * tombstone pull, the file tombstone pull, the one-time re-read) — written inline each had to remember the live config and the
+ * id, and `deliveryOf`'s door for a pushed page is `deliveryOfRequest` (`api/sync/_shared.ts`).
+ */
+export function deliveryOfMember(localSpaceId: string, member: { instanceId: string }): Delivery {
+  return deliveryOf(getConfig(), localSpaceId, { peerInstanceId: member.instanceId });
 }
 
 /**

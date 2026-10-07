@@ -35,6 +35,7 @@ import { moveFile, listFilesRecursive } from './files.js';
 import { hasLiveFileRecordAt, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
 import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
+import { rekeyedRow } from '../sync/local-only-fields.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
 import { actUnderPendingTombstones, forgetFinishedMove, moveWasBegun, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
@@ -91,7 +92,8 @@ async function relocateDerivedFileMeta(spaceId: string, src: string, dst: string
   const now = new Date().toISOString();
   const moved = derived.map(d => {
     const id = movedId(d._id, src, dst) ?? d._id;
-    return { ...d, _id: id, path: id, parentFileId: movedId(d.parentFileId!, src, dst) ?? d.parentFileId, updatedAt: now };
+    // Written out again under a new identity, so it is a record written HERE and nobody's delivery (`rekeyedRow`).
+    return rekeyedRow(d, { _id: id, path: id, parentFileId: movedId(d.parentFileId!, src, dst) ?? d.parentFileId, updatedAt: now });
   });
   await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: [...derived.map(d => d._id), ...moved.map(d => d._id)] } }));
   // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it

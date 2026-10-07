@@ -119,6 +119,25 @@ export function carriedFields({ restore, suppressed }: { restore: boolean; suppr
   return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
 }
 
+/**
+ * The `deliveredBy` stamp an arriving version is written with: a restore keeps the backup's own (`''` for a backup that
+ * has none — what it replaced is never what it keeps), anything else is the peer the door proved delivered it (`''` for
+ * nobody: an admin or local push). Never absent.
+ *
+ * ## What it prevents
+ *
+ * The stamp is the ground the upstream's deletion stands on (`sync/deletion-authority.ts`), so a row stored WITHOUT one
+ * is a row nobody can say who delivered. Both write shapes of the arrival writer (the replace in `sync/arrivals.ts`, the file
+ * merge in `sync/file-meta-write.ts`) spelled the restore-or-delivery choice themselves, and a copy that wrote `undefined`
+ * where this writes `''` leaves the key out of the document. One answer, so neither shape can drop it.
+ */
+export function stampOfArrival(
+  { restore, doc, deliveredBy }: { restore: boolean; doc: Readonly<Record<string, unknown>>; deliveredBy?: string | undefined },
+): string {
+  if (restore) return typeof doc['deliveredBy'] === 'string' ? doc['deliveredBy'] : '';
+  return deliveredBy ?? '';
+}
+
 /** `$unset` of every derived field — the content changed or is gone. */
 export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
 /** `$unset` of the vector half — only the decision to embed changed. */
