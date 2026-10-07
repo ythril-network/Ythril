@@ -618,8 +618,15 @@ answer is lost is read back while the hold is still held. On the serving instanc
   the erased file back from a peer: metadata whose `seq` is at or below the tombstone's `rowSeq` is counted in
   `filemeta.tombstoned` (a higher `seq` is a newer version and is stored), and **bytes a peer uploads** to
   `POST /api/files/:spaceId` for that path, whose hash is the erased content's, are answered `200 { tombstoned: true }`
-  and not stored. A user's own upload is never refused, and a tombstone held from before the upgrade carries no
-  `rowSeq` and shadows nothing. See [Files API](05-files-api.md#delete-a-file).
+  and not stored. **A delete counts from the moment its bytes are gone, not from its publication**: a delete writes its
+  tombstone first and publishes it once the file is removed, and in between it shadows exactly as a published one does —
+  by version for metadata, by content hash for bytes, at the metadata writer, the manifest download (re-asked right
+  before the bytes are written) and both byte doors. A delete whose file is still there shadows nothing; one whose path
+  cannot be looked at is neither: the byte door answers a retryable `503` (the sender does not remember it) and the
+  manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written. A path a
+  peer supplies is resolved before it is looked up (`x/../file` is `file`). A user's own upload is never refused, and a
+  tombstone held from before the upgrade carries no `rowSeq` and shadows nothing. See
+  [Files API](05-files-api.md#delete-a-file).
 
 ### Merkle Consistency Check
 

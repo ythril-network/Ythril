@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { getDataRoot } from '../config/loader.js';
+import { toDocId } from '../util/paths.js';
 
 /**
  * Resolve a user-supplied path within a space's data directory (LEXICAL check).
@@ -116,6 +117,37 @@ export async function resolveSafePathChecked(spaceId: string, userPath: string):
   const abs = resolveSafePath(spaceId, userPath);
   await assertNoSymlinkEscape(spaceId, abs);
   return abs;
+}
+
+/** A peer's path that resolves to the space's own root: not a file, so not a key ({@link peerFileKey}). */
+export class PathNamesTheSpaceError extends RangeError {
+  constructor(userPath: string) {
+    super(`Path names the space itself: '${userPath}'`);
+    this.name = 'PathNamesTheSpaceError';
+  }
+}
+
+/**
+ * THE one resolver for a path a PEER supplied (a manifest entry, a tombstone's path, an upload's `?path=`): the sandbox-resolved
+ * absolute path, and the KEY every lookup is made by — the resolved path relative to the space's root, as a document id.
+ *
+ * ## What it prevents (bundle-71, Q-404)
+ *
+ * The write was made at the resolved path (`x/../victim` is the file `victim`) while the held tombstones, the local manifest
+ * and the file row were looked up by the peer's TEXT. A peer that still held a file this instance had deleted brought it back
+ * by spelling the path differently, overwrote a local file instead of landing beside it as a conflict copy, and left rows keyed
+ * by a spelling nothing ever reads again. A path has one identity, and this is where it is decided: the tombstone apply, the
+ * byte doors and the manifest pull all key by `key`, and none builds a key from a peer's text.
+ *
+ * @throws RangeError when the path leaves the space or names a symlinked escape; {@link PathNamesTheSpaceError} (also a
+ *   `RangeError`) when it resolves to the space's root, which no file has as its key. Any other failure to look at the path
+ *   is thrown as it came.
+ */
+export async function peerFileKey(spaceId: string, userPath: string): Promise<{ abs: string; key: string }> {
+  const abs = await resolveSafePathChecked(spaceId, userPath);
+  const key = toDocId(path.relative(spaceRoot(spaceId), abs));
+  if (key === '' || key === '.') throw new PathNamesTheSpaceError(userPath);
+  return { abs, key };
 }
 
 /** Return the absolute data root for a space's files */

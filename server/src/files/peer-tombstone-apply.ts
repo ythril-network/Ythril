@@ -18,9 +18,10 @@
  *  1. **Shape**: a `_id`, a bounded `path`, a comparable `deletedAt`, an `issuer` that is text and a `rowSeq` that is a
  *     seq. A malformed element is refused ALONE and counted; the page goes on. A `deletedAt` in the future is CLAMPED to now
  *     (an older receiver positions by it, and a far-future one would sit above every acknowledgement for ever).
- *  2. **The path** is resolved through the sandbox (`resolveSafePathChecked`): a path that leaves the space, or goes
- *     through a link that does, is refused and touches nothing — never normalised into the tree. The row it names is keyed by
- *     the RESOLVED path, never by the sender's text.
+ *  2. **The path** is resolved through the sandbox by the one resolver of a peer's path (`peerFileKey`, which every door that
+ *     looks a peer's path up shares, Q-404): a path that leaves the space, or goes through a link that does, is refused and
+ *     touches nothing — never normalised into the tree. The row it names is keyed by the RESOLVED path, never by the
+ *     sender's text.
  *  3. **An id already held is a no-op.** The pull reads every tombstone every cycle; one this instance holds has been
  *     applied, and applied again it deletes the file a peer has since re-created (which the next manifest pull downloads,
  *     which the next read deletes: a loop for as long as the tombstone is held).
@@ -51,7 +52,6 @@
  * What it does not do: the row's delete does not carry `deleteBound` as a record's does — a file's bytes go first and cannot
  * be bound by a predicate, so a row replaced between the read and the delete is judged by the page's own read.
  */
-import path from 'node:path';
 import { z } from 'zod';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -59,13 +59,12 @@ import { getConfig } from '../config/loader.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { MAX_CURSOR_ID_LENGTH } from '../util/seq-keyset.js';
-import { toDocId } from '../util/paths.js';
 import { seqRefusal, arrivalId, refusedFieldsOf, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
 import { authorises, fileTargetOf, MAX_ISSUER, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
 import { recordDecline, sayDeclines, saidDeletions } from '../sync/decline-report.js';
 import { servesOnward } from '../sync/served-watermark.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
-import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { peerFileKey, PathNamesTheSpaceError } from './sandbox.js';
 import { deleteStoredIfPresent } from './stored-bytes.js';
 import { removeFileHere } from './remove-file-here.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
@@ -116,17 +115,17 @@ async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{
   const t = parsed.data;
   const why = seqRefusal(t.rowSeq, { optional: true });
   if (why) return { refused: { _id: t._id, reason: `rowSeq: ${why}` } };
-  let abs: string;
+  let resolved: { abs: string; key: string };
   try {
-    abs = await resolveSafePathChecked(localSpaceId, t.path);
+    resolved = await peerFileKey(localSpaceId, t.path);
   } catch (err) {
-    // A path that leaves the space (a `RangeError`) is refused. Any other failure to look at it is that element's too: one
-    // path the file system will not resolve must not stop the page, and nothing was touched.
-    return { refused: { _id: t._id, reason: err instanceof RangeError ? 'its path leaves the space' : 'its path cannot be resolved here' } };
+    // A path that leaves the space (a `RangeError`) is refused, and so is one that names the space itself. Any other failure to
+    // look at it is that element's too: one path the file system will not resolve must not stop the page, and nothing was touched.
+    const reason = err instanceof PathNamesTheSpaceError ? 'its path names the space itself'
+      : err instanceof RangeError ? 'its path leaves the space' : 'its path cannot be resolved here';
+    return { refused: { _id: t._id, reason } };
   }
-  const key = toDocId(path.relative(spaceRoot(localSpaceId), abs));
-  if (key === '' || key === '.') return { refused: { _id: t._id, reason: 'its path names the space itself' } };
-  return { ok: { id: t._id, key, abs, deletedAt: t.deletedAt > now ? now : t.deletedAt, issuer: t.issuer, rowSeq: t.rowSeq } };
+  return { ok: { id: t._id, key: resolved.key, abs: resolved.abs, deletedAt: t.deletedAt > now ? now : t.deletedAt, issuer: t.issuer, rowSeq: t.rowSeq } };
 }
 
 /**

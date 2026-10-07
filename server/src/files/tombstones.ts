@@ -21,7 +21,9 @@
  *
  * - **Written pending** ({@link writePendingFileTombstones}), before the irreversible step. **Nothing that serves,
  *   replicates, prunes or counts tombstones sees a pending one**: every reader of the collection is in this module
- *   (`a-file-tombstone-is-read-through-its-one-module.test.js`) and reads only {@link PUBLISHED} ones.
+ *   (`a-file-tombstone-is-read-through-its-one-module.test.js`) and reads only {@link PUBLISHED} ones — with ONE
+ *   exception, which is a question and not a service: what an ARRIVING file is compared with also takes a pending tombstone
+ *   whose act has already removed the path's bytes ({@link decideArrivals}, Q-348), because that delete has happened.
  * - **Confirmed** ({@link confirmFileTombstones}) once ITS OWN path's bytes are gone or moved, and stamped with that
  *   time, so a push position a peer acknowledged meanwhile cannot prune it unsent. A store failure there fails the act
  *   (`503`); its retry, or the settle below, finishes it. Per path, not per act: one act's paths can lose their bytes
@@ -77,8 +79,10 @@
  *
  * A held tombstone is also a statement about a VERSION of a path, not about the path for ever: `rowSeq` is the version it
  * erased and `contentHash` the hash of the content (this instance's own row, never read from bytes). An arriving file is
- * compared with them in one place, {@link shadowedArrivals} — by version for metadata, by content for bytes — so a peer that
- * still holds a deleted file cannot bring it back through any door, and a newer version of the path is never refused.
+ * compared with them in one place, {@link decideArrivals} — by version for metadata, by content for bytes — so a peer that
+ * still holds a deleted file cannot bring it back through any door, and a newer version of the path is never refused. A PENDING
+ * tombstone whose act has already removed the path's bytes counts exactly as a published one (Q-348): the delete happened and is
+ * only waiting to be published. The stray drain alone reads the published ones ({@link heldFileTombstones}).
  *
  * ## A move's marker
  *
@@ -106,6 +110,7 @@ import { keyedLock } from '../util/keyed-lock.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
 import { heldTombstoneRefuses } from '../sync/upsert-plan.js';
+import { StoreTimeout } from '../db/write-timeout.js';
 
 /** A file tombstone as stored HERE: the replicated shape, plus what never leaves this instance. */
 interface StoredFileTombstone extends FileTombstoneDoc {
@@ -966,21 +971,79 @@ export function settledFileTombstones<T extends { positionAt: string }>(sent: re
 /** The tombstones this instance holds for each of `paths`: what an arriving file is compared with. */
 export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }
 
-/**
- * THE one reader of the published tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what
- * a comparison needs of each (its id, the version it erased, the hash of the content it erased). Every arrival site asks
- * it (`shadowedArrivals`, the stray drain's settle); a second reader would be a second answer to "is this path deleted".
- */
-export async function heldFileTombstones(spaceId: string, paths: readonly string[]): Promise<Map<string, HeldFileTombstone[]>> {
+/** What a comparison reads of a tombstone: published or pending, the same fields. */
+const HELD_PROJECTION = { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 } as const;
+
+/** The rows of {@link tombstonesAtPaths}, grouped by path, as the comparison reads them. */
+function heldByPath(rows: readonly StoredFileTombstone[]): Map<string, HeldFileTombstone[]> {
   const out = new Map<string, HeldFileTombstone[]>();
-  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk }, ...PUBLISHED }),
-    { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 });
   for (const t of rows) {
     if (!out.has(t.path)) out.set(t.path, []);
     out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
       ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
   }
   return out;
+}
+
+/**
+ * THE one reader of the PUBLISHED tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what
+ * a comparison needs of each (its id, the version it erased, the hash of the content it erased).
+ *
+ * **Published ones only, on purpose, and the stray drain reads only this** (`settleUnstored`): its answer decides whether a
+ * record is DISCARDED, and a pending tombstone names an act that may not happen, which the drain deliberately waits on
+ * (bundle-30 I15). What an ARRIVING file is compared with is wider — it adds the pending tombstones whose act has already
+ * removed the path's bytes ({@link decideArrivals}, Q-348) — so the arrival sites ask THAT, never this directly.
+ */
+export async function heldFileTombstones(spaceId: string, paths: readonly string[]): Promise<Map<string, HeldFileTombstone[]>> {
+  return heldByPath(await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk }, ...PUBLISHED }), HELD_PROJECTION));
+}
+
+/** The tombstones an arrival is compared with, and the pending ones that could not be judged ({@link readHeldFor}). */
+interface HeldForArrivals {
+  /** Published tombstones, and pending ones whose act has removed the path's bytes: a deletion that happened. */
+  held: Map<string, HeldFileTombstone[]>;
+  /** Pending tombstones whose path could not be looked at: neither an act that happened nor one that did not. */
+  unlooked: Map<string, HeldFileTombstone[]>;
+  /** The first failure to look, for the answer's `cause`. */
+  cause?: unknown;
+}
+
+/**
+ * The PENDING tombstones of some paths whose act has already removed the path's bytes here — a deletion that HAPPENED and is
+ * only waiting to be published (Q-348) — and those whose path cannot be looked at. A pending row whose path still has bytes is in
+ * neither: its act has not happened, or failed, and it shadows nothing. A row that names no version and no content shadows
+ * nothing whatever the disk says, so it is not looked at.
+ *
+ * Read by path through {@link FILE_TOMBSTONE_QUERIES}' by-path question, then one look at the disk per path that has such a row
+ * (`bytesPresent`: only a missing path is an answer). Never `heldFileTombstones`: that one is the published ones, which the stray
+ * drain reads and which must not widen.
+ */
+async function actedPendingTombstones(
+  spaceId: string, paths: readonly string[],
+): Promise<{ gone: Map<string, HeldFileTombstone[]>; unlooked: Map<string, HeldFileTombstone[]>; cause?: unknown }> {
+  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths,
+    chunk => FILE_TOMBSTONE_QUERIES.pendingByPath({ paths: chunk }).filter, HELD_PROJECTION);
+  const speaking = heldByPath(rows.filter(t => typeof t.rowSeq === 'number' || (typeof t.contentHash === 'string' && t.contentHash !== '')));
+  const gone = new Map<string, HeldFileTombstone[]>();
+  const unlooked = new Map<string, HeldFileTombstone[]>();
+  let cause: unknown;
+  for (const [p, here] of speaking) {
+    try {
+      if (!await bytesPresent(await resolveSafePathChecked(spaceId, p))) gone.set(p, here);
+    } catch (err) {
+      unlooked.set(p, here);
+      cause ??= err;
+    }
+  }
+  return { gone, unlooked, ...(cause !== undefined ? { cause } : {}) };
+}
+
+/** The tombstones an arrival at each of `paths` is compared with: the published ones, and the pending ones whose act has happened. */
+async function readHeldFor(spaceId: string, paths: readonly string[]): Promise<HeldForArrivals> {
+  const held = await heldFileTombstones(spaceId, paths);
+  const { gone, unlooked, cause } = await actedPendingTombstones(spaceId, paths);
+  for (const [p, rows] of gone) held.set(p, [...(held.get(p) ?? []), ...rows]);
+  return { held, unlooked, ...(cause !== undefined ? { cause } : {}) };
 }
 
 /** Which of `ids` are published tombstones already held here: an id held is never applied a second time. */
@@ -1097,28 +1160,81 @@ export interface MetaArrival { kind: 'meta'; seq: number; author?: string; deliv
 export type FileArrival = { id: string; path: string } & (MetaArrival | { kind: 'bytes'; sha256: string });
 
 /**
- * Which of `arrivals` a held tombstone shadows — THE predicate every arrival site asks (the metadata writer, the stray
- * drain's fill, the manifest pull, the byte door), one chunked read of the held tombstones by path for all of them, then
- * {@link shadowDecision} per arrival. Returns the ids.
+ * What {@link decideArrivals} came to: the arrivals a deletion shadows, and the ones it could not tell about.
+ */
+export interface ArrivalVerdicts {
+  /** Ids a held tombstone — published, or pending with its act's bytes already gone — shadows. */
+  shadowed: Set<string>;
+  /** Ids a pending tombstone WOULD shadow if its act had happened, whose path could not be looked at to tell. */
+  undecided: Set<string>;
+  /** The first failure to look, when there is an undecided arrival. */
+  cause?: unknown;
+}
+
+/**
+ * The failure of a door that cannot tell whether a delete already happened: a retryable `503`, in the one shape every door
+ * answers a failure on the store's side with (`StoreTimeout` — `classifyReadFailure` answers it `503` with `Retry-After`, and the
+ * sender does not remember it). Neither guess is safe: "it did not happen" stores bytes a delete erased, and "it did"
+ * tells the sender the path is tombstoned for good (`200 { tombstoned: true }` is remembered until it restarts).
+ */
+const cannotTellIfDeleted = (cause: unknown): StoreTimeout =>
+  new StoreTimeout('Looking at a path to tell whether its file was deleted here', { cause });
+
+/**
+ * Which of `arrivals` a held tombstone shadows, and which it could not be decided for — THE predicate every arrival site asks
+ * (the metadata writer, the manifest pull, the byte doors): one chunked read of the published tombstones by path for all of
+ * them, one of the pending ones, then {@link shadowDecision} per arrival.
+ *
+ * **A pending tombstone counts when its act has already removed the path's bytes here** (Q-348): the delete happened and is only
+ * waiting to be published, and in that window every peer that still holds the file would otherwise bring it back. It shadows
+ * exactly as a published one does — by version for metadata, by content hash for bytes. One whose path still has bytes
+ * shadows nothing. When the path cannot be looked at (anything but "it does not exist"), an arrival that tombstone would shadow is
+ * `undecided`: the door fails closed ({@link shadowedArrivals}), the manifest pull leaves it for the next cycle.
  *
  * For BYTES it also reads whether a LIVE row at the path is newer than the tombstone (`liveRowNewer`): identical bytes
  * re-created as a newer version arrive with their metadata first, and pass. That read happens only for an arrival some
- * held tombstone could shadow by content, so a path nobody deleted costs no more than the tombstone read.
+ * held tombstone could shadow by content, so a path nobody deleted costs no more than the tombstone reads.
+ */
+export async function decideArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
+  if (arrivals.length === 0) return { shadowed: new Set(), undecided: new Set() };
+  return judgeArrivals(spaceId, await readHeldFor(spaceId, arrivals.map(a => a.path)), arrivals);
+}
+
+/** {@link decideArrivals} over tombstones already read. */
+async function judgeArrivals(spaceId: string, read: HeldForArrivals, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
+  const shadowed = await shadowedAgainst(spaceId, read.held, arrivals);
+  const waiting = arrivals.filter(a => !shadowed.has(a.id) && read.unlooked.has(a.path));
+  if (waiting.length === 0) return { shadowed, undecided: new Set() };
+  // The same predicate, with the rows that could not be looked at counted as happened: what they would shadow is undecided.
+  const withUnlooked = new Map(read.held);
+  for (const a of waiting) withUnlooked.set(a.path, [...(read.held.get(a.path) ?? []), ...(read.unlooked.get(a.path) ?? [])]);
+  const undecided = await shadowedAgainst(spaceId, withUnlooked, waiting);
+  return { shadowed, undecided, ...(undecided.size > 0 ? { cause: read.cause } : {}) };
+}
+
+/**
+ * Which of `arrivals` a held tombstone shadows ({@link decideArrivals}), for a door that cannot go on without the answer: an
+ * arrival it could not decide throws a retryable `503` ({@link cannotTellIfDeleted}) and nothing is stored. Returns the ids.
  */
 export async function shadowedArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<Set<string>> {
-  if (arrivals.length === 0) return new Set();
-  return shadowedAgainst(spaceId, await heldFileTombstones(spaceId, arrivals.map(a => a.path)), arrivals);
+  const { shadowed, undecided, cause } = await decideArrivals(spaceId, arrivals);
+  if (undecided.size > 0) throw cannotTellIfDeleted(cause);
+  return shadowed;
 }
 
 /**
  * Whether a PEER's bytes for `path` are shadowed — the byte door's question, which asks by path FIRST: the hash of the bytes
- * (`sha256Of`, called only when needed) is computed only when some held tombstone for the path carries a content hash to
- * compare it with, so a path nobody deleted — nearly every upload — costs one indexed read and no hashing of the body.
+ * (`sha256Of`, called only when needed, and awaited) is computed only when some tombstone for the path — published, or pending and
+ * not looked at — carries a content hash to compare it with, so a path nobody deleted — nearly every upload — costs the indexed
+ * reads and no hashing of the body. A path that cannot be looked at throws a retryable `503` ({@link shadowedArrivals}).
  */
-export async function bytesShadowed(spaceId: string, path: string, sha256Of: () => string): Promise<boolean> {
-  const held = await heldFileTombstones(spaceId, [path]);
-  if (!(held.get(path) ?? []).some(t => typeof t.contentHash === 'string' && t.contentHash !== '')) return false;
-  return (await shadowedAgainst(spaceId, held, [{ id: path, path, kind: 'bytes', sha256: sha256Of() }])).has(path);
+export async function bytesShadowed(spaceId: string, path: string, sha256Of: () => string | Promise<string>): Promise<boolean> {
+  const read = await readHeldFor(spaceId, [path]);
+  const hashed = (rows: readonly HeldFileTombstone[] | undefined): boolean => (rows ?? []).some(t => typeof t.contentHash === 'string' && t.contentHash !== '');
+  if (!hashed(read.held.get(path)) && !hashed(read.unlooked.get(path))) return false;
+  const { shadowed, undecided, cause } = await judgeArrivals(spaceId, read, [{ id: path, path, kind: 'bytes', sha256: await sha256Of() }]);
+  if (undecided.size > 0) throw cannotTellIfDeleted(cause);
+  return shadowed.has(path);
 }
 
 /** {@link shadowedArrivals} over tombstones already read: the decision per arrival, and the live-row read bytes need. */

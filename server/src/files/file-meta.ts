@@ -27,6 +27,7 @@ import { embedArrivedFiles } from '../sync/file-meta-write.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 import { rekeyedRow, stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
+import { peerFileKey } from './sandbox.js';
 
 /**
  * The optional fields a `deleteFields` path may clear on a file's metadata record.
@@ -156,6 +157,10 @@ export async function upsertFileMeta(
  *
  * A known record gets its size and hash. A record the metadata has not reached yet is created at `seq` 0 and
  * authored by the peer, so the first authored metadata to arrive replaces it whatever its `seq`.
+ *
+ * `filePath` is the PEER's text and is resolved here, by the one resolver (`peerFileKey`, Q-404): the bytes were written at the
+ * resolved path, and a row keyed by the spelling (`x/../k.txt`) is one nothing ever reads again. A caller that already holds the
+ * key passes it — resolving a key gives the key.
  */
 export async function recordArrivedFile(
   spaceId: string,
@@ -164,7 +169,7 @@ export async function recordArrivedFile(
   sha256: string,
   from: AuthorRef,
 ): Promise<void> {
-  const normalised = toDocId(filePath);
+  const { key: normalised } = await peerFileKey(spaceId, filePath);
   const now = new Date().toISOString();
   // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
   // expiry, because arriving bytes are not an authored write and must not re-slide it.
