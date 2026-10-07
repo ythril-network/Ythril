@@ -30,6 +30,11 @@ import { Socket } from 'node:net';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
+import { stampRunnerOutcome } from './mask-client-report.mjs';
+import { CLIENT_RESULTS } from './_shared/client-results.mjs';
+
+/** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
+const CLIENT_REPORT = join('test-results', CLIENT_RESULTS);
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -51,7 +56,9 @@ const BUILT_GATES = [
   ['audit-route-coverage', 'a mutating route with no audit rule leaves no trace of who changed what'],
 ];
 
-const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts });
+// Every child gets `testChildEnv`'s environment, not this process's: the recorder's token and the runner's wire stay out of
+// anything a test (or a dependency a test imports) can read. A caller that needs more passes `env` itself.
+const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', env: testChildEnv(), ...opts });
 
 const failures = [];
 
@@ -315,9 +322,17 @@ try { run('npm run typecheck:client'); } catch {
 }
 
 console.log('\n── client unit tests (includes i18n key coverage) ──');
-try { run('npm run test:client'); } catch {
+// The command is ci.yml's client step, character for character (`ci-workflow-is-sound` holds the two equal): this step is
+// the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report goes first,
+// so a run that dies before writing one cannot leave an earlier run's report standing as this run's; the runner's own
+// verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
+rmSync(CLIENT_REPORT, { force: true });
+let clientOutcome = 'success';
+try { run('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json'); } catch {
+  clientOutcome = 'failure';
   failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
 }
+stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
 
 // The production build type-checks TEMPLATES (AOT) and compiles under the app's own tsconfig, neither of
 // which the unit-test run does. It caught a `[...NodeList]` spread that every test passed straight over,
