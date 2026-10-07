@@ -10,8 +10,10 @@
  *     tombstone with no `rowSeq` (legacy, from before this release) shadows NO metadata: today's behaviour, and the
  *     stated limit of the release.
  *   - **bytes** (`{ kind: 'bytes', sha256, liveRowNewer }`): shadowed when some held tombstone's own local
- *     `contentHash` equals the arriving hash AND no live row at the path is newer than the tombstone. Identical bytes
- *     re-created as a newer version arrive with their metadata first (`liveRowNewer`) and pass. A tombstone with no
+ *     `contentHash` equals the arriving hash AND the live row at the path is not re-created since the tombstone
+ *     (`recreatedSince`, files/tombstone-shadow.ts: other bytes, or a newer version by the tombstone's issuer — never a
+ *     seq compared across authors). Identical bytes re-created by the issuer arrive with their metadata first
+ *     (`liveRowNewer`) and pass. A tombstone with no
  *     `contentHash` (legacy) shadows no bytes — the path-only discard the stray drain keeps is a separate, named rule.
  *
  * Without the version half a deleted file's path is poisoned for ever (every later upload of it is refused); without
