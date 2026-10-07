@@ -18,7 +18,7 @@ import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.j
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, DELETION_REACH } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
@@ -378,7 +378,7 @@ export const delete_factTool: ToolHandler = {
     + 'because those two link fields had no reader anywhere in the server — the reference was stored and '
     + 'replicated and nothing could see it, so the referring record was quietly left pointing at a fact '
     + 'that no longer existed. With strict linkage OFF the delete still always succeeds.\n\n'
-    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer. The '
+    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' The '
     + 'record is not quietly resurrected from a peer that still has it. That is also why this cannot be undone by '
     + 'writing the record back with the same id — the tombstone outranks it.\n\n'
     + 'PARAMETERS:\n'

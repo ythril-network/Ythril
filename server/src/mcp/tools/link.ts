@@ -10,6 +10,7 @@ import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { DELETION_REACH } from './shared.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
 const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
@@ -121,7 +122,7 @@ export const delete_linkTool: ToolHandler = {
     + 'THE LINK RECORD IS THE WHOLE CONNECTION, so removing it removes the connection. There is no second '
     + 'copy on either end to contradict it, and nothing an ordinary edit of those records could restore.\n\n'
     + 'A TOMBSTONE IS WRITTEN, so the deletion reaches peer instances on the next sync instead of being '
-    + 'quietly restored by one that still holds the link: it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer.\n\n'
+    + 'quietly restored by one that still holds the link: ' + DELETION_REACH + '\n\n'
     + 'PARAMETERS:\n'
     + '- `id` — the link\'s `_id`, as `save_link` and `filter` report it. An id that is not a link is an '
     + 'ERROR, not a silent success.\n'

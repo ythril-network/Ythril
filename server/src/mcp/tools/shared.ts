@@ -69,6 +69,16 @@ export const SUPERSEDED_SCHEMA = {
     + 'Not the same as `suppressEmbeddings`, which removes the vector and makes a record unrankable.',
 } as const;
 
+/**
+ * Who a delete reaches — the one sentence every record delete tool states, written once so the five cannot drift
+ * apart (the deletion authority itself is `sync/deletion-authority.ts`). It states the GUARANTEE a caller relies
+ * on, never the mechanism: a deletion travels to every copy this instance wrote and, on a directional network,
+ * downstream; it does not reach a mesh peer's copy that another instance wrote.
+ */
+export const DELETION_REACH =
+  'it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything '
+  + 'downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer.';
+
 export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   type: 'boolean',
   description:

@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -491,7 +491,7 @@ export const delete_entityTool: ToolHandler = {
   description: 'Delete an entity by id. IRREVERSIBLE, and it is a DELETE rather than a retire — if you want the record to stop appearing in semantic search while staying readable and traversable, set `suppressEmbeddings` on it instead.\n\n'
     + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, fact, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `graph_merge` into the record that should have held them.\n\n'
     + 'OR DELETE IT WITH ITS BLOCKING EDGES, in one call: pass the `token` from `delete_entity_preview` as `cascadeToken`. The cascade removes those edges, each with its tombstone, a chunk at a time — a chunk lands whole or not at all, so a failure never leaves an edge gone without the tombstone that tells peers — and then the entity. A fact, chrono entry or file that still names the entity refuses the cascade BEFORE anything is removed.\n\n'
-    + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync: it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer. A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.',
+    + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
