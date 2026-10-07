@@ -63,6 +63,29 @@ export const workflowFiles = () => trackedSources('.github/workflows', { ext: ['
 /** Every committed workflow, `[{ file, doc }]`. */
 export const loadAllWorkflows = () => workflowFiles().map((file) => ({ file, doc: loadWorkflow(file) }));
 
+/**
+ * Every committed local action, repo-relative (`.github/actions/<name>/action.yml`). A composite action runs steps of its
+ * own — a checkout, a credential in an input — so a rule over "every step the repository runs" reads these too, and a rule
+ * that read only `workflows/` concluded about all of them (the failure dump moved here out of `ci.yml`).
+ */
+export const actionFiles = () => trackedSources('.github/actions', { ext: ['.yml', '.yaml'], floor: 1 });
+
+/** Parse one local action's text. A document without `runs` is the gate's failure, not an action that runs nothing. */
+export function parseAction(text, label = 'action') {
+  const doc = load(text);
+  if (!doc || typeof doc !== 'object' || !doc.runs || typeof doc.runs !== 'object') {
+    throw new Error(`${label} does not parse to an action with runs`);
+  }
+  return doc;
+}
+
+/** One local action, parsed. A missing file throws, as `loadWorkflow` does. */
+export function loadAction(rel, root = REPO_ROOT) {
+  const file = join(root, rel);
+  if (!existsSync(file)) throw new Error(`${rel} does not exist under ${root} — there is no action to read`);
+  return parseAction(readFileSync(file, 'utf8'), rel);
+}
+
 /** `[{ id, name, job }]` — `name` is the display name, which is what a ruleset's required check matches. */
 export function jobEntries(doc) {
   return Object.entries(doc.jobs).map(([id, job]) => ({ id, name: job.name ?? id, job }));

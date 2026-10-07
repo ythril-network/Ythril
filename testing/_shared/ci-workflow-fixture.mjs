@@ -48,6 +48,7 @@ const STACK_JOB = (id, name, script = id) => `
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -67,6 +68,26 @@ const STACK_JOB = (id, name, script = id) => `
         run: npm run test:${script}${UPLOAD_RESULTS(id)}`;
 
 export const NEEDED_JOBS = ['client-tests', 'prepare', 'standalone', 'integration', 'sync'];
+
+/**
+ * The command the client job runs, written once: the fixture's client step and the fixture's preflight both carry it, and
+ * the rule that holds the two equal (`ci-workflow-is-sound`, "preflight runs the client's command") reads it from both.
+ */
+export const CLIENT_COMMAND = 'npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json';
+
+/**
+ * A miniature of `scripts/preflight.mjs` in the one respect the parity rule reads: how it runs the client's unit tests. The
+ * wrapper is the real one's shape (a local `run` over `execSync`) and gives its child `testChildEnv`'s environment.
+ */
+export const GOOD_PREFLIGHT = `
+import { execSync } from 'node:child_process';
+import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
+
+const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', env: testChildEnv(), ...opts });
+
+try { run('npm run typecheck:client'); } catch { /* reported below */ }
+try { run('${CLIENT_COMMAND}'); } catch { /* reported below */ }
+`;
 
 const verdictLines = NEEDED_JOBS
   .map((id) => `          [ "@{{ needs.${id}.result }}" = success ] || { echo "${id}: not success"; exit 1; }`)
@@ -95,12 +116,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm${NPM_CI}
       - name: Client unit tests
-        run: npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json${UPLOAD_RESULTS('client-tests')}
+        run: ${CLIENT_COMMAND}${UPLOAD_RESULTS('client-tests')}
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
@@ -109,6 +131,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -150,6 +173,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -173,6 +198,8 @@ jobs:
         run: |
 ${verdictLines}
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
