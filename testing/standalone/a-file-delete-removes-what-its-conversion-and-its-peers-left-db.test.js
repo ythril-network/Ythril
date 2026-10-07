@@ -28,6 +28,9 @@
  *  4. the delete still publishes ONE tombstone, for the file: the sidecars' deletion is their parent's, so none is written
  *     for them (a control: green on the base, and it must stay so)
  *
+ *  5. a DIRECTORY's delete (REST only) removes the same for every file under it, by the same step, and nothing of a directory
+ *     whose name merely starts with its own (`d2/`, `dd/`)
+ *
  * Run: node --test testing/standalone/a-file-delete-removes-what-its-conversion-and-its-peers-left-db.test.js
  * (requires a prior `npm run build:server`)
  */
@@ -217,5 +220,43 @@ describe('deleting a file removes what its conversion and its peers left, and on
     assert.ok(!acts.failed(a), JSON.stringify(a.body));
     assert.deepEqual(await acts.published(), { served: [f], pushed: [f] },
       'a delete of a converted file must publish its own path only');
+  });
+
+  /*
+   * A DIRECTORY's delete is the same cascade over a tree, and had the same defect twice over: it removed the derived rows whose
+   * `parentFileId` starts with `<d>/` (one level), so the caption and face rows of an extracted image — whose parent is
+   * `_extracted/<d>/<f>/x.jpg` — stayed; and it removed the sidecar BYTES under `_converted/<d>/` and `_extracted/<d>/` but not
+   * the top-level rows an arrival made for them. REST is its only door (a directory delete needs `{ confirm: true }`).
+   */
+  describe('deleting a directory removes what every file under it left, and only that', () => {
+    const rmDir = (d) => acts.rest('DELETE', { path: d }, { confirm: true });
+
+    for (const soft of [false, true]) {
+      it(`${soft ? 'with softDeleteFileMeta, ' : ''}every artefact of every file under the directory goes; a neighbour directory keeps its own`, async () => {
+        loader.getConfig().softDeleteFileMeta = soft;
+        const top = await seedFileWithEverything('docs/d/f.txt');
+        const nested = await seedFileWithEverything('docs/d/sub/k.txt');
+        // `d2` and `dd` only START like `d`: their sidecar trees (`_converted/docs/d2/…`) and their rows are not the directory's.
+        const near = await seedNeighbour('docs/d2/g.txt');
+        const far = await seedNeighbour('docs/dd/h.txt');
+        const before = [...await leftOf(top, 'docs/d/f.txt'), ...await leftOf(nested, 'docs/d/sub/k.txt')];
+        assert.equal(before.length, 2 * (7 + 4 + 1), `fixture: a file under the directory does not have everything it is meant to (${before})`);
+
+        const a = await rmDir('docs/d');
+        assert.ok(!acts.failed(a), `directory delete: ${JSON.stringify(a.body)}`);
+
+        assert.deepEqual({
+          left: [...await leftOf(top, 'docs/d/f.txt'), ...await leftOf(nested, 'docs/d/sub/k.txt')],
+          neighbourLost: [...await lostOfNeighbour(near), ...await lostOfNeighbour(far)],
+        }, { left: [], neighbourLost: [] },
+          'left = what the directory delete left behind (rows two levels down, the arrived sidecars\' top-level rows, an image\'s job); '
+          + 'neighbourLost = what it took from a directory whose name only starts with the same letters');
+        for (const ids of [top, nested]) {
+          for (const id of [ids.chunk, ids.image, ids.caption, ids.face]) {
+            assert.equal(await rowOf(id), null, `the derived row ${id} was kept: derived rows are removed whatever the setting`);
+          }
+        }
+      });
+    }
   });
 });
