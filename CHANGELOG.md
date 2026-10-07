@@ -172,8 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contradiction scans. Records an earlier version skipped stay missing on a peer until they are next edited.
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
   refused element's seq can no longer move the position; against an older server it holds, as before.
-- **Sync:** A deletion a publisher or parent relays now reaches records it relayed from other instances, and its retention sweep's deletions apply below it; they were declined and never retried. A one-time re-read applies what the upstream still holds.
-- **Sync:** A file deleted on one peer is removed on the others at the version it names: a file re-created since is kept (it was deleted and downloaded again each cycle), and file tombstones page past the cut a pull read and the one body a push sent.
+- **Sync:** A deletion a publisher or parent relays now reaches records it relayed from other instances, and its retention sweep's deletions apply below it; they were declined and never retried. A one-time re-read applies what the upstream still holds. A record tombstone whose `instanceId` is over 256 characters is refused.
+- **Sync:** A file deleted on one peer is removed on the others at the version it names: a file re-created since is kept (it was deleted and downloaded again each cycle), and file tombstones page past the cut a pull read and the one body a push sent. A push logs how many a peer refused; a deleted directory's cached hashes are dropped.
 - **Files:** A file a publisher pushes is recorded as an arrival, so later description and tag edits are no longer skipped; arriving
   bytes revive a soft-deleted path and get this instance's file retention window. A file-metadata arrival no longer overwrites a newer copy.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered (audit `file.stray_filemeta.drain`), never over a
