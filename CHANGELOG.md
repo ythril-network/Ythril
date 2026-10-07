@@ -183,7 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, `_converted/` and `_extracted/`
   sidecars and links (`PATCH /api/files/:spaceId`, `move_file`). A retried move completes only a move it began; a directory delete needs `confirm: true`.
 - **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and the TTL sweep; `delete_file` no longer claims a missing path "succeeds quietly".
-- **Files:** A deleted file, or its `_converted/`/`_extracted/` sidecars, no longer returns from a peer by any door, even before its deletion is published; a delete removes every row derived from it; a peer's path is judged resolved. A deletion held from before the upgrade covers nothing.
+- **Files:** A deleted file or its sidecars no longer return from a peer by any door, even before publish; a delete takes every row derived from it; a peer's path is judged resolved (file metadata whose id is not is `rejected`). A deletion held from before the upgrade covers nothing.
 - **Search:** Records matching a `recall` query equally well come back in a stable order (ties break by id), so paging with `skip`/`nextSkip` shows each once, on MCP and `POST /api/brain/recall`.
 - **Search:** `recall`, `similar` and the write-time duplicate check straight after a space's first write no longer answer `503`
   while its vector index initialises. `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, on REST and MCP.
