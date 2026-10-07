@@ -61,7 +61,7 @@ import { isComparableIso } from '../util/comparable-iso.js';
 import { MAX_CURSOR_ID_LENGTH } from '../util/seq-keyset.js';
 import { toDocId } from '../util/paths.js';
 import { seqRefusal, arrivalId, refusedFieldsOf, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
-import { authorises, MAX_ISSUER, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
+import { authorises, fileTargetOf, MAX_ISSUER, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
 import { recordDecline, sayDeclines, saidDeletions } from '../sync/decline-report.js';
 import { servesOnward } from '../sync/served-watermark.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
@@ -175,7 +175,8 @@ export async function applyPeerFileTombstones(
       const issuer = a.issuer ?? delivery.peerInstanceId;
       const row = rows.get(a.key);
       // A row a soft delete already flagged is a deletion already recorded: nothing here is left to judge or to remove.
-      const target = row !== undefined && row.deletedAt === undefined ? row : null;
+      // A placeholder that arriving bytes created has no author to speak for it (`fileTargetOf`, Q-405).
+      const target = row !== undefined && row.deletedAt === undefined ? fileTargetOf(row) : null;
       const verdict = authorises(delivery, issuer, target, selfId);
       if (!verdict.ok) {
         recordDecline(ledger, { id: a.id, reason: verdict.reason, kind: 'file', what: 'file', issuer, delivery, target: target ?? undefined });

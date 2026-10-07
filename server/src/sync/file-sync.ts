@@ -92,7 +92,9 @@ export async function syncFiles(
         if (ackResp.ok) {
           recordFileTombstoneAck(member.instanceId, spaceId, ackedPositionFrom(ourTombstones));
           // `refused` and `declined` are additive: an older peer sends neither. A re-send is refused or declined again, so the
-          // position advances past them, as the record push's does, and the lines below are what tell an operator.
+          // position advances past them, as the record push's does, and the lines below are what tell an operator. (A
+          // declined file tombstone met a row somebody authored: a row only arriving bytes created is authorless to the
+          // receiver's authority, `fileTargetOf`, Q-405, so the origin's deletion of it is applied.)
           const body = await boundedJson<{ refused?: unknown; declined?: unknown }>(ackResp, 'sync peer')
             .catch(() => ({}) as { refused?: unknown; declined?: unknown });
           refused += refusedCountOf(body);

@@ -602,12 +602,15 @@ answer is lost is read back while the hold is still held. On the serving instanc
   (part of `applied`). `refused` and `declined` are omitted when zero, so an older receiver's `{ applied }` reads
   alike. **A tombstone is applied only when its authority holds** (the same two grounds as a record's, with the
   file's record as the target) **and only to the version it names**: a file row whose seq is above `rowSeq` is a
-  re-creation made after the deletion and is kept. An element without `issuer` (an older peer's) is read as issued
-  by the peer that sent it. An id the receiver already holds is not applied again.
+  re-creation made after the deletion and is kept. **A row that arriving bytes created has no author for this purpose**:
+  when a peer delivers a file's bytes before its metadata, the receiver's row is a placeholder (seq 0, authored only by
+  the peer that delivered the bytes), and the file's origin deleting it is applied, not declined. A row anybody authored
+  (metadata at a seq above 0) is protected from another peer's tombstone as before. An element without `issuer` (an older
+  peer's) is read as issued by the peer that sent it. An id the receiver already holds is not applied again.
   **Your `200` is an acknowledgement, and no more than that.** The sender records the newest position in the pages
   you answered `200` to and eventually drops its own copies below the minimum across all members — so answer `200` only
-  once the tombstones are handled, applied or judged: a declined one will be declined again, so the sender may stop
-  sending it, and `{ applied: 0 }` is a valid acknowledgement for a page whose every element was already held. A
+  once the tombstones are handled, applied or judged: a declined one (a file row somebody authored, never the placeholder
+  that arriving bytes created) will be declined again, so the sender may stop sending it, and `{ applied: 0 }` is a valid acknowledgement for a page whose every element was already held. A
   non-2xx or a timeout means the sender keeps its copies, which is the safe direction. (It used to read
   *"durably recorded"*; a receiver that applies a deletion but keeps no copy, because it has no one to pass it on
   to, is correct.)

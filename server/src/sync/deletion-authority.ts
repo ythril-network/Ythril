@@ -17,7 +17,7 @@
  *    deletion may arrive before its record); it deletes nothing, and it is never a decline.
  *  - **issuer** — the delivery PROVES the issuer (a trusted admin relays any issuer's; a peer must be the issuer) and the
  *    issuer governs the target's author (`tombstoneGoverns`: the same instance, or either side unknown). The rule as it
- *    was.
+ *    was — except that a FILE row arriving bytes created has no author to govern (`fileTargetOf`, Q-405).
  *  - **upstream** — on a DIRECTIONAL network (pub/sub, braintree) the deliverer is this space's direct upstream and the
  *    stored `deliveredBy` stamp of the target IS that deliverer, whoever wrote it, and it was not written HERE. That is
  *    the owner's ruling D-14: what an upstream relayed, it may delete downstream. This instance's own records and every
@@ -109,6 +109,33 @@ export function deliveryOf(cfg: Config, localSpaceId: string, auth: DeliveryAuth
  */
 export function deliveryOfMember(localSpaceId: string, member: { instanceId: string }): Delivery {
   return deliveryOf(getConfig(), localSpaceId, { peerInstanceId: member.instanceId });
+}
+
+/** What `fileTargetOf` reads of a held file row. */
+export interface HeldFileRow extends DeletionTarget {
+  seq?: number;
+}
+
+/**
+ * The row of a FILE as the deletion authority reads it: a placeholder that arriving bytes created has no author (bundle-71, Q-405).
+ *
+ * Bytes land before their metadata when a peer R delivers a file's bytes, and `recordArrivedFile` creates the row as a
+ * placeholder: seq 0, `author` = R (the deliverer, by lack of anyone else), nothing authored in it. Read as R's, the
+ * file's origin O could never delete it — O's tombstone was declined `not_author` and, being declined, not stored either, so
+ * the file stayed here for ever and nothing relayed its deletion on. A placeholder is recognised by what it holds: version 0
+ * and an author that is only the deliverer. Such a row is returned WITHOUT its author, which `tombstoneGoverns` already
+ * governs (an author-less row is deleted by whoever proves they issued the tombstone). The row stays protected the moment
+ * anything authors it: metadata lands at a seq above 0 (or at 0 from an author who is not the deliverer), and then its author
+ * counts as before.
+ *
+ * Files only. A record is never written as a placeholder, so `authorises` over a record keeps reading its author (D-14).
+ * Passing a record here would hand its author's protection to whoever proves the issuer; the caller is the file apply.
+ */
+export function fileTargetOf<R extends HeldFileRow>(row: R): R {
+  const author = row.author?.instanceId;
+  if (row.seq !== 0 || author === undefined || author === '' || author !== row.deliveredBy) return row;
+  const { author: _placeholderAuthor, ...authorless } = row;
+  return authorless as R;
 }
 
 /**

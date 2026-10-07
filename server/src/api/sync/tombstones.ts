@@ -198,7 +198,10 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
  * At most `MAX_TOMBSTONES_PER_REQUEST` per request (the record route's cap, one constant), refused whole before anything is
  * read; an honest sender pages at `FILE_TOMBSTONE_PAGE`. The answer is counts: `applied` (admitted by shape and path),
  * `refused` (a malformed element, each on its own) and `declined` (the deletion authority did not honour it; absent when
- * none). A `200` acknowledges the page — a declined element would be declined again, so the sender may prune it.
+ * none). A `200` acknowledges the page — a declined element would be declined again, so the sender may prune it. That holds
+ * because the authority reads a row by what it holds: a row that ARRIVING BYTES created (seq 0, authored only by whoever
+ * delivered them — `recordArrivedFile`'s placeholder) is authorless to it (`fileTargetOf`), so the file's origin deleting
+ * what a peer delivered first is applied, never declined; what is declined is a row somebody authored.
  */
 syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
