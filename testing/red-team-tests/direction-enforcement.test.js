@@ -10,6 +10,9 @@
  * peer token (with peerInstanceId) and then verifies every inbound write
  * endpoint rejects the push-only peer.
  *
+ * The last block (bundle-51, D-14 C) holds the same line for DELETIONS on a braintree: the instance above may delete
+ * what it relayed, and nothing below it may send a tombstone up, whoever it names as the issuer.
+ *
  * Run: node --test testing/red-team-tests/direction-enforcement.test.js
  */
 
@@ -19,7 +22,7 @@ import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, createTestSpace, getInstanceId, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -335,6 +338,115 @@ describe('S10: non-peer user PATs are refused on sync data writes', () => {
       `/api/sync/batch-upsert?spaceId=general&networkId=${closedNetworkId}`,
       { facts: [{ _id: crypto.randomUUID(), fact: `s10 peer positive control ${Date.now()}`, seq: 1 }] },
     );
+    assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Bundle-51 (D-14 C): on a braintree, a deletion travels DOWN. A child that
+// sends a tombstone to its parent is refused, and so is a sibling — two
+// children of the same parent are strangers to each other. The refusal does not
+// depend on who the tombstone says issued it: the child is refused when it names
+// itself, the other child, or the parent, and what it targets survives.
+//
+// A is the root here (a handshake admits a child at once only on the root), which
+// is the instance whose door is knocked on; the "upstream may delete what it
+// relayed" half is a behaviour of a receiving node and is held by the sync suite
+// (`braintree.test.js`) and the standalone door tests, not here.
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('Braintree: a child and a sibling cannot send tombstones up to their parent', () => {
+  let space;
+  let btNetworkId;
+  let rootId;
+  const peers = {};       // { child: { token, instanceId }, sibling: { token, instanceId } }
+  const victims = {};     // record id by AUTHOR: the child, the sibling and the root
+  const FILE = `bt-direction-${Date.now()}.md`;
+
+  /** A fact stored on A by A's admin through the sync door, which keeps the author it is given. */
+  async function plantFactAuthoredBy(instanceId, label) {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const r = await post(INSTANCES.a, adminToken, `/api/sync/batch-upsert?spaceId=${space.id}`, {
+      facts: [{ _id: id, spaceId: space.id, fact: `bt-direction victim authored by ${label}`, tags: [],
+        author: { instanceId, instanceLabel: label }, createdAt: now, updatedAt: now, seq: 5 }],
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body?.facts?.inserted, 1, `the fixture record was not stored: ${JSON.stringify(r.body)}`);
+    return id;
+  }
+
+  const fileStatus = async () => (await fetch(`${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(FILE)}`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  })).status;
+
+  before(async () => {
+    adminToken = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    rootId = getInstanceId('ythril-a');
+    space = await createTestSpace('bt-direction', [[INSTANCES.a, adminToken]]);
+
+    const n = await post(INSTANCES.a, adminToken, '/api/networks', {
+      label: `BT Direction ${Date.now()}`, type: 'braintree', spaces: [space.id], votingDeadlineHours: 1,
+    });
+    assert.equal(n.status, 201, JSON.stringify(n.body));
+    btNetworkId = n.body.id;
+
+    // Two children of the root, each admitted by the real handshake: each holds a token bound to its own id.
+    peers.child = await doHandshake(adminToken, btNetworkId, 'Red-Team BT Child');
+    peers.sibling = await doHandshake(adminToken, btNetworkId, 'Red-Team BT Sibling');
+    const members = (await get(INSTANCES.a, adminToken, `/api/networks/${btNetworkId}`)).body?.members ?? [];
+    for (const [who, peer] of Object.entries(peers)) {
+      assert.equal(members.find(m => m.instanceId === peer.instanceId)?.direction, 'push', `the ${who} must be a push-only member`);
+    }
+
+    victims.child = await plantFactAuthoredBy(peers.child.instanceId, 'the child');
+    victims.sibling = await plantFactAuthoredBy(peers.sibling.instanceId, 'the sibling');
+    victims.root = await plantFactAuthoredBy(rootId, 'the root');
+    const w = await fetch(`${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(FILE)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ content: 'bt-direction file that no tombstone from below may delete', encoding: 'utf8' }),
+    });
+    assert.ok(w.status < 300, `fixture file: ${w.status}`);
+    assert.equal(await fileStatus(), 200, 'the fixture file must be readable before the attempts');
+  });
+
+  after(async () => {
+    if (btNetworkId) await del(INSTANCES.a, adminToken, `/api/networks/${btNetworkId}`).catch(() => {});
+    await space?.remove();
+  });
+
+  for (const who of ['child', 'sibling']) {
+    it(`a ${who} sending record tombstones up is refused whoever it names as the issuer, and nothing is deleted`, async () => {
+      const peer = peers[who];
+      // One tombstone per author that exists in the tree — the child, the sibling, the root — each claiming that author
+      // as its issuer, so the set covers a peer naming itself, its sibling and its parent.
+      const tombstones = Object.entries(victims).map(([author, id], i) => ({
+        _id: id, type: 'fact', spaceId: space.id, deletedAt: new Date().toISOString(),
+        instanceId: author === 'root' ? rootId : peers[author].instanceId, seq: Date.now() + 1_000_000 + i,
+      }));
+      assert.ok(tombstones.length >= 3, 'the attempt must name an issuer of each kind');
+      const r = await post(INSTANCES.a, peer.token, `/api/sync/tombstones?spaceId=${space.id}&networkId=${btNetworkId}`, { tombstones });
+      assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
+      assert.ok(r.body?.error?.includes('write not permitted'), `Error should be the direction guard: ${r.body?.error}`);
+      for (const [author, id] of Object.entries(victims)) {
+        assert.equal((await readRecord(INSTANCES.a, adminToken, space.id, 'facts', id)).status, 200,
+          `a ${who}'s tombstone deleted the record authored by the ${author}`);
+      }
+    });
+
+    it(`a ${who} sending a file tombstone up is refused, and the file stays`, async () => {
+      const peer = peers[who];
+      const r = await post(INSTANCES.a, peer.token, `/api/sync/file-tombstones?networkId=${btNetworkId}`, {
+        spaceId: space.id,
+        tombstones: [{ _id: crypto.randomUUID(), path: FILE, deletedAt: new Date().toISOString(), issuer: rootId }],
+      });
+      assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
+      assert.equal(await fileStatus(), 200, `a ${who}'s file tombstone deleted the file`);
+    });
+  }
+
+  it('control: the same child can still READ what its parent serves, so the refusals above are the direction guard', async () => {
+    const r = await get(INSTANCES.a, peers.child.token, `/api/sync/tombstones?spaceId=${space.id}&networkId=${btNetworkId}`);
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 });
