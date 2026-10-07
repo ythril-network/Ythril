@@ -35,6 +35,8 @@ import { makeScratchRepo } from './scratch-git-repo.mjs';
 import { buildZip } from './zip-builder.mjs';
 import { jobEntries, loadCi } from './ci-workflow.mjs';
 import { maskClientReport } from '../../scripts/mask-client-report.mjs';
+import { startFakeGithub, FAKE_GH_TOKEN } from './fake-github-actions.mjs';
+import { startFakeYthril } from './fake-ythril-tool-server.mjs';
 
 export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs');
 
@@ -257,8 +259,59 @@ export function githubJobs(...jobs) {
  */
 export function clientArtifact(id, report, { root, attempt = 1, masked = true, entry = 'client.json', extra = [] } = {}) {
   const body = masked ? maskClientReport(report, root) : report;
-  return { id, name: `test-results-client-tests-${attempt}`, zip: buildZip([{ name: entry, data: JSON.stringify(body) }, ...extra]) };
+  return clientArtifactFromEntries(id, [{ name: entry, data: JSON.stringify(body) }, ...extra], { attempt });
 }
+
+/**
+ * The client job's artifact made of raw zip entries (`{ name, data }`), for a test that is about what the recorder does with
+ * an artifact that holds no report, a misplaced one, or one that is not a report. The artifact's name (the job id the
+ * recorder reads from it) is spelled here and in {@link clientArtifact}, which builds on this.
+ */
+export const clientArtifactFromEntries = (id, entries, { attempt = 1 } = {}) => ({ id, name: `test-results-client-tests-${attempt}`, zip: buildZip(entries) });
+
+// ── A scratch world for a test that runs the recorder against the fake Actions API ───────────────────────────────
+
+/**
+ * Stand up the fake Actions API serving `world` (`{ runs, jobsByRun, artifactsByRun }`), a scratch working directory and
+ * the environment that points the script at both, run `body`, and close all of it.
+ *
+ * `body` gets `{ github, work, dir, env }`; `env` carries `extraEnv` too (the run id a `--summary` judges against, say).
+ * `world` may be mutated by the test after this has started it — the fake serves the object it was given.
+ */
+export async function withGithubWorld(world, body, extraEnv = {}) {
+  const github = await startFakeGithub(world);
+  const work = makeWorkdir();
+  const env = { GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN, ...extraEnv };
+  try { return await body({ github, work, dir: work.dir, env }); } finally { await github.close(); work.cleanup(); }
+}
+
+/**
+ * {@link withGithubWorld} with a fake Ythril instance beside it, for a test that records: `env` also holds its URL and
+ * token, and `body` also gets `ythril` and `pass(args = ['--record-ci'])`, one run of the script in the scratch directory.
+ */
+export function withRecordingWorld(world, body) {
+  return withGithubWorld(world, async (ctx) => {
+    const ythril = await startFakeYthril();
+    const env = { ...ctx.env, YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token };
+    const pass = (args = ['--record-ci']) => runTimes(args, { cwd: ctx.dir, env });
+    try { return await body({ ...ctx, env, ythril, pass }); } finally { await ythril.close(); }
+  });
+}
+
+/** The record keys the fake instance holds, sorted. */
+export const keysOf = (ythril) => ythril.store.map(e => e.properties.recordKey).sort();
+
+/** The properties of every record the fake instance holds, by record key. */
+export const propertiesByKey = (ythril) => Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e.properties]));
+
+/** The whole entries the fake instance holds, by suite (a local run holds one entry per suite). */
+export const entriesBySuite = (server) => Object.fromEntries(server.store.map(e => [e.properties.suite, e]));
+
+/** A record's `measurements` text, parsed. */
+export const measurementsOf = (entry) => JSON.parse(entry.properties.measurements);
+
+/** The requests of the fake Actions API, from request `from` on, that fetched an artifact's bytes. */
+export const zipRequests = (github, from) => github.requests.slice(from).filter(q => q.path.startsWith('/blob/') || /\/actions\/artifacts\/\d+\/zip$/.test(q.path));
 
 /** Write `<dir>/test-results/client.json`, where a local run leaves the client's report, and return its path. */
 export function writeClientReport(dir, report) {

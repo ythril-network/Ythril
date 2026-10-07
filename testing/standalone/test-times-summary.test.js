@@ -34,8 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { jsonlFor, makeWorkdir, runTimes, runTimesWithoutPackages, everything, T, githubRun, resultsArtifact, clientArtifact } from '../_shared/test-times-harness.mjs';
+import { jsonlFor, makeWorkdir, withGithubWorld, runTimes, runTimesWithoutPackages, everything, T, githubRun, resultsArtifact, clientArtifact } from '../_shared/test-times-harness.mjs';
 import { buildZip } from '../_shared/zip-builder.mjs';
 import { clientReport } from '../_shared/client-report-fixtures.mjs';
 
@@ -195,11 +194,9 @@ function world({ corrupt = [] } = {}) {
   return { runs, jobsByRun: {}, artifactsByRun };
 }
 
-async function withGithub(opts, body) {
-  const github = await startFakeGithub(world(opts));
-  const work = makeWorkdir();
-  try { return await body({ github, work, env: { GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN, GITHUB_RUN_ID: '2012' } }); } finally { await github.close(); work.cleanup(); }
-}
+/** The judged run is 2012: the baseline must leave it out of its own history. */
+const withJudgedRun = (fake, body) => withGithubWorld(fake, body, { GITHUB_RUN_ID: '2012' });
+const withGithub = (opts, body) => withJudgedRun(world(opts), body);
 
 describe('--summary: the baseline', () => {
   it('flags a file slower than the last ten runs of main, naming file, suite, time and limit', async () => {
@@ -376,11 +373,7 @@ function worldOf({ client = (id) => clientArtifact(9500 + id, usualClient(), { r
   return { runs, jobsByRun: {}, artifactsByRun };
 }
 
-async function withBaseline(opts, body) {
-  const github = await startFakeGithub(worldOf(opts));
-  const work = makeWorkdir();
-  try { return await body({ github, work, env: { GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN, GITHUB_RUN_ID: '2012' } }); } finally { await github.close(); work.cleanup(); }
-}
+const withBaseline = (opts, body) => withJudgedRun(worldOf(opts), body);
 
 describe('--summary: the baseline reads the client like any suite', () => {
   it('flags a client file and suite slower than the last runs of main, naming the suite', async () => {

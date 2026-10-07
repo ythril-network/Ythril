@@ -50,6 +50,19 @@ export function parseSource(file, text) {
 export const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
 /**
+ * The expression under any parentheses, `!`, `as`, `satisfies` and `await`.
+ *
+ * The one list of wrappers that do not change what an expression IS: the delay-promise reader (`timer-sites.mjs`) and the
+ * name readers (`standalone/_expression-names.mjs`) each wrote their own, and the shorter one stopped seeing a call the
+ * moment someone wrote it the other way. A new wrapper (`satisfies` was the last) is added here once.
+ */
+export function unwrapExpression(e) {
+  while (e && (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
+    || ts.isSatisfiesExpression(e) || ts.isAwaitExpression(e))) e = e.expression;
+  return e;
+}
+
+/**
  * Visit `node` and what it holds, NOT entering a nested function: a `return` inside a callback ends the
  * callback, never the test that contains it. `visit` returns `true` to stop and say "found".
  *

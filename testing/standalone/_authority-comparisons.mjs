@@ -16,8 +16,8 @@
  * Reading the tree makes a comment impossible to match; a table in the gate that uses it holds the shapes it must and
  * must not flag, so the detector is itself seen red.
  */
-import { parseSource, lineOf, ts } from '../_shared/syntax-tree.mjs';
-import { unwrapExpression, lastName } from './_expression-names.mjs';
+import { parseSource, lineOf, ts, unwrapExpression } from '../_shared/syntax-tree.mjs';
+import { lastName } from './_expression-names.mjs';
 
 const PARTY = [
   ['ISSUER', /^issuer$/],

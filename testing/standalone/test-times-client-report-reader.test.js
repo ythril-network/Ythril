@@ -39,7 +39,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as reader from '../../scripts/_shared/client-results.mjs';
-import { clientReport, clientReportNames } from '../_shared/client-report-fixtures.mjs';
+import { clientReport, clientReportNames, HOSTILE_TIMES, hostileReportText } from '../_shared/client-report-fixtures.mjs';
 
 const ROOT = '/work/Ythril';
 const START = Date.UTC(2026, 9, 7, 12, 0, 0);
@@ -151,29 +151,22 @@ describe('parseClientReport: a missing time is zero, a hostile one is refused or
   });
 
   const HOSTILE = [
-    ['a negative duration', (r) => { r.testResults[0].assertionResults[0].duration = -5; }],
-    ['an infinite duration', (r) => { r.testResults[0].assertionResults[0].duration = '__INFINITY__'; }],
-    ['a duration that is a string', (r) => { r.testResults[0].assertionResults[0].duration = '12'; }],
+    ...HOSTILE_TIMES,
     ['a duration that is not a number', (r) => { r.testResults[0].assertionResults[0].duration = 'NaN'; }],
     ['a duration that is a boolean', (r) => { r.testResults[0].assertionResults[0].duration = true; }],
     ['a duration that is an object', (r) => { r.testResults[0].assertionResults[0].duration = { valueOf: 1 }; }],
-    ['a file start past the range of a Date', (r) => { r.testResults[0].startTime = 8.64e15 + 1; }],
     ['a file end before the range of a Date', (r) => { r.testResults[0].endTime = -8.64e15 - 1; }],
-    ['an infinite file end', (r) => { r.testResults[0].endTime = '__INFINITY__'; }],
-    ['a report start past the range of a Date', (r) => { r.startTime = 8.64e15 + 1; }],
     ['a report start that is a string', (r) => { r.startTime = String(r.startTime); }],
   ];
-  // JSON cannot say Infinity; a producer that wrote 1e999 did, and JSON.parse reads it back as Infinity.
-  const asText = (r) => text(r).replaceAll('"__INFINITY__"', '1e999');
 
   for (const [what, mutate] of HOSTILE) {
     it(`${what}: ignored as 0 when times are not strict, refused when they are`, () => {
       const r = report('passed');
       mutate(r);
-      const lax = parse(asText(r), { strictTimes: false });
+      const lax = parse(hostileReportText(r), { strictTimes: false });
       finiteMs(lax, what);
       assert.deepEqual(countsOf(lax), countsOf(withCounts({ tests: 3, passed: 3 })), `${what}: the counts do not depend on a timing`);
-      const refused = refusalOf(() => parse(asText(r), { strictTimes: true }));
+      const refused = refusalOf(() => parse(hostileReportText(r), { strictTimes: true }));
       assert.ok(refused, `${what}: a strict read must refuse it`);
       assert.ok(!(refused instanceof RangeError), `${what}: refused as ${refused.name}, not as an out-of-range Date`);
     });

@@ -29,8 +29,13 @@ export const MAX_MEASUREMENTS_CHARS = 400_000;
 /** How many of a suite's slowest tests a record names. */
 export const SLOWEST_KEPT = 20;
 
-/** A count or a time as the records hold one: a finite number that is not negative. */
-export const isCount = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+/**
+ * A count or a time as the records hold one: a finite number that is not negative, and not past `max` when one is given
+ * (a client report's epoch and duration are bounded by the last millisecond a four-digit ISO date holds).
+ *
+ * The one bounded-number predicate for a figure from outside: a count, a duration and an epoch were three spellings of it.
+ */
+export const isCount = (n, { max = Infinity } = {}) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
 
 /** A test file's path as stored: repo-relative with forward slashes; an absolute path outside the repo is masked. */
 export function storedPath(file, root) {

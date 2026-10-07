@@ -91,8 +91,25 @@ export function reportSpan(report) {
   return { startMs: report.startTime, endMs: Math.max(report.startTime, ...ends) };
 }
 
-/** What a report says its spec files are, in the order it lists them. */
-export const specNames = (report) => report.testResults.map(f => f.name);
+/**
+ * The timing anomalies a report from outside can carry, as `[what, mutate(report)]` rows, held identically by the reader
+ * (`parseClientReport`) and the recorder that reads through it. A duration or a time that is negative, infinite, not a number, or
+ * past what a `Date` holds is IGNORED by a gate reader and refused by a strict one, and never reaches a figure. `'__INFINITY__'`
+ * marks an infinite number: JSON cannot say it, so {@link hostileReportText} writes it the way a producer that wrote `1e999` did.
+ *
+ * Each suite appends the rows only it can say (a duration that is a boolean, a file that ends before it starts).
+ */
+export const HOSTILE_TIMES = [
+  ['a negative duration', (r) => { r.testResults[0].assertionResults[0].duration = -5; }],
+  ['an infinite duration', (r) => { r.testResults[0].assertionResults[0].duration = '__INFINITY__'; }],
+  ['a duration that is a string', (r) => { r.testResults[0].assertionResults[0].duration = '12'; }],
+  ['a file start past the range of a Date', (r) => { r.testResults[0].startTime = 8.64e15 + 1; }],
+  ['a report start past the range of a Date', (r) => { r.startTime = 8.64e15 + 1; }],
+  ['an infinite file end', (r) => { r.testResults[0].endTime = '__INFINITY__'; }],
+];
+
+/** A report as the text a producer would write, with every `'__INFINITY__'` of {@link HOSTILE_TIMES} an infinite number. */
+export const hostileReportText = (report) => JSON.stringify(report).replaceAll('"__INFINITY__"', '1e999');
 
 /** The spec files fixture `name` ran, repo-relative (what the checkout that produced it tracked): to be committed into a scratch repository. */
 export const specPaths = (name) => rawClientReport(name).testResults.map(f => {

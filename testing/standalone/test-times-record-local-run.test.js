@@ -51,7 +51,7 @@ import { join } from 'node:path';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
 import { closedLoopbackPort } from '../_shared/closed-port.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
-import { makeWorkdir, writeResults, runTimes, spawnTimes, everything, T } from '../_shared/test-times-harness.mjs';
+import { makeWorkdir, writeResults, runTimes, spawnTimes, everything, entriesBySuite as bySuite, T } from '../_shared/test-times-harness.mjs';
 
 const envFor = (server, extra = {}) => ({ YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token, ...extra });
 const PRIMITIVE = new Set(['string', 'number', 'boolean']);
@@ -88,7 +88,6 @@ const byKey = (server) => {
   for (const e of server.store) { const k = e.properties?.recordKey; map.set(k, [...(map.get(k) ?? []), e]); }
   return map;
 };
-const bySuite = (server) => Object.fromEntries(server.store.map(e => [e.properties.suite, e]));
 
 const findKey = (obj, key) => {
   if (obj === null || typeof obj !== 'object') return undefined;

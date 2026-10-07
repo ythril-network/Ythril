@@ -35,10 +35,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
 import { buildZip } from '../_shared/zip-builder.mjs';
-import { makeWorkdir, runTimes, everything, SHA, T, jsonlFor, githubRun as run, githubJobs, clientArtifact } from '../_shared/test-times-harness.mjs';
+import { withRecordingWorld, keysOf, measurementsOf, zipRequests, everything, SHA, T, jsonlFor, githubRun as run, githubJobs, clientArtifact, clientArtifactFromEntries } from '../_shared/test-times-harness.mjs';
 import { clientReport, reportSpan, specPaths, FAILURE_FIXTURES } from '../_shared/client-report-fixtures.mjs';
 
 const CI_ROOT = '/home/runner/work/Ythril/Ythril';
@@ -65,20 +63,11 @@ function world({ client, nodeExtra = [] }) {
   };
 }
 
-async function withWorld(opts, body) {
-  const github = await startFakeGithub(world(opts));
-  const ythril = await startFakeYthril();
-  const work = makeWorkdir();
-  const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-  const pass = (args = ['--record-ci']) => runTimes(args, { cwd: work.dir, env });
-  try { return await body({ github, ythril, dir: work.dir, env, pass }); } finally { await github.close(); await ythril.close(); work.cleanup(); }
-}
+const withWorld = (opts, body) => withRecordingWorld(world(opts), body);
 
+/** The whole entries (not their properties, as `propertiesByKey` gives) by record key: these tests read `startsAt` and `type` too. */
 const byKey = (ythril) => Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e]));
-const keysOf = (ythril) => ythril.store.map(e => e.properties.recordKey).sort();
-const measurementsOf = (entry) => JSON.parse(entry.properties.measurements);
 const withClient = (name, mutate = () => {}, options = {}) => { const r = ciReport(name); mutate(r); return clientArtifact(7002, r, { root: CI_ROOT, ...options }); };
-const zipRequests = (github, from) => github.requests.slice(from).filter(q => q.path.startsWith('/blob/') || /\/actions\/artifacts\/\d+\/zip$/.test(q.path));
 
 describe('--record-ci records the client job from its own artifact', () => {
   it('writes one record for the client job beside the node job\'s, keyed by the artifact\'s job id, with the report\'s figures', async () => {
@@ -173,7 +162,7 @@ describe('masking is held through this door as well: the same secrets, masked in
 });
 
 describe('an artifact that cannot say what the client did is a problem of that job, said once, never quoting it', () => {
-  const clientArtifactOf = (entries) => ({ id: 7002, name: 'test-results-client-tests-1', zip: buildZip(entries) });
+  const clientArtifactOf = (entries) => clientArtifactFromEntries(7002, entries);
   const PROBLEMS = [
     ['no client.json in it at all', clientArtifactOf([{ name: 'readme.txt', data: 'nothing here' }])],
     ['client.json under a folder, not at the top (an exact entry name is read)', clientArtifactOf([{ name: 'nested/client.json', data: JSON.stringify(ciReport('passed')) }])],

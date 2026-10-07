@@ -471,7 +471,15 @@ function buildPayload({ source, runId, attempt, job, suite, summary, commit, bra
 
 // ---- writing to the instance --------------------------------------------------------------------------------------
 
-const newestFirst = (a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0);
+/**
+ * A comparator that puts the larger value of `field` first (ISO times compare as text). The one newest-first order of this
+ * script's rows: a record's `createdAt`, a run summary's `startsAt`. Its ascending twin is the same comparator with its
+ * arguments swapped, never a second spelling of the comparison.
+ */
+const newestBy = (field) => (a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0);
+
+const newestFirst = newestBy('createdAt');
+const newestStartFirst = newestBy('startsAt');
 
 /** The entries holding `key`, newest first. The server's predicate is not trusted: a row that lacks the key is not one. */
 async function findByKey(api, key) {
@@ -581,8 +589,15 @@ function destination() {
   try { return { api: createYthrilApi({ url, token }), shownUrl: url.replace(/\/+$/, '') }; } catch (err) { return { why: err.message }; }
 }
 
+/**
+ * The first line of what a thrown value says (or of a string): the one way this script puts a failure on a line. Not the
+ * timing reporter's `firstLine`, which takes a test's message and masks and caps it; this one reads a caught `err`, and its
+ * callers hand it errors this script built or a library's, never a test's text.
+ */
+const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
+
 /** The one-line reason a call failed, naming the status and the instance, never a secret. */
-const whyOf = (err, shownUrl) => (err instanceof YthrilApiError && err.status !== undefined ? `${err.status} from ${shownUrl}` : String(err?.message ?? err).split('\n')[0]);
+const whyOf = (err, shownUrl) => (err instanceof YthrilApiError && err.status !== undefined ? `${err.status} from ${shownUrl}` : firstLine(err));
 
 /** A failure that every later call would repeat: the instance is not there, or it refuses this token. */
 const stopsEverything = (err) => !(err instanceof YthrilApiError) || err.status === undefined || err.status === 401 || err.status === 403;
@@ -661,7 +676,6 @@ function localPayloads() {
   }
 
   const payloads = [];
-  const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
   for (const [suite, items] of bySuite) {
     try {
       const summary = summariseSuite({ texts: items.map(i => i.text), root });
@@ -686,7 +700,7 @@ async function recordLocal() {
   const refused = refuseUnderCi('--record');
   if (refused) return refused;
   let found;
-  try { found = localPayloads(); } catch (err) { console.log(`test-times: not recorded: ${String(err.message).split('\n')[0]}`); return 0; }
+  try { found = localPayloads(); } catch (err) { console.log(`test-times: not recorded: ${firstLine(err)}`); return 0; }
   sayProblems(found.problems);
   if (!found.payloads.length && !found.problems.length) console.log(`test-times: nothing to record: no test-results/*.jsonl or ${CLIENT_RESULTS}`);
   return recordPayloads(found.payloads);
@@ -697,7 +711,7 @@ async function recordPayloads(payloads) {
   const dest = destination();
   let locked;
   try { locked = await recordUnderLock(payloads, dest); } catch (err) {
-    console.log(`test-times: not recorded: ${String(err?.message ?? err).split('\n')[0]}`);
+    console.log(`test-times: not recorded: ${firstLine(err)}`);
     return 0;
   }
   if (locked === null) for (const p of payloads) keepPayload(p, 'another recorder holds test-results/.record.lock');
@@ -778,6 +792,16 @@ function githubClient() {
 const outcomeOfConclusion = (c) => (c === 'success' ? 'passed' : c === 'failure' || c === 'timed_out' ? 'failed' : c === 'cancelled' ? 'cancelled' : 'incomplete');
 const runIdOf = (run) => (Number.isSafeInteger(run.id) && run.id > 0 ? run.id : null);
 const startedOf = (run) => isoOrNull(run.run_started_at) ?? isoOrNull(run.created_at);
+
+/**
+ * The client's report among the entries of the client job's artifact, or undefined. Found by its exact entry name and
+ * nowhere else: a `client.json` in another job's artifact (a merged folder, a stranger's upload) is not a client run, and
+ * neither is one under a folder. The caller asks it of the client job's artifact only.
+ */
+const clientReportIn = (entries) => entries.find(e => e.name === CLIENT_RESULTS);
+
+/** Workflow runs, newest start first; two starting together, the higher run id first. */
+const newestRunFirst = (a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id);
 const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
 
 /**
@@ -871,14 +895,12 @@ async function ciPayloads(gh, run, have = new Set()) {
       payloads.push(buildPayload({ ...common, attempt: found.attempt, job, suite, summary, wallMs: wallOf(summary) }));
     }
     if (job === CLIENT_JOB) {
-      // Read from this job's artifact by its exact entry name, and nowhere else: a `client.json` in another job's artifact (a
-      // merged folder, a stranger's upload) is not a client run, and neither is one under a folder.
-      const entry = entries.find(e => e.name === CLIENT_RESULTS);
+      const entry = clientReportIn(entries);
       if (!entry) { problems.push({ text: `${job}: ${CLIENT_RESULTS} is not in the artifact, so the client's run is not recorded`, persistent: true }); continue; }
       try {
         const summary = summariseClient({ report: parseClientReport(entry.data.toString('utf8'), { strictTimes: true }), root: process.cwd() });
         payloads.push(buildPayload({ ...common, attempt: found.attempt, job, suite: 'client', summary, wallMs: wallOf(summary) }));
-      } catch (err) { problems.push({ text: `${job}: ${CLIENT_RESULTS} cannot be read (${String(err?.message ?? err).split('\n')[0]}), so the client's run is not recorded`, persistent: true }); }
+      } catch (err) { problems.push({ text: `${job}: ${CLIENT_RESULTS} cannot be read (${firstLine(err)}), so the client's run is not recorded`, persistent: true }); }
     }
   }
 
@@ -916,7 +938,7 @@ async function recordCi({ rewriteKey } = {}) {
       collected.push(...batch);
       if (rewriteKey ? collected.some(r => String(r.id) === parts.runId) : collected.length >= BACKFILL_RUNS) break;
     }
-    const newest = collected.sort((a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id));
+    const newest = collected.sort(newestRunFirst);
     const runs = rewriteKey ? newest.filter(r => String(r.id) === parts.runId) : newest.slice(0, BACKFILL_RUNS);
     if (rewriteKey && !runs.length) { console.error(`test-times: run ${parts.runId} is not among the completed pushes to main of ${REPO} from ci.yml; nothing rewritten`); exit = 1; return; }
 
@@ -964,7 +986,7 @@ async function rewriteLocal(key) {
   const refused = refuseUnderCi('--rewrite');
   if (refused) return refused;
   let found;
-  try { found = localPayloads(); } catch (err) { console.error(`test-times: ${String(err.message).split('\n')[0]}`); return 1; }
+  try { found = localPayloads(); } catch (err) { console.error(`test-times: ${firstLine(err)}`); return 1; }
   sayProblems(found.problems);
   const mine = found.payloads.filter(p => p.properties.recordKey === key);
   if (!mine.length) { console.error('test-times: no result in test-results/ has that record key'); return 1; }
@@ -987,7 +1009,7 @@ const qualifies = (r, suite) => {
 /** The newest {@link BASELINE_RUNS} runs that qualify for `suite`, the judged run left out of its own baseline. */
 function baselineOf(judged, history, suite) {
   return history.filter(r => qualifies(r, suite)).filter(r => r.runId !== judged.runId)
-    .sort((a, b) => (a.startsAt < b.startsAt ? 1 : a.startsAt > b.startsAt ? -1 : 0)).slice(0, BASELINE_RUNS);
+    .sort(newestStartFirst).slice(0, BASELINE_RUNS);
 }
 
 const p90 = (values) => { const s = [...values].sort((a, b) => a - b); return s[Math.ceil(0.9 * s.length) - 1]; };
@@ -1050,9 +1072,9 @@ async function trendRows(api, { dir, limit, suite, except = [] }) {
   const rows = answer?.data?.results;
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
   // The server's order and page size are asked for and checked again, like its predicate.
-  const sign = dir === 'asc' ? 1 : -1;
+  const order = dir === 'asc' ? (a, b) => newestStartFirst(b, a) : newestStartFirst;
   return rows.filter(isTrendRow).filter(r => (suite === undefined || r.properties.suite === suite) && !except.includes(r.properties.suite))
-    .sort((a, b) => sign * (a.startsAt < b.startsAt ? -1 : a.startsAt > b.startsAt ? 1 : 0)).slice(0, limit);
+    .sort(order).slice(0, limit);
 }
 
 /** The most suites one `--trend` will discover: a bound on a walk whose server may ignore what it is asked. */
@@ -1074,8 +1096,6 @@ async function trendRowsPerSuite(api, limit) {
   }
   return rows.sort(newestStartFirst);
 }
-
-const newestStartFirst = (a, b) => (a.startsAt < b.startsAt ? 1 : a.startsAt > b.startsAt ? -1 : 0);
 
 /** A record's per-file times, fetched on their own (the listing never carries `measurements`). */
 async function filesOf(api, row) {
@@ -1177,7 +1197,7 @@ const clientFigures = (report, root) => figuresOf('client', summariseClient({ re
 const baselineSuite = (s) => [s.suite, { ms: s.ms, scope: s.scope, outcome: s.outcome, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }];
 
 /** A GitHub Actions annotation: one line of its own, so the run page shows it. */
-const annotate = (what, message) => `::warning title=${what}::${String(message).split('\n')[0].replace(/[\r%]/g, ' ')}`;
+const annotate = (what, message) => `::warning title=${what}::${firstLine(message).replace(/[\r%]/g, ' ')}`;
 
 /**
  * Files and suites slower than the last {@link SUMMARY_BASELINE_RUNS} trusted, successful runs of main, read from their
@@ -1200,7 +1220,7 @@ async function summaryBaseline(figures) {
     const listed = await gh.json(`/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100`);
     const runs = trustedRuns(listed?.workflow_runs ?? [])
       .filter(r => r.status === 'completed' && r.conclusion === 'success' && String(r.id) !== currentId && runIdOf(r) && startedOf(r))
-      .sort((a, b) => (startedOf(b) ?? '').localeCompare(startedOf(a) ?? '') || Number(b.id) - Number(a.id))
+      .sort(newestRunFirst)
       .slice(0, SUMMARY_BASELINE_RUNS);
     for (const run of runs) {
       if (Date.now() > deadline) { warnings.push(annotate('baseline', `the time budget (${seconds(SUMMARY_BASELINE_BUDGET_MS)}) ended before run ${run.id}; the remaining runs were not read`)); break; }
@@ -1210,10 +1230,11 @@ async function summaryBaseline(figures) {
         let clientText = null;
         for (const [job, found] of latestResultArtifacts(artifacts, run)) {
           if (Number.isFinite(found.size) && found.size > SUMMARY_ARTIFACT_CAP) throw new Error(`${job}: the artifact is larger than ${SUMMARY_ARTIFACT_CAP} bytes`);
-          for (const e of parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`))) {
+          const entries = parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`));
+          for (const e of entries) {
             if (e.name.endsWith('.jsonl')) results.push({ name: e.name.split('/').at(-1), text: e.data.toString('utf8') });
-            else if (job === CLIENT_JOB && e.name === CLIENT_RESULTS) clientText = e.data.toString('utf8');
           }
+          if (job === CLIENT_JOB) clientText = clientReportIn(entries)?.data.toString('utf8') ?? clientText;
         }
         const suites = suitesOf(results, process.cwd());
         // Each suite is read on its own: a run that never had a client report says nothing about it, and one whose report cannot
@@ -1224,11 +1245,11 @@ async function summaryBaseline(figures) {
         if (!suites.length) continue;
         history.push({ runId: String(run.id), startsAt: startedOf(run), branch: 'main', suites: Object.fromEntries(suites.map(baselineSuite)) });
       } catch (err) {
-        warnings.push(annotate('baseline', `run ${run.id} was not read: ${String(err?.message ?? err).split('\n')[0]}`));
+        warnings.push(annotate('baseline', `run ${run.id} was not read: ${firstLine(err)}`));
       }
     }
   } catch (err) {
-    warnings.push(annotate('baseline', `the last runs of main could not be listed: ${String(err?.message ?? err).split('\n')[0]}`));
+    warnings.push(annotate('baseline', `the last runs of main could not be listed: ${firstLine(err)}`));
     return { lines: ['baseline not read: GitHub could not be reached (see the warning), the figures above stand alone'], warnings };
   }
   if (!history.length) return { lines: ['no baseline: none of the last runs of main left results that could be read'], warnings };
@@ -1256,7 +1277,7 @@ async function summarise({ results }) {
   let clientNote = '';
   try {
     figures.push(clientFigures(readClientReport(dir), process.cwd()));
-  } catch (err) { clientNote = String(err?.message ?? err).split('\n')[0]; }
+  } catch (err) { clientNote = firstLine(err); }
 
   const { lines, warnings } = await summaryBaseline(figures);
   const markdown = renderRunSummary({ suites: figures, clientNote, baseline: lines });
@@ -1325,5 +1346,5 @@ async function main(argv) {
 }
 
 if (isEntryPoint(import.meta.url)) {
-  process.exitCode = await main(process.argv.slice(2)).catch((err) => { console.error(`test-times: ${String(err?.message ?? err).split('\n')[0]}`); return 1; });
+  process.exitCode = await main(process.argv.slice(2)).catch((err) => { console.error(`test-times: ${firstLine(err)}`); return 1; });
 }

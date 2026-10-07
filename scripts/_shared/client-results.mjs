@@ -42,6 +42,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from '../../testing/standalone/_sources.mjs';
 import { repoRelative, slashPath } from './repo-path.mjs';
+import { isCount } from './measurements.mjs';
 
 /** The client's report inside the results folder: written by the client's test run (CI's client job, preflight), downloaded beside the node results. */
 export const CLIENT_RESULTS = 'client.json';
@@ -57,8 +58,8 @@ const UNNAMED_SPEC = '(unnamed spec)';
 /** The last millisecond of year 9999: a time a four-digit ISO date holds, which is what a record's `startsAt` is. (`Date` itself holds far more, and `Invalid time value` is what it says past that.) */
 const LAST_EPOCH_MS = 253_402_300_799_999;
 
-const isEpoch = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= LAST_EPOCH_MS;
-const isDuration = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= LAST_EPOCH_MS;
+/** An epoch or a duration out of a report: a count no larger than the last millisecond a record's date holds. */
+const isTime = (n) => isCount(n, { max: LAST_EPOCH_MS });
 
 /** vitest's status as the counter it moves; a status not listed here (`pending`, `run`, `queued`, `only`, an unknown one) reached no verdict. */
 const KIND = new Map([['passed', 'passed'], ['failed', 'failed'], ['skipped', 'skipped'], ['disabled', 'skipped'], ['todo', 'todo']]);
@@ -97,7 +98,7 @@ export function parseClientReport(text, { strictTimes = false } = {}) {
   if (report === null || typeof report !== 'object' || !Array.isArray(report.testResults)) {
     throw new Error('the client report is not a vitest JSON report (no testResults array)');
   }
-  const startMs = timing(report.startTime, isEpoch, 'a start time', strictTimes);
+  const startMs = timing(report.startTime, isTime, 'a start time', strictTimes);
   if (strictTimes && startMs === undefined) throw new Error('the client report has no start time');
 
   const counts = { tests: 0, passed: 0, failed: 0, skipped: 0, todo: 0, pending: 0 };
@@ -109,7 +110,7 @@ export function parseClientReport(text, { strictTimes = false } = {}) {
       const status = typeof t?.status === 'string' ? t.status : '';
       return {
         name: String(t?.fullName ?? t?.title ?? '(unnamed test)'), kind: KIND.get(status) ?? 'pending', status,
-        ms: timing(t?.duration, isDuration, 'a test duration', strictTimes) ?? 0, message: firstString(t?.failureMessages), whole: false,
+        ms: timing(t?.duration, isTime, 'a test duration', strictTimes) ?? 0, message: firstString(t?.failureMessages), whole: false,
       };
     });
     // A file that failed without a failed assertion (it never collected, a hook threw) is one failure of its own, once.
@@ -119,8 +120,8 @@ export function parseClientReport(text, { strictTimes = false } = {}) {
     }
     for (const t of tests) { counts.tests++; counts[t.kind]++; }
 
-    const fileStart = timing(entry?.startTime, isEpoch, 'a file start time', strictTimes);
-    const fileEnd = timing(entry?.endTime, isEpoch, 'a file end time', strictTimes);
+    const fileStart = timing(entry?.startTime, isTime, 'a file start time', strictTimes);
+    const fileEnd = timing(entry?.endTime, isTime, 'a file end time', strictTimes);
     if (fileEnd !== undefined && (lastEnd === undefined || fileEnd > lastEnd)) lastEnd = fileEnd;
     files.push({
       file: typeof entry?.name === 'string' && entry.name !== '' ? entry.name : UNNAMED_SPEC,

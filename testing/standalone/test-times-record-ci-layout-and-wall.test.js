@@ -25,9 +25,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { makeWorkdir, runTimes, everything, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact, clientArtifact } from '../_shared/test-times-harness.mjs';
+import { withRecordingWorld, propertiesByKey, everything, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact, clientArtifact } from '../_shared/test-times-harness.mjs';
 import { clientReport, reportSpan } from '../_shared/client-report-fixtures.mjs';
 
 const CI_ROOT = '/home/runner/work/Ythril/Ythril';
@@ -69,17 +67,11 @@ function world() {
   };
 }
 
-async function withWorld(body) {
-  const github = await startFakeGithub(world());
-  const ythril = await startFakeYthril();
-  const work = makeWorkdir();
-  const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-  try {
-    const r = await runTimes(['--record-ci'], { cwd: work.dir, env });
-    const records = Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e.properties]));
-    return await body({ r, records, github, ythril });
-  } finally { await github.close(); await ythril.close(); work.cleanup(); }
-}
+/** One `--record-ci` pass over the world; `body` reads what it recorded. */
+const withWorld = (body) => withRecordingWorld(world(), async ({ github, ythril, pass }) => {
+  const r = await pass();
+  return body({ r, records: propertiesByKey(ythril), github, ythril });
+});
 
 describe('the fakes answer what GitHub answers', () => {
   it('names every job by its display name, never by the id an artifact name carries', () => {

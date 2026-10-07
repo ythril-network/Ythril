@@ -44,8 +44,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { makeWorkdir, writeResults, writeClientReport, runTimes, everything, T } from '../_shared/test-times-harness.mjs';
-import { clientReport, reportSpan, specPaths, FAILURE_FIXTURES } from '../_shared/client-report-fixtures.mjs';
+import { makeWorkdir, writeResults, writeClientReport, runTimes, everything, measurementsOf, entriesBySuite, T } from '../_shared/test-times-harness.mjs';
+import { clientReport, reportSpan, specPaths, FAILURE_FIXTURES, HOSTILE_TIMES, hostileReportText } from '../_shared/client-report-fixtures.mjs';
 
 const envFor = (server, extra = {}) => ({ YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token, ...extra });
 const PRIMITIVE = new Set(['string', 'number', 'boolean']);
@@ -65,9 +65,7 @@ async function withClientRun({ tracked = [], extra = [], git = {} } = {}, body) 
 }
 
 const nodeFiles = (dir) => writeResults(dir, { suite: 'standalone', batch: 'pure', files: [{ file: A, ms: 1000, tests: [T('t1', 1)] }] });
-const records = (server) => Object.fromEntries(server.store.map(e => [e.properties.suite, e]));
-const clientRecord = (server) => records(server).client;
-const measurementsOf = (entry) => JSON.parse(entry.properties.measurements);
+const clientRecord = (server) => entriesBySuite(server).client;
 const clientLines = (r) => everything(r).split(/\r?\n/).filter(l => /client/i.test(l));
 
 /** What the plan says a record's times are, read off the report. */
@@ -329,14 +327,9 @@ describe('what the client\'s report says is masked on the way in, and a hostile 
   });
 
   const HOSTILE = [
-    ['a negative duration', (r) => { r.testResults[0].assertionResults[0].duration = -5; }],
-    ['an infinite duration', (r) => { r.testResults[0].assertionResults[0].duration = '__INFINITY__'; }],
-    ['a duration that is a string', (r) => { r.testResults[0].assertionResults[0].duration = '12'; }],
+    ...HOSTILE_TIMES,
     ['a file that ends before it starts', (r) => { r.testResults[0].endTime = r.testResults[0].startTime - 10_000; }],
-    ['a file start no Date holds', (r) => { r.testResults[0].startTime = 8.64e15 + 1; }],
-    ['a report start no Date holds', (r) => { r.startTime = 8.64e15 + 1; }],
     ['a report start that is not a number', (r) => { r.startTime = 'yesterday'; }],
-    ['an infinite file end', (r) => { r.testResults[0].endTime = '__INFINITY__'; }],
   ];
   for (const [what, mutate] of HOSTILE) {
     it(`${what}: no crash, and either a record with finite non-negative figures or a named problem`, async () => {
@@ -344,7 +337,7 @@ describe('what the client\'s report says is masked on the way in, and a hostile 
         nodeFiles(dir);
         const r0 = report('passed');
         mutate(r0);
-        writeClientReport(dir, JSON.stringify(r0).replaceAll('"__INFINITY__"', '1e999'));
+        writeClientReport(dir, hostileReportText(r0));
         const r = await runTimes(['--record'], { cwd: dir, env });
         assert.equal(r.code, 0, everything(r));
         assert.doesNotMatch(everything(r), /RangeError|Invalid time value|Invalid Date/, `${what}: an out-of-range epoch reached \`Date\``);

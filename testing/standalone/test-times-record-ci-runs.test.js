@@ -35,9 +35,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { startFakeGithub, FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { makeWorkdir, runTimes, everything, REPO, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
+import { FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
+import { withRecordingWorld, propertiesByKey as records, runTimes, everything, REPO, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
 
 const spec = (suite, batch, file, extra = {}) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }], ...extra });
 
@@ -61,11 +60,10 @@ function world() {
   ];
   // The API names a job by its DISPLAY name (`Prepare`, `Standalone (no services)`), never by the workflow's job id; the ids are
   // read from ci.yml and an older run's job (the one job of the serial workflow) is named as it was.
-  const jobs = (...ids) => githubJobs(...ids);
   const jobsByRun = {
-    1001: jobs('prepare', 'standalone-pure', 'integration', 'test'),
-    1002: jobs('prepare', 'standalone-pure'), 1003: jobs('prepare'), 1004: [{ name: 'release' }], 1005: [{ name: 'Build & Test' }],
-    1006: jobs('prepare', 'standalone-pure'),
+    1001: githubJobs('prepare', 'standalone-pure', 'integration', 'test'),
+    1002: githubJobs('prepare', 'standalone-pure'), 1003: githubJobs('prepare'), 1004: [{ name: 'release' }], 1005: [{ name: 'Build & Test' }],
+    1006: githubJobs('prepare', 'standalone-pure'),
     1007: githubJobs({ name: 'Build & Test' }),
   };
   const artifactsByRun = {
@@ -83,15 +81,7 @@ function world() {
   return { runs, jobsByRun, artifactsByRun };
 }
 
-async function withWorld(body) {
-  const github = await startFakeGithub(world());
-  const ythril = await startFakeYthril();
-  const work = makeWorkdir();
-  const env = { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token, GITHUB_API_URL: github.url, GH_TOKEN: FAKE_GH_TOKEN };
-  try { return await body({ github, ythril, dir: work.dir, env }); } finally { await github.close(); await ythril.close(); work.cleanup(); }
-}
-
-const records = (ythril) => Object.fromEntries(ythril.store.map(e => [e.properties.recordKey, e.properties]));
+const withWorld = (body) => withRecordingWorld(world(), body);
 
 describe('--record-ci', () => {
   it('records each (job, suite) of the trusted runs and nothing of the others', async () => {

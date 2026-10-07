@@ -277,12 +277,15 @@ function aggregateTestScripts(allScripts = packageScripts()) {
   return [...aggregates];
 }
 
+/** The upload steps of one job whose artifact name starts `test-results`: the one filter every rule over the results uploads reads. */
+const resultsUploadsOf = (job) => stepsUsing(job, 'actions/upload-artifact').filter((u) => /^test-results/.test(String(u.with?.name ?? '')));
+
 function oneSuitePerResultsArtifactViolations(doc, scripts = packageScripts()) {
   const v = [];
   const aggregates = aggregateTestScripts(scripts);
   let jobsWithResults = 0;
   for (const { id, job } of jobEntries(doc)) {
-    const uploads = stepsUsing(job, 'actions/upload-artifact').filter((u) => /^test-results/.test(String(u.with?.name ?? '')));
+    const uploads = resultsUploadsOf(job);
     if (uploads.length === 0) continue;
     jobsWithResults++;
     if (uploads.length > 1) v.push(`${id}: ${uploads.length} results artifacts from one job`);
@@ -678,9 +681,8 @@ function uploadNameViolations(doc) {
   const v = [];
   let seen = 0;
   for (const { id, job } of jobEntries(doc)) {
-    for (const s of stepsUsing(job, 'actions/upload-artifact')) {
+    for (const s of resultsUploadsOf(job)) {
       const name = String(s.with?.name ?? '');
-      if (!/^test-results/.test(name)) continue;
       seen++;
       const named = resultsNameJob(name);
       if (named == null) {

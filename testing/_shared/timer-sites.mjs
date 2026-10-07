@@ -39,7 +39,7 @@
  *
  * Syntax only — no type checker. Parsing, locating a node and walking a body are `syntax-tree.mjs`'s.
  */
-import { ts, parseSource, lineOf } from './syntax-tree.mjs';
+import { ts, parseSource, lineOf, unwrapExpression } from './syntax-tree.mjs';
 
 /** Names that are a sleep wherever they are imported from. A same-file function is judged by its body, never by this list. */
 const SLEEP_NAMES = /^(sleep|sleepMs|delay|pause|nap|snooze|wait)$/i;
@@ -61,7 +61,6 @@ const LOOPS = new Set([
 
 const isFunctionNode = (n) => ts.isArrowFunction(n) || ts.isFunctionExpression(n)
   || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
-const unparenthesised = (e) => (ts.isParenthesizedExpression(e) ? unparenthesised(e.expression) : e);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // the marker: the one reader of the comment block above a node
@@ -175,15 +174,15 @@ function isDelayPromise(n, bound) {
   if (ts.isBlock(executor.body)) {
     const [only] = executor.body.statements;
     if (executor.body.statements.length !== 1 || !ts.isExpressionStatement(only)) return false;
-    call = unparenthesised(only.expression);
+    call = unwrapExpression(only.expression);
   } else {
-    call = unparenthesised(executor.body);
+    call = unwrapExpression(executor.body);
   }
   if (!ts.isCallExpression(call) || !armsGlobalTimer(call, bound) || call.arguments.length < 2) return false;
   const callback = call.arguments[0];
   if (ts.isIdentifier(callback)) return callback.text === resolve;
   if ((ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) && callback.parameters.length === 0 && !ts.isBlock(callback.body)) {
-    const inner = unparenthesised(callback.body);
+    const inner = unwrapExpression(callback.body);
     return ts.isCallExpression(inner) && inner.arguments.length === 0 && inner.expression.getText() === resolve;
   }
   return false;
@@ -193,10 +192,10 @@ function isDelayPromise(n, bound) {
 function soleDelayPromise(fn, bound) {
   const body = fn.body;
   if (!body) return null;
-  if (!ts.isBlock(body)) return isDelayPromise(unparenthesised(body), bound) ? unparenthesised(body) : null;
+  if (!ts.isBlock(body)) return isDelayPromise(unwrapExpression(body), bound) ? unwrapExpression(body) : null;
   if (body.statements.length !== 1) return null;
   const [only] = body.statements;
-  if (ts.isReturnStatement(only) && only.expression && isDelayPromise(unparenthesised(only.expression), bound)) return unparenthesised(only.expression);
+  if (ts.isReturnStatement(only) && only.expression && isDelayPromise(unwrapExpression(only.expression), bound)) return unwrapExpression(only.expression);
   return null;
 }
 
@@ -277,7 +276,7 @@ export function fixedDelays(text, file = 'snippet.js') {
   const out = [];
   const visit = (n) => {
     if (ts.isAwaitExpression(n)) {
-      const operand = unparenthesised(n.expression);
+      const operand = unwrapExpression(n.expression);
       const kind = isDelayPromise(operand, bound) ? 'inline-delay'
         : ts.isCallExpression(operand) && callsTimersPromises(operand, bound) ? 'timers-promises-delay' : null;
       if (kind) out.push(finding(sf, file, operand, kind, markerAbove(sf, text, n, 'waits-differently', { loopsOnly: true })));
@@ -330,7 +329,7 @@ export function awaitedSleeps(text, file = 'snippet.js') {
   const out = [];
   const visit = (n) => {
     if (ts.isAwaitExpression(n)) {
-      const operand = unparenthesised(n.expression);
+      const operand = unwrapExpression(n.expression);
       if (sleeps(operand)) {
         const e = ts.isCallExpression(operand) ? operand.expression : null;
         const name = e && ts.isIdentifier(e) ? e.text : e && ts.isPropertyAccessExpression(e) ? e.name.text : null;

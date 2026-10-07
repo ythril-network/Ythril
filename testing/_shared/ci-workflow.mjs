@@ -34,25 +34,37 @@ export { CI_WORKFLOW };
 /** The name the ruleset requires. A rename silently drops the merge gate, so it is the one string kept literal. */
 export const MERGE_GATE_NAME = 'Build & Test';
 
-/** Parse one workflow's text. A document that is not a mapping with jobs is the gate's failure, not a pass. */
-export function parseWorkflow(text, label = 'workflow') {
+/**
+ * Parse one YAML document under `.github` — a workflow (`jobs`) or a local action (`runs`). A document that is not a mapping
+ * holding its `key` as a mapping is the gate's failure, not a pass.
+ *
+ * The one parse for both kinds: they were two functions that differed in a key and a noun, and a rule added to one (a
+ * refusal, a different YAML schema) would have been missing from the other.
+ */
+function parseDocument(text, label, key, noun) {
   const doc = load(text);
-  if (!doc || typeof doc !== 'object' || !doc.jobs || typeof doc.jobs !== 'object') {
-    throw new Error(`${label} does not parse to a workflow with jobs`);
+  if (!doc || typeof doc !== 'object' || !doc[key] || typeof doc[key] !== 'object') {
+    throw new Error(`${label} does not parse to ${noun} with ${key}`);
   }
   return doc;
 }
+
+/** One YAML document under `.github`, read and parsed. A missing file throws — "no document" must never read as "one that runs nothing". */
+function loadDocument(rel, root, parse, noun) {
+  const file = join(root, rel);
+  if (!existsSync(file)) throw new Error(`${rel} does not exist under ${root} — there is no ${noun} to read`);
+  return parse(readFileSync(file, 'utf8'), rel);
+}
+
+/** Parse one workflow's text. A document that is not a mapping with jobs is the gate's failure, not a pass. */
+export const parseWorkflow = (text, label = 'workflow') => parseDocument(text, label, 'jobs', 'a workflow');
 
 /**
  * One workflow, parsed: `rel` under `root`. The root defaults to this repository and does not depend on the working
  * directory; a script that answers a question about "a repo" (`unrun-tests --root`) passes the copy it was given.
  * A missing file throws — "no workflow" must never read as "a workflow that runs nothing".
  */
-export function loadWorkflow(rel = CI_WORKFLOW, root = REPO_ROOT) {
-  const file = join(root, rel);
-  if (!existsSync(file)) throw new Error(`${rel} does not exist under ${root} — there is no workflow to read`);
-  return parseWorkflow(readFileSync(file, 'utf8'), rel);
-}
+export const loadWorkflow = (rel = CI_WORKFLOW, root = REPO_ROOT) => loadDocument(rel, root, parseWorkflow, 'workflow');
 
 /** `ci.yml`, parsed. */
 export const loadCi = (root = REPO_ROOT) => loadWorkflow(CI_WORKFLOW, root);
@@ -71,20 +83,10 @@ export const loadAllWorkflows = () => workflowFiles().map((file) => ({ file, doc
 export const actionFiles = () => trackedSources('.github/actions', { ext: ['.yml', '.yaml'], floor: 1 });
 
 /** Parse one local action's text. A document without `runs` is the gate's failure, not an action that runs nothing. */
-export function parseAction(text, label = 'action') {
-  const doc = load(text);
-  if (!doc || typeof doc !== 'object' || !doc.runs || typeof doc.runs !== 'object') {
-    throw new Error(`${label} does not parse to an action with runs`);
-  }
-  return doc;
-}
+export const parseAction = (text, label = 'action') => parseDocument(text, label, 'runs', 'an action');
 
 /** One local action, parsed. A missing file throws, as `loadWorkflow` does. */
-export function loadAction(rel, root = REPO_ROOT) {
-  const file = join(root, rel);
-  if (!existsSync(file)) throw new Error(`${rel} does not exist under ${root} — there is no action to read`);
-  return parseAction(readFileSync(file, 'utf8'), rel);
-}
+export const loadAction = (rel, root = REPO_ROOT) => loadDocument(rel, root, parseAction, 'action');
 
 /** `[{ id, name, job }]` — `name` is the display name, which is what a ruleset's required check matches. */
 export function jobEntries(doc) {
@@ -110,10 +112,10 @@ const isLocalAction = (step) => typeof step.uses === 'string' && step.uses.start
  */
 function compositeStepsOf(uses, root) {
   for (const name of ['action.yml', 'action.yaml']) {
-    const file = join(root, uses, name);
-    if (!existsSync(file)) continue;
-    const action = load(readFileSync(file, 'utf8'));
-    return action?.runs?.using === 'composite' && Array.isArray(action.runs.steps) ? action.runs.steps : [];
+    const rel = join(uses, name);
+    if (!existsSync(join(root, rel))) continue;
+    const action = loadAction(rel, root);
+    return action.runs.using === 'composite' && Array.isArray(action.runs.steps) ? action.runs.steps : [];
   }
   throw new Error(`\`uses: ${uses}\` names a local action with no action.yml under ${root}`);
 }

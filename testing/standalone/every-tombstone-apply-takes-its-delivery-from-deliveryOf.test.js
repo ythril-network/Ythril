@@ -46,9 +46,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
-import { parseSource, ts } from '../_shared/syntax-tree.mjs';
+import { parseSource, ts, unwrapExpression } from '../_shared/syntax-tree.mjs';
 import { deliveryArgumentsOf, APPLIES, DELIVERY_PARAM, DELIVERY_BUILDERS } from './_delivery-arguments.mjs';
-import { unwrapExpression, calleeNameOf } from './_expression-names.mjs';
+import { calleeNameOf } from './_expression-names.mjs';
 
 /** The two doors each apply has: the push route and the pull step. A floor, not a count of what the repo holds. */
 const DOORS = 2;
