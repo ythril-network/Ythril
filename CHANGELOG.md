@@ -251,7 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
 - **Sync:** A peer can no longer stop other members' deletions by planting more than 5000 tombstones at one seq, for pullers on this release; a puller on an older release stays stuck there until it upgrades.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's, on a pub/sub network or a tree, for what it delivered. Your own records are never deletable by your upstream; a compromised publisher can delete what it relayed.
-- **Sync:** A peer's file tombstone no longer deletes the bytes for any admitted peer: it needs the issuer's own authority or the upstream's, and a relayed one keeps its issuer.
+- **Sync:** A peer's file tombstone no longer deletes the bytes for any admitted peer: it needs the issuer's own authority or the upstream's, and a relayed one keeps its issuer. A file tombstone held here refuses a later copy only as a record tombstone would, so a peer cannot block a path's future files.
 
 ## [5.6.8] — 2026-10-07
 

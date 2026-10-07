@@ -58,9 +58,10 @@ const heldFor = (p) => door.coll(S, 'file_tombstones').findOne({ path: p });
 const stray = (id) => door.coll(S, 'filemeta').findOne({ _id: id });
 
 /** A published file tombstone this instance holds: `rowSeq` and `contentHash` are what it knows of what it erased. */
-const hold = (p, { rowSeq, contentHash } = {}) => door.coll(S, 'file_tombstones').insertOne({
+const hold = (p, { rowSeq, contentHash, issuer } = {}) => door.coll(S, 'file_tombstones').insertOne({
   _id: `held-${p}`, spaceId: S, path: p, deletedAt: HELD_AT, positionAt: HELD_AT,
   ...(rowSeq !== undefined ? { rowSeq } : {}), ...(contentHash !== undefined ? { contentHash } : {}),
+  ...(issuer !== undefined ? { issuer } : {}),
 });
 const meta = (p, seq, extra = {}) => build.filemeta(S, p, seq, { author: PEER_AUTHOR, ...extra });
 
@@ -101,6 +102,17 @@ describe('a held file tombstone shadows what it erased, at every arrival', { ski
           assert.equal(answer.body.filemeta.tombstoned, 2, `the batch answer does not count the shadowed versions: ${JSON.stringify(answer.body.filemeta)}`);
           assert.equal(answer.body.filemeta.upserted, 3, JSON.stringify(answer.body.filemeta));
         }
+      });
+
+      it('a tombstone another instance planted for the path does not refuse the version its proven author delivers', async () => {
+        // The pre-ship finding: a peer stored a deletion of a path nobody held, at a high version, and every later file at
+        // that path was refused. The record rule (`heldTombstoneRefuses`) is now asked here too: the deliverer is the author.
+        await hold('planted.txt', { rowSeq: 1_000_000, issuer: 'some-other-instance' });
+        await hold('own.txt', { rowSeq: 1_000_000, issuer: PEER });
+        const answer = await d.deliver([meta('planted.txt', 3), meta('own.txt', 3)]);
+        assert.ok(await row('planted.txt'), 'another instance\'s tombstone refused the version its proven author delivered');
+        assert.equal(await row('own.txt'), null, 'the author\'s own deletion stopped refusing the version it erased');
+        if (name === 'push') assert.equal(answer.body.filemeta.tombstoned, 1, JSON.stringify(answer.body.filemeta));
       });
     });
   }

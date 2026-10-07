@@ -89,6 +89,7 @@ import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
+import { heldTombstoneRefuses } from '../sync/upsert-plan.js';
 
 /** A file tombstone as stored HERE: the replicated shape, plus what never leaves this instance. */
 interface StoredFileTombstone extends FileTombstoneDoc {
@@ -591,7 +592,7 @@ export function settledFileTombstones<T extends { positionAt: string }>(sent: re
 }
 
 /** The tombstones this instance holds for each of `paths`: what an arriving file is compared with. */
-export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string }
+export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }
 
 /**
  * THE one reader of the published tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what
@@ -602,10 +603,11 @@ export async function heldFileTombstones(spaceId: string, paths: readonly string
   const out = new Map<string, HeldFileTombstone[]>();
   for (const chunk of inChunks([...new Set(paths)], READ_CHUNK)) {
     const rows = await tombstonesOf(spaceId)
-      .find(asFilter<StoredFileTombstone>({ path: { $in: chunk }, ...PUBLISHED }), { projection: { _id: 1, path: 1, rowSeq: 1, contentHash: 1 } }).toArray();
+      .find(asFilter<StoredFileTombstone>({ path: { $in: chunk }, ...PUBLISHED }), { projection: { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 } }).toArray();
     for (const t of rows) {
       if (!out.has(t.path)) out.set(t.path, []);
-      out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}) });
+      out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
+        ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
     }
   }
   return out;
@@ -638,7 +640,11 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
  * A tombstone is a statement about a version of a path, not about the path for ever:
  *  - **metadata** is shadowed when some held tombstone has `rowSeq >= seq`: the arrival is the version the deletion
  *    erased, or older. A higher seq is a newer version and passes. A tombstone with no `rowSeq` (written before versions
- *    travelled) shadows no metadata, which is how it behaved and the stated limit of the release.
+ *    travelled) shadows no metadata, which is how it behaved and the stated limit of the release. And only a tombstone
+ *    that speaks against this version's author and deliverer shadows it — the record rule, `heldTombstoneRefuses`: one
+ *    another instance issued does not refuse the version its proven author delivers, and one stored for an upstream
+ *    does not refuse that upstream's later version. Without it a peer could store a deletion of a path nobody held, at
+ *    a high version, and refuse every later file at that path.
  *  - **bytes** are shadowed when some held tombstone's own `contentHash` equals the arriving hash and no live row at the
  *    path is newer than it (`liveRowNewer`: identical bytes re-created as a newer version arrive with their metadata
  *    first and pass). A tombstone with no hash shadows no bytes.
@@ -647,16 +653,25 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
  * refused; without the content half a peer's still-live copy of the deleted bytes comes back on every cycle.
  */
 export function shadowDecision(
-  held: ReadonlyArray<{ rowSeq?: number; contentHash?: string }>,
-  arrival: { kind: 'meta'; seq: number } | { kind: 'bytes'; sha256: string; liveRowNewer: boolean },
+  held: ReadonlyArray<{ rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }>,
+  arrival: MetaArrival | { kind: 'bytes'; sha256: string; liveRowNewer: boolean },
 ): boolean {
-  if (arrival.kind === 'meta') return held.some(t => typeof t.rowSeq === 'number' && t.rowSeq >= arrival.seq);
+  if (arrival.kind === 'meta') {
+    return held.some(t => typeof t.rowSeq === 'number' && t.rowSeq >= arrival.seq
+      && heldTombstoneRefuses(t, arrival.author, arrival.deliveredBy));
+  }
   if (arrival.liveRowNewer) return false;
   return held.some(t => typeof t.contentHash === 'string' && t.contentHash !== '' && t.contentHash === arrival.sha256);
 }
 
+/**
+ * An arriving version of a file's metadata: its seq, who wrote it and the peer the door PROVES delivered it. Without a
+ * deliverer (a local or admin write, the stray drain) every held tombstone at or above the version shadows it.
+ */
+export interface MetaArrival { kind: 'meta'; seq: number; author?: string; deliveredBy?: string }
+
 /** One arrival to ask {@link shadowedArrivals} about: its id, its path, and what it is — metadata at a version, or bytes with a hash. */
-export type FileArrival = { id: string; path: string } & ({ kind: 'meta'; seq: number } | { kind: 'bytes'; sha256: string });
+export type FileArrival = { id: string; path: string } & (MetaArrival | { kind: 'bytes'; sha256: string });
 
 /**
  * Which of `arrivals` a held tombstone shadows — THE predicate every arrival site asks (the metadata writer, the stray

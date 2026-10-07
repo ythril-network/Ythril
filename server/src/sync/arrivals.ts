@@ -360,7 +360,8 @@ export async function writeArrivals(
   // A file's metadata a held tombstone covers is not written (Q-229): by VERSION, so a newer one passes. A restore is the
   // operator's own instruction and is never judged by one. Asked of the one predicate every arrival of a file asks.
   if (family === 'files' && !restore && toWrite.length > 0) {
-    const shadowed = await shadowedArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0 })));
+    const shadowed = await shadowedArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0,
+      author: (d.author as { instanceId?: string } | undefined)?.instanceId, deliveredBy: opts.deliveredBy })));
     if (shadowed.size > 0) {
       out.tombstoned.push(...shadowed);
       toWrite = toWrite.filter(d => !shadowed.has(d._id));

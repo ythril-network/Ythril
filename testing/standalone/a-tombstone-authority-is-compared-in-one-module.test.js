@@ -26,8 +26,9 @@
  *
  * ## The one reasoned exemption
  *
- * `upsert-plan.ts` keeps the ARRIVAL-side question — `tombSeqFor`, which decides whether a tombstone already held
- * refuses a record that arrives now — and the definition of `tombstoneGoverns` it shares with `authorises`. They are a
+ * `upsert-plan.ts` keeps the ARRIVAL-side question — `heldTombstoneRefuses`, which decides whether a tombstone already
+ * held refuses a version that arrives now, for a record (`tombSeqFor`) and for a file's metadata (`shadowDecision`) alike —
+ * and the definition of `tombstoneGoverns` it shares with `authorises`. They are a
  * different question (refuse an arrival; not delete a held object), named here by function so the exemption cannot
  * widen to the file. If a second arrival-side site appears it fails this gate and is either moved into the module or
  * argued for here.
@@ -52,8 +53,8 @@ const MODULE = 'server/src/sync/deletion-authority.ts';
 /** Function-level exemptions: `file` -> the names of the top-level functions whose comparisons are another question. */
 const EXEMPT = new Map([
   ['server/src/sync/upsert-plan.ts', new Map([
-    ['tombSeqFor', 'the ARRIVAL side: does a tombstone already held refuse a record arriving now'],
-    ['tombstoneGoverns', 'the one spelling of "same instance, or either unknown" that `authorises` and `tombSeqFor` share'],
+    ['heldTombstoneRefuses', 'the ARRIVAL side: does a tombstone already held refuse a record or file version arriving now'],
+    ['tombstoneGoverns', 'the one spelling of "same instance, or either unknown" that `authorises` and `heldTombstoneRefuses` share'],
   ])],
 ]);
 

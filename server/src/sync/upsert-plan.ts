@@ -312,10 +312,24 @@ function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
  */
 function tombSeqFor(doc: ArrivalDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
   if (held === undefined) return undefined;
-  if (supersededVia(held, deliveredBy) !== undefined) return undefined;
-  const author = doc.author?.instanceId;
+  return heldTombstoneRefuses(held, doc.author?.instanceId, deliveredBy) ? held.seq : undefined;
+}
+
+/**
+ * Does a held tombstone speak against an arriving version written by `author` and delivered by `deliveredBy`, whatever
+ * the two versions are? The WHO half of the arrival question (the rules above), asked by a record (`tombSeqFor`) and by
+ * a file's metadata (`shadowDecision` in `files/tombstones.ts`); the version half is each kind's own.
+ *
+ * What it prevents: the file side once asked only the version, so a tombstone any pushing peer stored for a path nobody
+ * held yet, at a high version, refused every later version of a file at that path from every author — and a path,
+ * unlike a record id, is easy to guess.
+ */
+export function heldTombstoneRefuses(
+  held: { issuer?: string; storedVia?: string }, author: string | undefined, deliveredBy: string | undefined,
+): boolean {
+  if (supersededVia(held, deliveredBy) !== undefined) return false;
   const provenOtherAuthor = !tombstoneGoverns(held.issuer, author) && deliveredBy !== undefined && author === deliveredBy;
-  return provenOtherAuthor ? undefined : held.seq;
+  return !provenOtherAuthor;
 }
 
 /**
@@ -324,7 +338,7 @@ function tombSeqFor(doc: ArrivalDoc, held: HeldTombstone | undefined, deliveredB
  * the version lands (`tombstoneCleanups.via`) — otherwise this instance would go on serving a deletion of a record it
  * now holds in a newer version, and a child whose copy it delivered would apply it and lose that version too.
  */
-function supersededVia(held: HeldTombstone, deliveredBy: string | undefined): string | undefined {
+function supersededVia(held: { storedVia?: string }, deliveredBy: string | undefined): string | undefined {
   return held.storedVia !== undefined && held.storedVia === deliveredBy ? held.storedVia : undefined;
 }
 

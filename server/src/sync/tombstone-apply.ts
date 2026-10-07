@@ -211,10 +211,12 @@ export async function applyPeerTombstones(
         // The re-read only: a record newer than the deletion is a re-creation. It is kept, and so is its tombstone
         // unstored — a held tombstone beside a live record would be served on as a deletion of it.
         if (opts.repair && typeof target?.seq === 'number' && target.seq > t.seq) continue;
-        store.push(verdict.ground === 'upstream' && delivery.peerInstanceId ? { t, via: delivery.peerInstanceId } : { t });
-        // A stored tombstone at a higher seq means this one is stale: it is not stored over, and deletes nothing.
+        // A stored tombstone at a higher seq means this one is stale: it is not stored over, and deletes nothing. Asked
+        // BEFORE the store, because storing it would still mark the newer one as held for this upstream (`storedVia`),
+        // and that mark lets the upstream's later version past a deletion it did not make.
         const heldSeq = held.get(t._id)?.seq;
         if (typeof heldSeq === 'number' && heldSeq > t.seq) continue;
+        store.push(verdict.ground === 'upstream' && delivery.peerInstanceId ? { t, via: delivery.peerInstanceId } : { t });
         // The upstream bound names no issuer (it is the stamp and the self-exclusion), so every issuer shares its group.
         const issuer = verdict.ground === 'issuer' ? t.instanceId : '';
         const key = JSON.stringify([verdict.ground, issuer]);

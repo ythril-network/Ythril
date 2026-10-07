@@ -293,6 +293,19 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
       assert.equal(r.body.facts.tombstoned, 1, `the exception reached a tombstone that was never stored via the upstream: ${JSON.stringify(r.body.facts)}`);
     });
 
+    // Pre-ship sweep 5(c): a STALE deletion the upstream re-sends (below the one held) is not stored, so it cannot mark the
+    // newer one as held for the upstream — that mark would let the upstream's later version past a deletion it never made.
+    for (const [doorName, d] of Object.entries(DOORS)) {
+      it(`${doorName}: a stale tombstone from the upstream leaves the newer held one unmarked`, async () => {
+        await door.coll(S, 'facts').insertOne(fact('stale-mark', 5, THIRD, PEER));
+        await door.coll(S, 'tombstones').insertOne({ ...tomb('stale-mark', 50, THIRD) });
+        await d.deliver([tomb('stale-mark', 10, THIRD)]);
+        const held = await stored('tombstones', 'stale-mark');
+        assert.equal(held?.seq, 50, `fixture: the newer held tombstone was replaced: ${JSON.stringify(held)}`);
+        assert.ok(!('storedVia' in held), `a stale tombstone marked the newer held one as stored for the upstream: ${JSON.stringify(held)}`);
+      });
+    }
+
     it('PIN pull: the same, for a tombstone not stored via the upstream', async () => {
       await door.coll(S, 'tombstones').insertOne(heldPlain('late-plain-pull'));
       door.state.records[S] = { facts: [later('late-plain-pull')] };
