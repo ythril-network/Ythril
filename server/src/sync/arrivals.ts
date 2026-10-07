@@ -28,6 +28,11 @@
  *     tier only, never the vector, its model or `matchedText`, which describe content it no longer embeds
  *     (`Q-230`); and a RESTORE carries nothing from the copy it replaces — the backup's own record-tier fields come
  *     with the document (`RESTORED_LOCAL_FIELDS`), and what the backup does not carry is absent (`Q-234`).
+ *     **Who delivered the version is stamped last** (`deliveredBy`, bundle-51): the delivering peer's id, or `''`
+ *     when nobody delivered it (an admin push), written AFTER the carried fields so the stored stamp never survives a
+ *     new delivery. The upstream deletion ground (`sync/deletion-authority.ts`) stands on that stamp alone, and a
+ *     carried one would let the first deliverer of a record keep the right to delete what another peer later sent.
+ *     A restore keeps the backup's own stamp, which is part of what it restores (`''` for a backup that has none).
  *  5. **D-9, the receiver's retention** (owner decision, 2026-10-01): a record that carries no receiver stamp is
  *     stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now, never the
  *     sender's. A stamp already on the stored copy is carried by a peer's arrival, never recomputed. An arrival
@@ -86,7 +91,7 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -113,6 +118,12 @@ export interface ArrivalOptions {
   deferEnqueue?: boolean;
   /** Who sent it, for the log lines only. */
   from?: string;
+  /**
+   * The peer the door PROVES delivered the page — stored on every record it writes (`deliveredBy`). Absent for a
+   * delivery with no peer behind it (an admin or local token), which is stamped `''`: nobody's. Ignored by a restore,
+   * whose records carry the backup's own stamp.
+   */
+  deliveredBy?: string;
   /**
    * The stray-filemeta drain (`Q-219`) only: each file record is RECOVERED onto its row by `fillFileMetaFromStray`
    * rather than merged — a row this instance made by default is filled, a peer-written row keeps the seq accept AT
@@ -227,8 +238,9 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
     // JSON turned a stamp into text; stored as text it never compares with a Date and the sweep never fires.
+    // Only the date-typed ones: a peer's id is text, and read as a date it would be thrown away.
     const v = doc[f];
-    if (typeof v === 'string') {
+    if (RESTORED_DATE_FIELDS.has(f) && typeof v === 'string') {
       const at = new Date(v);
       if (Number.isNaN(at.getTime())) delete doc[f]; else doc[f] = at;
     }
@@ -252,10 +264,13 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
  * The replace, as an update pipeline so the carried fields cross IN THE SAME WRITE: the stored values of `carried`
  * (a missing one is simply absent), over the D-9 defaults, under what arrived — every peer value inside `$literal`.
  * Read-free, and race-free against an embed worker writing a vector between a read and this write.
+ *
+ * `deliveredBy` is the fourth operand, after what was carried: the stamp of THIS delivery wins over the stored one. A
+ * restore passes the backup's own (`''` when it carried none): what it replaced is never what it keeps.
  */
-function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>): unknown[] {
+function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string): unknown[] {
   const kept = Object.fromEntries([...carried].map(f => [f, `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }] } }];
+  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }] } }];
 }
 
 const storeRefusal = (err: unknown): string =>
@@ -343,7 +358,8 @@ export async function writeArrivals(
     const stamps = defaults.get(d._id) ?? ({} as Doc);
     return family === 'files'
       ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet })
-      : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }));
+      : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }),
+        restore ? (typeof d.deliveredBy === 'string' ? d.deliveredBy : '') : (opts.deliveredBy ?? ''));
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
   // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.

@@ -136,10 +136,16 @@ export interface ArrivalDoc extends Replicable {
  * A tombstone stored here for an id: its seq, and the instance that issued it. The issuer is what lets a tombstone
  * refuse only the records its own issuer wrote (bundle-46): without it, a tombstone one peer planted for an id
  * blocked every later copy of that record from every other author.
+ *
+ * `storedVia` is the upstream this instance stored the tombstone FOR (the D-14 ground of `authorises`: a relayed
+ * deletion of a record the upstream itself delivered), absent for every other tombstone. It is local to the tombstone
+ * collection and never served (`brain/tombstones.ts`). It exists so the upstream's own later version is not refused by
+ * the deletion it relayed, which carries a seq the issuer's clock chose (`tombSeqFor`).
  */
 export interface HeldTombstone {
   seq: number;
   issuer?: string;
+  storedVia?: string;
 }
 
 /** What the planner needs to know of a stored copy. */
@@ -292,9 +298,17 @@ function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
  * author for a deleted id would resurrect it past its tombstone. It is the mirror of the rule a tombstone itself
  * passes (`applyPeerTombstones`: its issuer must be the delivering peer). When either side carries no instance (a
  * legacy tombstone, an author-less record) the tombstone governs, as it always did.
+ *
+ * **A tombstone stored via the upstream does not refuse that upstream's later version** (`storedVia`): the upstream
+ * sending a version again means it superseded its own deletion, and its seq is a position in ITS clock, so a relayed
+ * tombstone whose issuer claimed a high seq would otherwise refuse every later version of the record from the very peer
+ * that deleted it, on the whole subtree below. A tombstone stored for another reason, and a version delivered by
+ * anybody else, are refused exactly as before — a lateral non-author included. This is the ARRIVAL side of the
+ * question `authorises` answers for a delete, which is why it is spelled here and not there.
  */
 function tombSeqFor(doc: ArrivalDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
   if (held === undefined) return undefined;
+  if (held.storedVia !== undefined && held.storedVia === deliveredBy) return undefined;
   const author = doc.author?.instanceId;
   const provenOtherAuthor = !tombstoneGoverns(held.issuer, author) && deliveredBy !== undefined && author === deliveredBy;
   return provenOtherAuthor ? undefined : held.seq;

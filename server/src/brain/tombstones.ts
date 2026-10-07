@@ -14,6 +14,9 @@ import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
  * arrival machinery they share stay out of its import graph.
  */
 
+/** The fields of a stored tombstone that never leave this instance. */
+const LOCAL_TOMBSTONE_FIELDS_EXCLUDED = { storedVia: 0 } as const;
+
 /**
  * List tombstones that come after `after` — settled seqs only, because every caller moves a cursor to the last
  * tombstone it is handed and one committed below that cursor is never offered again.
@@ -22,6 +25,9 @@ import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
  * also reads the rest of the run at that seq. Several members can plant tombstones at one seq (a peer names the seq of
  * what it issued), and a page that ended inside such a run must be able to continue it. `type` narrows to one tombstone
  * type; without it the read is every type, in `(seq, _id)` order, which is what a cursor-mode `GET /tombstones` serves.
+ *
+ * What this returns is what leaves the instance — the GET route and the push read it — so `storedVia` (the upstream a
+ * tombstone was stored for, local to this instance) is excluded HERE and cannot be served by a caller that forgot.
  */
 export async function listTombstones(
   spaceId: string,
@@ -30,7 +36,7 @@ export async function listTombstones(
   type?: TombstoneDoc['type'],
 ): Promise<TombstoneDoc[]> {
   return readAfterSeq<TombstoneDoc>(spaceId, 'tombstones', typeof after === 'number' ? { seq: after } : after,
-    { limit, extra: type ? { type } : undefined });
+    { limit, extra: type ? { type } : undefined, projection: LOCAL_TOMBSTONE_FIELDS_EXCLUDED });
 }
 
 /**

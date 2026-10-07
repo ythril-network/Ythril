@@ -48,6 +48,7 @@ import { withoutVector } from './read-projection.js';
 import type { EdgeDoc } from '../config/types.js';
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { rekeyedRow } from '../sync/local-only-fields.js';
 
 /**
  * The result of a re-key. `null` where the identity did not change, so a caller can fall through to its
@@ -166,9 +167,14 @@ export async function rekeyEdges(
     /*
      * ── ONLY THE AUTHOR MAY MOVE IT ─────────────────────────────────────────────────────────────────────
      *
-     * `applyPeerTombstones` deletes the underlying document **only if it was authored by the instance that
-     * issued the tombstone**. That guard exists so a remote tombstone cannot delete locally-authored content,
-     * it is what protects a pubsub subscriber's own data, and it returns silently.
+     * A peer applies a tombstone only when `authorises` (`sync/deletion-authority.ts`) says so: the delivering peer
+     * proved it issued the tombstone AND wrote the document, or — on a pub/sub or tree network — the delivering peer
+     * is the receiver's direct UPSTREAM and delivered the document itself. A re-key issues the tombstone as THIS
+     * instance, and a receiver that is not downstream of it (a mesh peer, the upstream of this instance) holds
+     * nothing it delivered, so only an edge THIS instance authored is one every receiver will delete. The decision
+     * is spelled here rather than asked of the module because it is the SENDING side's question — which of its
+     * own rows are safe to move — and it is stricter than `tombstoneGoverns` on purpose: an edge with an EMPTY
+     * author is the issuer's to delete as far as a receiver is concerned, and is still not moved here.
      *
      * Edges replicate carrying their ORIGINAL author, so a tombstone this instance issues for an edge a peer
      * authored is dropped by that peer — while the insert half propagates normally, because the edges pull has
@@ -176,9 +182,9 @@ export async function rekeyEdges(
      * keep the old row AND gain the new one: two rows for one relationship, and the old one still asserting a
      * relationship that no longer exists. That is worse than the limit this function removes.
      *
-     * Issuing the tombstone under `existing.author.instanceId` instead does not work either: it clears this
-     * guard and then fails the check below it, which requires the DELIVERING peer to be the issuer — a
-     * tombstone relayed on behalf of another author is refused and logged as cross-instance delete forgery.
+     * Issuing the tombstone under `existing.author.instanceId` instead does not work either: it clears the
+     * author check and then fails the issuer proof, which requires the DELIVERING peer to be the issuer — a
+     * tombstone relayed on behalf of another author is declined and logged as cross-instance delete forgery.
      *
      * So an edge authored elsewhere is not moved. The caller falls through to its ordinary in-place update,
      * which is what happened before this function existed and which converges — the edge simply keeps an id
@@ -223,7 +229,9 @@ export async function rekeyEdges(
     // `properties` describe the relationship, and the relationship did not change — only which entities it
     // connects, or what it is called. Rebuilding would reset an edge's provenance on every entity merge.
     const stored = moving.map(({ existing, newId, from, to, label }, i) => {
-      const doc = { ...existing, ...alsoSet, _id: newId, from, to, label, updatedAt: now, seq: insertSeq + i } as EdgeDoc;
+      // `rekeyedRow`: a row under a NEW id is a record written here, so it is stamped as nobody's delivery — the
+      // upstream that delivered the OLD row has no claim on what this instance made of it (`sync/local-only-fields.ts`).
+      const doc = rekeyedRow({ ...existing, ...alsoSet }, { _id: newId, from, to, label, updatedAt: now, seq: insertSeq + i }) as unknown as EdgeDoc;
       // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
       // a GET immediately contradict the 200 that created the row.
       for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];

@@ -267,6 +267,14 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    * honest once the readers prefer the records.
    */
   completeLinkage?: boolean;
+  /**
+   * The records stored here before the `deliveredBy` stamp existed have been stamped, once (`sync/delivered-by-backfill.ts`,
+   * bundle-51). Local bookkeeping about THIS disk like `completeLinkage` — never governed, synced or settable through the
+   * space API — and it lives on the space so that a rename carries it with the space and a deleted space takes it away.
+   * Absent means the back-fill is still owed; it is never cleared, because a second pass would stamp what a later local
+   * write left unstamped.
+   */
+  deliveredByBackfilled?: boolean;
   /** Per-space document-extraction mode override (F11-c). Local/operational (not governed or synced,
    *  like dupeRules): when set, documents uploaded to THIS space use this mode instead of the
    *  instance-wide `documentProcessing.mode`. Absent = inherit the instance default. */
@@ -1762,6 +1770,12 @@ export interface TombstoneDoc {
   /** Seq of the document at the time it was deleted — used to filter tombstones
    *  from pagination pages that already returned the live document. */
   originalSeq?: number;
+  /**
+   * LOCAL to this instance, never on the wire: the upstream peer this tombstone was stored FOR — a deletion it relayed,
+   * applied on the D-14 ground (`sync/deletion-authority.ts`). It lets that upstream's own later version of the record
+   * through (`tombSeqFor`) and is excluded from every row served or pushed (`listTombstones`). Tombstones are not hashed.
+   */
+  storedVia?: string;
 }
 
 /**

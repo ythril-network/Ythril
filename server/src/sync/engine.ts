@@ -26,7 +26,8 @@ import { log, peerText } from '../util/log.js';
 import { resolveWatermark, type TransferOutcome } from './watermark.js';
 import { pullFamily, type PullResult } from './pull-family.js';
 import { pushFamily } from './push-family.js';
-import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
+import { pushTombstones } from './tombstone-transfer.js';
+import { pullSpaceTombstones } from './pull-space-tombstones.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases, isDirectionalNetwork } from '../networks/network-spaces.js';
@@ -787,7 +788,7 @@ async function pullFromPeer(
 
   // Tombstones first, so deletions apply before anything that would re-upsert a deleted doc. Both directions
   // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
-  const tombstones = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
+  const tombstones = await pullSpaceTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
 
   let highestSeq = sinceSeq;
 
