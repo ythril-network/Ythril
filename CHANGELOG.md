@@ -91,8 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and an item error in a batch. `save_bulk` documents and declares the `id` of fact and chrono items.
 - **Sync:** A tombstone of a type the receiver does not know still answers `400`, so the sender re-sends after it upgrades. Tombstone
   pages and every arriving record (push, pull, import, file metadata included) cost a handful of database commands per page.
-- **Sync:** A fork's id derives from the parent's id, seq and text, so a re-sent push upserts its fork; an older receiver accepts an
-  eleventh. Documents past the 500-per-family cap and records the receiver's store refuses count in `rejected` (the latter named in the log).
+- **Sync:** A fork's id derives from the parent's id, seq and text, so a re-sent push upserts it; an older receiver accepts an eleventh.
+  A fork outlives its parent's delete. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed, so
   `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; the file manifest is still walked. `computedAt` is when the root was computed.
 - **Sync:** A page's `nextCursor` names a position (seq and record), still opaque: send it back unchanged. `GET /api/sync/tombstones`

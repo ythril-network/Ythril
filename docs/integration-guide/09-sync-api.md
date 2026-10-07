@@ -434,7 +434,8 @@ last type that carried theirs; now none do.
 **The same holds when this instance PULLS from you.** A pulled page is accepted by the same rules as a push: every
 document is validated against the schema above for its type (a document that fails is refused on its own and the
 rest of the page lands), a tombstone this instance holds refuses it, and an equal-seq divergent fact forks within
-the caps. The one difference is stated in [Sync Protocol → How a pulled page is stored](../sync-protocol.md#how-a-pulled-page-is-stored):
+the caps. A fork is its own record: deleting or expiring the fact it forked from does not remove it, and it is
+deleted like any other fact. The one difference is stated in [Sync Protocol → How a pulled page is stored](../sync-protocol.md#how-a-pulled-page-is-stored):
 a chrono `type` outside the vocabulary is stored on pull. Until 4.0 a pull kept the sender's vector — and, more
 expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then acted on — and until this
 release it validated nothing. Both directions drop the same local-only fields, and the serving side leaves them out

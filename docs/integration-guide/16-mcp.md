@@ -809,7 +809,7 @@ System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot
 }
 ```
 
-Returns confirmation with the deleted ID. Creates a tombstone for sync propagation: it reaches every peer holding a copy this instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a copy another instance wrote stays on a mesh peer. Requires a non-read-only token.
+Returns confirmation with the deleted ID. Creates a tombstone for sync propagation: it reaches every peer holding a copy this instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a copy another instance wrote stays on a mesh peer. The fact's forks (facts carrying `forkOf` naming it, made by sync when a peer sent a different text at the same version) are their own records and are not deleted with it; to erase a text everywhere it was kept, find them with `filter` on `facts`, `{"forkOf": "<id>"}`, and delete each. Requires a non-read-only token.
 
 ### Example: get_stats
 

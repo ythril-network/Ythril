@@ -121,6 +121,17 @@ describe('which deletes can be refused, and each one says so where the caller is
       'and must give the reason it is exempt, which is that nothing links to an edge');
   });
 
+  it('delete_fact says its forks survive it', () => {
+    // A fork (`forkOf` naming this fact, made by sync when a peer sent another text at the same version) is its own
+    // record: no delete, expiry, tombstone or wipe follows `forkOf` (it is read only by the fork caps and the
+    // planner). A caller deleting a fact to be rid of it needs to know its conflict copies stay.
+    assert.match(TOOLS.delete_fact, /forks?\b[^.]*\bnot deleted|forks?\b[^.]*\bstay|forks?\b[^.]*\bown records?/i,
+      'delete_fact does not say that the fact\'s forks are left in place');
+    // And how to find them: a caller erasing a text needs the forks' ids, and "delete each by id" is no help without them.
+    assert.match(TOOLS.delete_fact, /filter[^.]*forkOf/,
+      'delete_fact does not say how to find the fact\'s forks (a filter on forkOf)');
+  });
+
   it('and the claims are true — source, not prose', () => {
     // Read from source, so a description and its behaviour cannot drift apart in either direction.
     const has = (f) => /entityDeleteBlockers\(/.test(stripComments(readFileSync(f, 'utf8')));

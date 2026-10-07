@@ -370,6 +370,10 @@ The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== 
 
 **The fork keeps the divergent copy's `createdAt` and `updatedAt`** — when its text was written, not when this instance forked it — so its retention window counts from its own age and two receivers forking one divergence store one document under the one derived id.
 
+**A fork is its own record.** `forkOf` names the parent it diverged from and is read only by the two caps below and by
+the planner; nothing follows it on a delete. Deleting or expiring the parent leaves its forks in place, and a fork is
+deleted, expires and replicates like any other fact.
+
 **Two caps, on every door — both push routes and the pull.** A fork is refused when the parent's `forkOf` chain is already 10 deep, or when the parent already has 10 forks — stored ones and the ones the same request is creating, counted together. `POST /facts` answers `400 Fork depth limit (10) exceeded for _id '…'`; `batch-upsert` counts it in `forkDepthRefused` and `rejected`; a pull names it in the receiver's log and moves past it, as the push sender does. **Mixed versions:** the fan-out cap on `batch-upsert` is new in this release — an older receiver accepts an eleventh fork of one parent that a newer one refuses, so a network mixing the two can hold different fork sets for such a record.
 
 ### Receiver retention applies to arrivals

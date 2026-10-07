@@ -493,6 +493,10 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 > **Changed in 4.0:** a linked chrono entry or file blocks this delete, so a script that deleted such a fact
 > on an older version now gets `409` — clear the link first. With `strictLinkage` off it always succeeds.
 
+Deleting a fact does not delete its forks — the facts sync created when a peer sent a different text for it at the
+same version (they carry `forkOf` naming this fact). To erase a text everywhere it was kept, list them first with
+[`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only) on `facts`, `{"forkOf": "<id>"}`. A fork is its own record, deleted like any other fact.
+
 ---
 
 ### Empty a space
