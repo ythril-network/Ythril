@@ -79,6 +79,17 @@ for (const f of RESTORED_LOCAL_FIELDS) {
 }
 
 /**
+ * The restored fields that are DATES, which JSON wrote as text and a restore must turn back (the two retention stamps).
+ * Stored as text a stamp never compares with a Date and the sweep never fires; the other restored fields are not dates
+ * (`deliveredBy` is a peer's id, `syncBase` an object), and reading a peer's id as one deletes it.
+ */
+export const RESTORED_DATE_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt']);
+
+for (const f of RESTORED_DATE_FIELDS) {
+  if (!RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`RESTORED_DATE_FIELDS names '${f}', which a restore does not keep`);
+}
+
+/**
  * The VECTOR half of the derived fields: the vector and the model that made it, without `matchedText`.
  *
  * Two removals ask two different questions, and each had been spelled by hand at every site (four `$unset`s, one of

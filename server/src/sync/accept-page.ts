@@ -159,7 +159,7 @@ export async function acceptArrivingPage(
         const cleanups: Array<{ id: string; below: number }> = [];
         const diverged: Array<{ index: number; doc: Arrived }> = [];
         while (pending.length > 0) {
-          const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer });
+          const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer, deliveredBy });
           const skipped = new Set([...out.newerLocal, ...out.derived]);
           const split = new Set(out.diverged);
           const dup = new Set(out.duplicates);
@@ -207,7 +207,7 @@ export async function acceptArrivingPage(
       await withAllocatedSeqs(spaceId, forks.length, async (first) => {
         // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
         forkOut = await writePage(spaceId, 'facts', forks.map((f, k) => ({ ...f.doc, seq: first + k })),
-          { from: peer, deferEnqueue: true });
+          { from: peer, deliveredBy, deferEnqueue: true });
       }, `sync.${door}.fork`);
       await forkOut?.enqueue();
       const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
@@ -239,7 +239,7 @@ export async function acceptArrivingPage(
 }
 
 /** Store one family's documents through the arrival writer, with the family's own record type (`null`: links). */
-async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
+async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deliveredBy: string | undefined; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
   const { collection } = familyOf(key);
   return await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], docs, opts);
 }

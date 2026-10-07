@@ -8,18 +8,19 @@ import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { toSafeRelPath } from '../../util/paths.js';
 import { z } from 'zod';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
-import { getDataRoot } from '../../config/loader.js';
+import { getConfig, getDataRoot } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
-import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
+import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
+import { deliveryOf } from '../../sync/deletion-authority.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import { publishedFileTombstones, storePeerFileTombstone } from '../../files/tombstones.js';
 import path from 'node:path';
 import type { FileTombstoneDoc } from '../../config/types.js';
 
-import { spaceAllowed, pushAllowed, callerPeerId, syncReadStart, BAD_SYNC_START } from './_shared.js';
+import { spaceAllowed, pushAllowed, callerPeerId, deliveryFromToken, syncReadStart, BAD_SYNC_START } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
@@ -126,18 +127,22 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      * is refused alone and counted in `refused`; an element of a type this instance does not know answers 400 for
      * the page, so the sender holds it and re-sends after this receiver upgrades.
      *
-     * A peer token may only delete content its own instance issued and authored; a trusted local/admin token (no
-     * peerInstanceId) may relay any tombstone.
+     * A peer token may delete content its own instance issued and authored, and — when it is this space's direct upstream
+     * on a pub/sub or tree network — what it relayed here (`sync/deletion-authority.ts`); a trusted local/admin token (no
+     * peerInstanceId) may relay any tombstone. The delivery is resolved ONCE for the page, from the admitted space.
      */
-    const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
-    const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
+    const delivery = deliveryOf(getConfig(), spaceId, deliveryFromToken(req.authToken as Record<string, unknown>));
     // Bounded like every push door (bundle-30 `B2`): a stalled lock answers a retryable 503, never a hung request.
     const out = await withinWriteBound(async () => await applyPeerTombstones(spaceId, tombstones,
-      { peerInstanceId: callerPeerId, trustedRelay }, `sync POST tombstones from ${callerPeerId ?? 'a local token'}`));
+      delivery, `sync POST tombstones from ${delivery.peerInstanceId ?? 'a local token'}`));
     if (out.unknownTypes.length > 0) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
 
-    // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive.
-    res.status(200).json({ applied: out.admitted, refused: out.refused.length });
+    // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive, as is
+    // `declined` (elements the deletion authority did not honour; absent when none, so an exact old body still holds).
+    res.status(200).json({
+      applied: out.admitted, refused: out.refused.length,
+      ...(out.declined.length > 0 ? { declined: out.declined.length } : {}),
+    });
   } catch (err) {
     sendCaughtFailure(res, 'sync POST tombstones', err);
   }
