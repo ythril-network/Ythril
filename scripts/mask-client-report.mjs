@@ -72,6 +72,42 @@ export function maskClientReport(report, root = process.cwd()) {
   return maskNode(report, undefined, undefined, root);
 }
 
+/** What a runner can say about the run that wrote a report: a GitHub step's `outcome`, or a local exit code read as one. */
+const RUNNER_OUTCOMES = new Set(['success', 'failure', 'cancelled', 'skipped']);
+
+/**
+ * Write the runner's own verdict into a report, as its top-level `runnerOutcome`, IN PLACE.
+ *
+ * ## The question it answers
+ *
+ * "Did the process that wrote this report say it passed?" A report cannot say so itself: a run that was cut off, or whose
+ * runner failed, can leave a file that counts no failure. The recorder reads the stamp to call such a run incomplete
+ * instead of passed, so every producer of a client report (the CI mask step, preflight) stamps through this one function.
+ *
+ * ## The guard a hand-written copy would drop
+ *
+ * A word that is not a runner outcome throws, so a typo or an unset variable cannot become a stamp the recorder reads as
+ * something else. A report that is not there or does not parse is left alone and reported as `false`: the stamp never
+ * invents a report, and the aggregator is the one that says one is missing.
+ *
+ * @param {string} file     path of the report (`test-results/client.json`)
+ * @param {string} outcome  one of `success`, `failure`, `cancelled`, `skipped`
+ * @returns {boolean} whether a report was stamped
+ */
+export function stampRunnerOutcome(file, outcome) {
+  if (!RUNNER_OUTCOMES.has(outcome)) throw new Error(`stampRunnerOutcome: "${outcome}" is not a runner outcome`);
+  if (!existsSync(file)) return false;
+  let report;
+  try {
+    report = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (report === null || typeof report !== 'object' || Array.isArray(report)) return false;
+  writeFileSync(file, JSON.stringify({ ...report, runnerOutcome: outcome }));
+  return true;
+}
+
 function main(argv) {
   if (argv.length !== 1) {
     console.error('usage: node scripts/mask-client-report.mjs <path to client.json>');

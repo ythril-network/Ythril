@@ -16,7 +16,7 @@ Run `npm run preflight` first, always. It runs every structural check that needs
 
 | Suite | Needs | Run |
 |---|---|---|
-| Client unit tests (Vitest + jsdom) | nothing | `npm run test:client`, and `npm run build:client` (it catches template errors in components that have no spec) |
+| Client unit tests (Vitest + jsdom) | nothing | `npm run test:client` (it writes no report: preflight's client step runs ci.yml's command and does), and `npm run build:client` (it catches template errors in components that have no spec) |
 | Standalone, all of it | `server/dist`, a test MongoDB, the test stack | `npm run build:server`, `npm run test:up`, `npm run test:standalone` |
 | Standalone, the pure third | `server/dist`, and a built client for the one case that reads it (CI's job builds both; locally that case skips without one) | `npm run test:standalone:pure` |
 | Standalone, the database third | `server/dist`, the test MongoDB | `npm run test:standalone:db` |
@@ -82,6 +82,29 @@ A suite that got slower is a defect nobody reports, so every run leaves a record
 2. **The `test-results-<job>-<attempt>` artifacts** of the run, kept for 30 days. Each holds the JSONL files below.
 3. **The step summary of the `CI advisory` job**, which downloads those artifacts and writes the run's timings. That job
    is not a required check and may fail without failing the run.
+
+**The job's own log is public and unmasked.** Anyone can read it, and nothing rewrites it: the masking below covers the
+files a run uploads, not the console. A secret that reaches the console is published. So the question is what can reach
+repository code in `ci.yml` at all, and the answer is short:
+
+- **A read-only job token, only where a step declares it.** The `CI advisory` job's timings step sets `GH_TOKEN` from the
+  job token, to read the last runs of main from the Actions API. No other step sets it, and the workflow's own
+  permissions are `contents: read` and nothing wider.
+- **The cache token, in `prepare`.** The step that exposes the Actions cache to Buildx puts the runtime token and cache
+  URL in the environment of the steps after it in that job, so the image build can read the layer cache; the cache is
+  written on a push to main only.
+- **Test-only credentials.** The harness MongoDB's password is a known value published in the compose file and the
+  database listens on loopback only; the tokens the test stack mints belong to its own throwaway instances.
+- **Not the recorder's token.** The test-run recorder is refused under CI (`GITHUB_ACTIONS` or `CI` set), so CI never holds
+  its write token, and every test child's environment has the recorder's variables stripped
+  (`testing/_shared/test-child-env.mjs`).
+
+Every checkout sets `persist-credentials: false`, so the token a checkout would leave in `.git/config` is not on disk for
+the tests and dependencies that follow. The dump of the stack's container logs on a failed job is the same channel: it
+prints to this public log, so what a container prints is as public as what a test prints. `ci-workflow-is-sound` holds
+the checkouts and every place the workflows hand a credential to repository code, and
+`a-test-child-environment-is-one-module` holds the stripped environment, so a credential added to a job fails a gate
+before it reaches a log.
 
 **On your machine**, the same JSONL lands in `test-results/` (gitignored). Every runner (`run-suite`, `run-standalone`,
 preflight) clears its own suite's earlier files first, so what is there is only the last run's, one file per `node --test`

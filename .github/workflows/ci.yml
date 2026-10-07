@@ -69,6 +69,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -82,6 +84,7 @@ jobs:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
       - name: Client unit tests
+        id: client-unit-tests
         # Vitest + jsdom (see client/vitest.config.ts). This is what makes change-detection work (OnPush / zoneless)
         # verifiable rather than shipped on a green build: OnPush's failure mode is a silently-stale view, invisible
         # to `ng build`.
@@ -96,7 +99,11 @@ jobs:
         # The report holds every failure message in full (stack, diff, runner paths); the folder is uploaded below as a
         # public artifact. Masked IN PLACE, always (a failing test is when it holds a failure), and a report that
         # cannot be read is removed rather than uploaded raw (scripts/mask-client-report.mjs).
+        # The test step's own verdict goes in with it, as the report's `runnerOutcome`: a run cut off or failed by its
+        # runner can leave a report that counts no failure, and the recorder reads the stamp to call that incomplete.
         if: always()
+        env:
+          CLIENT_TEST_OUTCOME: ${{ steps.client-unit-tests.outcome }}
         run: node scripts/mask-client-report.mjs test-results/client.json
 
       - name: Build client (production)
@@ -128,6 +135,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -172,6 +181,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -230,6 +241,8 @@ jobs:
           # shallow clone has none, and the failure mode is the bad one: the diff errors, the check skips, and a
           # missing entry looks like a passing build.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -316,6 +329,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -389,6 +404,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -484,6 +501,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -554,6 +573,8 @@ jobs:
         with:
           # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
           fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -630,6 +651,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -690,6 +714,9 @@ jobs:
       # test files (`git ls-files`) and the scripts themselves.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
