@@ -127,6 +127,9 @@ describe('which deletes can be refused, and each one says so where the caller is
     // planner). A caller deleting a fact to be rid of it needs to know its conflict copies stay.
     assert.match(TOOLS.delete_fact, /forks?\b[^.]*\bnot deleted|forks?\b[^.]*\bstay|forks?\b[^.]*\bown records?/i,
       'delete_fact does not say that the fact\'s forks are left in place');
+    // And how to find them: a caller erasing a text needs the forks' ids, and "delete each by id" is no help without them.
+    assert.match(TOOLS.delete_fact, /filter[^.]*forkOf/,
+      'delete_fact does not say how to find the fact\'s forks (a filter on forkOf)');
   });
 
   it('and the claims are true — source, not prose', () => {

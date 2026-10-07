@@ -60,6 +60,8 @@ tags, linked entities and properties.
 **Conflict copies:** when two connected brains change the same fact to different texts before they sync, both
 texts are kept — the second arrives as its own fact (a conflict copy that names the fact it diverged from). It is
 an ordinary fact from then on: deleting or expiring the original does not remove it, and you delete it the same way.
+To remove a text everywhere it was kept, first find its copies: the **Query** tab, Filter mode, collection **facts**,
+filter `{"forkOf": "<the original's id>"}`.
 
 **Wiping everything:** There is no "Wipe all" button on the Brain toolbar. To clear a space's data, go to **Settings → Spaces → (space) → Danger tab** and use **Wipe all data**. You will be asked to type the space ID to confirm.
 
