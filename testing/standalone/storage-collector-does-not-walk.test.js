@@ -49,6 +49,7 @@ import assert from 'node:assert/strict';
 import { COLLECTION_SUFFIX } from '../../server/dist/config/types-knowledge.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sleep } from '../_shared/sleep.mjs';
 
 const ROOT = process.cwd();
 const REGISTRY_SRC = join(ROOT, 'server/src/metrics/registry.ts');
@@ -122,7 +123,7 @@ describe('the storage collector', () => {
 
     // The walk is real but tiny here — wait for the coalesced promise rather than guessing at a delay.
     for (let i = 0; i < 200 && quota.usageRefreshInFlight(); i++) {
-      await new Promise(r => setTimeout(r, 10));
+      await sleep(10);
     }
     assert.notEqual(quota.peekUsage(), null, 'the cold scrape did not start a measurement, so it never arrives');
 
@@ -144,11 +145,11 @@ describe('the storage collector', () => {
     for (let i = 0; i < 9; i++) quota.refreshUsageInBackground();
 
     for (let i = 0; i < 300 && quota.usageRefreshInFlight(); i++) {
-      await new Promise(r => setTimeout(r, 10));
+      await sleep(10);
     }
     // Let any un-coalesced stragglers land before counting, or an unguarded run could still be in flight and
     // the test would under-count its way to a pass.
-    await new Promise(r => setTimeout(r, 60));
+    await sleep(60);
 
     assert.equal(
       quota.usageMeasurementCount() - before, 1,
@@ -173,7 +174,7 @@ describe('the storage collector', () => {
     quota.invalidateUsageCache();
     quota.refreshUsageInBackground();
     for (let i = 0; i < 200 && quota.usageRefreshInFlight(); i++) {
-      await new Promise(r => setTimeout(r, 10));
+      await sleep(10);
     }
     // POISON the gauge, do not reset it. Two traps here, both hit in sequence:
     //   1. a prom-client gauge retains its last value, and test 3 already scraped — so with no preparation at all,

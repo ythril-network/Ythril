@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import net from 'node:net';
+import { sleep } from '../_shared/sleep.mjs';
 
 /** The drain used by `index.ts`, reproduced here so the test exercises the shape, not the file. */
 function drain(server, drainMs) {
@@ -36,7 +37,10 @@ function drain(server, drainMs) {
   });
 }
 
-const listen = server => new Promise(res => server.listen(0, '127.0.0.1', () => res(server.address().port)));
+const listen = (server) => {
+  // own-listener: tests how server.close drains, so the server's own close timing is the subject
+  return new Promise(res => server.listen(0, '127.0.0.1', () => res(server.address().port)));
+};
 
 describe('shutdown drains in-flight work', () => {
   it('waits for a slow request to finish before the close resolves', async () => {
@@ -47,7 +51,7 @@ describe('shutdown drains in-flight work', () => {
     const port = await listen(server);
 
     const inFlight = fetch(`http://127.0.0.1:${port}/`).then(r => r.text());
-    await new Promise(r => setTimeout(r, 50));      // ensure the request is actually in flight
+    await sleep(50);      // ensure the request is actually in flight
 
     const how = await drain(server, 5_000);
     assert.equal(how, 'drained', 'the drain should complete normally, not be forced');

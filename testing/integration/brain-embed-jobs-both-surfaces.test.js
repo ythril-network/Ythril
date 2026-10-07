@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -184,7 +185,7 @@ describe('MCP: the same two capabilities, through the other door', () => {
       again = await listRest();
       assert.ok(!mcp?.isError, `refused: ${JSON.stringify(mcp)}`);
       if (JSON.stringify(rest.body.counts) === JSON.stringify(again.body.counts)) break;
-      await new Promise(res => setTimeout(res, 300));
+      await sleep(300);
     }
     assert.deepEqual(again.body.counts, rest.body.counts,
       'the queue moved on all ten attempts, so nothing here can be compared — the embedder is not settling');

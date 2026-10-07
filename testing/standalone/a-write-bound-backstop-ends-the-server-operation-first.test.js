@@ -29,11 +29,11 @@ import { logLinesDuring } from './_log-lines.mjs';
 import * as writeBound from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 // A namespace import, so a build without `KILL_WAIT_MS` fails the cases that assert on behaviour and not the whole file at link time.
 const { callBounded, withinWriteBound, setWriteBoundForTest, SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS, PLAIN_WRITE_METHODS } = writeBound;
 const BOUND_MS = 40;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const BACKSTOP_MS = BOUND_MS + SERVER_FIRST_MARGIN_MS;
 
 /**

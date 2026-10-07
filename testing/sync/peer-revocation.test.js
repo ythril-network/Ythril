@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { dockerExec, INSTANCES, post, get, del, waitFor, createTestSpace } from './helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -168,7 +169,7 @@ describe('Peer credential revocation (H7)', () => {
 
     // Give the async revocation a moment, then confirm the PAT survived.
     // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await new Promise(r => setTimeout(r, 1500));
+    await sleep(1500);
     assert.ok(
       tokensWithPeerId('ythril-a', instanceIdB).length >= 1,
       'PAT must survive while B is still a member of another network',

@@ -38,6 +38,7 @@ import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -51,7 +52,7 @@ const SPACE = 'general';
 const A = 'aaaaaaaa-0000-4000-8000-0000000c1941';
 const B = 'aaaaaaaa-0000-4000-8000-0000000c1942';
 
-let server, mongo, factMod, entMod, edgeMod, chronoMod, bulkMod, mergeMod;
+let server, local, mongo, factMod, entMod, edgeMod, chronoMod, bulkMod, mergeMod;
 /** How many times the embedder was asked — the inline path's own witness, independent of what got stored. */
 let embedCalls = 0;
 
@@ -178,8 +179,8 @@ describe('a record stored as suppressed stays suppressed when rewritten without 
         res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: DIMS }, (_, i) => (i === 0 ? 1 : 0)) }] }));
       });
     });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     mongo = await openTestMongo('retiredrewritten');
     const loader = await import('../../server/dist/config/loader.js');
@@ -198,7 +199,7 @@ describe('a record stored as suppressed stays suppressed when rewritten without 
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(r => server.close(r));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

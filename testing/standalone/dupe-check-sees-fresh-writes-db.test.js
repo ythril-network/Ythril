@@ -35,6 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,7 +51,7 @@ process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 // `ensureSpaceFilesDir`. Pointing DATA_ROOT at somewhere writable would absorb exactly the regression this
 // is now the only test positioned to catch.
 
-let server, mongo, entities, recall, vectorIndex;
+let server, local, mongo, entities, recall, vectorIndex;
 
 /**
  * A deterministic vector keyed by a tag in the text, so a record can be made near-identical to the query or
@@ -77,8 +78,8 @@ describe('the duplicate check sees a record written a moment ago', { skip }, () 
         res.end(JSON.stringify({ data: [{ embedding: vectorFor(JSON.parse(body).input) }] }));
       });
     });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(
       { spaces: [{ id: SPACE, label: 'General' }], networks: [], tokens: [] }, null, 2,
@@ -121,7 +122,7 @@ describe('the duplicate check sees a record written a moment ago', { skip }, () 
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(r => server.close(r));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

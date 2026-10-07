@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, waitFor } from '../sync/helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -194,7 +195,7 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
 
     // Give the dispatcher a moment, then assert no spaceY delivery landed on the
     // spaceX-scoped webhook.
-    await new Promise(res => setTimeout(res, 3000));
+    await sleep(3000);
     const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookMatch}/deliveries`);
     const leaked = (r.body.deliveries ?? []).find(d => d.spaceId === spaceY);
     assert.ok(!leaked, 'a webhook scoped to spaceX must not receive spaceY events');

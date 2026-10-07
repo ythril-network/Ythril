@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -42,7 +43,7 @@ let seen = [];
 /** Flip to make the endpoint fail, without tearing the server down. */
 let failNext = false;
 
-let server, mongo, memory, entities, edges, chrono, queue, worker;
+let server, local, mongo, memory, entities, edges, chrono, queue, worker;
 
 const jobs = () => mongo.col(`${SPACE}_embed_jobs`);
 const memories = () => mongo.col(`${SPACE}_facts`);
@@ -67,8 +68,8 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
         res.end(JSON.stringify({ data: [{ embedding: vectorFor(input) }] }));
       });
     });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(
       { spaces: [{ id: SPACE, label: 'General' }], networks: [], tokens: [] }, null, 2,
@@ -86,7 +87,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(resolve => server.close(resolve));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

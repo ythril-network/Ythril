@@ -30,6 +30,8 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -41,10 +43,8 @@ const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
-let server, mongo, worker, queue;
+let server, local, mongo, worker, queue;
 let dupeReads = 0;
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /** A pending job as the queue writes one, with the lane fields the case needs. */
 async function seedJob(recordId, lane) {
@@ -73,8 +73,8 @@ describe('a rebuild job skips the insert-time duplicate check', { skip }, () => 
         res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: DIMS }, () => 0.5) }] }));
       });
     });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
 
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(
       { spaces: [{ id: SPACE, label: 'General' }], networks: [], tokens: [] }, null, 2,
@@ -93,7 +93,7 @@ describe('a rebuild job skips the insert-time duplicate check', { skip }, () => 
 
   after(async () => {
     await closeTestMongo();
-    await new Promise(r => server.close(r));
+    await local?.close();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 

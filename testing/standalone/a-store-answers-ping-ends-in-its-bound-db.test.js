@@ -27,6 +27,7 @@ import { MongoClient, MongoOperationTimeoutError } from 'mongodb';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { startFreezableRelay } from './_freezable-relay.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 import { createStoreAnswers, STORE_PING_MS } from '../../server/dist/db/store-answers.js';
 import { createProbeCache } from '../../server/dist/util/cached-probe.js';
 
@@ -64,7 +65,7 @@ describe('storeAnswers against a frozen store', { skip }, () => {
   it('settles at its own bound as MongoOperationTimeoutError, with the pool already cleared, and answers false', async () => {
     relay.freeze();
     // Let the monitor's heartbeat notice and clear the pool: from here a ping waits for SERVER SELECTION, which is 20 s here.
-    await new Promise((r) => setTimeout(r, CONNECT_MS + 2 * HEARTBEAT_MS + 500));
+    await sleep(CONNECT_MS + 2 * HEARTBEAT_MS + 500);
 
     const started = Date.now();
     const direct = await client.db('admin').command({ ping: 1 }, { timeoutMS: STORE_PING_MS }).then(() => null, (e) => e);

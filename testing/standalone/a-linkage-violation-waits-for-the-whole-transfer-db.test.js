@@ -24,6 +24,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -33,7 +34,7 @@ let door;
 
 /** What the violation log holds for `docId`, after any check still in flight had time to land. */
 async function violationsOf(docId) {
-  await new Promise(r => setTimeout(r, 400));
+  await sleep(400);
   return door.mongo.col(`${S}_link_violations`).find({ docId }).toArray();
 }
 

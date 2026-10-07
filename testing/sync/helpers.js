@@ -5,6 +5,7 @@
 
 import { execSync } from 'node:child_process';
 import { waitFor as sharedWaitFor } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 /** Synchronous sleep (these container-config readers are called synchronously). */
 function sleepSync(ms) {
@@ -106,7 +107,7 @@ export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
       return { status: resp.status, body };
     }
     const retryAfter = parseInt(resp.headers.get('retry-after') ?? '5', 10);
-    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+    await sleep(retryAfter * 1000);
   }
   // final attempt — return whatever we get
   return post(baseUrl, token, path, data);
@@ -720,7 +721,7 @@ export async function restoreOrFail(label, apply, verify, { attempts = 4, delayM
       last = err instanceof Error ? err.message : String(err);
     }
     // Saturated rather than broken is the observed failure, and a wait is what fixes that.
-    await new Promise(r => setTimeout(r, delayMs * attempt));
+    await sleep(delayMs * attempt);
   }
   throw new Error(
     `Could not restore ${label} after ${attempts} attempts (${last}). Refusing to exit quietly: this is `

@@ -19,6 +19,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, patch, waitFor } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -67,7 +68,7 @@ describe('Audit Log', () => {
     // Poll for the update entry correlated by entryId.
     let updateEntry;
     for (let i = 0; i < 20 && !updateEntry; i++) {
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(300);
       const r = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=fact.update&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
       assert.equal(r.status, 200);
       updateEntry = r.body.entries.find(e => e.entryId === memId);

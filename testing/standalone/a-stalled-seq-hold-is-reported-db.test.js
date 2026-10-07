@@ -37,6 +37,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { holdDocumentLock, settleWithin, eventually, setWriteBoundForTest } from './_write-faults.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -85,7 +86,7 @@ describe('a stalled seq hold is reported', { skip }, () => {
       await eventually(() => done || seq.lowestUncommittedSeq(P) !== undefined, 5000);
       seen.heldAt = seq.lowestUncommittedSeq(P);
       // Past the warn age, still inside the bound: the hold is open and old enough to owe a report.
-      await new Promise(r => setTimeout(r, WARN_MS + 300));
+      await sleep(WARN_MS + 300);
       seen.during = await gaugeFor(register, P);
       seen.res = await settleWithin(op, CAP_MS - WARN_MS - 300);
       seen.after = await gaugeFor(register, P);

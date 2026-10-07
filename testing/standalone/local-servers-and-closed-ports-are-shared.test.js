@@ -11,9 +11,13 @@
  * teardown instead of failing. Two relays to MongoDB then wanted the same shell. And the test of a refused
  * connection wrote "bind, read the port, release" twice, inline.
  *
- * What stays separate: roughly twenty older tests start their own throwaway `http` server inline. They share the
- * spelling and ask the same question; they are not converted here (each is a test-local server whose handler is the
- * subject), and a new helper or fake must use the module. The gate below is scoped to helpers (non-test sources).
+ * What this file holds, and what it does not: the behaviour of the two helpers themselves (what `listenOnLoopback`
+ * binds, that `close()` ends while a client holds a connection, what a closed port is), and that no non-test module
+ * re-writes their shell (tracking the accepted sockets, reading a port and closing at once). WHO must hand a server to
+ * the helper is a different question and is not held here: `a-test-waits-and-listens-through-one-helper` reads every
+ * tracked test and script out of the syntax tree and refuses a hand-bound `.listen` unless it says
+ * `// own-listener: <reason>`. This file used to say that some twenty older tests were left with their own server, and
+ * to keep a helper-only half of that rule; both moved there, so there is one gate per rule.
  *
  * Run: node --test testing/standalone/local-servers-and-closed-ports-are-shared.test.js
  */

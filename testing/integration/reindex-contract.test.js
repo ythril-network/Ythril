@@ -43,6 +43,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody, waitFor, waitForReindexRunEnd, filterRest } from '../sync/helpers.js';
 import { seedActiveReindexRun, clearSeededReindexState, closeReindexSeed } from '../_shared/reindex-run-seed.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -252,7 +253,7 @@ describe('reindex — what the API can actually attribute to it', () => {
     await reindex(SPACE);
     // Give the job time to have touched them; the assertion is about what did NOT change, so waiting longer is safe.
     await waitFor(async () => (await status(SPACE)).status === 200, 10_000, 1_000);
-    await new Promise(r => setTimeout(r, 5_000));
+    await sleep(5_000);
 
     const after = await filterRest(INSTANCES.a, token, { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     for (const r of after.body.results ?? []) {

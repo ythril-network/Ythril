@@ -27,10 +27,23 @@ import ts from 'typescript';
 
 export { ts };
 
-/** The parsed tree of `text`, read as `file`'s language says (`.ts`, `.tsx`, `.mts`, `.cts` are TypeScript; else JavaScript). */
+/** The last tree parsed for each file name, kept while its text is the same: see {@link parseSource}. */
+const lastParse = new Map();
+
+/**
+ * The parsed tree of `text`, read as `file`'s language says (`.ts`, `.tsx`, `.mts`, `.cts` are TypeScript; else JavaScript).
+ *
+ * One parse per file and text: the poll gate and the fixed-delay gate each read the same few hundred sources, and a file
+ * asked twice with the same text gets the tree it was given the first time. The tree is read-only for every caller here
+ * (a gate asks questions of it); one that rewrote a node would change the answer to the next.
+ */
 export function parseSource(file, text) {
+  const kept = lastParse.get(file);
+  if (kept?.text === text) return kept.tree;
   const kind = /\.([cm]?ts|tsx)$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  lastParse.set(file, { text, tree });
+  return tree;
 }
 
 /** The 1-based line a node starts on, in the source `sf` was parsed from. */

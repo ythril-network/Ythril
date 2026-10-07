@@ -8,6 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 // ── Two mock sidecars (PDF render + office render) ───────────────────────────
 function mockSidecar(state) {
@@ -36,12 +37,10 @@ function mockSidecar(state) {
 }
 const renderState = { health: 200, status: 200, body: null, tag: 'RENDER' };
 const officeState = { health: 200, status: 200, body: null, tag: 'OFFICE' };
-const renderSrv = mockSidecar(renderState);
-const officeSrv = mockSidecar(officeState);
-const renderBase = await new Promise((r) => renderSrv.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${renderSrv.address().port}`)));
-const officeBase = await new Promise((r) => officeSrv.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${officeSrv.address().port}`)));
-process.env.RENDER_SIDECAR_URL = renderBase;
-process.env.RENDER_OFFICE_SIDECAR_URL = officeBase;
+const renderSrv = await listenOnLoopback(mockSidecar(renderState));
+const officeSrv = await listenOnLoopback(mockSidecar(officeState));
+process.env.RENDER_SIDECAR_URL = renderSrv.url;
+process.env.RENDER_OFFICE_SIDECAR_URL = officeSrv.url;
 
 const R = await import('../../server/dist/files/converters/renderer.js');
 
@@ -152,8 +151,8 @@ describe('render client — renderDocumentPages routing + decode', () => {
   });
 
   it('throws when the target sidecar is unreachable', async () => {
-    await new Promise((r) => officeSrv.close(r));
+    await officeSrv.close();
     await assert.rejects(() => R.renderDocumentPages(Buffer.from('x'), { fileName: 'x.docx' }), /doc-office sidecar unreachable/);
-    await new Promise((r) => renderSrv.close(r));
+    await renderSrv.close();
   });
 });

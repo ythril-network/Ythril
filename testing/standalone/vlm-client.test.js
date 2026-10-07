@@ -8,6 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const state = { status: 200, body: null, lastRequest: null };
 const server = http.createServer((req, res) => {
@@ -23,7 +24,8 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404); res.end();
 });
-const base = await new Promise((r) => server.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${server.address().port}`)));
+const local = await listenOnLoopback(server);
+const base = local.url;
 
 const { transcribePageImage, repairMarkdown } = await import('../../server/dist/files/converters/vlm-client.js');
 
@@ -84,7 +86,7 @@ describe('VLM client', () => {
   });
 
   it('throws when the endpoint is unreachable', async () => {
-    await new Promise((r) => server.close(r));
+    await local.close();
     await assert.rejects(() => transcribePageImage(Buffer.from('x'), { baseUrl: base, model: 'm', prompt: 'p' }), /unreachable/);
   });
 });

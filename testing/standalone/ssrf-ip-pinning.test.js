@@ -13,11 +13,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { fetch as undiciFetch } from 'undici';
 import { pinnedAgent, ssrfSafeFetch, SsrfBlockedError } from '../../server/dist/util/ssrf.js';
 
 describe('pinnedAgent — connection is pinned to the validated IP', () => {
-  let server, port, received;
+  let server, local, port, received;
 
   before(async () => {
     server = http.createServer((req, res) => {
@@ -28,11 +29,11 @@ describe('pinnedAgent — connection is pinned to the validated IP', () => {
         res.writeHead(200); res.end('pinned-ok');
       });
     });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    port = server.address().port;
+    local = await listenOnLoopback(server);
+    port = local.port;
   });
 
-  after(() => { server.close(); });
+  after(() => local.close());
 
   it('routes a request for an UNRESOLVABLE hostname to the pinned IP (DNS bypassed)', async () => {
     // The hostname could never resolve; if the request succeeds, the socket was

@@ -60,6 +60,7 @@ describe('OIDC discovery — timeout', () => {
       // Never write a response, never end it: the classic "hung IdP".
       heldSockets.push(req.socket);
     });
+    // own-listener: binds the private LAN address, because the issuer guard blocks loopback
     await new Promise((resolve) => blackHole.listen(0, blackHoleHost, resolve));
     blackHolePort = blackHole.address().port;
   });

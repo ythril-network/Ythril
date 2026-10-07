@@ -36,6 +36,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { withCollectionAsView, withStalledReads, setWriteBoundForTest } from './_write-faults.mjs';
 import { MongoNetworkError } from 'mongodb';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -138,7 +139,7 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
       assert.doesNotThrow(() => sweep.sweepAfterMetaWrite('delta', SUPPRESSING), 'asking for the sweep threw into the meta write');
       assert.ok(await waitFor(() => warnsFor('delta').length > 0, 10_000, 50, undefined, { what: 'the failed meta-write sweep to be said' }));
       // Room for an unhandled rejection or a second line to show itself.
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(300);
     }, { pipeline: [{ $addFields: { _x: { $toInt: '$a' } } }] });
 
     const said = warnsFor('delta');
@@ -171,11 +172,11 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'foxtrot_facts', () => new Error('foxtrot read refused'), gate);
     try {
       sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING);
-      await new Promise(r => setTimeout(r, 50)); // the first sweep is now held at its read
+      await sleep(50); // the first sweep is now held at its read
       sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING); // joins it and queues one rerun, which nobody awaits
       open();
       assert.ok(await waitFor(() => failures.length >= 2, 10_000, 50, undefined, { what: 'the sweep and its rerun to fail' }));
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(300);
     } finally { restore(); }
 
     assert.equal(failures.length, 2, `${failures.length} failures counted for one sweep and one rerun: a failure was said twice or lost`);
@@ -193,12 +194,12 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     let boot;
     try {
       sweep.sweepAfterMetaWrite('golf', SUPPRESSING);
-      await new Promise(r => setTimeout(r, 50)); // held at its read
+      await sleep(50); // held at its read
       boot = sweep.sweepEverySpaceAtBoot(); // reaches golf, joins the held sweep
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(300);
       open();
       await boot;
-      await new Promise(r => setTimeout(r, 300));
+      await sleep(300);
     } finally { restore(); }
 
     // The held sweep failed once (the walk, which awaited it, says it) and the rerun the join queued failed once (nobody

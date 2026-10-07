@@ -16,9 +16,10 @@
  * 1. **a deadline exit** — the loop's own condition, or an `if` in its body that leaves the loop (`break`,
  *    `return`, `throw`), reads the clock (`Date.now()`, `performance.now()`, `process.hrtime`, `new Date()`
  *    arithmetic), directly or through a name assigned from one (`const now = Date.now()`);
- * 2. **an awaited sleep** in its body — `await sleep(...)`, `await new Promise(r => setTimeout(r, ...))`,
- *    `await setTimeout(...)` from `node:timers/promises`, or a function of the same file whose body calls
- *    `setTimeout` — nested functions excluded: a sleep inside a callback is not this loop's sleep;
+ * 2. **an awaited sleep** in its body — what a sleep IS is decided once, by `timer-sites.mjs` (`awaitsASleepIn`): a
+ *    call named like one, `timers/promises`' `setTimeout` under any import spelling, a `new Promise` that arms a
+ *    timer, or a function of the same file whose body arms one — nested functions excluded: a sleep inside a
+ *    callback is not this loop's sleep;
  * 3. **a condition it tests** — an operand of the loop condition that is not the clock, an `if` in the body that
  *    does not read the clock, or a `try` whose body leaves the loop on success (retry until it stops throwing).
  *
@@ -33,18 +34,14 @@
  *
  * A loop that asks a different question stays, with `// waits-differently: <reason>` in the comment block
  * directly above it. The reason has to say something: a bare marker or a one-word one does not exempt the loop,
- * because a marker that carries no reason is the loop without one.
+ * because a marker that carries no reason is the loop without one. The comment is read by `timer-sites.mjs`'
+ * `markerReason`, the same reader the fixed-delay and listener gates use: "directly above" and "a reason" mean one thing.
  *
  * Syntax only — no type checker. Parsing, locating a node and walking a body without entering a nested function are
  * `syntax-tree.mjs`'s; what a POLL is stays here.
  */
 import { ts, parseSource, lineOf, walkOwnCode } from './syntax-tree.mjs';
-
-/** Names that are a sleep wherever they are imported from. A same-file function calling `setTimeout` is derived. */
-const SLEEP_NAMES = /^(sleep|sleepMs|delay|pause|nap|snooze|wait|setTimeout)$/i;
-
-/** `// waits-differently: <reason>` — at least two words, so the reason says something. */
-const MARKER = /waits-differently:[ \t]*(\S+[ \t]+\S.*)/;
+import { awaitsASleepIn, markerReason } from './timer-sites.mjs';
 
 const LOOP_KINDS = new Set([ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.ForStatement]);
 
@@ -97,57 +94,11 @@ function clockNames(sf) {
   return names;
 }
 
-/** Functions of this file whose body calls `setTimeout` — a local sleep under whatever name it was given. */
-function localSleepers(sf) {
-  const names = new Set();
-  const callsSetTimeout = (body) => {
-    let hit = false;
-    const v = (n) => {
-      if (ts.isCallExpression(n) && /^(globalThis\.)?setTimeout$|\.setTimeout$/.test(n.expression.getText())) hit = true;
-      ts.forEachChild(n, v);
-    };
-    v(body);
-    return hit;
-  };
-  const visit = (n) => {
-    if (ts.isFunctionDeclaration(n) && n.name && n.body && callsSetTimeout(n.body)) names.add(n.name.text);
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer
-      && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer)) && callsSetTimeout(n.initializer)) {
-      names.add(n.name.text);
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
-  return names;
-}
-
-/** Does the loop's own body (not a nested function) await a sleep? */
-function awaitsSleep(loop, sleepers) {
+/** Does the loop's own body (not a nested function) await a sleep? `sleeps` is `timer-sites.mjs`' answer: the one definition. */
+function awaitsSleep(loop, sleeps) {
   let found = false;
-  const isSleepCall = (call) => {
-    const e = call.expression;
-    const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null;
-    return name !== null && (SLEEP_NAMES.test(name) || sleepers.has(name));
-  };
-  const operandSleeps = (operand) => {
-    let hit = false;
-    const v = (n) => {
-      if (ts.isCallExpression(n) && isSleepCall(n)) hit = true;
-      // `new Promise(r => setTimeout(r, n))` — the executor is a nested function, entered on purpose.
-      if (ts.isNewExpression(n) && n.expression.getText() === 'Promise') {
-        const inner = (m) => {
-          if (ts.isCallExpression(m) && /^(globalThis\.)?setTimeout$/.test(m.expression.getText())) hit = true;
-          ts.forEachChild(m, inner);
-        };
-        inner(n);
-      }
-      ts.forEachChild(n, v);
-    };
-    v(operand);
-    return hit;
-  };
   const visit = (n) => {
-    if (ts.isAwaitExpression(n) && operandSleeps(n.expression)) found = true;
+    if (ts.isAwaitExpression(n) && sleeps(n.expression)) found = true;
   };
   const body = ts.isForStatement(loop) || ts.isWhileStatement(loop) || ts.isDoStatement(loop) ? loop.statement : loop;
   walkOwnCode(body, visit);
@@ -225,24 +176,6 @@ function usesName(expr, names) {
 }
 
 /**
- * Is the loop exempt — a `// waits-differently: <reason>` in the comment block directly above it?
- * "Directly" means the last comment ends on the line before the loop (or on its line) with nothing between.
- */
-function markerAbove(sf, text, loop) {
-  const ranges = ts.getLeadingCommentRanges(text, loop.getFullStart()) ?? [];
-  const lineOfPos = (pos) => sf.getLineAndCharacterOfPosition(pos).line;
-  let nextLine = lineOfPos(loop.getStart(sf));
-  for (let i = ranges.length - 1; i >= 0; i--) {
-    const r = ranges[i];
-    if (lineOfPos(r.end) < nextLine - 1) return null; // a blank line: this comment belongs to something above
-    const found = text.slice(r.pos, r.end).match(MARKER);
-    if (found) return found[1].replace(/\s*\*\/\s*$/, '').trim();
-    nextLine = lineOfPos(r.pos);
-  }
-  return null;
-}
-
-/**
  * Every hand-written poll in one source text.
  *
  * @param {string} text
@@ -253,17 +186,17 @@ function markerAbove(sf, text, loop) {
 export function pollLoops(text, file = 'snippet.js') {
   const sf = parseSource(file, text);
   const clocked = clockNames(sf);
-  const sleepers = localSleepers(sf);
+  const sleeps = awaitsASleepIn(sf);
   const out = [];
   const visit = (n) => {
-    if (LOOP_KINDS.has(n.kind) && awaitsSleep(n, sleepers)) {
+    if (LOOP_KINDS.has(n.kind) && awaitsSleep(n, sleeps)) {
       const { deadline, condition } = classify(n, clocked);
       if (deadline && condition) {
         out.push({
           file,
           line: lineOf(sf, n),
           kind: ts.SyntaxKind[n.kind],
-          reason: markerAbove(sf, text, n),
+          reason: markerReason(sf, text, n, 'waits-differently'),
           text: n.getText(sf).split(/\r?\n/)[0].slice(0, 100),
         });
       }

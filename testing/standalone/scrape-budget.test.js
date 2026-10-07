@@ -45,6 +45,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Gauge } from 'prom-client';
+import { sleep } from '../_shared/sleep.mjs';
 
 const REGISTRY = '../../server/dist/metrics/registry.js';
 const SOURCE = 'server/src/metrics/registry.js'.replace('/dist/', '/src/');
@@ -56,8 +57,6 @@ async function loadRegistry(budgetMs) {
   else process.env.METRICS_SCRAPE_BUDGET_MS = String(budgetMs);
   return import(`${REGISTRY}?budget=${budgetMs}-${bust++}`);
 }
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /**
  * Register a collector that takes `workMs` and reports one value.

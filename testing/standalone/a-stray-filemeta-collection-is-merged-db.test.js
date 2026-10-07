@@ -47,6 +47,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { parkWrites, withCollectionAsView } from './_write-faults.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'strayfm';
@@ -94,7 +95,7 @@ async function auditFor(space, operation) {
   for (let i = 0; i < 50; i++) {        // the audit write is fire-and-forget, so poll rather than sleep once
     const e = await audit.findOne({ spaceId: space, operation });
     if (e) return e;
-    await new Promise(r => setTimeout(r, 20));
+    await sleep(20);
   }
   return null;
 }

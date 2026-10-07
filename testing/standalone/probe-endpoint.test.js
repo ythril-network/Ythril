@@ -29,6 +29,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 // ── Mock model endpoint ───────────────────────────────────────────────────────
 const state = { v1: 200, tags: 200, v1Body: null, tagsBody: null };
@@ -49,15 +50,15 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
+let local;
 let base;
 let probeModelEndpoint;
 before(async () => {
-  base = await new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`));
-  });
+  local = await listenOnLoopback(server);
+  base = local.url;
   ({ probeModelEndpoint } = await import('../../server/dist/api/media-config.js'));
 });
-after(() => new Promise((r) => server.close(r)));
+after(() => local.close());
 
 describe('probeModelEndpoint', () => {
   it('reaches an OpenAI-compatible endpoint via /v1/models and finds the model', async () => {

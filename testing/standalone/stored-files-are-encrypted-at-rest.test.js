@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
+import { sleep } from '../_shared/sleep.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-f43-'));
 process.env['DATA_ROOT'] = root;
@@ -182,7 +183,7 @@ describe('the file door', () => {
     let release;
     const held = stored.withPathLock(abs, () => new Promise(r => { release = r; }));
     const deleted = stored.deleteStored(abs);
-    await new Promise(r => setTimeout(r, 30));
+    await sleep(30);
     assert.ok(fs.existsSync(abs), 'the delete ran while another holder had the path');
     release();
     await held; await deleted;
@@ -195,7 +196,7 @@ describe('the file door', () => {
     let release;
     const held = stored.withPathLock(abs, () => new Promise(r => { release = r; }));
     const written = stored.writeStored(abs, Buffer.from('late'));
-    await new Promise(r => setTimeout(r, 30));
+    await sleep(30);
     assert.ok(!fs.existsSync(abs), 'the write ran while another holder had the path');
     release();
     await held; await written;

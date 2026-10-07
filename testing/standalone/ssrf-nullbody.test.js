@@ -32,6 +32,7 @@ describe('ssrfSafeFetch — real undici path reconstructs null-body statuses', (
       if (req.url === '/notify') { res.writeHead(204); res.end(); return; }        // null-body status
       res.writeHead(200, { 'content-type': 'text/plain' }); res.end('hello');       // body must survive
     });
+    // own-listener: binds every interface so the LAN address answers, because the fetch is pinned to it
     await new Promise(r => server.listen(0, '0.0.0.0', r));
     const port = server.address().port;
     // Resolve the fake peer hostname to the bound private IP; allowPrivate lets a 10/172/192 target pass.

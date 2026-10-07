@@ -37,6 +37,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { createScriptedHost, gate } from './_scripted-inference-host.mjs';
 import { createFakeSpawn, autopilot } from './_fake-child.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'general';
@@ -254,7 +255,7 @@ describe('the brain embed queue and a lost inference process (real MongoDB)', { 
     it('stops heartbeating when the embed is over', async () => {
       const { id } = await enqueue('quick');
       await worker.runOneEmbedJob({ heartbeatMs: 10 });
-      await new Promise(r => setTimeout(r, 60));
+      await sleep(60);
       assert.equal(await jobs().countDocuments({ _id: id }), 0);
       assert.equal(await jobs().countDocuments({ status: 'processing' }), 0,
         'a beat after the finish must not resurrect or re-mark the job');

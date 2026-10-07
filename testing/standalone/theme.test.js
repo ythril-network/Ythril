@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
+import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,7 +60,7 @@ function writeConfig(cfg) {
 
 async function reloadConfig() {
   // Wait for Docker Desktop bind-mount propagation before triggering reload.
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await sleep(600);
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
 }
@@ -114,9 +115,9 @@ describe('GET /api/theme — external theming endpoint', () => {
       body = await r.json();
       if (body.cssUrl === testUrl) break;
       writeConfig(cfg);
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await sleep(600);
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await sleep(400);
     }
     assert.equal(body.cssUrl, testUrl, `Expected cssUrl '${testUrl}', got '${body.cssUrl}'`);
   });
