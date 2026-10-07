@@ -347,6 +347,12 @@ One such line now and then is a slow moment; the same space appearing repeatedly
 database connection to look into. The gauge `ythril_seq_horizon_oldest_hold_seconds` shows the same thing as a
 number per space.
 
+**`file tombstone position held …` names a deletion that held up the deletions after it.** While the record of a
+file's deletion is being stored, peers are sent no deletion of that space placed after it, so none can be skipped.
+The line has the same shape and the same limit as the one above — `at=` is the deletion's place instead of `seq=` —
+and the gauge `ythril_file_tombstone_oldest_hold_seconds` shows it as a number per space. Seen repeatedly, file
+deletions in that space are not reaching peers.
+
 **`Write bound: the server did not answer … by its own deadline` names a write the database had to be told to drop.**
 A write that is stopped (`ended=timeout`) is stopped by the database at its limit; if the database has not
 answered half a second after that — it is blocked behind another session's uncommitted insert, or the request reached it
