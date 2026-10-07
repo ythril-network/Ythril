@@ -456,4 +456,14 @@ describe('--help names every input the script reads', () => {
       }
     });
   });
+
+  it('says --record-ci takes the id of the run a caller waits for (Q-402), and that the pass fails when it was not listed', async () => {
+    await withRun({}, async ({ dir }) => {
+      const r = await runTimes(['--help'], { cwd: dir });
+      assert.equal(r.code, 0, everything(r));
+      assert.match(r.stdout, /--record-ci\s+\[<runId>\]/, `--help shows the optional run id:\n${r.stdout}`);
+      const entry = r.stdout.slice(r.stdout.indexOf('--record-ci'), r.stdout.indexOf('--type-schema'));
+      assert.match(entry, /not (?:in|among) the listing|not listed/i, `the entry says what happens to a named run the pass did not list:\n${entry}`);
+    });
+  });
 });
