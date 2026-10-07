@@ -37,9 +37,12 @@ export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
  * there on), where `runs` answers every read alike. It is what a listing that lags behind a run that has just finished looks
  * like: stale on the first read and holding the run on a later one. The page after the first is empty either way.
  *
- * @param {{ runs: object[], listings?: object[][], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
+ * `pages` (optional) is a listing of more than one page: page n answers `pages[n - 1]` (an empty list past the last), on every
+ * read, where `runs` answers page 1 alone. It is what a run older than the first page's runs looks like.
+ *
+ * @param {{ runs: object[], listings?: object[][], pages?: object[][], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
  */
-export async function startFakeGithub({ runs, listings, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
+export async function startFakeGithub({ runs, listings, pages, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
   let listingReads = 0;
   const artifactById = new Map();
@@ -59,6 +62,11 @@ export async function startFakeGithub({ runs, listings, jobsByRun = {}, artifact
     const page = Number(u.searchParams.get('page') ?? '1');
     let m;
     if ((m = u.pathname.match(/^\/repos\/[^/]+\/[^/]+\/actions\/(?:runs|workflows\/[^/]+\/runs)$/))) {
+      if (pages) {
+        if (page === 1) listingReads++;
+        const here = pages[page - 1] ?? [];
+        return json(200, { total_count: here.length, workflow_runs: here });
+      }
       if (page > 1) return json(200, { total_count: 0, workflow_runs: [] });
       const held = listings ? listings[Math.min(listingReads, listings.length - 1)] : runs;
       listingReads++;

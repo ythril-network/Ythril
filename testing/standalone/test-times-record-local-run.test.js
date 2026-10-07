@@ -444,6 +444,27 @@ describe('recording is refused under CI, and sends nothing', () => {
       });
     }
   }
+
+  it('every recording form is refused with one code, and it is not the code of an ordinary failure', async () => {
+    await withRun({}, async ({ server, dir }) => {
+      writeStandard(dir);
+      const env = envFor(server, { GITHUB_ACTIONS: 'true', GH_TOKEN: 'ghp_irrelevant' });
+      // An ordinary failure of this script (a command it does not know) is the code a refusal must be told apart from.
+      const ordinary = await runTimes(['--no-such-command'], { cwd: dir, env: envFor(server) });
+      assert.notEqual(ordinary.code, 0, everything(ordinary));
+      const codes = new Map();
+      for (const args of [['--record'], ['--record-ci'], ['--record-ci', '1001'], ['--rewrite', 'ci:1001:1:standalone-pure:standalone'], ['--rewrite', 'local:1:1:local:standalone']]) {
+        const r = await runTimes(args, { cwd: dir, env });
+        assert.match(everything(r), /GITHUB_ACTIONS|\bCI\b/, `${args.join(' ')} was not refused for CI:\n${everything(r)}`);
+        codes.set(args.join(' '), r.code);
+      }
+      assert.equal(new Set(codes.values()).size, 1, `the refusal's code depends on the form: ${JSON.stringify([...codes])}`);
+      const [code] = codes.values();
+      assert.notEqual(code, 0);
+      assert.notEqual(code, ordinary.code, 'a refusal for CI exits with the code of an ordinary failure, so a caller cannot tell the two apart');
+      assert.equal(server.calls.length, 0, 'nothing is sent from CI');
+    });
+  });
 });
 
 describe('--help names every input the script reads', () => {
