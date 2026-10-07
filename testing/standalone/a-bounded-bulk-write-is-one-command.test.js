@@ -409,7 +409,7 @@ const SITES = [
   { file: 'server/src/files/file-meta.ts', sites: 1, kind: 'sliced', reason: 'every file under a moved directory: the count is the store\'s' },
   { file: 'server/src/files/move-cascade.ts', sites: 1, kind: 'sliced', reason: 'every derived row of a moved file: the count is the store\'s' },
   { file: 'server/src/files/media/job-queue.ts', sites: 1, kind: 'sliced', reason: 'every media job under a moved path: the count is the store\'s' },
-  { file: 'server/src/files/tombstones.ts', sites: 2, kind: 'sliced', reason: 'one tombstone per path of a deleted or moved directory: the count is the store\'s' },
+  { file: 'server/src/files/tombstones.ts', sites: 4, kind: 'sliced', reason: 'one tombstone per path of a deleted or moved directory, one per tombstone a peer delivered that is kept to pass on, one delete per path a newer arriving version supersedes (a peer\'s page: the count is the store\'s)' },
   { file: 'server/src/files/manifest.ts', sites: 1, kind: 'sliced', reason: 'one cache row per file hashed in a round: the count is the store\'s; small rows' },
   { file: 'server/src/metrics/space-activity-store.ts', sites: 2, kind: 'sliced', reason: 'one row per bucket of a space\'s activity: the count is the store\'s; small rows' },
 ];

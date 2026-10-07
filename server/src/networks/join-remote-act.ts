@@ -30,7 +30,7 @@ import { mergePeerRoster } from './member-introductions.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
-import { widenPeerTokensOf } from './network-spaces.js';
+import { isDirectionalNetwork, widenPeerTokensOf } from './network-spaces.js';
 import { inviterIsWhoItClaims, knownPeerAt } from '../auth/peer-identity.js';
 import { resolveJoinSpaces } from './join-spaces.js';
 import { recordSpaceAlias } from '../sync/space-map.js';
@@ -350,9 +350,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       label: applyData.instanceLabel ?? 'remote',
       url: new URL(inviteUrl).origin,
       tokenHash: tokenForAHash,
-      direction: applyData.networkType === 'pubsub' ? 'pull'
-               : applyData.networkType === 'braintree' ? 'pull'
-               : 'both',
+      // The inviter's network type decides it (the stored network may predate this join): a directional member is pulled from.
+      direction: isDirectionalNetwork({ type: applyData.networkType as NetworkConfig['type'] }) ? 'pull' : 'both',
       lastSeqReceived: {},
     });
   }

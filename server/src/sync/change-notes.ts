@@ -32,7 +32,7 @@ import { getConfig } from '../config/loader.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { localToRemote, remoteToLocal } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
-import { upstreamOf } from '../networks/network-spaces.js';
+import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
 import type { NetworkActResult } from '../networks/network-acts.js';
@@ -95,7 +95,7 @@ export function downwardMembers(net: NetworkConfig, selfId?: string): NetworkMem
 
 /** Why a note cannot be sent on `net` from here, or null. One sentence for both doors. */
 export function changeNoteRefusal(net: NetworkConfig): string | null {
-  if (net.type !== 'pubsub' && net.type !== 'braintree') {
+  if (!isDirectionalNetwork(net)) {
     return `A change note travels with a downward sync, and a ${net.type} network has none: only pub/sub (publisher to subscribers) and braintree (parent to children) sync downward.`;
   }
   if (downwardMembers(net).length === 0) {
@@ -248,7 +248,7 @@ export async function receiveChangeNotes(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const net = getConfig().networks.find(n => n.id === networkId);
   if (!net) return { status: 404, body: { error: 'Network not found' } };
-  if (!fromInstanceId || upstreamOf(net) !== fromInstanceId) {
+  if (!isUpstreamPeer(net, fromInstanceId)) {
     return { status: 403, body: { error: 'Only the instance above this one in the network may send it change notes.' } };
   }
   const parsed = IncomingChangeNotes.safeParse(body);

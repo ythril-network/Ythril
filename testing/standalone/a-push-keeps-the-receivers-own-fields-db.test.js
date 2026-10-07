@@ -58,7 +58,18 @@ const LOCAL_VALUES = {
   _expireAt: new Date('2099-01-01T00:00:00.000Z'),
   _contentExpireAt: new Date('2098-01-01T00:00:00.000Z'),
   syncBase: { 'some-peer': 'sha-agreed' },
+  // bundle-51: who delivered the stored version. RE-STAMPED by the arrival (below), not carried across it.
+  deliveredBy: 'an-earlier-deliverer',
 };
+
+/**
+ * The local-only fields an arrival WRITES rather than carries: the stamp is part of the version, so a peer's newer copy is
+ * stamped with the peer that delivered it and the stored copy's value does not survive (`an-arrival-stores-who-delivered-it-db`
+ * holds the stamp itself). Named here because "every local-only field survives" is otherwise false of exactly this one.
+ */
+const RESTAMPED = new Set(['deliveredBy']);
+/** The instance the push door authenticates (`PEER_TOKEN`): the deliverer the stamp must name. */
+const DELIVERER = 'push-door-peer';
 
 /** The families a push REPLACES (file metadata merges with `$set` and keeps its own fields by construction). */
 const REPLACED = Object.entries(FAMILIES).filter(([k]) => k !== 'filemeta').map(([key, f]) => ({ key, ...f }));
@@ -90,6 +101,7 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
     it('the field set is read from the module and every field has a fixture value', () => {
       assert.ok(LOCAL_ONLY.size >= 6, `LOCAL_ONLY_FIELDS: ${[...LOCAL_ONLY]}`);
       assert.deepEqual([...LOCAL_ONLY].filter(f => !(f in LOCAL_VALUES)), [], 'a local-only field with no fixture goes unchecked');
+      for (const f of RESTAMPED) assert.ok(LOCAL_ONLY.has(f), `'${f}' is no longer a local-only field: it would be hashed and replicated`);
     });
 
     for (const fam of REPLACED) {
@@ -106,10 +118,13 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
           assert.equal(r.code, 200, JSON.stringify(r.body));
           const after = await door.coll(S, fam.coll).findOne({ _id: id });
           assert.equal(after.seq, 6, 'the newer copy did not land');
-          const lost = [...LOCAL_ONLY].filter(f => JSON.stringify(after[f]) !== JSON.stringify(local[f]));
+          const lost = [...LOCAL_ONLY].filter(f => !RESTAMPED.has(f) && JSON.stringify(after[f]) !== JSON.stringify(local[f]));
           assert.deepEqual(lost, [],
             `${via} ${fam.key}: a peer's edit erased the receiver's own ${lost.join(', ')}. The retention stamps stop `
             + 'the record expiring here; the vector drops it out of search until it is re-embedded');
+          // What the arrival re-stamps is the deliverer of THIS version, not the stored copy's.
+          assert.equal(after.deliveredBy, DELIVERER,
+            `${via} ${fam.key}: the newer copy was delivered by '${DELIVERER}' and the stored deliveredBy is ${JSON.stringify(after.deliveredBy)}`);
         });
       }
     }

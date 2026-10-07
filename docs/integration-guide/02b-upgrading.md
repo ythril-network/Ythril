@@ -50,6 +50,56 @@ has the index from its first write. Two things an integrator can see:
 The duplicate and contradiction scanners keep their cursor as `(seq, _id)`: the first run after the upgrade scans the
 records at the one `seq` its cursor named once more, and nothing below it.
 
+**Upgrading past 5.6.x changes who may delete what below a publisher or a parent, and re-reads that upstream's deletions once.**
+On a pub/sub network or a tree, an instance now applies its direct upstream's deletion of a record **that upstream
+delivered to it, whoever wrote it**. Until now it applied a deletion only to a record the deleting instance wrote,
+so a record the publisher relayed from a third instance, and any record a publisher's retention sweep removed
+after relaying it, stayed on every subscriber for good. What stays out of an upstream's reach: records this
+instance wrote itself, and records that reached it through any other peer. **The cost is the same trust the
+network already extends: a publisher or parent that is compromised or misconfigured can delete, on every instance
+below it, everything it relayed.** Clubs, closed and democratic networks are unchanged. The rule is in
+[Sync Protocol → Tombstone deletion authorisation](../sync-protocol.md#tombstone-deletion-authorisation).
+
+- **A one-time back-fill, then a one-time re-read, in each space's first sync cycle after the upgrade.** The
+  instance records, per record, which peer delivered it; rows stored before the upgrade carry no such record,
+  so each space is stamped once (a record is attributed to the upstream only when every network carrying the
+  space has that one upstream and the record was written by someone else; every other row is attributed to
+  nobody, and is deletable by its own author alone). Then, per space, the instance asks each upstream for its
+  tombstones from the beginning and applies them, which delivers the deletions it declined while it ran the
+  older rule. It does not touch your record watermark and moves no record. It is bounded per cycle, so a long
+  set finishes over several cycles from where it stopped; if the upstream cannot answer it stays owed and is
+  said once in the log.
+- **Watch it.** The gauge `ythril_sync_tombstone_rereads_owed` is the number still owed and falls to `0`; each
+  space says so in one info line when its re-read finishes (even when it deleted none), naming the upstream and how many records it deleted;
+  `ythril_sync_tombstones_applied_total{ground="upstream"}` carries those deletions; and a deletion that is
+  declined is counted in `ythril_sync_tombstones_declined_total{kind,reason}` and said once per peer, space and
+  reason (see [Prometheus Metrics](11-setup-api.md#prometheus-metrics)). An instance that joined after the upgrade has nothing to re-read.
+- **What it recovers, and what it cannot.** Only deletions the upstream still holds. An upstream pruned a
+  tombstone once every member counted as past it, and a declined one counted, so a deletion that is old enough may
+  be gone at the source: the record it would have removed stays until you delete it. A `merkle: true` network shows
+  that as a divergence on the space. A re-read deletes a record only if its seq is not above the tombstone's, which
+  fails toward keeping a record re-created after the deletion.
+- **Upgrade root-first.** A middle node that re-reads after its children have passed the seq a relayed tombstone
+  carries leaves them holding the record, because a relayed tombstone keeps its issuer's seq and is not offered again
+  by position (the same limit that records have, in the Sync Protocol's watermark section). Upgrading the root, then
+  each level below it, avoids it.
+
+**Mixed versions: what an older peer does with each change.**
+
+| Change | An older peer receiving it | An older peer sending it |
+|---|---|---|
+| The upstream ground (needs no new field) | Applies only the issuer's own ground: a relayed record's deletion is declined without a trace, and the sender may prune it. The upgrade's re-read recovers it where the upstream still holds it | Applied here on the upstream ground |
+| `POST /api/sync/tombstones` answers `declined` (omitted when zero) | Never sends it; read a missing one as zero | Ignores it |
+| `GET /api/sync/tombstones` | Unchanged | Unchanged: this instance pulls as before |
+| File tombstones gain `issuer` and `rowSeq`, are judged by the same rule, and keep a newer re-created file | Ignores both keys. It deletes the bytes for any tombstone it is sent, keeps the file's record, and passes the tombstone on without an `issuer`; this instance reads one with no `issuer` as issued by the peer that sent it | Applied here under the rule, with no version to compare: a re-created file is not protected until both ends upgrade |
+| `GET /api/sync/file-tombstones` takes `cursor` and answers `nextCursor` | Ignores `cursor`, answers one page at its fixed ceiling with no `nextCursor`; this instance warns that the answer may be cut | Without `cursor` it answers exactly as before, so an older puller reads what it always did (and still cannot read past the ceiling) |
+| `POST /api/sync/file-tombstones` is paged and answers `{ applied, refused?, declined? }` | Answers `{ applied }` only, and takes a large body the way it did | Sends one body for everything, which this instance takes up to the per-request cap; a set larger than that cannot succeed until it upgrades |
+| Bytes a held file tombstone covers: `200 { tombstoned: true }`; `filemeta.tombstoned` in the batch answer | Stores them, as before, and omits the counter | Treats the `200` as stored and ignores the extra counter: no re-upload loop |
+
+Every answer added in the table is additive, so an older instance reads it as the answer it always gave.
+**A file tombstone this instance held before the upgrade names no version, so it shadows nothing**: the protection
+against a peer returning a deleted file applies to deletions made after the upgrade.
+
 **Upgrading to 5.6.0 or later deletes the read spills older versions wrote into spaces, and that cannot be
 undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
 of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
@@ -65,7 +115,7 @@ collection, and the drop cannot be undone.** Those versions stored other instanc
 collection nothing read. A pass inside the retention cycle (every few minutes, at most 10,000 records per space per
 pass) fills each file row this instance made itself with the keys it lacks, gives a row another instance wrote the
 usual newer-wins rule, and never creates a row. A record whose file has no row here waits up to 30 days for the
-file's bytes, and is discarded sooner when a file tombstone says the file was deleted. A record with a key of the
+file's bytes, and is discarded sooner when a file tombstone says the file was deleted (a tombstone from before the upgrade, which names no version, by path alone). A record with a key of the
 wrong type, or a chunk's `parentFileId`, is discarded and counted as refused; a key a record lacks is never required,
 because only the keys it carries are filled. The log line counts what was discarded; it does not list the records. When a space's collection is empty it is dropped, with one log line and one
 audit entry, `file.stray_filemeta.drain`, naming the space. To keep a copy first, `mongodump --collection
@@ -96,6 +146,17 @@ longer has it — which, once the background build above has finished and droppe
 instance that is a boot that takes as long as the build did. The `{ seq: 1, _id: 1 }` indexes stay: an older build neither
 reads nor drops them, and they cost a second index on every write until the upgrade is done again. A scanner cursor that
 the newer build wrote is read by the older one as its `seq` alone, and scans nothing twice.
+
+**A rollback to 5.6.x carries the delivery stamp into builds that do not know it, and returns to the older deletion rule.**
+Every record stored since the upgrade holds `deliveredBy`, a field an older build does not know is local: it hashes it,
+so a `merkle: true` network with a rolled-back member logs `MERKLE_DIVERGENCE` for the spaces where it differs, and it
+serves it in sync pages. An older peer drops it from record families, but its file schema is strict, so **it refuses
+a file record that carries it, and file metadata does not reach an older peer from a rolled-back instance** until
+the stamp is gone. Nothing is lost: the records are intact, and an upgrade done again finds the stamps in place
+(the markers for the back-fill and the re-read stay in `config.json`; a copy of `config.json` taken before
+the upgrade runs both again, harmlessly). The older build applies only a deletion its issuer's own peer delivered
+for a record the issuer wrote, so deletions a publisher relayed stop reaching the instance, and file tombstones are
+applied with no check of who sent them, as before.
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
 keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and

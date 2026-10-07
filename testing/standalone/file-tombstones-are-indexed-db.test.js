@@ -20,6 +20,9 @@
  *
  * - Space initialisation creates both indexes, and the boot pass that covers spaces initialisation never revisits
  *   (`ensureQueryIndexes`) creates them on a space whose collection has none.
+ * - The served page and the push's pages (bundle-51, Q-96) read `{ positionAt > p }` in `(positionAt, _id)` order, every request of
+ *   every peer every cycle: a fourth index serves it, partial on the stamp only a published tombstone carries, and the boot pass
+ *   gives a tombstone stored before positions existed its local position.
  * - MongoDB's winning plan for each REAL query uses them — an index the planner does not choose is decoration — and the
  *   same queries scan without them, which is the control that makes the first assertion mean something.
  *
@@ -48,13 +51,17 @@ function planStages(explain) {
   return names;
 }
 const keysOf = async () => (await coll.listIndexes().toArray()).map(ix => Object.keys(ix.key).join(',')).filter(k => k !== '_id');
-const WANTED = ['pending,deletedAt', 'move.from,move.to', 'path'];
+const WANTED = ['pending,deletedAt', 'move.from,move.to', 'path', 'positionAt,_id'];
 
-/** The two questions, as the module asks them. */
+/** The questions, as the module asks them. */
 const settleQuery = () => coll.find({ pending: true, deletedAt: { $lte: new Date().toISOString() } }).sort({ deletedAt: 1 }).limit(500);
 const markerQuery = () => coll.find({ 'move.from': 'a.txt', 'move.to': 'b.txt' });
 const pathQuery = () => coll.find({ path: { $in: ['x.txt', 'a.txt'] } });
-const QUESTIONS = [['settle', settleQuery], ['move marker', markerQuery], ['one per path', pathQuery]];
+// The served page and the push's pages (bundle-51): published rows after a position, in `(positionAt, _id)` order. The rest of a
+// run of equal positions is not a question of its own here: its `_id` bound is answered by the `_id` index, which no drop removes,
+// so it could not show the control.
+const pageQuery = () => coll.find({ spaceId: S, pending: { $exists: false }, positionAt: { $gt: '' } }).sort({ positionAt: 1, _id: 1 }).limit(501);
+const QUESTIONS = [['settle', settleQuery], ['move marker', markerQuery], ['one per path', pathQuery], ['served page', pageQuery]];
 
 describe('file tombstones are indexed', { skip }, () => {
   before(async () => {
@@ -62,10 +69,15 @@ describe('file tombstones are indexed', { skip }, () => {
     coll = door.coll(S, 'file_tombstones');
     // Enough published rows that a scan and an index plan differ, and a few of each kind the queries look for.
     const now = Date.now();
-    await coll.insertMany(Array.from({ length: 200 }, (_, i) => ({ _id: `p${i}`, spaceId: S, path: `f${i}.txt`, deletedAt: new Date(now - i).toISOString() })));
+    await coll.insertMany(Array.from({ length: 200 }, (_, i) => {
+      const at = new Date(now - i).toISOString();
+      return { _id: `p${i}`, spaceId: S, path: `f${i}.txt`, deletedAt: at, positionAt: at };
+    }));
     await coll.insertMany([
       { _id: 'pend', spaceId: S, path: 'x.txt', deletedAt: new Date(now - 3_600_000).toISOString(), pending: true },
       { _id: 'mark', spaceId: S, path: 'a.txt', deletedAt: new Date(now).toISOString(), move: { from: 'a.txt', to: 'b.txt' } },
+      // A tombstone stored before positions existed: published, and with no `positionAt` — the boot pass gives it one.
+      { _id: 'legacy', spaceId: S, path: 'legacy.txt', deletedAt: '2026-01-01T00:00:00.000Z' },
     ]);
   });
   after(async () => { await door?.close(); });
@@ -94,5 +106,14 @@ describe('file tombstones are indexed', { skip }, () => {
     await ensureQueryIndexes();
     const keys = await keysOf();
     for (const k of WANTED) assert.ok(keys.includes(k), `the boot pass did not index ${k} on an existing space: found ${keys.join(' | ') || 'none'}`);
+  });
+
+  it('the boot pass gives a tombstone stored before positions existed its local position, and never to a pending one', async () => {
+    const { ensureQueryIndexes } = await import('../../server/dist/spaces/ensure-query-indexes.js');
+    await ensureQueryIndexes();
+    const legacy = await coll.findOne({ _id: 'legacy' });
+    assert.equal(typeof legacy?.positionAt, 'string', 'a published tombstone with no position is invisible to the paged read and the push, which read `positionAt`');
+    assert.ok(legacy.positionAt >= '2026-01-01T00:00:00.000Z', 'its position is not a local instant');
+    assert.equal((await coll.findOne({ _id: 'pend' }))?.positionAt, undefined, 'a pending tombstone was given a position: it is published only once its act has happened');
   });
 });

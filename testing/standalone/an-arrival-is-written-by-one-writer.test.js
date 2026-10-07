@@ -85,11 +85,23 @@ const EXEMPT = {
     'file sync: the BYTES of a file arrived, and the receiver records what it derived from them',
   'server/src/files/file-meta.ts:deleteFileMeta':
     'file sync: a file tombstone removes the file and its metadata',
+  'server/src/files/file-meta.ts:markFileMetaDeleted':
+    'file sync: a peer\'s file tombstone, on an instance that keeps deleted rows for audit (`softDeleteFileMeta`), flags the row '
+    + 'deleted instead of removing it (`removeFileHere`, the steps of a local delete) — a delete, not an arrival',
+  'server/src/files/converters/pipeline.ts:deleteConversionArtifacts':
+    'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here (`removeFileHere`), as a '
+    + 'local delete does — rows no peer sends (`derived` in the writer), removed with the file they came from',
   'server/src/sync/file-sync.ts:recordSyncBase':
     'file sync: the last-agreed hash a conflict is judged against, local bookkeeping on the file row',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '
     + 'no arriving document',
+  'server/src/sync/delivered-by-backfill.ts:stampCollection':
+    'the one-time stamp of who delivered the rows stored before `deliveredBy` existed (bundle-51), run by the sync cycle: it '
+    + 'writes a local-only field on rows already held and stores no arriving document',
+  'server/src/brain/entities.ts:unlabelFacesWhere':
+    'the face-label cascade of a deleted entity (`unlabelFacesForEntities`, which a peer-applied entity tombstone now runs, '
+    + 'Q-395): it clears the entity\'s claim on face rows already held and stores no arriving document',
 };
 
 const INDEX = moduleIndex('server/src');

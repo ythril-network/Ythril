@@ -131,4 +131,6 @@ DELETE /api/brain/spaces/:spaceId/links/:id
 
 The two records at either end are untouched. The link record IS the whole connection, so removing it
 removes the connection — there is no second copy on either end to contradict it. A tombstone is written, so
-the removal reaches peer instances on the next sync instead of being restored by one that still holds it.
+the removal reaches peer instances on the next sync instead of being restored by one that still holds it. Which
+peers apply it follows the sync deletion rule: every peer holding a link this instance wrote, and on a pub/sub or tree
+network everything downstream of this instance; a link another instance wrote stays in place on a mesh peer.

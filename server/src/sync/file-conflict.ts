@@ -60,12 +60,19 @@ export function decideFilePull(local: ManifestEntry | undefined, remote: Manifes
  * raises the conflict instead of our push erasing its edit. The push decided by modification time alone, so which of
  * two edits survived depended on whose clock was later. Without a base (nothing agreed yet, e.g. data from before
  * this rule) the old newer-wins order stands, so an upgrade does not turn every existing file into a conflict.
+ *
+ * `toldTombstoned` is the peer's own answer to an earlier upload of exactly these bytes (`200 { tombstoned: true }`,
+ * `sync/told-tombstoned.ts`): it holds a tombstone that erased them, so they are not sent again while our hash for the path
+ * is unchanged. It is read FIRST, because the peer having no copy of the path — what sends the push below — is exactly
+ * what that tombstone is the reason for.
  */
 export function decideFilePush(
   local: ManifestEntry & { modifiedAt: string },
   peer: (ManifestEntry & { modifiedAt: string }) | undefined,
   base?: string,
+  toldTombstoned = false,
 ): 'push' | 'skip' {
+  if (toldTombstoned) return 'skip';
   if (!peer) return 'push';
   if (local.sha256 === peer.sha256) return 'skip';
   if (base !== undefined) return peer.sha256 === base ? 'push' : 'skip';

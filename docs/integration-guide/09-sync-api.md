@@ -288,7 +288,11 @@ push still succeeds. An older peer keeps offering its spills until it upgrades; 
 its own copies are swept locally, so a mixed network converges without anyone upgrading first.
 
 **Deletions travel on `/api/sync/file-tombstones`**, as they always have — a deleted file has a file
-tombstone rather than a brain one, so the metadata page carries no tombstones of its own.
+tombstone rather than a brain one, so the metadata page carries no tombstones of its own. A metadata
+arrival that a held file tombstone covers (its `rowSeq` is at or above the arriving `seq`) is counted in the
+batch answer's `filemeta.tombstoned`, not stored, and not `rejected`: the sender reads it as delivered. The
+counter is additive and appears only when it is above zero; an older receiver never sends it, so read a missing one as zero. See
+[File Sync Artifacts](#file-sync-artifacts).
 
 > **Metadata written before 4.0 has no `seq`, and the page cursor is `seq > n`.** So it does not reach a
 > peer until the record is next written. `npm run links:convert` stamps the ones already stored —
@@ -358,6 +362,8 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
   "links":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
   "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
+
+`filemeta.tombstoned` is the one counter that is **absent when it is zero** (above, a held file tombstone covered that many arrivals): read a missing one as zero.
 
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
@@ -439,7 +445,7 @@ re-embedded and the record stays searchable meanwhile. **Unless the receiver sup
 own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps and
 `syncBase` only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
 longer embeds, and `matchedText` would keep removed text findable by lexical search. A file's derived passages lose
-their vectors with it.
+their vectors with it. Every arrival is also stamped with the peer that delivered it (`deliveredBy`, local to the receiver and never sent on), which is what the [deletion rule](#tombstones) reads.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written — by push (batch or single route, a new
@@ -534,11 +540,15 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 - `GET /api/sync/tombstones?spaceId=general&cursor=<cursor>&limit=5000` returns grouped `{ entities, facts, edges, chrono, links }` tombstones, each ascending by seq, **and `nextCursor`** beside them. The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
   - **Cursor mode pages by position.** It is one read of every type: `limit` rows (default 1000, max 5000, **the page's total**) in `(seq, _id)` order after the cursor's position, grouped by type. Echo `nextCursor` as `cursor` until it is `null`; the cursor is opaque ([above](#common-query-parameters)). The first request carries the bare-seq cursor of your watermark — the base64url text of the decimal number, for example `base64url("0")` — **together with `sinceSeq` set to the same watermark**: that is the one cursor a client writes, and only for that first request. A server that predates cursor mode ignores `cursor` and reads `sinceSeq`, and answers with no `nextCursor` — which is how a client knows to page it the older way. It pages through any number of tombstones at one seq: equal seqs are legitimate, because an instance relays tombstones issued by several others, and any member's token may name any seq for what it issues.
   - **`sinceSeq` alone is the older mode and is unchanged**: `seq > sinceSeq`, per type, at most `limit` of each (default 1000, max 5000), no `nextCursor`. Page it tie-safe: a full array may hold more at its last seq, so ask next from the lowest last seq among the full arrays **minus one**, and skip what you already applied by `(type, _id)`. Moving to the last seq instead loses every tombstone of a run that straddles the page. A full array that is all one seq cannot be paged past by seq: stop, and hold your watermark below it. Use cursor mode to page past it.
-- `POST /api/sync/tombstones` accepts `{ tombstones: [...] }`, at most 5000 per request (`400` above), and answers `200 { applied, refused }`.
-  - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` is additive — an older receiver answers `{ applied }` only. A refusal is by shape, so re-sending it changes nothing; advance past it.
+- `POST /api/sync/tombstones` accepts `{ tombstones: [...] }`, at most 5000 per request (`400` above), and answers `200 { applied, refused, declined }`.
+  - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` and `declined` are additive — an older receiver answers `{ applied }` only, and a receiver omits `declined` when it is zero, so read a missing one as zero. A refusal is by shape, so re-sending it changes nothing; advance past it.
+  - **`declined` counts the elements the receiver judged it may not apply** (see the authority below). It is a part of `applied`, not an addition to it: `applied` is what passed the shape check. A declined element is not stored and would be declined again, so advance past it as past a refusal; a sender that does read it logs a non-zero count, because on a directional network it means the deletion did not reach a record you expected it to.
   - An element of a `type` the receiver does not know answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied: hold your watermark and re-send after the receiver upgrades.
-  - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. It deletes a record only when your peer identity issued it and authored the record; one that fails that is refused and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is.
+  - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. **Who may delete what** is one rule with two grounds, and a tombstone needs either. **Your own**: your peer identity delivered it, issued it, and the record is one you authored (or one with no author, which legacy data lacks). **Your upstream's**, on a pub/sub or tree network only: when the receiver's direct upstream — the publisher it subscribes to, or its parent — delivers a tombstone, it deletes the record that this receiver stored as delivered by that upstream, **whoever wrote it**; the receiver stores who delivered each record, and that is what it reads. A receiver's own records are never deletable by its upstream, nor are records that reached it through another peer. A tombstone that meets neither ground is declined and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is. A tombstone for a record the receiver does not hold is stored and deletes nothing. The full rule, with its cost, is in [Sync Protocol → Tombstone deletion authorisation](../sync-protocol.md#tombstone-deletion-authorisation).
+  - **A deletion your peer's retention sweep issues is a deletion:** it applies on the upstream ground to what an upstream relayed, and on the issuer ground to what the sweeping instance wrote.
   - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send. A store that could not take the page in time answers a retryable `503`, as every push route does.
+
+**Mixed versions.** The upstream ground needs no new field on the wire: it is decided from who delivered the page and what the receiver stored. A receiver that predates it applies only the issuer's own ground, so below a publisher or parent on an older build, a deletion of a record the publisher relayed from another author is declined without a trace (it counts as served, and the sender may prune it). An instance that upgrades **re-reads its upstream's tombstones once**, from the beginning and per space, so it picks up what it declined meanwhile, as far as the upstream still holds them ([Upgrading](02b-upgrading.md)); upgrade the root of a tree before the nodes below it. `declined` is read as zero when absent, and a puller on an older build reads tombstones exactly as before.
 
 **The `sinceSeq` you send is recorded.** (With `cursor`, the cursor's seq **minus one** is: everything below it was delivered, and part of the run at it may not have been.) The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
 
@@ -568,15 +578,44 @@ answer is lost is read back while the hold is still held. On the serving instanc
 ### File Sync Artifacts
 
 - `GET /api/sync/manifest?spaceId=general` returns file digest metadata for delta detection. The answer also names `spaceId`, the local id the responder resolved the request to, which a peer uses for the file transfers that follow.
-- `GET /api/sync/file-tombstones?spaceId=general&since=<ISO>` returns file delete tombstones. **The sync engine
-  deliberately omits `since`**: a file tombstone carries its original `deletedAt` and can be relayed onward long
-  afterwards, so filtering by it would skip an older deletion arriving late and the file would stay. Use it only
-  if you can tolerate that.
-- `POST /api/sync/file-tombstones` applies file delete tombstones (`{ spaceId, tombstones: [...] }`).
-  **Your `200` is an acknowledgement.** The sender records the newest `deletedAt` in the batch as your confirmed
-  position and eventually drops its own copies below the minimum across all members — so answer `200` only once
-  the tombstones are durably recorded. `{ applied: 0 }` is a valid acknowledgement (the upsert is idempotent);
-  a non-2xx or a timeout means the sender keeps its copies, which is the safe direction.
+- `GET /api/sync/file-tombstones?spaceId=general&cursor=<cursor>&since=<ISO>` returns file delete tombstones, each
+  `{ _id, spaceId, path, deletedAt, issuer?, rowSeq? }`: `issuer` is the instance whose act deleted the file and
+  `rowSeq` the seq of the file record that act deleted, the version it erased (neither carries content, and an older
+  server sends neither). **With `cursor` it pages**: one page in order of this server's own position for each
+  tombstone, and `{ tombstones, nextCursor }` where `nextCursor` is opaque, echoed back as `cursor`, and `null` on
+  the last page; a `cursor` it cannot read answers `400` (`cursor must be a cursor a previous page of this route
+  returned`), and an empty one reads as none. A client does not build a cursor beyond the opening one its first
+  request carries: the sync engine opens with the start of time, `1970-01-01T00:00:00.000Z`, in the encoded form
+  `MTk3MC0wMS0wMVQwMDowMDowMC4wMDBa`, which a server with the paged mode reads as "from the beginning" (an empty
+  `cursor` is NOT that, it reads as none and answers the legacy way). After that a client only echoes `nextCursor` ([why it is a position](../sync-protocol.md#lastfiletombstoneackedat--the-same-bound-for-file-tombstones-from-acknowledgement)).
+  **Without `cursor` it answers as it always did**, in one answer cut at a fixed ceiling, with no `nextCursor`;
+  a client that never sends one cannot read past that ceiling, and a client that gets a full answer with no
+  `nextCursor` from an older server should treat it as possibly cut. **The sync engine deliberately omits `since`**: a file tombstone
+  carries its original `deletedAt` and can be relayed onward long afterwards, so filtering by it would skip an older
+  deletion arriving late and the file would stay. Use it only if you can tolerate that.
+- `POST /api/sync/file-tombstones` applies file delete tombstones (`{ spaceId, tombstones: [...] }`), at most as many
+  per request as `POST /api/sync/tombstones` takes (`400` above); send them in pages. It answers
+  `200 { applied, refused?, declined? }`: `applied` is the elements that passed the shape check, `refused` those
+  thrown away for their shape (a path that is not a safe relative path, an id or `deletedAt` that is not valid),
+  `declined` those the receiver judged it may not apply under the [deletion authority](../sync-protocol.md#tombstone-deletion-authorisation)
+  (part of `applied`). `refused` and `declined` are omitted when zero, so an older receiver's `{ applied }` reads
+  alike. **A tombstone is applied only when its authority holds** (the same two grounds as a record's, with the
+  file's record as the target) **and only to the version it names**: a file row whose seq is above `rowSeq` is a
+  re-creation made after the deletion and is kept. An element without `issuer` (an older peer's) is read as issued
+  by the peer that sent it. An id the receiver already holds is not applied again.
+  **Your `200` is an acknowledgement, and no more than that.** The sender records the newest position in the pages
+  you answered `200` to and eventually drops its own copies below the minimum across all members — so answer `200` only
+  once the tombstones are handled, applied or judged: a declined one will be declined again, so the sender may stop
+  sending it, and `{ applied: 0 }` is a valid acknowledgement for a page whose every element was already held. A
+  non-2xx or a timeout means the sender keeps its copies, which is the safe direction. (It used to read
+  *"durably recorded"*; a receiver that applies a deletion but keeps no copy, because it has no one to pass it on
+  to, is correct.)
+- **Peer arrivals against a held file tombstone.** An instance that holds a file tombstone for a path does not take
+  the erased file back from a peer: metadata whose `seq` is at or below the tombstone's `rowSeq` is counted in
+  `filemeta.tombstoned` (a higher `seq` is a newer version and is stored), and **bytes a peer uploads** to
+  `POST /api/files/:spaceId` for that path, whose hash is the erased content's, are answered `200 { tombstoned: true }`
+  and not stored. A user's own upload is never refused, and a tombstone held from before the upgrade carries no
+  `rowSeq` and shadows nothing. See [Files API](05-files-api.md#delete-a-file).
 
 ### Merkle Consistency Check
 
@@ -608,7 +647,7 @@ root a full recompute gives, by construction.
 What is excluded follows one rule, worth knowing if you are comparing roots yourself: **a field that is hashed
 must replicate, as it is.** The local-only fields are out: `embedding`, `embeddingModel` and `matchedText` are
 derived by the local model, so peers running different models legitimately differ, and the retention stamps
-(`_expireAt`, `_contentExpireAt`) and the sync base are each instance's own — a peer's stamp is never adopted,
+(`_expireAt`, `_contentExpireAt`) the sync base and `deliveredBy` (which peer delivered the record, read by the deletion rule) are each instance's own — a peer's stamp is never adopted,
 in either direction, because the sweep that acts on it would then be following another operator's policy.
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
 `spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field

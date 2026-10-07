@@ -62,6 +62,26 @@ export function upstreamOf(net: NetworkConfig): string | undefined {
   return undefined;
 }
 
+/**
+ * Is `net` DIRECTIONAL — does it have a position above some member (a subscriber's publisher, a tree node's
+ * parent), so that its push only runs down and its pull only runs up? The one answer to "pub/sub or braintree",
+ * asked by the sync cycle, the invite, the push-door direction block and the deletion authority; written inline at
+ * each it was a list of two types that a third directional type would have been added to in one place only.
+ */
+export function isDirectionalNetwork(net: Pick<NetworkConfig, 'type'> | undefined): boolean {
+  return net?.type === 'pubsub' || net?.type === 'braintree';
+}
+
+/**
+ * Is `id` the instance ABOVE this one in `net` (`upstreamOf`)? False for an empty or missing id and for a network
+ * with nobody above it, so a caller can never match "no upstream" against "no id". The one spelling of the
+ * comparison that decides who may announce a space, send a change note, supply the schema and, since D-14, whose
+ * deletion of a record it relayed this instance honours.
+ */
+export function isUpstreamPeer(net: NetworkConfig, id: string | undefined): boolean {
+  return !!id && upstreamOf(net) === id;
+}
+
 /** The spaces this instance announces for `net`, in the network's ids — a local alias is never what a peer calls it. */
 export function announcedSpaces(net: NetworkConfig): string[] {
   return net.spaces.map(s => localToRemote(net, s));
@@ -77,7 +97,7 @@ export function spacesToAdopt(
   fromInstanceId: string,
   announced: unknown,
 ): { networkId: string; localId: string }[] {
-  if (!Array.isArray(announced) || !fromInstanceId || upstreamOf(net) !== fromInstanceId) return [];
+  if (!Array.isArray(announced) || !isUpstreamPeer(net, fromInstanceId)) return [];
   const out: { networkId: string; localId: string }[] = [];
   for (const id of announced) {
     if (typeof id !== 'string' || !SPACE_ID.test(id)) continue;
@@ -312,7 +332,7 @@ export function healSpaceAliases(
   announced: unknown,
   spaceNames: unknown,
 ): { networkId: string; localId: string }[] {
-  if (!Array.isArray(announced) || !fromInstanceId || upstreamOf(net as NetworkConfig) !== fromInstanceId) return [];
+  if (!Array.isArray(announced) || !isUpstreamPeer(net as NetworkConfig, fromInstanceId)) return [];
   if (spaceNames === null || typeof spaceNames !== 'object' || Array.isArray(spaceNames)) return [];
   const names = new Map<string, string>();
   for (const [networkId, local] of Object.entries(spaceNames as Record<string, unknown>).slice(0, MAX_SPACE_NAMES)) {

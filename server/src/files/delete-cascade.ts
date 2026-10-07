@@ -39,10 +39,12 @@ import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent, deleteStored, isMissingPath } from './stored-bytes.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
-import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
-import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
+import { bytesPresent, deleteStoredIfPresent } from './stored-bytes.js';
+import { deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { forgetFileHashesByPrefix } from './manifest.js';
+import { cancelMediaJobsByPrefix } from './media/job-queue.js';
+import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
+import { removeFileHere } from './remove-file-here.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
 import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
@@ -63,20 +65,11 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
   const pending = await writePendingFileTombstones(spaceId, [filePath]);
   // A concurrent delete that got there first has done this half; anything else is the caller's failure.
   await actUnderPendingTombstones(pending, async () => {
-    if (present) await deleteStored(abs).catch(err => { if (!isMissingPath(err)) throw err; });
+    if (present) await deleteStoredIfPresent(abs);
   });
-  invalidateUsageCache(); // freed disk — reflect it in the next quota check
-  const at = `for ${peerText(spaceId)}/${peerText(filePath)}`;
-  // Cancel any queued media/text job so it cannot outlive the file and retry forever.
-  await unlessTheStoreFailed(`cancelMediaJob error ${at}`, () => cancelMediaJob(spaceId, filePath));
-  await unlessTheStoreFailed(`deleteConversionArtifacts error ${at}`, () => deleteConversionArtifacts(spaceId, filePath));
-  // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
-  // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta.
-  if (getConfig().softDeleteFileMeta === true) {
-    await unlessTheStoreFailed(`markFileMetaDeleted error ${at}`, () => markFileMetaDeleted(spaceId, filePath));
-  } else {
-    await unlessTheStoreFailed(`deleteFileMeta error ${at}`, () => deleteFileMeta(spaceId, filePath));
-  }
+  // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
+  // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
+  await removeFileHere(spaceId, filePath, { failure: 'throw' });
   emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path: filePath }, ...(actor ?? {}) });
 }
 
@@ -123,6 +116,8 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   await unlessTheStoreFailed(`cancelMediaJobsByPrefix error ${at}`, () => cancelMediaJobsByPrefix(spaceId, dirPath));
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
+  // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.
+  await unlessTheStoreFailed(`forgetFileHashesByPrefix error ${at}`, () => forgetFileHashesByPrefix(spaceId, dirPath));
   // That removal survives its own failure, so the sidecars' tombstones are settled from the disk: published where the
   // bytes went, dropped where they are still here.
   await settlePendingFileTombstones(pendingAmong(pending, sidecars));

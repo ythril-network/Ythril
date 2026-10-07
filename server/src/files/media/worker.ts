@@ -30,7 +30,7 @@
  * provider set (no mid-job swap).
  */
 
-import { getConfig, getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
+import { getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
 import { toSafeRelPath } from '../../util/paths.js';
 import { concreteSpaceIds } from '../../spaces/proxy.js';
 import { intervalJob, type IntervalJob } from '../../util/interval-job.js';
@@ -38,13 +38,14 @@ import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
-import { claimNextJob, completeJob, failJob, resetStalledJobs, cancelMediaJob, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob } from './job-queue.js';
+import { removeFileHere } from '../remove-file-here.js';
+import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob } from './job-queue.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
 import { col, asFilter } from '../../db/mongo.js';
 import type { FileMetaDoc } from '../../config/types.js';
-import { updateFileMeta, markFileMetaDeleted, setDerivedDescriptionIfUnset } from '../file-meta.js';
+import { updateFileMeta, setDerivedDescriptionIfUnset } from '../file-meta.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
 import {
@@ -691,23 +692,9 @@ async function processJob(
  */
 async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise<void> {
   if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
-  const fileId = claim.jobId;
-  await cancelMediaJob(spaceId, fileId).catch(err =>
-    log.warn(`reconcileDeletedSource: cancelMediaJob ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-  );
-  await deleteConversionArtifacts(spaceId, fileId).catch(err =>
-    log.warn(`reconcileDeletedSource: deleteConversionArtifacts ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-  );
-  // Honour softDeleteFileMeta: flag the orphaned record for audit, or hard-remove it.
-  if (getConfig().softDeleteFileMeta === true) {
-    await markFileMetaDeleted(spaceId, fileId).catch(err =>
-      log.warn(`reconcileDeletedSource: flag file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-    );
-  } else {
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: fileId })).catch(err =>
-      log.warn(`reconcileDeletedSource: delete file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-    );
-  }
+  // The job, the artefacts, the cached hash and the record — honouring softDeleteFileMeta (flag the orphan for audit, or
+  // remove it) — by the one list of what a file leaves; each step swallows its own failure, there being nothing to retry with.
+  await removeFileHere(spaceId, claim.jobId, { failure: 'swallow' });
 }
 
 

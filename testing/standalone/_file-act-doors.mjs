@@ -28,8 +28,29 @@ process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 process.env['SYNC_ALLOW_INSECURE_PEERS'] = 'true';
 
 const T0 = '2026-09-01T00:00:00.000Z';
-/** The fields a file tombstone has on the wire — what a peer's `POST /file-tombstones` stores. */
-export const WIRE_KEYS = ['_id', 'deletedAt', 'path', 'spaceId'];
+/** What every published tombstone carries: its identity. The rest of `wireKeys()` is present when the act knew it (a row to read a version from). */
+export const IDENTITY_KEYS = Object.freeze(['_id', 'deletedAt', 'path', 'spaceId']);
+/**
+ * The fields a file tombstone has on the wire — what a peer's `POST /file-tombstones` stores. DERIVED from the projection
+ * every serving reader uses (`WIRE` in `files/tombstones.ts`, exported for this), never listed: a hand-written list was
+ * right until the wire gained `issuer` and `rowSeq` (bundle-51), and a test holding "no local field leaks" against a stale
+ * list either fails the new field or, worse, is edited to pass it. The floor guards the failure of a derivation — an empty
+ * or reshaped `WIRE` would make every "nothing but wire fields" check pass about nothing.
+ *
+ * A function and not a constant: this module is imported by five suites, and a top-level read of a build that lacks the
+ * export would fail all five at load for a question only one of them asks.
+ */
+export async function wireKeys() {
+  const { WIRE } = await import('../../server/dist/files/tombstones.js');
+  if (!WIRE || typeof WIRE !== 'object') {
+    throw new Error('files/tombstones.ts no longer exports WIRE (the projection of a tombstone\'s wire fields) — _file-act-doors.mjs derives its wire keys from it');
+  }
+  const keys = Object.keys(WIRE).sort();
+  if (keys.length < 4 || !IDENTITY_KEYS.every(k => keys.includes(k))) {
+    throw new Error(`WIRE names ${JSON.stringify(keys)}: a tombstone's identity (${IDENTITY_KEYS}) is missing — re-anchor`);
+  }
+  return keys;
+}
 /** What "nothing was published" reads as from {@link FileActDoors.published}. */
 export const NOTHING = Object.freeze({ served: [], pushed: [] });
 

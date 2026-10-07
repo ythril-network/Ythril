@@ -136,10 +136,16 @@ export interface ArrivalDoc extends Replicable {
  * A tombstone stored here for an id: its seq, and the instance that issued it. The issuer is what lets a tombstone
  * refuse only the records its own issuer wrote (bundle-46): without it, a tombstone one peer planted for an id
  * blocked every later copy of that record from every other author.
+ *
+ * `storedVia` is the upstream this instance stored the tombstone FOR (the D-14 ground of `authorises`: a relayed
+ * deletion of a record the upstream itself delivered), absent for every other tombstone. It is local to the tombstone
+ * collection and never served (`brain/tombstones.ts`). It exists so the upstream's own later version is not refused by
+ * the deletion it relayed, which carries a seq the issuer's clock chose (`tombSeqFor`).
  */
 export interface HeldTombstone {
   seq: number;
   issuer?: string;
+  storedVia?: string;
 }
 
 /** What the planner needs to know of a stored copy. */
@@ -205,8 +211,12 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
    * Stale tombstones to delete: those below `below`. `onLanding` means only once the record lands — a tombstone
    * deleted before a write that then fails leaves the record absent and its deletion gone. Without it, the stored
    * copy is already above the tombstone (a crash between a write and its cleanup), so it is stale now.
+   *
+   * `via` marks a tombstone this instance stored FOR the upstream that is now delivering a version of the record
+   * (`supersededVia`): it is removed whatever seq it claims, matched on `storedVia` instead of a seq bound, because the
+   * seq is a position in the issuer's clock and says nothing about whether this upstream's version came after it.
    */
-  tombstoneCleanups: Map<string, { below: number; onLanding: boolean }>;
+  tombstoneCleanups: Map<string, { below: number; onLanding: boolean; via?: string }>;
 }
 
 /**
@@ -292,12 +302,44 @@ function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
  * author for a deleted id would resurrect it past its tombstone. It is the mirror of the rule a tombstone itself
  * passes (`applyPeerTombstones`: its issuer must be the delivering peer). When either side carries no instance (a
  * legacy tombstone, an author-less record) the tombstone governs, as it always did.
+ *
+ * **A tombstone stored via the upstream does not refuse that upstream's later version** (`storedVia`): the upstream
+ * sending a version again means it superseded its own deletion, and its seq is a position in ITS clock, so a relayed
+ * tombstone whose issuer claimed a high seq would otherwise refuse every later version of the record from the very peer
+ * that deleted it, on the whole subtree below. A tombstone stored for another reason, and a version delivered by
+ * anybody else, are refused exactly as before — a lateral non-author included. This is the ARRIVAL side of the
+ * question `authorises` answers for a delete, which is why it is spelled here and not there.
  */
 function tombSeqFor(doc: ArrivalDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
   if (held === undefined) return undefined;
-  const author = doc.author?.instanceId;
+  return heldTombstoneRefuses(held, doc.author?.instanceId, deliveredBy) ? held.seq : undefined;
+}
+
+/**
+ * Does a held tombstone speak against an arriving version written by `author` and delivered by `deliveredBy`, whatever
+ * the two versions are? The WHO half of the arrival question (the rules above), asked by a record (`tombSeqFor`) and by
+ * a file's metadata (`shadowDecision` in `files/tombstones.ts`); the version half is each kind's own.
+ *
+ * What it prevents: the file side once asked only the version, so a tombstone any pushing peer stored for a path nobody
+ * held yet, at a high version, refused every later version of a file at that path from every author — and a path,
+ * unlike a record id, is easy to guess.
+ */
+export function heldTombstoneRefuses(
+  held: { issuer?: string; storedVia?: string }, author: string | undefined, deliveredBy: string | undefined,
+): boolean {
+  if (supersededVia(held, deliveredBy) !== undefined) return false;
   const provenOtherAuthor = !tombstoneGoverns(held.issuer, author) && deliveredBy !== undefined && author === deliveredBy;
-  return provenOtherAuthor ? undefined : held.seq;
+  return !provenOtherAuthor;
+}
+
+/**
+ * The upstream whose delivery supersedes `held`, or `undefined` when none does: the tombstone was stored for the very
+ * peer now delivering a version of the record. It does not refuse that version (`tombSeqFor`) and it is DELETED once
+ * the version lands (`tombstoneCleanups.via`) — otherwise this instance would go on serving a deletion of a record it
+ * now holds in a newer version, and a child whose copy it delivered would apply it and lose that version too.
+ */
+function supersededVia(held: { storedVia?: string }, deliveredBy: string | undefined): string | undefined {
+  return held.storedVia !== undefined && held.storedVia === deliveredBy ? held.storedVia : undefined;
 }
 
 /**
@@ -362,7 +404,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
   };
   const siblingsOf = (id: string): number => (input.siblings?.get(id) ?? 0) + (forksMade.get(id) ?? 0);
 
-  const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined): void => {
+  const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined, via: string | undefined): void => {
     plan.verdicts[i] = verdict;
     const prev = parentOf(doc._id);
     overlay.set(doc._id, doc);
@@ -380,6 +422,9 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     if (tomb !== undefined) {
       superseded.add(doc._id);
       plan.tombstoneCleanups.set(doc._id, { below: doc.seq, onLanding: true });
+    } else if (via !== undefined) {
+      superseded.add(doc._id);
+      plan.tombstoneCleanups.set(doc._id, { below: doc.seq, onLanding: true, via });
     }
   };
 
@@ -389,7 +434,9 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       plan.verdicts[i] = 'unknownType';
       return;
     }
-    const tomb = superseded.has(doc._id) ? undefined : tombSeqFor(doc, tombstones.get(doc._id), input.deliveredBy);
+    const held = superseded.has(doc._id) ? undefined : tombstones.get(doc._id);
+    const tomb = tombSeqFor(doc, held, input.deliveredBy);
+    const via = held === undefined ? undefined : supersededVia(held, input.deliveredBy);
     if (tomb !== undefined && tomb >= doc.seq) { plan.verdicts[i] = 'tombstoned'; return; }
 
     const cur: StoredCopy | undefined = overlay.get(doc._id) ?? stored.get(doc._id);
@@ -397,8 +444,8 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     const newer = isNewerCopy(doc.seq, curSeq);
 
     if (kind === 'facts') {
-      if (cur === undefined) return accept(i, doc, 'inserted', tomb);
-      if (newer) return accept(i, doc, 'updated', tomb);
+      if (cur === undefined) return accept(i, doc, 'inserted', tomb, via);
+      if (newer) return accept(i, doc, 'updated', tomb, via);
       if (divergesFrom(doc, cur)) {
         const forkId = forkIdFor(doc._id, doc.seq, doc.fact ?? '');
         if (input.existingForks?.has(forkId) || newForks.has(forkId)) {
@@ -417,7 +464,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       const key = uniqueKey(kind, doc);
       const holder = key === undefined ? undefined : keyOwner.get(key);
       if (holder !== undefined && holder !== doc._id) { plan.verdicts[i] = 'duplicate'; return; }
-      return accept(i, doc, 'upserted', tomb);
+      return accept(i, doc, 'upserted', tomb, via);
     }
     plan.verdicts[i] = 'skipped';
     // The stored copy is already above a tombstone the page still sees: a write landed and its cleanup did not.

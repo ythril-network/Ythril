@@ -28,7 +28,7 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, saveConfig } from '../config/loader.js';
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { localToRemote } from '../sync/space-map.js';
@@ -38,9 +38,12 @@ export type WipePlan =
   | { governed: false }
   | { governed: true; rounds: { networkId: string; networkLabel: string; roundId: string }[] };
 
-/** Networks that carry this space. Exported so a caller can report "which networks" without re-deriving it. */
-export function networksHolding(spaceId: string): NetworkConfig[] {
-  return getConfig().networks.filter(n => n.spaces.includes(spaceId));
+/**
+ * Networks that carry this space. Exported so a caller can report "which networks" without re-deriving it — the wipe
+ * vote, and the deletion authority, which asks it of a config it was handed (`cfg`) rather than the live one.
+ */
+export function networksHolding(spaceId: string, cfg?: Pick<Config, 'networks'>): NetworkConfig[] {
+  return (cfg ?? getConfig()).networks.filter(n => n.spaces.includes(spaceId));
 }
 
 /**

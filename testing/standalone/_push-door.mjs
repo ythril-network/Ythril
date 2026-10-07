@@ -44,6 +44,21 @@ export const PEER_TOKEN = Object.freeze({
   peerInstanceId: 'push-door-peer',
 });
 
+/** A peer-bound token for any peer id: what `PEER_TOKEN` is for one instance, for a test whose subject is WHO delivers. */
+export const peerToken = (peerInstanceId) => Object.freeze({
+  rights: { perSpace: {}, spaceAdmin: { floor: true, spaces: [] } },
+  peerInstanceId,
+});
+
+/**
+ * A local admin token: no peer identity, an instance admin — what the sync write routes treat as a TRUSTED RELAY
+ * (`isNonPeerSyncWrite` lets it through, and a tombstone it delivers is its own authority). Its pushes have no
+ * delivering peer, so a record it writes is stamped `deliveredBy: ''` (bundle-51).
+ */
+export const ADMIN_TOKEN = Object.freeze({
+  rights: { instanceAdmin: true, perSpace: {}, spaceAdmin: { floor: true, spaces: [] } },
+});
+
 const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 const T0 = '2026-09-01T00:00:00.000Z';
 
@@ -173,6 +188,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir,
   (await import('../../server/dist/config/loader.js')).loadConfig();
   const docs = await import('../../server/dist/api/sync/docs.js');
   const tombs = await import('../../server/dist/api/sync/tombstones.js');
+  const manifest = await import('../../server/dist/api/sync/manifest.js');
   const { resolveNetworkSpaceAlias } = await import('../../server/dist/api/sync/space-alias.js');
   const { initSpace } = await import('../../server/dist/spaces/lifecycle.js');
   for (const s of spaces) await initSpace(s.id, { waitForVectorReady: false });
@@ -204,7 +220,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir,
     return r;
   };
 
-  const routers = [docs.syncDocsRouter, tombs.syncTombstonesRouter];
+  const routers = [docs.syncDocsRouter, tombs.syncTombstonesRouter, manifest.syncManifestRouter];
   function handlerFor(method, routePath) {
     for (const router of routers) {
       const layer = router.stack.find(l => l.route?.path === routePath && l.route.methods[method]);

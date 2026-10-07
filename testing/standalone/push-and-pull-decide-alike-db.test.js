@@ -116,8 +116,14 @@ function rows() {
     const id = idFor(key, 'r');
     const t = TEXT[key];
     out.push(
-      { name: `${key}: a new record lands`, family: key, verdict: isFacts ? 'inserted' : 'upserted',
-        seed: () => ({}), page: (s) => [make(key, s, id, 5)], check: (snap) => has(snap, id, 'seq', 5) },
+      { name: `${key}: a new record lands, stamped with its deliverer`, family: key, verdict: isFacts ? 'inserted' : 'upserted',
+        seed: () => ({}), page: (s) => [make(key, s, id, 5)],
+        check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) },
+      // bundle-51: every arrival stores who delivered it, and every door the same one (the pushing token proves the peer the
+      // pull reads from). A newer copy replaces the deliverer of the version it replaces.
+      { name: `${key}: a newer copy replaces the stored one and the deliverer with it`, family: key, verdict: isFacts ? 'updated' : 'upserted',
+        seed: (s) => ({ stored: [{ ...make(key, s, id, 3), deliveredBy: 'the-earlier-deliverer' }] }),
+        page: (s) => [make(key, s, id, 5)], check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) },
       { name: `${key}: a newer copy replaces the stored one`, family: key, verdict: isFacts ? 'updated' : 'upserted',
         seed: (s) => ({ stored: [make(key, s, id, 3, t ? { [t]: 'old' } : {})] }),
         page: (s) => [make(key, s, id, 5, t ? { [t]: 'new' } : {})],
@@ -154,6 +160,14 @@ function rows() {
         verdict: 'tombstoned',
         seed: (s) => ({ tombstones: [tomb(s, key, id, 7, THIRD)] }), page: (s) => [make(key, s, id, 5, { author: { ...OTHER_AUTHOR } })],
         check: (snap) => !has(snap, id) },
+      // bundle-51 (D-14 = C): a tombstone applied on the UPSTREAM's say-so is stored via it, and does not refuse that same
+      // upstream's later version of the record — on every door alike (`a-tombstone-from-the-upstream-deletes-what-it-relayed-db`
+      // holds the rest: a lateral peer's copy of it is still refused, and a tombstone not stored via the upstream still governs).
+      { name: `${key}: a tombstone stored via the delivering upstream does not refuse that upstream's later version of a third author's record`,
+        family: key, verdict: isFacts ? 'inserted' : 'upserted',
+        seed: (s) => ({ tombstones: [{ ...tomb(s, key, id, 7, THIRD), storedVia: PEER }] }),
+        page: (s) => [make(key, s, id, 5, { author: { instanceId: THIRD, instanceLabel: THIRD } })],
+        check: (snap) => has(snap, id, 'seq', 5) },
     );
   }
 
@@ -205,7 +219,7 @@ async function snapshot(local, key, knownIds) {
     if (out.forkOf && !knownIds.has(out._id)) { delete out.seq; delete out.createdAt; delete out.updatedAt; }
     return out;
   });
-  const tombstones = await door.coll(local, 'tombstones').find({}, { projection: { _id: 1, seq: 1, type: 1, instanceId: 1 } })
+  const tombstones = await door.coll(local, 'tombstones').find({}, { projection: { _id: 1, seq: 1, type: 1, instanceId: 1, storedVia: 1 } })
     .sort({ _id: 1 }).toArray();
   return { docs, tombstones };
 }
@@ -213,7 +227,12 @@ async function snapshot(local, key, knownIds) {
 async function seedLocal(local, seeded) {
   if (seeded.stored?.length) {
     const fam = families.find(f => f.payloadKey === seeded.family);
-    await door.coll(local, fam.collection).insertMany(seeded.stored);
+    /*
+     * bundle-51: a stored record is one THIS DELIVERER delivered — it carries `deliveredBy`, as every arrival stores it. A row
+     * seeded without one is a record stored before the stamp existed, which the pull's cycle stamps once (the back-fill) and the
+     * push never does, so the same seed would leave the two doors' stored rows differing by a field neither row is about.
+     */
+    await door.coll(local, fam.collection).insertMany(seeded.stored.map(d => ({ deliveredBy: PEER, ...d })));
   }
   if (seeded.tombstones?.length) await door.coll(local, 'tombstones').insertMany(seeded.tombstones);
 }

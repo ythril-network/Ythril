@@ -355,6 +355,30 @@ checks that it is gone, for at most 0.4 s) and only then tells the caller to ret
 (a warning, nothing to do) or *could not be confirmed gone* (an error: the write may still be running in the database and
 could land after the caller was told it timed out — look at the database server and at who holds the lock).
 
+**A deletion from a peer that this instance did not apply is said once, and counted.** A peer's deletion is applied only
+where the rule allows it: the peer that delivered it issued it and wrote the record, or the peer is your publisher (or your
+parent in a tree) and delivered that record to you, and never when you wrote the record yourself. Otherwise the log says so in
+one warning that names the peer, the space and the reason, held back to one line per peer, space and reason per window
+however often it comes again, and `ythril_sync_tombstones_declined_total` counts every one by `kind` and `reason`. On a club
+or closed network this is routine, because every instance sends every deletion it holds and a peer applies only the ones it
+may. Below a publisher it is the line to read: it means a deletion your publisher made did not reach a record here, and the
+reason says whether you wrote that record, whether it arrived by another route, or whether it was not the publisher's.
+
+**A deletion your publisher or parent made, applied here, is said once per sync page**: one info line naming the upstream,
+the space and how many records it deleted (the one-time re-read below says it once per space instead, when it finishes); `ythril_sync_tombstones_applied_total{ground="upstream"}` counts them. It is
+the line to look for when a record you did not touch has gone: it was deleted above you, whoever wrote it.
+
+**After an upgrade, each space re-reads its publisher's deletions once, and says when it has finished.** The first sync
+cycles of a space after the upgrade stamp the records stored before it (which peer delivered each one) and then read the
+upstream's deletions from the beginning, applying the ones an older version declined. A space whose re-read finishes logs one info
+line naming the space, the upstream and how many records it deleted (even none), and `ythril_sync_tombstone_rereads_owed` falls as spaces
+finish; a re-read that cannot proceed (the upstream refuses, or answers an error) is named once and stays owed, so a gauge
+that does not reach `0` is a stopped re-read, not a slow one. No audit entry is written for it. **What it cannot recover:** a
+deletion the upstream no longer holds, because it had pruned it once every member counted as past it. The record that
+deletion would have removed is still here, and nothing marks it. To find such records, compare the space's record counts with
+the publisher's, or set `merkle: true` on the network (an integrator's setting, [Sync Protocol](../sync-protocol.md)): a space whose
+content differs after a sync is logged as `MERKLE_DIVERGENCE`, naming it. Delete what the publisher no longer has.
+
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
 clean-ups of old search-result files, stray file metadata, upload leftovers and expired tombstones, the duplicate and

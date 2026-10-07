@@ -156,18 +156,24 @@ export async function acceptArrivingPage(
         // The winners, then — for any whose write failed — the version accepted before it, until each id lands
         // or runs out of versions.
         let pending = [...plan.accepts.values()].map(list => [...list]);
-        const cleanups: Array<{ id: string; below: number }> = [];
+        const cleanups: Array<{ id: string; below: number; via?: string }> = [];
         const diverged: Array<{ index: number; doc: Arrived }> = [];
         while (pending.length > 0) {
-          const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer });
+          const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer, deliveredBy });
           const skipped = new Set([...out.newerLocal, ...out.derived]);
           const split = new Set(out.diverged);
           const dup = new Set(out.duplicates);
+          const covered = new Set(out.tombstoned);
           const refused = new Map(out.refused.map(r => [r._id, r.reason]));
           const next: typeof pending = [];
           for (const list of pending) {
             const top = list.at(-1)!;
             const id = top.doc._id;
+            if (covered.has(id)) {
+              // A held file tombstone covers the version (Q-229); the versions planned before it are lower, so it covers those too.
+              for (const a of list) res.verdicts[items[a.index]!.index] = 'tombstoned';
+              continue;
+            }
             if (skipped.has(id) || split.has(id)) {
               for (const a of list) res.verdicts[items[a.index]!.index] = 'skipped';
               // A same-seq copy with other content landed meanwhile: this one is a divergence, planned again below.
@@ -182,7 +188,7 @@ export async function acceptArrivingPage(
               continue;
             }
             const clean = plan.tombstoneCleanups.get(id);
-            if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq });
+            if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq, ...(clean.via !== undefined ? { via: clean.via } : {}) });
             landed.push({ key, doc: top.doc });
           }
           pending = next;
@@ -207,7 +213,7 @@ export async function acceptArrivingPage(
       await withAllocatedSeqs(spaceId, forks.length, async (first) => {
         // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
         forkOut = await writePage(spaceId, 'facts', forks.map((f, k) => ({ ...f.doc, seq: first + k })),
-          { from: peer, deferEnqueue: true });
+          { from: peer, deliveredBy, deferEnqueue: true });
       }, `sync.${door}.fork`);
       await forkOut?.enqueue();
       const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
@@ -239,7 +245,7 @@ export async function acceptArrivingPage(
 }
 
 /** Store one family's documents through the arrival writer, with the family's own record type (`null`: links). */
-async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
+async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deliveredBy: string | undefined; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
   const { collection } = familyOf(key);
   return await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], docs, opts);
 }

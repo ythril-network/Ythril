@@ -18,11 +18,14 @@ import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { writeInOneCommands } from '../db/one-command.js';
+import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
+import { toDocId } from '../util/paths.js';
+import { escapeRegex } from '../util/redos.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -169,6 +172,34 @@ export async function buildFileManifest(
   }
 
   return results;
+}
+
+/**
+ * Forget the cached hash of files that are gone, so the cache never advertises a path nothing holds — what a delete does
+ * (`files/remove-file-here.ts`) and what the legacy spill sweep does, one spelling of "this path has no bytes any more".
+ * A full manifest walk prunes the same entries on its next round; this is the delete saying so itself, which an
+ * incremental walk never does.
+ */
+export async function forgetFileHashes(spaceId: string, ids: readonly string[]): Promise<void> {
+  const cache = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
+  for (const chunk of inChunks([...new Set(ids)], ROWS_PER_BULK_COMMAND)) {
+    await cache.deleteMany(asFilter<HashCacheDoc>({ _id: { $in: chunk } }));
+  }
+}
+
+/**
+ * {@link forgetFileHashes} for every path under the directory `dirPath` — what a directory delete does for the tree it took
+ * (`files/delete-cascade.ts`), as a single file's delete does for its path. Without it the cache keeps advertising every file
+ * of a tree nothing holds until a full manifest walk happens to prune it, which an incremental one never does.
+ *
+ * The prefix is the directory's path and a `/`, regex-escaped, so `my.dir` never forgets `myXdir/` nor `my.dir2/`; an empty
+ * path matches nothing here rather than everything.
+ */
+export async function forgetFileHashesByPrefix(spaceId: string, dirPath: string): Promise<void> {
+  const norm = toDocId(dirPath).replace(/\/?$/, '');
+  if (!norm) return;
+  await col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes')).deleteMany(
+    asFilter<HashCacheDoc>({ _id: { $regex: `^${escapeRegex(norm + '/')}` } }));
 }
 
 /**

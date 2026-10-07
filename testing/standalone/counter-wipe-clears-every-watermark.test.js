@@ -33,7 +33,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, balancedFrom } from './_structural-window.mjs';
+import { bodyOf } from './_structural-window.mjs';
 import { memberWatermarks } from '../_shared/member-watermarks.mjs';
 
 const seqSrc = stripComments(readFileSync('server/src/util/seq.ts', 'utf8'));
@@ -65,13 +65,22 @@ describe('the field list this reset is built from', () => {
 });
 
 describe('the wipe recovery covers every one of them', () => {
-  it('names all of them, and names them in ONE place', () => {
+  it('names all of them, and names them in ONE place', async () => {
     /*
      * ALL-OR-NONE, which is the only assertion that would have failed on the buggy version. "It handles
      * lastSeqReceived" was true the whole time the other three were being ignored.
      */
-    const list = balancedFrom(seqSrc, seqSrc.indexOf('STALE_ON_COUNTER_WIPE'), 'the stale-watermark list');
-    const missing = memberWatermarkFields().filter(f => !list.includes(`'${f}'`));
+    /*
+     * The list IS `PER_SPACE_WATERMARKS` (bundle-51): the rename carries that list and the wipe clears it, so a map is
+     * added to one place and both rules cover it. So this asserts the two halves of that — the wipe's list is the
+     * declared one and nothing else, and the declared one names every per-space map on the member type. An exclusion
+     * (a map that must survive a wipe) would be written in `util/seq.ts` by name and the first assertion would see it.
+     */
+    const decl = seqSrc.slice(seqSrc.indexOf('const STALE_ON_COUNTER_WIPE'));
+    assert.match(decl.slice(0, decl.indexOf(';') + 1), /^const STALE_ON_COUNTER_WIPE[^=]*=\s*PER_SPACE_WATERMARKS\s*;$/,
+      'the wipe\'s list is not exactly PER_SPACE_WATERMARKS — a second list of the same maps is the omission this gate exists to catch');
+    const { PER_SPACE_WATERMARKS } = await import('../../server/dist/config/types-networks.js');
+    const missing = memberWatermarkFields().filter(f => !PER_SPACE_WATERMARKS.includes(f));
     assert.deepEqual(missing, [],
       'these per-space watermarks are measured against the seq counter and are NOT cleared when it is wiped. '
       + 'Each one that survives describes numbers about to be reused by different records. If one genuinely '

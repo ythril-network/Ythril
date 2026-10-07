@@ -34,7 +34,12 @@ import { blockAfter } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
-const CASCADE = stripComments(readFileSync('server/src/files/delete-cascade.ts', 'utf8'));
+// The cascade is two modules since bundle-51: the order and the tombstones are `delete-cascade.ts`'s, and what a file leaves
+// once its bytes are gone (the job, the artefacts, the cached hash, the usage figure, the row) is `remove-file-here.ts`'s,
+// shared with the media worker's reconcile and a peer's file tombstone. Read as one text, `delete-cascade.ts` first, so the
+// order assertions below still compare positions in the order the steps run.
+const CASCADE = stripComments(readFileSync('server/src/files/delete-cascade.ts', 'utf8')
+  + '\n' + readFileSync('server/src/files/remove-file-here.ts', 'utf8'));
 const FILES = stripComments(readFileSync('server/src/files/files.ts', 'utf8'));
 // The file door (F-43): the rename and the parent-creation that `files.ts` used to do inline now happen here.
 const DOOR = stripComments(readFileSync('server/src/files/stored-bytes.ts', 'utf8'));
@@ -96,7 +101,9 @@ describe('delete_file describes the cascade it really performs', () => {
       'delete_file decides something itself before the cascade — the description describes the cascade');
     const notFound = CASCADE.indexOf('throw new NotFoundError(');
     const tombstone = CASCADE.indexOf('writePendingFileTombstones(');
-    const unlink = CASCADE.indexOf('deleteStored(');
+    // The unlink is `deleteStoredIfPresent` (bundle-51 round 4): the one deleter that reads a missing path as done and nothing
+    // else as done, where the cascade used to spell that tolerance by hand around `deleteStored`.
+    const unlink = CASCADE.indexOf('deleteStoredIfPresent(');
     assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
     assert.ok(notFound < tombstone && tombstone < unlink,
       'the cascade must refuse a path that is not there, then write the tombstone, then remove the bytes — in that order');

@@ -397,8 +397,8 @@ kind that is not one of the four is a `400` in every space, strict or not.
 
 **Correcting one is a `PATCH`.** Both fields are accepted by `PATCH /edges/:id`, and they are the only way to
 fix a wrong or missing kind: an edge's identity is its `(from, to, label)` triplet so the endpoint itself
-cannot be moved, and delete-and-recreate does not survive a sync network — a tombstone removes only its
-ISSUER's own content, so a peer-authored edge comes back. A corrected kind re-embeds on the next pass, because
+cannot be moved, and delete-and-recreate does not survive a sync network — a peer applies a tombstone only to
+what its issuer wrote (or, below an upstream, to what that upstream relayed), so a peer-authored edge comes back on a mesh. A corrected kind re-embeds on the next pass, because
 the endpoint then resolves in the right collection.
 
 **What the edge embeds changes with the kind.** An edge's vector is built from `from label to` with the
@@ -449,10 +449,11 @@ survivor already holds.
 An identity that is **already taken** by another edge is refused with `409 edge_identity_taken` naming the
 edge in the way, rather than surfaced as an index violation.
 
-**One case does not move: an edge this instance did not author.** Deleting the old id on a peer requires a
-tombstone issued by the document's own author — that rule is what stops one instance deleting another's
-content, and it applies here too. So an edge that arrived from a peer keeps its original id when its identity
-changes. It is one row, it converges, and the only cost is that a third peer creating the same relationship
+**One case does not move: an edge this instance did not author.** The re-key deletes the old id with a
+tombstone this instance issues, and a peer applies a tombstone to what its issuer wrote (the deletion rule in
+[Sync Protocol](../sync-protocol.md#tombstone-deletion-authorisation)); a mesh peer would not apply it to an edge
+another instance wrote, and the re-key does not depend on the topology it runs in. So an edge that arrived from a
+peer keeps its original id when its identity changes. It is one row, it converges, and the only cost is that a third peer creating the same relationship
 derives a different id and hits the unique index.
 
 Edges created before 3.6 keep their original random ids, so not every stored `_id` is derived. There is no

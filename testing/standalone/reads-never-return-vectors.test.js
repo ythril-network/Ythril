@@ -155,7 +155,9 @@ describe('the vector never leaves the database', () => {
       'the projection must be derived from NEVER_RETURNED_FIELDS — a hand-written `{ embedding: 0 }` is a '
       + 'second copy of the rule, and adding a second never-returned field would then need a sweep of every '
       + 'reader, which is the sweep that was already missed once');
-    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0 });
+    // The vector, and `deliveredBy` (bundle-51): which peer delivered a record here is local state that names a peer of this
+    // instance's network, so no read returns it either. Written out, not derived — a derivation would assert the list equals itself.
+    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0, deliveredBy: 0 });
   });
 
   it('an EXCLUSION projection, so a new record field is never silently absent from the API', () => {

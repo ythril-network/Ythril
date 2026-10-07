@@ -267,6 +267,14 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    * honest once the readers prefer the records.
    */
   completeLinkage?: boolean;
+  /**
+   * The records stored here before the `deliveredBy` stamp existed have been stamped, once (`sync/delivered-by-backfill.ts`,
+   * bundle-51). Local bookkeeping about THIS disk like `completeLinkage` — never governed, synced or settable through the
+   * space API — and it lives on the space so that a rename carries it with the space and a deleted space takes it away.
+   * Absent means the back-fill is still owed; it is never cleared, because a second pass would stamp what a later local
+   * write left unstamped.
+   */
+  deliveredByBackfilled?: boolean;
   /** Per-space document-extraction mode override (F11-c). Local/operational (not governed or synced,
    *  like dupeRules): when set, documents uploaded to THIS space use this mode instead of the
    *  instance-wide `documentProcessing.mode`. Absent = inherit the instance default. */
@@ -1762,6 +1770,12 @@ export interface TombstoneDoc {
   /** Seq of the document at the time it was deleted — used to filter tombstones
    *  from pagination pages that already returned the live document. */
   originalSeq?: number;
+  /**
+   * LOCAL to this instance, never on the wire: the upstream peer this tombstone was stored FOR — a deletion it relayed,
+   * applied on the D-14 ground (`sync/deletion-authority.ts`). It lets that upstream's own later version of the record
+   * through (`tombSeqFor`) and is excluded from every row served or pushed (`listTombstones`). Tombstones are not hashed.
+   */
+  storedVia?: string;
 }
 
 /**
@@ -1780,6 +1794,14 @@ export interface FileTombstoneDoc {
    *  (`sync/file-tombstone-ack.ts`, applied by `brain/tombstone-prune.ts`). File tombstones carry no seq, so
    *  the acknowledgement is by this timestamp rather than the served-seq floor record tombstones use. */
   deletedAt: string;
+  /** The instance whose act deleted the file — what the deletion authority (`sync/deletion-authority.ts`) matches
+   *  against the delivering peer and the file's author. Absent from a tombstone an older peer issued: such a one is
+   *  read as issued by its deliverer. */
+  issuer?: string;
+  /** The seq of the file ROW the act deleted — the VERSION it erased. A row whose seq is above it is a re-creation and
+   *  survives the tombstone; metadata at or below it is shadowed (`shadowDecision`, `files/tombstones.ts`). Absent
+   *  from a tombstone written before versions travelled: it then erases whatever is at the path, as it always did. */
+  rowSeq?: number;
 }
 
 export interface FileMetaDoc {

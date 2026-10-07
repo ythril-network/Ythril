@@ -157,6 +157,8 @@ No voting round propagated to A, B, or C — organiser's yes is sufficient.
 
 Members form a directed tree. The founder is the root. Data flows **top-down only** — a parent pushes to its children; no data flows back up. Node A and Node B only share what the Root has already received; they have no direct connection to each other. A new leaf is approved by **all ancestors on the path from the inviting node up to the root**. Leaves may leave at any time and go off-grid; the root has no technical ability to prevent this.
 
+**Deletions follow the same direction.** A node applies its parent's deletion of a record that parent delivered to it, whoever wrote it, stores the deletion and passes it on, so something deleted at the root is deleted at every level below it. A node's own records are never deletable by its parent, and a record that reached a node by any other route is not either. Everything a node's parent can delete in the node, it can delete in the whole subtree below it, which is the trust a tree already places in its root; see [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-authorisation).
+
 If an intermediate node goes offline, its subtree is partitioned until it returns. The grandparent can issue a **reparent invite** so the grandchild temporarily or permanently moves up one level — see [Braintree: temporary and permanent re-parenting](#braintree-temporary-and-permanent-re-parenting).
 
 ```mermaid
@@ -265,12 +267,12 @@ The subscriber runs all of it itself: `POST /api/networks/join-by-key` on its ow
 
 **Subscriber-local data safety:**
 
-Subscribers may add their own content to the synced spaces. Publisher-pushed content coexists alongside subscriber-local content — it is never overwritten or displaced. If the publisher deletes a document, the tombstone only removes the publisher's copy on the subscriber; subscriber-authored documents are unaffected. Two layers of protection guarantee this:
+Subscribers may add their own content to the synced spaces. Publisher-pushed content coexists alongside subscriber-local content — it is never overwritten or displaced. **If the publisher deletes a document, the deletion applies on the subscriber to whatever the publisher delivered — including a record the publisher relayed from a third instance — and never to a document the subscriber wrote.** (This is also how a publisher's retention sweep reaches its subscribers.) Two layers of protection keep subscriber-authored content out of the publisher's reach:
 
 1. **UUIDv4 identity** — every document `_id` is a UUIDv4 (122 bits of randomness). Two independent instances will never generate the same ID, so a publisher's tombstone structurally cannot target a subscriber-created document.
-2. **Author guard** — even if IDs hypothetically collided, `applyPeerTombstones` compares `tombstone.instanceId` against `localDoc.author.instanceId` and, when they differ, neither deletes nor stores the tombstone. It also applies a tombstone only to the subscriber's own space the sync admitted, never to a space the tombstone names.
+2. **The deletion rule** — each instance records which peer delivered every record it holds, and a deletion arriving from the publisher is applied only to a record that came from that publisher and that the instance did not write; anything else is declined, not applied and not stored. A tombstone is also applied only to the subscriber's own space the sync admitted, never to a space the tombstone names.
 
-See [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-authorisation) and [Document ID collision safety](sync-protocol.md#document-id-collision-safety) in the sync protocol for details. The same protection applies to all directional network types (braintree, pubsub).
+See [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-authorisation) and [Document ID collision safety](sync-protocol.md#document-id-collision-safety) in the sync protocol for details. The same rule applies to all directional network types (braintree, pubsub). **The cost is the trust a subscriber already places in its publisher:** a publisher that is compromised or misconfigured can delete, on every subscriber, everything it relayed to them, but nothing a subscriber wrote. Subscribers upgrading to the release that introduced this rule re-read their publisher's deletions once ([Upgrading](integration-guide/02b-upgrading.md)).
 
 **Key differences from Braintree:**
 
@@ -525,6 +527,8 @@ Regardless of network type:
   operator asked for the delete removes its own copy, once no other network still carries it. So the boundary is
   not "nobody can touch your data": a wipe is governed by the network's own rules, and a deletion is never the
   network's to make.
+
+  **Deleted records travel too, on a rule of their own.** On a club, closed or democratic network a peer's deletion applies only to a record that peer wrote. On a pub/sub network or a tree, your upstream's deletion also applies to what it delivered to you, whoever wrote it, and never to a record you wrote yourself. A record's author and the instance that delivered it are the only two things that decide it.
 
   **It acts only on a round that passed, and only on a space that network carries.** A round that expires without
   enough yes changes nothing, a round naming a space the network does not share is ignored however it arrives, and

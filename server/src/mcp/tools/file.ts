@@ -1,5 +1,5 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
+import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -270,9 +270,10 @@ export const delete_fileTool: ToolHandler = {
     + 'completes the delete as above. A retry after a delete that DID complete answers not found — read that as '
     + '"already gone". However many attempts it took, peers are sent ONE tombstone per deleted path: the '
     + 'successful attempt\'s replaces any a failed one left behind.\n\n'
-    + 'THE TOMBSTONE IS WHY RE-UPLOADING TO THE SAME PATH DOES NOT UNDO THIS cleanly on a synced space — the '
-    + 'tombstone propagates and outranks the old copy on peers. Upload the file again by all means; just do '
-    + 'not expect the deletion to be forgotten.\n\n'
+    + 'WHO THE DELETION REACHES: ' + DELETION_REACH + ' A file this instance only relayed from above counts as '
+    + 'downstream. A file ANOTHER instance wrote, deleted here, stays gone here until the instance that wrote it changes '
+    + 'it, while the other mesh peers (a club, closed or democratic network) keep it. The tombstone names the version '
+    + 'that was deleted, so uploading a file to the same path again afterwards is a newer version that a peer keeps.\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — the file path relative to the space root, as `list_dir` reports it. One FILE: this is not '
     + 'the tool for removing a directory tree.\n'
@@ -356,7 +357,8 @@ export const move_fileTool: ToolHandler = {
     + 'THE OLD PATHS ARE TOMBSTONED, and that is not bookkeeping. Sync has no rename detection: it sees a '
     + 'file gone from one path and present at another, so without a tombstone the peer\'s manifest pushes the '
     + 'ORIGINAL back and you end up with both. For a directory move every child path is tombstoned, not just '
-    + 'the directory.\n\n'
+    + 'the directory. Who the tombstones reach is who a delete reaches: ' + DELETION_REACH + ' So a file ANOTHER '
+    + 'instance wrote keeps its old path on a mesh peer, which then holds both paths.\n\n'
     + 'NOTHING CHECKS THE DESTINATION FIRST. There is no "already exists" refusal here — the move is a '
     + 'filesystem rename, and a rename onto an existing file replaces it. Read `list_dir` first if that would '
     + 'lose something. Missing parent directories of `dst` ARE created for you.\n\n'

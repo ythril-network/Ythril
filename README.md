@@ -185,7 +185,7 @@ can fake another's vote, even when the vote is passed along through other member
 - **Auth** — personal access tokens (bcrypt-hashed, per-space scope, per-area rights, read-only mode, expiry) ·
   **OIDC/SSO** (Keycloak, Entra ID, Okta, Auth0…) · OAuth with dynamic client registration for MCP clients ·
   optional **TOTP MFA** for admin actions.
-- **Network trust** — RSA-4096-OAEP invite handshake; Ed25519-signed governance votes and tombstones.
+- **Network trust** — RSA-4096-OAEP invite handshake; Ed25519-signed governance votes. Deletions are not signed: a peer's deletion is applied only to what it wrote, or, below an upstream on a pub/sub network or a tree, to what that upstream delivered.
 - **Hardening** — query-operator allowlist, ReDoS-guarded regex, path-traversal sandboxing, storage quotas,
   rate limiting, CSP and security headers.
 - **SSRF defence in depth** — outbound targets are re-resolved and every resolved IP checked (private ranges,

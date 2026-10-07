@@ -122,6 +122,13 @@ async function main(): Promise<void> {
         const { setPostureProvider } = await import('./metrics/registry.js');
         setPostureProvider(() => computeSecurityPosture().checks);
       }
+      // The one-time tombstone re-reads still owed, counted from the config at scrape time — the same reason, the same shape.
+      {
+        const { setRereadsOwedProvider } = await import('./metrics/registry.js');
+        const { rereadsOwed } = await import('./sync/deletion-authority.js');
+        const { getConfig } = await import('./config/loader.js');
+        setRereadsOwedProvider(() => rereadsOwed(getConfig()));
+      }
       const posture = computeSecurityPosture();
       const issues = posture.checks.filter(c => c.level !== 'pass');
       if (issues.length === 0) {

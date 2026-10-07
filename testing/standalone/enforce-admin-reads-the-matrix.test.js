@@ -109,7 +109,10 @@ describe('every decision site asks the one predicate', () => {
     // by hand when the field is deleted.
     for (const [f, what] of [
       ['server/src/api/notify.ts', 'the peer-relay check'],
-      ['server/src/api/sync/tombstones.ts', 'the trusted-relay check'],
+      // Was `api/sync/tombstones.ts`, "the trusted-relay check". That inline check is gone (bundle-51): both tombstone doors
+      // take their delivery from `deliveryFromToken` (`api/sync/_shared.ts`), which asks `peerRelayCaller`, and THAT is
+      // where the question "is this token a trusted relay" is decided now — so the row follows the decision.
+      ['server/src/auth/peer-relay.ts', 'the trusted-relay check (`peerRelayCaller`, which `deliveryFromToken` builds the tombstone doors\' delivery on)'],
       // Was `api/spaces.ts`, "the maxGiB carve-out". That inline check is gone: `SPACE_FIELD_RIGHTS` now
       // governs every field on the settings body and `maxGiB` is the row reading `instanceAdmin`. The
       // decision moved, so the row follows it — the site is not the rule, but this case is a set-claim

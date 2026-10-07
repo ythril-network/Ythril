@@ -809,7 +809,7 @@ System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot
 }
 ```
 
-Returns confirmation with the deleted ID. Creates a tombstone for sync propagation. Requires a non-read-only token.
+Returns confirmation with the deleted ID. Creates a tombstone for sync propagation: it reaches every peer holding a copy this instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a copy another instance wrote stays on a mesh peer. Requires a non-read-only token.
 
 ### Example: get_stats
 

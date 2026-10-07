@@ -25,6 +25,7 @@
 import { getConfig, saveConfigSoon } from '../config/loader.js';
 import { reachesSpace } from '../auth/space-reach.js';
 import type { Config, NetworkMember } from '../config/types.js';
+import { setMemberSpaceMark } from './member-space-mark.js';
 
 /** The subset of a member this decision needs — so the pure part is testable without a config. */
 export interface ServedMember {
@@ -79,6 +80,32 @@ export function membersServing(cfg: Config, spaceId: string): NetworkMember[] {
 }
 
 /**
+ * The peers in `peerTokenIds` that are not among `members` — a peer that can reach the space through a token and has no
+ * member row to record anything on. The one spelling of "a peer outside the membership", asked by both retention floors
+ * (a stranger blocks pruning: nothing it has seen is knowable) and by the upstream stamp's back-fill (a stranger is a
+ * second route a record could have arrived by).
+ */
+export function peersOutside(members: ReadonlyArray<{ instanceId: string }>, peerTokenIds: readonly string[]): string[] {
+  const known = new Set(members.map(m => m.instanceId));
+  return peerTokenIds.filter(id => !known.has(id));
+}
+
+/** The peers that reach `spaceId` ONLY by a token: `peerTokensReaching` less every member of a network carrying it. */
+export function peersReachingOnlyByToken(cfg: Config, spaceId: string): string[] {
+  return peersOutside(membersServing(cfg, spaceId), peerTokensReaching(cfg, spaceId));
+}
+
+/**
+ * Does this instance serve `spaceId` to any peer OTHER than `except` — a member of a network carrying it, or a peer that
+ * reaches it by a token alone? The one answer to "is there anyone to pass a relayed deletion on to": a file tombstone's
+ * path is often personal, so an instance with nobody downstream applies a relayed one and does not keep the name of the file.
+ */
+export function servesOnward(cfg: Config, spaceId: string, except?: string): boolean {
+  const members = membersServing(cfg, spaceId);
+  return members.some(m => m.instanceId !== except) || peersOutside(members, peerTokensReaching(cfg, spaceId)).some(id => id !== except);
+}
+
+/**
  * The highest seq every peer has provably been served for this space.
  *
  * Pure in `members` and `peerTokenIds` so each branch is checkable without a database or a config file — and
@@ -94,8 +121,7 @@ export function tombstoneFloor(
   spaceId: string,
   peerTokenIds: string[] = [],
 ): TombstoneFloor {
-  const known = new Set(members.map(m => m.instanceId));
-  const stranger = peerTokenIds.find(id => !known.has(id));
+  const stranger = peersOutside(members, peerTokenIds)[0];
   if (stranger !== undefined) {
     // A peer that can read us but has nowhere to record a watermark. Nothing it has seen is knowable.
     return { prune: false, reason: 'peer-token-scoped', blockedBy: stranger };
@@ -176,7 +202,7 @@ export function recordServedSeq(
  * here, and none of them needs a config file or a running instance.
  *
  * Mutates `cfg` in place, and takes no `await`, so it cannot be holding a detached reference across a reload
- * (the mechanism behind #346/#348/#353/#604).
+ * (the mechanism behind #346/#348/#353/#604) — `setMemberSpaceMark` is the loop, shared with the other per-space marks.
  */
 export function applyServedSeq(
   cfg: Config,
@@ -184,17 +210,5 @@ export function applyServedSeq(
   spaceId: string,
   sinceSeq: number,
 ): boolean {
-  if (!peerInstanceId) return false;
-  let changed = false;
-  for (const net of cfg.networks ?? []) {
-    if (!net.spaces?.includes(spaceId)) continue;
-    const m = net.members?.find(x => x.instanceId === peerInstanceId);
-    if (!m) continue;
-    const next = foldServedSeq(m.lastSeqServed?.[spaceId], sinceSeq);
-    if (next === null) continue;
-    m.lastSeqServed ??= {};
-    m.lastSeqServed[spaceId] = next;
-    changed = true;
-  }
-  return changed;
+  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastSeqServed', current => foldServedSeq(current, sinceSeq));
 }

@@ -45,6 +45,8 @@ A **media** re-upload whose bytes are unchanged answers `"complete"` instead: th
 is kept rather than re-run. See [Media Embedding](05b-media-embedding.md#upload-response) for when a
 re-upload does re-analyse — which is every case except that one.
 
+**A peer's upload of a file this instance deleted is not stored.** Sync pushes a file's bytes to this route with a peer token. When this instance holds a deletion for that path, no live file there is newer than it, and the arriving bytes are the content the deletion erased, the answer is `200 { "tombstoned": true }` and nothing is written, so the file does not come back from a peer that has not heard of the deletion yet. It is a `200` on purpose: a sender that took it for a failure would upload the same bytes every cycle. Identical bytes re-created as a newer version arrive with their metadata first and are stored. A user's own upload, with any other token, is **never** refused this way, and a chunked upload is checked when it is assembled. A deletion held from before the upgrade names no version and shadows nothing. See [Sync API → File Sync Artifacts](09-sync-api.md#file-sync-artifacts).
+
 ### Upload a File (JSON / base64)
 
 ```http
@@ -281,6 +283,16 @@ are removed from the file store. Deleting a **directory** does the same for ever
 including the `_converted/<path>` and `_extracted/<path>` subtrees, and writes a sync **tombstone**
 per removed file so peers delete their copies too (otherwise the next sync would push them back).
 
+**Who the deletion reaches.** A peer applies the tombstone to the copy it holds only when the deletion rule allows it
+(see [Sync API → file tombstones](09-sync-api.md#file-sync-artifacts)): a peer deletes **a copy this instance wrote**
+wherever it is a peer, and on a pub/sub or tree network **everything downstream of this instance**, including a
+file this instance only relayed from above. A delete of a file **another instance wrote** stays local on a mesh peer
+(a club, closed or democratic network): it is not applied there, so the other peers keep the file, and it stays
+gone from this instance only until the instance that wrote it changes the file again (the held deletion covers the
+version it saw). A peer applies it to the version this instance deleted
+and no later one — a file re-uploaded to the path since is kept — and removes the file's derived records and
+sidecars with it. The same holds for a move, whose old paths are tombstoned.
+
 **Soft-delete (`softDeleteFileMeta`).** With this top-level config flag set to `true` (default
 `false`), deleting a file **retains** its metadata record and flags it `deletedAt = <timestamp>`
 instead of removing it. Flagged records stay listed and searchable but are shown as "deleted" in the
@@ -308,8 +320,9 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   `GET /api/sync/file-tombstones` and pushed by a sync cycle — only once ITS path's bytes are gone or moved.
   That is per path, not per act: a move's or a directory delete's conversion sidecars (`_converted/…`,
   `_extracted/…`) go after the file, and each sidecar's tombstone waits for its own move or removal. A peer
-  that is sent a tombstone deletes its copy and passes the tombstone on, back to this instance too, so a
-  tombstone for bytes still here would delete the only copy; a pending one is sent to nobody. An act that
+  that applies a tombstone deletes its copy and, where it serves the space onward, passes the tombstone on, back
+  to this instance too, so a tombstone for bytes still here would delete the only copy; a pending one is sent
+  to nobody. An act that
   fails (a store failure, or an unlink, rename or tree removal that fails for any other reason) settles its
   pending tombstones from the disk at once — published for a path whose file is gone, dropped for one whose
   file is still there — so a directory delete that stops part way still tells peers about the files it did
@@ -319,8 +332,9 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
 - **One tombstone per path per act, retries included.** Publishing a path's tombstone removes every other
   pending tombstone for that path — the one a failed attempt left behind is the same intent, not an act of
   its own — and the TTL sweep drops a leftover whose path already has a tombstone published after it was
-  written, rather than publish a second. A retried act used to end with two: a peer deletes its copy for
-  every tombstone it is sent, so the later one deleted a re-upload of that path made in between.
+  written, rather than publish a second. A retried act used to end with two, and the later one deleted a
+  re-upload of that path made in between. A tombstone now also names the version it deleted, so a peer keeps a
+  later one, but a second tombstone is still noise nobody needs.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
   the file at `destination`, the record at the old path and the mark its first attempt left with its

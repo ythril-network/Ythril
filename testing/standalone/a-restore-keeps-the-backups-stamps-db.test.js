@@ -16,6 +16,11 @@
  *   `schema > space` window, or absent where this instance gives none — never the replaced copy's;
  * - a `syncBase` the backup does not carry is absent.
  *
+ * **bundle-51 adds a third record-tier field, `deliveredBy`** (who delivered the version held here; the upstream's tombstone
+ * deletes what the upstream delivered). Same rule, different value kind: the backup's string is stored as it is, and a
+ * backup with none stores the empty string — "nobody delivered it to this instance" — never the replaced copy's, which
+ * would let a peer the backup never named retire what was restored. It is held on every family, links included.
+ *
  * Sentinels: the replaced copy holds the epoch and 9999-12-31 as BSON Dates, values no D-9 window produces, so a
  * survivor is unmistakable.
  *
@@ -42,7 +47,7 @@ const DAY = 86_400_000;
 const T0 = Date.parse('2026-09-01T00:00:00.000Z');
 const EPOCH = new Date(0);
 const FAR = new Date('9999-12-31T23:59:59.999Z');
-const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', files: 'filemeta' };
+const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link', files: 'filemeta' };
 
 let door, importMod, families, RESTORED;
 
@@ -66,8 +71,35 @@ describe('a restore keeps the backup\'s stamps, never the replaced copy\'s (Q-23
 
   it('the families and the record-tier fields are derived', () => {
     assert.ok(stamped().length >= 5, `only ${stamped().length} stamped families`);
-    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', 'syncBase'],
+    // bundle-51: `deliveredBy` — who delivered the version this instance holds — is a record-tier field too: this
+    // instance's own backup keeps it, and a restore never takes the replaced copy's. It is held on EVERY family (a link
+    // has no retention but is delivered like the rest), below, rather than on the stamped ones the retention rows use.
+    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', 'deliveredBy', 'syncBase'],
       'RESTORED_LOCAL_FIELDS changed — give the new field a sentinel here before trusting this file');
+  });
+
+  it('deliveredBy: the backup\'s value is stored; a backup with none stores the empty string, never the replaced copy\'s — on every family', async () => {
+    assert.ok(families.length >= 6, `only ${families.length} families`);
+    const wrong = [];
+    for (const fam of families) {
+      // A backup that carries it: stored as the backup carried it, over the replaced copy's.
+      const own = idFor(fam, 'dv-own');
+      await door.coll(S, fam.collection).insertOne({ ...backupOf(fam, own), seq: 39, deliveredBy: 'the-replaced-copys-deliverer' });
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, own, { deliveredBy: 'the-backups-deliverer' })] });
+      // A backup that carries none: nobody delivered it to this instance, so the empty string — the replaced copy's never.
+      const none = idFor(fam, 'dv-none');
+      await door.coll(S, fam.collection).insertOne({ ...backupOf(fam, none), seq: 39, deliveredBy: 'the-replaced-copys-deliverer' });
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, none)] });
+      // And where nothing is stored at all.
+      const fresh = idFor(fam, 'dv-fresh');
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, fresh)] });
+      const [a, b, c] = await Promise.all([own, none, fresh].map(id => door.coll(S, fam.collection).findOne({ _id: id })));
+      if (a?.seq !== 40 || b?.seq !== 40 || c === null) { wrong.push(`${fam.collection}: fixture check — a restore did not land`); continue; }
+      if (a.deliveredBy !== 'the-backups-deliverer') wrong.push(`${fam.collection}: the backup carried its deliverer and the restore stored ${show(a.deliveredBy)}`);
+      if (b.deliveredBy !== '') wrong.push(`${fam.collection}: the backup carried none and the restore stored ${show(b.deliveredBy)}, want the empty string`);
+      if (c.deliveredBy !== '') wrong.push(`${fam.collection}: a restored record with nothing stored carries ${show(c.deliveredBy)}, want the empty string`);
+    }
+    assert.deepEqual(wrong, [], 'a restore stored the wrong deliverer: the replaced copy\'s would let a peer the backup never named delete what it restored');
   });
 
   it('the backup carries NONE: the replaced copy\'s sentinels and syncBase never survive; D-9 stamps from createdAt', async () => {

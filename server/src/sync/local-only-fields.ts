@@ -30,6 +30,9 @@
  *   data** — an operator who configured a year of retention loses records after the sender's seven days,
  *   with nothing logged and nothing to distinguish it from their own policy working.
  *
+ * - **`deliveredBy`** — which peer delivered this version HERE. A peer's copy would say who delivered the record to
+ *   the peer, which is a different fact, and a deletion authority resting on it would be the peer's to write.
+ *
  * A lapsed window's RESULT is not local and does replicate: `contentRedacted` and `contentRedactedAt` say
  * the record had a description and no longer has one, which is what the record IS.
  */
@@ -39,6 +42,10 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // Per peer, the file hash this instance and that peer last both held (`sync/file-sync.ts`, Q-66): what THIS
   // instance agreed with whom, so it is served to no peer and hashed nowhere.
   'syncBase',
+  // Which peer DELIVERED this version here (bundle-51, D-14): the fact the upstream deletion ground stands on
+  // (`sync/deletion-authority.ts`). It names a peer of THIS instance's network, so no other instance is told it, and
+  // a peer's own stamp would say who delivered the record THERE, which is nothing about who delivered it here.
+  'deliveredBy',
 ]);
 
 /**
@@ -48,10 +55,15 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
  * The retention stamps ARE the record tier of retention: a per-record `ttlDays` is never stored, only the stamp
  * it produced, so dropping them would hand a "never expire" record the space default and the sweep would delete
  * it network-wide. `syncBase` is what this instance last agreed with each peer about a file; dropping it on a
- * self-restore turns every divergent file into a conflict copy. A PEER's copy of either is still refused: these
- * are kept only from a restore, which is this instance's own backup, never from a sync arrival.
+ * self-restore turns every divergent file into a conflict copy. `deliveredBy` is who delivered the record here: a
+ * restore that dropped it would leave every relayed record without the stamp its upstream's deletion needs, and the
+ * back-fill that stamped the pre-release rows has already run and will not run again. A PEER's copy of any of them
+ * is still refused: these are kept only from a restore, which is this instance's own backup, never from a sync arrival.
+ *
+ * The default is not allowed to classify a field: `every-local-only-field-is-classified-on-purpose` holds that each
+ * local-only name is here or is named derived, with a reason, in the gate.
  */
-export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase']);
+export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy']);
 
 /**
  * The rest — what THIS instance computes with its own model (`embedding`, `embeddingModel`, `matchedText`), so
@@ -64,6 +76,17 @@ export const DERIVED_LOCAL_FIELDS: ReadonlySet<string> =
 for (const f of RESTORED_LOCAL_FIELDS) {
   // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
+}
+
+/**
+ * The restored fields that are DATES, which JSON wrote as text and a restore must turn back (the two retention stamps).
+ * Stored as text a stamp never compares with a Date and the sweep never fires; the other restored fields are not dates
+ * (`deliveredBy` is a peer's id, `syncBase` an object), and reading a peer's id as one deletes it.
+ */
+export const RESTORED_DATE_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt']);
+
+for (const f of RESTORED_DATE_FIELDS) {
+  if (!RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`RESTORED_DATE_FIELDS names '${f}', which a restore does not keep`);
 }
 
 /**
@@ -96,6 +119,25 @@ export function carriedFields({ restore, suppressed }: { restore: boolean; suppr
   return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
 }
 
+/**
+ * The `deliveredBy` stamp an arriving version is written with: a restore keeps the backup's own (`''` for a backup that
+ * has none — what it replaced is never what it keeps), anything else is the peer the door proved delivered it (`''` for
+ * nobody: an admin or local push). Never absent.
+ *
+ * ## What it prevents
+ *
+ * The stamp is the ground the upstream's deletion stands on (`sync/deletion-authority.ts`), so a row stored WITHOUT one
+ * is a row nobody can say who delivered. Both write shapes of the arrival writer (the replace in `sync/arrivals.ts`, the file
+ * merge in `sync/file-meta-write.ts`) spelled the restore-or-delivery choice themselves, and a copy that wrote `undefined`
+ * where this writes `''` leaves the key out of the document. One answer, so neither shape can drop it.
+ */
+export function stampOfArrival(
+  { restore, doc, deliveredBy }: { restore: boolean; doc: Readonly<Record<string, unknown>>; deliveredBy?: string | undefined },
+): string {
+  if (restore) return typeof doc['deliveredBy'] === 'string' ? doc['deliveredBy'] : '';
+  return deliveredBy ?? '';
+}
+
 /** `$unset` of every derived field — the content changed or is gone. */
 export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
 /** `$unset` of the vector half — only the decision to embed changed. */
@@ -126,4 +168,26 @@ export function stripLocalOnly<T extends object>(doc: T): T {
   const out = { ...doc } as Record<string, unknown>;
   for (const f of LOCAL_ONLY_FIELDS) delete out[f];
   return out as T;
+}
+
+/**
+ * A row that is written out again under a NEW id — an edge or link whose endpoints moved, a file that was renamed —
+ * is a new record written HERE, whatever the old one was: so it is stamped as nobody's delivery (`deliveredBy: ''`),
+ * and it carries nothing that described the old identity (`syncBase`, this instance's per-peer agreement about the
+ * old path).
+ *
+ * ## What it prevents
+ *
+ * A re-key spreads `{ ...old, _id: newId }`, and the stamp rode along: a record this instance made out of a relayed one
+ * then looked relayed itself, and its upstream could delete it. The stamp is the one field a hand-written copy would
+ * forget, because nothing but this rule ever reads it, so it is put inside the helper where no caller can leave it
+ * out. The vector and the retention stamps are NOT dropped: they describe the content and this instance's policy,
+ * which a re-key does not change (`edge-rekey.ts` keeps the vector on purpose).
+ *
+ * `patch` wins over the old row, as the spread it replaces; the stamp and `syncBase` win over `patch`.
+ */
+export function rekeyedRow<T extends object, P extends object>(old: T, patch: P): Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' } {
+  const out = { ...old, ...patch, deliveredBy: '' } as Record<string, unknown>;
+  delete out['syncBase'];
+  return out as Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' };
 }

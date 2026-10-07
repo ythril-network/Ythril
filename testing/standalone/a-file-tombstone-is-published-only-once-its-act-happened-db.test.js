@@ -24,8 +24,8 @@
  *   its bytes, published once it has none.
  * - Every other reader leaves it alone too: the prune does not remove it as delivered, and the stray-metadata drain
  *   does not take it for a deletion.
- * - A delete or a move that happened publishes exactly one tombstone per path, carrying only the four fields a
- *   tombstone has on the wire.
+ * - A delete or a move that happened publishes exactly one tombstone per path, carrying only fields a tombstone has on
+ *   the wire (`WIRE`, derived — not a list kept here) and always its identity.
  *
  * Run: node --test testing/standalone/a-file-tombstone-is-published-only-once-its-act-happened-db.test.js
  */
@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { build } from './_push-door.mjs';
-import { openFileActDoors, NOTHING, WIRE_KEYS } from './_file-act-doors.mjs';
+import { openFileActDoors, NOTHING, wireKeys, IDENTITY_KEYS } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 
@@ -188,10 +188,15 @@ describe('a file tombstone is published only once its act happened', { skip }, (
       const m = await move(via, 'from.txt', 'to.txt');
       assert.ok(!failed(m), `the move: ${JSON.stringify(m.body ?? m.text)}`);
       await cleanUpsSettled();
+      const WIRE_KEYS = await wireKeys();
       for (const [door, list] of [['served', await served()], ['pushed', await pushed()]]) {
         assert.deepEqual(list.map(t => t.path).sort(), ['from.txt', 'gone.txt'], `${door}: not one tombstone per path`);
         for (const t of list) {
-          assert.deepEqual(Object.keys(t).sort(), WIRE_KEYS, `${door}: a tombstone carries fields that are not on the wire`);
+          // The rule is "nothing but wire fields, and the identity of the tombstone always": the version a deletion saw (`rowSeq`)
+          // and its issuer are wire fields too, present when the act had them, and a hand-listed set is what went stale.
+          const keys = Object.keys(t).sort();
+          assert.deepEqual(keys.filter(k => !WIRE_KEYS.includes(k)), [], `${door}: a tombstone carries fields that are not on the wire`);
+          assert.deepEqual(IDENTITY_KEYS.filter(k => !keys.includes(k)), [], `${door}: a tombstone lacks a field of its identity`);
         }
       }
     });

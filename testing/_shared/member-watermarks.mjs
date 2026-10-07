@@ -37,9 +37,12 @@ const TYPES = 'server/src/config/types-networks.ts';
 /**
  * The per-space maps on `NetworkMember`, as field names.
  *
- * `lastX?: Record<string, number|string>` — a position per space, whatever it counts. The value type is part
- * of the pattern on purpose: `Record<string, number>` is a position and `Record<string, string>` is a
- * timestamp, and both are watermarks; anything else on the interface is not keyed by space at all.
+ * `field?: Record<string, number|string>` — a position per space, whatever it counts and whatever it is called
+ * (`lastSeqServed`, and `tombstoneRereadAt`, the state of the one-time re-read, which a rename must carry and a
+ * wipe must re-owe all the same). The value type is part of the pattern on purpose: `Record<string, number>` is a
+ * position and `Record<string, string>` is a timestamp or a cursor, and all are watermarks; anything else on the
+ * interface is not keyed by space at all. A name pattern (`last…`) was the second thing that could rot here: the
+ * first map that did not start with it was outside every gate built on this.
  *
  * @param {number} [floor] the minimum that means the scan worked
  * @returns {string[]} field names, in declaration order
@@ -49,7 +52,7 @@ export function memberWatermarks(floor = 4) {
   const at = src.indexOf('interface NetworkMember');
   if (at === -1) throw new Error(`${TYPES} no longer declares interface NetworkMember — re-anchor this helper`);
   const iface = src.slice(at, src.indexOf('\n}', at));
-  const found = [...iface.matchAll(/^\s*(last[A-Za-z]*)\??:\s*Record<string,\s*(?:number|string)>/gm)]
+  const found = [...iface.matchAll(/^\s*([A-Za-z]+)\??:\s*Record<string,\s*(?:number|string)>/gm)]
     .map(m => m[1]);
   if (found.length < floor) {
     throw new Error(

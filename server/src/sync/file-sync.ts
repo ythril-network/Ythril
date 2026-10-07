@@ -6,24 +6,33 @@
  * routes) and the conflict rule that follows it both belong here, beside the transfer they change.
  */
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDataRoot } from '../config/loader.js';
 import type { NetworkMember, ConflictDoc, FileMetaDoc } from '../config/types.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { toSafeRelPath } from '../util/paths.js';
-import { log, peerText } from '../util/log.js';
+import { log, logSafe, peerText } from '../util/log.js';
+import { sha256Hex } from '../util/sha256-hex.js';
+import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { buildFileManifest } from '../files/manifest.js';
-import { readStored, writeStored, deleteStored } from '../files/stored-bytes.js';
+import { readStored, writeStored } from '../files/stored-bytes.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
-import { deleteFileMeta, recordArrivedFile } from '../files/file-meta.js';
-import { publishedFileTombstones } from '../files/tombstones.js';
+import { recordArrivedFile } from '../files/file-meta.js';
+import {
+  publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, shadowedArrivals,
+  LEGACY_FILE_TOMBSTONE_LIMIT,
+} from '../files/tombstones.js';
+import { applyPeerFileTombstones } from '../files/peer-tombstone-apply.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
 import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile } from './file-conflict.js';
 import { peerFileSpaceId } from './space-map.js';
+import { deliveryOfMember } from './deletion-authority.js';
+import { declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
+import { serverCursorOf } from './seq-run-pager.js';
+import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
+import { noteToldTombstoned, wasToldTombstoned } from './told-tombstoned.js';
 
 export async function syncFiles(
   member: NetworkMember,
@@ -42,27 +51,7 @@ export async function syncFiles(
     // Fetch tombstones before the manifest so that files deleted on the peer
     // are removed locally before the manifest comparison runs.
     if (doPull) try {
-      const tsResp = await peerSafeFetch(
-        `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`,
-        opts(),
-      );
-      if (tsResp.ok) {
-        const { tombstones } = await boundedJson<{ tombstones: { path: string }[] }>(tsResp, 'sync peer');
-        const spaceDataRoot = getDataRoot();
-        const spaceFiles = path.resolve(spaceDataRoot, 'files', spaceId);
-        for (const ts of tombstones) {
-          try {
-            // Normalise to prevent path traversal (sandbox-safe relative path).
-            const rel = toSafeRelPath(ts.path);
-            const abs = path.join(spaceFiles, rel);
-            if (!abs.startsWith(spaceFiles + path.sep) && abs !== spaceFiles) continue;
-            await deleteStored(abs).catch(() => { /* already gone — ignore */ });
-            await deleteFileMeta(spaceId, rel).catch(() => { /* best-effort */ });
-          } catch { /* ignore per-file errors */ }
-        }
-      } else {
-        log.warn(`File tombstones from ${peerText(member.label)}: ${tsResp.status}`);
-      }
+      await pullFileTombstones(member, spaceId, remoteSpaceId, networkId, opts);
     } catch (err) {
       // Tombstone fetch is best-effort; continue with manifest sync.
       log.warn(`File tombstone fetch from ${peerText(member.label)}: ${peerText(err)}`);
@@ -71,31 +60,54 @@ export async function syncFiles(
     // ── 1b. Push our file tombstones to the peer ──────────────────────────
     // Files we deleted locally must be propagated to the peer so they disappear there too.
     if (doPush) try {
-      // Published ones only: a tombstone whose act has not happened is pushed to no peer (bundle-30 I15).
-      const ourTombstones = await publishedFileTombstones(spaceId);
-      if (ourTombstones.length > 0) {
-        const ackResp = await peerSafeFetch(
-          `${member.url}/api/sync/file-tombstones?networkId=${encodeURIComponent(networkId)}`,
-          {
-            ...opts(),
-            method: 'POST',
-            body: JSON.stringify({ spaceId: remoteSpaceId, tombstones: ourTombstones }),
-          },
-        );
-        // A 200 is a real acknowledgement, and it used to be thrown away. The peer upserts every tombstone it
-        // receives and re-propagates it onward, so a 200 proves this peer now holds them — which is what lets us
+      // In pages of at most FILE_TOMBSTONE_PAGE, each acknowledged on its own: one body carrying the whole set outgrew the
+      // request limit and then failed every cycle for ever, since the set only shrinks once a peer acknowledges it (Q-396).
+      const sentTo = `Push file tombstones to ${peerText(member.label)}`;
+      const endpoint = `${member.url}/api/sync/file-tombstones?networkId=${encodeURIComponent(networkId)}`;
+      const outcome: TransferOutcome = { deliveredThrough: 0, truncated: false };
+      let after: IsoPosition = ISO_READ_START;
+      let refused = 0;
+      let declined = 0;
+      for (let pages = 1; ; pages++) {
+        // Published ones only: a tombstone whose act has not happened is pushed to no peer (bundle-30 I15). The page names the
+        // row past it (`peek`), to know whether it ends inside a run of rows at one position, and whether there is a next one.
+        const { rows: sent, next, peek } = await publishedFileTombstonePage(spaceId, after);
+        if (sent.length === 0) break;
+        const ackResp = await peerSafeFetch(endpoint, {
+          ...opts(),
+          method: 'POST',
+          body: JSON.stringify({ spaceId: remoteSpaceId, tombstones: sent.map(fileTombstoneOnTheWire) }),
+        });
+        // A 200 is a real acknowledgement, and it used to be thrown away. The peer judges every tombstone it receives and
+        // re-propagates the ones it keeps, so a 200 proves this peer has dealt with them — which is what lets us
         // drop ours (see `sync/file-tombstone-ack.ts`). The position is taken from the array we actually SENT,
         // never from a fresh query: a file deleted between building this body and reading the response was not in
-        // the payload, and counting it as delivered would drop a tombstone no peer has seen.
+        // the payload, and counting it as delivered would drop a tombstone no peer has seen. Rows of a run the page ends in
+        // are not proven yet: the rest of the run goes in the next page.
         //
-        // Anything other than 200 acknowledges nothing. A 403 means a direction-blocked peer that will never
-        // accept our tombstones, and pruning on a rejected push is precisely how a deleted file comes back.
+        // Anything other than 200 acknowledges nothing, and stops the pages: nothing after a page the peer did not
+        // acknowledge is counted. A 403 means a direction-blocked peer that will never accept our tombstones, and pruning
+        // on a rejected push is precisely how a deleted file comes back.
+        const ourTombstones = settledFileTombstones(sent, peek);
         if (ackResp.ok) {
           recordFileTombstoneAck(member.instanceId, spaceId, ackedPositionFrom(ourTombstones));
+          // `refused` and `declined` are additive: an older peer sends neither. A re-send is refused or declined again, so the
+          // position advances past them, as the record push's does, and the lines below are what tell an operator.
+          const body = await boundedJson<{ refused?: unknown; declined?: unknown }>(ackResp, 'sync peer')
+            .catch(() => ({}) as { refused?: unknown; declined?: unknown });
+          refused += refusedCountOf(body);
+          declined += declinedCountOf(body);
         } else {
-          log.debug(`Push file tombstones to ${peerText(member.label)}: ${ackResp.status} — position not advanced`);
+          log.debug(`${sentTo}: ${ackResp.status} — position not advanced`);
+          break;
         }
+        if (next === null) break;
+        const last = sent[sent.length - 1]!;
+        after = { at: last.positionAt, id: last._id };
+        if (stopAtPageBound(outcome, (why) => log.warn(`${sentTo} stopped: ${logSafe(why)}; the rest is sent next cycle.`), pages, MAX_TRANSFER_PAGES)) break;
       }
+      sayPeerRefused('file tombstones', member.label, spaceId, refused);
+      sayPeerDeclined('file tombstones', member.label, spaceId, declined);
     } catch (err) {
       log.warn(`Push file tombstones to ${peerText(member.label)}: ${peerText(err)}`);
     }
@@ -117,6 +129,14 @@ export async function syncFiles(
     const dataRoot = getDataRoot();
     const spaceRoot = path.resolve(dataRoot, 'files', spaceId);
 
+    // The bytes a held file tombstone erased are not downloaded again (Q-229): asked ONCE for every entry that would be
+    // fetched, by the same predicate every other arrival of a file's bytes asks (`shadowedArrivals`).
+    const shadowed = doPull
+      ? await shadowedArrivals(spaceId, manifest
+        .filter(r => !isInstanceLocalFile(r.path) && decideFilePull(oursMap.get(r.path), r, bases.get(r.path)) !== 'skip')
+        .map(r => ({ id: r.path, path: r.path, kind: 'bytes' as const, sha256: r.sha256 })))
+      : new Set<string>();
+
     if (doPull) for (const remote of manifest) {
       if (isInstanceLocalFile(remote.path)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       const local = oursMap.get(remote.path);
@@ -128,6 +148,7 @@ export async function syncFiles(
         if (bases.get(remote.path) !== remote.sha256) await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
         continue;
       }
+      if (shadowed.has(remote.path)) continue;
 
       try {
         /*
@@ -152,7 +173,7 @@ export async function syncFiles(
         );
         if (!dl.ok) { log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`); continue; }
         const buf = Buffer.from(await dl.arrayBuffer());
-        const sha = createHash('sha256').update(buf).digest('hex');
+        const sha = sha256Hex(buf);
         if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}`); continue; }
 
         pulledFiles++;
@@ -210,7 +231,9 @@ export async function syncFiles(
       // Taken from this peer a moment ago: `localEntry` predates that write, so pushing it would undo it (Q-66).
       if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
       // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
-      if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath)) === 'skip') continue;
+      // A path the peer has told us it holds a tombstone for is not sent again while our hash for it is unchanged.
+      const told = wasToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256);
+      if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), told) === 'skip') continue;
       try {
         const absPath = path.join(spaceRoot, localPath);
         // Plaintext on the wire, whatever this instance keeps at rest: the peer applies its own rules (F-43).
@@ -233,6 +256,11 @@ export async function syncFiles(
         );
         if (!pushResp.ok) {
           log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: HTTP ${pushResp.status}`);
+        } else if ((await boundedJson<{ tombstoned?: unknown }>(pushResp, 'sync peer').catch(() => ({}) as { tombstoned?: unknown })).tombstoned === true) {
+          // `200 { tombstoned: true }`: the peer holds a tombstone for exactly these bytes and stored nothing. Not a failure
+          // (an older sender would read one as such and upload again), and not a delivery either — remembered, so the
+          // next cycle does not send the same bytes to be refused the same way (`sync/told-tombstoned.ts`).
+          noteToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256);
         } else {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
@@ -260,6 +288,53 @@ async function syncBasesFor(spaceId: string, peerId: string): Promise<Map<string
   const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
     .find(asFilter<SyncedFileMeta>({ [key]: { $exists: true } }), { projection: { _id: 1, [key]: 1 } }).toArray();
   return new Map(docs.map(d => [String(d._id), String(d.syncBase?.[peerId] ?? '')]));
+}
+
+/**
+ * Pull the peer's file tombstones, a page at a time, to the end, applying each page through the one apply
+ * (`applyPeerFileTombstones`) with the page's `Delivery`: the peer pulled from is the authenticated source, and whether it is
+ * this space's upstream is this instance's own knowledge (`sync/deletion-authority.ts`), never the peer's say-so.
+ *
+ * The first request carries the cursor of the start of time: a server with the paged mode answers 500 rows and a `nextCursor`,
+ * which is echoed until it is `null`. An older server ignores `cursor`, answers one answer with no `nextCursor` and is read
+ * once — and when that answer is as long as such a server ever answers, it may have been cut, which is said, because rows
+ * past it are not reachable by an older server's own contract. The pull is still never filtered by `since` (see
+ * `sync/file-tombstone-ack.ts`). A stop at the page bound of one cycle is said, and the rest is read next cycle.
+ */
+async function pullFileTombstones(
+  member: NetworkMember, spaceId: string, remoteSpaceId: string, networkId: string, opts: () => RequestInit,
+): Promise<void> {
+  const peer = peerText(member.label);
+  const delivery = deliveryOfMember(spaceId, member);
+  const where = `sync pull file-tombstones from ${member.label}`;
+  const outcome: TransferOutcome = { deliveredThrough: 0, truncated: false };
+  let cursor: string = ISO_START_CURSOR;
+  for (let pages = 1; ; pages++) {
+    const tsResp = await peerSafeFetch(
+      `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}&cursor=${cursor}`,
+      opts(),
+    );
+    if (!tsResp.ok) {
+      await tsResp.body?.cancel().catch(() => {});
+      log.warn(`File tombstones from ${peer}: ${tsResp.status}`);
+      return;
+    }
+    const data = await boundedJson<{ tombstones?: unknown; nextCursor?: unknown }>(tsResp, 'sync peer');
+    const page = Array.isArray(data?.tombstones) ? data.tombstones : [];
+    await applyPeerFileTombstones(spaceId, page, delivery, where);
+    const next = serverCursorOf(data?.nextCursor);
+    if (next === undefined) {
+      if (page.length >= LEGACY_FILE_TOMBSTONE_LIMIT) {
+        log.warn(`File tombstones from ${peer}: a full answer of ${page.length} with no nextCursor — an older server's answer may be truncated, `
+          + 'and the deletions past it are not read until it is upgraded.');
+      }
+      return;
+    }
+    if (next === null) return;
+    if (next === cursor) { log.warn(`File tombstones from ${peer}: the peer answered the cursor it was given; stopped.`); return; }
+    if (stopAtPageBound(outcome, (why) => log.warn(`File tombstones from ${peer} stopped: ${logSafe(why)}; the rest is read next cycle.`), pages, MAX_TRANSFER_PAGES)) return;
+    cursor = next;
+  }
 }
 
 /** Record that this instance and `peerId` now both hold `sha256` for the file at `filePath`. */

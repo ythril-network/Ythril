@@ -51,6 +51,7 @@ import { andPredicates } from '../db/and-predicates.js';
 import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { createProbeCache, type ProbeTtl } from './cached-probe.js';
+import { isComparableIso, COMPARABLE_ISO_LENGTH } from './comparable-iso.js';
 import { MAX_SYNC_SEQ, SEQ_CARRYING, settledSeqRange } from './seq.js';
 
 // ── The position and its cursor ────────────────────────────────────────────────
@@ -110,6 +111,89 @@ export function decodeSeqCursor(cursor: unknown): SeqPosition | undefined {
   if (id === '' || id.length > MAX_CURSOR_ID_LENGTH) return undefined;
   return { seq, id };
 }
+
+// ── The position of a read that is keyed by a TIME, not a seq ──────────────────
+
+/**
+ * Where a read of records that carry no seq but an instant starts — the file tombstones, which are positioned by when
+ * they were published or received here (`positionAt`): strictly after `at`, and — with an `id` — after that record within
+ * the run of equal instants. `at` is a comparable ISO instant (`util/comparable-iso.ts`), or `''` for the start of time.
+ */
+export interface IsoPosition {
+  at: string;
+  id?: string | undefined;
+}
+
+/** The start of a read with no cursor: before every instant. */
+export const ISO_READ_START: IsoPosition = Object.freeze({ at: '' });
+
+/**
+ * The one refusal text for an instant cursor that cannot be read. Fixed, so it never repeats what the caller sent — the
+ * same rule as {@link parseSeqText}'s routes (`Q-388`).
+ */
+export const BAD_ISO_CURSOR = 'cursor must be a cursor a previous page of this route returned';
+
+/**
+ * The cursor for an instant position: `base64url("<instant>:<id>")`, or `base64url("<instant>")` when there is no id or
+ * the id is longer than {@link MAX_CURSOR_ID_LENGTH}. The twin of {@link encodeSeqCursor}, and for the same reason it is a
+ * pair: two records published in one millisecond share an instant, and a cursor that named only the instant would skip the
+ * rest of the run at every page boundary (`Q-277`, one level down).
+ *
+ * The instant is FIXED WIDTH, so the text is split at a known offset and never searched: an id that is a path holds colons,
+ * and so does an ISO instant.
+ */
+export function encodeIsoCursor(position: IsoPosition): string {
+  const { at, id } = position;
+  if (!isComparableIso(at)) throw new RangeError(`a cursor cannot name instant ${String(at)}`);
+  const text = id !== undefined && id !== '' && id.length <= MAX_CURSOR_ID_LENGTH ? `${at}:${id}` : at;
+  return Buffer.from(text).toString('base64url');
+}
+
+/**
+ * The position an instant cursor names, or `undefined` for anything it refuses (the route answers `400` with
+ * {@link BAD_ISO_CURSOR}). Type-checked, the instant a comparable ISO value, the separator a colon, the id non-empty and
+ * bounded. An absent or empty cursor is {@link ISO_READ_START}, so a caller reads one answer for "no cursor" and for "the
+ * first page".
+ */
+export function isoReadStart(cursor: unknown): IsoPosition | undefined {
+  if (cursor === undefined || cursor === '') return ISO_READ_START;
+  if (typeof cursor !== 'string' || !CURSOR_TEXT.test(cursor)) return undefined;
+  const text = Buffer.from(cursor, 'base64url').toString();
+  const at = text.slice(0, COMPARABLE_ISO_LENGTH);
+  if (!isComparableIso(at)) return undefined;
+  if (text.length === COMPARABLE_ISO_LENGTH) return { at };
+  if (text[COMPARABLE_ISO_LENGTH] !== ':') return undefined;
+  const id = text.slice(COMPARABLE_ISO_LENGTH + 1);
+  if (id === '' || id.length > MAX_CURSOR_ID_LENGTH) return undefined;
+  return { at, id };
+}
+
+/**
+ * The cursor of the start of time — what the FIRST request of a cursor-mode read of an instant-keyed route carries. An
+ * empty cursor reads as "no cursor" (the legacy answer), so a client that wants the paged mode from the first request sends
+ * this one; it sorts before every instant a position can name.
+ */
+export const ISO_START_CURSOR: string = encodeIsoCursor({ at: '1970-01-01T00:00:00.000Z' });
+
+/**
+ * The two finds that read everything strictly after `after` in an instant-keyed collection, in `(field, _id)` order: `tie`
+ * (the rest of the run at the cursor's own instant, or `null` when the cursor names no id) and `range` (every later
+ * instant). The twin of {@link seqKeysetFilters}, with no horizon (an instant is never allocated ahead of its write) and
+ * no readiness question: with the compound index the two finds are bounded scans, and without it — the window while it is
+ * built — each is a scan that keeps the same ties, because a tie is decided by the filters and not by the index. `extra`
+ * narrows both, composed with `$and` as the seq filters compose it.
+ */
+export function isoKeysetFilters(
+  field: string, after: IsoPosition, extra?: Readonly<Record<string, unknown>>,
+): { tie: Record<string, unknown> | null; range: Record<string, unknown> } {
+  return {
+    tie: after.id !== undefined && after.at !== '' ? composed({ [field]: after.at, _id: { $gt: after.id } }, extra) : null,
+    range: composed({ [field]: { $gt: after.at } }, extra),
+  };
+}
+
+/** The order that goes with {@link isoKeysetFilters}: the instant, then `_id`, so a run of equal instants has one order. */
+export const isoKeysetSort = (field: string): Readonly<Record<string, 1>> => Object.freeze({ [field]: 1, _id: 1 });
 
 /**
  * Order two positions the way the store orders `(seq, _id)`: by seq, then by `_id` as UTF-8 BYTES. Mongo compares strings
@@ -225,6 +309,32 @@ const keysetReady = (collName: string): Promise<boolean> =>
 // ── The read ───────────────────────────────────────────────────────────────────
 
 /**
+ * Run the two finds of a keyset read in their order — `tie` (the rest of the run at the cursor's own position, `null` when
+ * there is none) and then, only when the page is not yet full, `range` (everything after) — and join their answers.
+ *
+ * ## What it prevents
+ *
+ * The same four lines stood in every keyset reader (the seq reader, its fallback while the compound index builds, the file
+ * tombstones' page): `first` read, `first.length >= limit` to stop, the rest asked for `limit - first.length`. The line a copy
+ * drops is the middle one, which makes a full tie page cost a second find that is then thrown away, or hands back a page longer
+ * than asked. `limit` is `undefined` for a read with no bound (a whole collection of tombstones), which asks both finds for
+ * everything.
+ *
+ * `find` reads for both; `readRange` replaces it for the range alone, for a reader whose range read has a step of its own (the
+ * fallback re-reads the run its last row ends in). Both are handed the filter and the number of rows still wanted.
+ */
+export async function tieThenRange<T, N extends number | undefined>(
+  find: (filter: Record<string, unknown>, n: N) => Promise<T[]>,
+  tie: Record<string, unknown> | null, range: Record<string, unknown>, limit: N,
+  readRange: (filter: Record<string, unknown>, n: N) => Promise<T[]> = find,
+): Promise<T[]> {
+  const first = tie ? await find(tie, limit) : [];
+  if (limit !== undefined && first.length >= limit) return first;
+  // `N` is `undefined` exactly when `limit` is, so what is still wanted is too.
+  return [...first, ...await readRange(range, (limit === undefined ? undefined : limit - first.length) as N)];
+}
+
+/**
  * Up to `limit` records of one space collection that come after `after`, settled ones only, in `(seq, _id)` order.
  *
  * `extra` narrows what is read (composed with `$and`); `projection` is the caller's. The horizon is taken here, once,
@@ -243,9 +353,7 @@ export async function readAfterSeq<T extends Document>(
   const { tie, range } = await settledSeqKeysetFilters(spaceId, after, extra);
   // `lastSeq` in the fallback comes from `range`, so it is below the horizon too: the run re-read needs no bound of its own.
   if (!(await keysetReady(collName))) return readWithoutCompound(find, tie, range, extra, limit);
-  const first = tie ? await find(tie, SEQ_KEYSET_SORT, limit) : [];
-  if (first.length >= limit) return first;
-  return [...first, ...await find(range, SEQ_KEYSET_SORT, limit - first.length)];
+  return tieThenRange((filter, n: number) => find(filter, SEQ_KEYSET_SORT, n), tie, range, limit);
 }
 
 /**
@@ -263,19 +371,19 @@ async function readWithoutCompound<T extends Document>(
   tie: Record<string, unknown> | null, range: Record<string, unknown>,
   extra: Readonly<Record<string, unknown>> | undefined, limit: number,
 ): Promise<T[]> {
-  const first = tie ? await find(tie, ID_SORT, limit) : [];
-  if (first.length >= limit) return first;
-  const want = limit - first.length;
-  const page = await find(range, SEQ_ONLY_SORT, want);
-  if (page.length === 0) return first;
   const positionOf = (d: T): SeqPosition => {
     const r = d as unknown as { seq: number; _id: string };
     return { seq: r.seq, id: r._id };
   };
-  const lastSeq = positionOf(page[page.length - 1]!).seq;
-  // The runs before the last one are complete in this page; their order is fixed here, a page at most, so the answer is
-  // `(seq, _id)` throughout, as with the compound.
-  const head = page.filter(d => positionOf(d).seq < lastSeq).sort((a, b) => compareSeqPositions(positionOf(a), positionOf(b)));
-  const run = await find(composed({ seq: lastSeq }, extra), ID_SORT, want - head.length);
-  return [...first, ...head, ...run];
+  const rangeInRuns = async (filter: Record<string, unknown>, want: number): Promise<T[]> => {
+    const page = await find(filter, SEQ_ONLY_SORT, want);
+    if (page.length === 0) return [];
+    const lastSeq = positionOf(page[page.length - 1]!).seq;
+    // The runs before the last one are complete in this page; their order is fixed here, a page at most, so the answer is
+    // `(seq, _id)` throughout, as with the compound.
+    const head = page.filter(d => positionOf(d).seq < lastSeq).sort((a, b) => compareSeqPositions(positionOf(a), positionOf(b)));
+    const run = await find(composed({ seq: lastSeq }, extra), ID_SORT, want - head.length);
+    return [...head, ...run];
+  };
+  return tieThenRange((filter, n: number) => find(filter, ID_SORT, n), tie, range, limit, rangeInRuns);
 }

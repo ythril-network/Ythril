@@ -27,6 +27,16 @@
  * once per process from the counter. `seedPeer` bumps the peer-side counter through the server's own `bumpSeq`, so a
  * seed is served whatever was seeded before it.
  *
+ * ## The topology a case is about (bundle-51)
+ *
+ * Who may delete what a peer delivered depends on WHERE the peer sits: the upstream of a directional network (a pubsub
+ * publisher, a braintree parent) or anything else (a subscriber, a child, a club member, a stranger). So the door takes
+ * the network's `type`, a braintree `myParentInstanceId`, the peer's `direction` and member fields, and a second CLUB
+ * network carrying the same spaces through a `LATERAL` member (`lateral`) — and `configure` rewrites any of them on the
+ * live config for the next case, because the process has ONE door (its config, Mongo layer and engine are singletons) and
+ * `reset` puts the opening topology back. With `files: true` the fake peer also serves the REAL file-tombstone and
+ * manifest handlers over its own storage and disk, and canned plain-file routes.
+ *
  * ## What it does not do
  *
  * It does not stub the engine, the transfer, the apply or the data layer. A case that needs a peer to send what no
@@ -34,6 +44,9 @@
  * its way out — the receiver must not trust it either way.
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import compression from 'compression';
 import { openPushDoor } from './_push-door.mjs';
@@ -48,6 +61,14 @@ export const PEER_LABEL = 'Pull-door peer';
 
 /** The author block of a record the fake peer wrote. */
 export const PEER_AUTHOR = Object.freeze({ instanceId: PEER, instanceLabel: PEER_LABEL });
+
+/**
+ * A LATERAL writer: a member of a CLUB network that carries the same space (`lateral` below). It is no upstream of
+ * anything, so what it delivered is never the fake peer's to delete (bundle-51).
+ */
+export const LATERAL = 'pull-door-lateral';
+export const LATERAL_LABEL = 'Pull-door lateral';
+export const LATERAL_AUTHOR = Object.freeze({ instanceId: LATERAL, instanceLabel: LATERAL_LABEL });
 
 /** Where the fake peer keeps the tombstones it serves for a space it is asked for by `remote`. */
 export const peerSide = (remote) => `peer-${remote}`;
@@ -73,14 +94,36 @@ const SERVING_TOKEN = Object.freeze({
  * @param {boolean} [o.monitorCommands]
  * @param {Record<string, object>} [o.meta]  local space id -> its `meta` (suppression tiers, type schemas, retention)
  * @param {Record<string, object>} [o.spaceExtra]  local space id -> further space config (`recordTtlDays`, …)
+ * @param {string} [o.type]  the network's type: `pubsub` (default), `braintree`, `club`, `closed`, `democratic`. With
+ *   `pubsub` and the default direction `pull` the fake peer is this instance's PUBLISHER, i.e. its upstream
+ * @param {string} [o.myParentInstanceId]  a braintree network's parent of THIS instance (`upstreamOf` reads it): the
+ *   fake peer is the upstream when it is `PEER`, and a stranger to the tree otherwise
+ * @param {object} [o.memberExtra]  further fields on the fake peer's member record (`parentInstanceId`, …)
+ * @param {boolean|string[]} [o.lateral]  also carry the same spaces (or these local ids) through a CLUB network whose one
+ *   member is `LATERAL`: a space reached by a non-directional network as well. Toggled later by `configure`
+ * @param {boolean} [o.files]  serve the file routes on the fake peer too — the REAL `GET`/`POST /api/sync/file-tombstones`
+ *   and `GET /api/sync/manifest` handlers over the peer's own storage and disk, and the plain file routes
+ *   (`GET`/`POST /api/files/:space`) as canned answers. Off by default: the existing callers never meet them
+ *
+ * ONE DOOR PER PROCESS (the config, the Mongo layer and the engine are module singletons). A case that needs another
+ * TOPOLOGY does not open another door: `configure` rewrites the live network config, and `reset` puts it back.
  */
 export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], direction = 'pull', monitorCommands = false,
-  meta = {}, spaceExtra = {} }) {
+  meta = {}, spaceExtra = {}, type = 'pubsub', myParentInstanceId, memberExtra, lateral = false, files = false }) {
   const host = privateHostAddress();
   assert.ok(host, 'no non-loopback IPv4 on this host — callers skip on privateAddressSkipReason() first');
   const NET = `${suite}-net`;
+  const LATERAL_NET = `${suite}-lateral-net`;
   const remoteOf = new Map(spaces.map(s => [s, s]));
   for (const [remote, local] of Object.entries(spaceMap ?? {})) remoteOf.set(local, remote);
+  const lateralSpaces = (on) => (Array.isArray(on) ? on : spaces);
+  const lateralNetwork = (on) => ({
+    id: LATERAL_NET, label: 'Pull-door lateral network', type: 'club', origin: 'joined', spaces: [...lateralSpaces(on)], votes: [],
+    votingDeadlineHours: 24,
+    members: [{ instanceId: LATERAL, label: LATERAL_LABEL, url: 'http://192.0.2.1:9', tokenHash: 'x', direction: 'both' }],
+  });
+  /** The topology the door opened with: `reset` returns to it, so one case's `configure` never leaks into the next. */
+  const initial = { type, myParentInstanceId, memberExtra: memberExtra ?? {}, lateral };
 
   let door;
   let families = [];
@@ -127,6 +170,31 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
      * every route the fake peer does not serve does.
      */
     network: null,
+    // ── the file routes (`files: true` only) ────────────────────────────────────────────────────────────────────────
+    /** Every `GET /file-tombstones` the receiver sent, its query as the receiver wrote it. */
+    fileTombstoneRequests: [],
+    /** Every file tombstone the receiver PUSHED, in arrival order, and each request's body `{ n, answer }`. */
+    fileTombstonesReceived: [],
+    fileTombstonePosts: [],
+    /**
+     * `(req, res) => void | Promise<void>` — answers `GET /file-tombstones` INSTEAD of the real handler: a scripted older
+     * server (no `cursor` mode, no `nextCursor`, `issuer`-less rows) or a server that fails. Unset, the real handler
+     * answers over `seedPeerFileTombstones`.
+     */
+    fileTombstoneGet: null,
+    /** The same for `POST /file-tombstones`: `(req, res) => void | Promise<void>`. */
+    fileTombstonePost: null,
+    /** Every `GET /manifest` the receiver sent, and `(req, res) => …` to answer it INSTEAD of the real handler. */
+    manifestRequests: [],
+    manifest: null,
+    /** Every `GET /api/files/:space?path=` the receiver sent (the byte download), by `{ space, path }`. */
+    fileDownloads: [],
+    /**
+     * Every `POST /api/files/:space?path=` the receiver sent (the byte push): `{ space, path, sha256, size }`. Answered
+     * `{ status: 'ok' }` unless `fileUpload` — `(info, res) => boolean` — answers it and returns true.
+     */
+    fileUploads: [],
+    fileUpload: null,
   };
 
   const app = express();
@@ -170,6 +238,58 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   app.use('/api/sync/networks', express.json({ limit: '100mb' }), (req, res, next) => {
     if (state.network) state.network(req, res, next); else next();
   });
+  if (files) {
+    /** Serve a real sync route over the peer-side space the receiver asked for as `spaceId` (query or body). */
+    const serveReal = async (req, res, method, route, token) => {
+      const asked = { ...req.query };
+      const query = { ...asked };
+      if (typeof asked.spaceId === 'string') query.spaceId = peerSide(asked.spaceId);
+      delete query.networkId;
+      Object.defineProperty(req, 'query', { value: query, writable: true, configurable: true, enumerable: true });
+      if (req.body && typeof req.body.spaceId === 'string') req.body = { ...req.body, spaceId: peerSide(req.body.spaceId) };
+      req.authToken = token;
+      await door.handler(method, route)(req, res);
+    };
+    const failed = (res) => (err) => { if (!res.headersSent) res.status(500).json({ error: String(err) }); };
+    app.get('/api/sync/file-tombstones', async (req, res) => {
+      state.fileTombstoneRequests.push({ ...req.query });
+      if (state.fileTombstoneGet) { await Promise.resolve(state.fileTombstoneGet(req, res)).catch(failed(res)); return; }
+      await serveReal(req, res, 'get', '/file-tombstones', SERVING_TOKEN).catch(failed(res));
+    });
+    app.post('/api/sync/file-tombstones', express.json({ limit: '100mb' }), async (req, res) => {
+      const sent = Array.isArray(req.body?.tombstones) ? req.body.tombstones : [];
+      state.fileTombstonesReceived.push(...sent);
+      const post = { n: state.fileTombstonePosts.length + 1, count: sent.length, answer: undefined };
+      state.fileTombstonePosts.push(post);
+      const json = res.json.bind(res);
+      res.json = (b) => { post.answer = { code: res.statusCode, body: b }; return json(b); };
+      if (state.fileTombstonePost) { await Promise.resolve(state.fileTombstonePost(req, res)).catch(failed(res)); return; }
+      // The receiving side of this push is the real handler over the PEER's storage, authenticated as the instance that
+      // pushed (so a tombstone it issued is its own, as a real peer's apply reads it).
+      await serveReal(req, res, 'post', '/file-tombstones', { ...SERVING_TOKEN, peerInstanceId: `${suite}-receiver` }).catch(failed(res));
+    });
+    app.get('/api/sync/manifest', async (req, res) => {
+      state.manifestRequests.push({ ...req.query });
+      if (state.manifest) { await Promise.resolve(state.manifest(req, res)).catch(failed(res)); return; }
+      await serveReal(req, res, 'get', '/manifest', SERVING_TOKEN).catch(failed(res));
+    });
+    // The plain file routes: the bytes under the peer's disk, canned (what the byte door does is the door's own question).
+    app.get('/api/files/:space', (req, res) => {
+      const rel = String(req.query.path ?? '');
+      state.fileDownloads.push({ space: req.params.space, path: rel });
+      const abs = path.join(peerFilesRoot(req.params.space.replace(/^peer-/, '')), rel);
+      if (!fs.existsSync(abs)) { res.status(404).json({ error: 'not on the fake peer' }); return; }
+      res.type('application/octet-stream').send(fs.readFileSync(abs));
+    });
+    app.post('/api/files/:space', express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
+      const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      const info = { space: req.params.space, path: String(req.query.path ?? ''), size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex') };
+      state.fileUploads.push(info);
+      if (state.fileUpload?.(info, res)) return;
+      res.json({ status: 'ok' });
+    });
+  }
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
     if (state.failFamily === req.params.family) { req.socket.destroy(); return; }
@@ -192,10 +312,12 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
       suite, monitorCommands,
       spaces: [...spaces, ...extraSpaces, ...peerSpaces].map(space),
       networks: [{
-        id: NET, label: 'Pull-door network', type: 'pubsub', spaces, votes: [], votingDeadlineHours: 24,
+        id: NET, label: 'Pull-door network', type, spaces, votes: [], votingDeadlineHours: 24,
         ...(spaceMap ? { spaceMap } : {}),
-        members: [{ instanceId: PEER, label: PEER_LABEL, url, tokenHash: 'x', direction }],
-      }],
+        ...(type === 'club' ? { origin: 'joined' } : {}),
+        ...(myParentInstanceId !== undefined ? { myParentInstanceId } : {}),
+        members: [{ instanceId: PEER, label: PEER_LABEL, url, tokenHash: 'x', direction, ...(memberExtra ?? {}) }],
+      }, ...(lateral ? [lateralNetwork(lateral)] : [])],
       secrets: { peerTokens: { [PEER]: 'pull-door-token' } },
     });
   } catch (err) {
@@ -219,16 +341,89 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     await seq.bumpSeq(peerSide(remote), tombstones.reduce((m, t) => Math.max(m, t.seq), 0));
   }
 
+  /** The member fields a `configure` added, so `reset` can take them off again. */
+  const configuredKeys = new Set();
+
+  /** The fake peer's file-tombstone rows for the space it is asked for as `remote`, stored and served by the REAL handler. */
+  async function seedPeerFileTombstones(remote, docs) {
+    if (docs.length === 0) return;
+    await door.mongo.col(`${peerSide(remote)}_file_tombstones`).insertMany(docs.map(d => ({ ...d })), { ordered: false });
+  }
+
+  /** The directory a peer-side space's files live in, and this instance's own. */
+  function peerFilesRoot(remote) { return path.join(loader.getDataRoot(), 'files', peerSide(remote)); }
+  function localFilesRoot(local) { return path.join(loader.getDataRoot(), 'files', local); }
+
+  /** Put bytes on the fake peer's disk for the space it is asked for as `remote`: what its manifest advertises. */
+  function seedPeerFile(remote, rel, bytes) {
+    const abs = path.join(peerFilesRoot(remote), rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, bytes);
+  }
+
+  /** Put bytes on THIS instance's disk for a local space, as an earlier arrival or upload left them. */
+  function writeLocalFile(local, rel, bytes) {
+    const abs = path.join(localFilesRoot(local), rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, bytes);
+  }
+  const localFileExists = (local, rel) => fs.existsSync(path.join(localFilesRoot(local), rel));
+
+  /**
+   * Rewrite the LIVE network config for the next cases — the topology a case is about, on the one door the process has.
+   * Every field is optional; what is not named stays. `reset` returns to the topology the door opened with.
+   *
+   * @param {object} [o]
+   * @param {string} [o.type]  the network's type
+   * @param {string|null} [o.myParentInstanceId]  a braintree parent (`null` removes it)
+   * @param {'pull'|'push'|'both'} [o.direction]  the fake peer's direction, from this instance's view
+   * @param {object} [o.memberExtra]  fields merged into the fake peer's member record
+   * @param {boolean|string[]} [o.lateral]  carry the spaces through a club network with a `LATERAL` member (`false` removes it)
+   */
+  function configure({ type: t, myParentInstanceId: parent, direction: d, memberExtra: extra, lateral: l } = {}) {
+    const cfg = loader.getConfig();
+    const net = cfg.networks.find(n => n.id === NET);
+    if (t !== undefined) {
+      net.type = t;
+      if (t === 'club') net.origin = 'joined';
+    }
+    if (parent !== undefined) { if (parent === null) delete net.myParentInstanceId; else net.myParentInstanceId = parent; }
+    if (d !== undefined) member().direction = d;
+    if (extra) { Object.assign(member(), extra); for (const k of Object.keys(extra)) configuredKeys.add(k); }
+    if (l !== undefined) {
+      cfg.networks = cfg.networks.filter(n => n.id !== LATERAL_NET);
+      if (l) cfg.networks.push(lateralNetwork(l));
+    }
+  }
+
   /** Forget everything a previous case left: both sides' rows, the receiver's watermarks, the fake peer's logs. */
   async function reset({ direction: d = direction } = {}) {
     for (const s of [...spaces, ...extraSpaces]) await door.wipe(s);
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
+    // The topology goes back to what the door opened with, and the receiver's repair state is owed again: a case that
+    // `configure`d or re-read must not decide the next one.
+    configure({ type: initial.type, myParentInstanceId: initial.myParentInstanceId ?? null, lateral: initial.lateral });
+    if (files) {
+      for (const s of [...spaces, ...extraSpaces, ...peerSpaces]) {
+        for (const part of ['file_tombstones', 'file_hashes']) await door.mongo.col(`${s}_${part}`).deleteMany({});
+        fs.rmSync(path.join(loader.getDataRoot(), 'files', s), { recursive: true, force: true });
+      }
+    }
     const m = member();
+    for (const k of configuredKeys) delete m[k];
+    configuredKeys.clear();
+    for (const k of Object.keys(initial.memberExtra)) m[k] = initial.memberExtra[k];
+    delete m.tombstoneRereadAt;
+    // The file-tombstone acknowledgement is a watermark too, and it only ever moves forward: left from a case that pushed
+    // everything, it would stand in for the next case's own position and every "acknowledged up to here" row would read it.
+    delete m.lastFileTombstoneAckedAt;
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {
       tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null,
       family: null, batchUpsert: null, batchRequests: [], familyRequests: [],
+      fileTombstoneRequests: [], fileTombstonesReceived: [], fileTombstonePosts: [], fileTombstoneGet: null, fileTombstonePost: null,
+      manifestRequests: [], manifest: null, fileDownloads: [], fileUploads: [], fileUpload: null,
     });
   }
 
@@ -283,5 +478,6 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   return {
     ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
     member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
+    configure, config: () => loader.getConfig(), LATERAL_NET, seedPeerFileTombstones, seedPeerFile, writeLocalFile, localFileExists, peerFilesRoot, localFilesRoot,
   };
 }

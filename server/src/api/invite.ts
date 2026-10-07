@@ -52,7 +52,7 @@ import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader
 import { createToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { claimedPeerIsProven } from '../auth/peer-identity.js';
-import { announcedSpaces, widenPeerTokensOf } from '../networks/network-spaces.js';
+import { announcedSpaces, isDirectionalNetwork, widenPeerTokensOf } from '../networks/network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -532,7 +532,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       label: instanceLabel,
       url: instanceUrl,
       tokenHash,
-      direction: (net.type === 'braintree' || net.type === 'pubsub') ? 'push' : 'both',
+      direction: isDirectionalNetwork(net) ? 'push' : 'both',
       lastSyncAt: undefined,
       lastSeqReceived: {},
       children: net.type === 'braintree' ? [] : undefined,

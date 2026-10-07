@@ -26,7 +26,10 @@
  *   as the backup carried them, a missing stamp from D-9 (the record's own `createdAt` by this instance's window), and
  *   NEVER the replaced copy's — a field the backup does not carry is removed, the replaced copy's vector, model and
  *   `matchedText` included (`carriedFields`, the arrival writer's own answer; the merge once kept them, D2).
- * - **A peer's arrival** keeps a stamp the stored row has and is given D-9's where it has none.
+ * - **A peer's arrival** keeps a stamp the stored row has and is given D-9's where it has none — and is stamped with WHO
+ *   DELIVERED it (`deliveredBy`, bundle-51), which is not carried: its own step after the carried fields, so a newer version
+ *   delivered by another peer is that peer's. A restore stores the backup's own (`''` when it has none); the stray drain's
+ *   fill passes none, and the stored stamp stays.
  * - **An arrival this instance suppresses** loses every derived field (`embedding`, `embeddingModel`,
  *   `matchedText`): they describe content it no longer embeds, and `matchedText` would keep removed text findable.
  */
@@ -36,7 +39,7 @@ import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { carriedFields, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
+import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
 export interface FileMetaUpdateOptions {
@@ -46,6 +49,14 @@ export interface FileMetaUpdateOptions {
   restore?: boolean;
   /** The receiver suppresses this file: its derived fields go. */
   suppressed?: boolean;
+  /**
+   * Who delivered this version (`deliveredBy`, bundle-51): the delivering peer's id, or `''` for nobody (an admin or local
+   * push). Stamped explicitly, AFTER the carried fields, because the carry would otherwise keep the stored stamp and a
+   * newer version delivered by another peer would stay the first deliverer's. Absent: the stored stamp is left alone —
+   * what the stray drain's fill wants, which is not an arrival from a peer at that moment. Ignored by a restore, which
+   * stores the backup's own (`''` for a backup that has none).
+   */
+  deliveredBy?: string;
 }
 
 /**
@@ -72,6 +83,9 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
       set[f] = given !== undefined ? { $literal: given } : fallback !== undefined ? { $literal: fallback } : '$$REMOVE';
     }
   }
+  // Who delivered THIS version: its own step, after the loop above, so no carried value can stand in for it.
+  // Absent for a caller that is not an arrival from a peer (the stray drain's fill): the stored stamp is left alone.
+  if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
   return [{ $set: set }];
 }
 

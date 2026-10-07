@@ -213,6 +213,28 @@ export async function deleteStored(abs: string): Promise<void> {
 }
 
 /**
+ * Delete a stored file if it is there: a path that is already gone is an answer (`isMissingPath`, which also reads a path
+ * through a regular file as gone), and anything else — a permission refused, a store that will not answer — is the caller's
+ * failure.
+ *
+ * ## What it prevents
+ *
+ * Four deleters wrote `deleteStored(abs).catch(err => { if (!isMissingPath(err)) throw err; })` by hand, and the half a copy
+ * drops is the `if`: a bare `catch {}` answers a permission failure as "already gone", and the row then goes while the bytes
+ * stay. The tolerance is here so it cannot be written wider.
+ *
+ * `skipDirectory` is for a caller whose path came from a peer and means ONE file: a directory there is left alone and is not
+ * an error, because an unlink of one fails anyway and a tree must never go with a single path's deletion.
+ */
+export async function deleteStoredIfPresent(abs: string, { skipDirectory = false }: { skipDirectory?: boolean } = {}): Promise<void> {
+  if (skipDirectory) {
+    const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+    if (stat === null || stat.isDirectory()) return;
+  }
+  await deleteStored(abs).catch((err: unknown) => { if (!isMissingPath(err)) throw err; });
+}
+
+/**
  * Move a stored file under both paths' locks, taken in SORTED order rather than source-then-destination: two moves
  * crossing (A to B while B to A) would otherwise each hold one lock and wait for ever on the other.
  */

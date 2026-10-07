@@ -6,6 +6,10 @@ import { z } from 'zod';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
+import { peerRelayCaller } from '../../auth/peer-relay.js';
+import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletion-authority.js';
+import { networksHolding } from '../../spaces/wipe-vote.js';
+import { isDirectionalNetwork } from '../../networks/network-spaces.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -252,6 +256,31 @@ export function callerPeerId(authToken: Record<string, unknown> | undefined): st
 }
 
 /**
+ * Who a page of tombstones came from, as the push route knows it from the authenticated token: the peer the token is
+ * bound to, a trusted instance administrator relaying on anyone's behalf, or nobody entitled to either.
+ *
+ * The input of `deliveryOf` (`sync/deletion-authority.ts`), which adds what only this instance's config knows — whether
+ * that peer is the space's upstream. Built on `peerRelayCaller` so the three-way answer has one spelling: a peer
+ * identity WINS over admin (a token bound to a peer acts as that peer), and a token that is neither is no relay. The
+ * two tombstone routes each read the field by hand (`['peerInstanceId']`) and the admin test beside it.
+ */
+export function deliveryFromToken(authToken: Record<string, unknown> | undefined): DeliveryAuth {
+  const caller = peerRelayCaller(authToken as Parameters<typeof peerRelayCaller>[0]);
+  if (caller.kind === 'peer') return { peerInstanceId: caller.peerInstanceId };
+  return { trustedRelay: caller.kind === 'admin' };
+}
+
+/**
+ * The delivery of a page a peer PUSHED, resolved once for the page from the space the door admitted and the request's
+ * authenticated token against the live config — what both tombstone doors hand their apply. The pull side's twin is
+ * `deliveryOfMember` (`sync/deletion-authority.ts`); the token is read here and nowhere else, so a door cannot hand the
+ * authority a peer id it took from the body.
+ */
+export function deliveryOfRequest(spaceId: string, req: { authToken?: unknown }): Delivery {
+  return deliveryOf(getConfig(), spaceId, deliveryFromToken(req.authToken as Record<string, unknown> | undefined));
+}
+
+/**
  * The peer a peer-bound token belongs to, as the author of what it delivers — or undefined for any other token.
  * The label is the member's as this instance lists it, or the id when no network lists the peer.
  */
@@ -322,7 +351,7 @@ export function spaceAllowed(
       const usable = networkId
         ? memberNets.filter(n => n.id === networkId)
         : memberNets;
-      return usable.some(n => n.spaces.includes(spaceId));
+      return networksHolding(spaceId, { networks: usable }).length > 0;
     }
     // A peer whose join is still being voted on (or was denied) holds a
     // provisioned PAT but no membership — it must NOT fall through to plain
@@ -414,10 +443,10 @@ export function pushAllowed(
 export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<string, unknown> | undefined): boolean {
   const peerInstanceId = callerPeerId(authToken);
   if (!peerInstanceId) return false;
-  const nets = peerMemberNetworks(peerInstanceId).filter(n => n.spaces.includes(spaceId));
+  const nets = networksHolding(spaceId, { networks: peerMemberNetworks(peerInstanceId) });
   if (nets.length === 0) return false;
   return !nets.some(n => {
-    if (n.type !== 'braintree' && n.type !== 'pubsub') return true;
+    if (!isDirectionalNetwork(n)) return true;
     const member = n.members.find(m => m.instanceId === peerInstanceId);
     // direction='push' means WE push to THEM — they should not be writing to us
     return member ? member.direction !== 'push' : false;

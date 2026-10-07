@@ -100,6 +100,11 @@ describe('a delivered tombstone moves the counter, and a counter that could not 
   for (const name of ['push', 'pull']) {
     describe(name, () => {
       it('a tombstone refused on authorship still advances the counter: its seq was received', async () => {
+        // bundle-51: the fake peer of the pull door is this instance's UPSTREAM, and an upstream's tombstone now deletes what
+        // the upstream delivered whoever wrote it — so the deletion this row needs REFUSED must come from a deliverer that is
+        // not the upstream. The pull is re-pointed at a peer that is a subscriber (`both`: this instance publishes to it); the
+        // push door's peer is no member of the network at all. Neither is the upstream, so authorship decides, as it did.
+        if (name === 'pull') door.configure({ direction: 'both' });
         await door.coll(C, 'facts').insertOne(build.fact(C, 'theirs', 3, author('someone-else')));
         const res = await deliver(name, C, [tomb(C, 'theirs', 90, ISSUER[name])]);
         const at = name === 'push' ? res.counterAtResponse : await door.counter(C);

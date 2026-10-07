@@ -28,6 +28,11 @@
  *     tier only, never the vector, its model or `matchedText`, which describe content it no longer embeds
  *     (`Q-230`); and a RESTORE carries nothing from the copy it replaces — the backup's own record-tier fields come
  *     with the document (`RESTORED_LOCAL_FIELDS`), and what the backup does not carry is absent (`Q-234`).
+ *     **Who delivered the version is stamped last** (`deliveredBy`, bundle-51): the delivering peer's id, or `''`
+ *     when nobody delivered it (an admin push), written AFTER the carried fields so the stored stamp never survives a
+ *     new delivery. The upstream deletion ground (`sync/deletion-authority.ts`) stands on that stamp alone, and a
+ *     carried one would let the first deliverer of a record keep the right to delete what another peer later sent.
+ *     A restore keeps the backup's own stamp, which is part of what it restores (`''` for a backup that has none).
  *  5. **D-9, the receiver's retention** (owner decision, 2026-10-01): a record that carries no receiver stamp is
  *     stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now, never the
  *     sender's. A stamp already on the stored copy is carried by a peer's arrival, never recomputed. An arrival
@@ -86,7 +91,7 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields, stampOfArrival } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -98,6 +103,7 @@ import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { isLegacyReadSpill } from './file-conflict.js';
+import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -113,6 +119,12 @@ export interface ArrivalOptions {
   deferEnqueue?: boolean;
   /** Who sent it, for the log lines only. */
   from?: string;
+  /**
+   * The peer the door PROVES delivered the page — stored on every record it writes (`deliveredBy`). Absent for a
+   * delivery with no peer behind it (an admin or local token), which is stamped `''`: nobody's. Ignored by a restore,
+   * whose records carry the backup's own stamp.
+   */
+  deliveredBy?: string;
   /**
    * The stray-filemeta drain (`Q-219`) only: each file record is RECOVERED onto its row by `fillFileMetaFromStray`
    * rather than merged — a row this instance made by default is filled, a peer-written row keeps the seq accept AT
@@ -147,6 +159,11 @@ export interface ArrivalOutcome {
   refused: ArrivalRefusal[];
   /** Not written by rule: a file chunk or face record (derived from the blob here), or a legacy read spill. */
   derived: string[];
+  /**
+   * Not written: a held file tombstone covers this VERSION of the file (its `rowSeq` is at or above the arriving seq,
+   * Q-229). Only for file metadata, and never for a restore. The page is answered `tombstoned`, as a record is.
+   */
+  tombstoned: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
   /** `fillOnly`: the row this instance made already had everything the record could give it. */
@@ -201,6 +218,16 @@ export function arrivalId(doc: unknown): string {
 }
 
 /**
+ * The fields a wire schema refused an element for, as text for a refusal's reason: each issue's path, `(element)` for the
+ * element itself, named once and bounded. A path names a peer's keys, so it is bounded where the reason is built (`Q-270`) —
+ * the one spelling for every apply that refuses an element by shape (a record's tombstone, a file's), so a refusal reads
+ * the same from each and none of them says a peer's key unbounded.
+ */
+export function refusedFieldsOf(error: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> }> }): string {
+  return peerList(new Set(error.issues.map(i => i.path.join('.') || '(element)')), ', ');
+}
+
+/**
  * One warning per page for what a door did not store, naming the first ids — the shape every door logs, so a
  * refusal reads the same from a push, a pull and a restore. Never a line per document: a poison page would
  * flood the log ring with one fact.
@@ -227,8 +254,9 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
     // JSON turned a stamp into text; stored as text it never compares with a Date and the sweep never fires.
+    // Only the date-typed ones: a peer's id is text, and read as a date it would be thrown away.
     const v = doc[f];
-    if (typeof v === 'string') {
+    if (RESTORED_DATE_FIELDS.has(f) && typeof v === 'string') {
       const at = new Date(v);
       if (Number.isNaN(at.getTime())) delete doc[f]; else doc[f] = at;
     }
@@ -252,10 +280,13 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
  * The replace, as an update pipeline so the carried fields cross IN THE SAME WRITE: the stored values of `carried`
  * (a missing one is simply absent), over the D-9 defaults, under what arrived — every peer value inside `$literal`.
  * Read-free, and race-free against an embed worker writing a vector between a read and this write.
+ *
+ * `deliveredBy` is the fourth operand, after what was carried: the stamp of THIS delivery wins over the stored one. A
+ * restore passes the backup's own (`''` when it carried none): what it replaced is never what it keeps.
  */
-function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>): unknown[] {
+function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string): unknown[] {
   const kept = Object.fromEntries([...carried].map(f => [f, `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }] } }];
+  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }] } }];
 }
 
 const storeRefusal = (err: unknown): string =>
@@ -293,7 +324,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
-    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], collapsed: [],
+    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], collapsed: [],
     complete: [], unstored: [], maxReceived: 0,
     enqueue: async () => {
       if (recordType === null || queued.length === 0) return;
@@ -324,8 +355,18 @@ export async function writeArrivals(
     }
     page.set(doc._id, prepared(doc, family, restore));
   }
-  const toWrite = [...page.values()];
+  let toWrite = [...page.values()];
   retagToLocalSpace(toWrite, spaceId);
+  // A file's metadata a held tombstone covers is not written (Q-229): by VERSION, so a newer one passes. A restore is the
+  // operator's own instruction and is never judged by one. Asked of the one predicate every arrival of a file asks.
+  if (family === 'files' && !restore && toWrite.length > 0) {
+    const shadowed = await shadowedArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0,
+      author: (d.author as { instanceId?: string } | undefined)?.instanceId, deliveredBy: opts.deliveredBy })));
+    if (shadowed.size > 0) {
+      out.tombstoned.push(...shadowed);
+      toWrite = toWrite.filter(d => !shadowed.has(d._id));
+    }
+  }
 
   // ── per document: the D-9 defaults and the receiver's suppression, the space's policy read once ─────────────
   const collName = spaceCollection(spaceId, family);
@@ -342,8 +383,9 @@ export async function writeArrivals(
     const quiet = suppressed.has(d._id);
     const stamps = defaults.get(d._id) ?? ({} as Doc);
     return family === 'files'
-      ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet })
-      : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }));
+      ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' })
+      : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }),
+        stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }));
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
   // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.
@@ -500,6 +542,12 @@ export async function writeArrivals(
   }
   // What was received and not written (collapsed, derived) still moves the counter: it is the peer's clock.
   await bump(out.maxReceived);
+  // A NEWER version of a file supersedes the tombstones held for its path (Q-229) — only once it has landed, so a write
+  // that failed keeps the deletion. A restore replaces whatever is stored and judges nothing by a tombstone.
+  if (family === 'files' && !restore) {
+    const landedIds = new Set([...out.inserted, ...out.updated]);
+    await supersedeFileTombstones(spaceId, toWrite.filter(d => landedIds.has(d._id)).map(d => ({ path: d._id, seq: d.seq ?? 0 })));
+  }
 
   warnArrivalsNotStored(where, spaceId, family, 'refused', out.refused);
   // A repeated id is a sender's bug or a page that overlapped itself: one copy was kept, by the accept rule.

@@ -36,6 +36,7 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { writeTombstone, removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { rekeyedRow } from '../sync/local-only-fields.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -937,7 +938,8 @@ async function relinkAndAbsorb(
       await withAllocatedSeqs(spaceId, fresh.length, (first) => writeInOneCommands(fresh.map(({ link, newId }, i) => ({
         replaceOne: {
           filter: { _id: newId, spaceId },
-          replacement: { ...link, _id: newId, to: survivor._id, updatedAt: now, seq: first + i },
+          // `rekeyedRow`: a link under a NEW id is a record this instance wrote, stamped as nobody's delivery.
+          replacement: rekeyedRow(link, { _id: newId, to: survivor._id, updatedAt: now, seq: first + i }),
           upsert: true,
         },
       })), (slice, { ordered }) => linkColl.bulkWrite(asBulk<LinkDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.link');

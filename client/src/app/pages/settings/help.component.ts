@@ -114,6 +114,7 @@ export const HELP_DOCS = [
       'decisions/02-two-layer-ssrf-defence.md',
       'decisions/03-no-runtime-model-downloads.md',
       'decisions/04-a-result-row-is-whole-or-absent.md',
+      'decisions/05-an-upstream-may-delete-what-it-relayed.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

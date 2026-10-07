@@ -24,7 +24,10 @@
  */
 import type { Config } from '../config/types.js';
 import { getConfig, saveConfigSoon } from '../config/loader.js';
-import { membersServing, peerTokensReaching } from './served-watermark.js';
+import { membersServing, peerTokensReaching, peersOutside } from './served-watermark.js';
+import { setMemberSpaceMark } from './member-space-mark.js';
+import { isComparableIso } from '../util/comparable-iso.js';
+import { fileTombstonePosition } from '../files/tombstones.js';
 
 /** The subset of a member this decision needs — keeps the pure part testable without a config. */
 export interface AckedMember {
@@ -34,19 +37,16 @@ export interface AckedMember {
 }
 
 export type FileTombstoneFloor =
-  /** Safe to delete file tombstones whose `deletedAt` is at or below `upTo` (ISO8601). */
+  /** Safe to delete file tombstones whose position (`positionAt`; `deletedAt` for one stored before positions) is at or below `upTo` (ISO8601). */
   | { prune: true; upTo: string; peers: number }
   | { prune: false; reason: 'member-never-acked' | 'peer-token-scoped'; blockedBy?: string };
 
 /**
- * ISO8601 UTC timestamps sort lexically, which is what lets this compare with `<` instead of parsing dates.
- * That only holds for the fixed-width `Z` form the codebase writes (`new Date().toISOString()`), so anything
- * else is treated as unknown rather than compared — a `+02:00` offset would sort wrongly and silently move the
- * floor forward.
+ * ISO8601 UTC timestamps sort lexically, which is what lets this compare with `<` instead of parsing dates — the
+ * fixed-width `Z` form only, so anything else is treated as unknown rather than compared (`util/comparable-iso.ts`,
+ * where the rule lives so the file-tombstone cursor asks the same question). Re-exported: this is where its readers look.
  */
-export function isComparableIso(v: unknown): v is string {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v);
-}
+export { isComparableIso };
 
 /**
  * The newest `deletedAt` every peer has acknowledged, or a reason not to prune.
@@ -61,8 +61,7 @@ export function fileTombstoneFloor(
   spaceId: string,
   peerTokenIds: string[] = [],
 ): FileTombstoneFloor {
-  const known = new Set(members.map(m => m.instanceId));
-  const stranger = peerTokenIds.find(id => !known.has(id));
+  const stranger = peersOutside(members, peerTokenIds)[0];
   if (stranger !== undefined) {
     return { prune: false, reason: 'peer-token-scoped', blockedBy: stranger };
   }
@@ -93,14 +92,21 @@ export function fileTombstoneFloorForSpace(cfg: Config, spaceId: string): FileTo
  *
  * Deliberately computed over the pushed set rather than a fresh query: a file deleted between building the
  * body and reading the response was never in the payload, and treating it as delivered would drop a tombstone
- * no peer has seen. Malformed or missing `deletedAt` values are skipped, so one bad row cannot vouch for the
- * rest — and if none of them is comparable the answer is `null`, meaning "this push proves nothing".
+ * no peer has seen. The position of a row is its `positionAt` — this instance's own clock, the publish time of an own
+ * tombstone and the receive time of a relayed one — or, for a row that carries none, its `deletedAt`, which was the
+ * position before positions existed (`fileTombstonePosition`). Malformed or missing positions are skipped, so one bad row cannot
+ * vouch for the rest — and if none of them is comparable the answer is `null`, meaning "this push proves nothing".
+ *
+ * The caller hands it what the answer PROVES delivered, which is not always everything it sent: a page that ends inside a
+ * run of rows at one position leaves the rest of the run for the next page, so the rows at that position are not proven
+ * (`settledFileTombstones`), or a prune at the position would take the unsent rest of the run with it.
  */
-export function ackedPositionFrom(pushed: Array<{ deletedAt?: unknown }>): string | null {
+export function ackedPositionFrom(pushed: Array<{ positionAt?: unknown; deletedAt?: unknown }>): string | null {
   let max: string | null = null;
   for (const t of pushed) {
-    if (!isComparableIso(t.deletedAt)) continue;
-    if (max === null || t.deletedAt > max) max = t.deletedAt;
+    const at = fileTombstonePosition(t);
+    if (!isComparableIso(at)) continue;
+    if (max === null || at > max) max = at;
   }
   return max;
 }
@@ -141,19 +147,8 @@ export function applyFileTombstoneAck(
   spaceId: string,
   ackedAt: string | null,
 ): boolean {
-  if (!peerInstanceId || ackedAt === null) return false;
-  let changed = false;
-  for (const net of cfg.networks ?? []) {
-    if (!net.spaces?.includes(spaceId)) continue;
-    const m = net.members?.find(x => x.instanceId === peerInstanceId);
-    if (!m) continue;
-    const next = foldAckedAt(m.lastFileTombstoneAckedAt?.[spaceId], ackedAt);
-    if (next === null) continue;
-    m.lastFileTombstoneAckedAt ??= {};
-    m.lastFileTombstoneAckedAt[spaceId] = next;
-    changed = true;
-  }
-  return changed;
+  if (ackedAt === null) return false;
+  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastFileTombstoneAckedAt', current => foldAckedAt(current, ackedAt));
 }
 
 /*
