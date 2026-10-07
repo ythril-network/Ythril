@@ -16,7 +16,10 @@
  *  3. **Authorised before it is stored.** A tombstone for a record another author wrote, or one whose issuer is not
  *     the peer delivering it, is refused and NOT stored — stored, it refuses every later copy of that record from its
  *     real author. And an arriving record is refused by a stored tombstone only when that tombstone's issuer
- *     authored it, so a planted tombstone cannot block another author's record.
+ *     authored it, so a planted tombstone cannot block another author's record. (bundle-51: "authorised" has a second ground
+ *     — the delivering peer is this instance's UPSTREAM and delivered the record whoever wrote it — held in
+ *     `a-tombstone-from-the-upstream-deletes-what-it-relayed-db`. The two refusal rows here keep their meaning by seeding who
+ *     DELIVERED the record, and each has a twin with a deliverer that is no upstream.)
  *  4. **The answer.** `applied` keeps its meaning for an honest page; `refused` is additive.
  *
  * ## How the doors are driven
@@ -152,8 +155,19 @@ describe('a peer tombstone is applied where it was admitted, element by element'
     });
 
     describe(`${name}: authorised before it is stored`, () => {
+      /*
+       * RE-ANCHORED, bundle-51 (D-14 = C). The pull door's fake peer is this instance's UPSTREAM, and an upstream's
+       * tombstone now also deletes a record the UPSTREAM DELIVERED, whoever wrote it and whoever issued the tombstone — so a
+       * record that had no stamp (these rows' old seed) is no longer "a record the deliverer has no claim on" on that door.
+       * What these two rows state is unchanged: a tombstone is refused when neither ground holds. So the seed now says WHO
+       * DELIVERED the record — another peer — which is the thing that keeps it out of the upstream's reach; and the same
+       * rows are held again with a deliverer that is NOT the upstream and delivered the record itself, below, where the
+       * stamp alone must not be enough.
+       */
+      const DELIVERED_BY_ANOTHER = 'a-different-peer';
+
       it('a tombstone for another author\'s record is refused and NOT stored', async () => {
-        await door.coll(S, 'facts').insertOne(fact(S, 'o1', 3, 'someone-else'));
+        await door.coll(S, 'facts').insertOne({ ...fact(S, 'o1', 3, 'someone-else'), deliveredBy: DELIVERED_BY_ANOTHER });
         await d.deliver(S, [tomb(S, 'o1', 30, d.issuer)]);
         assert.ok(await stored(S, 'facts', 'o1'), 'a peer deleted a record another author wrote');
         assert.equal(await stored(S, 'tombstones', 'o1'), null,
@@ -161,7 +175,7 @@ describe('a peer tombstone is applied where it was admitted, element by element'
       });
 
       it('a tombstone whose issuer is not the delivering peer is refused and NOT stored', async () => {
-        await door.coll(S, 'facts').insertOne(fact(S, 'v1', 3, 'victim-instance'));
+        await door.coll(S, 'facts').insertOne({ ...fact(S, 'v1', 3, 'victim-instance'), deliveredBy: DELIVERED_BY_ANOTHER });
         await d.deliver(S, [tomb(S, 'v1', 31, 'victim-instance')]);
         assert.ok(await stored(S, 'facts', 'v1'), 'a forged issuer deleted the victim\'s record');
         assert.equal(await stored(S, 'tombstones', 'v1'), null, 'the forged tombstone was stored');
@@ -170,6 +184,32 @@ describe('a peer tombstone is applied where it was admitted, element by element'
       it('a tombstone whose target is absent is stored (the control)', async () => {
         await d.deliver(S, [tomb(S, 'absent', 32, d.issuer)]);
         assert.ok(await stored(S, 'tombstones', 'absent'), 'a tombstone for a record not held here was not stored');
+      });
+    });
+
+    /*
+     * THE TWINS (bundle-51): the same two refusals with a deliverer that is NOT this instance's upstream, and a record it
+     * delivered ITSELF — the stamp the upstream's deletion rests on, in the hands of a peer it does not belong to. On the push
+     * door the peer is no member of the network (so never an upstream); on the pull door the fake peer is re-pointed at a
+     * SUBSCRIBER (`direction: 'both'`: this instance is the publisher). The stamp is necessary for the upstream's authority
+     * and not sufficient: without the upstream's place in the network the refusals hold as they always did. PINS — green
+     * before and after; they go red the day the rule reads the stamp without asking where the deliverer sits.
+     */
+    describe(`${name}: a deliverer that is not the upstream keeps both refusals, even for a record it delivered`, () => {
+      beforeEach(() => { if (name === 'pull') door.configure({ direction: 'both' }); });
+
+      it('a tombstone for another author\'s record it delivered is refused and NOT stored', async () => {
+        await door.coll(S, 'facts').insertOne({ ...fact(S, 'o2', 3, 'someone-else'), deliveredBy: d.issuer });
+        await d.deliver(S, [tomb(S, 'o2', 33, d.issuer)]);
+        assert.ok(await stored(S, 'facts', 'o2'), 'a peer that is no upstream deleted a record another author wrote, on the strength of having delivered it');
+        assert.equal(await stored(S, 'tombstones', 'o2'), null, 'the refused tombstone was stored');
+      });
+
+      it('a tombstone whose issuer is not the delivering peer is refused and NOT stored, for a record the peer delivered', async () => {
+        await door.coll(S, 'facts').insertOne({ ...fact(S, 'v2', 3, 'victim-instance'), deliveredBy: d.issuer });
+        await d.deliver(S, [tomb(S, 'v2', 34, 'victim-instance')]);
+        assert.ok(await stored(S, 'facts', 'v2'), 'a forged issuer deleted the victim\'s record through a deliverer that is no upstream');
+        assert.equal(await stored(S, 'tombstones', 'v2'), null, 'the forged tombstone was stored');
       });
     });
   }

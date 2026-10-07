@@ -53,6 +53,8 @@ const LOCAL_VALUE = {
   embedding: [0.1, 0.2, 0.3], embeddingModel: 'local-model', matchedText: 'the text a search matched',
   _expireAt: new Date('2030-01-01T00:00:00.000Z'), _contentExpireAt: new Date('2030-01-01T00:00:00.000Z'),
   syncBase: { somePeer: 'abc' },
+  // bundle-51: who delivered the stored version — names a peer, so it never goes out.
+  deliveredBy: 'some-peer',
 };
 
 /** Store records as this instance's own writes would, so the engine's push cycle offers them. */
@@ -79,6 +81,8 @@ describe('a push never skips a record that shares its seq', { skip }, () => {
   it('derives the replicated families and the local-only fields, so an empty set cannot pass', () => {
     assert.ok(families.length >= 6, `only ${families.length} families`);
     assert.ok(LOCAL_ONLY_FIELDS.size >= 5, `only ${LOCAL_ONLY_FIELDS.size} local-only fields — the derivation is broken`);
+    // The field the wire row below must see seeded: were it missing from the set, "no local-only field is on the wire" would never look for it.
+    assert.ok(LOCAL_ONLY_FIELDS.has('deliveredBy'), 'deliveredBy is not a local-only field: a record\'s deliverer (a peer\'s id) would be pushed to every other peer');
     for (const f of LOCAL_ONLY_FIELDS) assert.ok(f in LOCAL_VALUE, `no fixture value for the local-only field '${f}' — add one, or it is never checked on the wire`);
   });
 
