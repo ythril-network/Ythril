@@ -17,7 +17,10 @@
  *  - **Only the upstream.** The same stamp from a subscriber, a child, a club member or a stranger deletes nothing: the
  *    table runs every network type the config knows and expects what `upstreamOf` says, rather than a list of two.
  *  - **Only what it delivered.** A record this instance wrote, one a lateral writer delivered, one an admin pushed
- *    (stamp `''`) and one another peer delivered all survive the upstream's tombstone. The stamp is the only thing B reads.
+ *    (stamp `''`) and one another peer delivered all survive the upstream's tombstone. The stamp is what B reads, with
+ *    one exclusion: a record THIS instance authored survives even when the upstream's stamp is on it (a record the
+ *    upstream relayed back to its author), whoever issued the tombstone — D-14: this instance's own records stay
+ *    protected. Held per network type on both doors in the table, and end to end below.
  *  - **The issuer is not asked.** A relayed tombstone is issued by the original deleter; B reads the deliverer and the
  *    stamp, so a tombstone issued by the third author and delivered by the upstream applies.
  *  - **A stored tombstone is the receiver's to relay.** A tombstone applied on B is STORED, with `storedVia` (the
@@ -97,6 +100,8 @@ const SCENARIOS = [
   { id: 'admin-pushed', note: 'an admin pushed it: stamp is the empty string', author: THIRD, stamp: '', issuer: PEER },
   { id: 'other-peer', note: 'a third party wrote it, ANOTHER peer delivered it', author: THIRD, stamp: OTHER_PEER, issuer: PEER },
   { id: 'self-authored', note: 'this instance wrote it', author: 'ME', stamp: undefined, issuer: PEER },
+  { id: 'self-authored-stamped-upstream', note: 'this instance wrote it and the upstream delivered this copy (stamp is the peer)', author: 'ME', stamp: PEER, issuer: PEER },
+  { id: 'self-authored-stamped-upstream-relayed', note: 'the same, the tombstone issued by a third party and relayed by the upstream', author: 'ME', stamp: PEER, issuer: THIRD },
   { id: 'unstamped-third', note: 'a third party wrote it and it carries no stamp', author: THIRD, stamp: undefined, issuer: PEER },
   { id: 'authorless-legacy', note: 'no author at all (a legacy row)', author: undefined, stamp: undefined, issuer: PEER },
   { id: 'empty-author-legacy', note: 'an empty author', author: '', stamp: undefined, issuer: PEER },
@@ -107,7 +112,8 @@ const SCENARIOS = [
 function oracle(s, upstream) {
   const author = s.author === 'ME' ? ME : s.author;
   const a = s.issuer === PEER && !(s.issuer && author && s.issuer !== author);
-  const b = upstream && typeof s.stamp === 'string' && s.stamp !== '' && s.stamp === PEER;
+  // B never reaches a record THIS instance wrote, even one the upstream's stamp is on.
+  const b = upstream && author !== ME && typeof s.stamp === 'string' && s.stamp !== '' && s.stamp === PEER;
   return { deleted: a || b, viaUpstream: !a && b };
 }
 
@@ -185,6 +191,10 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
     const record = () => build.fact(S, 'e2e', 3, { author: { instanceId: THIRD, instanceLabel: THIRD } });
     const pushBy = (token) => () => door.push('/batch-upsert', { facts: [record()] }, { spaceId: S, token });
     const pulledFromPeer = async () => { door.state.records[S] = { facts: [record()] }; await door.sync(); };
+    // A record THIS instance authored, relayed back by the upstream: it lands stamped with the upstream's id.
+    const ownRecord = () => build.fact(S, 'e2e', 3, { author: { instanceId: ME, instanceLabel: ME } });
+    const ownPushedByUpstream = () => door.push('/batch-upsert', { facts: [ownRecord()] }, { spaceId: S, token: peerToken(PEER) });
+    const ownPulledFromUpstream = async () => { door.state.records[S] = { facts: [ownRecord()] }; await door.sync(); };
 
     for (const [doorName, d] of Object.entries(DOORS)) {
       it(`${doorName}: what the UPSTREAM pushed is deleted by the upstream's tombstone`, async () => {
@@ -193,6 +203,18 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
       });
       it(`${doorName}: what the UPSTREAM served to this instance's pull is deleted by the upstream's tombstone`, async () => {
         assert.equal(await relayedThenDeleted(pulledFromPeer, d), false, 'a pulled record survived the upstream\'s tombstone');
+      });
+      it(`${doorName}: a self-authored record stamped by the upstream (pushed back to its author) survives it`, async () => {
+        assert.equal(await relayedThenDeleted(ownPushedByUpstream, d), true,
+          'a record this instance authored, relayed back by the upstream and stamped with its id, was deleted by the upstream\'s tombstone');
+        const kept = await stored('facts', 'e2e');
+        assert.equal(kept.deliveredBy, PEER, 'fixture: the record was not stamped by the upstream, so the exclusion was not what saved it');
+      });
+      it(`${doorName}: a self-authored record stamped by the upstream (served to this instance's pull) survives it`, async () => {
+        assert.equal(await relayedThenDeleted(ownPulledFromUpstream, d), true,
+          'a self-authored record the upstream served back to this instance\'s pull was deleted by the upstream\'s tombstone');
+        const kept = await stored('facts', 'e2e');
+        assert.equal(kept.deliveredBy, PEER, 'fixture: the record was not stamped by the upstream, so the exclusion was not what saved it');
       });
       it(`${doorName}: what an ADMIN pushed survives it`, async () => {
         assert.equal(await relayedThenDeleted(pushBy(ADMIN_TOKEN), d), true, 'an admin-pushed record was deleted by the upstream');

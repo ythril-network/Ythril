@@ -12,11 +12,16 @@
  *   - **issuer** — the delivery proves the issuer (a trusted admin relays any issuer; a peer must BE the issuer)
  *     AND `tombstoneGoverns(issuer, target author)` (same instance, or either side unknown).
  *   - **upstream** — the deliverer is this space's direct upstream on a DIRECTIONAL network (pub/sub subscriber,
- *     braintree child) AND the stored `deliveredBy` stamp of the target IS that deliverer. Whoever wrote the
- *     record, and whatever the issuer says: that is the D-14 ground, and the headline row below pins it.
+ *     braintree child) AND the stored `deliveredBy` stamp of the target IS that deliverer AND the target is not
+ *     authored by THIS instance. Whoever else wrote the record, and whatever the issuer says: that is the D-14
+ *     ground, and the headline row below pins it. A record this instance wrote is never the upstream's to delete
+ *     (D-14: this instance's own records stay protected), even if the upstream's stamp is on it — a record this
+ *     instance authored can carry the stamp when the upstream relayed it back, and the stamp must not turn
+ *     authorship over to whoever relayed it.
  *
  * A decline names which half failed: `not_author` (the issuer proof held, authorship did not, upstream does not
- * apply), `not_upstream` (the deliverer is an upstream but the stamp is not its own), `not_issuer` (nothing else).
+ * apply), `not_upstream` (the deliverer is an upstream but the upstream ground does not apply to this target: the
+ * stamp is not its own, or this instance wrote the record), `not_issuer` (nothing else).
  *
  * ## Why a table over the whole product
  *
@@ -30,7 +35,9 @@
  * ## Mutation that turns it red
  *
  * In `authorises`, drop the `target.deliveredBy === delivery.peerInstanceId` comparison (or make `upstream` true for
- * any directional member): the lateral-and-stamp rows and the self/lateral-writer survival rows go red. Make ground
+ * any directional member): the lateral-and-stamp rows and the lateral-writer survival rows go red. Drop the
+ * `target.author?.instanceId !== selfId` clause of the upstream ground: every row whose author is `self` and whose
+ * stamp is the deliverer's goes red, and so does the self-authored-and-stamped headline row. Make ground
  * `issuer` ignore `tombstoneGoverns`: the lateral-writer rows go red. Let `deliveryOf` treat a `both` pub/sub member
  * as upstream: the fail-closed rows go red.
  *
@@ -88,7 +95,8 @@ function expected({ trusted, deliverer, upstream }, issuer, target) {
   const author = target.author?.instanceId;
   const proof = trusted || (deliverer !== undefined && deliverer === issuer);
   const governs = !(issuer && author && issuer !== author);
-  const stamped = upstream && typeof target.deliveredBy === 'string' && target.deliveredBy !== '' && target.deliveredBy === deliverer;
+  // The upstream ground never reaches a record THIS instance wrote, whatever stamp it carries.
+  const stamped = upstream && author !== SELF && typeof target.deliveredBy === 'string' && target.deliveredBy !== '' && target.deliveredBy === deliverer;
   if (proof && governs) return { ok: true, ground: 'issuer' };
   if (stamped) return { ok: true, ground: 'upstream' };
   if (proof) return { ok: false, reason: 'not_author' };
@@ -234,6 +242,20 @@ describe('the headline row and the rows around it', () => {
     // Locally written records carry the blank stamp: the upstream may not delete what this instance wrote.
     assert.deepEqual(shape(authorises(D(), P, { author: { instanceId: SELF }, deliveredBy: '' }, SELF)),
       { ok: false, reason: 'not_author' });
+  });
+
+  it('a record THIS instance wrote survives its upstream\'s tombstone even when the upstream\'s stamp is on it', () => {
+    const { authorises } = mod('own record, stamped by the upstream');
+    // The stamp names the upstream and so matches the deliverer, but the ground does not reach what this instance
+    // wrote (D-14: its own records stay protected). Issuer P (not self) fails the issuer ground, so nothing authorises.
+    const own = { author: { instanceId: SELF }, deliveredBy: P };
+    assert.deepEqual(shape(authorises(D(), P, own, SELF)), { ok: false, reason: 'not_author' },
+      'the upstream issued it and delivered it, the stamp is its own, and it still may not delete a record this instance wrote');
+    for (const issuer of [T, undefined]) {
+      assert.equal(authorises(D(), issuer, own, SELF).ok, false, `issuer ${issuer}`);
+    }
+    // The same stamp on a record a THIRD instance wrote is exactly the headline row: the author is what changed.
+    assert.deepEqual(shape(authorises(D(), P, { ...own, author: { instanceId: T } }, SELF)), { ok: true, ground: 'upstream' });
   });
 
   it('a blank stamp is no stamp: `deliveredBy: \'\'` never equals a deliverer', () => {

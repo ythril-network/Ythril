@@ -9,7 +9,12 @@
  *
  *   - ground `issuer`   -> `{ 'author.instanceId': { $in: [issuer, null, ''] } }` — the issuer's own records and
  *                          author-less ones, today's bound;
- *   - ground `upstream` -> `{ deliveredBy: deliverer }` — exactly what the deliverer stamped, nothing author-keyed.
+ *   - ground `upstream` -> `{ deliveredBy: deliverer, 'author.instanceId': { $ne: selfId } }` — exactly what the
+ *                          deliverer stamped, minus anything THIS instance wrote: the verdict's own exclusion
+ *                          (`target.author?.instanceId !== selfId`) is repeated inside the write, so a record this
+ *                          instance authored is never taken by the upstream ground, whatever stamp it carries. The
+ *                          author clause is the self-exclusion and nothing else: it names no issuer, and it never
+ *                          selects an author, it only refuses one.
  *
  * ## Why the guard is part of the module and is tested
  *
@@ -22,8 +27,9 @@
  *
  * ## Mutation that turns it red
  *
- * Make the `upstream` bound `{ 'author.instanceId': … }`, or swap the two grounds, or drop `null`/`''` from the
- * issuer's `$in` (author-less records stop being the issuer's to delete — a change of behaviour for every legacy
+ * Make the `upstream` bound select an author (`{ 'author.instanceId': issuer }`), or drop its `$ne: selfId` clause
+ * (a record this instance wrote and the upstream stamped is taken), or swap the two grounds, or drop `null`/`''` from
+ * the issuer's `$in` (author-less records stop being the issuer's to delete — a change of behaviour for every legacy
  * record), or let the upstream bound take an empty deliverer.
  *
  * Run: node --test testing/standalone/a-delete-write-carries-the-bound-of-its-ground.test.js
@@ -40,49 +46,61 @@ describe('deleteBound', () => {
   it('issuer ground: the issuer\'s records, plus author-less and blank-author ones, and nothing keyed on a stamp', () => {
     const { deleteBound } = mod('issuer ground');
     for (const issuer of ['inst-a', 'inst-b']) {
-      const bound = deleteBound('issuer', { issuer });
+      const bound = deleteBound('issuer', { issuer, selfId: 'inst-self' });
       assert.deepEqual(bound, { 'author.instanceId': { $in: [issuer, null, ''] } });
       assert.equal('deliveredBy' in bound, false, 'the issuer ground is not bounded by a stamp');
     }
   });
 
-  it('issuer ground ignores a deliverer: the bound is the issuer\'s, whoever delivered it', () => {
+  it('issuer ground ignores a deliverer and selfId: the bound is the issuer\'s, whoever delivered it', () => {
     const { deleteBound } = mod('issuer ground / deliverer');
-    assert.deepEqual(deleteBound('issuer', { issuer: 'inst-a', deliverer: 'inst-up' }), { 'author.instanceId': { $in: ['inst-a', null, ''] } });
+    assert.deepEqual(deleteBound('issuer', { issuer: 'inst-a', deliverer: 'inst-up', selfId: 'inst-self' }), { 'author.instanceId': { $in: ['inst-a', null, ''] } });
   });
 
-  it('upstream ground: exactly the records the deliverer stamped, and nothing keyed on an author', () => {
+  it('upstream ground: exactly the records the deliverer stamped, minus this instance\'s own', () => {
     const { deleteBound } = mod('upstream ground');
     for (const deliverer of ['inst-up', 'inst-other']) {
-      const bound = deleteBound('upstream', { issuer: 'inst-claimed', deliverer });
-      assert.deepEqual(bound, { deliveredBy: deliverer });
-      assert.equal('author.instanceId' in bound, false, 'the upstream ground is not bounded by an author');
+      for (const selfId of ['inst-self', 'inst-self-2']) {
+        const bound = deleteBound('upstream', { issuer: 'inst-claimed', deliverer, selfId });
+        assert.deepEqual(bound, { deliveredBy: deliverer, 'author.instanceId': { $ne: selfId } });
+      }
     }
   });
 
-  it('upstream ground ignores the issuer: a deletion the upstream issued in someone else\'s name is bounded by the stamp alone', () => {
+  it('upstream ground never selects an author: its author clause only excludes this instance', () => {
+    const { deleteBound } = mod('upstream ground / author clause');
+    const bound = deleteBound('upstream', { issuer: 'inst-claimed', deliverer: 'inst-up', selfId: 'inst-self' });
+    const clause = bound['author.instanceId'];
+    assert.deepEqual(Object.keys(clause), ['$ne'], 'the author clause is a bare $ne: it refuses an author, it never names one');
+    assert.notEqual(clause.$ne, 'inst-claimed', 'the exclusion is of THIS instance, not of the issuer the tombstone named');
+  });
+
+  it('upstream ground ignores the issuer: a deletion the upstream issued in someone else\'s name is bounded by the stamp and the self-exclusion alone', () => {
     const { deleteBound } = mod('upstream ground / issuer');
-    assert.deepEqual(deleteBound('upstream', { issuer: 'x', deliverer: 'inst-up' }), deleteBound('upstream', { issuer: 'y', deliverer: 'inst-up' }));
+    assert.deepEqual(deleteBound('upstream', { issuer: 'x', deliverer: 'inst-up', selfId: 'inst-self' }),
+      deleteBound('upstream', { issuer: 'y', deliverer: 'inst-up', selfId: 'inst-self' }));
   });
 
   it('the two grounds never build the same predicate', () => {
     const { deleteBound } = mod('grounds differ');
-    const p = { issuer: 'inst-up', deliverer: 'inst-up' };
+    const p = { issuer: 'inst-up', deliverer: 'inst-up', selfId: 'inst-self' };
     assert.notDeepEqual(deleteBound('issuer', p), deleteBound('upstream', p));
   });
 
   it('upstream ground cannot be built without a deliverer: an absent or blank one would match rows it must never reach', () => {
     const { deleteBound } = mod('upstream ground guard');
     for (const deliverer of [undefined, '']) {
-      assert.throws(() => deleteBound('upstream', { issuer: 'inst-up', deliverer }), undefined,
+      assert.throws(() => deleteBound('upstream', { issuer: 'inst-up', deliverer, selfId: 'inst-self' }), undefined,
         `deleteBound('upstream') with deliverer ${JSON.stringify(deliverer)} returned a predicate instead of refusing`);
     }
   });
 
   it('every call hands back a fresh object, so a caller adding its own `_id` clause cannot alter the next bound', () => {
     const { deleteBound } = mod('fresh');
-    const a = deleteBound('upstream', { issuer: 'i', deliverer: 'inst-up' });
+    const a = deleteBound('upstream', { issuer: 'i', deliverer: 'inst-up', selfId: 'inst-self' });
     a._id = { $in: ['x'] };
-    assert.deepEqual(deleteBound('upstream', { issuer: 'i', deliverer: 'inst-up' }), { deliveredBy: 'inst-up' });
+    a['author.instanceId'].$ne = 'tampered';
+    assert.deepEqual(deleteBound('upstream', { issuer: 'i', deliverer: 'inst-up', selfId: 'inst-self' }),
+      { deliveredBy: 'inst-up', 'author.instanceId': { $ne: 'inst-self' } });
   });
 });

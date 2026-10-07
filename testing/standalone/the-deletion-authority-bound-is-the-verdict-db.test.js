@@ -10,6 +10,9 @@
  * had (`author.instanceId ∈ {issuer, null, ''}`, "a record another author wrote between the read and this write is not
  * taken with it"). Two grounds need two bounds, and `deleteBound(ground, …)` is the one place each is spelled: the delete
  * carries the predicate of the ground that authorised it, so the write re-checks the verdict instead of trusting it.
+ * The upstream's bound is `{ deliveredBy: deliverer, 'author.instanceId': { $ne: selfId } }`: the verdict's rule that the
+ * upstream ground never reaches a record THIS instance wrote is re-checked in the write too, so a record that became
+ * this instance's own between the read and the write is not taken with it.
  *
  * ## What is asserted, on seeded Mongo
  *
@@ -21,8 +24,10 @@
  *     `deleteBound` in a `deleteMany` over the ids that ground authorised. What is gone afterwards is exactly what the
  *     verdict said — no more, and every authorised target — and an absent target has nothing to delete.
  *  2. **A stale verdict deletes nothing** (the race rows): the stamp changed to another peer's, the author moved to a third
- *     party's, between the read and the write; the delete finds no record under its bound and the replacement survives.
- *     And the control: the same delete with nothing changed deletes.
+ *     party's, or to THIS instance (the self-exclusion), between the read and the write; the delete finds no record
+ *     under its bound and the replacement survives. And the control: the same delete with nothing changed deletes.
+ *     Also in the table: every cell where the delivering upstream's stamp sits on a record this instance wrote must
+ *     leave it standing (floored, so the cells cannot all be ones where the stamp was someone else's).
  *
  * ## Seen red
  *
@@ -98,6 +103,7 @@ describe('the delete carries the verdict, and a stale verdict deletes nothing', 
     const wrong = [];
     let cells = 0;
     let deletions = 0;
+    let selfStampedByUpstream = 0;
     for (const top of topologies(PEER)) {
       door.configure(top.set);
       const upstream = peerIsUpstream(door, upstreamOf, PEER, S);
@@ -118,13 +124,20 @@ describe('the delete carries the verdict, and a stale verdict deletes nothing', 
           for (const ground of ['issuer', 'upstream']) {
             const ids = seeded.filter(t => { const v = verdicts.get(t.id); return v.ok && v.ground === ground; }).map(t => t.id);
             if (ids.length === 0) continue;
-            await facts.deleteMany({ _id: { $in: ids }, ...authority.deleteBound(ground, { issuer, deliverer: auth.peerInstanceId }) });
+            await facts.deleteMany({ _id: { $in: ids }, ...authority.deleteBound(ground, { issuer, deliverer: auth.peerInstanceId, selfId: ME }) });
           }
           const left = new Set((await facts.find({}, { projection: { _id: 1 } }).toArray()).map(d => d._id));
           for (const t of seeded) {
             const v = verdicts.get(t.id);
             const shouldGo = v.ok && (v.ground === 'issuer' || v.ground === 'upstream');
             if (shouldGo) deletions++;
+            // The amended D-14 rule: a record THIS instance wrote is never the upstream's to delete, stamped or not.
+            // Counted only where the deliverer really is the stamped upstream, so the floor below cannot be met by cells
+            // where the stamp was never the deliverer's.
+            if (delivery.upstream && t.author === ME && t.stamp === auth.peerInstanceId) {
+              selfStampedByUpstream++;
+              if (!left.has(t.id)) wrong.push(`${top.name} / ${how} / issuer ${label(issuer)}: a record THIS instance wrote and the upstream stamped was deleted`);
+            }
             if (left.has(t.id) === shouldGo) {
               wrong.push(`${top.name} / ${how} / issuer ${label(issuer)} / author ${label(t.author)} stamp ${label(t.stamp)}: `
                 + `verdict ${JSON.stringify(v)} but the record is ${left.has(t.id) ? 'STILL THERE' : 'GONE'}`);
@@ -138,13 +151,14 @@ describe('the delete carries the verdict, and a stale verdict deletes nothing', 
     }
     assert.ok(cells >= 100, `only ${cells} cells ran`);
     assert.ok(deletions >= 100, `only ${deletions} deletions in the whole table: the verdict never authorised enough for the equality to mean anything`);
+    assert.ok(selfStampedByUpstream >= 6, `only ${selfStampedByUpstream} cells held a self-authored record stamped by the delivering upstream: the self-exclusion was never exercised`);
     assert.deepEqual(wrong.slice(0, 20), [], `${wrong.length} cell(s) disagree between the verdict and what the delete did`);
   });
 
   describe('a stale verdict deletes nothing', () => {
     const peerDelivery = () => authority.deliveryOf(door.config(), S, { peerInstanceId: PEER });
     const deleteUnder = async (verdict, issuer, id) => (await door.coll(S, 'facts').deleteMany({
-      _id: id, ...authority.deleteBound(verdict.ground, { issuer, deliverer: PEER }),
+      _id: id, ...authority.deleteBound(verdict.ground, { issuer, deliverer: PEER, selfId: ME }),
     })).deletedCount;
 
     it('upstream ground: the record was replaced by another peer\'s copy between the read and the write', async () => {
@@ -155,6 +169,25 @@ describe('the delete carries the verdict, and a stale verdict deletes nothing', 
       await facts.updateOne({ _id: 'race-up' }, { $set: { deliveredBy: OTHER, seq: 4 } });   // a newer delivery landed
       assert.equal(await deleteUnder(verdict, THIRD, 'race-up'), 0, 'the upstream\'s delete took a record another peer had since delivered');
       assert.ok(await facts.findOne({ _id: 'race-up' }), 'the replacement was deleted');
+    });
+
+    it('upstream ground: the record became this instance\'s own (an edit here) between the read and the write', async () => {
+      const facts = door.coll(S, 'facts');
+      await facts.insertOne({ ...build.fact(S, 'race-self', 3, { author: { instanceId: THIRD, instanceLabel: THIRD } }), deliveredBy: PEER });
+      const verdict = authority.authorises(peerDelivery(), THIRD, await facts.findOne({ _id: 'race-self' }), ME);
+      assert.deepEqual(verdict, { ok: true, ground: 'upstream' }, 'fixture: the read verdict is not the upstream ground');
+      // The stamp is still the upstream's; only the author changed, which is the half of the write the self-exclusion guards.
+      await facts.updateOne({ _id: 'race-self' }, { $set: { 'author.instanceId': ME } });
+      assert.equal(await deleteUnder(verdict, THIRD, 'race-self'), 0, 'the upstream\'s delete took a record this instance has since come to author');
+      assert.ok(await facts.findOne({ _id: 'race-self' }), 'the self-authored record was deleted');
+    });
+
+    it('upstream ground: a self-authored record carrying the upstream\'s stamp is outside the bound outright', async () => {
+      const facts = door.coll(S, 'facts');
+      await facts.insertOne({ ...build.fact(S, 'self-stamped', 3, { author: { instanceId: ME, instanceLabel: ME } }), deliveredBy: PEER });
+      assert.equal(await deleteUnder({ ok: true, ground: 'upstream' }, THIRD, 'self-stamped'), 0,
+        'the upstream ground\'s own bound reached a record this instance wrote');
+      assert.ok(await facts.findOne({ _id: 'self-stamped' }));
     });
 
     it('issuer ground: the record\'s author moved to a third party between the read and the write', async () => {
