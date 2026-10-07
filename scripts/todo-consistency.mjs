@@ -72,7 +72,7 @@ const NOT_A_QUEUE = new Map([
   ['_PARKED-DECISIONS.md', 'owner DECISIONS, not work — no verify line, not in the ordered index (see rule 5)'],
   ['_DEPRECATIONS.md', 'a removal checklist keyed to a future major, not the current queue'],
   ['_CLA-BOT-SETUP.md', 'setup instructions'],
-  ['_NEXT-PR-PLAN.md', 'the working plan for the PR in flight; cleared on push'],
+  ['_NEXT-PR-PLAN.md', 'the working plan for the next pull request; cleared when its branch is pushed'],
 ]);
 
 /**
