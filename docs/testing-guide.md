@@ -127,7 +127,8 @@ Four things to know when you read a file:
 - **A failure message is stored as its first line, capped, with token-shaped strings masked.** No stack, no diff.
   The client's Vitest report (`client.json`) is the other half of a run's artifacts, and holds full messages; the
   client job rewrites it through the same masking, in place, before it uploads it (`scripts/mask-client-report.mjs`),
-  and removes a report it cannot read rather than upload it raw.
+  and removes a report it cannot read rather than upload it raw. The recorder masks what it stores for itself as well, so a
+  report that reached it unmasked still stores no secret.
 
 The recording is attached to a `node --test` run only by `testing/_shared/timing-reporter-flags.mjs`. It makes the
 destination directory first (node exits 7 when it is missing), names the default reporter beside ours so the console
@@ -136,7 +137,8 @@ the tests'. If you write a new runner, call that helper; a source gate finds run
 
 ### Where the time goes inside a file
 
-A file's duration includes loading its module. When a file is slow, ask three questions: how long its hooks took, how
+A node file's duration includes loading its module. A client file's is vitest's own, from its start to its end, and leaves out
+collection and setup, so a client figure is not comparable with a node one. When a file is slow, ask three questions: how long its hooks took, how
 long it spent waiting, and how long it spent working. The hooks are in the suite records. The waits are recorded by the
 shared wait helper when `YTHRIL_TEST_WAIT_TIMING_FILE` names a file to append them to (one `{"type":"wait",…}` line per
 wait, held or timed out); nothing sets it for you, so set it for a run you want to break down. Work is what is left.
@@ -148,10 +150,11 @@ node scripts/test-times.mjs --trend [--last N] [--flags]
 ```
 
 `--trend` reads the recorded runs (branch `main`, whole-suite runs, passed) from the Ythril instance you point it at, not
-from GitHub, so it needs the recording setup below. It prints the newest runs per suite, and states the day of the first
-recorded run so a short history is not read as a long one. `--flags` also judges the newest run of each suite against the
-ones before it and names a file or a suite that is slower than it has been. The thresholds are constants beside the
-function that applies them in `scripts/test-times.mjs`; read them there.
+from GitHub, so it needs the recording setup below. It prints the newest `--last N` runs of each suite (the client is a suite
+like the others), and states the day of the first recorded run so a short history is not read as a long one. `--flags` also
+judges the newest run of each suite against the ones before it and names a file or a suite that is slower than it has been.
+The thresholds are constants beside the function that applies them in `scripts/test-times.mjs`; read them there. A client
+file takes a few seconds, so a client file's flag cannot fire (a file must be 30 seconds over its usual); the client suite's can.
 
 ### The summary of one run
 
@@ -161,9 +164,10 @@ node scripts/test-times.mjs --summary --results <folder of downloaded results>
 
 This is what the `CI advisory` job runs over the artifacts it downloads (`test-results-*` of this attempt, merged into one
 folder: every job's `*.jsonl` and the client's `client.json`). It prints, and writes to the run's step summary: a row per
-suite (tests, passed, failed, skipped, files, test time, wall time, outcome, where `incomplete` means the results were cut
-off and are not read as passed), the slowest files and tests, every skip with its reason (the ones CI does not expect are
-marked), and the failures. With `GH_TOKEN` it also names the files and suites slower than the last ten runs of `main`, read
+suite, the client's included (tests, passed, failed, skipped, files, test time, wall time, outcome, where `incomplete` means the
+results were cut off, or a client test never reached a verdict, and are not read as passed), the slowest files and tests, every
+skip with its reason (the ones CI does not expect are marked), and the failures, each message as inline code. A client report
+that cannot be read is one line saying why, never quoting it. With `GH_TOKEN` it also names the files and suites slower than the last ten runs of `main`, read
 from their artifacts, so it needs no Ythril instance; a baseline GitHub will not give is a warning and the summary still
 prints. It records nothing.
 
@@ -172,9 +176,11 @@ prints. It records nothing.
 This is for maintainers who want a long history of how long main takes. A contributor needs none of it, and the line
 `test-times: not recorded: …` that a run may print is normal when it is not set up.
 
-`scripts/test-times.mjs` turns the JSONL into one `Test-Run` chrono entry per suite and writes it to a Ythril instance you
-point it at. The fields of an entry are one exported description, `TEST_RUN_SCHEMA` in the same script, and the recorder
-builds its object from that list, so a field outside it is a bug. Its commands:
+`scripts/test-times.mjs` turns the JSONL into one `Test-Run` chrono entry per node suite, and the client's vitest report
+(`test-results/client.json`) into one more, suite `client`, and writes them to a Ythril instance you point it at. The fields
+of an entry are one exported description, `TEST_RUN_SCHEMA` in the same script, and the recorder builds its object from that
+list, so a field outside it is a bug. **The recorder is run by hand**: nothing runs it after a local run or after a CI run,
+so a history has the gaps of the days nobody ran `--record` or `--record-ci`. Its commands:
 
 ```bash
 node scripts/test-times.mjs --record              # record the local run in test-results/
@@ -201,14 +207,29 @@ What the recorder guarantees, and why each is there:
   record of for every job whose results artifact the run still lists, deciding that from the artifact list and the keys it
   holds, with no download. A run recorded in part is completed (only the jobs it lacks are written), a recorded run whose
   artifacts have expired is left as it is, and a recorded run with an artifact that can never be read (not a zip, past the
-  size cap) is said once per pass and does not fail it.
+  size cap, or a client job's artifact with no readable `client.json`, which is read by that exact entry name from that job's
+  artifact and from no other) is said once per pass and does not fail it. When a pass meets no completely recorded run it
+  says what it met: runs recorded but missing a job's record are completed and the walk goes on.
 - **Only trusted CI runs are read.** `--record-ci`, the baselines and `--trend` start from one function that admits a
   push to `main` of this repository through `ci.yml`, decided from the run object the Actions API returns and from nothing
   an artifact says about itself. A pull request, a fork or another workflow is never recorded. Artifact bytes are read as
   hostile input: size caps, no `..` or absolute names, nothing written to disk.
 - **Incomplete is not passed.** A results set without its closing line, with a wrong count or a torn last line is recorded
-  as `incomplete`. A baseline is drawn only from whole-suite, passed, `main` runs, and the run being judged is left out of
-  its own baseline.
+  as `incomplete`. The client's report is `incomplete` when a test never reached a verdict, when the test command's own
+  result (`runnerOutcome`, written into the report by CI's mask step and by preflight) says it did not succeed and no
+  failure is counted, or when vitest says `success: false` with none; a report from before that stamp existed is read
+  without it, and a test command that died outside the assertions leaves such a report looking clean. A baseline is drawn
+  only from whole-suite, passed, `main` runs, each suite on its own, and the run being judged is left out of its own baseline.
+- **The client is one suite, counted once per cause.** A spec file that never collected, or whose `beforeAll` threw, is one
+  failure with its reason (or `(no message)`); a run in which every file failed so is `failed`, not refused. A local run is
+  `full` when every `.spec.ts` tracked at the recorded commit is an entry of the report; a CI run's client job always runs the
+  whole suite. A client report older than the commit being recorded is not that commit's run: it is said in one line and not
+  recorded, and the node suites beside it are. Each suite's trouble is only that suite's.
+- **Layout is a label, and time is the job's own.** `layout` says `ci-parallel-v2` when a run left results of more than one
+  test job and `ci-serial-v1` when it left one, read from the artifact names, never from a job's name. It is not a key to
+  compare records by: records written before this was derived so all say `ci-serial-v1`, and their `wallMs` was the run's, not
+  the job's. A job's `wallMs` is the span its own results recorded (a node suite's start and end, the client report's start
+  to the end of its last file); a job whose results record none has none.
 - **CI never holds the token.** Recording is refused when `GITHUB_ACTIONS` or `CI` is set, and `run-suite`,
   `run-standalone` and preflight strip the `YTHRIL_TEST_RUNS_` variables (and the marker variable `node --test` sets
   in its own children) from the environment of every test they start, so a test cannot read the recorder's
@@ -390,6 +411,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `scripts/preflight.mjs` | Where preflight finds the test MongoDB. Defaults are the test stack's loopback address and published port. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs` | The recorder's instance and token. See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
+| `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
 | `YTHRIL_TEST_WAIT_TIMING_FILE` | `testing/_shared/wait-for.mjs` | A file every wait appends one timing line to. Unset: nothing is recorded. |
 | `YTHRIL_TEST_APP_CPUS`, `YTHRIL_TEST_APP_MEM`, `YTHRIL_TEST_APP_A_MEM` | `testing/docker-compose.test.yml` | CPU and memory ceilings of the Ythril instances; instance A has its own memory variable because it carries the heaviest suites. |
 | `YTHRIL_TEST_MONGO_CPUS`, `YTHRIL_TEST_MONGO_MEM`, `YTHRIL_TEST_MONGO_A_MEM` | `testing/docker-compose.test.yml` | The same for the databases. |

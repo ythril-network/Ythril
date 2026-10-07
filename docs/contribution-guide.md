@@ -162,7 +162,7 @@ Runs every structural gate that does **not** need Docker — `scripts/preflight.
 
 These are grouped into one command because they share a property: **each catches something that produces no error, no failed build and no failed unit test.** An unregistered icon renders as a blank space. A scheduler nobody starts looks like one with nothing to do. A documented endpoint that doesn't exist returns a 404 with nothing to explain it. A translation key missing from `de`/`pl` renders the raw key.
 
-Deciding *which* of those applies to a given change is exactly the judgement people get wrong at the end of a long task — a PR shipped a blank icon that way, past a green docs lint, 685 green client tests and a green production build. Run the lot; it's cheap.
+Deciding *which* of those applies to a given change is exactly the judgement people get wrong at the end of a long task — a PR shipped a blank icon that way, past a green docs lint, a green client suite and a green production build. Run the lot; it's cheap.
 
 Preflight is not the whole run: the suites that need Docker (integration, sync, red-team) run in CI, and the ones your change reaches should run on your machine too. The next sections say how.
 
@@ -172,7 +172,7 @@ Preflight is not the whole run: the suites that need Docker (integration, sync, 
 npm run test:client          # → vitest run
 ```
 
-Runs the Angular component/service specs under `client/` in a jsdom environment. This suite runs in CI as its own job, `client-tests` in `.github/workflows/ci.yml`, beside the production client build.
+Runs the Angular component/service specs under `client/` in a jsdom environment. This suite runs in CI as its own job, `client-tests` in `.github/workflows/ci.yml`, beside the production client build. The command writes no report of its own: CI's job and `npm run preflight` add `--reporter=json` and write `test-results/client.json`, which is what the recorder (`scripts/test-times.mjs --record`) reads as the client's run ([testing guide](testing-guide.md#recording-runs-to-a-ythril-instance-optional)).
 
 #### Characterization tests before a refactor
 
