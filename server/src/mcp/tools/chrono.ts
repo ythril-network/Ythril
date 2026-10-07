@@ -480,7 +480,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'A RECURRENCE RULE DOES NOT SPREAD THE DELETE, because it never created anything to delete. '
     + '`recurrence` describes one entry as repeating; it does not generate further entries, so there is no '
     + 'series here and no "this and all future occurrences" to choose between.\n\n'
-    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync and the entry is '
+    + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer. The entry is '
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it.\n\n'
     + 'PARAMETERS:\n'

@@ -54,7 +54,7 @@ longer has a row for the old path.
 **A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
 from disk — although the **Files** count still includes it. Delete it through the API
 (`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
-told to remove their copy too.
+told to remove their copy too (which ones apply it is explained next).
 
 **Deleting a file twice is not a second success.** Where the instance keeps a deleted file's record for audit, that
 record stays, flagged as deleted. A second delete of the same path, or a delete naming one of a file's pieces (a
@@ -62,6 +62,8 @@ chunk of a document or a face found in a picture) rather than the file, answers 
 an error from the MCP `delete_file` tool: nothing is deleted again, no second removal notice goes to synced peers
 and no second `file.deleted` webhook fires. So after a delete that timed out, a **404** on the retry can mean the
 first one did complete; check the file list before deleting again.
+
+**Which peers delete their copy when you delete a file.** Deleting a file, or moving it, tells synced peers, and a peer applies the notice only where the rule allows it: every peer that holds **a copy your instance wrote** deletes it, and on a **pub/sub network or a tree** everything *below* you does as well, including a file you only relayed from above. A file **another instance wrote**, deleted here on a club, closed or democratic network, is removed on your instance alone: the other peers keep it, and it stays gone here until the instance that wrote it changes the file again. A peer applies the notice to the version you deleted, so a file someone uploaded again to that path since is kept, and it removes the file's text, thumbnails and search entries with it. A peer that has no one below it applies the deletion and does not keep the file's name afterwards.
 
 **New folder:** Click **New folder** in the toolbar.
 
