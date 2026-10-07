@@ -281,7 +281,12 @@ To delete a directory, include `{ "confirm": true }` in the request body.
 
 Deleting a file cascades: its metadata record, any queued embedding job, and all conversion
 artifacts — chunk records plus the on-disk `_converted/<id>.md` and `_extracted/<id>/` sidecars —
-are removed from the file store. Deleting a **directory** does the same for every file beneath it,
+are removed from the file store. **Everything derived from the file goes with it, however deep:** the records of an
+extracted image's caption and faces hang from the image, not from the file, and are removed too; so are the metadata rows
+a peer's copy of a sidecar made on this instance (a peer that never converted the file holds its sidecars as ordinary
+files), flagged or removed as the file's own record is (`softDeleteFileMeta`), and the queued jobs of the extracted images.
+A directory `<id>.md/` standing beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never
+touched by the file's delete. Deleting a **directory** does the same for every file beneath it,
 including the `_converted/<path>` and `_extracted/<path>` subtrees, and writes a sync **tombstone**
 per removed file so peers delete their copies too (otherwise the next sync would push them back).
 
@@ -337,6 +342,15 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   written, rather than publish a second. A retried act used to end with two, and the later one deleted a
   re-upload of that path made in between. A tombstone now also names the version it deleted, so a peer keeps a
   later one, but a second tombstone is still noise nobody needs.
+- **A file's sidecars follow the file; they get no tombstone of their own.** Deleting one file writes ONE tombstone, for
+  that file. A peer that applies it removes the file's derived records and sidecars (the list above), and a peer that still
+  offers a sidecar afterwards — its bytes by `POST /api/files` (single or chunked) or in a manifest, its metadata in a batch or a
+  pull — is refused it exactly as the file would be: `200 { "tombstoned": true }` at the byte door, no download from a
+  manifest, counted as `tombstoned` in a metadata batch. The deciding tombstone is the **parent's**, and it counts when it erased
+  content here (it carries the hash of the file it removed — one stored for a path nobody held does not shadow anything) and the
+  file has not been re-created since (a live row whose content hashes differently, or a newer version by the same author). A
+  person's upload to a sidecar path is never asked. A deleted file that is written again at the same path is a new file, whose
+  conversion writes its sidecars afresh.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
   the file at `destination`, the record at the old path and the mark its first attempt left with its

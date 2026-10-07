@@ -45,6 +45,7 @@ import { forgetFileHashesByPrefix } from './manifest.js';
 import { cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere } from './remove-file-here.js';
+import { sidecarsOf } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
 import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
@@ -96,10 +97,7 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   const tree = present
     ? await listFilesRecursive(spaceId, dirPath)
     : (await fileRecordPaths(spaceId, dirPath)).filter(p => p !== toDocId(dirPath));
-  const sidecars = (await Promise.all([
-    listFilesRecursive(spaceId, `_converted/${dirPath}`),
-    listFilesRecursive(spaceId, `_extracted/${dirPath}`),
-  ])).flat();
+  const sidecars = (await Promise.all(sidecarsOf(dirPath, 'directory').map(s => listFilesRecursive(spaceId, s.path)))).flat();
   // BEFORE the tree goes, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here leaves the tree in
   // place and the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
   // The tree's are published once the tree has gone, the sidecars' once THEY have — a later step, below (I16, P4-3) —

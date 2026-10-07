@@ -82,7 +82,9 @@
  * compared with them in one place, {@link decideArrivals} — by version for metadata, by content for bytes — so a peer that
  * still holds a deleted file cannot bring it back through any door, and a newer version of the path is never refused. A PENDING
  * tombstone whose act has already removed the path's bytes counts exactly as a published one (Q-348): the delete happened and is
- * only waiting to be published. The stray drain alone reads the published ones ({@link heldFileTombstones}).
+ * only waiting to be published. The stray drain alone reads the published ones ({@link heldFileTombstones}). **A sidecar of a deleted
+ * file** (`_converted/<p>.md`, `_extracted/<p>/…`) has no tombstone of its own: it is shadowed by its PARENT's, under the same
+ * conditions, in the same place ({@link shadowedByParent}).
  *
  * ## A move's marker
  *
@@ -109,7 +111,8 @@ import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
-import { heldTombstoneRefuses } from '../sync/upsert-plan.js';
+import { parentOfSidecar } from './moved-paths.js';
+import { heldTombstoneRefuses, isNewerVersionByTheIssuer } from '../sync/upsert-plan.js';
 import { StoreTimeout } from '../db/write-timeout.js';
 
 /** A file tombstone as stored HERE: the replicated shape, plus what never leaves this instance. */
@@ -1191,23 +1194,43 @@ const cannotTellIfDeleted = (cause: unknown): StoreTimeout =>
  * shadows nothing. When the path cannot be looked at (anything but "it does not exist"), an arrival that tombstone would shadow is
  * `undecided`: the door fails closed ({@link shadowedArrivals}), the manifest pull leaves it for the next cycle.
  *
+ * **A sidecar is judged by its PARENT's tombstone too** (Q-349): the tombstones read for an arrival at `_converted/<p>.md` or under
+ * `_extracted/<p>/` include the ones held for `<p>`, and {@link shadowedByParent} decides whether they shadow it — the same two
+ * pending states (acted, not looked at) apply to the parent's.
+ *
  * For BYTES it also reads whether a LIVE row at the path is newer than the tombstone (`liveRowNewer`): identical bytes
  * re-created as a newer version arrive with their metadata first, and pass. That read happens only for an arrival some
  * held tombstone could shadow by content, so a path nobody deleted costs no more than the tombstone reads.
  */
 export async function decideArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
   if (arrivals.length === 0) return { shadowed: new Set(), undecided: new Set() };
-  return judgeArrivals(spaceId, await readHeldFor(spaceId, arrivals.map(a => a.path)), arrivals);
+  return judgeArrivals(spaceId, await readHeldFor(spaceId, pathsDecidingArrivals(arrivals.map(a => a.path))), arrivals);
+}
+
+/**
+ * The paths whose tombstones decide arrivals at `paths`: each path, and for a SIDECAR (`_converted/<p>.md`, `_extracted/<p>/…`)
+ * the file `<p>` it is a product of — its deletion is the parent's, and a sidecar has no tombstone of its own (Q-349,
+ * {@link shadowedByParent}). The one place the parent's path is added, so every door that asks reads the same set.
+ */
+function pathsDecidingArrivals(paths: readonly string[]): string[] {
+  const asked = new Set(paths);
+  for (const p of paths) {
+    const parent = parentOfSidecar(p)?.parent;
+    if (parent !== undefined) asked.add(parent);
+  }
+  return [...asked];
 }
 
 /** {@link decideArrivals} over tombstones already read. */
 async function judgeArrivals(spaceId: string, read: HeldForArrivals, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
   const shadowed = await shadowedAgainst(spaceId, read.held, arrivals);
-  const waiting = arrivals.filter(a => !shadowed.has(a.id) && read.unlooked.has(a.path));
+  const waiting = arrivals.filter(a => !shadowed.has(a.id) && pathsDecidingArrivals([a.path]).some(p => read.unlooked.has(p)));
   if (waiting.length === 0) return { shadowed, undecided: new Set() };
   // The same predicate, with the rows that could not be looked at counted as happened: what they would shadow is undecided.
   const withUnlooked = new Map(read.held);
-  for (const a of waiting) withUnlooked.set(a.path, [...(read.held.get(a.path) ?? []), ...(read.unlooked.get(a.path) ?? [])]);
+  for (const a of waiting) {
+    for (const p of pathsDecidingArrivals([a.path])) withUnlooked.set(p, [...(read.held.get(p) ?? []), ...(read.unlooked.get(p) ?? [])]);
+  }
   const undecided = await shadowedAgainst(spaceId, withUnlooked, waiting);
   return { shadowed, undecided, ...(undecided.size > 0 ? { cause: read.cause } : {}) };
 }
@@ -1229,9 +1252,11 @@ export async function shadowedArrivals(spaceId: string, arrivals: readonly FileA
  * reads and no hashing of the body. A path that cannot be looked at throws a retryable `503` ({@link shadowedArrivals}).
  */
 export async function bytesShadowed(spaceId: string, path: string, sha256Of: () => string | Promise<string>): Promise<boolean> {
-  const read = await readHeldFor(spaceId, [path]);
-  const hashed = (rows: readonly HeldFileTombstone[] | undefined): boolean => (rows ?? []).some(t => typeof t.contentHash === 'string' && t.contentHash !== '');
-  if (!hashed(read.held.get(path)) && !hashed(read.unlooked.get(path))) return false;
+  const asked = pathsDecidingArrivals([path]);
+  const read = await readHeldFor(spaceId, asked);
+  const hashed = (rows: readonly HeldFileTombstone[] | undefined): boolean => (rows ?? []).some(erasedContent);
+  // A sidecar's parent's tombstone speaks for it whatever the sidecar's own bytes are: the hash is still taken, for the one verdict.
+  if (!asked.some(p => hashed(read.held.get(p)) || hashed(read.unlooked.get(p)))) return false;
   const { shadowed, undecided, cause } = await judgeArrivals(spaceId, read, [{ id: path, path, kind: 'bytes', sha256: await sha256Of() }]);
   if (undecided.size > 0) throw cannotTellIfDeleted(cause);
   return shadowed.has(path);
@@ -1256,6 +1281,71 @@ async function shadowedAgainst(
     const erased = Math.max(-1, ...here.map(t => t.rowSeq ?? -1));
     const liveRowNewer = row !== undefined && row.deletedAt === undefined && typeof row.seq === 'number' && row.seq > erased;
     if (shadowDecision(here, { kind: 'bytes', sha256: a.sha256, liveRowNewer })) shadowed.add(a.id);
+  }
+  for (const id of await shadowedByParent(spaceId, held, arrivals.filter(a => !shadowed.has(a.id)))) shadowed.add(id);
+  return shadowed;
+}
+
+/** A tombstone that erased REAL content here: it carries the hash of the row it removed. One stored for a path nobody held has none. */
+const erasedContent = (t: { contentHash?: string }): boolean => typeof t.contentHash === 'string' && t.contentHash !== '';
+
+/** What the verdict reads of a parent's row: its version, the hash of its bytes, whether a soft delete flagged it, who wrote and delivered it. */
+interface ParentRow { seq?: number; sha256?: string; deletedAt?: string; author?: { instanceId?: string }; deliveredBy?: string }
+
+/**
+ * Has the path a tombstone erased been RE-CREATED since? A live row whose bytes hash differently from the content the tombstone
+ * erased, or one at a newer version by the SAME author. Never the version alone across authors: two instances' counters are not
+ * one clock, and a peer's low-seq row would otherwise be outranked by this instance's high one for ever.
+ */
+function parentRecreated(t: HeldFileTombstone, row: ParentRow | undefined): boolean {
+  if (row === undefined) return false;
+  if (typeof row.sha256 === 'string' && row.sha256 !== t.contentHash) return true;
+  return isNewerVersionByTheIssuer(t, row);
+}
+
+/**
+ * Which of `arrivals` are SIDECARS of a file a held tombstone erased — a sidecar follows its parent (bundle-71, Q-349).
+ *
+ * ## What it prevents
+ *
+ * A converted file's sidecars are derived rows where it was converted, and derived rows never replicate. A peer that never
+ * converted holds them as ordinary files, and a peer that still holds them re-advertises them after the parent's deletion
+ * reached it: the tombstone names the parent only, and the sidecar has no tombstone, no version and no author of its own here,
+ * so nothing refused it and the deleted file's text came back without the file. Giving each sidecar its own tombstone was the
+ * other answer, and the wrong one: it is declined at a peer (the sidecar's author is not the deleter), it carries no version or
+ * hash to compare an arrival with, and it is re-applied every cycle at a leaf. The sidecar's deletion IS its parent's.
+ *
+ * ## The rule
+ *
+ * A sidecar of `p` (`parentOfSidecar`: `_converted/<p>.md`, anything under `_extracted/<p>/`) is shadowed — bytes and metadata
+ * alike, the sidecar's own version and author notwithstanding — when a held tombstone for `p`
+ *  - **erased real content here** (it carries a `contentHash`): a tombstone stored for a path nobody held has none, so a peer
+ *    cannot block a path's sidecars by sending a deletion for a path it guessed;
+ *  - **speaks against the parent** (`heldTombstoneRefuses`, the who-half the parent's own arrival gets) judged by the PARENT row's
+ *    author and deliverer where a live one exists — never the sidecar row's, whose author is whoever delivered it, which would let
+ *    every sidecar through, including for a tombstone this instance issued itself;
+ *  - and `p` has not been **re-created** ({@link parentRecreated}).
+ *
+ * Stated limit: a parent re-created AFTER its sidecar was refused does not bring the sidecar back until the sender restarts or
+ * its hash changes (a receiver that never converts is fed by the pull).
+ */
+async function shadowedByParent(
+  spaceId: string, held: ReadonlyMap<string, HeldFileTombstone[]>, arrivals: readonly FileArrival[],
+): Promise<Set<string>> {
+  const asked = arrivals.flatMap(a => {
+    const parent = parentOfSidecar(a.path)?.parent;
+    const here = parent === undefined ? [] : (held.get(parent) ?? []).filter(erasedContent);
+    return parent !== undefined && here.length > 0 ? [{ id: a.id, parent, here }] : [];
+  });
+  const shadowed = new Set<string>();
+  if (asked.length === 0) return shadowed;
+  const rows = await readStoredById<ParentRow>(spaceCollection(spaceId, 'files'), [...new Set(asked.map(x => x.parent))],
+    { seq: 1, sha256: 1, deletedAt: 1, author: 1, deliveredBy: 1 });
+  for (const { id, parent, here } of asked) {
+    // A row a soft delete flagged is the deletion itself, not a re-creation, and speaks for nobody.
+    const stored = rows.get(parent);
+    const live = stored !== undefined && stored.deletedAt === undefined ? stored : undefined;
+    if (here.some(t => !parentRecreated(t, live) && heldTombstoneRefuses(t, live?.author?.instanceId, live?.deliveredBy))) shadowed.add(id);
   }
   return shadowed;
 }

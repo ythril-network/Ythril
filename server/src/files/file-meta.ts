@@ -28,6 +28,7 @@ import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 import { rekeyedRow, stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { peerFileKey } from './sandbox.js';
+import { getConfig } from '../config/loader.js';
 
 /**
  * The optional fields a `deleteFields` path may clear on a file's metadata record.
@@ -606,6 +607,16 @@ export async function markFileMetaDeleted(
     // that simply stopped changing.
     asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq } }),
   ), 'file.delete');
+}
+
+/**
+ * Take a file's metadata row out of view as this instance is configured to: flag it (`softDeleteFileMeta`, retained for audit)
+ * or remove it. The one answer for every row a delete retires — the file's own, and each sidecar row a peer's bytes made at a
+ * path under it (`deleteConversionArtifacts`) — so a soft delete cannot flag the first and hard-delete the second.
+ */
+export async function retireFileMeta(spaceId: string, filePath: string): Promise<void> {
+  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeleted(spaceId, filePath);
+  else await deleteFileMeta(spaceId, filePath);
 }
 
 /**

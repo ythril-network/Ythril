@@ -28,7 +28,8 @@
  *
  * `upsert-plan.ts` keeps the ARRIVAL-side question — `heldTombstoneRefuses`, which decides whether a tombstone already
  * held refuses a version that arrives now, for a record (`tombSeqFor`) and for a file's metadata (`shadowDecision`) alike —
- * and the definition of `tombstoneGoverns` it shares with `authorises`. They are a
+ * and the definition of `tombstoneGoverns` it shares with `authorises`, and `isNewerVersionByTheIssuer` (is a live row a later
+ * version of what a held tombstone deleted, by the tombstone's own issuer: what re-creates a deleted file's parent). They are a
  * different question (refuse an arrival; not delete a held object), named here by function so the exemption cannot
  * widen to the file. If a second arrival-side site appears it fails this gate and is either moved into the module or
  * argued for here.
@@ -55,6 +56,7 @@ const EXEMPT = new Map([
   ['server/src/sync/upsert-plan.ts', new Map([
     ['heldTombstoneRefuses', 'the ARRIVAL side: does a tombstone already held refuse a record or file version arriving now'],
     ['tombstoneGoverns', 'the one spelling of "same instance, or either unknown" that `authorises` and `heldTombstoneRefuses` share'],
+    ['isNewerVersionByTheIssuer', 'the ARRIVAL side again (bundle-71, Q-349): is a live row a later version of what a held tombstone deleted, by the tombstone\'s own issuer — what re-creates a deleted file, so that its sidecars stop being shadowed. It deletes nothing and judges no delivery; it lives beside `heldTombstoneRefuses` because `files/tombstones.ts` cannot import this module (a cycle through the space lifecycle)'],
   ])],
 ]);
 

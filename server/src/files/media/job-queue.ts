@@ -20,7 +20,7 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { jobIdsUnder, movedId } from '../moved-paths.js';
+import { jobIdsUnder, movedId, sidecarsOf } from '../moved-paths.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -687,7 +687,9 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
 export async function cancelMediaJobsByPrefix(spaceId: string, dirPath: string): Promise<void> {
   const dir = toDocId(dirPath).replace(/\/?$/, '');
   if (!dir) return; // guard: empty path would match everything
-  const prefixes = [`${dir}/`, `_converted/${dir}/`, `_extracted/${dir}/`];
+  // The folder's own jobs and the jobs of its sidecar trees. Read as a directory's, which is also right for the extracted tree of a
+  // FILE (`_extracted/<f>/`): that is the one sidecar tree of a file a job can sit under, and the file's own `<f>/` matches nothing.
+  const prefixes = [dir, ...sidecarsOf(dir, 'directory').map(s => s.path)].map(p => `${p}/`);
   await jobCollection(spaceId).deleteMany(
     asFilter<MediaJobDoc>({ $or: prefixes.map(p => ({ _id: { $regex: `^${escapeRegex(p)}` } })) }),
   );

@@ -198,6 +198,17 @@ export const isMissingPath = (err: unknown): boolean => {
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
 
+/**
+ * Whether what is at `abs` is a DIRECTORY: `false` for a regular file and for a path that does not exist, and any other
+ * failure to look is thrown (the same terms as {@link bytesPresent}). The one answer to "is this a tree", for a caller whose
+ * path could be either and must not act on a tree as if it were one file — a file's delete, a peer's single-path
+ * tombstone, a move's sidecar.
+ */
+export async function isStoredDirectory(abs: string): Promise<boolean> {
+  const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+  return stat !== null && stat.isDirectory();
+}
+
 /** Delete a stored file under its path lock. */
 export async function deleteStored(abs: string): Promise<void> {
   await withPathLock(abs, () => fsp.unlink(abs));
@@ -218,10 +229,7 @@ export async function deleteStored(abs: string): Promise<void> {
  * an error, because an unlink of one fails anyway and a tree must never go with a single path's deletion.
  */
 export async function deleteStoredIfPresent(abs: string, { skipDirectory = false }: { skipDirectory?: boolean } = {}): Promise<void> {
-  if (skipDirectory) {
-    const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
-    if (stat === null || stat.isDirectory()) return;
-  }
+  if (skipDirectory && await isStoredDirectory(abs)) return;
   await deleteStored(abs).catch((err: unknown) => { if (!isMissingPath(err)) throw err; });
 }
 

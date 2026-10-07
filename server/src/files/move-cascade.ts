@@ -34,10 +34,10 @@
 import { moveFile, listFilesRecursive } from './files.js';
 import { hasLiveFileRecordAt, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
-import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
+import { movedId, movedSidecars, parentIdsUnder, type PathKind } from './moved-paths.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent } from './stored-bytes.js';
+import { bytesPresent, isStoredDirectory } from './stored-bytes.js';
 import { actUnderPendingTombstones, forgetFinishedMove, moveWasBegun, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
 import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
@@ -64,14 +64,22 @@ const exists = async (spaceId: string, relPath: string): Promise<boolean> =>
  * detection, so a path without a tombstone is still advertised by a peer's manifest and comes back on the next pull.
  */
 async function pathsLeaving(spaceId: string, src: string, dst: string): Promise<{ moved: string[]; sidecars: string[] }> {
+  // What `src` IS decides which sidecars it owns, so it is read from the disk (`isStoredDirectory`), never inferred from whether it
+  // has children: an empty directory has none and is still a directory, whose trees are not a file's converted Markdown.
+  const kind = await kindAt(spaceId, src);
   const children = await listFilesRecursive(spaceId, src);
   const sidecars: string[] = [];
-  for (const { from } of movedSidecars(src, dst)) {
+  for (const { from } of await movedSidecars(spaceId, src, dst, kind)) {
     const under = await listFilesRecursive(spaceId, from);
     if (under.length > 0) sidecars.push(...under);
     else if (await exists(spaceId, from)) sidecars.push(from);
   }
   return { moved: children.length > 0 ? children : [src], sidecars };
+}
+
+/** What the path at `relPath` is on disk — a directory or, whatever else, a file: the kind its sidecars are asked by. */
+async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
+  return await isStoredDirectory(await resolveSafePathChecked(spaceId, relPath)) ? 'directory' : 'file';
 }
 
 /**
@@ -156,7 +164,8 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
  * it here. Each step finds its work at `src`, so a step that already ran finds none.
  */
 async function afterTheBytesMoved(spaceId: string, src: string, dst: string, held: string[]): Promise<void> {
-  for (const sidecar of movedSidecars(src, dst)) {
+  // The bytes have moved, so what the path IS is read where they went.
+  for (const sidecar of await movedSidecars(spaceId, src, dst, await kindAt(spaceId, dst))) {
     if (!(await exists(spaceId, sidecar.from))) continue;
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
       log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`));
