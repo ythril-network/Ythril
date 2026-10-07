@@ -6,7 +6,7 @@
  *
  * A PR shipped `icon="activity"`, which is not in the ICONS registry. `PhIconComponent` resolves an
  * unknown name to an empty string, so it rendered as a blank space with no error and no build failure.
- * Docs lint passed, all 685 client tests passed, the production AOT build passed. The one check that
+ * Docs lint passed, every client test passed, the production AOT build passed. The one check that
  * catches it — `icon-registry-coverage` — was the one not run, because remembering which gate matches
  * which change is exactly the kind of thing a person gets wrong at the end of a long task.
  *
