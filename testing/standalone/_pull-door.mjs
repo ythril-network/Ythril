@@ -414,6 +414,9 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     configuredKeys.clear();
     for (const k of Object.keys(initial.memberExtra)) m[k] = initial.memberExtra[k];
     delete m.tombstoneRereadAt;
+    // The file-tombstone acknowledgement is a watermark too, and it only ever moves forward: left from a case that pushed
+    // everything, it would stand in for the next case's own position and every "acknowledged up to here" row would read it.
+    delete m.lastFileTombstoneAckedAt;
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {

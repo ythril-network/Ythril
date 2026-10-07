@@ -35,6 +35,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { markdownWindow, resolveTextWindow } from '../../files/markdown-window.js';
 import { pageList } from '../../brain/list-page.js';
+import { NEVER_RETURNED_PROJECTION } from '../../brain/read-projection.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
 import { tagsError } from '../../util/request-bounds.js';
@@ -134,7 +135,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   // `#media-chunk<n>` for audio — two spellings of one thing.
   const chunkFilter = { parentFileId: parentId, chunkIndex: { $exists: true } };
   const [chunkDocs, chunkTotal] = await Promise.all([
-    files.find(asFilter<FileMetaDoc>(chunkFilter)).sort({ chunkIndex: 1 }).skip(skip).limit(limit).toArray(),
+    files.find(asFilter<FileMetaDoc>(chunkFilter), { projection: NEVER_RETURNED_PROJECTION }).sort({ chunkIndex: 1 }).skip(skip).limit(limit).toArray(),
     files.countDocuments(asFilter<FileMetaDoc>(chunkFilter)),
   ]);
 
@@ -142,7 +143,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   // the pipeline writes at most 50 images per file — and the images then page through the shared list rule, so a
   // file with more says so rather than stopping at a number (Q-128). Metadata only; the image bytes stay in the store.
   const derived = await files
-    .find(asFilter<FileMetaDoc>({ parentFileId: parentId, chunkIndex: { $exists: false } }))
+    .find(asFilter<FileMetaDoc>({ parentFileId: parentId, chunkIndex: { $exists: false } }), { projection: NEVER_RETURNED_PROJECTION })
     .toArray() as FileMetaDoc[];
 
   const allImages = derived

@@ -10,13 +10,30 @@
  *
  * A quota refusal is thrown as `QuotaError` for the door to map (REST answers 507, MCP an error result).
  */
+import { createHash } from 'node:crypto';
 import { writeFileBytes } from './files.js';
 import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
+import { bytesShadowed } from './tombstones.js';
+import { toDocId } from '../util/paths.js';
 import type { AuthorRef } from '../config/types.js';
 import { dispatchFileProcessing, type DispatchResult } from './dispatch.js';
 import type { InputFormat } from './converters/pipeline.js';
 import { checkQuota } from '../quota/quota.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+
+/**
+ * Are the bytes a PEER is delivering to the upload door the content a held file tombstone erased (bundle-51, Q-229)? Asked
+ * by the door for a peer's arrival ONLY — never for a person's upload, which is a new authored version and always succeeds —
+ * and answered by it `200 { tombstoned: true }` with nothing stored: an error status would be read by an older sender as a
+ * failure, and it would upload the whole file again every cycle.
+ *
+ * `content` is the body (hashed here, and only when a tombstone for the path carries a hash to compare it with) or an already
+ * known hash (a chunked upload's assembly). What it prevents: a peer that still holds a deleted file's bytes bringing them
+ * back through the one door the manifest pull and the metadata writer do not guard.
+ */
+export async function peerBytesShadowed(spaceId: string, filePath: string, content: Buffer | { sha256: string }): Promise<boolean> {
+  return bytesShadowed(spaceId, toDocId(filePath), () => (Buffer.isBuffer(content) ? createHash('sha256').update(content).digest('hex') : content.sha256));
+}
 
 export interface StoreFileMeta {
   description?: string;

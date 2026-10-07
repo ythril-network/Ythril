@@ -37,7 +37,7 @@
  */
 import { concreteSpaces } from '../spaces/proxy.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
-import { tombstonedFilePaths } from '../files/tombstones.js';
+import { heldFileTombstones, shadowDecision } from '../files/tombstones.js';
 import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
@@ -59,7 +59,7 @@ const WAIT_DAYS = 30;
  * Each record's own fill is bounded the same way, by being inside it (`fillFileMetaFromStray`).
  */
 
-type StrayDoc = { _id: string; keptSince?: string };
+type StrayDoc = { _id: string; keptSince?: string; seq?: number };
 
 /** Who the drain's records came from, for the log lines. */
 const FROM = 'a 4.0-5.6.1 pull (stray filemeta collection)';
@@ -153,20 +153,28 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, c
 }
 
 /**
- * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone holds the
- * path (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
+ * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone covers the
+ * record (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
+ *
+ * "Covers" is the version rule where a tombstone has a version (`shadowDecision`: a record NEWER than the deletion waits,
+ * its file may still arrive), and the old rule — the path alone — where it has none: a tombstone held from before versions
+ * travelled (no `rowSeq`) cannot say which version it erased, so a record at its path is discarded as it always was.
+ * (A record the version rule covers never gets here: the arrival writer refused it as `tombstoned` before the fill.)
  * Read inside the walk's bound (`withinHousekeepingBound`).
  */
 async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: string[]): Promise<{ discard: string[]; wait: string[] }> {
   if (unstored.length === 0) return { discard: [], wait: [] };
   // Published tombstones only: a pending one names an act that may not happen (bundle-30 I15, `files/tombstones.ts`).
-  const tombstoned = await tombstonedFilePaths(spaceId, unstored);
-  const since = new Map(page.map(d => [d._id, d.keptSince]));
+  const held = await heldFileTombstones(spaceId, unstored);
+  const byId = new Map(page.map(d => [d._id, d]));
   const expired = Date.now() - WAIT_DAYS * 86_400_000;
   const discard: string[] = [], wait: string[] = [];
   for (const id of unstored) {
-    const kept = since.get(id);
-    if (tombstoned.has(id) || (kept !== undefined && Date.parse(kept) < expired)) discard.push(id);
+    const here = held.get(id) ?? [];
+    const stray = byId.get(id);
+    const kept = stray?.keptSince;
+    const covered = here.some(t => t.rowSeq === undefined) || shadowDecision(here, { kind: 'meta', seq: stray?.seq ?? 0 });
+    if (covered || (kept !== undefined && Date.parse(kept) < expired)) discard.push(id);
     else wait.push(id);
   }
   return { discard, wait };

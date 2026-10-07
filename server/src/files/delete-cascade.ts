@@ -40,9 +40,10 @@ import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStored, isMissingPath } from './stored-bytes.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
-import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
-import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
+import { deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { cancelMediaJobsByPrefix } from './media/job-queue.js';
+import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
+import { removeFileHere } from './remove-file-here.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
 import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
@@ -65,18 +66,9 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
   await actUnderPendingTombstones(pending, async () => {
     if (present) await deleteStored(abs).catch(err => { if (!isMissingPath(err)) throw err; });
   });
-  invalidateUsageCache(); // freed disk — reflect it in the next quota check
-  const at = `for ${peerText(spaceId)}/${peerText(filePath)}`;
-  // Cancel any queued media/text job so it cannot outlive the file and retry forever.
-  await unlessTheStoreFailed(`cancelMediaJob error ${at}`, () => cancelMediaJob(spaceId, filePath));
-  await unlessTheStoreFailed(`deleteConversionArtifacts error ${at}`, () => deleteConversionArtifacts(spaceId, filePath));
-  // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
-  // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta.
-  if (getConfig().softDeleteFileMeta === true) {
-    await unlessTheStoreFailed(`markFileMetaDeleted error ${at}`, () => markFileMetaDeleted(spaceId, filePath));
-  } else {
-    await unlessTheStoreFailed(`deleteFileMeta error ${at}`, () => deleteFileMeta(spaceId, filePath));
-  }
+  // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
+  // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
+  await removeFileHere(spaceId, filePath, { failure: 'throw' });
   emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path: filePath }, ...(actor ?? {}) });
 }
 

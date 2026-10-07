@@ -24,7 +24,8 @@ import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
-import { storeFile, recordStoredFile, type StoreFileMeta } from '../files/store-file.js';
+import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
+import { deleteStored } from '../files/stored-bytes.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { primitivePropertyError } from '../brain/property-values.js';
@@ -124,6 +125,13 @@ export function registerUploadRoute(router: Router): void {
             const absTarget = resolveSafePath(targetSpace, filePath);
             await assertNoSymlinkEscape(targetSpace, absTarget);
             const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
+            // A peer's bytes that a held file tombstone erased are not kept (Q-229): the assembled blob is removed and the
+            // answer is the one the single upload gives (`peerBytesShadowed`). A person's upload is never asked.
+            if (arrivedFrom && await peerBytesShadowed(targetSpace, filePath, { sha256 })) {
+              await deleteStored(absTarget);
+              res.status(200).json({ tombstoned: true });
+              return;
+            }
             // Metadata, the processing queue and the webhook — the same sequence as every other door
             // (files/store-file.ts); the bytes are already assembled on disk.
             const ttlDays = parseTtlDaysQuery(req);
@@ -201,6 +209,12 @@ export function registerUploadRoute(router: Router): void {
         if (req.body?.properties != null) metaOpts.properties = req.body.properties as Record<string, string | number | boolean>;
         const ttlDaysQ = parseTtlDaysQuery(req);
         if (ttlDaysQ !== undefined) metaOpts.ttlDays = ttlDaysQ;
+        // A peer's bytes that a held file tombstone erased are stored nowhere and answered `200 { tombstoned: true }`
+        // (Q-229, `peerBytesShadowed`): checked before quota and before any write. A person's upload is never asked.
+        if (arrivedFrom && await peerBytesShadowed(targetSpace, filePath, decoded!)) {
+          res.status(200).json({ tombstoned: true });
+          return;
+        }
         const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
 
         // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door

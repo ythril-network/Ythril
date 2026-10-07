@@ -415,7 +415,11 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const chronoStats = { upserted: count('chrono', 'upserted'), skipped: count('chrono', 'skipped'), tombstoned: count('chrono', 'tombstoned'), schemaViolations: violated('chrono'), unknownType: count('chrono', 'unknownType') };
     // A link arriving under another id for endpoints already linked IS that link: skipped, never a fault.
     const linkStats = { upserted: count('links', 'upserted'), skipped: count('links', 'skipped') + count('links', 'duplicate'), tombstoned: count('links', 'tombstoned') };
-    const fileMetaStats = { upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped') };
+    // `tombstoned` is additive (bundle-51): file metadata a held file tombstone covers — a deletion this instance holds for that
+    // version of the path. A sender reads it as delivered (the deletion is the answer); an older receiver omits it, and so does
+    // this one when none was covered, so the answer of a page nothing shadowed is the one it always was.
+    const fileTombstoned = count('filemeta', 'tombstoned');
+    const fileMetaStats = { upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped'), ...(fileTombstoned > 0 ? { tombstoned: fileTombstoned } : {}) };
 
     // X-20: a 200 says the batch was accepted, not that a record was stored. What each document became is in the
     // counters, and the seq range says WHICH records they refer to — with DEBUG on, beside the sender's own line.

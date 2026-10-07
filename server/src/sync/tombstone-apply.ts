@@ -65,8 +65,8 @@ import type { TombstoneDoc } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { advanceCounterPast } from './counter-after-page.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
+import { declineText, sayDeclines } from './decline-report.js';
 import { retagToLocalSpace } from './upsert-plan.js';
 import { authorises, deleteBound, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
 import { unlabelFacesForEntities } from '../brain/entities.js';
@@ -78,13 +78,6 @@ import { syncTombstonesAppliedTotal, syncTombstonesDeclinedTotal } from '../metr
  * bounded by the door rather than by the sender.
  */
 export const MAX_TOMBSTONES_PER_REQUEST = 5000;
-
-/**
- * How long a decline that keeps happening is said once. A publisher whose deletions are declined here sends the same
- * ones every cycle; the counter carries the rate, so the line is for the first sight and a reminder per window.
- */
-const DECLINE_SAID_AGAIN_MS = 60 * 60_000;
-const declineSaid = warnOnce<string>({ every: DECLINE_SAID_AGAIN_MS });
 
 /** The wire shape of one tombstone. Unknown keys are stripped, so what is stored is only what is declared here. */
 const TombstoneShape = z.object({
@@ -150,19 +143,6 @@ export interface TombstoneApplyOptions {
 /** The target as the apply reads it: what authority reads, and the seq the repair bounds by. */
 type HeldTarget = DeletionTarget & { seq?: number };
 
-/** The words a decline carries, per reason; every peer value in them is bounded where the text is built (`Q-270`). */
-function declineText(reason: 'not_issuer' | 'not_author' | 'not_upstream', t: TombstoneDoc, delivery: Delivery, target: HeldTarget | undefined): string {
-  const peer = peerText(delivery.peerInstanceId ?? '-');
-  const issuerText = peerText(t.instanceId);
-  if (reason === 'not_issuer') {
-    return `issuer '${issuerText}' is not the delivering peer '${peer}' — possible cross-instance delete forgery`;
-  }
-  if (reason === 'not_author') {
-    return `the record here was written by '${peerText(target?.author?.instanceId)}', not by the issuer '${issuerText}'`;
-  }
-  return `the record here was not delivered by the upstream '${peer}' (delivered by '${peerText(target?.deliveredBy ?? '-')}'), and it did not write it`;
-}
-
 /**
  * Apply a page of tombstones a peer delivered, to the space the door ADMITTED — see the module docblock.
  *
@@ -227,7 +207,7 @@ export async function applyPeerTombstones(
         // `t.instanceId` is the sender's text: the authority decides what it is worth, never this loop.
         const verdict = authorises(delivery, t.instanceId, target ?? null, selfId);
         if (!verdict.ok) {
-          const reason = declineText(verdict.reason, t, delivery, target);
+          const reason = declineText(verdict.reason, 'record', { issuer: t.instanceId, delivery, target });
           out.declined.push({ _id: t._id, reason });
           if (!declinedBy.has(verdict.reason)) declinedBy.set(verdict.reason, []);
           declinedBy.get(verdict.reason)!.push({ _id: t._id, reason });
@@ -297,11 +277,8 @@ export async function applyPeerTombstones(
   // The apply's own failure is the one thrown; a counter left behind fails the call only when nothing else did.
   const behind = await advanceCounterPast(localSpaceId, out.maxSeq, where);
   warnArrivalsNotStored(where, localSpaceId, 'tombstone', 'refused', out.refused);
-  for (const [reason, items] of declinedBy) {
-    // A standing decline is the same ones every cycle: said once per (peer, space, reason) window, counted every time.
-    declineSaid(JSON.stringify([delivery.peerInstanceId ?? '', localSpaceId, reason]),
-      () => warnArrivalsNotStored(where, localSpaceId, 'tombstone', `declined (${reason})`, items));
-  }
+  // A standing decline is the same ones every cycle: said once per (peer, space, reason) window, counted every time.
+  sayDeclines(where, localSpaceId, 'tombstone', delivery, declinedBy);
   if (failed) throw failure;
   if (behind) throw behind;
   return out;

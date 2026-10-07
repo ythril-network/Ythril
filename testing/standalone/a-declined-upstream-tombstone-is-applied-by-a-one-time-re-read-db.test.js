@@ -172,7 +172,9 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
 
     it('3. a failing re-read stays owed, keeps the record watermark the ordinary pull earned, and the next cycle finishes it', async () => {
       await declinedEarlier('rep-fail');
-      door.state.records[R] = { facts: [fact(R, 'fresh-15', 15, THIRD)] };
+      // Authored by the PEER pulled from: the record watermark advances only over the pulled peer's OWN records (`highSeq` in
+      // `pull-family.ts` counts a record whose author is the member), so a relayed third author's would leave it at 10.
+      door.state.records[R] = { facts: [fact(R, 'fresh-15', 15, PEER)] };
       // Only the read from 0 fails: the ordinary pull (from 10) and the record pages are served.
       door.state.tamper = (_body, asked) => { if (String(asked.sinceSeq) === '0') throw new Error('scripted failure of the re-read'); };
       await door.logsDuring(() => door.sync());

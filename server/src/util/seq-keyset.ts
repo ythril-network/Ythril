@@ -169,6 +169,33 @@ export function isoReadStart(cursor: unknown): IsoPosition | undefined {
 }
 
 /**
+ * The cursor of the start of time — what the FIRST request of a cursor-mode read of an instant-keyed route carries. An
+ * empty cursor reads as "no cursor" (the legacy answer), so a client that wants the paged mode from the first request sends
+ * this one; it sorts before every instant a position can name.
+ */
+export const ISO_START_CURSOR: string = encodeIsoCursor({ at: '1970-01-01T00:00:00.000Z' });
+
+/**
+ * The two finds that read everything strictly after `after` in an instant-keyed collection, in `(field, _id)` order: `tie`
+ * (the rest of the run at the cursor's own instant, or `null` when the cursor names no id) and `range` (every later
+ * instant). The twin of {@link seqKeysetFilters}, with no horizon (an instant is never allocated ahead of its write) and
+ * no readiness question: with the compound index the two finds are bounded scans, and without it — the window while it is
+ * built — each is a scan that keeps the same ties, because a tie is decided by the filters and not by the index. `extra`
+ * narrows both, composed with `$and` as the seq filters compose it.
+ */
+export function isoKeysetFilters(
+  field: string, after: IsoPosition, extra?: Readonly<Record<string, unknown>>,
+): { tie: Record<string, unknown> | null; range: Record<string, unknown> } {
+  return {
+    tie: after.id !== undefined && after.at !== '' ? composed({ [field]: after.at, _id: { $gt: after.id } }, extra) : null,
+    range: composed({ [field]: { $gt: after.at } }, extra),
+  };
+}
+
+/** The order that goes with {@link isoKeysetFilters}: the instant, then `_id`, so a run of equal instants has one order. */
+export const isoKeysetSort = (field: string): Readonly<Record<string, 1>> => Object.freeze({ [field]: 1, _id: 1 });
+
+/**
  * Order two positions the way the store orders `(seq, _id)`: by seq, then by `_id` as UTF-8 BYTES. Mongo compares strings
  * by bytes, and JavaScript's `<` compares UTF-16 units — they disagree outside the BMP, so a client or scanner that
  * compared with `<` could call a position "not ahead" that the store served after it. A position without an id sorts

@@ -27,6 +27,7 @@ import { getConfig, saveConfigSoon } from '../config/loader.js';
 import { membersServing, peerTokensReaching, peersOutside } from './served-watermark.js';
 import { setMemberSpaceMark } from './member-space-mark.js';
 import { isComparableIso } from '../util/comparable-iso.js';
+import { positionOf } from '../files/tombstones.js';
 
 /** The subset of a member this decision needs — keeps the pure part testable without a config. */
 export interface AckedMember {
@@ -36,7 +37,7 @@ export interface AckedMember {
 }
 
 export type FileTombstoneFloor =
-  /** Safe to delete file tombstones whose `deletedAt` is at or below `upTo` (ISO8601). */
+  /** Safe to delete file tombstones whose position (`positionAt`; `deletedAt` for one stored before positions) is at or below `upTo` (ISO8601). */
   | { prune: true; upTo: string; peers: number }
   | { prune: false; reason: 'member-never-acked' | 'peer-token-scoped'; blockedBy?: string };
 
@@ -91,14 +92,21 @@ export function fileTombstoneFloorForSpace(cfg: Config, spaceId: string): FileTo
  *
  * Deliberately computed over the pushed set rather than a fresh query: a file deleted between building the
  * body and reading the response was never in the payload, and treating it as delivered would drop a tombstone
- * no peer has seen. Malformed or missing `deletedAt` values are skipped, so one bad row cannot vouch for the
- * rest — and if none of them is comparable the answer is `null`, meaning "this push proves nothing".
+ * no peer has seen. The position of a row is its `positionAt` — this instance's own clock, the publish time of an own
+ * tombstone and the receive time of a relayed one — or, for a row that carries none, its `deletedAt`, which was the
+ * position before positions existed (`positionOf`). Malformed or missing positions are skipped, so one bad row cannot
+ * vouch for the rest — and if none of them is comparable the answer is `null`, meaning "this push proves nothing".
+ *
+ * The caller hands it what the answer PROVES delivered, which is not always everything it sent: a page that ends inside a
+ * run of rows at one position leaves the rest of the run for the next page, so the rows at that position are not proven
+ * (`settledFileTombstones`), or a prune at the position would take the unsent rest of the run with it.
  */
-export function ackedPositionFrom(pushed: Array<{ deletedAt?: unknown }>): string | null {
+export function ackedPositionFrom(pushed: Array<{ positionAt?: unknown; deletedAt?: unknown }>): string | null {
   let max: string | null = null;
   for (const t of pushed) {
-    if (!isComparableIso(t.deletedAt)) continue;
-    if (max === null || t.deletedAt > max) max = t.deletedAt;
+    const at = positionOf(t);
+    if (!isComparableIso(at)) continue;
+    if (max === null || at > max) max = at;
   }
   return max;
 }

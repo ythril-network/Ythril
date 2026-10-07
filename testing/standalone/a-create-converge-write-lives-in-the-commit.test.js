@@ -103,6 +103,9 @@ const EXEMPT = {
   // CLAUDE.md, "What a receiver does after the write"). It replaced `ingestBrainDoc` (push, import) and the pull's
   // `batchUpsertBySeq`, and the routes' inline `$setOnInsert`, which is why the docs.ts orphan exemption is gone.
   'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and admin import: the arrival writer',
+  'server/src/sync/delivered-by-backfill.ts:stampCollection':
+    'the one-time stamp of who delivered the rows stored before `deliveredBy` existed (bundle-51): a migration of LOCAL state (a '
+    + 'local-only field of rows already held) run once per space by the sync cycle, never a create or a converge',
   // migrations and restore
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': 'boot migration over local state',
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': 'boot migration: drops the 4.x link arrays',

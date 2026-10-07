@@ -103,6 +103,7 @@ import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { isLegacyReadSpill } from './file-conflict.js';
+import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -158,6 +159,11 @@ export interface ArrivalOutcome {
   refused: ArrivalRefusal[];
   /** Not written by rule: a file chunk or face record (derived from the blob here), or a legacy read spill. */
   derived: string[];
+  /**
+   * Not written: a held file tombstone covers this VERSION of the file (its `rowSeq` is at or above the arriving seq,
+   * Q-229). Only for file metadata, and never for a restore. The page is answered `tombstoned`, as a record is.
+   */
+  tombstoned: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
   /** `fillOnly`: the row this instance made already had everything the record could give it. */
@@ -308,7 +314,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
-    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], collapsed: [],
+    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], collapsed: [],
     complete: [], unstored: [], maxReceived: 0,
     enqueue: async () => {
       if (recordType === null || queued.length === 0) return;
@@ -339,8 +345,17 @@ export async function writeArrivals(
     }
     page.set(doc._id, prepared(doc, family, restore));
   }
-  const toWrite = [...page.values()];
+  let toWrite = [...page.values()];
   retagToLocalSpace(toWrite, spaceId);
+  // A file's metadata a held tombstone covers is not written (Q-229): by VERSION, so a newer one passes. A restore is the
+  // operator's own instruction and is never judged by one. Asked of the one predicate every arrival of a file asks.
+  if (family === 'files' && !restore && toWrite.length > 0) {
+    const shadowed = await shadowedArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0 })));
+    if (shadowed.size > 0) {
+      out.tombstoned.push(...shadowed);
+      toWrite = toWrite.filter(d => !shadowed.has(d._id));
+    }
+  }
 
   // ── per document: the D-9 defaults and the receiver's suppression, the space's policy read once ─────────────
   const collName = spaceCollection(spaceId, family);
@@ -357,7 +372,7 @@ export async function writeArrivals(
     const quiet = suppressed.has(d._id);
     const stamps = defaults.get(d._id) ?? ({} as Doc);
     return family === 'files'
-      ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet })
+      ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' })
       : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }),
         restore ? (typeof d.deliveredBy === 'string' ? d.deliveredBy : '') : (opts.deliveredBy ?? ''));
   };
@@ -516,6 +531,12 @@ export async function writeArrivals(
   }
   // What was received and not written (collapsed, derived) still moves the counter: it is the peer's clock.
   await bump(out.maxReceived);
+  // A NEWER version of a file supersedes the tombstones held for its path (Q-229) — only once it has landed, so a write
+  // that failed keeps the deletion. A restore replaces whatever is stored and judges nothing by a tombstone.
+  if (family === 'files' && !restore) {
+    const landedIds = new Set([...out.inserted, ...out.updated]);
+    await supersedeFileTombstones(spaceId, toWrite.filter(d => landedIds.has(d._id)).map(d => ({ path: d._id, seq: d.seq ?? 0 })));
+  }
 
   warnArrivalsNotStored(where, spaceId, family, 'refused', out.refused);
   // A repeated id is a sender's bug or a page that overlapped itself: one copy was kept, by the accept rule.

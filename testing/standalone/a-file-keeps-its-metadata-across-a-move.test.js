@@ -64,10 +64,13 @@ describe('the gate is reading the functions it names', () => {
 });
 
 describe('a move carries the record whole', () => {
-  it('the re-insert spreads the existing document rather than listing its fields', () => {
+  it('the re-insert is the existing document re-keyed (`rekeyedRow`, which spreads it) rather than a list of its fields', () => {
+    // Re-anchored (bundle-51): the spread moved into `rekeyedRow(old, patch)` (`sync/local-only-fields.ts`), the one place a row
+    // written under a NEW id is built, which spreads `old` and resets only the two LOCAL fields that described the old identity
+    // (`deliveredBy`, stamped as nobody's delivery, and `syncBase`) — neither is authored data, and the helper's own gate holds it.
     const body = bodyOf(SRC, 'renameFileMeta');
-    assert.match(body, /insertOne\([\s\S]*\.\.\.existing/,
-      'the renamed record must be built by spreading the one it replaces. A field list carries what '
+    assert.match(body, /insertOne\([\s\S]*rekeyedRow\(\s*existing\s*,/,
+      'the renamed record must be built from the one it replaces. A field list carries what '
       + 'somebody remembered on the day, and a file added a field to later arrives at its new path '
       + 'without it — with no error, because an insert of a partial document is a valid insert.');
   });
@@ -79,11 +82,11 @@ describe('a move carries the record whole', () => {
      * the new identity, and the stamp that says when.
      */
     const body = bodyOf(SRC, 'renameFileMeta');
-    const insert = /insertOne\(asDoc<FileMetaDoc>\(\{([\s\S]*?)\}\)\)/.exec(body);
+    const insert = /rekeyedRow\(\s*existing\s*,\s*\{([\s\S]*?)\}\)/.exec(body);
     assert.ok(insert, 'could not read the re-insert — re-anchor this case');
     const assigned = [...insert[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)].map(m => m[1]);
     assert.deepEqual(assigned.sort(), ['_id', 'path', 'updatedAt'],
-      `the re-insert assigns ${assigned.join(', ')} on top of the spread. Anything beyond the new id, the `
+      `the re-insert assigns ${assigned.join(', ')} on top of the existing document. Anything beyond the new id, the `
       + 'new path and the stamp is a field a move silently rewrites.');
   });
 });

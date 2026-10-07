@@ -163,11 +163,17 @@ export async function acceptArrivingPage(
           const skipped = new Set([...out.newerLocal, ...out.derived]);
           const split = new Set(out.diverged);
           const dup = new Set(out.duplicates);
+          const covered = new Set(out.tombstoned);
           const refused = new Map(out.refused.map(r => [r._id, r.reason]));
           const next: typeof pending = [];
           for (const list of pending) {
             const top = list.at(-1)!;
             const id = top.doc._id;
+            if (covered.has(id)) {
+              // A held file tombstone covers the version (Q-229); the versions planned before it are lower, so it covers those too.
+              for (const a of list) res.verdicts[items[a.index]!.index] = 'tombstoned';
+              continue;
+            }
             if (skipped.has(id) || split.has(id)) {
               for (const a of list) res.verdicts[items[a.index]!.index] = 'skipped';
               // A same-seq copy with other content landed meanwhile: this one is a divergence, planned again below.

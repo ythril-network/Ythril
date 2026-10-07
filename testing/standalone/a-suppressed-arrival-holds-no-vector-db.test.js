@@ -55,7 +55,12 @@ const LOCAL_VALUES = {
   _expireAt: new Date('2099-01-01T00:00:00.000Z'),
   _contentExpireAt: new Date('2098-01-01T00:00:00.000Z'),
   syncBase: { 'some-peer': 'sha-agreed' },
+  // Who delivered the stored version (bundle-51): a fixture so the table covers it, and the one local-only field an arrival
+  // REPLACES rather than keeps — it names who delivered THIS version, so the new delivery's stamp wins (`BY_THE_ARRIVAL`).
+  deliveredBy: 'the-earlier-deliverer',
 };
+/** Local-only fields a peer's arrival replaces by its own delivery instead of carrying across: what a "keeps" check leaves out. */
+const BY_THE_ARRIVAL = new Set(['deliveredBy']);
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', filemeta: 'filemeta' };
 
 let door, importMod, families, TYPE_FIELD, LOCAL_ONLY;
@@ -168,7 +173,7 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
         await deliver(via, fam, OPEN, arriving(fam, OPEN, id, 6, 'none'));
         const after = await door.coll(OPEN, fam.collection).findOne({ _id: id });
         if (after?.seq !== 6) { wrong.push(`${fam.key}: fixture check — the arrival did not land`); continue; }
-        const lost = [...LOCAL_ONLY].filter(f => !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
+        const lost = [...LOCAL_ONLY].filter(f => !BY_THE_ARRIVAL.has(f) && !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
         if (lost.length) wrong.push(`${fam.key}: lost ${lost.join(', ')}`);
       }
       assert.deepEqual(wrong, [], `${via}: a peer's edit of a record this instance still embeds erased its own fields`);

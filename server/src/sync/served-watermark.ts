@@ -96,6 +96,16 @@ export function peersReachingOnlyByToken(cfg: Config, spaceId: string): string[]
 }
 
 /**
+ * Does this instance serve `spaceId` to any peer OTHER than `except` — a member of a network carrying it, or a peer that
+ * reaches it by a token alone? The one answer to "is there anyone to pass a relayed deletion on to": a file tombstone's
+ * path is often personal, so an instance with nobody downstream applies a relayed one and does not keep the name of the file.
+ */
+export function servesOnward(cfg: Config, spaceId: string, except?: string): boolean {
+  const members = membersServing(cfg, spaceId);
+  return members.some(m => m.instanceId !== except) || peersOutside(members, peerTokensReaching(cfg, spaceId)).some(id => id !== except);
+}
+
+/**
  * The highest seq every peer has provably been served for this space.
  *
  * Pure in `members` and `peerTokenIds` so each branch is checkable without a database or a config file — and

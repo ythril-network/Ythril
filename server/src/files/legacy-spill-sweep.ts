@@ -38,6 +38,7 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { deleteStored, isMissingPath } from './stored-bytes.js';
+import { forgetFileHashes } from './manifest.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -93,7 +94,7 @@ async function sweepSpace(spaceId: string): Promise<number> {
   invalidateUsageCache();
 
   // The `files` record is the finder (see the header): it goes last, so a failure of either delete is redone by the next run.
-  await col(spaceCollection(spaceId, 'fileHashes')).deleteMany(asFilter({ _id: { $in: removed } }));
+  await forgetFileHashes(spaceId, removed);
   await col(spaceCollection(spaceId, 'files')).deleteMany(asFilter({ _id: { $in: removed } }));
 
   log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${spaceId}'`);

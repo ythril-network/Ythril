@@ -54,6 +54,18 @@
  * projection keeps every local field off the wire rather than each reader remembering to. File tombstones are not
  * hashed (`brain/merkle.ts` reads none), so no hash rule applies to either field.
  *
+ * ## Positions, and what an arrival is compared with (bundle-51)
+ *
+ * A tombstone has no seq, so paging, acknowledgement and pruning key on a LOCAL position, `positionAt`: the publish time of
+ * an own tombstone, the RECEIVE time of a relayed one ({@link positionOf} is the one reading of it, falling back to
+ * `deletedAt` for a row stored before positions existed). A relayed tombstone keyed by its sender's `deletedAt` was pruned
+ * before it was ever served when that was old, and a far-future one sat above every acknowledgement for ever.
+ *
+ * A held tombstone is also a statement about a VERSION of a path, not about the path for ever: `rowSeq` is the version it
+ * erased and `contentHash` the hash of the content (this instance's own row, never read from bytes). An arriving file is
+ * compared with them in one place, {@link shadowedArrivals} — by version for metadata, by content for bytes — so a peer that
+ * still holds a deleted file cannot bring it back through any door, and a newer version of the path is never refused.
+ *
  * ## A move's marker
  *
  * A move's tombstones also name the move (`move: { from, to }`). With no bytes at `from` and bytes at `to`, that is the
@@ -66,11 +78,15 @@ import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
 import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
 import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
-import type { FileTombstoneDoc } from '../config/types.js';
+import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
+import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
+import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
-import { throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
+import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
+import { inChunks } from '../util/chunks.js';
+import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, type IsoPosition } from '../util/seq-keyset.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
 
@@ -119,8 +135,13 @@ export const FILE_TOMBSTONE_INDEXES = [
   // move's tombstones carry it, and only until the move is finished.
   { keys: { 'move.from': 1, 'move.to': 1 }, options: { sparse: true } },
   // One tombstone per path: `publishOnePerPath` reads a path's tombstones and removes its other pending ones, on every
-  // publish (bundle-30 I17); `tombstonedFilePaths` asks by path too.
+  // publish (bundle-30 I17); `heldFileTombstones` (what an arriving file is compared with) asks by path too.
   { keys: { path: 1 }, options: {} },
+  // The served page and the push's pages: `{ positionAt > p }` (and `{ positionAt = p, _id > id }` for the rest of a run)
+  // sorted by `(positionAt, _id)`, every request of every peer every cycle (bundle-51, Q-96). Partial on the stamp, which
+  // only a PUBLISHED tombstone carries, so the few pending ones are not in it; a read always names `positionAt`, which is
+  // what lets the planner use a partial index.
+  { keys: { positionAt: 1, _id: 1 }, options: { partialFilterExpression: { positionAt: { $exists: true } } } },
 ] as const;
 
 /**
@@ -133,15 +154,43 @@ export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void>
 }
 
 /**
- * What publishing a tombstone writes: `pending` gone, and `deletedAt` stamped NOW — the real time, never a caller's
- * clock — because `deletedAt` is the push position peers acknowledge, and a tombstone published under an older stamp
- * could fall below a position acknowledged while it was pending and be pruned unsent. Written only by
- * {@link publishOnePerPath}, the one way a tombstone is published.
+ * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
+ * was the position then. What an acknowledgement, a prune and a page compare, and nothing else is. Pure.
  */
-const publishedNow = () => ({ $set: { deletedAt: new Date().toISOString() }, $unset: { pending: '' as const } });
+export const positionOf = (t: { positionAt?: unknown; deletedAt?: unknown }): string | undefined =>
+  typeof t.positionAt === 'string' ? t.positionAt : typeof t.deletedAt === 'string' ? t.deletedAt : undefined;
+
+/**
+ * Give every published tombstone stored before positions existed one (migration of LOCAL state: a file tombstone is never
+ * hashed and its position is this instance's own). The position is NOW and not the row's `deletedAt`: an own tombstone's
+ * `deletedAt` was its position, but a relayed one carried the SENDER's clock, which is exactly what a local position must
+ * never hold — and now sorts above every acknowledgement recorded so far, so the one thing it can cost is that a row is kept
+ * until its next acknowledgement, never pruned unsent. Idempotent and cheap when there is nothing to do, so the boot pass
+ * runs it for every space; a row with no comparable `deletedAt` to carry is left alone.
+ *
+ * Until it has run, a page read does not see such a row (it reads `positionAt`); the push then sends fewer and
+ * acknowledges only what it sent, so the gap is a delay and never a loss.
+ */
+export async function positionLegacyFileTombstones(spaceId: string): Promise<number> {
+  const res = await tombstonesOf(spaceId).updateMany(
+    asFilter<StoredFileTombstone>({ ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $type: 'string' } }),
+    asUpdate<StoredFileTombstone>({ $set: { positionAt: new Date().toISOString() } }));
+  return res.modifiedCount;
+}
+
+/**
+ * What publishing a tombstone writes: `pending` gone, and `deletedAt` and `positionAt` stamped NOW — the real time, never a
+ * caller's clock — because the position is what peers acknowledge, and a tombstone published under an older stamp could
+ * fall below a position acknowledged while it was pending and be pruned unsent. Written only by {@link publishOnePerPath},
+ * the one way a tombstone is published.
+ */
+const publishedNow = () => {
+  const now = new Date().toISOString();
+  return { $set: { deletedAt: now, positionAt: now }, $unset: { pending: '' as const } };
+};
 
 /** A pending tombstone about to be published: while pending, `deletedAt` is when it was written. */
-type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move'>;
+type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move' | 'issuer' | 'rowSeq' | 'contentHash'>;
 
 /**
  * THE one way a tombstone is published — confirmed by its act, settled from the disk by a failed step, a retried
@@ -171,7 +220,7 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
   const tombstones = tombstonesOf(spaceId);
   const paths = [...new Set(docs.map(d => d.path))];
   const stored = await tombstones.find(asFilter<StoredFileTombstone>({ path: { $in: paths } }),
-    { projection: { _id: 1, path: 1, deletedAt: 1, pending: 1 } }).toArray();
+    { projection: { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1 } }).toArray();
   const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
   const { $set, $unset } = publishedNow();
   const ops: object[] = [];
@@ -180,13 +229,25 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
   let published = 0;
   let dropped = 0;
   for (const path of paths) {
-    const newestPublished = stored.filter(t => t.path === path && !t.pending).reduce((m, t) => (t.deletedAt > m ? t.deletedAt : m), '');
+    // The newest PUBLISHED position for the path (a relayed tombstone's is its receive time): the one clock every stored
+    // tombstone shares, where `deletedAt` of a relayed one is the sender's.
+    const newestPublished = stored.filter(t => t.path === path && !t.pending).reduce((m, t) => {
+      const at = positionOf(t) ?? '';
+      return at > m ? at : m;
+    }, '');
     const candidates = docs.filter(d => d.path === path && !alreadyPublished.has(d._id));
     const winner = candidates.filter(d => d.deletedAt > newestPublished).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))[0];
     if (winner) {
+      // What the act knew of the version it erased travels with it, so an upsert (a tombstone the stale settle dropped
+      // while its act was still running) writes it again rather than publishing a bare one.
+      const knew = {
+        ...(winner.issuer !== undefined ? { issuer: winner.issuer } : {}),
+        ...(winner.rowSeq !== undefined ? { rowSeq: winner.rowSeq } : {}),
+        ...(winner.contentHash !== undefined ? { contentHash: winner.contentHash } : {}),
+      };
       ops.push({ updateOne: {
         filter: asFilter<StoredFileTombstone>({ _id: winner._id }),
-        update: asUpdate<StoredFileTombstone>({ $set: { ...$set, spaceId, path, ...(winner.move ? { move: winner.move } : {}) }, $unset }),
+        update: asUpdate<StoredFileTombstone>({ $set: { ...$set, spaceId, path, ...knew, ...(winner.move ? { move: winner.move } : {}) }, $unset }),
         upsert: true,
       } });
       ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ path, pending: true, _id: { $ne: winner._id } }) } });
@@ -201,6 +262,24 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
     { ordered: false, commandKindOf: bulkCommandOf });
   if (superseded.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: superseded }, pending: true }));
   return { published, dropped: dropped + superseded.length };
+}
+
+/** The file rows of `ids` (a row's id is its path), with what a tombstone records of the version it erases. */
+async function readFileRows(spaceId: string, ids: readonly string[]): Promise<Map<string, Pick<FileMetaDoc, 'seq' | 'sha256'>>> {
+  try {
+    return await readStoredById<Pick<FileMetaDoc, 'seq' | 'sha256'>>(spaceCollection(spaceId, 'files'), ids, { seq: 1, sha256: 1 });
+  } catch (err) {
+    // Never the act's failure. The stamps are what a tombstone KNOWS of the version it erases, and a bare tombstone shadows
+    // less (the stated limit of one held from before this release) and deletes exactly as it did. A store that is down fails
+    // the write that follows, which is where the act answers it: failing here instead put a READ before the write and kept
+    // the one failure the doors are held to (a failed bulk write, `a-store-failure-answers-alike-on-every-door-db`) from
+    // ever being met. The store's own failure is not said here either: the driver's text is logged once, by the door that
+    // answers it, and the write that follows meets the same fault.
+    if (classifyReadFailure(err).status < 500) {
+      log.warn(`file tombstones for ${peerText(spaceId)} (${ids.length}): the rows they erase could not be read, so they carry no version: ${peerText(err)}`);
+    }
+    return new Map();
+  }
 }
 
 /** The marker a move writes on its tombstones, as a filter. */
@@ -227,7 +306,21 @@ export async function writePendingFileTombstones(
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
   const now = new Date().toISOString();
   const marker = move ? { move: { from: toDocId(move.from), to: toDocId(move.to) } } : {};
-  const pending = { spaceId, docs: unique.map(p => ({ _id: uuidv4(), spaceId, path: p, deletedAt: now, pending: true as const, ...marker })) };
+  // What the act knows of what it is about to erase, read ONCE for every path (one `$in` per chunk): who is acting, and the
+  // version and content hash of each file ROW. The hash is the row's, never the bytes' — the bytes may be the next thing
+  // to go, and a row hash costs no read of them. A path with no row (derived sidecar, an orphan) is stamped with the issuer
+  // alone: a version and a hash it does not have are not guessed.
+  const rows = await readFileRows(spaceId, unique);
+  const issuer = authorRef().instanceId;
+  const pending = { spaceId, docs: unique.map((p): StoredFileTombstone => {
+    const row = rows.get(p);
+    return {
+      _id: uuidv4(), spaceId, path: p, deletedAt: now, pending: true as const, ...marker,
+      ...(issuer ? { issuer } : {}),
+      ...(typeof row?.seq === 'number' ? { rowSeq: row.seq } : {}),
+      ...(typeof row?.sha256 === 'string' && row.sha256 !== '' ? { contentHash: row.sha256 } : {}),
+    };
+  }) };
   if (pending.docs.length === 0) return pending;
   try {
     const stored = tombstonesOf(spaceId);
@@ -428,32 +521,112 @@ export async function forgetFinishedMove(spaceId: string, from: string, to: stri
 
 // ── The readers: published tombstones only ────────────────────────────────────────────────────────────────────────
 
-/**
- * The published tombstones of a space in their wire shape, oldest first — what `GET /api/sync/file-tombstones` serves
- * and what a sync cycle pushes. `since` keeps those published after it.
- */
-export async function publishedFileTombstones(
-  spaceId: string, { since, limit }: { since?: string; limit?: number } = {},
-): Promise<FileTombstoneDoc[]> {
-  const filter = asFilter<StoredFileTombstone>({ spaceId, ...PUBLISHED, ...(since ? { deletedAt: { $gt: since } } : {}) });
-  const cursor = tombstonesOf(spaceId).find(filter, { projection: WIRE }).sort({ deletedAt: 1 });
-  return (limit !== undefined ? cursor.limit(limit) : cursor).toArray() as Promise<FileTombstoneDoc[]>;
+/** A published tombstone as the readers hand it on: its wire shape, and the position this instance holds it at. */
+export type PositionedFileTombstone = FileTombstoneDoc & { positionAt: string };
+
+/** The wire shape of a tombstone: exactly the fields of {@link WIRE}, never the position or any other local field. */
+export function fileTombstoneOnTheWire(t: FileTombstoneDoc): FileTombstoneDoc {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(WIRE)) if ((t as unknown as Record<string, unknown>)[k] !== undefined) out[k] = (t as unknown as Record<string, unknown>)[k];
+  return out as unknown as FileTombstoneDoc;
 }
 
-/** Which of `paths` a published tombstone names: files known to be deleted, here or by a peer. */
-export async function tombstonedFilePaths(spaceId: string, paths: readonly string[]): Promise<Set<string>> {
-  if (paths.length === 0) return new Set();
-  const rows = await tombstonesOf(spaceId)
-    .find(asFilter<StoredFileTombstone>({ path: { $in: [...paths] }, ...PUBLISHED }), { projection: { path: 1 } }).toArray();
-  return new Set(rows.map(t => t.path));
+/** The legacy read's ceiling: one answer, cut here, as the route has always answered a request with no cursor. */
+export const LEGACY_FILE_TOMBSTONE_LIMIT = 5000;
+/** A cursor-mode page, and a push request's size. */
+export const FILE_TOMBSTONE_PAGE = 500;
+
+/**
+ * The published tombstones of a space, in position order (`positionAt`, then `_id`), each with the position it was read at —
+ * what `GET /api/sync/file-tombstones` serves and what a sync cycle pushes, a page at a time.
+ *
+ * - `after` is where to resume: strictly after that position, and — with an id — after that tombstone within a run of equal
+ *   positions, so a run of any length pages and no row is skipped at a page boundary (the twin of the record routes' keyset,
+ *   `util/seq-keyset.ts`). The start of time reads everything.
+ * - `since` is the older, instant-only question (`positionAt > since`), kept for a client that still sends it.
+ * - `limit` bounds the answer; the rows of the answer carry their position, which a page's own cursor is built from.
+ *
+ * Reads `positionAt`, which {@link positionLegacyFileTombstones} gives every row stored before positions existed.
+ */
+export async function publishedFileTombstones(
+  spaceId: string, { after, since, limit }: { after?: IsoPosition; since?: string; limit?: number } = {},
+): Promise<PositionedFileTombstone[]> {
+  const projection = { ...WIRE, positionAt: 1 } as const;
+  const sort = isoKeysetSort('positionAt');
+  const find = async (filter: Record<string, unknown>, n: number | undefined): Promise<PositionedFileTombstone[]> => {
+    const cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ spaceId, ...PUBLISHED, ...filter } as never), { projection }).sort({ ...sort });
+    return (n !== undefined ? cursor.limit(n) : cursor).toArray() as Promise<PositionedFileTombstone[]>;
+  };
+  const { tie, range } = isoKeysetFilters('positionAt', after ?? { at: since ?? '' });
+  const first = tie ? await find(tie, limit) : [];
+  if (limit !== undefined && first.length >= limit) return first;
+  return [...first, ...await find(range, limit === undefined ? undefined : limit - first.length)];
+}
+
+/**
+ * One page of {@link publishedFileTombstones} and where it ends: `next` is the position to resume from, or `null` when the
+ * page reached the end. One more row than the page is read, which decides it without a second query.
+ */
+export async function publishedFileTombstonePage(
+  spaceId: string, after: IsoPosition, limit: number = FILE_TOMBSTONE_PAGE,
+): Promise<{ rows: PositionedFileTombstone[]; next: string | null }> {
+  const read = await publishedFileTombstones(spaceId, { after, limit: limit + 1 });
+  const rows = read.slice(0, limit);
+  const last = rows[rows.length - 1];
+  return { rows, next: read.length > limit && last ? encodeIsoCursor({ at: last.positionAt, id: last._id }) : null };
+}
+
+/**
+ * Which of a sent page's rows a `200` PROVES delivered, given the first row it did not send (`peek`, or `undefined` at the
+ * end): all of them, unless the page ends inside a RUN of rows at one position — then every row at that position is left out,
+ * because the rest of the run is still to send and an acknowledgement at the position would let a prune take it.
+ * The position is the only thing acknowledged, so this is the file-tombstone twin of `completeThrough` (`sync/watermark.ts`):
+ * a transfer is complete through a position only when nothing more can arrive at it. A page that is ONE run proves nothing.
+ */
+export function settledFileTombstones<T extends { positionAt: string }>(sent: readonly T[], peek: { positionAt: string } | undefined): T[] {
+  const last = sent[sent.length - 1];
+  if (last === undefined || peek === undefined || peek.positionAt !== last.positionAt) return [...sent];
+  return sent.filter(t => t.positionAt !== last.positionAt);
+}
+
+/** The tombstones this instance holds for each of `paths`: what an arriving file is compared with. */
+export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string }
+
+/**
+ * THE one reader of the published tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what
+ * a comparison needs of each (its id, the version it erased, the hash of the content it erased). Every arrival site asks
+ * it (`shadowedArrivals`, the stray drain's settle); a second reader would be a second answer to "is this path deleted".
+ */
+export async function heldFileTombstones(spaceId: string, paths: readonly string[]): Promise<Map<string, HeldFileTombstone[]>> {
+  const out = new Map<string, HeldFileTombstone[]>();
+  for (const chunk of inChunks([...new Set(paths)], READ_CHUNK)) {
+    const rows = await tombstonesOf(spaceId)
+      .find(asFilter<StoredFileTombstone>({ path: { $in: chunk }, ...PUBLISHED }), { projection: { _id: 1, path: 1, rowSeq: 1, contentHash: 1 } }).toArray();
+    for (const t of rows) {
+      if (!out.has(t.path)) out.set(t.path, []);
+      out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}) });
+    }
+  }
+  return out;
+}
+
+/** Which of `ids` are published tombstones already held here: an id held is never applied a second time. */
+export async function heldFileTombstoneIds(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
+  const rows = await readStoredById<object>(spaceCollection(spaceId, 'fileTombstones'), ids, { _id: 1 }, { filter: PUBLISHED });
+  return new Set(rows.keys());
 }
 
 /**
  * Remove the published tombstones at or below an acknowledged push position (`brain/tombstone-prune.ts` decides it).
- * A pending one is never removed here: no peer was sent it, so no acknowledgement covers it.
+ * A pending one is never removed here: no peer was sent it, so no acknowledgement covers it. A tombstone stored before
+ * positions existed is judged by its `deletedAt`, which was its position; one with neither is never removed — it cannot be
+ * proven delivered.
  */
 export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Promise<number> {
-  const res = await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ deletedAt: { $lte: upTo }, ...PUBLISHED }));
+  const res = await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({
+    ...PUBLISHED,
+    $or: [{ positionAt: { $lte: upTo } }, { positionAt: { $exists: false }, deletedAt: { $lte: upTo } }],
+  }));
   return res.deletedCount ?? 0;
 }
 
@@ -481,8 +654,105 @@ export function shadowDecision(
   return held.some(t => typeof t.contentHash === 'string' && t.contentHash !== '' && t.contentHash === arrival.sha256);
 }
 
-/** Keep a tombstone a peer pushed, to pass it on: its four wire fields, inserted once by id. */
-export async function storePeerFileTombstone(spaceId: string, doc: FileTombstoneDoc): Promise<void> {
-  await tombstonesOf(spaceId).updateOne(asFilter<StoredFileTombstone>({ _id: doc._id }),
-    asUpdate<StoredFileTombstone>({ $setOnInsert: doc }), { upsert: true });
+/** One arrival to ask {@link shadowedArrivals} about: its id, its path, and what it is — metadata at a version, or bytes with a hash. */
+export type FileArrival = { id: string; path: string } & ({ kind: 'meta'; seq: number } | { kind: 'bytes'; sha256: string });
+
+/**
+ * Which of `arrivals` a held tombstone shadows — THE predicate every arrival site asks (the metadata writer, the stray
+ * drain's fill, the manifest pull, the byte door), one chunked read of the held tombstones by path for all of them, then
+ * {@link shadowDecision} per arrival. Returns the ids.
+ *
+ * For BYTES it also reads whether a LIVE row at the path is newer than the tombstone (`liveRowNewer`): identical bytes
+ * re-created as a newer version arrive with their metadata first, and pass. That read happens only for an arrival some
+ * held tombstone could shadow by content, so a path nobody deleted costs no more than the tombstone read.
+ */
+export async function shadowedArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<Set<string>> {
+  if (arrivals.length === 0) return new Set();
+  return shadowedAgainst(spaceId, await heldFileTombstones(spaceId, arrivals.map(a => a.path)), arrivals);
+}
+
+/**
+ * Whether a PEER's bytes for `path` are shadowed — the byte door's question, which asks by path FIRST: the hash of the bytes
+ * (`sha256Of`, called only when needed) is computed only when some held tombstone for the path carries a content hash to
+ * compare it with, so a path nobody deleted — nearly every upload — costs one indexed read and no hashing of the body.
+ */
+export async function bytesShadowed(spaceId: string, path: string, sha256Of: () => string): Promise<boolean> {
+  const held = await heldFileTombstones(spaceId, [path]);
+  if (!(held.get(path) ?? []).some(t => typeof t.contentHash === 'string' && t.contentHash !== '')) return false;
+  return (await shadowedAgainst(spaceId, held, [{ id: path, path, kind: 'bytes', sha256: sha256Of() }])).has(path);
+}
+
+/** {@link shadowedArrivals} over tombstones already read: the decision per arrival, and the live-row read bytes need. */
+async function shadowedAgainst(
+  spaceId: string, held: ReadonlyMap<string, HeldFileTombstone[]>, arrivals: readonly FileArrival[],
+): Promise<Set<string>> {
+  const shadowed = new Set<string>();
+  const needRows = arrivals.filter(a => a.kind === 'bytes' && (held.get(a.path) ?? []).some(t => t.contentHash === a.sha256));
+  const live = needRows.length === 0 ? new Map<string, { seq?: number; deletedAt?: string }>()
+    : await readStoredById<{ seq?: number; deletedAt?: string }>(spaceCollection(spaceId, 'files'), needRows.map(a => a.path), { seq: 1, deletedAt: 1 });
+  for (const a of arrivals) {
+    const here = held.get(a.path) ?? [];
+    if (here.length === 0) continue;
+    if (a.kind === 'meta') {
+      if (shadowDecision(here, a)) shadowed.add(a.id);
+      continue;
+    }
+    const row = live.get(a.path);
+    const erased = Math.max(-1, ...here.map(t => t.rowSeq ?? -1));
+    const liveRowNewer = row !== undefined && row.deletedAt === undefined && typeof row.seq === 'number' && row.seq > erased;
+    if (shadowDecision(here, { kind: 'bytes', sha256: a.sha256, liveRowNewer })) shadowed.add(a.id);
+  }
+  return shadowed;
+}
+
+/**
+ * Remove the held tombstones that an arriving NEWER version of their path supersedes: for each `{ path, seq }` those with
+ * a `rowSeq` below `seq`. Called once the version has LANDED (a write that failed keeps the deletion). A tombstone with no
+ * `rowSeq` names no version, so no arrival is known to be newer than it and it stays — the stated limit of one held from
+ * before this release.
+ */
+export async function supersedeFileTombstones(spaceId: string, landed: ReadonlyArray<{ path: string; seq: number }>): Promise<number> {
+  if (landed.length === 0) return 0;
+  const ops = landed.map(l => ({ deleteMany: { filter: asFilter<StoredFileTombstone>({ path: l.path, rowSeq: { $lt: l.seq }, ...PUBLISHED }) } }));
+  let removed = 0;
+  await writeInOneCommands(ops, async (slice, { ordered }) => {
+    const r = await tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered });
+    removed += r.deletedCount ?? 0;
+  }, { ordered: false, commandKindOf: bulkCommandOf });
+  return removed;
+}
+
+/** A tombstone a peer delivered that this instance KEEPS, to pass it on. */
+export interface RelayedFileTombstone {
+  _id: string; path: string; deletedAt: string;
+  /** Who deleted the file: the tombstone's own issuer, or its deliverer for an older peer's. Absent only for a trusted relay's issuer-less one. */
+  issuer?: string; rowSeq?: number;
+  /** The hash of the file row it erased here, when it erased one. */
+  contentHash?: string;
+  /** The upstream whose say-so it stood on, when it stood on the upstream ground. */
+  storedVia?: string;
+}
+
+/**
+ * Keep tombstones a peer delivered, to pass them on: the wire fields — with the ISSUER that signed the deletion, so the next
+ * hop judges it as that issuer's — and this instance's own: the position (the RECEIVE time, never the sender's clock), the
+ * hash of what was erased here, and the upstream it stood on. Inserted once by id (`$setOnInsert`), in the space the door
+ * ADMITTED, one bulk write for the page.
+ */
+export async function storeRelayedFileTombstones(spaceId: string, docs: readonly RelayedFileTombstone[]): Promise<void> {
+  if (docs.length === 0) return;
+  const receivedAt = new Date().toISOString();
+  const ops = docs.map(d => ({ updateOne: {
+    filter: asFilter<StoredFileTombstone>({ _id: d._id }),
+    update: asUpdate<StoredFileTombstone>({ $setOnInsert: {
+      _id: d._id, spaceId, path: d.path, deletedAt: d.deletedAt, positionAt: receivedAt,
+      ...(d.issuer !== undefined ? { issuer: d.issuer } : {}),
+      ...(d.rowSeq !== undefined ? { rowSeq: d.rowSeq } : {}),
+      ...(d.contentHash !== undefined ? { contentHash: d.contentHash } : {}),
+      ...(d.storedVia !== undefined ? { storedVia: d.storedVia } : {}),
+    } }),
+    upsert: true,
+  } }));
+  await writeInOneCommands(ops, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
+    { ordered: false, commandKindOf: bulkCommandOf });
 }

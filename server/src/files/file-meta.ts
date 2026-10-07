@@ -25,6 +25,8 @@ import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/file-meta-write.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
+import { rekeyedRow } from '../sync/local-only-fields.js';
+import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 
 /**
  * The optional fields a `deleteFields` path may clear on a file's metadata record.
@@ -176,6 +178,10 @@ export async function recordArrivedFile(
       $unset: { deletedAt: '' },
       $setOnInsert: {
         spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
+        // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
+        // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
+        // that another peer delivered, gains nothing over it.
+        deliveredBy: from.instanceId,
         ...(expireAt ? { _expireAt: expireAt } : {}),
       },
     } as never),
@@ -264,7 +270,7 @@ export async function setDerivedDescriptionIfUnset(
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) })) as FileMetaDoc | null;
+    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
 }
 
 export async function updateFileMeta(
@@ -481,7 +487,8 @@ export async function updateFileMeta(
     } catch { /* non-fatal — face side-effects must never block file meta write */ }
   }
 
-  return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as Promise<FileMetaDoc | null>;
+  return col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ _id: normalised }), { projection: NEVER_RETURNED_PROJECTION }) as Promise<FileMetaDoc | null>;
 }
 
 /** Remove the metadata record when a file is deleted. */
@@ -576,7 +583,9 @@ function liveFileRecords(path: string, scope: 'under' | 'exactly-at' | 'at-or-un
 
 /**
  * Soft-delete: flag a single file's metadata record as deleted (`deletedAt = now`)
- * instead of removing it. No-op if the record does not exist. Used when
+ * instead of removing it. No-op if the record does not exist, **and for one already flagged**: a deletion that is
+ * already recorded (and already paged to the peers by the seq it took) is not stamped again, so a second tombstone for
+ * the same path — a peer's relayed one beside ours — cannot re-flag the row and bump its seq. Used when
  * `softDeleteFileMeta` is enabled so a deleted file leaves an auditable record.
  */
 export async function markFileMetaDeleted(
@@ -585,7 +594,7 @@ export async function markFileMetaDeleted(
 ): Promise<void> {
   const normalised = toDocId(filePath);
   await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: normalised }),
+    asFilter<FileMetaDoc>({ _id: normalised, deletedAt: { $exists: false } }),
     // `P-32`: a deletion is an authored change. The file TOMBSTONE carries the removal to a peer; this
     // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
     // that simply stopped changing.
@@ -640,12 +649,13 @@ export async function renameFileMeta(
   const now = new Date().toISOString();
   // MongoDB does not allow updating _id; delete + re-insert with new path.
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>({
-    ...existing,
+  // `rekeyedRow`: a row under a NEW id is written here, so it is stamped as nobody's delivery and carries none of what this
+  // instance agreed with its peers about the OLD path (`syncBase`) — a peer that delivered the old path cannot retire the new one.
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(rekeyedRow(existing, {
     _id: normDst,
     path: normDst,
     updatedAt: now,
-  }));
+  })));
 
   await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
 }
@@ -713,8 +723,8 @@ export async function renameFileMetaByPrefix(
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ _id: { $in: oldIds } }),
   );
-  const updated = docs.map(d => ({
-    ...d,
+  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery.
+  const updated = docs.map(d => rekeyedRow(d, {
     _id: dstPrefix + d._id.slice(srcPrefix.length),
     path: dstPrefix + d.path.slice(srcPrefix.length),
     updatedAt: now,

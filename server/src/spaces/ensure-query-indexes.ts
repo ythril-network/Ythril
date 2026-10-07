@@ -40,7 +40,7 @@ import { buildKeysetIndex, type KeysetBuild } from './keyset-indexes.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
-import { ensureFileTombstoneIndexes } from '../files/tombstones.js';
+import { ensureFileTombstoneIndexes, positionLegacyFileTombstones } from '../files/tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { concreteSpaces } from './proxy.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
@@ -104,6 +104,8 @@ export async function ensureQueryIndexes(): Promise<number> {
       })),
       // The file tombstones' indexes, the same call `initSpace` makes (bundle-30 I16).
       { name: 'file tombstone indexes', ensure: () => ensureFileTombstoneIndexes(space.id) },
+      // The local position a tombstone stored before positions existed lacks (bundle-51): the paged read and the push read it.
+      { name: 'file tombstone positions', ensure: () => positionLegacyFileTombstones(space.id) },
       // The fork caps' indexes, for a space `initSpace` never revisits — the same list it creates (`FORK_INDEXES`).
       ...FORK_INDEXES.map(ix => ({
         name: `facts ${Object.keys(ix.keys).join(',')} index`,
