@@ -70,6 +70,11 @@ const REFUSED = [
   ['a path that merely ends with ci.yml', r => { r.path = 'fork/.github/workflows/ci.yml'; }],
   ['a different case of the path', r => { r.path = '.github/workflows/CI.yml'; }],
   ['no path', r => { delete r.path; }],
+  ['a full run (the push of a full-run/ ref, run by full-run.yml: never recorded, its timings are not kept)', r => {
+    r.event = 'push';
+    r.path = '.github/workflows/full-run.yml';
+    r.head_branch = 'full-run/x';
+  }],
   ['a release branch', r => { r.head_branch = 'release/5.6.x'; }],
   ['a feature branch', r => { r.head_branch = 'feature/faster-ci'; }],
   ['a branch that merely starts with main', r => { r.head_branch = 'main-backdoor'; }],

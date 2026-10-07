@@ -100,6 +100,7 @@ on:
     branches: [main, 'release/**']
   push:
     branches: [main]
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -213,4 +214,28 @@ ${verdictLines}
         run: node scripts/executed-tests.mjs --results test-results
       - name: No skip nobody expected
         run: node scripts/unexpected-skips.mjs --results test-results
+`.replaceAll('@{{', '${{');
+
+/**
+ * A miniature of `full-run.yml`, the caller that runs the whole of `GOOD_CI` on a push to `full-run/<bundle>`: one job that
+ * only calls it, grants the caller's token what the called jobs ask (`ci-advisory`'s `actions: read`, and nothing else),
+ * and cancels an older run of the same ref. The rules that hold it read `GOOD_CI` beside it, so the two change together.
+ */
+export const GOOD_FULL_RUN = `
+name: Full run
+on:
+  push:
+    branches: ['full-run/**']
+permissions:
+  contents: read
+concurrency:
+  group: full-run-@{{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  full:
+    name: Full run
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci.yml
 `.replaceAll('@{{', '${{');
