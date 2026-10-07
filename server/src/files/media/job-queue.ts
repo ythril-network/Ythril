@@ -20,7 +20,7 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { jobIdsUnder, movedId, sidecarsOf } from '../moved-paths.js';
+import { jobIdsUnder, movedId, movedRoot, sidecarsOf } from '../moved-paths.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -685,7 +685,7 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
  * job ids do not share the folder prefix. Called on recursive directory delete.
  */
 export async function cancelMediaJobsByPrefix(spaceId: string, dirPath: string): Promise<void> {
-  const dir = toDocId(dirPath).replace(/\/?$/, '');
+  const dir = movedRoot(dirPath);
   if (!dir) return; // guard: empty path would match everything
   // The folder's own jobs and the jobs of its sidecar trees. Read as a directory's, which is also right for the extracted tree of a
   // FILE (`_extracted/<f>/`): that is the one sidecar tree of a file a job can sit under, and the file's own `<f>/` matches nothing.

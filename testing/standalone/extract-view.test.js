@@ -66,8 +66,11 @@ describe('the extract route', () => {
 
   it('partitions the derived records, so an image is never listed as a chunk', () => {
     assert.match(handler, /chunkIndex: \{ \$exists: false \}/);
-    assert.match(handler, /startsWith\('_extracted\/'\)/);
-    assert.match(handler, /startsWith\('_converted\/'\)/);
+    // Through the one sidecar module (`parentOfSidecar`, which says which role a path has), never a prefix test written here:
+    // the root names are that module's, and a second spelling of them is the copy that drifts (Q-349).
+    assert.match(handler, /parentOfSidecar\(d\.path\)\?\.role === 'extracted'/);
+    assert.match(handler, /parentOfSidecar\(d\.path\)\?\.role === 'converted'/);
+    assert.doesNotMatch(handler, /startsWith\('_(?:extracted|converted)\//, 'a sidecar root is named by the sidecar module only');
   });
 
   it('bounds every list it returns', () => {

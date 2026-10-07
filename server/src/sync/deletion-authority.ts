@@ -50,6 +50,7 @@ import { isDirectionalNetwork, isUpstreamPeer, upstreamOf } from '../networks/ne
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { peersReachingOnlyByToken } from './served-watermark.js';
 import { tombstoneGoverns } from './upsert-plan.js';
+import { isArrivedPlaceholder } from '../files/file-meta.js';
 
 /**
  * The longest instance id a tombstone's issuer may be named by. The issuer is a peer's text that is compared with the
@@ -132,8 +133,7 @@ export interface HeldFileRow extends DeletionTarget {
  * Passing a record here would hand its author's protection to whoever proves the issuer; the caller is the file apply.
  */
 export function fileTargetOf<R extends HeldFileRow>(row: R): R {
-  const author = row.author?.instanceId;
-  if (row.seq !== 0 || author === undefined || author === '' || author !== row.deliveredBy) return row;
+  if (!isArrivedPlaceholder(row)) return row;
   const { author: _placeholderAuthor, ...authorless } = row;
   return authorless as R;
 }

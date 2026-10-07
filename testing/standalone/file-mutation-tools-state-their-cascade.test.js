@@ -145,9 +145,11 @@ describe('delete_file removes what its conversion and its sidecars left, however
       'the remover reads only the rows whose parentFileId is the file itself; a row whose parent is one of the file\'s SIDECAR paths outlives it');
   });
 
-  it('cancels the queued jobs of the extracted images, by the prefix of the file\'s extraction tree', () => {
-    assert.match(REMOVER, /cancelMediaJobsByPrefix\([^)]*_extracted\//,
-      'a queued job of an extracted image retries for ever against a tree the delete removed');
+  it('cancels the queued jobs of the extracted images, by the file\'s own path (the queue derives the trees a path owns)', () => {
+    assert.match(PIPELINE, /cancelMediaJobsByPrefix\(spaceId,\s*originalId\)/,
+      'a queued job of an extracted image retries for ever against a tree the delete removed; the cascade must hand the queue the file\'s own path, not spell the extraction tree itself');
+    assert.doesNotMatch(PIPELINE, /cancelMediaJobsByPrefix\([^)]*_extracted\//,
+      'the extraction tree\'s name is the queue\'s to derive (sidecarsOf); a literal here is the second copy of that rule');
   });
 
   it('one module answers which sidecar paths belong to a path (and the inverse), and the cascade reads it', () => {

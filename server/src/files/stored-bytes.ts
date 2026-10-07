@@ -41,6 +41,7 @@ import {
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { resolveSafePathChecked } from './sandbox.js';
 
 /** A stored file that exists but cannot be read back: a foreign or missing key, or altered bytes. */
 export class StoredFileUnreadable extends Error {
@@ -182,6 +183,22 @@ export async function bytesPresent(abs: string): Promise<boolean> {
     if (isMissingPath(err)) return false;
     throw err;
   }
+}
+
+/**
+ * {@link bytesPresent} for a SPACE-RELATIVE path: resolved inside the space's sandbox first, symlink escape included
+ * (`resolveSafePathChecked`), then asked.
+ *
+ * ## What it prevents
+ *
+ * Five callers (the tombstone settle and its marker sweep, the arrival shadow's pending-act read, the conversion's lease-lost
+ * clean-up, a move's existence checks) each wrote `bytesPresent(await resolveSafePathChecked(spaceId, p))` by hand, and the half a
+ * copy drops is the resolve: an `abs` joined from a peer's text with `path.join` looks outside the space, or at a path the
+ * sandbox would have refused. A path outside the sandbox is the caller's `RangeError`; a failure to look is thrown, on the terms
+ * of {@link bytesPresent}.
+ */
+export async function bytesPresentAt(spaceId: string, relPath: string): Promise<boolean> {
+  return bytesPresent(await resolveSafePathChecked(spaceId, relPath));
 }
 
 /**

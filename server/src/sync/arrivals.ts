@@ -14,7 +14,8 @@
  * is here, and a door cannot store a record without passing through all of them:
  *
  *  1. **Shape, per document** (`arrivalRefusal`): a string `_id`, a seq that is a non-negative integer the
- *     counter can carry (absent only for file metadata older than seqs). A refusal is that document's, never
+ *     counter can carry (absent only for file metadata older than seqs), and — for file metadata that is not a restore —
+ *     an `_id` that IS the key its path resolves to (`fileKeyRefusal`, Q-404). A refusal is that document's, never
  *     the page's — a poison document must not hold back everything sent with it.
  *  2. **Retag** to the local space, unconditionally: under a `spaceMap` alias the sender's id names another
  *     space, and every `spaceId`-filtered read on this instance would miss the record.
@@ -104,6 +105,7 @@ import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { isLegacyReadSpill } from './file-conflict.js';
 import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
+import { peerFileKey } from '../files/sandbox.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -194,6 +196,29 @@ export function arrivalRefusal(doc: unknown, { seqOptional }: { seqOptional: boo
   const { _id: id, seq } = doc as { _id?: unknown; seq?: unknown };
   if (typeof id !== 'string' || id.length === 0) return '_id is not a non-empty string';
   return seqRefusal(seq, { optional: seqOptional });
+}
+
+/**
+ * Why a file-metadata document's `_id` cannot be the key of a file row, or `null` when it can: the id must BE the key its path
+ * resolves to (`peerFileKey`), which is what every other door looks the file up by (bundle-71, Q-404).
+ *
+ * ## What it prevents
+ *
+ * A row keyed by a peer's SPELLING of a path (`x/../victim`) is a row nothing reads again — the bytes, the tombstones and the
+ * local manifest all key by the resolved `victim` — and the shadow ask for it was made by the spelling, so a tombstone held for
+ * `victim` never saw the arrival. Refused as a shape violation, counted with every other, rather than keyed for the writer: the
+ * peer's record for `victim` arrives under its own id, and one for a path that leaves the space is no file of this one.
+ *
+ * Reasons carry no text of the peer's: they travel to a log line and back in an answer. Anything but a refused path (a failure
+ * to look at the disk) is thrown, so the page fails and is retried rather than a document being refused for a fault of ours.
+ */
+async function fileKeyRefusal(spaceId: string, id: string): Promise<string | null> {
+  try {
+    return (await peerFileKey(spaceId, id)).key === id ? null : '_id is not the canonical key of its path';
+  } catch (err) {
+    if (err instanceof RangeError) return '_id is not a path inside the space';
+    throw err;
+  }
 }
 
 /**
@@ -344,6 +369,9 @@ export async function writeArrivals(
     const doc = raw as Doc;
     // A chunk is derived from the blob here; a legacy read spill (`Q-92`) travels in neither direction.
     if (family === 'files' && (isDerived(doc) || isLegacyReadSpill(doc._id))) { out.derived.push(doc._id); continue; }
+    // A restore's ids are this instance's own export's, and it is never judged by a peer's rules; any other arrival is a peer's text.
+    const keyWhy = family === 'files' && !restore ? await fileKeyRefusal(spaceId, doc._id) : null;
+    if (keyWhy) { out.refused.push({ _id: doc._id, reason: keyWhy }); continue; }
     const seq = doc.seq ?? 0;
     if (seq > out.maxReceived) out.maxReceived = seq;
     const prev = page.get(doc._id);

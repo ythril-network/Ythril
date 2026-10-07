@@ -25,7 +25,10 @@
  *  - the manifest pull: an entry spelled `x/../victim` against a local `victim` with a different hash lands as a CONFLICT
  *    COPY (the local file is untouched); against a held tombstone for `victim` it is skipped, never downloaded;
  *  - no file row key — and no row `path` — holds a `.` or `..` segment after either door has stored arrivals spelled that way,
- *    and each lands at its resolved key.
+ *    and each lands at its resolved key;
+ *  - the METADATA door, pushed and pulled: a file-meta document whose `_id` is not its canonical key is refused as a shape violation
+ *    (counted `rejected`, as every shape refusal is), so a spelling of `victim` is neither stored under that spelling nor
+ *    looked up by it against the tombstone held for `victim`; a document keyed canonically is stored.
  *
  * Run: node --test testing/standalone/a-peer-supplied-file-path-is-resolved-before-it-is-looked-up-db.test.js
  * (requires a prior `npm run build:server`)
@@ -37,8 +40,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { peerToken } from './_push-door.mjs';
-import { openPullDoor, PEER } from './_pull-door.mjs';
+import { build, peerToken } from './_push-door.mjs';
+import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { openByteDoor } from './_byte-door.mjs';
 import { postWhole, postInHalves } from './_byte-door-uploads.mjs';
 
@@ -131,6 +134,34 @@ describe('a peer-supplied file path is resolved before it is looked up', { skip 
       const keys = await assertNoDotSegmentKeys(4, 'the byte door');
       assert.deepEqual(keys, ['d/k3.txt', 'k1.txt', 'k2.txt', 'k4.txt'], 'a file did not land at the key of its resolved path');
     });
+  });
+
+  describe('the metadata door', () => {
+    /** File metadata as the fake peer delivers it: pushed to the batch door, or served to the engine's pull. */
+    const DOORS = {
+      push: async (docs) => door.push('/batch-upsert', { filemeta: docs }, { spaceId: S, token: peerToken(PEER) }),
+      pull: async (docs) => { door.state.records[S] = { filemeta: docs }; await door.sync(); return undefined; },
+    };
+    const meta = (p, seq) => build.filemeta(S, p, seq, { author: PEER_AUTHOR });
+
+    for (const [name, deliver] of Object.entries(DOORS)) {
+      for (const spelling of SPELLINGS) {
+        it(`${name}: a document keyed "${spelling}" against a held tombstone for victim is not stored, under that spelling or the resolved one`, async () => {
+          await holdVictim();
+          // A version the tombstone does NOT erase (seq 9 > rowSeq 5): shadowed by nothing, so only the key can refuse it.
+          const answer = await deliver([meta(spelling, 9)]);
+          assert.deepEqual((await allRows()).map(r => r._id), [],
+            `the document keyed "${spelling}" was stored: a peer's spelling of a path is a key nothing reads again, and it slipped past the tombstone held for the path`);
+          if (name === 'push') assert.equal(answer.body.filemeta.rejected, 1, `the shape refusal is not counted: ${JSON.stringify(answer.body.filemeta)}`);
+        });
+      }
+
+      it(`${name}: a document keyed by its canonical key is stored beside a refused spelling`, async () => {
+        const answer = await deliver([meta('x/../victim', 1), meta('plain.txt', 1)]);
+        assert.deepEqual((await allRows()).map(r => r._id), ['plain.txt'], 'the canonical document was not stored, or the spelling was');
+        if (name === 'push') assert.deepEqual([answer.body.filemeta.upserted, answer.body.filemeta.rejected], [1, 1], JSON.stringify(answer.body.filemeta));
+      });
+    }
   });
 
   describe('the manifest pull', () => {

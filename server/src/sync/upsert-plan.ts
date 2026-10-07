@@ -347,7 +347,7 @@ export function isNewerVersionByTheIssuer(
 ): boolean {
   const author = row.author?.instanceId;
   return !!held.issuer && held.issuer === author
-    && typeof row.seq === 'number' && typeof held.rowSeq === 'number' && row.seq > held.rowSeq;
+    && typeof row.seq === 'number' && typeof held.rowSeq === 'number' && isNewerCopy(row.seq, held.rowSeq);
 }
 
 /**

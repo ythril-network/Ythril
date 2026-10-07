@@ -31,7 +31,8 @@
  * and the definition of `tombstoneGoverns` it shares with `authorises`, and `isNewerVersionByTheIssuer` (is a live row a later
  * version of what a held tombstone deleted, by the tombstone's own issuer: what re-creates a deleted file's parent). They are a
  * different question (refuse an arrival; not delete a held object), named here by function so the exemption cannot
- * widen to the file. If a second arrival-side site appears it fails this gate and is either moved into the module or
+ * widen to the file. `file-meta.ts`'s `isArrivedPlaceholder` is the same kind of exemption (bundle-71, Q-405): the shape the
+ * arriving-bytes writer makes, recognised beside it, which the authority consumes through `fileTargetOf`. If a second arrival-side site appears it fails this gate and is either moved into the module or
  * argued for here.
  *
  * ## Mutation that turns it red
@@ -57,6 +58,9 @@ const EXEMPT = new Map([
     ['heldTombstoneRefuses', 'the ARRIVAL side: does a tombstone already held refuse a record or file version arriving now'],
     ['tombstoneGoverns', 'the one spelling of "same instance, or either unknown" that `authorises` and `heldTombstoneRefuses` share'],
     ['isNewerVersionByTheIssuer', 'the ARRIVAL side again (bundle-71, Q-349): is a live row a later version of what a held tombstone deleted, by the tombstone\'s own issuer — what re-creates a deleted file, so that its sidecars stop being shadowed. It deletes nothing and judges no delivery; it lives beside `heldTombstoneRefuses` because `files/tombstones.ts` cannot import this module (a cycle through the space lifecycle)'],
+  ])],
+  ['server/src/files/file-meta.ts', new Map([
+    ['isArrivedPlaceholder', 'the SHAPE `recordArrivedFile` writes (seq 0, authored only by its own deliverer), recognised beside the writer that makes it so the two cannot drift. It decides nothing about a deletion: the authority reads it through `fileTargetOf` (`sync/deletion-authority.ts`) and applies `authorises` to the result. Kept here, not in the module, because the writer\'s shape is the writer\'s — a copy in the module would stop recognising a placeholder the day the writer changed it'],
   ])],
 ]);
 

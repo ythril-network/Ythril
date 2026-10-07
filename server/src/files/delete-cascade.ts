@@ -34,13 +34,12 @@
  * (`parentFileId`) is not a delete still owed, so a retry of a delete that completed is not found — it used to
  * answer `204`, write a second tombstone, move the record's seq and fire a second `file.deleted`.
  */
-import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStoredIfPresent } from './stored-bytes.js';
-import { deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetFileHashesByPrefix } from './manifest.js';
 import { cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
@@ -121,9 +120,5 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   await settlePendingFileTombstones(pendingAmong(pending, sidecars));
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
-  if (getConfig().softDeleteFileMeta === true) {
-    await unlessTheStoreFailed(`markFileMetaDeletedByPrefix error ${at}`, () => markFileMetaDeletedByPrefix(spaceId, dirPath));
-  } else {
-    await unlessTheStoreFailed(`deleteFileMetaByPrefix error ${at}`, () => deleteFileMetaByPrefix(spaceId, dirPath));
-  }
+  await unlessTheStoreFailed(`retireFileMetaUnder error ${at}`, () => retireFileMetaUnder(spaceId, dirPath));
 }

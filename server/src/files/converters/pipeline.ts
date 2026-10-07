@@ -13,7 +13,7 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
 import { removeTree } from '../remove-tree.js';
-import { bytesPresent } from '../stored-bytes.js';
+import { bytesPresentAt } from '../stored-bytes.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -34,7 +34,7 @@ import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/typ
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelMediaJobsByPrefix } from '../media/job-queue.js';
-import { convertedFileOf, extractedTreeOf, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
+import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
 import { rowsDerivedFrom } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
@@ -519,16 +519,19 @@ export async function storeConversionResults(
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
     // claim lost to stall recovery the file is still there, and the same paths now belong to the run that replaced us.
-    // Gone means the path does not exist (`bytesPresent`). A failure to look is NOT gone: it keeps the sidecars, which
+    // Gone means the path does not exist (`bytesPresentAt`). A failure to look is NOT gone: it keeps the sidecars, which
     // is what every case but a deleted source wants (preship-4 P4-5).
     let sourceGone = false;
     try {
-      sourceGone = !(await bytesPresent(await resolveSafePathChecked(spaceId, originalId)));
+      sourceGone = !(await bytesPresentAt(spaceId, originalId));
     } catch (lookErr) {
       log.warn(`Could not tell whether ${peerText(spaceId)}/${peerText(originalId)} is still here; its sidecars are kept: ${peerText(lookErr)}`);
     }
     if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
-      await rmSidecarsOf(spaceId, originalId);
+      // For a caller with no failure to give: what cannot be looked at (a failure to tell whether a path is a directory means
+      // "not known to be the file's", which keeps it) is logged and the sidecars stay.
+      await removeSidecarBytes(spaceId, await sidecarsOwnedBy(spaceId, originalId, 'file')).catch(cleanupErr =>
+        log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
     throw err;
   }
@@ -553,16 +556,12 @@ async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
 }
 
 /**
- * Remove the bytes of every sidecar the FILE `originalId` owns, for a caller with no failure to give: whatever cannot be looked
- * at or removed is logged and the sidecars stay (`rmArtifactPath` never throws; a failure to tell whether a path is a
- * directory means "not known to be the file's", which keeps it).
+ * THE byte step of every sidecar removal: the bytes of `owned`, whatever cannot be removed logged and left (`rmArtifactPath`
+ * never throws). `deleteConversionArtifacts` and the directory's remover reach it through {@link removeWhatSidecarsLeft}; a
+ * conversion that lost its lease reaches it directly, for the sidecars it wrote.
  */
-async function rmSidecarsOf(spaceId: string, originalId: string): Promise<void> {
-  try {
-    for (const s of await sidecarsOwnedBy(spaceId, originalId, 'file')) await rmArtifactPath(spaceId, s.path);
-  } catch (err) {
-    log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(err)}`);
-  }
+async function removeSidecarBytes(spaceId: string, owned: readonly Sidecar[]): Promise<void> {
+  for (const sidecar of owned) await rmArtifactPath(spaceId, sidecar.path);
 }
 
 /**
@@ -590,8 +589,9 @@ export async function deleteConversionArtifacts(
   originalFilePath: string,
 ): Promise<void> {
   const originalId = toDocId(originalFilePath);
-  // The jobs go first, so none starts over what is being removed. Their ids are `_extracted/<id>/…` (an extracted image).
-  await cancelMediaJobsByPrefix(spaceId, `_extracted/${originalId}/`);
+  // The jobs go first, so none starts over what is being removed. The queue derives the trees a path owns (`_extracted/<id>/…`,
+  // an extracted image's jobs) from the path itself: the rule is its, and is not spelled a second time here.
+  await cancelMediaJobsByPrefix(spaceId, originalId);
   await removeWhatSidecarsLeft(spaceId, [originalId], await sidecarsOwnedBy(spaceId, originalId, 'file'));
 
   log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
@@ -628,7 +628,7 @@ async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[],
   for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
   for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);
 
-  for (const s of owned) await rmArtifactPath(spaceId, s.path);
+  await removeSidecarBytes(spaceId, owned);
 }
 
 /**
@@ -643,7 +643,7 @@ export async function deleteConversionArtifactsByPrefix(
   spaceId: string,
   dirPath: string,
 ): Promise<void> {
-  const dir = toDocId(dirPath).replace(/\/?$/, '');
+  const dir = movedRoot(dirPath);
   if (!dir) return; // guard: empty path would match everything
 
   // The roots: the file rows under the folder (with its slash, so `d` is not `d2`). What derives from them — chunks, the rows of

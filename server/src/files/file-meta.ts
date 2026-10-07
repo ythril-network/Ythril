@@ -201,6 +201,20 @@ export async function recordArrivedFile(
 }
 
 /**
+ * Is this file row what `recordArrivedFile` makes: a placeholder that arriving bytes created, with nothing authored in it?
+ *
+ * The shape that function writes is version 0 and an author that is only the deliverer (`author.instanceId` = `deliveredBy`,
+ * by lack of anyone else). It is asked HERE, beside the writer, so the rule that recognises the row cannot drift from the code
+ * that makes it: the deletion authority reads such a row as authorless (`fileTargetOf`, Q-405), and a second spelling of the
+ * shape would stop recognising a placeholder the moment the writer's shape changed, leaving the file's origin unable to delete it.
+ * A row anything has authored (metadata at a seq above 0, or at 0 from an author who is not the deliverer) is not one.
+ */
+export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?: string }; deliveredBy?: string }): boolean {
+  const author = row.author?.instanceId;
+  return row.seq === 0 && author !== undefined && author !== '' && author === row.deliveredBy;
+}
+
+/**
  * Partially update the metadata record for a file (tags, description,
  * entity/chrono/fact linkage, properties).  Re-embeds the record on
  * every successful update.  Returns the updated document, or null if the
@@ -617,6 +631,16 @@ export async function markFileMetaDeleted(
 export async function retireFileMeta(spaceId: string, filePath: string): Promise<void> {
   if (getConfig().softDeleteFileMeta === true) await markFileMetaDeleted(spaceId, filePath);
   else await deleteFileMeta(spaceId, filePath);
+}
+
+/**
+ * {@link retireFileMeta} for every row under a directory: flag the file rows and remove their derived rows (`softDeleteFileMeta`),
+ * or remove them all. The same configured answer as for one row, asked once for the whole subtree, so a directory's delete cannot
+ * spell the soft-or-hard choice a second way from a file's.
+ */
+export async function retireFileMetaUnder(spaceId: string, dirPath: string): Promise<void> {
+  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeletedByPrefix(spaceId, dirPath);
+  else await deleteFileMetaByPrefix(spaceId, dirPath);
 }
 
 /**

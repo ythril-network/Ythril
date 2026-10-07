@@ -104,16 +104,21 @@ import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { indexNamesOf } from '../db/index-names.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
-import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent } from './stored-bytes.js';
+import { bytesPresentAt } from './stored-bytes.js';
 import { parentOfSidecar } from './moved-paths.js';
-import { heldTombstoneRefuses, isNewerVersionByTheIssuer } from '../sync/upsert-plan.js';
-import { StoreTimeout } from '../db/write-timeout.js';
+import {
+  heldByPath, erasedContent, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows,
+  type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type ParentRow,
+} from './tombstone-shadow.js';
+
+// The arrival decision lives in `tombstone-shadow.ts` (pure, over rows already read); these are its public names, here, where every caller reads them.
+export { shadowDecision, type HeldFileTombstone, type MetaArrival, type FileArrival, type ArrivalVerdicts } from './tombstone-shadow.js';
 
 /** A file tombstone as stored HERE: the replicated shape, plus what never leaves this instance. */
 interface StoredFileTombstone extends FileTombstoneDoc {
@@ -189,20 +194,14 @@ export const FILE_TOMBSTONE_INDEXES = [
 export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void> {
   for (const ix of FILE_TOMBSTONE_INDEXES) await tombstonesOf(spaceId).createIndex(ix.keys, ix.options);
   // Local state, so there is nothing to migrate but the index: the one a question no longer asks is maintained on every
-  // pending write for nothing. An index that is already gone is the state wanted.
-  for (const name of REPLACED_FILE_TOMBSTONE_INDEXES) {
-    await tombstonesOf(spaceId).dropIndex(name).catch((err: unknown) => {
-      const code = (err as { code?: number }).code;
-      if (code !== INDEX_NOT_FOUND && code !== NAMESPACE_NOT_FOUND) throw err;
-    });
-  }
+  // pending write for nothing. Dropped only when listed (`indexNamesOf`, as `spaces/keyset-indexes.ts` drops the bare index it
+  // replaces): an index already gone is the state wanted, and a drop that fails any other way is the pass's failure.
+  const present = await indexNamesOf(spaceCollection(spaceId, 'fileTombstones'));
+  for (const name of REPLACED_FILE_TOMBSTONE_INDEXES.filter(n => present.includes(n))) await tombstonesOf(spaceId).dropIndex(name);
 }
 
 /** The indexes a later release replaced, by name: dropped by {@link ensureFileTombstoneIndexes}. */
 const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
-/** The server's `IndexNotFound` and `NamespaceNotFound`: a drop of what is not there. */
-const INDEX_NOT_FOUND = 27;
-const NAMESPACE_NOT_FOUND = 26;
 
 /**
  * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
@@ -303,12 +302,18 @@ async function clockForWrite(spaceId: string): Promise<PositionClock> {
 }
 
 /**
- * The next instant of the space's clock: the wall clock, or one millisecond past the last handed out when the wall clock has not
- * moved (or went back). Never equal to an earlier one, so two stamps of one space always order. Synchronous: a hold is
- * registered in the same tick that takes the stamp.
+ * The next instant the space's clock WOULD hand out (epoch milliseconds), without handing it: the wall clock, or one millisecond past
+ * the last handed out when the wall clock has not moved (or went back). The one formula of "what comes next" — {@link tick} takes
+ * it and {@link settledPositionCap} reads it, so a cap can never be above a stamp taken after it by one spelling disagreeing.
+ */
+const nextInstant = (clock: PositionClock): number => Math.max(Date.now(), clock.last + 1);
+
+/**
+ * Hand out the next instant of the space's clock. Never equal to an earlier one, so two stamps of one space always order.
+ * Synchronous: a hold is registered in the same tick that takes the stamp.
  */
 function tick(clock: PositionClock): string {
-  clock.last = Math.max(Date.now(), clock.last + 1);
+  clock.last = nextInstant(clock);
   return new Date(clock.last).toISOString();
 }
 
@@ -339,7 +344,7 @@ async function withPositionHeld<T>(spaceId: string, write: (stamp: string) => Pr
 export async function settledPositionCap(spaceId: string): Promise<string> {
   const clock = await clockOf(spaceId);
   // Read after the await, in one tick with the hold registry: a hold entered while the seed was out is below this answer or equal to it.
-  return positionHolds.lowest(spaceId) ?? new Date(Math.max(Date.now(), clock.last + 1)).toISOString();
+  return positionHolds.lowest(spaceId) ?? new Date(nextInstant(clock)).toISOString();
 }
 
 /** The cap as an `extra` for the iso keyset: the rows strictly below it. */
@@ -351,16 +356,27 @@ const prunable = (upTo: string, cap: string) => ({ ...PUBLISHED, positionAt: { $
 
 /** What a builder of {@link FILE_TOMBSTONE_QUERIES} is asked with; each reads the parts it needs. */
 export interface FileTombstoneQuerySample {
-  spaceId: string; now: Date; before: string; paths: readonly string[]; after: IsoPosition; cap: string; upTo: string; limit: number;
+  spaceId: string; now: Date; before: string; paths: readonly string[]; after: IsoPosition; cap: string; upTo: string; limit?: number | undefined;
 }
-/** A question as the store is asked it. */
-export interface FileTombstoneQuery { filter: Record<string, unknown>; sort?: Record<string, 1>; limit?: number }
+/**
+ * A question as the store is asked it. A keyset page is two reads, and `tie` is the first of them (the rest of a run of equal
+ * positions, after a cursor's id) where `filter` is the second (strictly later positions): {@link ask} runs them as one.
+ */
+export interface FileTombstoneQuery { filter: Record<string, unknown>; tie?: Record<string, unknown> | null; sort?: Record<string, 1>; limit?: number | undefined }
+
+/** A page in `(positionAt, _id)` order over the two halves of a position keyset, `base` narrowing both. */
+const positionPage = (
+  base: Record<string, unknown>, { tie, range }: { tie: Record<string, unknown> | null; range: Record<string, unknown> }, limit: number | undefined,
+): FileTombstoneQuery =>
+  ({ filter: { ...base, ...range }, tie: tie && { ...base, ...tie }, sort: { ...isoKeysetSort('positionAt') }, limit });
 
 /**
  * THE questions the module asks of its collection that an index must answer, each a function of one sample bag. The module runs
  * every one of its own reads through its entry (the settle, the by-path reader, the pages, the prune), and
  * `file-tombstones-are-indexed-db` explains these same objects, so the plan it checks is the plan the module runs and not a copy
- * of it. The two page questions are the RANGE half of a keyset read (the tie half is the same shape one instant narrower).
+ * of it. The two page questions carry both halves of a keyset read (`filter` is the range, `tie` the same shape one instant
+ * narrower) and {@link ask} runs them as one: the page read and the prune are THESE questions, so an index gate that explains them
+ * explains what is run.
  */
 export const FILE_TOMBSTONE_QUERIES = {
   /** The settle's batch: pending rows written (or last looked at) before `before`, oldest first. */
@@ -374,18 +390,21 @@ export const FILE_TOMBSTONE_QUERIES = {
     ({ filter: { path: { $in: [...paths] }, pending: true } }),
   /** A page of published tombstones after `after`, below the cap, in `(positionAt, _id)` order. */
   cappedPage: ({ spaceId, after, cap, limit }: Pick<FileTombstoneQuerySample, 'spaceId' | 'after' | 'cap' | 'limit'>): FileTombstoneQuery =>
-    ({ filter: { spaceId, ...PUBLISHED, ...isoKeysetFilters('positionAt', after, belowCap(cap)).range }, sort: { ...isoKeysetSort('positionAt') }, limit }),
+    positionPage({ spaceId, ...PUBLISHED }, isoKeysetFilters('positionAt', after, belowCap(cap)), limit),
   /** A page of the tombstones the prune may take: published, acknowledged, settled. */
   prunePage: ({ after, cap, upTo, limit }: Pick<FileTombstoneQuerySample, 'after' | 'cap' | 'upTo' | 'limit'>): FileTombstoneQuery =>
-    ({ filter: isoKeysetFilters('positionAt', after, prunable(upTo, cap)).range, sort: { ...isoKeysetSort('positionAt') }, limit }),
+    positionPage({}, isoKeysetFilters('positionAt', after, prunable(upTo, cap)), limit),
 } as const;
 
-/** Run one of {@link FILE_TOMBSTONE_QUERIES}' questions. */
+/** Run one of {@link FILE_TOMBSTONE_QUERIES}' questions — a keyset page as its tie half, then its range half, up to the limit. */
 async function ask<T>(spaceId: string, q: FileTombstoneQuery, projection: Record<string, 1>): Promise<T[]> {
-  let cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(q.filter as never), { projection });
-  if (q.sort) cursor = cursor.sort(q.sort);
-  if (q.limit !== undefined) cursor = cursor.limit(q.limit);
-  return await cursor.toArray() as unknown as T[];
+  const read = async (filter: Record<string, unknown>, limit: number | undefined): Promise<T[]> => {
+    let cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(filter as never), { projection });
+    if (q.sort) cursor = cursor.sort(q.sort);
+    if (limit !== undefined) cursor = cursor.limit(limit);
+    return await cursor.toArray() as unknown as T[];
+  };
+  return tieThenRange(read, q.tie ?? null, q.filter, q.limit);
 }
 
 /**
@@ -580,10 +599,13 @@ async function publishSlice(
         { ordered: false, commandKindOf: bulkCommandOf });
     }, 'file.tombstone.publish');
   }
-  for (const ids of inChunks(superseded, READ_CHUNK)) afterOps.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ _id: { $in: ids }, pending: true }) } });
   // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
   await writeInOneCommands(afterOps, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
     { ordered: false, commandKindOf: bulkCommandOf });
+  // The covered ones, by id: a delete, one command per chunk of ids.
+  for (const ids of inChunks(superseded, READ_CHUNK)) {
+    await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: ids }, pending: true }));
+  }
   return { published: winners.length, dropped };
 }
 
@@ -763,7 +785,7 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], ge
   const unresolved: string[] = [];
   for (const t of rows) {
     try {
-      if (await bytesPresent(await resolveSafePathChecked(spaceId, t.path))) here.push(t._id); else gone.push(t);
+      if (await bytesPresentAt(spaceId, t.path)) here.push(t._id); else gone.push(t);
     } catch (err) {
       unresolved.push(t._id);
       log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
@@ -851,7 +873,7 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
       if (seen.has(key)) continue;
       seen.add(key);
       try {
-        if (await bytesPresent(await resolveSafePathChecked(spaceId, t.move.to)) && !await bytesPresent(await resolveSafePathChecked(spaceId, t.move.from))) {
+        if (await bytesPresentAt(spaceId, t.move.to) && !await bytesPresentAt(spaceId, t.move.from)) {
           await forgetFinishedMove(spaceId, t.move.from, t.move.to);
         }
       } catch { /* cannot look: the marker stays, and the next sweep asks again */ }
@@ -930,17 +952,11 @@ export const FILE_TOMBSTONE_PAGE = 500;
 export async function publishedFileTombstones(
   spaceId: string, { after, since, limit }: { after?: IsoPosition; since?: string; limit?: number } = {},
 ): Promise<PositionedFileTombstone[]> {
-  const projection = { ...WIRE, positionAt: 1 } as const;
-  const sort = isoKeysetSort('positionAt');
-  const find = async (filter: Record<string, unknown>, n: number | undefined): Promise<PositionedFileTombstone[]> => {
-    const cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ spaceId, ...PUBLISHED, ...filter } as never), { projection }).sort({ ...sort });
-    return (n !== undefined ? cursor.limit(n) : cursor).toArray() as Promise<PositionedFileTombstone[]>;
-  };
   // Below the cap, whichever way the read starts (a cursor, or the older `since`): an open position hold stops the page
   // short of its stamp, so nothing it hands out can be acknowledged above a row that has not landed.
   const cap = await settledPositionCap(spaceId);
-  const { tie, range } = isoKeysetFilters('positionAt', after ?? { at: since ?? '' }, belowCap(cap));
-  return tieThenRange(find, tie, range, limit);
+  return ask<PositionedFileTombstone>(spaceId,
+    FILE_TOMBSTONE_QUERIES.cappedPage({ spaceId, after: after ?? { at: since ?? '' }, cap, limit }), { ...WIRE, positionAt: 1 });
 }
 
 /**
@@ -971,22 +987,8 @@ export function settledFileTombstones<T extends { positionAt: string }>(sent: re
   return sent.filter(t => t.positionAt !== last.positionAt);
 }
 
-/** The tombstones this instance holds for each of `paths`: what an arriving file is compared with. */
-export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }
-
-/** What a comparison reads of a tombstone: published or pending, the same fields. */
+/** What a comparison reads of a tombstone: published or pending, the same fields (`HeldFileTombstone`, grouped by `heldByPath`). */
 const HELD_PROJECTION = { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 } as const;
-
-/** The rows of {@link tombstonesAtPaths}, grouped by path, as the comparison reads them. */
-function heldByPath(rows: readonly StoredFileTombstone[]): Map<string, HeldFileTombstone[]> {
-  const out = new Map<string, HeldFileTombstone[]>();
-  for (const t of rows) {
-    if (!out.has(t.path)) out.set(t.path, []);
-    out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
-      ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
-  }
-  return out;
-}
 
 /**
  * THE one reader of the PUBLISHED tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what
@@ -1018,7 +1020,7 @@ interface HeldForArrivals {
  * nothing whatever the disk says, so it is not looked at.
  *
  * Read by path through {@link FILE_TOMBSTONE_QUERIES}' by-path question, then one look at the disk per path that has such a row
- * (`bytesPresent`: only a missing path is an answer). Never `heldFileTombstones`: that one is the published ones, which the stray
+ * (`bytesPresentAt`: only a missing path is an answer). Never `heldFileTombstones`: that one is the published ones, which the stray
  * drain reads and which must not widen.
  */
 async function actedPendingTombstones(
@@ -1026,13 +1028,13 @@ async function actedPendingTombstones(
 ): Promise<{ gone: Map<string, HeldFileTombstone[]>; unlooked: Map<string, HeldFileTombstone[]>; cause?: unknown }> {
   const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths,
     chunk => FILE_TOMBSTONE_QUERIES.pendingByPath({ paths: chunk }).filter, HELD_PROJECTION);
-  const speaking = heldByPath(rows.filter(t => typeof t.rowSeq === 'number' || (typeof t.contentHash === 'string' && t.contentHash !== '')));
+  const speaking = heldByPath(rows.filter(t => typeof t.rowSeq === 'number' || erasedContent(t)));
   const gone = new Map<string, HeldFileTombstone[]>();
   const unlooked = new Map<string, HeldFileTombstone[]>();
   let cause: unknown;
   for (const [p, here] of speaking) {
     try {
-      if (!await bytesPresent(await resolveSafePathChecked(spaceId, p))) gone.set(p, here);
+      if (!await bytesPresentAt(spaceId, p)) gone.set(p, here);
     } catch (err) {
       unlooked.set(p, here);
       cause ??= err;
@@ -1075,10 +1077,7 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   let removed = 0;
   let after: IsoPosition = ISO_READ_START;
   for (;;) {
-    const { tie, range } = isoKeysetFilters('positionAt', after, prunable(upTo, cap));
-    const page = await tieThenRange(
-      (filter, n: number) => ask<PrunableRow>(spaceId, { filter, sort: { ...isoKeysetSort('positionAt') }, limit: n }, PRUNABLE),
-      tie, range, FILE_TOMBSTONE_PAGE);
+    const page = await ask<PrunableRow>(spaceId, FILE_TOMBSTONE_QUERIES.prunePage({ after, cap, upTo, limit: FILE_TOMBSTONE_PAGE }), PRUNABLE);
     removed += await removeUnlessKept(spaceId, page);
     const last = page[page.length - 1];
     if (page.length < FILE_TOMBSTONE_PAGE || !last?.positionAt) break;
@@ -1123,67 +1122,6 @@ function keepsAfterPrune(row: PrunableRow, pendingPaths: ReadonlySet<string>, ke
 }
 
 /**
- * Does a held file tombstone SHADOW an arriving file — by VERSION for its metadata, by CONTENT for its bytes? Pure, over
- * the tombstones held for the arrival's path (Q-229).
- *
- * A tombstone is a statement about a version of a path, not about the path for ever:
- *  - **metadata** is shadowed when some held tombstone has `rowSeq >= seq`: the arrival is the version the deletion
- *    erased, or older. A higher seq is a newer version and passes. A tombstone with no `rowSeq` (written before versions
- *    travelled) shadows no metadata, which is how it behaved and the stated limit of the release. And only a tombstone
- *    that speaks against this version's author and deliverer shadows it — the record rule, `heldTombstoneRefuses`: one
- *    another instance issued does not refuse the version its proven author delivers, and one stored for an upstream
- *    does not refuse that upstream's later version. Without it a peer could store a deletion of a path nobody held, at
- *    a high version, and refuse every later file at that path.
- *  - **bytes** are shadowed when some held tombstone's own `contentHash` equals the arriving hash and no live row at the
- *    path is newer than it (`liveRowNewer`: identical bytes re-created as a newer version arrive with their metadata
- *    first and pass). A tombstone with no hash shadows no bytes.
- *
- * What it prevents: without the version half a deleted file's path is poisoned for ever, every later upload of it
- * refused; without the content half a peer's still-live copy of the deleted bytes comes back on every cycle.
- */
-export function shadowDecision(
-  held: ReadonlyArray<{ rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }>,
-  arrival: MetaArrival | { kind: 'bytes'; sha256: string; liveRowNewer: boolean },
-): boolean {
-  if (arrival.kind === 'meta') {
-    return held.some(t => typeof t.rowSeq === 'number' && t.rowSeq >= arrival.seq
-      && heldTombstoneRefuses(t, arrival.author, arrival.deliveredBy));
-  }
-  if (arrival.liveRowNewer) return false;
-  return held.some(t => typeof t.contentHash === 'string' && t.contentHash !== '' && t.contentHash === arrival.sha256);
-}
-
-/**
- * An arriving version of a file's metadata: its seq, who wrote it and the peer the door PROVES delivered it. Without a
- * deliverer (a local or admin write, the stray drain) every held tombstone at or above the version shadows it.
- */
-export interface MetaArrival { kind: 'meta'; seq: number; author?: string; deliveredBy?: string }
-
-/** One arrival to ask {@link shadowedArrivals} about: its id, its path, and what it is — metadata at a version, or bytes with a hash. */
-export type FileArrival = { id: string; path: string } & (MetaArrival | { kind: 'bytes'; sha256: string });
-
-/**
- * What {@link decideArrivals} came to: the arrivals a deletion shadows, and the ones it could not tell about.
- */
-export interface ArrivalVerdicts {
-  /** Ids a held tombstone — published, or pending with its act's bytes already gone — shadows. */
-  shadowed: Set<string>;
-  /** Ids a pending tombstone WOULD shadow if its act had happened, whose path could not be looked at to tell. */
-  undecided: Set<string>;
-  /** The first failure to look, when there is an undecided arrival. */
-  cause?: unknown;
-}
-
-/**
- * The failure of a door that cannot tell whether a delete already happened: a retryable `503`, in the one shape every door
- * answers a failure on the store's side with (`StoreTimeout` — `classifyReadFailure` answers it `503` with `Retry-After`, and the
- * sender does not remember it). Neither guess is safe: "it did not happen" stores bytes a delete erased, and "it did"
- * tells the sender the path is tombstoned for good (`200 { tombstoned: true }` is remembered until it restarts).
- */
-const cannotTellIfDeleted = (cause: unknown): StoreTimeout =>
-  new StoreTimeout('Looking at a path to tell whether its file was deleted here', { cause });
-
-/**
  * Which of `arrivals` a held tombstone shadows, and which it could not be decided for — THE predicate every arrival site asks
  * (the metadata writer, the manifest pull, the byte doors): one chunked read of the published tombstones by path for all of
  * them, one of the pending ones, then {@link shadowDecision} per arrival.
@@ -1205,20 +1143,6 @@ const cannotTellIfDeleted = (cause: unknown): StoreTimeout =>
 export async function decideArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<ArrivalVerdicts> {
   if (arrivals.length === 0) return { shadowed: new Set(), undecided: new Set() };
   return judgeArrivals(spaceId, await readHeldFor(spaceId, pathsDecidingArrivals(arrivals.map(a => a.path))), arrivals);
-}
-
-/**
- * The paths whose tombstones decide arrivals at `paths`: each path, and for a SIDECAR (`_converted/<p>.md`, `_extracted/<p>/…`)
- * the file `<p>` it is a product of — its deletion is the parent's, and a sidecar has no tombstone of its own (Q-349,
- * {@link shadowedByParent}). The one place the parent's path is added, so every door that asks reads the same set.
- */
-function pathsDecidingArrivals(paths: readonly string[]): string[] {
-  const asked = new Set(paths);
-  for (const p of paths) {
-    const parent = parentOfSidecar(p)?.parent;
-    if (parent !== undefined) asked.add(parent);
-  }
-  return [...asked];
 }
 
 /** {@link decideArrivals} over tombstones already read. */
@@ -1286,23 +1210,6 @@ async function shadowedAgainst(
   return shadowed;
 }
 
-/** A tombstone that erased REAL content here: it carries the hash of the row it removed. One stored for a path nobody held has none. */
-const erasedContent = (t: { contentHash?: string }): boolean => typeof t.contentHash === 'string' && t.contentHash !== '';
-
-/** What the verdict reads of a parent's row: its version, the hash of its bytes, whether a soft delete flagged it, who wrote and delivered it. */
-interface ParentRow { seq?: number; sha256?: string; deletedAt?: string; author?: { instanceId?: string }; deliveredBy?: string }
-
-/**
- * Has the path a tombstone erased been RE-CREATED since? A live row whose bytes hash differently from the content the tombstone
- * erased, or one at a newer version by the SAME author. Never the version alone across authors: two instances' counters are not
- * one clock, and a peer's low-seq row would otherwise be outranked by this instance's high one for ever.
- */
-function parentRecreated(t: HeldFileTombstone, row: ParentRow | undefined): boolean {
-  if (row === undefined) return false;
-  if (typeof row.sha256 === 'string' && row.sha256 !== t.contentHash) return true;
-  return isNewerVersionByTheIssuer(t, row);
-}
-
 /**
  * Which of `arrivals` are SIDECARS of a file a held tombstone erased — a sidecar follows its parent (bundle-71, Q-349).
  *
@@ -1324,7 +1231,7 @@ function parentRecreated(t: HeldFileTombstone, row: ParentRow | undefined): bool
  *  - **speaks against the parent** (`heldTombstoneRefuses`, the who-half the parent's own arrival gets) judged by the PARENT row's
  *    author and deliverer where a live one exists — never the sidecar row's, whose author is whoever delivered it, which would let
  *    every sidecar through, including for a tombstone this instance issued itself;
- *  - and `p` has not been **re-created** ({@link parentRecreated}).
+ *  - and `p` has not been **re-created** (`parentShadows`, `tombstone-shadow.ts`, which holds the pure verdict).
  *
  * Stated limit: a parent re-created AFTER its sidecar was refused does not bring the sidecar back until the sender restarts or
  * its hash changes (a receiver that never converts is fed by the pull).
@@ -1341,12 +1248,7 @@ async function shadowedByParent(
   if (asked.length === 0) return shadowed;
   const rows = await readStoredById<ParentRow>(spaceCollection(spaceId, 'files'), [...new Set(asked.map(x => x.parent))],
     { seq: 1, sha256: 1, deletedAt: 1, author: 1, deliveredBy: 1 });
-  for (const { id, parent, here } of asked) {
-    // A row a soft delete flagged is the deletion itself, not a re-creation, and speaks for nobody.
-    const stored = rows.get(parent);
-    const live = stored !== undefined && stored.deletedAt === undefined ? stored : undefined;
-    if (here.some(t => !parentRecreated(t, live) && heldTombstoneRefuses(t, live?.author?.instanceId, live?.deliveredBy))) shadowed.add(id);
-  }
+  for (const { id, parent, here } of asked) if (parentShadows(here, rows.get(parent))) shadowed.add(id);
   return shadowed;
 }
 

@@ -34,8 +34,11 @@ import { topLevelFunctionSpans } from './_call-graph.mjs';
 
 const OWNER = 'server/src/files/tombstones.ts';
 const CAP = 'settledPositionCap';
-/** A comparison of the position in a query: a range operator on it, or the shared keyset over it. */
-const COMPARES_POSITION = /positionAt['"]?\s*:\s*\{\s*\$(?:lt|lte|gt|gte)\b|isoKeysetFilters\s*\(\s*['"]positionAt['"]/;
+/**
+ * A comparison of the position in a query: a range operator on it, the shared keyset over it, or asking one of the module's two
+ * position questions (`FILE_TOMBSTONE_QUERIES.cappedPage` / `.prunePage`), whose builders hold the keyset the readers run.
+ */
+const COMPARES_POSITION = /positionAt['"]?\s*:\s*\{\s*\$(?:lt|lte|gt|gte)\b|isoKeysetFilters\s*\(\s*['"]positionAt['"]|FILE_TOMBSTONE_QUERIES\s*\.\s*(?:cappedPage|prunePage)\s*\(/;
 
 /** `{ readers, uncapped }`: the functions that compare `positionAt`, and those among them that never ask the cap. */
 export function positionReaders(code) {
@@ -78,5 +81,8 @@ describe('every ordering read of a file tombstone position is capped by one func
     assert.deepEqual(positionReaders(oneMissing).uncapped, ['prune'], 'a reader that drops the cap is not seen');
     const keyset = `async function since(s) { const { tie, range } = isoKeysetFilters('positionAt', after); return tieThenRange(find, tie, range); }`;
     assert.deepEqual(positionReaders(keyset), { readers: ['since'], uncapped: ['since'] }, 'the shared keyset over positionAt is not a comparison to the scan');
+    const asked = `async function page(s) { return ask(s, FILE_TOMBSTONE_QUERIES.cappedPage({ spaceId: s, after, cap: 'x' })); }\n`
+      + `async function prune(s, upTo) { const cap = await ${CAP}(s); return ask(s, FILE_TOMBSTONE_QUERIES.prunePage({ after, cap, upTo })); }`;
+    assert.deepEqual(positionReaders(asked), { readers: ['page', 'prune'], uncapped: ['page'] }, 'a reader that asks the position questions is not seen');
   });
 });
