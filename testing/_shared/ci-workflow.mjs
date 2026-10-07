@@ -73,7 +73,7 @@ export const loadCi = (root = REPO_ROOT) => loadWorkflow(CI_WORKFLOW, root);
 export const loadFullRun = (root = REPO_ROOT) => loadWorkflow(FULL_RUN_WORKFLOW, root);
 
 /** Every committed workflow file, repo-relative. The listing is git's, with a floor inside `trackedSources`. */
-export const workflowFiles = () => trackedSources('.github/workflows', { ext: ['.yml', '.yaml'], floor: 3 });
+export const workflowFiles = () => trackedSources('.github/workflows', { ext: ['.yml', '.yaml'], floor: 4 });
 
 /** Every committed workflow, `[{ file, doc }]`. */
 export const loadAllWorkflows = () => workflowFiles().map((file) => ({ file, doc: loadWorkflow(file) }));

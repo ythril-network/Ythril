@@ -414,7 +414,7 @@ locally only the test files its diff reaches.
 - **The cost is two full graphs per bundle, by design:** this run and the pull request's. A full run's result artifacts are
   kept 30 days and nobody reads them. A full run also writes no image or sidecar cache (see
   [What is cached](#what-is-cached-and-what-is-not)), so one after a bundle that changed image layers builds them cold.
-- **An outside contributor is not asked for one.** Only a maintainer can push a `full-run/` ref to this repository, and a
+- **An outside contributor is not asked for one.** Only someone with push access to the repository can push a `full-run/` ref, and a
   contributor's pull request runs every suite through its own `Build & Test`. A fork may run the same workflow in its own
   Actions.
 

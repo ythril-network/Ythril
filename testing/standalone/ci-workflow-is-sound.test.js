@@ -1481,7 +1481,7 @@ describe('ci.yml — the rules, held against the real workflow', () => {
   it('the gate is a job of its own that nothing else waits for (a gate in the middle is not a gate)', () => {
     const [gate] = mergeGateEntries(REAL);
     assert.ok(gate, `no job is named "${MERGE_GATE_NAME}"`);
-    const waitedFor = jobEntries(REAL).filter((j) => j.id !== gate.id &&transitiveNeeds(REAL, j.id).has(gate.id)).map((j) => j.id);
+    const waitedFor = jobEntries(REAL).filter((j) => j.id !== gate.id && transitiveNeeds(REAL, j.id).has(gate.id)).map((j) => j.id);
     assert.deepEqual(waitedFor, [], 'jobs wait for the gate, so it is not the last thing that runs');
   });
 });
