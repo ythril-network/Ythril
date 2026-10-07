@@ -95,6 +95,7 @@ below it, everything it relayed.** Clubs, closed and democratic networks are unc
 | `GET /api/sync/file-tombstones` takes `cursor` and answers `nextCursor` | Ignores `cursor`, answers one page at its fixed ceiling with no `nextCursor`; this instance warns that the answer may be cut | Without `cursor` it answers exactly as before, so an older puller reads what it always did (and still cannot read past the ceiling) |
 | `POST /api/sync/file-tombstones` is paged and answers `{ applied, refused?, declined? }` | Answers `{ applied }` only, and takes a large body the way it did | Sends one body for everything, which this instance takes up to the per-request cap; a set larger than that cannot succeed until it upgrades |
 | Bytes a held file tombstone covers: `200 { tombstoned: true }`; `filemeta.tombstoned` in the batch answer | Stores them, as before, and omits the counter | Treats the `200` as stored and ignores the extra counter: no re-upload loop |
+| A deleted file's sidecars (`_converted/`, `_extracted/`) are refused by the parent's tombstone, and a delete removes the rows they left | Keeps the sidecar bytes and rows it received for a file a peer deleted, and may advertise them again | Its push of such a sidecar is answered `200 { tombstoned: true }`, so it stops sending it |
 
 Every answer added in the table is additive, so an older instance reads it as the answer it always gave.
 **A file tombstone this instance held before the upgrade names no version, so it shadows nothing**: the protection
