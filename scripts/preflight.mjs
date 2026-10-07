@@ -30,11 +30,12 @@ import { Socket } from 'node:net';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
+import { TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS } from './_shared/client-results.mjs';
 
 /** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
-const CLIENT_REPORT = join('test-results', CLIENT_RESULTS);
+const CLIENT_REPORT = join(TIMING_RESULTS_FOLDER, CLIENT_RESULTS);
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
