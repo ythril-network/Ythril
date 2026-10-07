@@ -93,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pages and every arriving record (push, pull, import, file metadata included) cost a handful of database commands per page.
 - **Sync:** A fork's id derives from the parent's id, seq and text, so a re-sent push upserts its fork; an older receiver accepts an
   eleventh. Documents past the 500-per-family cap and records the receiver's store refuses count in `rejected` (the latter named in the log).
+- **Sync:** `delete_fact` and the guides say that a fork is its own record: deleting or expiring its parent leaves it, and it is deleted by its own id.
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed, so
   `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; the file manifest is still walked. `computedAt` is when the root was computed.
 - **Sync:** A page's `nextCursor` names a position (seq and record), still opaque: send it back unchanged. `GET /api/sync/tombstones`

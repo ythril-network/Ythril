@@ -22,7 +22,16 @@ Set-Location server; npx tsx src/index.ts              # run in background, redi
 so the SPA fallback cannot serve `index.html` out of `.claude\worktrees\<name>\client\dist\browser` — `/setup`
 answers 404 while the API works (found by the Q-99 part 2 verify, 2026-10-01). Point `CLIENT_DIST` at a junction
 outside the dot path (`New-Item -ItemType Junction -Path <scratch>\client-browser -Target <worktree>\client\dist\browser`)
-and remove the junction afterwards.
+and remove the junction afterwards. A junction follows every client rebuild; a copy of the bundle works too, but has
+to be copied again after each one. Playwright shows this as a timeout waiting for `#label`.
+
+**Write the server log as UTF-8.** A PowerShell `>` redirect writes UTF-16, so a grep of the log for `Setup complete`
+or an error finds nothing while the text is there. Start the server with
+`... 2>&1 | Out-File -Encoding utf8 <scratch>\server.log`, or decode the file as `utf16le` before searching it.
+
+**Reuse a warm model cache.** A fresh `DATA_ROOT` puts the model cache at `<DATA_ROOT>\.model-cache`, so every new
+scratch root downloads the embedding model again before the first embed. Point `MODEL_CACHE_DIR` at a cache an earlier
+run already filled (one scratch cache kept outside the per-run roots) and the server embeds from the first record.
 
 **Anything that runs `recall` or `similar` needs a search engine, and host mongod has none.** Every recall answers
 `SearchNotEnabled` (code 31082) against it — found by the Q-92 verify, 2026-09-28; this line used to say host mongod
@@ -105,16 +114,8 @@ Routes to sweep: `/brain`, `/files/conflicts`, `/schema-library`, `/settings/{to
 - Collect page console errors; filter for `NG0`/zone patterns after change-detection work.
 - One benign 500 ("Config not loaded") is logged during first-run before setup completes — pre-existing server behavior, not a client bug.
 - On plain host mongod the server logs "Could not list search indexes" warnings — harmless in scratch runs.
-- **From a git worktree under `.claude/`, the server will not serve the SPA** (found 2026-09-30, bundle-32). Express's
-  `static` and `sendFile` refuse any path with a dot-folder in it, so every page answers `{"error":"Not found"}`
-  and the setup page never appears (Playwright times out waiting for `#label`). Copy the built bundle to a path
-  with no dot-folder and point `CLIENT_DIST` at it — copy again after every client rebuild:
-  ```bash
-  cp -r client/dist/browser <scratch>/dist-copy
-  CLIENT_DIST='<scratch>/dist-copy' PORT=3260 TRUST_PROXY=1 CONFIG_PATH='<scratch>/config/config.json' \
-    DATA_ROOT='<scratch>/data' MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true' \
-    npx tsx src/index.ts   # from server/
-  ```
+- From a git worktree under `.claude/` the server will not serve the SPA — see *Isolated server* above for the
+  `CLIENT_DIST` junction.
 - **The app has ONE theme.** There is no light/dark switch and no `prefers-color-scheme` rule in `styles.scss`, so a
   "both themes" check does not apply — screenshot the one theme and say so rather than emulating a scheme the CSS
   ignores.
