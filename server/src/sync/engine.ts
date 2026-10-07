@@ -29,7 +29,7 @@ import { pushFamily } from './push-family.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
+import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases, isDirectionalNetwork } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
@@ -432,7 +432,7 @@ async function runSyncForMember(
     // Push to this member if the direction allows it (push or both).
     // Pull from this member if bidirectional (both), or for non-directional networks.
     // Braintree/Pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
-    const isDirectional = net.type === 'braintree' || net.type === 'pubsub';
+    const isDirectional = isDirectionalNetwork(net);
     const shouldPull = !isDirectional || member.direction === 'both' || member.direction === 'pull';
     const shouldPush = !isDirectional || member.direction === 'both' || member.direction === 'push';
 
@@ -894,7 +894,7 @@ async function pushToPeer(
   // push is O(changed) and its heap is flat however much has accumulated since the last sync.
   // Braintree nodes relay docs from all peers; other topologies only push their own authored docs
   // to prevent foreign docs (e.g. received from a third instance) from polluting peers' watermarks.
-  const isDirectionalType = freshNet?.type === 'braintree' || freshNet?.type === 'pubsub';
+  const isDirectionalType = isDirectionalNetwork(freshNet);
   const ownedFilter = isDirectionalType ? {} : { 'author.instanceId': cfg.instanceId };
 
   let maxSeqPushed = lastSeqPushed;

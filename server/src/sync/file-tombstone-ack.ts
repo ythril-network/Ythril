@@ -24,7 +24,9 @@
  */
 import type { Config } from '../config/types.js';
 import { getConfig, saveConfigSoon } from '../config/loader.js';
-import { membersServing, peerTokensReaching } from './served-watermark.js';
+import { membersServing, peerTokensReaching, peersOutside } from './served-watermark.js';
+import { setMemberSpaceMark } from './member-space-mark.js';
+import { isComparableIso } from '../util/comparable-iso.js';
 
 /** The subset of a member this decision needs — keeps the pure part testable without a config. */
 export interface AckedMember {
@@ -39,14 +41,11 @@ export type FileTombstoneFloor =
   | { prune: false; reason: 'member-never-acked' | 'peer-token-scoped'; blockedBy?: string };
 
 /**
- * ISO8601 UTC timestamps sort lexically, which is what lets this compare with `<` instead of parsing dates.
- * That only holds for the fixed-width `Z` form the codebase writes (`new Date().toISOString()`), so anything
- * else is treated as unknown rather than compared — a `+02:00` offset would sort wrongly and silently move the
- * floor forward.
+ * ISO8601 UTC timestamps sort lexically, which is what lets this compare with `<` instead of parsing dates — the
+ * fixed-width `Z` form only, so anything else is treated as unknown rather than compared (`util/comparable-iso.ts`,
+ * where the rule lives so the file-tombstone cursor asks the same question). Re-exported: this is where its readers look.
  */
-export function isComparableIso(v: unknown): v is string {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v);
-}
+export { isComparableIso };
 
 /**
  * The newest `deletedAt` every peer has acknowledged, or a reason not to prune.
@@ -61,8 +60,7 @@ export function fileTombstoneFloor(
   spaceId: string,
   peerTokenIds: string[] = [],
 ): FileTombstoneFloor {
-  const known = new Set(members.map(m => m.instanceId));
-  const stranger = peerTokenIds.find(id => !known.has(id));
+  const stranger = peersOutside(members, peerTokenIds)[0];
   if (stranger !== undefined) {
     return { prune: false, reason: 'peer-token-scoped', blockedBy: stranger };
   }
@@ -141,19 +139,8 @@ export function applyFileTombstoneAck(
   spaceId: string,
   ackedAt: string | null,
 ): boolean {
-  if (!peerInstanceId || ackedAt === null) return false;
-  let changed = false;
-  for (const net of cfg.networks ?? []) {
-    if (!net.spaces?.includes(spaceId)) continue;
-    const m = net.members?.find(x => x.instanceId === peerInstanceId);
-    if (!m) continue;
-    const next = foldAckedAt(m.lastFileTombstoneAckedAt?.[spaceId], ackedAt);
-    if (next === null) continue;
-    m.lastFileTombstoneAckedAt ??= {};
-    m.lastFileTombstoneAckedAt[spaceId] = next;
-    changed = true;
-  }
-  return changed;
+  if (ackedAt === null) return false;
+  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastFileTombstoneAckedAt', current => foldAckedAt(current, ackedAt));
 }
 
 /*

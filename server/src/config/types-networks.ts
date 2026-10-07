@@ -50,6 +50,12 @@ export interface NetworkMember {
    *  peer's position in ours, and without it a tombstone can never be safely dropped (see
    *  `sync/served-watermark.ts`). Monotonic; absent means "never pulled", which blocks pruning. */
   lastSeqServed?: Record<string, number>;
+  /** spaceId → where the ONE-TIME re-read of this UPSTREAM's tombstones stands (`sync/deletion-authority.ts`,
+   *  `nextRereadState`): absent = owed from the start, a cursor = owed from there, `'done'` = ran to the end once and
+   *  is never asked for again. It exists because deletions an upstream issued before D-14 were declined and the
+   *  receive watermark moved past them; re-reading what it still holds applies them. Kept per member and space like
+   *  the watermarks (a rename carries it, a counter wipe re-owes it), and never shown by `GET /api/networks`. */
+  tombstoneRereadAt?: Record<string, string>;
   consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
   parentInstanceId?: string; // braintree only
   /** Set during a temporary reparent; stores the original parent so it can be restored. */
@@ -120,18 +126,19 @@ export interface MemberRemoval {
  *
  * ## Why the list exists, and why it lives next to the type rather than at its one caller
  *
- * `applySpaceRenameToConfig` carried these with one `if` block per field: the same rule written four times,
+ * `applySpaceRenameToConfig` carried these with one `if` block per field: the same rule written once per field,
  * and the failure of a missed copy is silent by construction. A watermark that is not carried resets to
  * "unknown", which is SAFE — the pull re-reads from 0, idempotent by seq, and the retention floors simply
  * stop pruning. Nothing errors and nothing is lost, so nobody would ever report it.
  *
- * A fifth per-space watermark is added HERE, to the interface above, by somebody who has no reason to open
+ * The next per-space map is added HERE, to the interface above, by somebody who has no reason to open
  * `spaces/rename.ts`. The list sitting beside the fields is what puts the decision in front of them, and
  * `file-tombstone-ack.test.js` reads the interface's own source to check nothing has been added to it and
- * left out of this.
+ * left out of this. The same list is what a seq-counter wipe clears (`STALE_ON_COUNTER_WIPE`, `util/seq.ts`): a
+ * map that must survive a wipe is excluded THERE, with its reason, rather than left off this list.
  */
 export const PER_SPACE_WATERMARKS = [
-  'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt',
+  'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
 ] as const satisfies readonly (keyof NetworkMember)[];
 
 export interface VoteCast {

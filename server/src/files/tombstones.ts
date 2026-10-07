@@ -48,7 +48,8 @@
  * ## What crosses the wire
  *
  * `FileTombstoneDoc` is the replicated shape and the only one served ({@link WIRE}): `_id`, `spaceId`, `path`,
- * `deletedAt` — exactly what a receiver's `POST /file-tombstones` stores. `pending` and `move` are this instance's own
+ * `deletedAt`, and `issuer` and `rowSeq` where the act knew them — exactly what a receiver's `POST /file-tombstones`
+ * stores. `pending`, `move`, `contentHash`, `storedVia` and `positionAt` are this instance's own
  * ({@link StoredFileTombstone}): a pending tombstone is never served, a confirmed one carries no `pending`, and the
  * projection keeps every local field off the wire rather than each reader remembering to. File tombstones are not
  * hashed (`brain/merkle.ts` reads none), so no hash rule applies to either field.
@@ -79,10 +80,23 @@ interface StoredFileTombstone extends FileTombstoneDoc {
   pending?: true;
   /** The move that wrote it, when one did: what tells a retried move it is owed. */
   move?: { from: string; to: string };
+  /** The hash of the file row's content when the act (or the apply) removed it, as THIS instance held it — what a
+   *  later byte arrival is compared with (`shadowDecision`). Never on the wire: a deletion carries no fingerprint of
+   *  the erased content. */
+  contentHash?: string;
+  /** The upstream that delivered a RELAYED tombstone, so a later version from that same upstream is not refused by it. */
+  storedVia?: string;
+  /** This instance's own position for the tombstone, for paging, acknowledgement and pruning: the publish time of an
+   *  own one, the RECEIVE time of a relayed one — a foreign clock never enters a local position. */
+  positionAt?: string;
 }
 
-/** The fields a file tombstone has on the wire. Every serving reader projects to these and nothing else. */
-const WIRE = { _id: 1, spaceId: 1, path: 1, deletedAt: 1 } as const;
+/**
+ * The fields a file tombstone has on the wire. Every serving reader projects to these and nothing else. Exported so a
+ * gate can derive the wire shape from it instead of keeping a list that goes stale the day a field joins (`issuer` and
+ * `rowSeq` did).
+ */
+export const WIRE = { _id: 1, spaceId: 1, path: 1, deletedAt: 1, issuer: 1, rowSeq: 1 } as const;
 /** A tombstone whose act has happened: the only kind any reader outside the act's own bookkeeping may see. */
 const PUBLISHED = { pending: { $exists: false } } as const;
 /** How long a pending tombstone may wait for its act before the TTL sweep settles it from the disk. */
@@ -441,6 +455,30 @@ export async function tombstonedFilePaths(spaceId: string, paths: readonly strin
 export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Promise<number> {
   const res = await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ deletedAt: { $lte: upTo }, ...PUBLISHED }));
   return res.deletedCount ?? 0;
+}
+
+/**
+ * Does a held file tombstone SHADOW an arriving file — by VERSION for its metadata, by CONTENT for its bytes? Pure, over
+ * the tombstones held for the arrival's path (Q-229).
+ *
+ * A tombstone is a statement about a version of a path, not about the path for ever:
+ *  - **metadata** is shadowed when some held tombstone has `rowSeq >= seq`: the arrival is the version the deletion
+ *    erased, or older. A higher seq is a newer version and passes. A tombstone with no `rowSeq` (written before versions
+ *    travelled) shadows no metadata, which is how it behaved and the stated limit of the release.
+ *  - **bytes** are shadowed when some held tombstone's own `contentHash` equals the arriving hash and no live row at the
+ *    path is newer than it (`liveRowNewer`: identical bytes re-created as a newer version arrive with their metadata
+ *    first and pass). A tombstone with no hash shadows no bytes.
+ *
+ * What it prevents: without the version half a deleted file's path is poisoned for ever, every later upload of it
+ * refused; without the content half a peer's still-live copy of the deleted bytes comes back on every cycle.
+ */
+export function shadowDecision(
+  held: ReadonlyArray<{ rowSeq?: number; contentHash?: string }>,
+  arrival: { kind: 'meta'; seq: number } | { kind: 'bytes'; sha256: string; liveRowNewer: boolean },
+): boolean {
+  if (arrival.kind === 'meta') return held.some(t => typeof t.rowSeq === 'number' && t.rowSeq >= arrival.seq);
+  if (arrival.liveRowNewer) return false;
+  return held.some(t => typeof t.contentHash === 'string' && t.contentHash !== '' && t.contentHash === arrival.sha256);
 }
 
 /** Keep a tombstone a peer pushed, to pass it on: its four wire fields, inserted once by id. */

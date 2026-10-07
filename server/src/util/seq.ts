@@ -1,5 +1,6 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
+import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
@@ -358,13 +359,14 @@ export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
 /**
  * Every watermark that becomes a LIE when the seq counters are wiped.
  *
- * All four are `spaceId -> position` maps on a network member, and all four are meaningless once the counter
- * they were measured against restarts at zero. Listing them here rather than at the reset below is what makes
- * "did we cover all of them" a readable question — the reset used to clear exactly one, and the other three
- * were not excluded for a reason, they were not thought of.
+ * Each is a `spaceId -> position` map on a network member, and each is meaningless once the counter it was
+ * measured against restarts at zero. It IS `PER_SPACE_WATERMARKS` (`config/types-networks.ts`), not a second
+ * list of the same maps: the reset used to clear exactly one and the rest were not excluded for a reason, they
+ * were not thought of — and a list kept here beside the one the rename carries is the same omission waiting for
+ * the next map. The one-time tombstone re-read (`tombstoneRereadAt`) is on it, and re-owing it after a wipe is
+ * harmless: the re-read is idempotent. A map that must SURVIVE a wipe is excluded here, by name, with its reason.
  */
-const STALE_ON_COUNTER_WIPE = ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServed',
-  'lastFileTombstoneAckedAt'] as const;
+const STALE_ON_COUNTER_WIPE: readonly (typeof PER_SPACE_WATERMARKS)[number][] = PER_SPACE_WATERMARKS;
 
 /**
  * Detects the bind-mount / volume mismatch that occurs when `docker compose
@@ -374,7 +376,7 @@ const STALE_ON_COUNTER_WIPE = ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServe
  * members still carry watermarks from the previous run. Local seqs now restart at 1 while the watermarks
  * describe a history of numbers that will be reused for entirely different records.
  *
- * ## It used to clear ONE of the four, and the other three fail in different directions
+ * ## It used to clear ONE of them, and the others fail in different directions
  *
  * | watermark | what it means | stale-high costs |
  * |---|---|---|
@@ -388,7 +390,7 @@ const STALE_ON_COUNTER_WIPE = ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServe
  * genuinely matches nothing. That is indistinguishable from a healthy idle cycle without the debug line the
  * push loop now emits.
  *
- * The third and fourth fail toward PRUNING, which `sync/served-watermark.ts` names as the dangerous direction:
+ * The last two of those fail toward PRUNING, which `sync/served-watermark.ts` names as the dangerous direction:
  * a tombstone dropped too early lets a deleted record come back from a peer that never saw the deletion.
  * Clearing them fails toward keeping, which is that module's stated rule.
  *

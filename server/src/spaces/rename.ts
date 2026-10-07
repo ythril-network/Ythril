@@ -235,13 +235,13 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
       for (const p of net.pendingSpaces ?? []) if (p.localId === oldId) p.localId = newId;
     }
 
-    // Update member watermark keys (lastSeqReceived / lastSeqPushed / lastSeqServed /
-    // lastFileTombstoneAckedAt).
+    // Update every member's per-space watermark key (`PER_SPACE_WATERMARKS`).
     //
-    // All four are keyed by space id, so a rename that misses one silently resets that watermark to
-    // "unknown". For the two pull watermarks that means re-pulling from 0 (idempotent by seq). For the two
-    // retention floors it means the tombstone prune stops until every member has pulled (or acked) again —
-    // safe, and invisible, which is why they are carried here rather than left to heal.
+    // They are all keyed by space id, so a rename that misses one silently resets that watermark to
+    // "unknown". For a pull watermark that means re-pulling from 0 (idempotent by seq). For a retention floor
+    // it means the tombstone prune stops until every member has pulled (or acked) again, and for the
+    // tombstone re-read state it means the repair is owed again — safe, and invisible, which is why they are
+    // carried here rather than left to heal.
     /*
      * ONE loop over `PER_SPACE_WATERMARKS`, not one `if` per field.
      *

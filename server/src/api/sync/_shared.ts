@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
+import { peerRelayCaller } from '../../auth/peer-relay.js';
+import type { DeliveryAuth } from '../../sync/deletion-authority.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -249,6 +251,21 @@ export function syncReadStart(sinceSeq: unknown, cursor: unknown): SeqPosition |
 export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {
   const v = authToken?.['peerInstanceId'];
   return typeof v === 'string' && v ? v : undefined;
+}
+
+/**
+ * Who a page of tombstones came from, as the push route knows it from the authenticated token: the peer the token is
+ * bound to, a trusted instance administrator relaying on anyone's behalf, or nobody entitled to either.
+ *
+ * The input of `deliveryOf` (`sync/deletion-authority.ts`), which adds what only this instance's config knows — whether
+ * that peer is the space's upstream. Built on `peerRelayCaller` so the three-way answer has one spelling: a peer
+ * identity WINS over admin (a token bound to a peer acts as that peer), and a token that is neither is no relay. The
+ * two tombstone routes each read the field by hand (`['peerInstanceId']`) and the admin test beside it.
+ */
+export function deliveryFromToken(authToken: Record<string, unknown> | undefined): DeliveryAuth {
+  const caller = peerRelayCaller(authToken as Parameters<typeof peerRelayCaller>[0]);
+  if (caller.kind === 'peer') return { peerInstanceId: caller.peerInstanceId };
+  return { trustedRelay: caller.kind === 'admin' };
 }
 
 /**

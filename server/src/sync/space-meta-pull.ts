@@ -18,7 +18,7 @@ import { withoutBrokenLibraryRefs } from '../spaces/body-schemas.js';
 import { storeNetworkLayer } from '../spaces/effective-meta.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { upstreamOf } from '../networks/network-spaces.js';
+import { isUpstreamPeer } from '../networks/network-spaces.js';
 import { mergeReplicatedMeta } from './replicated-meta.js';
 import { peerSafeFetch } from './peer-fetch.js';
 
@@ -30,7 +30,7 @@ export async function pullSpaceMetaFromUpstream(
   remoteSpaceId: string,
   opts: () => RequestInit,
 ): Promise<boolean> {
-  if (upstreamOf(net) !== member.instanceId) return false;
+  if (!isUpstreamPeer(net, member.instanceId)) return false;
   try {
     const q = new URLSearchParams({ spaceId: remoteSpaceId, networkId: net.id });
     const resp = await peerSafeFetch(`${member.url}/api/sync/meta?${q}`, opts());

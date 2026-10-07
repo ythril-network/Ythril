@@ -51,6 +51,7 @@ import { andPredicates } from '../db/and-predicates.js';
 import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { createProbeCache, type ProbeTtl } from './cached-probe.js';
+import { isComparableIso, COMPARABLE_ISO_LENGTH } from './comparable-iso.js';
 import { MAX_SYNC_SEQ, SEQ_CARRYING, settledSeqRange } from './seq.js';
 
 // ── The position and its cursor ────────────────────────────────────────────────
@@ -109,6 +110,62 @@ export function decodeSeqCursor(cursor: unknown): SeqPosition | undefined {
   const id = text.slice(colon + 1);
   if (id === '' || id.length > MAX_CURSOR_ID_LENGTH) return undefined;
   return { seq, id };
+}
+
+// ── The position of a read that is keyed by a TIME, not a seq ──────────────────
+
+/**
+ * Where a read of records that carry no seq but an instant starts — the file tombstones, which are positioned by when
+ * they were published or received here (`positionAt`): strictly after `at`, and — with an `id` — after that record within
+ * the run of equal instants. `at` is a comparable ISO instant (`util/comparable-iso.ts`), or `''` for the start of time.
+ */
+export interface IsoPosition {
+  at: string;
+  id?: string | undefined;
+}
+
+/** The start of a read with no cursor: before every instant. */
+export const ISO_READ_START: IsoPosition = Object.freeze({ at: '' });
+
+/**
+ * The one refusal text for an instant cursor that cannot be read. Fixed, so it never repeats what the caller sent — the
+ * same rule as {@link parseSeqText}'s routes (`Q-388`).
+ */
+export const BAD_ISO_CURSOR = 'cursor must be a cursor a previous page of this route returned';
+
+/**
+ * The cursor for an instant position: `base64url("<instant>:<id>")`, or `base64url("<instant>")` when there is no id or
+ * the id is longer than {@link MAX_CURSOR_ID_LENGTH}. The twin of {@link encodeSeqCursor}, and for the same reason it is a
+ * pair: two records published in one millisecond share an instant, and a cursor that named only the instant would skip the
+ * rest of the run at every page boundary (`Q-277`, one level down).
+ *
+ * The instant is FIXED WIDTH, so the text is split at a known offset and never searched: an id that is a path holds colons,
+ * and so does an ISO instant.
+ */
+export function encodeIsoCursor(position: IsoPosition): string {
+  const { at, id } = position;
+  if (!isComparableIso(at)) throw new RangeError(`a cursor cannot name instant ${String(at)}`);
+  const text = id !== undefined && id !== '' && id.length <= MAX_CURSOR_ID_LENGTH ? `${at}:${id}` : at;
+  return Buffer.from(text).toString('base64url');
+}
+
+/**
+ * The position an instant cursor names, or `undefined` for anything it refuses (the route answers `400` with
+ * {@link BAD_ISO_CURSOR}). Type-checked, the instant a comparable ISO value, the separator a colon, the id non-empty and
+ * bounded. An absent or empty cursor is {@link ISO_READ_START}, so a caller reads one answer for "no cursor" and for "the
+ * first page".
+ */
+export function isoReadStart(cursor: unknown): IsoPosition | undefined {
+  if (cursor === undefined || cursor === '') return ISO_READ_START;
+  if (typeof cursor !== 'string' || !CURSOR_TEXT.test(cursor)) return undefined;
+  const text = Buffer.from(cursor, 'base64url').toString();
+  const at = text.slice(0, COMPARABLE_ISO_LENGTH);
+  if (!isComparableIso(at)) return undefined;
+  if (text.length === COMPARABLE_ISO_LENGTH) return { at };
+  if (text[COMPARABLE_ISO_LENGTH] !== ':') return undefined;
+  const id = text.slice(COMPARABLE_ISO_LENGTH + 1);
+  if (id === '' || id.length > MAX_CURSOR_ID_LENGTH) return undefined;
+  return { at, id };
 }
 
 /**

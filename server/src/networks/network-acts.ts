@@ -95,7 +95,8 @@ export function networkView(net: NetworkConfig): Record<string, unknown> {
   return {
     ...rest,
     myRole,
-    members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => ({
+    // `tombstoneRereadAt` is this instance's repair bookkeeping about a peer (`sync/deletion-authority.ts`), not network state.
+    members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, tombstoneRereadAt: _tr, ...m }) => ({
       ...m,
       belowFloor: peerFloorRefusal(m.version, m.versionCheckedAt),
       minPeerVersion: MIN_PEER_VERSION,

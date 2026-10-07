@@ -100,8 +100,11 @@ export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'vector
  * the graph traversal fetched edge documents with no projection at all, so `_graph[].edge.embedding` was a
  * float array per hop. That query now projects it out, and this is the second line of defence — a claim that
  * absolute should not rest on one projection being remembered at every fetch site.
+ *
+ * It holds what no read returns, not only vectors: `deliveredBy` names the peer that delivered a record
+ * (`sync/local-only-fields.ts`), which is local state about THIS instance's network and nobody's to read back.
  */
-export const NEVER_RETURNED_FIELDS: readonly string[] = ['embedding'];
+export const NEVER_RETURNED_FIELDS: readonly string[] = ['embedding', 'deliveredBy'];
 
 /**
  * The named fields that are actually present, or `{}` when the caller did not ask for them.
