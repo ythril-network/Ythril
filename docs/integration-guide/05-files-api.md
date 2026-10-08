@@ -329,7 +329,8 @@ absent from the listing and from every file count (`GET /spaces/:spaceId/stats`,
 space's own shape all answer the same number); it is not a result of `recall` or `similar`, on either door, nor of the
 lexical half of a search; a graph walk does not reach it and attaches none of its fields; it is not a valid edge or
 link target, so a strict-linkage space refuses a reference to it exactly as it refuses a path that never existed; the
-by-path metadata read, the extract route and `PATCH`/`update_file_meta` answer `404` for it. **The exception is the
+by-path metadata read, the extract route and `PATCH` answer `404` for it, and `update_file_meta` refuses it exactly as
+it refuses a path that never existed (`isError` on MCP, `400` on `POST /api/update_file_meta`, like every tool failure). **The exception is the
 structured query door**: `POST /api/filter` and `POST /api/query` over `collection: "files"` DO return it, because
 after all of the above nothing else would, and the record exists to be read. Filter on `deletedAt` to tell the two
 apart — `{"deletedAt": {"$exists": false}}` for the files the space has, `{"deletedAt": {"$exists": true}}` for what
