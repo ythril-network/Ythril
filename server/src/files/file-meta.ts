@@ -612,8 +612,52 @@ export async function markFileMetaDeleted(
   const normalised = toDocId(filePath);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
+    flagAndStrip() as never,
   );
+}
+
+/**
+ * The ONE write that flags a row and removes everything its bytes made — `Q-418`.
+ *
+ * ## Why it is one write and not two
+ *
+ * The flag and the strip have to land together or not at all. As two statements, a crash between them leaves a
+ * flagged row still holding its vector and its text, and nothing ever re-runs the strip: the second attempt sees a
+ * row that is already flagged and does nothing. So the window is not small, it is permanent.
+ *
+ * ## Why it is a pipeline
+ *
+ * Because one of the removals is conditional and a plain `$unset` cannot ask a question. A `description` is the
+ * person's when they wrote it and the file's own prose when a conversion produced it, and only the second is made
+ * from bytes the space no longer has. `descriptionSource` is what tells them apart, so the description goes exactly
+ * when that marker says `generated` or `extracted`, and the marker goes with it — it exists only in that case.
+ *
+ * ## What goes, and why each
+ *
+ * The vector and its model, and `matchedText`: the row must not be rankable or findable by text. `excerpt`: a
+ * verbatim passage of a document whose bytes are deleted. `sha256`: a fingerprint of those same bytes.
+ * `embeddingStatus`: left at `complete` it makes a re-upload of identical bytes skip reprocessing, so a revived path
+ * would never be read again.
+ *
+ * ## What stays, deliberately
+ *
+ * The audit record: `path`, `author`, `createdAt`, `deletedAt`, the retention stamp, `tags`, `properties`, and a
+ * description a person wrote. Those are what somebody deleted, not what the bytes produced.
+ */
+function flagAndStrip(): object[] {
+  const MACHINE_MADE = ['generated', 'extracted'];
+  return [
+    { $set: { deletedAt: new Date().toISOString() } },
+    { $unset: ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha256', 'embeddingStatus'] },
+    {
+      $set: {
+        description: {
+          $cond: [{ $in: ['$descriptionSource', MACHINE_MADE] }, '$$REMOVE', '$description'],
+        },
+      },
+    },
+    { $unset: ['descriptionSource'] },
+  ];
 }
 
 /**
@@ -651,10 +695,12 @@ export async function markFileMetaDeletedByPrefix(
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // Flag the user-visible file records.
+  // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
+  // for one file, from the one place that states it. A directory delete reaches here and never through
+  // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
   await coll.updateMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }),
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
+    flagAndStrip() as never,
   );
   // Remove derived chunk records outright.
   await coll.deleteMany(
