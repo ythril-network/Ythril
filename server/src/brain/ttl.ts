@@ -203,4 +203,12 @@ export async function ensureTtlIndex(spaceId: string): Promise<void> {
   } catch (err) {
     log.warn(`ensureTtlIndex ${peerText(spaceCollection(spaceId, 'chrono'))} content: ${peerText(err)}`);
   }
+  // Files only, for the same reason: the flagged-row repair (`stripFlaggedRowsOnce`) and the purge of deleted files'
+  // audit records (`flaggedPage`) both ask `deletedAt: { $exists: true }` of every space every cycle. Sparse, so it
+  // indexes the deleted files' records and nothing else — on a space that never deletes, an empty index.
+  try {
+    await col(spaceCollection(spaceId, 'files')).createIndex({ deletedAt: 1 }, { name: 'ttl_deletedAt', sparse: true });
+  } catch (err) {
+    log.warn(`ensureTtlIndex ${peerText(spaceCollection(spaceId, 'files'))} deletedAt: ${peerText(err)}`);
+  }
 }

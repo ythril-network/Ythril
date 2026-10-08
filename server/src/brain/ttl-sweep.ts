@@ -334,16 +334,15 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${peerText(err)}`));
 
   // Rows flagged deleted by a release before the flag write stripped them still hold what the bytes made (Q-418). The
-  // repair is query-defined and keeps no marker — a stripped row leaves the query — so it costs one bounded read per
-  // space per cycle once there is nothing left to do, and a space that fails is passed over rather than stopping the
-  // ones behind it.
-  const stripped = await eachSpace(STRIP_STEP, concreteSpaces(), async space => {
+  // repair is query-defined and keeps no marker — a stripped row leaves the query — so once there is nothing left to do
+  // it costs one read of the sparse `deletedAt` index per space per cycle (`ensureTtlIndex`), never a scan of the files;
+  // and a space that fails is passed over rather than stopping the ones behind it.
+  await eachSpace(STRIP_STEP, concreteSpaces(), async space => {
     strippedRows += await stripFlaggedRowsOnce(space.id, SWEEP_BATCH);
   });
   if (strippedRows > 0) {
     log.info(`Stripped what the bytes made from ${strippedRows} file record(s) flagged deleted before this release.`);
   }
-  void stripped;
 
   return total;
 }
