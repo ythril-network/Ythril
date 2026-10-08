@@ -411,6 +411,37 @@ export async function claimNextJob(
 
 // ── Complete / fail ────────────────────────────────────────────────────────
 
+/**
+ * End a job for good: the file ROW's final state first, THEN the job's terminal status (`Q-434`).
+ *
+ * ## The order is the whole point, and it is the part a hand-written copy gets backwards
+ *
+ * Ending a job is two writes. With the job first, anything that stops the second — the process killed, the store
+ * refusing, a write that times out — leaves a `complete` or `failed` job over a row that reads `processing` for ever.
+ * Nothing revisits it: stall recovery re-queues a job that stopped reporting while CLAIMED, and a terminal job is not
+ * claimed. The file shows a spinner indefinitely, Retry is never offered on a file that reads as in progress, and the
+ * job collection says the work is done.
+ *
+ * Row first, a failure between the two leaves the job CLAIMED, and stall recovery re-runs it — an idempotent re-run
+ * over the same chunk ids, which is the cheap direction to be wrong in. Both terminal branches used to write the job
+ * first, each on its own; this is the one place that order is decided, so a third terminal branch inherits it.
+ *
+ * A failure of the row write is THROWN, not logged: the caller's job is still claimed, and it is the caller that knows
+ * whether to retry, release or let recovery have it.
+ */
+async function endJob(
+  spaceId: string,
+  fileId: string,
+  row: Parameters<typeof setFileProcessingState>[2],
+  job: { status: 'complete' | 'failed'; lastError?: string | null },
+): Promise<void> {
+  await setFileProcessingState(spaceId, fileId, row);
+  await jobCollection(spaceId).updateOne(
+    asFilter<MediaJobDoc>({ _id: fileId }),
+    asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() } }),
+  );
+}
+
 /** Mark a job done. The job itself is always `complete` (no more retries), but the
  *  FILE's embeddingStatus reflects whether every chunk actually embedded: pass
  *  'partial' when some chunks stored without a vector so the file stays distinguishable
@@ -420,12 +451,7 @@ export async function completeJob(
   fileId: string,
   fileEmbeddingStatus: 'complete' | 'partial' = 'complete',
 ): Promise<void> {
-  const now = new Date().toISOString();
-  await jobCollection(spaceId).updateOne(
-    asFilter<MediaJobDoc>({ _id: fileId }),
-    asUpdate<MediaJobDoc>({ $set: { status: 'complete', claimedAt: null, updatedAt: now } }),
-  );
-  await setFileProcessingState(spaceId, fileId, { embeddingStatus: fileEmbeddingStatus });
+  await endJob(spaceId, fileId, { embeddingStatus: fileEmbeddingStatus }, { status: 'complete' });
 }
 
 export async function failJob(
@@ -461,19 +487,10 @@ export async function failJob(
     markSpaceMayHaveWork(spaceId);
     log.warn(`Media job ${spaceId}/${fileId} failed (attempt ${attempts}/${maxAttempts}), retry after ${claimableAfter}: ${errorMessage}`);
   } else {
-    // Exhausted retries
-    await jobCollection(spaceId).updateOne(
-      asFilter<MediaJobDoc>({ _id: fileId }),
-      asUpdate<MediaJobDoc>({
-        $set: {
-          status: 'failed',
-          claimedAt: null,
-          lastError: safeError,
-          updatedAt: now,
-        },
-      }),
-    );
-    await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'failed', mediaJobError: safeError || undefined });
+    // Exhausted retries: ended through `endJob`, so the row is told before the job stops being claimed.
+    await endJob(spaceId, fileId,
+      { embeddingStatus: 'failed', mediaJobError: safeError || undefined },
+      { status: 'failed', lastError: safeError });
     log.warn(`Media job ${spaceId}/${fileId} exhausted retries: ${errorMessage}`);
   }
 }
