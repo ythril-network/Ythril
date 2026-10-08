@@ -32,6 +32,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep, signalHousekeeping } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { NotFoundError } from '../util/errors.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { defaultSpaceFailureReporter, walkVerdict, type SpaceFailureReporter } from '../util/space-failure.js';
@@ -80,10 +81,16 @@ const DELETERS: Record<TtlCollection, (spaceId: string, id: string, actor?: Webh
   files: (spaceId, id, actor) => deleteFileCascade(spaceId, id, actor).then(() => true),
 };
 
-/** Extra filter for the sweep query, per collection. Files: only the file-level records (chunk/face
- *  records carry `parentFileId` and never an `_expireAt`) and not already soft-deleted. */
+/**
+ * Extra filter for the sweep query, per collection. Files: only the file-level records — chunk and face records carry
+ * `parentFileId` and never an `_expireAt` — and not already soft-deleted.
+ *
+ * That is exactly `LIVE_FILE_ROW`, and until bundle-89 it was spelled out here by hand, which is the copy
+ * `live-file-row.ts` warns about in as many words: *"a site that spells `deletedAt: { $exists: false }` itself is the
+ * next one to forget the half beside it."* It was the only such copy left.
+ */
 const SWEEP_FILTER: Partial<Record<TtlCollection, Record<string, unknown>>> = {
-  files: { parentFileId: { $exists: false }, deletedAt: { $exists: false } },
+  files: { ...LIVE_FILE_ROW },
 };
 
 /** Delete one expired record through its normal deleter. False = the deleter matched nothing (see {@link sweepCollection}). */

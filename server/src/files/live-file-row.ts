@@ -24,3 +24,25 @@ export const LIVE_FILE_ROW = Object.freeze({
   parentFileId: Object.freeze({ $exists: false }),
   deletedAt: Object.freeze({ $exists: false }),
 });
+
+/**
+ * The OTHER question about a `files` row: is this row itself not the audit record of a deleted file — at ANY tier.
+ *
+ * ## Why it is separate from {@link LIVE_FILE_ROW} rather than a narrowing of it
+ *
+ * `LIVE_FILE_ROW` also demands `parentFileId` absent, which is right for "what files does this space have" and WRONG
+ * everywhere a chunk, caption or face row is a legitimate subject. Spreading it into the embed path, the embed sweep or
+ * recall's file branch would make every derived row unembeddable and invisible, because every one of them carries a
+ * `parentFileId`. That is not a theoretical slip: three separate design reviews reached for `LIVE_FILE_ROW` at exactly
+ * those sites before this constant existed.
+ *
+ * ## The limit, stated because it is the thing to get wrong
+ *
+ * This is ROW-LOCAL. A chunk, caption or face row NEVER carries `deletedAt` — the flag is written on the parent file row
+ * alone — so this predicate on a chunk's own filter is vacuous: it matches, and says nothing about whether the file it
+ * belongs to was deleted. A site that needs "is this row's FILE still here" has to read the parent, and must not reach for
+ * this and believe it has asked.
+ */
+export const NOT_A_FLAGGED_ROW = Object.freeze({
+  deletedAt: Object.freeze({ $exists: false }),
+});
