@@ -14,10 +14,13 @@
  *
  * ## What is derived, and the floor
  *
- * The instances are every tracked server source (comments blanked) outside the primitive's own module that calls `heldWhile(`.
- * The set must hold at least two (the seq horizon and the tombstone position), must include both named modules, and each of
- * them must import the primitive from `util/horizon-holds`. The primitive is DEFINED once, in that module: a second
- * definition of `heldWhile` anywhere in `server/src` is the second implementation, however carefully copied.
+ * An instance is read off TWO sites, because either one alone leaves a hole. The callers: every tracked server source (comments
+ * blanked) outside the primitive's own module that calls `heldWhile(`. The constructions: every one that builds a
+ * `new HorizonHolds(` — an instance that is entered and released by hand is a construction no caller of `heldWhile` names, so
+ * a derivation read only off the callers cannot see it. Each set must hold at least two (the seq horizon and the tombstone
+ * position) and include both named modules; each caller must import the primitive from `util/horizon-holds`; and every
+ * construction must be handed to `heldWhile` by the variable that holds it. The primitive is DEFINED once, in that module: a
+ * second definition of `heldWhile` anywhere in `server/src` is the second implementation, however carefully copied.
  *
  * Run: node --test testing/standalone/a-horizon-hold-has-one-primitive-and-every-instance-calls-it.test.js
  */
@@ -35,8 +38,27 @@ const CALLS_IT = /\bheldWhile\s*\(/;
 const DEFINES_IT = /(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\s+heldWhile\b|(?:^|\n)\s*(?:export\s+)?const\s+heldWhile\b/;
 const IMPORTS_THE_MODULE = /from\s+['"][^'"]*util\/horizon-holds\.js['"]|from\s+['"]\.\/horizon-holds\.js['"]/;
 
+/** A construction of an instance, with or without a type argument: `new HorizonHolds(` and `new HorizonHolds<string>(`. */
+const CONSTRUCTS_ONE = /\bnew\s+HorizonHolds\s*(?:<[^>(]*>)?\s*\(/;
+/** The variable an instance is bound to: `const positionHolds: HorizonHolds<string> = new HorizonHolds<string>(`. */
+const CONSTRUCTED_INTO = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*new\s+HorizonHolds\b/g;
+
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 const sources = trackedSources('server/src', { floor: 100 });
+
+/**
+ * The instances `code` builds that are never handed to `heldWhile` — by their variable, as its first argument — and so are
+ * entered and released by whatever the module wrote itself. A construction bound to no variable is one nothing can hand to it.
+ */
+function instancesNotHeldByThePrimitive(code) {
+  const bound = [...code.matchAll(CONSTRUCTED_INTO)].map(m => m[1]);
+  const constructions = code.match(new RegExp(CONSTRUCTS_ONE.source, 'g'))?.length ?? 0;
+  const unbound = Math.max(0, constructions - bound.length);
+  return [
+    ...bound.filter(name => !new RegExp(`\\bheldWhile\\s*\\(\\s*${name.replace(/\$/g, '\\$')}\\s*,`).test(code)),
+    ...Array.from({ length: unbound }, () => '(a construction bound to no variable)'),
+  ];
+}
 
 describe('the horizon hold is one primitive and every instance calls it', () => {
   it('the primitive lives in util/horizon-holds.ts and exports heldWhile', () => {
@@ -67,5 +89,28 @@ describe('the horizon hold is one primitive and every instance calls it', () => 
     assert.ok(instances.length >= 2, 'fixture: fewer than two instances derived — see the case above');
     const own = instances.filter(f => !IMPORTS_THE_MODULE.test(codeOf(f)));
     assert.deepEqual(own, [], 'these call a heldWhile that is not the shared one');
+  });
+
+  it('the instances are also derived from the constructions, there are at least two, and every one is held by the primitive', () => {
+    const constructors = sources.filter(f => f !== PRIMITIVE_MODULE && CONSTRUCTS_ONE.test(codeOf(f)));
+    assert.ok(constructors.length >= 2,
+      `only ${constructors.length} module(s) construct a HorizonHolds (${constructors}): a derivation that finds fewer is not reading the construction site`);
+    for (const named of NAMED_INSTANCES) {
+      assert.ok(constructors.includes(named), `${named} constructs no HorizonHolds — it is not an instance of the primitive (derived: ${constructors})`);
+    }
+    const byHand = constructors.flatMap(f => instancesNotHeldByThePrimitive(codeOf(f)).map(name => `${f}: ${name}`));
+    assert.deepEqual(byHand, [],
+      'an instance entered and released by hand is a second implementation of the release, the bound and the report, however it is named');
+  });
+
+  it('the check sees a construction that is entered by hand (the red case, read from a real instance)', () => {
+    const real = codeOf('server/src/files/tombstones.ts');
+    assert.deepEqual(instancesNotHeldByThePrimitive(real), [], 'fixture: the real module is held by the primitive');
+    const byHand = real.replace(/\bheldWhile\s*\(\s*positionHolds\s*,/g, 'positionHolds.enter(');
+    assert.notEqual(byHand, real, 'fixture: the mutation changed nothing, so it proves nothing');
+    assert.deepEqual(instancesNotHeldByThePrimitive(byHand), ['positionHolds']);
+    assert.equal(instancesNotHeldByThePrimitive('const h = new HorizonHolds<number>({});\nheldWhile(h, s, x, f);').length, 0);
+    assert.equal(instancesNotHeldByThePrimitive('export const h = new HorizonHolds({});').length, 1);
+    assert.equal(instancesNotHeldByThePrimitive('register(new HorizonHolds<string>({}));').length, 1);
   });
 });
