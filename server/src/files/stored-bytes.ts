@@ -191,9 +191,8 @@ export async function bytesPresent(abs: string): Promise<boolean> {
  *
  * ## What it prevents
  *
- * Five callers (the tombstone settle and its marker sweep, the arrival shadow's pending-act read, the conversion's lease-lost
- * clean-up, a move's existence checks) each wrote `bytesPresent(await resolveSafePathChecked(spaceId, p))` by hand, and the half a
- * copy drops is the resolve: an `abs` joined from a peer's text with `path.join` looks outside the space, or at a path the
+ * Every caller that asks "are the bytes here" for a path it was handed wrote `bytesPresent(await resolveSafePathChecked(spaceId, p))`
+ * by hand, and the half a copy drops is the resolve: an `abs` joined from a peer's text with `path.join` looks outside the space, or at a path the
  * sandbox would have refused. A path outside the sandbox is the caller's `RangeError`; a failure to look is thrown, on the terms
  * of {@link bytesPresent}.
  */
@@ -218,8 +217,7 @@ export const isMissingPath = (err: unknown): boolean => {
 /**
  * Whether what is at `abs` is a DIRECTORY: `false` for a regular file and for a path that does not exist, and any other
  * failure to look is thrown (the same terms as {@link bytesPresent}). The one answer to "is this a tree", for a caller whose
- * path could be either and must not act on a tree as if it were one file — a file's delete, a peer's single-path
- * tombstone, a move's sidecar.
+ * path could be either and must not act on a tree as if it were one file.
  */
 export async function isStoredDirectory(abs: string): Promise<boolean> {
   const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });

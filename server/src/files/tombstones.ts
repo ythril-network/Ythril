@@ -70,7 +70,7 @@
  * landed, and the prune took it unsent.
  *
  * **One per path, by this instance's own order** (Q-352): a pending row carries `writtenAt` (the clock above, set by the
- * act) and `settleAt` (what the settle selects and bumps); a published row carries `origin` (`own`, or `relayed`). Only an
+ * act) and `settleAt` (the wall clock's instant, what the settle selects and bumps); a published row carries `origin` (`own`, or `relayed`). Only an
  * own publication can cover a pending delete ({@link publishOnePerPath}), the publishers of a space run one at a time, and
  * the prune keeps a published tombstone whose path still holds a pending one.
  *
@@ -139,8 +139,8 @@ interface StoredFileTombstone extends FileTombstoneDoc {
    *  of one space order by it. What the one-per-path rule compares; `deletedAt` is the same instant while pending and the
    *  publish time after, and a foreign or settled clock never decides. Absent on a row stored before it existed. */
   writtenAt?: string;
-  /** What the settle selects and orders by, while pending: `writtenAt` until the settle cannot look at the path, then the
-   *  settle's own `now` — never `deletedAt` or `writtenAt`, which the one-per-path rule reads. */
+  /** What the settle selects and orders by, while pending: the WALL clock when the act wrote it (a timer, never a position), then
+   *  the settle's own `now` once it cannot look at the path — never `deletedAt` or `writtenAt`, which the one-per-path rule reads. */
   settleAt?: string;
   /** Who made the published row: `own` (this instance published it) or `relayed` (a peer's, kept to be passed on). A row
    *  with neither stamp is never taken for one this instance published, so it never suppresses an own tombstone. */
@@ -488,7 +488,10 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], ge
   return publishLock.run(spaceId, async () => {
     if (wipeGenerationOf(spaceId) !== generation) return { published: 0, dropped: docs.length };
     const byPath = new Map<string, ToPublish[]>();
-    for (const d of docs) byPath.set(d.path, [...(byPath.get(d.path) ?? []), d]);
+    for (const d of docs) {
+      const rows = byPath.get(d.path);
+      if (rows) rows.push(d); else byPath.set(d.path, [d]);
+    }
     let published = 0;
     let dropped = 0;
     // A slice is whole paths (a path's candidates are never split), and holds ONE stamp: its rows share the position, so the
@@ -662,9 +665,13 @@ export async function writePendingFileTombstones(
 ): Promise<PendingFileTombstones> {
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
   const generation = wipeGenerationOf(spaceId);
-  // One stamp of the space's clock for the act: `writtenAt` is what the one-per-path rule orders by, `settleAt` what the settle
-  // does, and `deletedAt` — while pending — is the same instant. Not held: a pending row has no position.
+  // One stamp of the space's clock for the act: `writtenAt` is what the one-per-path rule orders by (against positions, which are
+  // this clock's), and `deletedAt` — while pending — is the same instant. Not held: a pending row has no position.
+  // `settleAt` is a TIMER, read against the wall clock by the settle, so it is the wall clock and never the position clock: that
+  // one is seeded from the highest stored position and never goes back, and a pending row stamped from it while it was ahead of
+  // the wall was not settled, and so not published to peers, until the wall caught up.
   const now = tick(await clockForWrite(spaceId));
+  const settleAt = new Date().toISOString();
   const marker = move ? { move: { from: toDocId(move.from), to: toDocId(move.to) } } : {};
   // What the act knows of what it is about to erase, read ONCE for every path (one `$in` per chunk): who is acting, and the
   // version and content hash of each file ROW. The hash is the row's, never the bytes' — the bytes may be the next thing
@@ -675,7 +682,7 @@ export async function writePendingFileTombstones(
   const pending: PendingFileTombstones = { spaceId, generation, docs: unique.map((p): StoredFileTombstone => {
     const row = rows.get(p);
     return {
-      _id: uuidv4(), spaceId, path: p, deletedAt: now, writtenAt: now, settleAt: now, pending: true as const, ...marker,
+      _id: uuidv4(), spaceId, path: p, deletedAt: now, writtenAt: now, settleAt, pending: true as const, ...marker,
       ...(issuer ? { issuer } : {}),
       ...(typeof row?.seq === 'number' ? { rowSeq: row.seq } : {}),
       ...(typeof row?.sha256 === 'string' && row.sha256 !== '' ? { contentHash: row.sha256 } : {}),
@@ -1053,7 +1060,10 @@ async function actedPendingTombstones(
 async function readHeldFor(spaceId: string, paths: readonly string[]): Promise<HeldForArrivals> {
   const held = await heldFileTombstones(spaceId, paths);
   const { gone, unlooked, cause } = await actedPendingTombstones(spaceId, paths);
-  for (const [p, rows] of gone) held.set(p, [...(held.get(p) ?? []), ...rows]);
+  for (const [p, rows] of gone) {
+    const already = held.get(p);
+    if (already) already.push(...rows); else held.set(p, [...rows]);
+  }
   return { held, unlooked, ...(cause !== undefined ? { cause } : {}) };
 }
 
@@ -1234,13 +1244,9 @@ async function shadowedAgainst(
  * ## The rule
  *
  * A sidecar of `p` (`parentOfSidecar`: `_converted/<p>.md`, anything under `_extracted/<p>/`) is shadowed — bytes and metadata
- * alike, the sidecar's own version and author notwithstanding — when a held tombstone for `p`
- *  - **erased real content here** (it carries a `contentHash`): a tombstone stored for a path nobody held has none, so a peer
- *    cannot block a path's sidecars by sending a deletion for a path it guessed;
- *  - **speaks against the parent** (`heldTombstoneRefuses`, the who-half the parent's own arrival gets) judged by the PARENT row's
- *    author and deliverer where a live one exists — never the sidecar row's, whose author is whoever delivered it, which would let
- *    every sidecar through, including for a tombstone this instance issued itself;
- *  - and `p` has not been **re-created** (`parentShadows`, `tombstone-shadow.ts`, which holds the pure verdict).
+ * alike, the sidecar's own version and author notwithstanding — when the tombstones held for `p` shadow the PARENT. The
+ * conditions are `parentShadows` and `recreatedSince` (`tombstone-shadow.ts`), the pure verdicts, and are stated only there;
+ * this function reads the parent's tombstones and live row, and asks them.
  *
  * Stated limit: a parent re-created AFTER its sidecar was refused does not bring the sidecar back until the sender restarts or
  * its hash changes (a receiver that never converts is fed by the pull).

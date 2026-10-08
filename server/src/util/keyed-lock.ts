@@ -4,11 +4,11 @@
  *
  * ## Why a module
  *
- * The same chain was written twice by two authors who each needed "no two of these at once for one key": a path's writers
- * (`files/stored-bytes.ts`, `withPathLock`) and a collection's search-index reconciles (`spaces/search-index-presence.ts`).
- * A file tombstone's publish was the third — it reads a path's rows, decides, and writes, and two publishers that each read
- * before the other wrote published the path twice (`Q-352`). Single-flight and coalescing are the wrong semantics for all
- * three: a caller that waits must still RUN, after the one before it, with what that one left behind.
+ * The same chain was written by authors who each needed "no two of these at once for one key": a path's writers
+ * (`files/stored-bytes.ts`, `withPathLock`), a collection's search-index reconciles (`spaces/search-index-presence.ts`) and a
+ * file tombstone's publish — it reads a path's rows, decides, and writes, and two publishers that each read before the other
+ * wrote published the path twice (`Q-352`). Single-flight and coalescing are the wrong semantics for every one of them: a
+ * caller that waits must still RUN, after the one before it, with what that one left behind.
  *
  * ## What a hand-written copy drops
  *

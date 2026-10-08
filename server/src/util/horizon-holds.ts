@@ -6,7 +6,7 @@
  * A reader that pages by a position (a seq, an instant) and moves its cursor to the last row it saw loses any row that lands
  * BELOW the cursor afterwards. So a position that a write has taken and not yet committed must stop every reader below it
  * until the write ends. That is the seq horizon (`util/seq.ts`, `Q-196`) and it is the file-tombstone position
- * (`files/tombstones.ts`, `Q-346`): two instances of one hold, with two kinds of floor (a number, an ISO instant).
+ * (`files/tombstones.ts`, `Q-346`): instances of one hold, each with its own kind of floor (a number, an ISO instant).
  *
  * ## Why a module, and what a copy drops
  *
@@ -183,10 +183,10 @@ export async function heldWhile<F extends number | string, T>(
  * The watchdog is an interval job (`Q-317`) whose interval is a FUNCTION: a quarter of the hold warning, at least 250 ms, read when
  * the job starts (`intervalJob` reads it once per start). `startHorizonHoldWatchdog` is a restart (`stop(); start()`), so a hold figure
  * changed since the last start is the one in force for the next. The tick is synchronous and touches no database, so it never
- * overlaps and the bound it runs inside has nothing to end. Its label is the one it has always had, and the one the operator's
- * documentation names.
+ * overlaps and the bound it runs inside has nothing to end. Its label is the one the operator's documentation names, and it
+ * names the hold, not one kind of it, because the tick scans every instance.
  */
-const watchdog = intervalJob('Seq hold watchdog', () => Math.max(250, Math.floor(holdWarnMs() / 4)), () => {
+const watchdog = intervalJob('Horizon hold watchdog', () => Math.max(250, Math.floor(holdWarnMs() / 4)), () => {
   const now = Date.now();
   for (const holds of instances) holds.warnStalled(now);
 });

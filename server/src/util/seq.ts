@@ -4,7 +4,7 @@ import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { HorizonHolds, heldWhile, startHorizonHoldWatchdog, stopHorizonHoldWatchdog } from './horizon-holds.js';
+import { HorizonHolds, heldWhile } from './horizon-holds.js';
 
 /*
  * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
@@ -165,19 +165,6 @@ export function lowestUncommittedSeq(spaceId: string): number | undefined {
 /** How long the oldest hold on `spaceId` has been held, in seconds — 0 when it holds nothing. For the gauge. */
 export function oldestHoldAgeSeconds(spaceId: string): number {
   return seqHolds.oldestAgeSeconds(spaceId);
-}
-
-/**
- * The hold watchdog (`Q-200`) is the primitive's, and ONE for every instance of the hold (`util/horizon-holds.ts`): it
- * keeps its label, "Seq hold watchdog", and its start and stop wiring (`bootstrap.ts`, `index.ts`), and it now scans the
- * file-tombstone position's holds as well.
- */
-export function startSeqHoldWatchdog(): void {
-  startHorizonHoldWatchdog();
-}
-
-export function stopSeqHoldWatchdog(): void {
-  stopHorizonHoldWatchdog();
 }
 
 /**

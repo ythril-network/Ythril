@@ -54,6 +54,7 @@ import { openPushDoor } from './_push-door.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
+import { lineBefore } from './_structural-window.mjs';
 import { holdDocumentLock, holdCounterLock, settleWithin, eventually, setWriteBoundForTest } from './_write-faults.mjs';
 import { holderCases, loadHolderModules, seedHolderSpace, heldSeqAllocated, F } from './_seq-hold-cases.mjs';
 
@@ -76,7 +77,7 @@ const ENTER_MS = 5000;
 // file-tombstone position instance's one (bundle-71, Q-346). A function that calls one of them holds a horizon, and is owed a case.
 const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeq|withPositionHeld)\s*\(/g;
 /** A match that is the DEFINITION of the entry point (`function withPositionHeld(`), which holds nothing itself. */
-const isDefinition = (src, index) => /function\s+$/.test(src.slice(Math.max(0, index - 20), index));
+const isDefinition = (src, index) => /\bfunction$/.test(lineBefore(src, index, 'a holder match', { orEmpty: true }));
 function holders() {
   const out = new Map();
   for (const file of trackedSources('server/src', { floor: 100 })) {

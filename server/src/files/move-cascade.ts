@@ -50,9 +50,6 @@ import { log, peerText } from '../util/log.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-// Whether a space-relative path has bytes (`bytesPresentAt`): a failure to look is thrown, never read as "absent", which would
-// send a move into its completion path (preship-3 P3-6).
-
 /**
  * Every file path the move takes away, for the tombstones: the files themselves (`moved`, gone with the rename) and
  * their sidecars (`sidecars`, gone only once `afterTheBytesMoved` moves them, which can fail). Sync has no rename

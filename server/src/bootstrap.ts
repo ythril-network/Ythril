@@ -102,9 +102,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   const { startSyncScheduler } = await import('./sync/scheduler.js');
   startSyncScheduler();
-  // Names a seq hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.
-  const { startSeqHoldWatchdog } = await import('./util/seq.js');
-  startSeqHoldWatchdog();
+  // Names a hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.
+  const { startHorizonHoldWatchdog } = await import('./util/horizon-holds.js');
+  startHorizonHoldWatchdog();
   const { startBackupScheduler } = await import('./db/backup-scheduler.js');
   startBackupScheduler();
   const { startDupeScanner } = await import('./brain/dupe-scanner.js');
