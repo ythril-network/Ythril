@@ -111,6 +111,10 @@ function rows() {
   const tomb = (space, key, id, seq, issuer) =>
     build.tombstone(space, id, tombstoneTypeOf[key], seq, { instanceId: issuer });
   const has = (snap, id, field, value) => snap.docs.some(d => d._id === id && (field === undefined || d[field] === value));
+  // bundle-89 (Q-280): an ARRIVAL stores the version and the author the sender wrote — never this instance's own. Asked on the
+  // landing rows below, on every family and every door (the byte doors, the import and the three stampers outside the arrival
+  // doors are named in `an-arrival-stores-who-delivered-it-db`).
+  const authoredBy = (snap, id, instanceId) => snap.docs.some(d => d._id === id && d.author?.instanceId === instanceId);
   for (const { payloadKey: key } of families) {
     const isFacts = key === 'facts';
     const id = idFor(key, 'r');
@@ -118,12 +122,13 @@ function rows() {
     out.push(
       { name: `${key}: a new record lands, stamped with its deliverer`, family: key, verdict: isFacts ? 'inserted' : 'upserted',
         seed: () => ({}), page: (s) => [make(key, s, id, 5)],
-        check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) },
+        check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) && authoredBy(snap, id, PEER) },
       // bundle-51: every arrival stores who delivered it, and every door the same one (the pushing token proves the peer the
       // pull reads from). A newer copy replaces the deliverer of the version it replaces.
       { name: `${key}: a newer copy replaces the stored one and the deliverer with it`, family: key, verdict: isFacts ? 'updated' : 'upserted',
         seed: (s) => ({ stored: [{ ...make(key, s, id, 3), deliveredBy: 'the-earlier-deliverer' }] }),
-        page: (s) => [make(key, s, id, 5)], check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) },
+        page: (s) => [make(key, s, id, 5)],
+        check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'deliveredBy', PEER) && authoredBy(snap, id, PEER) },
       { name: `${key}: a newer copy replaces the stored one`, family: key, verdict: isFacts ? 'updated' : 'upserted',
         seed: (s) => ({ stored: [make(key, s, id, 3, t ? { [t]: 'old' } : {})] }),
         page: (s) => [make(key, s, id, 5, t ? { [t]: 'new' } : {})],
