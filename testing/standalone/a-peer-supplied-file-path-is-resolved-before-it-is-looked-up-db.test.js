@@ -28,7 +28,9 @@
  *    and each lands at its resolved key;
  *  - the METADATA door, pushed and pulled: a file-meta document whose `_id` is not its canonical key is refused as a shape violation
  *    (counted `rejected`, as every shape refusal is), so a spelling of `victim` is neither stored under that spelling nor
- *    looked up by it against the tombstone held for `victim`; a document keyed canonically is stored.
+ *    looked up by it against the tombstone held for `victim`; a document keyed canonically is stored;
+ *  - the other half of that rule: a file a PERSON uploads here under a spelling (a decomposed name, `a//b`, `./c`) is keyed by the
+ *    same canonical key, so its metadata, arriving at a receiver by either door, is accepted and never refused for ever.
  *
  * Run: node --test testing/standalone/a-peer-supplied-file-path-is-resolved-before-it-is-looked-up-db.test.js
  * (requires a prior `npm run build:server`)
@@ -42,7 +44,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
-import { openByteDoor } from './_byte-door.mjs';
+import { openByteDoor, USER_TOKEN } from './_byte-door.mjs';
 import { postWhole, postInHalves } from './_byte-door-uploads.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -162,6 +164,57 @@ describe('a peer-supplied file path is resolved before it is looked up', { skip 
         if (name === 'push') assert.deepEqual([answer.body.filemeta.upserted, answer.body.filemeta.rejected], [1, 1], JSON.stringify(answer.body.filemeta));
       });
     }
+  });
+
+  describe('a file this instance writes itself is keyed by the same canonical key', () => {
+    /*
+     * The receiver's refusal is only half the rule. A row this instance keyed by a SPELLING (`a//b`, a decomposed name from a
+     * macOS client) is a row every upgraded peer refuses for ever, so its metadata never replicates — and before the refusal
+     * existed it was accepted. The local writer and the peer's doors have to agree on the key, so a file is never refused by
+     * the instance that holds the other half of the network.
+     */
+    const LOCAL_SPELLINGS = [
+      ['a decomposed (NFD) name', 'café.txt', 'café.txt'],
+      ['an NFD name in a folder', 'docs/café.txt', 'docs/café.txt'],
+      ['an empty segment', 'a//b.txt', 'a/b.txt'],
+      ['a leading current-directory step', './c.txt', 'c.txt'],
+      ['an inner current-directory step', 'd/./e.txt', 'd/e.txt'],
+      ['a parent step', 'f/x/../g.txt', 'f/g.txt'],
+    ];
+    const DELIVER = {
+      push: async (docs) => door.push('/batch-upsert', { filemeta: docs }, { spaceId: S, token: peerToken(PEER) }),
+      pull: async (docs) => { door.state.records[S] = { filemeta: docs }; await door.sync(); return undefined; },
+    };
+
+    for (const [what, spelling, key] of LOCAL_SPELLINGS) {
+      it(`${what}: a person's upload is stored under the canonical id, and nothing under the spelling`, async () => {
+        const res = await postWhole(bytes, { space: S, path: spelling, content: `content of ${key}`, token: USER_TOKEN });
+        assert.ok(stored(res), JSON.stringify(res));
+        assert.deepEqual((await allRows()).map(r => [r._id, r.path]), [[key, key]],
+          `the local upload of ${JSON.stringify(spelling)} did not key its row by the key every other door looks it up by`);
+      });
+
+      for (const [door_, deliver] of Object.entries(DELIVER)) {
+        it(`${what}: the row's metadata, arriving at a receiver by ${door_}, is accepted, not rejected`, async () => {
+          const res = await postWhole(bytes, { space: S, path: spelling, content: `content of ${key}`, token: USER_TOKEN });
+          assert.ok(stored(res), JSON.stringify(res));
+          const [local] = await allRows();
+          assert.ok(local, 'the upload left no row');
+          await door.reset();
+          const answer = await deliver([build.filemeta(S, local._id, 1, { path: local.path, author: PEER_AUTHOR })]);
+          assert.deepEqual((await allRows()).map(r => r._id), [key],
+            `the id this instance wrote for ${JSON.stringify(spelling)} is refused by the arrival writer: ${JSON.stringify(answer?.body)}`);
+          if (door_ === 'push') assert.deepEqual([answer.body.filemeta.upserted, answer.body.filemeta.rejected], [1, 0], JSON.stringify(answer.body.filemeta));
+        });
+      }
+    }
+
+    it('two spellings of one name are one file: the second upload replaces the first and no second row is made', async () => {
+      await postWhole(bytes, { space: S, path: 'café.txt', content: 'first', token: USER_TOKEN });
+      await postWhole(bytes, { space: S, path: 'café.txt', content: 'second', token: USER_TOKEN });
+      assert.deepEqual((await allRows()).map(r => r._id), ['café.txt']);
+      assert.equal(await readLocal('café.txt'), 'second');
+    });
   });
 
   describe('the manifest pull', () => {
