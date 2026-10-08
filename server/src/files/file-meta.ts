@@ -53,7 +53,7 @@ import { applyDeleteFields } from '../brain/delete-fields.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
-import { isLocalFileField } from './processing-state.js';
+import { isLocalFileField } from './derived-fields.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
 
 
@@ -206,77 +206,6 @@ export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?
   return row.seq === 0 && author !== undefined && author !== '' && author === row.deliveredBy;
 }
 
-/**
- * Partially update the metadata record for a file (tags, description,
- * entity/chrono/fact linkage, properties).  Re-embeds the record on
- * every successful update.  Returns the updated document, or null if the
- * record does not exist.
- */
-/**
- * Write a DERIVED description only if the operator has not written one — decided by the DATABASE, in one operation.
- *
- * ## Why this is not `updateFileMeta` with a read in front of it
- *
- * The media worker used to do exactly that: `findOne`, compute `operatorWrote` from the result, then write on that
- * decision. The intent was right and documented — *"Only the description itself is theirs to keep"* — but a read-modify-write
- * cannot win the race it exists to win. An operator PATCH landing between the read and the write was silently overwritten
- * by the derived text, and nothing reported it: no field is missing, no status is wrong, the description is simply somebody
- * else's.
- *
- * Same shape as the 2.5.1 embedding defect, which computed a vector from the record *as the write had read it*.
- *
- * The filter carries the condition, so MongoDB arbitrates: if the stored description became non-empty in the meantime, the
- * update matches nothing and the operator's text stands. `^\s*$` rather than `''` because the guard it replaces used
- * `.trim()`, and a whitespace-only description was treated as absent.
- *
- * Returns whether it wrote, so a caller can log the difference rather than infer it.
- */
-export async function setDerivedDescriptionIfUnset(
-  spaceId: string,
-  filePath: string,
-  description: string,
-  /**
-   * Optional, and its ABSENCE is meaningful: `updateFileMeta` unsets `descriptionSource` when a description arrives
-   * without one, so a derived description with no known provenance must not inherit the previous one's. Ported
-   * faithfully rather than defaulted — mislabelling where a description came from is a worse bug than the race being
-   * fixed here.
-   */
-  descriptionSource?: 'generated' | 'extracted',
-): Promise<boolean> {
-  const _id = toDocId(filePath);
-  const r = await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({
-      _id,
-      // Never onto the audit record of a deleted file: the strip removes a machine-made description, so a flagged row
-      // SATISFIES the "no description" condition below, and this write would put derived text back on it and stamp it a
-      // seq — which the flag itself deliberately does not do.
-      ...NOT_A_FLAGGED_ROW,
-      $and: [
-        { $or: [
-          { description: { $exists: false } },
-          { description: null },
-          // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the
-          // backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and
-          // the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
-          { description: { $regex: /^\s*$/ } },
-        ] },
-        /*
-         * Only on a file THIS instance authored (`Q-143`), or a legacy record that names no author. A description is
-         * hashed and replicates by `seq`: derived on a receiver, it either stamps a seq that outranks the publisher's
-         * next edit, or — unstamped — can never replicate and reports a divergence for ever. The publisher derives
-         * its own from the same bytes, and that one travels.
-         */
-        { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
-      ],
-    } as never),
-    asUpdate<FileMetaDoc>({
-      // `P-32`: an authored write, so it advances the space counter and pages to a peer.
-      $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
-      ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
-    }),
-  ), 'file.describe');
-  return r.modifiedCount > 0;
-}
 
 /**
  * Read one file-metadata record by path, or null.
@@ -292,6 +221,12 @@ export async function getFileMeta(spaceId: string, filePath: string): Promise<Fi
     .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
 }
 
+/**
+ * Partially update the metadata record for a file (tags, description,
+ * entity/chrono/fact linkage, properties).  Re-embeds the record on
+ * every successful update.  Returns the updated document, or null if the
+ * record does not exist.
+ */
 export async function updateFileMeta(
   spaceId: string,
   filePath: string,
@@ -309,10 +244,6 @@ export async function updateFileMeta(
     linkChronos?: string[];
     linkFacts?: string[];
     properties?: Record<string, string | number | boolean>;
-    /** Provenance of an instance-written description. Omit when a human wrote it — see `FileMetaDoc`. */
-    descriptionSource?: 'generated' | 'extracted';
-    /** A converted document's own opening prose. Kept whatever the description says, and embedded. */
-    excerpt?: string;
   },
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
@@ -366,8 +297,6 @@ export async function updateFileMeta(
   // types, whose seq advances on every write and which had the identical defect.
   const $set: Record<string, unknown> = { updatedAt: now };
   if (opts.description !== undefined) $set['description'] = opts.description;
-  if (opts.descriptionSource !== undefined) $set['descriptionSource'] = opts.descriptionSource;
-  if (opts.excerpt !== undefined) $set['excerpt'] = opts.excerpt;
   if (opts.tags !== undefined) $set['tags'] = opts.tags;
 
   /**
@@ -390,7 +319,9 @@ export async function updateFileMeta(
   // the record claim a model wrote what an operator just typed, which is the one thing this field exists
   // to stop being ambiguous.
   const $unset: Record<string, ''> = {};
-  if (opts.description !== undefined && opts.descriptionSource === undefined) $unset['descriptionSource'] = '';
+  // A description given here is a CALLER's, never a derived one (the derived writer is `setDerivedDescriptionIfUnset`,
+  // which sets the marker itself), so the stale provenance always goes with it.
+  if (opts.description !== undefined) $unset['descriptionSource'] = '';
 
   /**
    * `deleteFields`, applied AFTER the merge — the same shape and order as the four brain writers.
@@ -405,7 +336,7 @@ export async function updateFileMeta(
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
     const merged: Record<string, unknown> = {
       description: opts.description !== undefined ? opts.description : existing.description,
-      excerpt: opts.excerpt !== undefined ? opts.excerpt : existing.excerpt,
+      excerpt: existing.excerpt,
       tags: opts.tags ?? existing.tags,
       properties: mergedProps ?? {},
     };

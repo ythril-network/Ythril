@@ -65,7 +65,7 @@ process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
 let h;
 let worker;
-let fileMeta;
+let fileMeta, derivedFields;
 let embedder;
 
 /** Every way a PERSON's bytes reach the byte door, and whether the door can carry a description with them. */
@@ -104,6 +104,8 @@ before(async () => {
   h.loader.getConfig().mediaEmbedding = { workerPollIntervalMs: 100, workerMaxPollIntervalMs: 200 };
   worker = await import('../../server/dist/files/media/worker.js');
   fileMeta = await import('../../server/dist/files/file-meta.js');
+  // The derived-description writer moved to the one writer of a field derived from a file's bytes (bundle-89).
+  derivedFields = await import('../../server/dist/files/derived-fields.js');
 });
 
 after(async () => {
@@ -226,7 +228,7 @@ describe('one upload stamps one row seq, and a write that lands nothing takes no
       it(`${c.name}: the write reports it wrote nothing and the counter stays where it was`, async () => {
         await c.arrange();
         const before = await h.door.counter(SPACE);
-        const wrote = await fileMeta.setDerivedDescriptionIfUnset(SPACE, FILE, 'A derived summary', 'extracted');
+        const wrote = await derivedFields.setDerivedDescriptionIfUnset(SPACE, FILE, 'A derived summary', 'extracted');
         const after = await h.door.counter(SPACE);
         assert.equal(wrote, false, 'fixture: the derived write landed, so this case drove no decline');
         assert.equal(await h.files().countDocuments({ description: 'A derived summary' }), 0, 'fixture: a derived description was stored');
@@ -239,7 +241,7 @@ describe('one upload stamps one row seq, and a write that lands nothing takes no
     it('the control: a derived write that LANDS takes one number and stamps the row it landed on', async () => {
       await fileMeta.upsertFileMeta(SPACE, FILE, 10, {});
       const before = await h.door.counter(SPACE);
-      const wrote = await fileMeta.setDerivedDescriptionIfUnset(SPACE, FILE, 'A derived summary', 'extracted');
+      const wrote = await derivedFields.setDerivedDescriptionIfUnset(SPACE, FILE, 'A derived summary', 'extracted');
       const after = await h.door.counter(SPACE);
       assert.equal(wrote, true, 'fixture: the derived write declined on a file nobody had described');
       assert.equal(after - before, 1, 'a write that landed took more or fewer than one number');

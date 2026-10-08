@@ -300,12 +300,18 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.deepEqual(seen, []);
     });
 
-    it('a file with NO row is read as suppressed: the chunk is stored with its text, no vector, and nothing is embedded', async () => {
+    /*
+     * CHANGED ON PURPOSE in bundle-89 (Q-418). The caption of a file with no row used to be stored as text (no vector,
+     * because a missing file reads as suppressed). It is not stored at all now: a row is absent because the file was
+     * deleted or was never recorded, and a caption under a path that holds no file is an orphan no listing shows, no
+     * delete reaches and nothing ever removes. Not storing it is the outcome the delete already decided, so it is not
+     * a failure either.
+     */
+    it('a file with NO row gets NO chunk, and that is not a failure', async () => {
       await runImage(OPEN, 'photos/gone.png');
-      const chunk = await files().findOne({ _id: 'photos/gone.png#media-chunk0' });
-      assert.ok(chunk, 'the chunk of a file with no row is written as text');
-      expectKeys(chunk, IMAGE_KEYS, false);
-      assert.deepEqual(seen, []);
+      assert.equal(await files().findOne({ _id: 'photos/gone.png#media-chunk0' }), null,
+        'a caption was stored for a file that is not there');
+      assert.deepEqual(seen, [], 'the embedder was called for a file that is not there');
     });
 
     it('an extracted image (a child of a document) is addressed by its own id; its chunk hangs from IT, not from the document', async () => {

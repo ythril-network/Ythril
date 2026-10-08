@@ -33,7 +33,7 @@
 import path from 'path';
 import { authorRef } from '../../config/author.js';
 import sharp from 'sharp';
-import { col, asDoc, asFilter } from '../../db/mongo.js';
+import { col, asFilter } from '../../db/mongo.js';
 import { getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
 import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
@@ -46,6 +46,7 @@ import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
 import type { Config as HumanConfig, Result } from '@vladmandic/human';
 import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from './face-external.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
@@ -422,11 +423,9 @@ export async function embedFaces(
       ...(boxRaw !== undefined ? { faceBbox: boxRaw as [number, number, number, number] } : {}),
     };
 
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-      asFilter<FileMetaDoc>({ _id: chunkId }),
-      asDoc<FileMetaDoc>(chunkDoc as FileMetaDoc),
-      { upsert: true },
-    );
+    // Through the one writer of a derived row, which reads the PARENT first: a face row written after the picture was
+    // deleted is a face recall still finds, for a file nobody can open.
+    await upsertDerivedFileRow(spaceId, chunkDoc as FileMetaDoc);
   }
 
   // ── 5. Auto-label parent file ───────────────────────────────────────────

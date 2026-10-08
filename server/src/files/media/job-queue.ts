@@ -20,7 +20,7 @@ import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
-import { setFileProcessingState } from '../processing-state.js';
+import { setFileProcessingState } from '../derived-fields.js';
 
 const MAX_ATTEMPTS = 3;
 

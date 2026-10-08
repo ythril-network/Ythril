@@ -96,7 +96,7 @@ const EXEMPT = {
   'server/src/files/file-meta.ts:upsertFileMeta':
     'the upload door\'s LOCAL branch: a person\'s upload is an authored write and is stamped as one. A peer\'s push never reaches '
     + 'it — `recordStoredFile` takes the arrival branch first and returns (asserted below)',
-  'server/src/files/processing-state.ts:setFileProcessingState':
+  'server/src/files/derived-fields.ts:setFileProcessingState':
     'a status mark on a row some writer already recorded — the byte writer\'s arrival, a person\'s upload through the same door, the '
     + 'media worker: it sets only local processing fields (`embeddingStatus`...), which no peer sends and the hash does not see, and '
     + 'stamps neither `updatedAt` nor `seq` by construction (`a-file-row-processing-write-goes-through-one-function`). Not an arrival write at any door',

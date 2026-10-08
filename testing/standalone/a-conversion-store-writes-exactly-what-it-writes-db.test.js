@@ -237,13 +237,23 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
     assert.deepEqual(seen, []);
   });
 
-  it('a file with NO row is read as suppressed: the chunks are stored as text, no vector, no failure', async () => {
+  /*
+   * CHANGED ON PURPOSE in bundle-89 (Q-418), and it was the characterization of the old rule: a file with no row used
+   * to have its passages stored as text (no vector, because `chunkVectorsFor` reads a missing file as suppressed).
+   *
+   * They are not stored now. A row is absent for one of two reasons and both say the same thing: the file was deleted
+   * outright, or it was never recorded. Storing a document's text under a path that holds no document leaves passages
+   * no listing shows, no delete reaches and sync offers for ever — the orphan this item exists to stop. The count is
+   * honestly zero, nothing is enqueued for extracted images that have no parent, and it is NOT a failure: the delete
+   * already decided this.
+   */
+  it('a file with NO row stores NOTHING, counts zero, and is not a failure', async () => {
     const claim = await claimFor(OPEN, 'docs/ghost.txt');
     const result = await store(OPEN, 'docs/ghost.txt', [chunk(0, 'text')], null, [], { claim });
-    assert.deepEqual(result, { chunkCount: 1, convertedFileId: null, embedFailures: 0 });
-    const row = await files().findOne({ _id: 'docs/ghost.txt#chunk0' });
-    assert.deepEqual(keysOf(row), CHUNK_KEYS.sort());
-    assert.deepEqual(seen, []);
+    assert.deepEqual(result, { chunkCount: 0, convertedFileId: null, embedFailures: 0 });
+    assert.equal(await files().countDocuments({ parentFileId: 'docs/ghost.txt' }), 0,
+      'a passage was stored for a file that is not there');
+    assert.deepEqual(seen, [], 'the embedder was called for a file that is not there');
   });
 
   it('a second store replaces rows of the SAME id and leaves other ids alone — pruning stale chunks is the worker\'s job, not this function\'s', async () => {

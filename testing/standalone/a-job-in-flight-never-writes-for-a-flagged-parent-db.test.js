@@ -126,7 +126,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
     faceMod = await import('../../server/dist/files/media/face-embedder.js');
     embedRecord = await import('../../server/dist/brain/embed-record.js');
     fileMeta = await import('../../server/dist/files/file-meta.js');
-    processingState = await import('../../server/dist/files/processing-state.js');
+    processingState = await import('../../server/dist/files/derived-fields.js');
   });
 
   after(async () => {
@@ -249,7 +249,8 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       await seedFile(id, { seq: 7, author: { instanceId: 'b89e2b', instanceLabel: 'b89e2b' } });
       await mongo.col('ythril_counters').updateOne({ _id: S }, { $set: { seq: 50 } }, { upsert: true });
       await flag(id);
-      const wrote = await fileMeta.setDerivedDescriptionIfUnset(S, id, 'a summary of the deleted bytes', 'generated');
+      // In `derived-fields.ts` since bundle-89, with the other writers of what the bytes produced.
+      const wrote = await processingState.setDerivedDescriptionIfUnset(S, id, 'a summary of the deleted bytes', 'generated');
       const row = await files().findOne({ _id: id });
       assert.deepEqual({ wrote, description: row.description, descriptionSource: row.descriptionSource, seq: row.seq, counter: await counter() },
         { wrote: false, description: undefined, descriptionSource: undefined, seq: 7, counter: 50 },

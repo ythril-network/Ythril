@@ -20,8 +20,8 @@
  *
  *  - `embedStoredRecord` (`brain/embed-record.ts`): its four guarded writes — the textless unset, the suppressed branch, the
  *    failure path and the success write — plus the outcomes `gone`, `unchanged` and `superseded`.
- *  - `setDerivedDescriptionIfUnset` (`files/file-meta.ts`): every reason it accepts and every reason it declines.
- *  - `setFileProcessingState` (`files/processing-state.ts`): set, unset, absent-is-untouched, several ids, and its refusals.
+ *  - `setDerivedDescriptionIfUnset` (`files/derived-fields.ts`): every reason it accepts and every reason it declines.
+ *  - `setFileProcessingState` (`files/derived-fields.ts`): set, unset, absent-is-untouched, several ids, and its refusals.
  *  - `updateFileMeta`'s excerpt write: local (stamps neither `seq` nor `updatedAt`), and the authored mix that does.
  *
  * The media embedders and `storeConversionResults` have their own files (`the-media-embedders-store-exactly-what-they-store-db`,
@@ -112,7 +112,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
     (await import('../../server/dist/config/loader.js')).loadConfig();
     embedRecord = await import('../../server/dist/brain/embed-record.js');
     meta = await import('../../server/dist/files/file-meta.js');
-    processing = await import('../../server/dist/files/processing-state.js');
+    processing = await import('../../server/dist/files/derived-fields.js');
   });
 
   after(async () => {
@@ -267,6 +267,9 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
 
   // ── setDerivedDescriptionIfUnset ────────────────────────────────────────────────────────────────────────────────
 
+  // It lives in `files/derived-fields.ts` since bundle-89 — the one writer of a field derived from a file's bytes —
+  // and what it does is unchanged: the same four conditions in the same one guarded update, the same stamps, the same
+  // return. Only where it is imported from moved.
   describe('setDerivedDescriptionIfUnset', () => {
     const ACCEPTED = {
       'no description field': { description: undefined },
@@ -281,7 +284,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
         // seq 0, so "a seq above the old one" is a statement about the stamp and not about where the counter happens to stand.
         const before = await seed(row('docs/a.md', { seq: 0, ...over }));
 
-        assert.equal(await meta.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), true);
+        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), true);
 
         const after = await stored('docs/a.md');
         assert.equal(after.description, 'Derived summary');
@@ -305,24 +308,24 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
       it(`declines ${reason}: returns false and the row is exactly as it was`, async () => {
         const before = await seed(row('docs/a.md', { descriptionSource: 'extracted', ...over }));
 
-        assert.equal(await meta.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), false);
+        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), false);
 
         assert.deepEqual(await stored('docs/a.md'), before);
       });
     }
 
     it('declines a path with no row at all: false, and no row is created', async () => {
-      assert.equal(await meta.setDerivedDescriptionIfUnset(OPEN, 'docs/none.md', 'Derived summary', 'generated'), false);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/none.md', 'Derived summary', 'generated'), false);
       assert.equal(await files().countDocuments({}), 0);
     });
 
     it('both sources are written as given, and a missing source REMOVES the previous one', async () => {
       await seed(row('docs/a.md', { description: '', descriptionSource: 'generated' }));
-      assert.equal(await meta.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Extracted opening', 'extracted'), true);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Extracted opening', 'extracted'), true);
       assert.equal((await stored('docs/a.md')).descriptionSource, 'extracted');
 
       await files().updateOne({ _id: 'docs/a.md' }, { $set: { description: '' } });
-      assert.equal(await meta.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Unknown provenance'), true);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Unknown provenance'), true);
       const after = await stored('docs/a.md');
       assert.equal(after.description, 'Unknown provenance');
       assert.ok(!('descriptionSource' in after), 'a description with no source inherited the previous one\'s label');
@@ -397,28 +400,36 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
     });
   });
 
-  // ── updateFileMeta: the excerpt ─────────────────────────────────────────────────────────────────────────────────
+  // ── the derived excerpt ─────────────────────────────────────────────────────────────────────────────────────────
 
-  describe('updateFileMeta, as the media worker writes a derived excerpt', () => {
-    it('an excerpt alone is a LOCAL write: it sets the excerpt, stamps neither seq nor updatedAt, queues one embed job, and returns the row', async () => {
+  /*
+   * It went through `updateFileMeta` until bundle-89, as a LOCAL field that stamped nothing. It now goes through
+   * `setDerivedExcerpt` in the one writer of a derived field, which asks whether the file is still there first — and
+   * `updateFileMeta` no longer takes an `excerpt` at all, because no door ever sent one and the worker was its only
+   * caller. What the write DOES is unchanged: the excerpt alone, no stamp, one embed job.
+   */
+  describe('setDerivedExcerpt, as the media worker writes a derived excerpt', () => {
+    it('an excerpt is a LOCAL write: it sets the excerpt, stamps neither seq nor updatedAt, and queues one embed job', async () => {
       const before = await seed(row('docs/a.md'));
 
-      const returned = await meta.updateFileMeta(OPEN, 'docs/a.md', { excerpt: 'the opening prose' });
+      assert.equal(await processing.setDerivedExcerpt(OPEN, 'docs/a.md', 'the opening prose'), 'written');
 
       const after = await stored('docs/a.md');
       assert.deepEqual(after, { ...before, excerpt: 'the opening prose' }, 'the excerpt write changed a field beyond the excerpt');
-      assert.equal(returned.excerpt, 'the opening prose');
-      assert.equal(returned.seq, before.seq);
       const queued = await jobs().find({}).toArray();
       assert.equal(queued.length, 1, 'one embed job is queued for the record, whichever field moved');
       assert.equal(queued[0].recordType, 'file');
       assert.equal(queued[0].recordId, 'docs/a.md');
     });
 
-    it('an excerpt WITH an authored field is an authored write: seq and updatedAt move', async () => {
+    it('an AUTHORED write beside it still stamps: the two are separate calls now, and only one of them is the file\'s own half', async () => {
       const before = await seed(row('docs/a.md'));
 
-      await meta.updateFileMeta(OPEN, 'docs/a.md', { excerpt: 'prose', tags: ['t', 'u'] });
+      await processing.setDerivedExcerpt(OPEN, 'docs/a.md', 'prose');
+      const between = await stored('docs/a.md');
+      assert.equal(between.seq, before.seq, 'the derived write stamped a seq');
+
+      await meta.updateFileMeta(OPEN, 'docs/a.md', { tags: ['t', 'u'] });
 
       const after = await stored('docs/a.md');
       assert.equal(after.excerpt, 'prose');
@@ -435,15 +446,18 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
       assert.deepEqual(await stored('docs/a.md'), without(before, ['excerpt']));
     });
 
-    it('a description with no source REMOVES the stored source; a description with one sets both', async () => {
+    /*
+     * The authored door no longer takes a `descriptionSource` (bundle-89): a description written through it is a
+     * CALLER's, and the only writer of a derived description sets the marker itself. So the rule is simpler than the
+     * pair this replaces — a description given here always clears a machine-made provenance, with no argument that can
+     * keep it — and the derived half is asserted where it is written, above.
+     */
+    it('a description a caller writes ALWAYS removes a machine-made source', async () => {
       await seed(row('docs/a.md', { descriptionSource: 'generated' }));
       await meta.updateFileMeta(OPEN, 'docs/a.md', { description: 'a person wrote this' });
-      assert.ok(!('descriptionSource' in await stored('docs/a.md')));
-
-      await meta.updateFileMeta(OPEN, 'docs/a.md', { description: 'a model wrote this', descriptionSource: 'generated' });
       const after = await stored('docs/a.md');
-      assert.equal(after.description, 'a model wrote this');
-      assert.equal(after.descriptionSource, 'generated');
+      assert.equal(after.description, 'a person wrote this');
+      assert.ok(!('descriptionSource' in after), 'the record still claims a model wrote what a person just typed');
     });
 
     it('a path with no row returns null, creates nothing and queues nothing', async () => {

@@ -25,7 +25,7 @@ import type { Chunk } from './types.js';
 import { ConversionUnavailableError } from './types.js';
 import { writeFile, writeFileBytes } from '../files.js';
 import { resolveSafePathChecked } from '../sandbox.js';
-import { col, asFilter, asDoc } from '../../db/mongo.js';
+import { col, asFilter } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import { chunkEmbedText } from '../../brain/embed-text.js';
 import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../../config/loader.js';
@@ -42,6 +42,7 @@ import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fields.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { inChunks } from '../../util/chunks.js';
 
@@ -505,17 +506,13 @@ export async function storeConversionResults(
 
   derivedDocs.push(...chunkDocs.filter(Boolean));
 
-  // The commit. Replace-by-id rather than a bare insert, for two reasons: a transaction aborts on its first
-  // duplicate key (the old `ordered: false` tolerance cannot exist inside one), and a write conflict makes
-  // `withTransaction` run this callback again from the top.
-  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  // The commit, through the one writer of a file's derived rows: it reads the PARENT first, so a conversion that
+  // finishes after the file was deleted stores nothing rather than leaving passages under a path that is gone. The
+  // claim fence around it is the earlier, cheaper stop; the row's flag is the authoritative one (see that module).
+  let stored: DerivedWriteOutcome;
   try {
-    await writeUnderClaim(spaceId, opts.claim, async session => {
-      for (const batch of inChunks(derivedDocs, INSERT_BATCH)) {
-        await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: batch.map(d => d._id) } }), { session });
-        await files.insertMany(batch.map(d => asDoc<FileMetaDoc>(d)), { session });
-      }
-    });
+    stored = await writeUnderClaim(spaceId, opts.claim, session =>
+      replaceDerivedFileRows(spaceId, originalId, derivedDocs, { session, batch: INSERT_BATCH }));
   } catch (err) {
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
@@ -536,6 +533,23 @@ export async function storeConversionResults(
         log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
     throw err;
+  }
+
+  /*
+   * THE SOURCE WENT WHILE WE WERE CONVERTING IT, and that is not a failure.
+   *
+   * The writer read the file's row and found it gone or flagged deleted, so the passages were not stored — storing them
+   * would leave a document's text under a path that no longer holds a document. The sidecar BYTES were written before
+   * the commit, so they are removed here for the same reason a claim lost over a gone source removes them: nothing names
+   * them any more, and sync would otherwise advertise them for ever. Nothing is enqueued for the extracted images, which
+   * have no parent to belong to, and the count is honestly zero.
+   */
+  if (stored === 'gone') {
+    if (convertedFileId || extractedImages.length > 0) {
+      await sidecarsOwnedBy(spaceId, originalId, 'file').then(owned => removeSidecarBytes(spaceId, owned)).catch(cleanupErr =>
+        log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
+    }
+    return { chunkCount: 0, convertedFileId: null, embedFailures };
   }
 
   for (const job of imageJobs) {

@@ -21,7 +21,7 @@ import type { FileMetaDoc } from '../config/types.js';
 import { getMediaEmbeddingConfig, DEFAULT_MEDIA_MAX_FILE_SIZE_BYTES } from '../config/loader.js';
 import { resolveInputFormat, deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
 import { enqueueMediaJob, enqueueTextJob } from './media/job-queue.js';
-import { setFileProcessingState } from './processing-state.js';
+import { setFileProcessingState } from './derived-fields.js';
 import { documentsAreOff } from './converters/extraction-level.js';
 import { mediaIsOff } from './converters/media-level.js';
 import { mimeTypeForPath } from './mime.js';
@@ -158,7 +158,7 @@ export async function dispatchFileProcessing(
     // Media (image/audio/video): enqueue an async embedding job, or record why we didn't.
     // `mediaType` is the guard-narrowed format so it satisfies FileMetaDoc's media subset.
     const mediaType = resolvedFormat;
-    // Through the one writer of a file's processing state (`files/processing-state.ts`): it stamps no `updatedAt` and no `seq`.
+    // Through the one writer of a file's processing state (`files/derived-fields.ts`): it stamps no `updatedAt` and no `seq`.
     const setMediaStatus = (status: Exclude<FileEmbeddingStatus, 'complete'>): Promise<unknown> =>
       setFileProcessingState(spaceId, normId, { mediaType, embeddingStatus: status });
     // Identical bytes that already completed, or whose job is under way: nothing to do, and this is the most expensive thing

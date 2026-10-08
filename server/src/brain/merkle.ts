@@ -170,7 +170,7 @@ const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...D
  * **The two lists must name the same fields.** That gate is what says so.
  *
  * Exported because the complement is the other half of the rule: every `FileMetaDoc` key NOT named here is local to
- * this instance, and `files/processing-state.ts` derives its local-only set from this list instead of keeping a second
+ * this instance, and `files/derived-fields.ts` derives its local-only set from this list instead of keeping a second
  * one (`Q-240`). Gates parse the declaration below from this file's source: keep its spelling, and do not write that
  * spelling anywhere above it, comments included.
  */

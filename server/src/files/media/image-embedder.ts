@@ -6,14 +6,13 @@
  * on the {spaceId}_files collection with `derivedText` = caption.
  */
 
-import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { authorRef } from '../../config/author.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import { getMediaEmbeddingConfig, getFaceRecognitionConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
 
 
 /**
@@ -79,12 +78,10 @@ export async function embedImage(
     ...vectorFields,
   };
 
-  // Upsert: a retry may re-run this after a partial failure
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-    asFilter<FileMetaDoc>({ _id: chunkId }),
-    asDoc<FileMetaDoc>(chunkDoc),
-    { upsert: true },
-  );
+  // Upsert: a retry may re-run this after a partial failure. Through the one writer of a derived row, which reads the
+  // PARENT first: a caption written after the file was deleted is an orphan row nothing removes, and the upsert is why
+  // the check cannot be a predicate in the filter — a non-matching filter on an upsert inserts.
+  await upsertDerivedFileRow(spaceId, chunkDoc);
 
   // Face recognition — run after the caption chunk is stored so the job can
   // still complete if face detection fails. Non-fatal.

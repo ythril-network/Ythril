@@ -24,7 +24,7 @@
  * ## What is derived, never listed
  *
  *  - **The fields**: the derived half of the local-only set (`DERIVED_LOCAL_FIELDS`, `sync/local-only-fields.ts`), the
- *    processing state `files/processing-state.ts` types, every other `FileMetaDoc` field the divergence hash does not see
+ *    processing state `files/derived-fields.ts` types, every other `FileMetaDoc` field the divergence hash does not see
  *    (`FILE_HASH_PROJECTION`) except the identity and byte-fact keys named below, and `descriptionSource`, which is hashed
  *    and replicates but is written ONLY alongside a derived description. A field added to `FileMetaDoc` and not hashed is
  *    in the rule the day it lands.
@@ -98,6 +98,12 @@ const EXEMPT = {
   'server/src/sync/arrivals.ts:writeArrivals':
     'the arrival writer CARRIES this instance\'s own stored vector across the replace of an arriving row (`carriedFields`) and writes none of '
     + 'its own: it computes nothing from bytes, and a vector that arrives is dropped (`an-arrival-is-written-by-one-writer`)',
+  'server/src/files/file-meta.ts:updateFileMeta':
+    'the AUTHORED-edit door, which computes nothing from bytes. It names two derived fields and writes neither as a derivation: '
+    + '`descriptionSource` is only ever REMOVED here, because a caller writing their own description must not leave a machine-made '
+    + 'provenance standing over it (the derived description and its marker are written by `setDerivedDescriptionIfUnset`, in the '
+    + 'module), and `faceEmbedding` appears in a FILTER selecting face rows already held, whose `faceEntityId` label it re-points '
+    + 'when the file\'s entity links change — a label never creates a row',
   'server/src/brain/entities.ts:unlabelFacesWhere':
     'the face-label cascade of a deleted entity: it clears the entity\'s claim on face rows already held and writes no content or '
     + 'vector, so it cannot make a row exist for a file that is gone',
@@ -203,8 +209,18 @@ describe('the derivation finds the writes at all, so the rule cannot pass by fin
 
   it('found the files-collection writes, among them the ones that write through a computed collection name', () => {
     assert.ok(WRITES.length >= 35, `only ${WRITES.length} write(s) to a files collection found`);
-    assert.ok(WRITES.some(w => w.file.endsWith('brain/embed-record.ts')),
-      'embed-record.ts writes through `col(collName)` and was not found — the computed-name sites are being skipped');
+    /*
+     * The computed-name anchor. It was `brain/embed-record.ts`, which wrote through `col(collName)` for every record
+     * kind — and that is the site the rule MOVED: the embed job now hands its update to the writer module, which is
+     * itself the computed-name writer (it takes the collection name, because the embed job is one site for every kind).
+     * Anchored on the module's own write, the case still proves what it was written to prove: a write whose collection
+     * is not a literal is found.
+     */
+    assert.ok(WRITES.some(w => w.file === OWNER && /^write/.test(w.fn)),
+      `no write in ${OWNER} goes through a collection name it is handed — the computed-name sites are being skipped`);
+    assert.ok(!WRITES.some(w => w.file.endsWith('brain/embed-record.ts')),
+      'embed-record.ts writes a files collection again: its four guarded writes belong to the one writer, which is what '
+      + 'asks whether the file is still live — a flag stamps no seq, so `atReadSeq` cannot see a delete');
   });
 
   it('some write anywhere touches a derived field (otherwise the rule below is vacuous), and the writers are not one function', () => {

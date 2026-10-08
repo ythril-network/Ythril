@@ -43,8 +43,7 @@ import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch,
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
-import { setFileProcessingState, type FileProcessingState } from '../processing-state.js';
-import { updateFileMeta, setDerivedDescriptionIfUnset } from '../file-meta.js';
+import { setFileProcessingState, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState } from '../derived-fields.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
 import {
@@ -588,7 +587,9 @@ async function processJob(
       // text, not a competing summary, and it is what makes a remembered phrase find this record. Only the
       // description itself is theirs to keep.
       if (derivedExcerpt) {
-        await updateFileMeta(spaceId, filePath, { excerpt: derivedExcerpt }).catch(err =>
+        // Through the one writer of a derived field, which asks whether the file is still here: the excerpt is
+        // derived from bytes a delete may have removed while the conversion ran.
+        await setDerivedExcerpt(spaceId, filePath, derivedExcerpt).catch(err =>
           log.warn(`Media worker: failed to write excerpt to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
         );
       }

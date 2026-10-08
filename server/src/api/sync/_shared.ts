@@ -603,7 +603,7 @@ export function removedFileMetaKeys(doc: Readonly<Record<string, unknown>>, { re
  * into a top-level file.
  *
  * Exported for ONE reader: `the-file-field-sets-agree.test.js`, which holds this list equal to `localFileFields()`
- * (`files/processing-state.ts`) — the same fact (the file-row keys that never travel) spelled from the wire side and from the
+ * (`files/derived-fields.ts`) — the same fact (the file-row keys that never travel) spelled from the wire side and from the
  * hash side, so a field added to only one of them is caught rather than served or hashed wrongly.
  */
 type FileMetaWireKey = keyof typeof IncomingFileMetaDoc.shape;

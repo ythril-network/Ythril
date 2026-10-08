@@ -24,7 +24,7 @@
  *   counts as touching a processing field when the function it sits in names one anywhere outside a comment. The safe
  *   direction for a gate is a finding a person reads; a write the parser cannot read is a write nothing checks.
  * - **The processing fields are NOT listed here as a second copy of the answer** — they are the fields
- *   `files/processing-state.ts` types (`setFileProcessingState`), read from that module's own source once it exists,
+ *   `files/derived-fields.ts` types (`setFileProcessingState`), read from that module's own source once it exists,
  *   and the documented set until then. Both are asserted to be real `FileMetaDoc` fields that the divergence hash does
  *   NOT see (`FILE_HASH_PROJECTION` in `brain/merkle.ts`), so a field renamed or promoted into the hash fails here
  *   rather than being quietly dropped from the rule.
@@ -47,10 +47,10 @@ import { stripComments } from './_strip-comments.mjs';
 
 const MERKLE = 'server/src/brain/merkle.ts';
 const TYPES = 'server/src/config/types.ts';
-const PROCESSING_STATE = 'server/src/files/processing-state.ts';
+const PROCESSING_STATE = 'server/src/files/derived-fields.ts';
 
 /**
- * The local processing state of a file row, until `processing-state.ts` states it itself.
+ * The local processing state of a file row, until `derived-fields.ts` states it itself.
  *
  * What the nine writers of `Q-240` write (plus the pointer the conversion records), and the fields the hash must never
  * see move with them. Once the module exists, `processingFields()` reads its typed argument instead and this is only

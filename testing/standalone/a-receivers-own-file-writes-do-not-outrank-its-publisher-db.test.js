@@ -73,7 +73,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     loader.loadConfig();
     meta = await import('../../server/dist/files/file-meta.js');
     wire = await import('../../server/dist/api/sync/_shared.js');
-    processing = await import('../../server/dist/files/processing-state.js');
+    processing = await import('../../server/dist/files/derived-fields.js');
   });
 
   after(async () => {
@@ -91,7 +91,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     assert.ok(wireKeys.length > 5, `the ingest schema declares ${wireKeys.length} keys — nothing is being checked`);
     // The set is DERIVED (FileMetaDoc keys the divergence hash does not see), so the floor says it is not empty.
     const local = [...(processing.localFileFields?.() ?? [])];
-    assert.ok(local.length >= 10, `processing-state.ts derives ${local.length} local file field(s)`);
+    assert.ok(local.length >= 10, `derived-fields.ts derives ${local.length} local file field(s)`);
     for (const k of ['sizeBytes', 'sha256', 'excerpt', 'embeddingStatus']) assert.ok(local.includes(k), `${k} is not local`);
     for (const f of local) assert.ok(!wireKeys.includes(f), `${f} is on the local list and also replicates`);
   });

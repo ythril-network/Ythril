@@ -13,15 +13,13 @@ import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
-import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
-import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { updateDerivedFileRow } from '../derived-fields.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
@@ -225,17 +223,14 @@ export async function embedVideo(
       try {
         // A suppressed file's chunk takes the combined TEXT (the lexical channel searches it) and no vector.
         const vectorFields = await vectors.fieldsFor(combined);
-        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-          asFilter<FileMetaDoc>({ _id: chunk.chunkId }),
-          asUpdate<FileMetaDoc>({
-            $set: {
-              content: combined,
-              matchedText: combined,
-              ...vectorFields,
-              updatedAt: now,
-            },
-          }),
-        );
+        // Through the one writer of a derived row, which reads the PARENT first: this rewrite lands minutes after the
+        // transcript was stored, and a file deleted in between must not get its segments re-embedded.
+        await updateDerivedFileRow(spaceId, chunk.chunkId, fileId, {
+          content: combined,
+          matchedText: combined,
+          ...vectorFields,
+          updatedAt: now,
+        });
       } catch (err) {
         log.warn(`Video embedder: re-embed failed for chunk ${chunk.chunkId}: ${err instanceof Error ? err.message : String(err)}`);
       }

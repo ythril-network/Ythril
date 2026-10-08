@@ -63,7 +63,7 @@ const DIMS = 8;
 const POISON = '1999-01-01T00:00:00.000Z';
 const POISON_SEQ = 4242;
 const HASH = 'c'.repeat(64);
-const PROCESSING_STATE = 'server/src/files/processing-state.ts';
+const PROCESSING_STATE = 'server/src/files/derived-fields.ts';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-procstate-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');

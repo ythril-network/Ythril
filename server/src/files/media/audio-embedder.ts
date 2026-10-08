@@ -16,14 +16,13 @@ import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
-import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
 
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
@@ -300,11 +299,9 @@ export async function embedAudio(
           chunkDurationMs: endMs - startMs,
         };
 
-        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-          asFilter<FileMetaDoc>({ _id: chunkId }),
-          asDoc<FileMetaDoc>(chunkDoc),
-          { upsert: true },
-        );
+        // Through the one writer of a derived row, which reads the PARENT first: a transcript segment written after
+        // the file was deleted is an orphan row nothing removes.
+        await upsertDerivedFileRow(spaceId, chunkDoc);
 
         results.push({ chunkId, startMs, endMs, transcript });
       } catch (err) {
