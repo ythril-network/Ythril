@@ -1,188 +1,189 @@
 /**
- * Re-uploading identical bytes does not re-run vision or speech-to-text over them.
+ * Re-sending identical bytes does not re-run vision or speech-to-text over them, and CHANGED bytes always do — asked of every
+ * way bytes arrive, through the door, never against a row a test wrote (bundle-48, Q-260).
  *
- * ## The waste
+ * ## The waste, and the rule that came with it
  *
- * `enqueueMediaJob` resets a terminal job on purpose — its own comment says "reset so re-upload triggers
- * re-processing" — because until now the pipeline had no way to tell a corrected file from the same file sent
- * twice. Every re-upload therefore paid for a full vision or speech-to-text pass, which is the single most
- * expensive thing this instance does, to reproduce a caption it already had.
+ * `enqueueMediaJob` resets a terminal job on purpose ("so re-upload triggers re-processing"): until the pipeline could tell a
+ * corrected file from the same file sent twice, every re-upload paid for a full vision or speech-to-text pass, the single
+ * most expensive thing this instance does, to reproduce a caption it already had. The guard that stopped it is an identity,
+ * not a guess: the same bytes (SHA-256) through the same pipeline produce the same analysis. It fires only when the stored
+ * hash matches AND the file's processing settled or is under way (`complete`, `pending`, `processing`); a `failed`, `partial`
+ * or `skipped` file is retried, because those are exactly the states a retry exists for. The wrong direction is invisible: a
+ * file silently never embedded is discovered only when someone searches for it and it is not there. So every uncertain case
+ * processes.
  *
- * ## Why this is lossless rather than a heuristic
+ * ## What this file used to do wrong (the defect bundle-48 fixes)
  *
- * The guard is an identity, not a guess: the same bytes (SHA-256, computed by the writer that just wrote them)
- * through the same pipeline produce the same analysis. It fires only on the conjunction of three conditions, and
- * every one of them is asserted separately below, because each alone would make it a guess:
+ * It seeded the PRIOR row by hand and called the dispatcher with it. Through a real door the row is rewritten by the arrival
+ * (the new size, the new hash) BEFORE the dispatcher reads it, so the comparison of "the stored hash" with "the arriving
+ * hash" compared the arriving hash with itself: CHANGED bytes on a `complete` file were skipped, and left `complete` under the
+ * new hash, with the old caption, for ever. Nothing here seeds a hash. The first arrival is the door's; only the worker's own
+ * terminal write is stood in for (`settle`, `_dispatch-door.mjs`).
  *
- *   - the CALLER supplied a hash — an unknown hash processes rather than assumes;
- *   - the STORED hash matches it;
- *   - the stored `embeddingStatus` is `complete` — anything else (failed, partial, pending, skipped) is retried.
+ * ## What is asserted, over every way bytes reach the door (a person or a peer, one request or chunked) and every status
  *
- * The wrong direction here is invisible in a way the right one is not: a file silently never embedded is
- * discovered only when someone searches for it and it is not there. So every uncertain case processes.
+ *   - identical bytes on a `complete`, `pending` or `processing` file: nothing is touched. The job row is IDENTICAL (its
+ *     poisoned `attempts`, `lastError` and `claimedAt` survive), the file's status is what it was, and a `complete` file is
+ *     answered `complete`;
+ *   - identical bytes on a `failed`, `partial` or `skipped` file: processed again (a pending job, reset);
+ *   - CHANGED bytes, whatever the status: processed (the file is `pending` under the NEW hash, a terminal job reset);
+ *   - identical bytes on a row that holds no hash (every media file stored before the hash existed): processed;
+ *   - in source: every call of the dispatcher hands over the hash, no door keeps a private copy of the sequence that could
+ *     forget it, and a writer without a hash never erases the stored one.
  *
  * Run: node --test testing/standalone/identical-bytes-skip-media-pipeline-db.test.js
+ * (requires a prior `npm run build:server`)
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { readFileSync } from 'node:fs';
+import { mongoSkipReason } from './_mongo-harness.mjs';
+import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
+import { openDispatchDoor, sha256Of, SETTLED_STATUSES } from './_dispatch-door.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
-const SPACE = `mediaskip${Date.now()}`;
-const FILE = 'clip.png';
-const HASH = 'a'.repeat(64);
 
-let mongo;
-let dispatchFileProcessing;
+const SPACE = 'mediaskip';
+const FILE = 'clip.png';
+const FIRST = 'the bytes of the first picture';
+const OTHER = 'the bytes of a corrected picture';
+
+/** The statuses under which identical bytes are NOT processed again: the work is done or is under way. The rest retry. */
+const LEAVE_ALONE = new Set(['complete', 'pending', 'processing']);
+/** A terminal job a re-run must reset (a job in flight is left to its worker). */
+const TERMINAL_JOB = new Set(['complete', 'partial', 'failed']);
+
+let h;
 
 before(async () => {
   if (skip) return;
-  mongo = await openTestMongo('mediaskip');
-  ({ dispatchFileProcessing } = await import('../../server/dist/files/dispatch.js'));
+  h = await openDispatchDoor({ suite: 'mediaskip', space: SPACE });
 });
+after(async () => { await h?.close(); });
 
-after(async () => {
-  if (skip) return;
-  await mongo.col(`${SPACE}_files`).drop().catch(() => {});
-  await closeTestMongo(mongo);
-});
-
-/**
- * "It did not skip" is proven by "it went on to the pipeline".
- *
- * The guard sits immediately above `getMediaEmbeddingConfig()`, and this is a database harness with no config
- * loaded — so falling through raises a recognisable error. That failure IS the evidence. Matching the message
- * rather than merely catching means an unrelated fault cannot pass as proof.
- */
-async function ranThePipeline(input) {
-  try {
-    const result = await dispatchFileProcessing(SPACE, FILE, input);
-    return { processed: false, result };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    assert.match(msg, /Config not loaded/,
-      `expected the media pipeline to be reached and fail on the absent config, got: ${msg}`);
-    return { processed: true, result: null };
-  }
+/** The first arrival through the door, then the worker's terminal write for `status`. Returns the settled state. */
+async function arrangeSettled(door, status, content = FIRST) {
+  const first = await door.send(h.bytes, { space: SPACE, path: FILE, content });
+  assert.ok([200, 201, 202].includes(first.code), `fixture: the first arrival was refused: ${JSON.stringify(first)}`);
+  const made = await h.stateOf(FILE);
+  assert.equal(made.row?.sha256, sha256Of(content), 'fixture: the door recorded the bytes it was sent');
+  assert.equal(made.row?.mediaType, 'image', 'fixture: the file is media');
+  assert.ok(made.job, 'fixture: the first arrival enqueued a media job');
+  return h.settle(FILE, status);
 }
 
-/** A file metadata record as an upload leaves one. */
-async function seed(over = {}) {
-  const c = mongo.col(`${SPACE}_files`);
-  await c.deleteOne({ _id: FILE }).catch(() => {});
-  await c.insertOne({
-    _id: FILE, spaceId: SPACE, path: FILE, sizeBytes: 1024, mediaType: 'image',
-    sha256: HASH, embeddingStatus: 'complete', createdAt: new Date().toISOString(),
-    ...over,
-  });
-  return c;
-}
+describe('the media pipeline runs again only when running it could change something', { skip }, () => {
+  beforeEach(async () => { await h.reset(); });
 
-describe('the media pipeline is skipped only when re-running it could not change anything', { skip }, () => {
-  it('same hash, already complete -> skipped, and the record is left alone', async () => {
-    const c = await seed();
-    const before = await c.findOne({ _id: FILE });
+  // The partition is stated by SETTLED_STATUSES (every status a worker or the dispatcher leaves), so a status added there is
+  // asked of every door below instead of being a case nobody wrote.
+  assert.ok(SETTLED_STATUSES.length >= 6 && [...LEAVE_ALONE].every(s => SETTLED_STATUSES.includes(s)),
+    'the settled statuses are derived from what a worker leaves; a floor keeps an empty list from passing every loop');
 
-    const { processed, result } = await ranThePipeline({ bytes: 1024, sha256: HASH });
-    assert.equal(processed, false, 'identical bytes that already embedded must not be analysed again');
-    assert.equal(result.embeddingStatus, 'complete',
-      'the caller is told the truth about the file, not a status describing work that did not happen');
+  for (const door of UPLOAD_DOORS) {
+    describe(door.name, () => {
+      for (const status of SETTLED_STATUSES) {
+        if (LEAVE_ALONE.has(status)) {
+          it(`identical bytes on a "${status}" file are left exactly as they are`, async () => {
+            const before = await arrangeSettled(door, status);
+            const answer = await door.send(h.bytes, { space: SPACE, path: FILE, content: FIRST });
+            assert.ok([200, 201, 202].includes(answer.code), `the re-send was refused: ${JSON.stringify(answer)}`);
+            const after = await h.stateOf(FILE);
+            assert.equal(after.row.embeddingStatus, status,
+              `identical bytes changed the file's status from "${status}" to "${after.row.embeddingStatus}": work that was done or under way was thrown away`);
+            if (before.job) assert.deepEqual(after.job, before.job, 'the job row was touched by an arrival that changed nothing');
+            if (status === 'complete') {
+              assert.equal(answer.body.embeddingStatus, 'complete',
+                'the caller is told the truth about the file, not a status describing work that did not happen');
+            }
+          });
+        } else {
+          it(`identical bytes on a "${status}" file are processed again`, async () => {
+            await arrangeSettled(door, status);
+            const answer = await door.send(h.bytes, { space: SPACE, path: FILE, content: FIRST });
+            assert.ok([200, 201, 202].includes(answer.code), `the re-send was refused: ${JSON.stringify(answer)}`);
+            const after = await h.stateOf(FILE);
+            assert.equal(after.row.embeddingStatus, 'pending', `a "${status}" file is exactly what a re-send exists to retry`);
+            assert.equal(after.job?.status, 'pending', 'the retry enqueued nothing');
+            assert.equal(after.job?.attempts, 0, 'the job row was not reset for the retry');
+          });
+        }
 
-    // Nothing was reset — the point of the change is that the completed job SURVIVES the re-upload.
-    assert.deepEqual(await c.findOne({ _id: FILE }), before);
-  });
+        it(`CHANGED bytes on a "${status}" file are processed, under the new hash`, async () => {
+          await arrangeSettled(door, status);
+          const answer = await door.send(h.bytes, { space: SPACE, path: FILE, content: OTHER });
+          assert.ok([200, 201, 202].includes(answer.code), `the re-send was refused: ${JSON.stringify(answer)}`);
+          const after = await h.stateOf(FILE);
+          assert.equal(after.row.sha256, sha256Of(OTHER), 'fixture: the row holds the new bytes');
+          assert.equal(after.row.embeddingStatus, 'pending',
+            `new bytes on a "${status}" file left it "${after.row.embeddingStatus}" under the new hash: the old analysis now describes a file that is gone`);
+          assert.equal(answer.body.embeddingStatus, 'pending', 'the caller was told the old analysis stands');
+          assert.ok(after.job, 'no job exists for the new bytes');
+          if (TERMINAL_JOB.has(status) || status === 'skipped') {
+            assert.equal(after.job.status, 'pending', 'a finished job was not reset for the new bytes');
+            assert.equal(after.job.attempts, 0, 'the old job\'s attempts carried over to the new bytes');
+          }
+        });
+      }
 
-  it('a DIFFERENT hash re-processes', async () => {
-    await seed();
-    const { processed } = await ranThePipeline({ bytes: 1024, sha256: 'b'.repeat(64) });
-    assert.equal(processed, true, 'new bytes are a new file — skipping would leave the old caption in place');
-  });
-
-  it('NO caller hash re-processes, even against a stored hash', async () => {
-  // set-claim: the NON-terminal media statuses -- everything except `complete`, which is the one that may
-  // skip. A partition stated by its larger half, not a copy of the status list.
-    // A writer that does not compute one is the pre-upgrade case, and every record written before this
-    // shipped. Unknown must mean "process it".
-    await seed();
-    const { processed } = await ranThePipeline({ bytes: 1024 });
-    assert.equal(processed, true, 'an unknown hash must process rather than assume');
-  });
-
-  for (const status of ['failed', 'partial', 'pending', 'skipped', 'processing']) {
-    it(`same hash but status "${status}" re-processes`, async () => {
-      // These are exactly the states a retry exists for. Skipping here would make a failed analysis
-      // permanent and a re-upload — the obvious human fix — do nothing at all.
-      await seed({ embeddingStatus: status });
-      const { processed } = await ranThePipeline({ bytes: 1024, sha256: HASH });
-      assert.equal(processed, true, `"${status}" is not a finished analysis`);
+      it('identical bytes on a row that holds NO hash are processed (every record stored before the hash existed)', async () => {
+        await arrangeSettled(door, 'complete');
+        await h.files().updateOne({ _id: FILE }, { $unset: { sha256: '' } });
+        const answer = await door.send(h.bytes, { space: SPACE, path: FILE, content: FIRST });
+        assert.ok([200, 201, 202].includes(answer.code), `the re-send was refused: ${JSON.stringify(answer)}`);
+        const after = await h.stateOf(FILE);
+        assert.equal(after.row.embeddingStatus, 'pending', 'a record that never stored a hash cannot claim identity');
+        assert.equal(after.job?.attempts, 0, 'the job was not reset for a file whose identity is unknown');
+      });
     });
   }
-
-  it('NO stored hash re-processes', async () => {
-    // Every media record that exists today. The field is optional and self-healing precisely so this case
-    // behaves like it always did.
-    await seed({ sha256: undefined });
-    const { processed } = await ranThePipeline({ bytes: 1024, sha256: HASH });
-    assert.equal(processed, true, 'a record that never stored a hash cannot claim identity');
-  });
 });
 
 describe('the writers supply the hash, or the guard is dead code', () => {
-  it('every upload path passes sha256 to both the meta write and the dispatch', async () => {
-    const { readFileSync } = await import('node:fs');
-    const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*/gm, '$1');
 
-    // The guard can only ever fire if the three writers that compute a hash also hand it over. Each of these
-    // computed one already — for the response body and the webhook — and threw it away.
-    /*
-     * The UPLOAD route's file, which stopped being `api/files.ts` when G-4 moved it to `files-upload.ts`. Read
-     * from where the writers are rather than from where they used to be: pointed at the old file these four
-     * assertions would all fail at once, which reads as four broken writers instead of one moved module.
-     */
-    //
-    // The sequence now lives ONCE, in `files/store-file.ts`, and every door goes through it — so the hand-over
-    // is asserted there, and each door is asserted to have no private copy of the sequence to forget it in.
-    const store = strip(readFileSync('server/src/files/store-file.ts', 'utf8'));
-    assert.match(store, /upsertFileMeta\(spaceId, filePath, sizeBytes, \{.*, sha256 \}\)/,
-      'the shared sequence must store the hash it was handed');
-    assert.match(store, /dispatchFileProcessing\(spaceId, filePath, \{[^}]*sha256,/,
-      'the shared sequence must pass the hash to the dispatcher');
-    assert.match(store, /const \{ sha256 \} = await writeFileBytes\(/, 'storeFile must use the hash of the bytes it wrote');
+  /** The text between the parentheses of the call that opens at `from` (just after its `(`), balanced. */
+  function argsOf(text, from) {
+    let depth = 1;
+    for (let i = from; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')' && --depth === 0) return text.slice(from, i);
+    }
+    throw new Error('an unbalanced call');
+  }
 
-    const doors = {
-      'server/src/api/files-upload.ts': /recordStoredFile\(\s*targetSpace, filePath, range\.total, sha256,/,
-      'server/src/mcp/tools/file.ts': null,
-    };
-    for (const [file, chunked] of Object.entries(doors)) {
+  it('every call of the dispatcher hands over the hash it has', () => {
+    const calls = [];
+    for (const file of trackedSources('server/src', { floor: 200 })) {
       const src = strip(readFileSync(file, 'utf8'));
-      assert.doesNotMatch(src, /\b(upsertFileMeta|dispatchFileProcessing)\(/,
-        `${file} writes metadata or dispatches itself — a private copy of the sequence is where the hash gets dropped`);
-      assert.match(src, /\bstoreFile\(/, `${file} must store through files/store-file.ts`);
-      if (chunked) assert.match(src, chunked, 'chunked assembly must hand over the hash it computed');
+      for (const m of src.matchAll(/(?<![\w.])dispatchFileProcessing\(/g)) {
+        if (/function\s+$/.test(src.slice(0, m.index))) continue; // its own definition
+        calls.push({ file, args: argsOf(src, m.index + m[0].length) });
+      }
+    }
+    assert.ok(calls.length >= 1, 'no call of dispatchFileProcessing found: the scan is broken, not the code');
+    for (const { file, args } of calls) {
+      assert.match(args, /\bsha256\b/, `${file} calls the dispatcher without the hash of the bytes: unknown means "process", so every arrival pays for the pipeline`);
     }
   });
 
-  it('the stored hash is never erased by a writer that does not have one', async () => {
-    const { readFileSync } = await import('node:fs');
-    const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  it('no door keeps a private copy of the sequence that could forget the hash', () => {
+    const doors = ['server/src/api/files-upload.ts', 'server/src/mcp/tools/file.ts'];
+    for (const file of doors) {
+      const src = strip(readFileSync(file, 'utf8'));
+      assert.doesNotMatch(src, /\b(upsertFileMeta|dispatchFileProcessing)\(/,
+        `${file} writes metadata or dispatches itself — a private copy of the sequence is where the hash gets dropped`);
+      assert.match(src, /\b(storeFile|recordStoredFile)\(/, `${file} must store through files/store-file.ts`);
+    }
+  });
+
+  it('the stored hash is never erased by a writer that does not have one', () => {
     const meta = strip(readFileSync('server/src/files/file-meta.ts', 'utf8'));
     // An unconditional `$set` would turn "unknown" into a permanent state — a `PATCH` of a description would
     // silently disarm the skip for that file for ever.
     assert.match(meta, /if \(opts\.sha256 !== undefined\) \$set\['sha256'\] = opts\.sha256;/,
       'the hash is written only when the caller states one');
-  });
-
-  it('the guard is a conjunction, in source', async () => {
-    const { readFileSync } = await import('node:fs');
-    const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-    const src = strip(readFileSync('server/src/files/dispatch.ts', 'utf8'));
-    assert.match(src, /prior\?\.sha256 === input\.sha256 && prior\?\.embeddingStatus === 'complete'/,
-      'either condition alone would skip work that still needs doing');
-    // And it must sit above the enqueue it is meant to prevent, not after it. Anchored on the CALL: the
-    // import of the same name is at the top of the file and would make this pass no matter where the guard is.
-    const guardAt = src.indexOf('prior?.sha256 === input.sha256');
-    const enqueueAt = src.indexOf('await enqueueMediaJob(');
-    assert.ok(enqueueAt > 0, 'the enqueue call moved or was renamed — this ordering check now proves nothing');
-    assert.ok(guardAt > 0 && guardAt < enqueueAt, 'a guard after the enqueue prevents nothing');
   });
 });

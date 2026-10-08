@@ -18,10 +18,20 @@
  *
  * ## What this gate does NOT assume
  *
- * Not a list of four filenames. Every site that STORES a vector under `server/src/brain` is found from
+ * Not a list of four filenames. Every site that STORES a vector under `server/src` is found from
  * source — which is how a FIFTH site in `merge.ts` and FIVE more in `reindex.ts` turned up, none of which the
  * four-creator framing would have reached. A list is what let those drift from `embedStoredRecord`'s claim
  * in the first place.
+ *
+ * ## It read `server/src/brain` only, and four vector stores lived outside it (Q-255, bundle-48)
+ *
+ * The scan was scoped to `server/src/brain/*.ts`, so its title ("every inline embed honours suppression") was a
+ * claim about a directory. A file's conversion chunks (`files/converters/pipeline.ts`) and its image, audio and video
+ * chunks (`files/media/*-embedder.ts`) are vector stores in the same sense — each calls `embed()` and writes
+ * `embedding: <result>.vector` onto a row — and none consulted suppression, so a file the operator had retired from
+ * meaning-ranked search kept a vector on every one of its passages. The queue path only repaired that LATER, and
+ * only for chunks it was asked to re-embed. The scan now covers every source under `server/src`; a file that
+ * is exempt carries its reason in `EXEMPT`, never a bare skip.
  *
  * Run: node --test testing/standalone/an-inline-embed-honours-suppression.test.js
  * (requires a prior `npm run build` in server/)
@@ -33,8 +43,37 @@ import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf, statementAround } from './_structural-window.mjs';
 import { suppressionResolvers, resolverCallPattern } from './_suppression-resolvers.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const { embeddingSuppressed } = await import('../../server/dist/brain/suppress-embeddings.js');
+
+/**
+ * Every server source, tracked AND untracked-but-not-ignored, with comments stripped — read once.
+ *
+ * The question is "what does the server store a vector from", and it is asked of the whole tree: a scan scoped to one
+ * directory concludes about that directory (Q-255). `trackedSources` carries the floor, so an empty listing throws
+ * instead of passing every loop below.
+ */
+let serverSourceCache;
+function serverSources() {
+  if (!serverSourceCache) {
+    serverSourceCache = new Map(trackedSources('server/src', { untracked: true, floor: 300 })
+      .map(file => [file, stripComments(readFileSync(file, 'utf8'))]));
+  }
+  return serverSourceCache;
+}
+
+/**
+ * Files that store a vector and are allowed not to consult suppression themselves, each with the reason.
+ *
+ * A bare skip is how a site stays outside a gate for ever, so an entry is a reason a reviewer can disagree with, and
+ * `every exemption still names a vector store` below fails when the file stops being one.
+ */
+const EXEMPT = {
+  'server/src/brain/embed-record.ts':
+    'the queue path itself: it consults suppression at the top of embedStoredRecord and returns before storing, so a '
+    + 'per-file count does not describe it. Asserted on its own at the bottom of this file.',
+};
 
 /** Brain sources, tracked AND untracked-but-not-ignored — a new creator must not be exempt on its own commit. */
 function brainFiles() {
@@ -54,15 +93,14 @@ function brainFiles() {
  * where a vector is written to a document. Scanning the STORE instead is exact, and it is what surfaced a
  * fifth site in `merge.ts` that the four-creator framing would never have reached.
  *
- * `embed-record.ts` is excluded because it IS the queue path: it consults suppression at the top of the
- * function and returns before storing, so the per-file count below does not describe it. It has its own
- * assertion instead.
+ * The files in {@link EXEMPT} are left out (the queue path, which has its own assertion). Everything else under
+ * `server/src` is scanned, not only `brain/`: a conversion chunk and a media chunk store a vector the same way a
+ * fact does.
  */
 function vectorStores() {
   const out = [];
-  for (const file of brainFiles()) {
-    if (file.endsWith('/embed-record.ts')) continue;
-    const src = stripComments(readFileSync(file, 'utf8'));
+  for (const [file, src] of serverSources()) {
+    if (file in EXEMPT) continue;
     for (const m of src.matchAll(/embedding:\s*\w+\.vector\b/g)) {
       out.push({ file, at: m.index });
     }
@@ -75,7 +113,34 @@ function vectorStores() {
  * reaches it, derived in `_suppression-resolvers.mjs` (the write planners ask through `vectorBeforeWrite`, which
  * asks through `suppressedAfterWrite`, `Q-194`).
  */
-const RESOLVERS = suppressionResolvers();
+/**
+ * The shared question, asked from OUTSIDE `brain/` as well.
+ *
+ * `suppressionResolvers()` reads two modules. A wrapper exported from a third (a file's own question, which joins the
+ * record flag, the space setting and the ancestor walk) would not be in it, so a caller of that wrapper would count
+ * as having no check. Extended here by the same rule the module uses — an exported function counts when it CALLS one
+ * that does, followed one hop at a time — over every server source, narrowed to functions NAMED for suppression so
+ * that `embedStoredRecord`, which merely contains a check, does not make every caller of it look like one.
+ */
+function sharedResolvers() {
+  const names = [...suppressionResolvers()];
+  const candidates = [];
+  for (const [file, src] of serverSources()) {
+    for (const m of src.matchAll(/^export (?:async )?function (\w*[Ss]uppress\w*)/gm)) {
+      candidates.push({ file, name: m[1], src });
+    }
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const c of candidates) {
+      if (names.includes(c.name)) continue;
+      const body = bodyOf(c.src, c.name).replace(/^[^\n]*\n/, '');
+      if (new RegExp(`\\b(?:${names.join('|')})\\s*\\(`).test(body)) { names.push(c.name); grew = true; }
+    }
+  }
+  return names;
+}
+const RESOLVERS = sharedResolvers();
 const resolverCall = () => resolverCallPattern(RESOLVERS);
 
 describe('the three-tier resolution has exactly one implementation', () => {
@@ -120,9 +185,30 @@ describe('every inline embed honours suppression', () => {
     // By IDENTITY rather than a count: the four creators store through one shared step since `Q-99` part 3, so
     // a count would have to be rewritten each time stores merge, and a count cannot say WHICH store is missing.
     const files = new Set(vectorStores().map(e => e.file));
-    for (const known of ['server/src/brain/write-plan/plan-steps.ts', 'server/src/brain/merge.ts']) {
-      assert.ok(files.has(known),
-        `the scan no longer finds the vector store in ${known}, so it has broken and nothing below is checked`);
+    const known = [
+      'server/src/brain/write-plan/plan-steps.ts', 'server/src/brain/merge.ts',
+      // Outside `brain/` (Q-255): a file's conversion chunks and its image, audio and video chunks.
+      'server/src/files/converters/pipeline.ts',
+      'server/src/files/media/image-embedder.ts', 'server/src/files/media/audio-embedder.ts',
+      'server/src/files/media/video-embedder.ts',
+    ];
+    for (const file of known) {
+      assert.ok(files.has(file),
+        `the scan no longer finds the vector store in ${file}, so it has broken and nothing below is checked`);
+    }
+    assert.ok([...files].some(f => !f.startsWith('server/src/brain/')),
+      'every vector store found is under server/src/brain: the scan is scoped to one directory again (Q-255)');
+  });
+
+  it('every exemption still names a file that stores a vector, and says why', () => {
+    // An exemption outlives the reason it was written for unless something re-reads it: a file that stopped storing
+    // a vector, or moved, would stay on the list for ever and read as a decision.
+    const sources = serverSources();
+    assert.ok(Object.keys(EXEMPT).length >= 1, 'no exemption left, so the queue path is being scanned as a creator');
+    for (const [file, reason] of Object.entries(EXEMPT)) {
+      assert.ok(sources.has(file), `${file} is exempt but is no longer a server source`);
+      assert.match(sources.get(file), /embedding:\s*\w+\.vector\b/, `${file} is exempt but stores no vector now`);
+      assert.ok(reason.length >= 40, `${file} is exempt with no real reason`);
     }
   });
 
@@ -143,7 +229,7 @@ describe('every inline embed honours suppression', () => {
      */
     const unguarded = [];
     for (const file of new Set(vectorStores().map(e => e.file))) {
-      const src = stripComments(readFileSync(file, 'utf8'));
+      const src = serverSources().get(file);
       const stores = (src.match(/embedding:\s*\w+\.vector\b/g) ?? []).length;
       const checks = (src.match(resolverCall()) ?? []).length;
       if (checks < stores) unguarded.push(`${file}: ${stores} vector store(s), ${checks} suppression check(s)`);
@@ -158,8 +244,11 @@ describe('every inline embed honours suppression', () => {
 
   it('the `suppressed` consts are computed from the shared helper, not hand-rolled', () => {
     // `!suppressed` in a guard is only as good as what produced it.
-    for (const file of brainFiles()) {
-      const src = stripComments(readFileSync(file, 'utf8'));
+    // The brain, plus every file outside it that stores a vector: a `suppressed` const in a file that stores nothing
+    // (sync's arrival writer has one that is a Set of ids) is a different question and is not this rule's subject.
+    const stores = new Set(vectorStores().map(e => e.file));
+    for (const [file, src] of serverSources()) {
+      if (!file.startsWith('server/src/brain/') && !stores.has(file)) continue;
       const at = src.indexOf('const suppressed =');
       if (at === -1) continue;
       assert.match(

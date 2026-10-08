@@ -94,15 +94,26 @@ describe('a published file reaches the subscriber', () => {
     // instance's next seq, this instance as the author of a new file, and a description derived here — so the
     // subscriber's copy tied or outranked the publisher's next edit, which then never landed (seen in CI as Q-69).
     // An arrival is recorded as the publisher's, whichever door brought the bytes (Q-143, the push half).
+    //
+    // Compared only once BOTH copies have finished processing: the status marks (pending, processing, complete) are the
+    // writes that used to stamp `updatedAt` on whichever instance ran them (Q-240), so a read taken before they have
+    // all landed would pass for a copy that is about to drift, and one taken after is the only read that proves they
+    // leave the authored half alone. The terminal set is every status processing ends in; `pending` and `processing`
+    // are the two that are not.
+    const TERMINAL = new Set(['complete', 'partial', 'failed', 'skipped', 'disabled']);
     await syncUntil(async () => {
       const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
-      return a !== undefined && b !== undefined && a.seq === b.seq;
-    }, async () => 'the subscriber never held the publisher\'s seq for the file: '
-      + `B ${JSON.stringify((await fileMetaOn(INSTANCES.b, tokenB))?.seq)}, A ${JSON.stringify((await fileMetaOn(INSTANCES.a, tokenA))?.seq)}`);
+      return a !== undefined && b !== undefined && a.seq === b.seq
+        && TERMINAL.has(a.embeddingStatus) && TERMINAL.has(b.embeddingStatus);
+    }, async () => {
+      const pick = d => d && { seq: d.seq, embeddingStatus: d.embeddingStatus, updatedAt: d.updatedAt };
+      return 'the subscriber never held the publisher\'s seq for the file, or one copy never finished processing: '
+        + `B ${JSON.stringify(pick(await fileMetaOn(INSTANCES.b, tokenB)))}, A ${JSON.stringify(pick(await fileMetaOn(INSTANCES.a, tokenA)))}`;
+    });
     const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
-    // Not `updatedAt` yet: local processing (the media worker's status marks) still stamps it on any instance's copy,
-    // which is its own defect, Q-240. This row holds the fields an arrival decides: seq, author and the metadata.
-    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, description: d.description, tags: d.tags });
+    // `updatedAt` is hashed and replicated, so it is part of the record an arrival decides — and local processing must
+    // never move it (Q-240). Equal here means neither instance's media worker stamped its own copy.
+    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, description: d.description, tags: d.tags, updatedAt: d.updatedAt });
     assert.deepEqual(authored(a), authored(b), 'the subscriber\'s copy of a pushed file is not the publisher\'s record');
   });
 

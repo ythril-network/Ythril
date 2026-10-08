@@ -370,6 +370,30 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   }
   const localFileExists = (local, rel) => fs.existsSync(path.join(localFilesRoot(local), rel));
 
+  /** The local spaces a `failRecordWrite` is in force on, so `reset` takes it off again. */
+  const faulted = new Set();
+
+  /**
+   * FAULT HOOK: make the write that RECORDS an arrived file fail, after its bytes have landed.
+   *
+   * What it does: puts a collection validator on this instance's `<local>_files` that refuses any document whose `sha256` is
+   * `sha256`, so the one write that stores the arrived file's size and hash (`recordArrivedFile`'s upsert) is refused by the
+   * DATABASE with a real write error — the engine, the transfer and the bytes are untouched. A document with another hash, or
+   * none, is written as ever, so a case can fault ONE file's record among others. Why a validator and not a stub: the
+   * engine's modules are ESM singletons a test cannot replace, and a stub would test the stub; this fails the same call a
+   * full disk or a primary stepping down fails.
+   *
+   * `clearRecordFault` (and `reset`) removes it.
+   */
+  async function failRecordWrite(local, sha256) {
+    await door.mongo.getDb().command({ collMod: `${local}_files`, validator: { sha256: { $ne: sha256 } }, validationLevel: 'strict', validationAction: 'error' });
+    faulted.add(local);
+  }
+  async function clearRecordFault() {
+    for (const local of faulted) await door.mongo.getDb().command({ collMod: `${local}_files`, validator: {}, validationLevel: 'off' });
+    faulted.clear();
+  }
+
   /**
    * Rewrite the LIVE network config for the next cases — the topology a case is about, on the one door the process has.
    * Every field is optional; what is not named stays. `reset` returns to the topology the door opened with.
@@ -399,6 +423,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
 
   /** Forget everything a previous case left: both sides' rows, the receiver's watermarks, the fake peer's logs. */
   async function reset({ direction: d = direction } = {}) {
+    await clearRecordFault();
     for (const s of [...spaces, ...extraSpaces]) await door.wipe(s);
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
     // The topology goes back to what the door opened with, and the receiver's repair state is owed again: a case that
@@ -407,7 +432,8 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     if (files) {
       for (const s of [...spaces, ...extraSpaces, ...peerSpaces]) {
         // `conflicts` too: a conflict copy a case's pull recorded is a row the next case's count would read.
-        for (const part of ['file_tombstones', 'file_hashes', 'conflicts']) await door.mongo.col(`${s}_${part}`).deleteMany({});
+        // `media_jobs` too: a processing job a case's arrival queued is a row the next case's "a job exists" would read.
+        for (const part of ['file_tombstones', 'file_hashes', 'conflicts', 'media_jobs']) await door.mongo.col(`${s}_${part}`).deleteMany({});
         fs.rmSync(path.join(loader.getDataRoot(), 'files', s), { recursive: true, force: true });
       }
     }
@@ -481,5 +507,6 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
     member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
     configure, config: () => loader.getConfig(), LATERAL_NET, seedPeerFileTombstones, seedPeerFile, writeLocalFile, localFileExists, peerFilesRoot, localFilesRoot,
+    failRecordWrite, clearRecordFault,
   };
 }

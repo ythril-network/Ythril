@@ -16,6 +16,9 @@
  * stored one is `201`/`202`, and which of them a case expects is the case's rule.
  */
 
+import { USER_TOKEN } from './_byte-door.mjs';
+import { peerToken } from './_push-door.mjs';
+
 /**
  * One request carrying the whole body.
  *
@@ -40,3 +43,22 @@ export async function postInHalves(door, { space, path, content, token }) {
   const last = await door.post({ space, path, bytes: bytes.subarray(mid), token, range: `bytes ${mid}-${bytes.length - 1}/${bytes.length}` });
   return { first, last };
 }
+
+/**
+ * Every way bytes reach the byte door: who delivers them (a person authors, a peer's push is an ARRIVAL) crossed with the
+ * shape of the upload (one request, or a chunked upload in two halves). A rule about what the door does with a file's bytes is
+ * a rule about all four, and a case that drives one of them cannot tell a door that does it from a door that does it for that
+ * caller (the same reason the helper takes the token as an argument). Derived here once so no case lists them by hand and
+ * leaves the chunked peer out.
+ *
+ * `send` answers with the verdict only: the chunked shape's last half, the single shape's one answer.
+ *
+ * @type {ReadonlyArray<{ name: string, arrival: boolean, chunked: boolean,
+ *   send: (door: { post: Function }, o: { space: string, path: string, content: string | Buffer, peer?: string }) => Promise<{ code: number, body: any }> }>}
+ */
+export const UPLOAD_DOORS = Object.freeze([
+  { name: 'a person, one request', arrival: false, chunked: false, send: (door, o) => postWhole(door, { ...o, token: USER_TOKEN }) },
+  { name: 'a person, chunked', arrival: false, chunked: true, send: async (door, o) => (await postInHalves(door, { ...o, token: USER_TOKEN })).last },
+  { name: 'a peer, one request', arrival: true, chunked: false, send: (door, o) => postWhole(door, { ...o, token: peerToken(o.peer ?? 'upload-door-peer') }) },
+  { name: 'a peer, chunked', arrival: true, chunked: true, send: async (door, o) => (await postInHalves(door, { ...o, token: peerToken(o.peer ?? 'upload-door-peer') })).last },
+]);
