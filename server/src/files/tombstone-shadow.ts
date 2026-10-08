@@ -34,6 +34,9 @@ export function heldByPath(rows: ReadonlyArray<HeldFileTombstone & { path: strin
 /** A tombstone that erased REAL content here: it carries the hash of the row it removed. One stored for a path nobody held has none. */
 export const erasedContent = (t: { contentHash?: string }): boolean => typeof t.contentHash === 'string' && t.contentHash !== '';
 
+/** Whether a tombstone erased exactly these bytes: it carries a content hash ({@link erasedContent}) and it is theirs. */
+export const erasedBy = (t: { contentHash?: string }, sha256: string): boolean => erasedContent(t) && t.contentHash === sha256;
+
 /**
  * An arriving version of a file's metadata: its seq, who wrote it and the peer the door PROVES delivered it. Without a
  * deliverer (a local or admin write, the stray drain) every held tombstone at or above the version shadows it.
@@ -82,7 +85,7 @@ export function shadowDecision(
       && heldTombstoneRefuses(t, arrival.author, arrival.deliveredBy));
   }
   if (arrival.liveRowNewer) return false;
-  return held.some(t => erasedContent(t) && t.contentHash === arrival.sha256);
+  return held.some(t => erasedBy(t, arrival.sha256));
 }
 
 /**

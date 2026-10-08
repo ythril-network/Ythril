@@ -104,7 +104,7 @@ import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { indexNamesOf } from '../db/index-names.js';
+import { dropIndexesIfPresent } from '../db/index-names.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
@@ -113,7 +113,7 @@ import { keyedLock } from '../util/keyed-lock.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { parentOfSidecar } from './moved-paths.js';
 import {
-  heldByPath, erasedContent, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
+  heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
 } from './tombstone-shadow.js';
 
@@ -194,10 +194,8 @@ export const FILE_TOMBSTONE_INDEXES = [
 export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void> {
   for (const ix of FILE_TOMBSTONE_INDEXES) await tombstonesOf(spaceId).createIndex(ix.keys, ix.options);
   // Local state, so there is nothing to migrate but the index: the one a question no longer asks is maintained on every
-  // pending write for nothing. Dropped only when listed (`indexNamesOf`, as `spaces/keyset-indexes.ts` drops the bare index it
-  // replaces): an index already gone is the state wanted, and a drop that fails any other way is the pass's failure.
-  const present = await indexNamesOf(spaceCollection(spaceId, 'fileTombstones'));
-  for (const name of REPLACED_FILE_TOMBSTONE_INDEXES.filter(n => present.includes(n))) await tombstonesOf(spaceId).dropIndex(name);
+  // pending write for nothing. Dropped only when listed (`dropIndexesIfPresent`, the one way a replaced index goes).
+  await dropIndexesIfPresent(spaceCollection(spaceId, 'fileTombstones'), REPLACED_FILE_TOMBSTONE_INDEXES);
 }
 
 /** The indexes a later release replaced, by name: dropped by {@link ensureFileTombstoneIndexes}. */
@@ -602,11 +600,19 @@ async function publishSlice(
   // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
   await writeInOneCommands(afterOps, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
     { ordered: false, commandKindOf: bulkCommandOf });
-  // The covered ones, by id: a delete, one command per chunk of ids.
-  for (const ids of inChunks(superseded, READ_CHUNK)) {
-    await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: ids }, pending: true }));
-  }
+  await dropPendingById(spaceId, superseded);
   return { published: winners.length, dropped };
+}
+
+/**
+ * Delete the PENDING tombstones among `ids` — never a published one, which another act may have made of the same id —
+ * one command per chunk of ids, so a whole directory's act is never one unbounded `$in`. The one way a pending row is
+ * removed by id: three hand spellings had the pending guard and only one had the chunking.
+ */
+async function dropPendingById(spaceId: string, ids: readonly string[]): Promise<void> {
+  for (const chunk of inChunks([...ids], READ_CHUNK)) {
+    await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, pending: true }));
+  }
 }
 
 /** The file rows of `ids` (a row's id is its path), with what a tombstone records of the version it erases. */
@@ -744,7 +750,7 @@ export function dropPendingFileTombstones(pending: PendingFileTombstones): void 
   const ids = pending.docs.map(d => d._id);
   drops.start(async () => {
     try {
-      await tombstonesOf(pending.spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: ids }, pending: true }));
+      await dropPendingById(pending.spaceId, ids);
     } catch (err) {
       log.warn(`dropPendingFileTombstones for space ${peerText(pending.spaceId)} (${ids.length}): ${peerText(err)} `
         + '— they are served to nobody, and the TTL sweep settles them');
@@ -791,7 +797,7 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], ge
       log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
     }
   }
-  if (here.length > 0) await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: here }, pending: true }));
+  await dropPendingById(spaceId, here);
   const { published, dropped } = await publishOnePerPath(spaceId, gone, generation);
   return { dropped: here.length, confirmed: published, superseded: dropped, unresolved };
 }
@@ -1193,7 +1199,7 @@ async function shadowedAgainst(
   spaceId: string, held: ReadonlyMap<string, HeldFileTombstone[]>, arrivals: readonly FileArrival[],
 ): Promise<Set<string>> {
   const shadowed = new Set<string>();
-  const needRows = arrivals.filter(a => a.kind === 'bytes' && (held.get(a.path) ?? []).some(t => t.contentHash === a.sha256));
+  const needRows = arrivals.filter(a => a.kind === 'bytes' && (held.get(a.path) ?? []).some(t => erasedBy(t, a.sha256)));
   const live = needRows.length === 0 ? new Map<string, StoredFileRow>()
     : await readStoredById<StoredFileRow>(spaceCollection(spaceId, 'files'), needRows.map(a => a.path), STORED_ROW_PROJECTION);
   for (const a of arrivals) {
@@ -1205,7 +1211,7 @@ async function shadowedAgainst(
     }
     // Re-created against every tombstone whose erased content these bytes are — by the one question the sidecar rule asks too (Q-407).
     const row = live.get(a.path);
-    const erasedByThese = here.filter(t => erasedContent(t) && t.contentHash === a.sha256);
+    const erasedByThese = here.filter(t => erasedBy(t, a.sha256));
     const liveRowNewer = erasedByThese.length > 0 && erasedByThese.every(t => recreatedSince(t, row));
     if (shadowDecision(here, { kind: 'bytes', sha256: a.sha256, liveRowNewer })) shadowed.add(a.id);
   }

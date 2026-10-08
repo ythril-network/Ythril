@@ -530,7 +530,8 @@ export async function storeConversionResults(
     if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
       // For a caller with no failure to give: what cannot be looked at (a failure to tell whether a path is a directory means
       // "not known to be the file's", which keeps it) is logged and the sidecars stay.
-      await removeSidecarBytes(spaceId, await sidecarsOwnedBy(spaceId, originalId, 'file')).catch(cleanupErr =>
+      // Both steps inside the one catch: listing what the file owns can fail to look too, and must not replace `err`.
+      await sidecarsOwnedBy(spaceId, originalId, 'file').then(owned => removeSidecarBytes(spaceId, owned)).catch(cleanupErr =>
         log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
     throw err;

@@ -21,7 +21,7 @@
  */
 import { col } from '../db/mongo.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { indexNamesOf } from '../db/index-names.js';
+import { dropIndexesIfPresent, indexNamesOf } from '../db/index-names.js';
 import { SEQ_KEYSET_INDEXES, bareKeysOf, indexNameOf, noteKeysetIndexes, type SeqKeysetIndex } from '../util/seq-keyset.js';
 
 /**
@@ -66,10 +66,7 @@ export async function buildKeysetIndex(
     if (!names.includes(name)) throw new Error(`index ${name} on ${collName} is not in its index list after its build; the bare ${bare} is kept`);
   }
   const droppedBare = names.includes(bare);
-  if (droppedBare) {
-    await col(collName).dropIndex(bare);
-    names = names.filter(n => n !== bare);
-  }
+  names = await dropIndexesIfPresent(collName, [bare], names);
   noteKeysetIndexes(collName, names);
   return { built, droppedBare };
 }
