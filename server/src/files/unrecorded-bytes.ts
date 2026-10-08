@@ -26,8 +26,8 @@
  *    they do not stay: the next pull whose peer offers the path takes them back (this function, once the store answers), and a
  *    person's retry of the upload rewrites them. Said once per window through the shared reporter.
  *  - the failure that left the bytes unrecorded (`cause`) was ITSELF the store not answering: the bytes are KEPT, as above, and the
- *    store is not asked, and nothing is said here (the caller reports the failure it holds). The lookup would go to the store that just failed, and a read retries inside its bound until the bound
- *    ends, so the door's answer to a failure it already holds waited that bound out; under a fault that fails at once, the retries
+ *    store is not asked, and nothing is said here (the caller reports the failure it holds). The lookup would go to the store
+ *    that just failed, and a read retries inside its bound until the bound ends, so the door's answer to a failure it already holds waited that bound out; under a fault that fails at once, the retries
  *    spun hot enough to exhaust the process (the store-failure gate's `write_file` door, bundle-48 Full run). The cause is a
  *    required argument so that a door cannot leave it out: one with no failure in hand (the pull's repair) passes `null`.
  *
