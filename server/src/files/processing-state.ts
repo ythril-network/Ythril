@@ -39,6 +39,7 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { FILE_HASH_PROJECTION } from '../brain/merkle.js';
+import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 /**
@@ -73,11 +74,12 @@ const FILE_META_KEYS: Readonly<Record<keyof FileMetaDoc, true>> = {
 /**
  * The keys the hash does not see and that are nonetheless NOT local state.
  *
- * `spaceId` is the receiver's own retag of an arriving row (`sync/retagged-fields.ts`) and `parentFileId` is declared
+ * The retagged fields (`RETAGGED_FIELDS`, `sync/retagged-fields.ts`: `spaceId`, the receiver's own retag of an arriving row,
+ * which is read from there rather than spelled again) and `parentFileId`, which is declared
  * `never` on the wire so a chunk is refused rather than stripped into a file: both are on `IncomingFileMetaDoc`, and a
  * key that replicates is not local. They are identity, which no processing write has any business setting.
  */
-const IDENTITY_KEYS: ReadonlySet<string> = new Set(['spaceId', 'parentFileId']);
+const IDENTITY_KEYS: ReadonlySet<string> = new Set([...RETAGGED_FIELDS, 'parentFileId']);
 
 let localKeys: ReadonlySet<string> | undefined;
 

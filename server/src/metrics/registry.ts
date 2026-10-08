@@ -997,17 +997,21 @@ export const syncTombstoneRereadsOwed = new Gauge({
 syncTombstoneRereadsOwed.set(0);
 
 /**
- * The two ways a peer's file BYTES arrive: `push` (the peer wrote to this instance's upload door, single or chunked) and `pull`
- * (this instance fetched them by the manifest). The values of the `door` label, listed here so the series can be declared at 0.
+ * The doors a peer's file arrives through, as `ythril_sync_file_arrivals_total` counts them: `push` (the peer wrote bytes to this
+ * instance's upload door, single or chunked), `pull` (this instance fetched bytes by the manifest), `metadata` (a file's row
+ * arrived by push or pull of the metadata) and `tombstone` (a file tombstone arrived). The last two only ever count an offer
+ * ignored as instance-local: bytes are recorded by the first two. The values of the `door` label, listed here so the series can
+ * be declared at 0.
  */
-export const FILE_ARRIVAL_DOORS = ['push', 'pull'] as const;
+export const FILE_ARRIVAL_DOORS = ['push', 'pull', 'metadata', 'tombstone'] as const;
 /**
  * What became of a file's arrival, the values of the `outcome` label (`files/bytes-arrived.ts` counts every one, through one
  * function): `recorded` (bytes, row and processing queue all written), `record_failed` (the row or the dispatch failed after the
  * bytes landed; a pull removed the bytes and redoes the file next cycle), the three `repaired_*` (a file whose bytes were already
  * here and whose record was brought up to date by a later cycle: its row held another hash, held no row at all, or its
  * processing never ran), `quota` (refused before the body was fetched) and `ignored_instance_local` (a peer offered a path no
- * instance sends, a conversion's sidecar, and nothing was stored).
+ * instance sends — a conversion's sidecar, a conflict copy, a schema snapshot, a legacy spill — by ANY door, bytes, metadata or
+ * tombstone, and nothing was stored).
  */
 export const FILE_ARRIVAL_OUTCOMES = [
   'recorded', 'record_failed', 'repaired_stale_row', 'repaired_missing_row', 'repaired_unprocessed', 'quota', 'ignored_instance_local',
@@ -1015,7 +1019,7 @@ export const FILE_ARRIVAL_OUTCOMES = [
 
 export const syncFileArrivalsTotal = new Counter({
   name: 'ythril_sync_file_arrivals_total',
-  help: 'File byte arrivals by door (push, pull) and outcome (recorded, record_failed, repaired_stale_row, repaired_missing_row, repaired_unprocessed, quota, ignored_instance_local)',
+  help: 'File arrivals by door (push, pull, metadata, tombstone) and outcome (recorded, record_failed, repaired_stale_row, repaired_missing_row, repaired_unprocessed, quota, ignored_instance_local)',
   labelNames: ['door', 'outcome'] as const,
   registers: [register],
 });

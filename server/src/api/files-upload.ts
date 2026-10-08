@@ -21,12 +21,12 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { resolveSafePath, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
-import { isInDerivedTree } from '../sync/file-conflict.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
 import { StreamVerificationError } from '../util/sha256-tap.js';
-import { checkQuota, QuotaError } from '../quota/quota.js';
+import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
@@ -112,8 +112,9 @@ export function registerUploadRoute(router: Router): void {
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
       const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
 
-      // A path inside a derived tree (a conversion's sidecar, `isInDerivedTree`: no instance sends one) is not stored when a PEER
-      // offers it — each instance converts by its own configuration. Answered `200`, not an error: an older sender reads
+      // A path that is instance-local (`isInstanceLocalFile`: a conversion's sidecar, a conflict copy, a schema snapshot, a legacy
+      // read spill — no instance sends one) is not stored when a PEER offers it — each instance derives them by its own
+      // configuration. Answered `200`, not an error: an older sender reads
       // an error as a failure and uploads the file again every cycle, and `200` is what lets it record a base and stop. Asked by the
       // KEY (`x/../_converted/y` is `_converted/y`), before the body is looked at or anything is staged; a person's upload is never asked.
       if (arrivedFrom) {
@@ -122,7 +123,7 @@ export function registerUploadRoute(router: Router): void {
           if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
           throw err;
         }
-        if (isInDerivedTree(key)) {
+        if (isInstanceLocalFile(key)) {
           countFileArrival('push', 'ignored_instance_local');
           res.status(200).json({ ignored: 'instance-local' });
           return;
@@ -182,7 +183,7 @@ export function registerUploadRoute(router: Router): void {
           await checkQuota(
             'files',
             firstChunk ? range.total : req.body.length,
-            firstChunk ? {} : { maxAgeMs: 10_000 },
+            firstChunk ? {} : { maxAgeMs: REPEATED_CHECK_USAGE_WINDOW_MS },
           );
         } catch (err) {
           if (err instanceof QuotaError) {

@@ -106,6 +106,7 @@ import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { isLegacyReadSpill, isInstanceLocalFile } from './file-conflict.js';
 import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 import { fileKeyOf } from '../files/sandbox.js';
+import { countFileArrival } from '../files/bytes-arrived.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
@@ -392,7 +393,12 @@ export async function writeArrivals(
     // snapshot, and what lies under a derived tree — each receiver converts by its own configuration).
     // A peer's row at such a path is ignored, never stored. A restore is this instance's OWN export, so its rows are not
     // judged by it: only the legacy spill, which no instance keeps any more, is left out of one.
-    if (family === 'files' && (isDerived(doc) || (restore ? isLegacyReadSpill(doc._id) : isInstanceLocalFile(doc._id)))) { out.derived.push(doc._id); continue; }
+    if (family === 'files' && (isDerived(doc) || (restore ? isLegacyReadSpill(doc._id) : isInstanceLocalFile(doc._id)))) {
+      // A peer's offer of an instance-local path is counted through the one arrival recorder (not a chunk, not a restore's spill).
+      if (!restore && !isDerived(doc)) countFileArrival('metadata', 'ignored_instance_local');
+      out.derived.push(doc._id);
+      continue;
+    }
     // A restore's ids are this instance's own export's, and it is never judged by a peer's rules; any other arrival is a peer's text.
     const keyWhy = family === 'files' && !restore ? fileKeyRefusal(spaceId, doc._id) : null;
     if (keyWhy) { out.refused.push({ _id: doc._id, reason: keyWhy }); continue; }

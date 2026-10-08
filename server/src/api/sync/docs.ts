@@ -74,8 +74,9 @@ const SERVED_AS: Partial<Record<PayloadKey, <D extends object>(doc: D) => D>> = 
  *   `/api/sync/file-tombstones` carries it, which is why `TOMBSTONE_TYPES` has no `file` member. Passing a
  *   type that matches nothing would have been the quiet alternative and it is a lie: it says deletions ride
  *   here and then carries none.
- * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve PARENTS
- * only — a chunk is derived from the blob and the receiver makes its own, with its own chunker and model.
+ * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve LIVE FILE ROWS
+ * only (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row) — a chunk is derived from the blob and the receiver makes its
+ * own, with its own chunker and model, and a soft delete reaches a peer as the file tombstone, never as its flagged row.
  * It comes from the family row rather than a parameter, so the page, the read by id and the push cannot
  * each be handed a different one.
  */
@@ -195,8 +196,8 @@ syncDocsRouter.get('/links', syncRateLimit, requireAuth, pageBySeq<LinkDoc>('lin
  * array it came from, so the graph on a peer showed the connection and the peer's own Files tab showed
  * none.
  *
- * PARENTS ONLY, and no tombstone rider: a chunk is derived locally, and a deleted file already has its own
- * tombstone route.
+ * LIVE FILE ROWS ONLY (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row), and no tombstone rider: a chunk is derived
+ * locally, and a deleted file already has its own tombstone route.
  */
 syncDocsRouter.get('/filemeta', syncRateLimit, requireAuth,
   /*

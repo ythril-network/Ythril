@@ -17,8 +17,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { col, asDoc, asFilter } from '../../db/mongo.js';
-import { embed } from '../../brain/embedding.js';
-import { storedFileEmbeddingSuppressed } from '../../brain/suppress-embeddings.js';
+import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { extForMimeType } from '../mime.js';
@@ -211,7 +210,7 @@ export async function embedAudio(
 ): Promise<AudioEmbedResult> {
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
-  const suppressed = await storedFileEmbeddingSuppressed(spaceId, fileId);
+  const vectors = await chunkVectorsFor(spaceId, fileId);
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-audio-'));
   const inputPath = path.join(tmpDir, `input.${mimeTypeToExt(mimeType)}`);
 
@@ -278,7 +277,7 @@ export async function embedAudio(
           throw new Error('STT returned non-string transcript; refusing to embed');
         }
 
-        const embResult = suppressed ? null : await embed(transcript);
+        const vectorFields = await vectors.fieldsFor(transcript);
         const chunkId = `${fileId}#media-chunk${i}`;
 
         const chunkDoc: FileMetaDoc = {
@@ -294,7 +293,7 @@ export async function embedAudio(
           chunkIndex: i,
           content: transcript,
           matchedText: transcript,
-          ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
+          ...vectorFields,
           chunkOffsetMs: startMs,
           chunkDurationMs: endMs - startMs,
         };

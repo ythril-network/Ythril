@@ -24,10 +24,9 @@ import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
 import { buildFileManifest, forgetFileHashes, seedFileHash, type ManifestEntry } from '../files/manifest.js';
 import { recordArrivedBytes, countFileArrival, type FileRepairReason } from '../files/bytes-arrived.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
-import { checkQuota, QuotaError, invalidateUsageCache } from '../quota/quota.js';
+import { checkQuota, QuotaError, invalidateUsageCache, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { withinHousekeepingBound } from '../db/write-bound.js';
-import { reportSpaceFailure, reportSpaceRecovered, SPACE_FAILURE_MAX_KEYS } from '../util/space-failure.js';
-import { LruMap } from '../util/lru-map.js';
+import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import {
@@ -55,9 +54,6 @@ import { pushStoredFile, type SendUpload } from './file-push.js';
  * The rest wait their turn; a file is repaired once, because the repair leaves it with a state that is not a reason.
  */
 export const MAX_FILE_REPAIRS_PER_CYCLE = 25;
-
-/** A usage measurement this young is reused by the quota check of a pull (the upload door's chunked path reads the same window). */
-const PULL_QUOTA_WINDOW_MS = 10_000;
 
 /** The names a failure of the pull's record, quota and repair steps is reported under: once per space and path per window. */
 const RECORD_STEP = declareStep('File pull record');
@@ -112,24 +108,13 @@ async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string,
  * record write), through the shared reporter — never a line of the pull's own, which would say the same fact every cycle for as
  * long as it lasts (`util/space-failure.ts`). The reporter counts every call, says the line once, and bounds the memory the
  * peer's paths could otherwise grow. A store that is not answering is the step's stop line, not this space's.
+ *
+ * A file that then succeeds at the step says so with `reportSpaceRecovered(step, spaceId, key)`: its next failure is news again.
+ * Scoped to the PATH (the reporter's `unit`), because a recovery of the whole (step, space) after any one file succeeded would
+ * forget a still-failing sibling's line, and it would be said again every cycle.
  */
 function sayPullFailure(step: string, spaceId: string, key: string, err: unknown): void {
-  failing.set(failingKey(step, spaceId, key), true);
   reportSpaceFailure(step, spaceId, err, { unit: key, when: 'next cycle', ...(storeIsNotAnswering(err) ? { kind: 'store-down' as const } : {}) });
-}
-
-/**
- * The (step, space, path) conditions this pull has said and not seen cleared, bounded like the reporter's own memory (the keys are a
- * peer's paths). It exists because the reporter forgets by (step, space) and not by path: calling `recovered` after ANY file of the
- * space succeeded would forget a still-failing sibling's line, and it would be said again every cycle. Only the path that failed
- * is the one whose success is news.
- */
-const failing = new LruMap<string, true>(SPACE_FAILURE_MAX_KEYS);
-const failingKey = (step: string, spaceId: string, key: string): string => `${step}\0${spaceId}\0${key}`;
-
-/** The file that failed `step` has now succeeded: its next failure is news again, and is said. */
-function pullRecovered(step: string, spaceId: string, key: string): void {
-  if (failing.delete(failingKey(step, spaceId, key))) reportSpaceRecovered(step, spaceId);
 }
 
 /**
@@ -322,7 +307,7 @@ export async function syncFiles(
             repairs++;
             // No deliverer: nobody can be credited with bytes that were already here (`recordArrivedBytes`).
             await recordArrivedBytes(spaceId, key, { sizeBytes: local.size, sha256: local.sha256, door: 'pull', repair: reason });
-            pullRecovered(REPAIR_STEP, spaceId, key);
+            reportSpaceRecovered(REPAIR_STEP, spaceId, key);
           } catch (err) {
             sayPullFailure(REPAIR_STEP, spaceId, key, err);   // counted as `record_failed` by the recorder; tried again next cycle
           }
@@ -339,14 +324,14 @@ export async function syncFiles(
         // whatever the space held. The measurement may be a few seconds old, so the bytes this call has already written are added.
         // A refusal is not a delivery: no base is written, and the file is asked for again once there is room.
         try {
-          await checkQuota('files', pulledBytes + remote.size, { maxAgeMs: PULL_QUOTA_WINDOW_MS });
+          await checkQuota('files', pulledBytes + remote.size, { maxAgeMs: REPEATED_CHECK_USAGE_WINDOW_MS });
         } catch (err) {
           if (!(err instanceof QuotaError)) throw err;
           countFileArrival('pull', 'quota');
           sayPullFailure(QUOTA_STEP, spaceId, key, err);
           continue;
         }
-        pullRecovered(QUOTA_STEP, spaceId, key);
+        reportSpaceRecovered(QUOTA_STEP, spaceId, key);
         /*
          * Whole-file body, so it gets the TRANSFER budget — and until now it did not, whatever this
          * comment said.
@@ -422,7 +407,7 @@ export async function syncFiles(
               continue;
             }
             pulledFiles++;
-            pullRecovered(RECORD_STEP, spaceId, key);
+            reportSpaceRecovered(RECORD_STEP, spaceId, key);
             await seedManifestHash(spaceId, key, abs, staged.sha256, staged.size);
             await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
             if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(key)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);

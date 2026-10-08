@@ -264,15 +264,38 @@ holds three different kinds of field:
 
 | | |
 |---|---|
-| **authored** — replicates | `description`, `descriptionSource`, `tags`, `properties`, `author`, `createdAt`, `updatedAt`, `seq`, the two suppression spellings. A 4.x link array arriving here is REFUSED rather than stripped — this schema is `.strict()` |
-| **derived from the local blob** — never sent, never overwritten | `sizeBytes`, `sha256`, `excerpt`, the vector, `chunkCount`, `embeddingStatus`, `conversionError` |
+| **authored** — replicates | What the wire schema declares (`IncomingFileMetaDoc` in `server/src/api/sync/_shared.ts`): its optional keys (e.g. the description and the tags), which are the ones a removal can name, and the identity and order keys `author`, `createdAt`, `updatedAt` and `seq`. A 4.x link array arriving here is REFUSED rather than stripped — this schema is `.strict()` |
+| **derived from the local blob, or this instance's own** — never sent, never overwritten | A stored file record's other keys (e.g. the size, the hash, the excerpt, the vector, the processing status, `deletedAt`): whatever the Merkle hash does not see (the inclusion list in `brain/merkle.ts`) and the wire schema does not declare. The rule is the code's; this table does not keep a copy of the list |
 | **chunk-only** — the whole record is refused | `parentFileId`, `chunkIndex`, `content` |
 
 A whole-document replace would leave the file reporting the SENDER's size and hash with no vector at all —
 findable by neither its own text nor its own name, with nothing having failed. So the write is a `$set` of
-the keys that arrived, and a key the sender omits is **left alone rather than cleared**: a peer on an older
-build sends fewer fields, and reading absence as deletion would let it erase a description it has never
-heard of.
+the keys that arrived, and **a key the sender omits is left alone rather than cleared — unless the sender
+says it removed it.** A peer on an older build sends fewer fields, and reading absence as deletion would let
+it erase a description it has never heard of; so absence only counts together with `authoredKeys`.
+
+**`authoredKeys` is how a removal crosses the wire.** Every sender — a push, the `full=true` pages of
+`GET /api/sync/filemeta` and `GET /api/sync/filemeta/:id`, a relay too — adds `authoredKeys`, an array of the
+authored keys *its version* knows. The set is read out of the wire schema (optional keys, less identity, order
+and wire-control keys), so a key added to the schema is covered from that release on. The receiver, in the same
+update that `$set`s the keys that arrived, `$unset`s each key that the sender lists, that the receiver also
+authors, and that the document lacks; a key the sender does not list is never touched, and a name that is no
+authored key (`sha256`, `deletedAt`, anything) is never unset whatever the list says. `authoredKeys` is
+consumed on arrival: never stored, never served as stored (a bounded array of at most 64 names of at most 64
+characters; more is refused). A copy that loses on its `seq` is not written, removal included. **`tags` is
+optional**, since a row whose tags were removed has none. An admin import (a restore) carries no list: an
+export is a full record, so every authored key its row lacks is removed; the stray drain removes nothing.
+
+**Older peers.** A receiver before this release refuses a document with a key it does not declare
+(`authoredKeys`) or without `tags`, discards it, and still answers `200`. So a push sends `authoredKeys` and
+an omitted `tags` only to a peer known to run 5.7.0 or later (a peer whose
+reported version is missing or does not parse counts as older); every other peer gets the shape every version
+accepts, `tags: []` for a row that has none, and no list. A peer that reports 5.7.0 or later and still
+refuses a page (it was rolled back) is offered that page once more in the older shape and is treated as older
+until its reported version changes; the fallback is warned once per peer per window. A pull has no such cut:
+an older puller strips `authoredKeys` as it strips every key it does not declare, and removes nothing. **So a
+removal reaches a peer only when both ends run this release, and one made while a peer ran an older version
+reaches it on the file's next edit after the peer upgrades.**
 
 **A chunk sent to `batch-upsert` is REFUSED and reported**, not stripped. A chunk is derived from the blob
 and the receiver makes its own, with its own chunker and its own model; stripped, it would land as a FILE
@@ -286,6 +309,25 @@ this instance serves and out of the space hash, its bytes are never pulled, and 
 whether it arrives by push or by pull — a pushed one is counted as `skipped`, not refused, so an older peer's
 push still succeeds. An older peer keeps offering its spills until it upgrades; this instance drops them, and
 its own copies are swept locally, so a mixed network converges without anyone upgrading first.
+
+**A conversion's sidecar never syncs either: each instance converts by its own settings.** Anything under the
+root `_converted/` or `_extracted/` (`a/_converted/x` is a user's file) is instance-local, as a read spill is:
+it is left out of the manifest, never pulled or pushed, and hashed by no Merkle root. A receiver applies its own
+rules to a file it is given, and a pdf, a docx or an epub converts
+differently by mode, so a publisher's sidecar is never the receiver's own: a receiver with conversion off
+holds no derived text at all. An older peer's offer is ignored without a refusal: the upload door answers
+`200 { "ignored": "instance-local" }` and stores nothing (the older sender reads it as delivered and stops),
+and a metadata row or a file tombstone for such a path is dropped; each is counted in
+`ythril_sync_file_arrivals_total{outcome="ignored_instance_local"}` under its door. The same holds at every door for
+the other instance-local paths: a conflict copy, a schema snapshot and a legacy spill. Sidecars a peer
+delivered before this release are retired, bytes and row, by the retention sweep.
+
+**A soft-deleted file's row never syncs.** With `softDeleteFileMeta` on, a delete leaves its row flagged
+`deletedAt`: local audit state that stamps no `seq` and no `updatedAt`. `GET /api/sync/filemeta` does not page it,
+`GET /api/sync/filemeta/:id` answers `404` for it, a push never sends it, and no Merkle root hashes it. The
+deletion reaches a peer as the file tombstone below, which the peer applies by **its own** `softDeleteFileMeta`. A
+sender from before this release still pushes the flagged row stripped of its flag, which lands live on the
+receiver.
 
 **Deletions travel on `/api/sync/file-tombstones`**, as they always have — a deleted file has a file
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own. A metadata
@@ -625,10 +667,31 @@ answer is lost is read back while the hold is still held. On the serving instanc
   by version for metadata, by content hash for bytes, at the metadata writer, the manifest download (re-asked right
   before the bytes are written) and both byte doors. A delete whose file is still there shadows nothing; one whose path
   cannot be looked at is neither: the byte door answers a retryable `503` (the sender does not remember it) and the
-  manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written. A path a
+  manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written, and a peer that promises the whole file's hash (`x-expected-sha256`, below) is asked at its FIRST range, by path and promised hash, so a shadowed file is turned away (`200 { "tombstoned": true }`) before any range is staged; the last range's check of the staged bytes stays the authoritative one. A path a
   peer supplies is resolved before it is looked up (`x/../file` is `file`). A user's own upload is never refused, and a
   tombstone held from before the upgrade carries no `rowSeq` and shadows nothing. See
   [Files API](05-files-api.md#delete-a-file).
+- **A peer's bytes are recorded by one function, whichever door they came through.** The upload door (`POST /api/files/:spaceId`
+  with a peer token, single or chunked) and the manifest pull both record an arrival the same way: the row (size and hash,
+  the peer as author of a row new here, no seq of its own), then the file is processed by THIS instance's own rules (a
+  document is queued for conversion, an image, audio or video file for its media pipeline, anything it does not analyse
+  is marked `skipped`), and **nothing is announced**: no `file.created` webhook and no live-view event, as for a synced
+  record. A changed version replaces the previous version's passages. A peer's metadata in the upload body is ignored.
+  A pull checks the space quota **before** it fetches a body (on the size the manifest declares), and a pull whose record
+  write fails removes the bytes it wrote and redoes the file next cycle; a file already held whose row names other bytes
+  than the disk's, has no row, or never went through processing is recorded by a later cycle, a few per space per cycle.
+  `ythril_sync_file_arrivals_total{door,outcome}` counts them ([metrics](11-setup-api.md)).
+- **Pushing a file above the receiver's single-body limit goes through the chunked door.** The non-final `202` answer of
+  `POST /api/files/:spaceId` with `Content-Range` carries `maxBodyBytes` besides `path` and `received`: the single-body
+  limit this door enforces (`maxUploadBodyBytes`), so a sender sizes its ranges under it. A sender may send
+  **`x-expected-sha256`**, the SHA-256 (64 hex digits) of the whole file, on any range: the door binds it to the assembly
+  and refuses a different one before the rename with `422`, storing nothing and dropping the staged ranges (a malformed
+  value is `400`, never read as absent). The sync engine sends it on every range, and remembers a refusal of the bytes
+  (`400`/`422`) per peer, path and hash, so the same bytes are not sent whole every cycle.
+- **A pull streams.** The sync engine reads a body through one hash tap into a staged temp file, stopped at the size the
+  manifest declared and verified in the stream's last step; the staged file is renamed into place only after the deletion
+  re-check and, under the path lock, a re-check that the disk still holds what the pull decided on (otherwise the bytes
+  land as a conflict copy). A body that is too long, too short or not the declared hash stores nothing.
 
 ### Merkle Consistency Check
 
@@ -665,13 +728,16 @@ in either direction, because the sweep that acts on it would then be following a
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
 `spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
 in neither category means two peers can never agree about identical content. File leaves hash the file's
-SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill — is
-not hashed at all, record or bytes. The check is advisory: a root mismatch is reported as `MERKLE_DIVERGENCE`, it
-does not block sync.
+SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill, a
+conversion's sidecar — is not hashed at all, record or bytes; nor is a soft-deleted file's row (`deletedAt`, local
+audit state). A file's processing status never touches its hashed `updatedAt`. The check is advisory: a root
+mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync.
 
-**Mixed versions:** a root from a version before this rule (which hashed `spaceId` and the instance-local
-files) never equals one from a version after it, so a `merkle: true` network whose members run both reports
-`MERKLE_DIVERGENCE` for every space until all of them have upgraded.
+**Mixed versions:** a root from a version before these rules (which hashed `spaceId`, the instance-local files, a
+conversion's sidecar and a soft-deleted row) never equals one from a version after it, so a `merkle: true` network
+whose members run both reports `MERKLE_DIVERGENCE` for every space until all of them have upgraded. A file
+whose processing stamped `updatedAt` before this release keeps a differing `updatedAt` at an equal seq, and so a
+divergence, until its next authored edit.
 
 ### Gossip Endpoints
 

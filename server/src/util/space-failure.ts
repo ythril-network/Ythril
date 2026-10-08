@@ -129,8 +129,13 @@ export interface SpaceFailureReporter {
   storeDown(step: string, err: unknown): void;
   /** Say that a step stopped because `k` spaces timed out in a row, once per window. */
   storeStalled(step: string, k: number): void;
-  /** The step succeeded for the space: the next failure of it is news. */
-  recovered(step: string, spaceId: string): void;
+  /**
+   * The step succeeded for the space: the next failure of it is news. With `unit` — the same `unit` a failure was reported
+   * under — only THAT unit's line is forgotten: a step that works through many units of a space (a pull's files, each its own
+   * path) must not forget a still-failing sibling's line, or it is said again every cycle, and must not keep a memory of its
+   * own to know which unit failed. Without `unit`, every unit of the (step, space) is forgotten.
+   */
+  recovered(step: string, spaceId: string, unit?: string): void;
   /** How many conditions are remembered. */
   readonly size: number;
 }
@@ -170,6 +175,8 @@ export function spaceFailureReporter(
   const count = (step: string, kind: SpaceFailureKind): void => signalHousekeeping({ type: 'space-failure', step, kind });
   const stepKeys = (step: string) => ({ down: `store-down\0${step}`, stalled: `stalled\0${step}` });
   const indexOf = (step: string, spaceId: string): string => `${step}\0${spaceId}`;
+  /** The one key of a (step, space, unit) condition: said by `spaceFailure`, forgotten by `recovered` — spelled once. */
+  const unitKey = (step: string, spaceId: string, unit: string | undefined): string => `space\0${step}\0${peerText(spaceId)}\0${unit ?? ''}`;
 
   const reporter: SpaceFailureReporter = {
     spaceFailure(step, spaceId, err, opts) {
@@ -182,7 +189,7 @@ export function spaceFailureReporter(
         const unit = o.unit === undefined ? '' : ` (${peerText(o.unit)})`;
         const failed = o.count === undefined ? '' : ` (count: ${o.count})`;
         const when = o.quarantineSec === undefined ? (o.when ?? 'next cycle') : `after quarantine (${o.quarantineSec}s)`;
-        const key = `space\0${step}\0${peerText(spaceId)}\0${o.unit ?? ''}`;
+        const key = unitKey(step, spaceId, o.unit);
         say(key, o.quarantineSec ?? 0, `${step} failed for space '${peerText(spaceId)}'${unit}: ${reason}${failed} — retried ${when}`, indexOf(step, peerText(spaceId)));
       } catch { /* the reporter never throws */ }
     },
@@ -198,11 +205,18 @@ export function spaceFailureReporter(
         say(stepKeys(step).stalled, 0, `${step} stopped: ${k} spaces timed out in a row; the store looks stalled — retried next cycle`);
       } catch { /* the reporter never throws */ }
     },
-    recovered(step, spaceId) {
+    recovered(step, spaceId, unit) {
       try {
         const index = indexOf(step, peerText(spaceId));
-        for (const key of saidFor.peek(index) ?? []) once.forget(key);
-        saidFor.delete(index);
+        if (unit === undefined) {
+          for (const key of saidFor.peek(index) ?? []) once.forget(key);
+          saidFor.delete(index);
+        } else {
+          const key = unitKey(step, spaceId, unit);
+          once.forget(key);
+          const said = saidFor.peek(index);
+          if (said?.delete(key) && said.size === 0) saidFor.delete(index);
+        }
         // A space that finished is the store answering: a stop it said for this step is over.
         const keys = stepKeys(step);
         once.forget(keys.down);
@@ -237,6 +251,6 @@ export function reportStoreStalled(step: string, k: number): void {
 }
 
 /** {@link SpaceFailureReporter.recovered} on the process-wide reporter. */
-export function reportSpaceRecovered(step: string, spaceId: string): void {
-  defaultSpaceFailureReporter.recovered(step, spaceId);
+export function reportSpaceRecovered(step: string, spaceId: string, unit?: string): void {
+  defaultSpaceFailureReporter.recovered(step, spaceId, unit);
 }

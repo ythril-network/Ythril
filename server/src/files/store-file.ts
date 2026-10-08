@@ -17,7 +17,7 @@ import { bytesShadowed } from './tombstones.js';
 import { peerFileKey } from './sandbox.js';
 import { toDocId } from '../util/paths.js';
 import type { AuthorRef } from '../config/types.js';
-import { dispatchFileProcessing, readPriorProcessing, type DispatchResult } from './dispatch.js';
+import { recordAndDispatchFile, type DispatchResult } from './dispatch.js';
 import { recordArrivedBytes } from './bytes-arrived.js';
 import type { InputFormat } from './converters/pipeline.js';
 import { checkQuota } from '../quota/quota.js';
@@ -84,14 +84,12 @@ export async function recordStoredFile(
     return { sha256, sizeBytes, ...dispatched };
   }
   filePath = toDocId(filePath);
-  // The row as it was BEFORE this write: the dispatcher compares the arriving hash with it, and after `upsertFileMeta` the row
-  // holds the arriving hash itself (`recordArrivedBytes` says why this read is the part a hand-written sequence drops).
-  const prior = await readPriorProcessing(spaceId, filePath);
-  await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
-  const dispatched = await dispatchFileProcessing(spaceId, filePath, {
-    bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256, prior,
+  // The row is read BEFORE it is written and handed to the dispatcher, inside the one function both doors go through
+  // (`recordAndDispatchFile`: its docblock says why that read is the part a hand-written sequence drops).
+  const dispatched = await recordAndDispatchFile(spaceId, filePath, {
+    bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256,
     ...(opts.contentType ? { contentType: opts.contentType } : {}),
-  });
+  }, () => upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 }));
   // A write NO ONE made — a call with no actor — emits nothing, on the bus or to a webhook: the rule every record family keeps
   // (`if (actor) emitWebhookEvent`). A person's upload and a tool call carry one.
   if (opts.actor) emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...opts.actor });

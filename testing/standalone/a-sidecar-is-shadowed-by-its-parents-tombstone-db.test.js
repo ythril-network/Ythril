@@ -130,10 +130,10 @@ const CONTROL = 'docs/s-control.txt';
 const allSidecars = (list = SCENARIOS) => list.flatMap(s => sidecarsOf(s.parent).map(id => ({ id, scenario: s })));
 const meta = (id) => build.filemeta(S, id, 1, { author: PEER_AUTHOR });
 
-/** What `ythril_sync_file_arrivals_total{push, ignored_instance_local}` has counted so far. */
-async function ignoredCount() {
+/** What `ythril_sync_file_arrivals_total{<door>, ignored_instance_local}` has counted so far: one counter for every door. */
+async function ignoredCount(door = 'push') {
   const { values } = await metrics.syncFileArrivalsTotal.get();
-  return values.find(v => v.labels.door === 'push' && v.labels.outcome === 'ignored_instance_local')?.value ?? 0;
+  return values.find(v => v.labels.door === door && v.labels.outcome === 'ignored_instance_local')?.value ?? 0;
 }
 
 describe('a peer\'s sidecar is ignored at every door, and a local one is left alone', { skip }, () => {
@@ -175,7 +175,11 @@ describe('a peer\'s sidecar is ignored at every door, and a local one is left al
     for (const [name, deliver] of [['push', pushMeta], ['pull', pullMeta]]) {
       it(`${name}: a sidecar row is never written, whatever its parent's state; a row beside it still is`, async () => {
         const rows = allSidecars();
+        const counted = await ignoredCount('metadata');
         const answer = await deliver([...rows.map(r => r.id), CONTROL]);
+        // The same recorder the byte door counts through, with its own door label: an ignored row is counted, never silent.
+        assert.ok(await ignoredCount('metadata') - counted >= rows.length,
+          'every ignored sidecar row is counted on ythril_sync_file_arrivals_total{door="metadata",outcome="ignored_instance_local"}');
         const stored = [];
         for (const r of rows) if ((await row(r.id)) !== null) stored.push(`${r.id} (${r.scenario.note})`);
         assert.deepEqual(stored, [], 'sidecar rows a metadata door STORED: a peer\'s sidecar row is another instance\'s derivation and is nobody\'s to keep');
@@ -187,6 +191,20 @@ describe('a peer\'s sidecar is ignored at every door, and a local one is left al
         }
       });
     }
+  });
+
+  describe('an arriving file tombstone', () => {
+    it('for a sidecar is ignored (not applied, not stored) and counted on the one arrival counter, with its own door label', async () => {
+      const rows = allSidecars();
+      const counted = await ignoredCount('tombstone');
+      const tombstones = rows.map(({ id }, i) => ({
+        _id: `ft-${id}`, spaceId: S, path: id, deletedAt: `2026-09-01T00:00:${String(i % 60).padStart(2, '0')}.000Z`, issuer: PEER, rowSeq: 3,
+      }));
+      const answer = await door.push('/file-tombstones', { spaceId: S, tombstones }, { spaceId: S, token: peerToken(PEER) });
+      assert.ok(answer.code === 200 || answer.code === 201, `the tombstone push was refused: ${JSON.stringify(answer)}`);
+      assert.equal(await ignoredCount('tombstone') - counted, rows.length, 'every ignored tombstone is counted once on ythril_sync_file_arrivals_total{door="tombstone"}');
+      for (const { id } of rows) assert.equal(await door.coll(S, 'file_tombstones').findOne({ path: id, _id: `ft-${id}` }), null, `${id}: a tombstone for a sidecar was stored`);
+    });
   });
 
   describe('arriving bytes', () => {

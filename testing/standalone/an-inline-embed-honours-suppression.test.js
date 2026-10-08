@@ -187,10 +187,9 @@ describe('every inline embed honours suppression', () => {
     const files = new Set(vectorStores().map(e => e.file));
     const known = [
       'server/src/brain/write-plan/plan-steps.ts', 'server/src/brain/merge.ts',
-      // Outside `brain/` (Q-255): a file's conversion chunks and its image, audio and video chunks.
-      'server/src/files/converters/pipeline.ts',
-      'server/src/files/media/image-embedder.ts', 'server/src/files/media/audio-embedder.ts',
-      'server/src/files/media/video-embedder.ts',
+      // Outside `brain/` (Q-255): a file's conversion chunks and its image, audio and video chunks all take their vector
+      // from the one producer, which resolves suppression itself (`chunkVectorsFor`) — the four producers no longer store one.
+      'server/src/files/chunk-vectors.ts',
     ];
     for (const file of known) {
       assert.ok(files.has(file),
@@ -198,6 +197,20 @@ describe('every inline embed honours suppression', () => {
     }
     assert.ok([...files].some(f => !f.startsWith('server/src/brain/')),
       'every vector store found is under server/src/brain: the scan is scoped to one directory again (Q-255)');
+  });
+
+  it('the file producers store no vector of their own: they take it from chunkVectorsFor', () => {
+    // The four producers of a file's passages (the conversion pipeline and the image, audio and video embedders) each wrote the
+    // guard and the store; one function holds both now, so a producer that stores a vector by hand is a second copy of the guard
+    // — and the per-file count above would pass it if it also called a resolver, which is exactly how a copy drops half.
+    const stores = new Set(vectorStores().map(e => e.file));
+    for (const file of ['server/src/files/converters/pipeline.ts', 'server/src/files/media/image-embedder.ts',
+      'server/src/files/media/audio-embedder.ts', 'server/src/files/media/video-embedder.ts']) {
+      const src = serverSources().get(file);
+      assert.ok(src, `${file} is no longer a server source: re-point this check`);
+      assert.ok(!stores.has(file), `${file} stores a vector itself: it must take it from chunkVectorsFor (files/chunk-vectors.ts)`);
+      assert.match(src, /\bchunkVectorsFor\(/, `${file} no longer asks chunkVectorsFor, so it resolves suppression some other way`);
+    }
   });
 
   it('every exemption still names a file that stores a vector, and says why', () => {

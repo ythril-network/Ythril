@@ -62,11 +62,6 @@ export const derivedHasText: Readonly<Record<string, unknown>> = {
   content: { $type: 'string', $ne: '' },
 };
 
-/** Where the ancestry bound and the ancestor walk live now: one rule for a file row's suppression
- *  (`fileEmbeddingSuppressed`), asked by this queue and by the producers of a file's passages. Re-exported because
- *  `files/derived-rows.ts` reads the bound from here. */
-export { MAX_ANCESTRY } from './suppress-embeddings.js';
-
 /**
  * The exact string this record's vector is built from.
  *

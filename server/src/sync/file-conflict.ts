@@ -118,10 +118,14 @@ export function isInDerivedTree(relPath: string): boolean {
 }
 
 /**
- * The spill half of `isInstanceLocalFile`, for the file-METADATA arrivals (the arrival writer and the stray drain):
- * a legacy read spill's metadata is refused there as its bytes are here. Named for its question, so the three
- * near-copies that spelled `spillIdFromPath` at a writer are one predicate (bundle-30 `R8`). Whether those arrivals
- * should refuse a conflict copy's or a schema snapshot's metadata as well is a behaviour change, filed, not folded in.
+ * The spill half of `isInstanceLocalFile`: a path a legacy read spill (Q-92) wrote. Named for its question, so the three
+ * near-copies that spelled `spillIdFromPath` at a writer are one predicate (bundle-30 `R8`).
+ *
+ * Asked ALONE by one door: a RESTORE (an import of this instance's own export, `sync/arrivals.ts`), which is never judged by
+ * the peer rules and leaves out only the spill, which no instance keeps any more. Every PEER's file-metadata arrival
+ * (push, pull) asks the whole {@link isInstanceLocalFile}: a conflict copy's, a schema snapshot's, a sidecar's and a spill's
+ * row are all ignored, never stored, and counted (`ythril_sync_file_arrivals_total{door="metadata",
+ * outcome="ignored_instance_local"}`), as their bytes and tombstones are.
  */
 export function isLegacyReadSpill(relPath: string): boolean {
   return spillIdFromPath(relPath) !== null;

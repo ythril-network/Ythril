@@ -34,7 +34,7 @@ sync, indexing — gets the plaintext back. Nothing an API caller sees changes: 
 describe the file as uploaded, so two peers compare equal whether either one encrypts.
 
 - **The format** is chunked AES-256-GCM (64 KiB chunks, each authenticated, under a key derived per file), so a
-  file of any size streams in and out without being held in memory. A flipped bit, a dropped, reordered or
+  file of any size streams in and out without being held in memory (a download, the sync pull and push, and the window `read_file` and the extract return; the media pipeline reads a file whole only where a model needs the whole file). A flipped bit, a dropped, reordered or
   truncated chunk, or a file from another instance refuses to decrypt; it never decodes to something plausible.
 - **Files stored before the secret was set are encrypted in the background** after each start, one at a time,
   each keeping its own modification time (so peers do not see an edit). Until that pass reaches a file it stays

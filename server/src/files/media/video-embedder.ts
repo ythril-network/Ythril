@@ -14,8 +14,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
-import { embed } from '../../brain/embedding.js';
-import { storedFileEmbeddingSuppressed } from '../../brain/suppress-embeddings.js';
+import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
@@ -126,7 +125,7 @@ export async function embedVideo(
 ): Promise<{ audioFailed: number; audioTotal: number }> {
   // Asked ONCE for the job, at its entry, for the keyframe re-embed below; the audio stage asks for its own chunks. A
   // suppressed file's chunks are stored with their text and no vector, and the embedder is asked nothing (Q-255).
-  const suppressed = await storedFileEmbeddingSuppressed(spaceId, fileId);
+  const vectors = await chunkVectorsFor(spaceId, fileId);
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-video-'));
   const videoExt = mimeTypeToVideoExt(mimeType);
   const videoPath = path.join(tmpDir, `input.${videoExt}`);
@@ -223,14 +222,14 @@ export async function embedVideo(
 
       try {
         // A suppressed file's chunk takes the combined TEXT (the lexical channel searches it) and no vector.
-        const embResult = suppressed ? null : await embed(combined);
+        const vectorFields = await vectors.fieldsFor(combined);
         await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
           asFilter<FileMetaDoc>({ _id: chunk.chunkId }),
           asUpdate<FileMetaDoc>({
             $set: {
               content: combined,
               matchedText: combined,
-              ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
+              ...vectorFields,
               updatedAt: now,
             },
           }),

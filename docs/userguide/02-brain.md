@@ -531,7 +531,10 @@ these three levels before treating it as a fault.
 Turning it **on** removes the vectors already stored for what it now covers — whether you turned it on, for the
 space or in a type's schema, or a network whose schema this space follows did — files and their passages included. A record's text is kept, so
 **Lexical** search still finds it. A record that arrives from a peer while its type or space is suppressed here
-is stored without a vector, whatever this instance held for it before.
+is stored without a vector, whatever this instance held for it before. The same holds for a **file**: while the
+file or its space is suppressed, the passages of its converted text and the captions, transcripts and video
+sections of its images, audio and video are stored with their text and no vector, whether you uploaded the
+file or a peer sent it.
 
 > Turning suppression off does not go back and embed what was written while it was on. Use **Backfill
 > embeddings** on the space's Danger tab, which embeds only what has no vector, or re-save an individual record.

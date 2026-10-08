@@ -22,7 +22,8 @@
  * **The prior read.** The row is read BEFORE it is written and handed to the dispatcher. By the time the dispatcher runs the row
  * already holds the arriving hash, so a dispatcher that reads the row itself compares the arriving bytes with themselves: a
  * CHANGED file on a `complete` row was skipped and left `complete` under the new hash, with the old analysis (probe A ran it).
- * The read is here, in the only function an arrival goes through, so no door can skip it.
+ * The read is inside `recordAndDispatchFile` (`files/dispatch.ts`), the one function a row write and its dispatch go through for an
+ * arrival and for a person's upload alike, so no door can skip it.
  *
  * **The count.** Every outcome is counted once, here (`ythril_sync_file_arrivals_total{door, outcome}`): a copy that recorded
  * the file and forgot the counter is an arrival an operator's dashboard never sees. A failure is counted and RETHROWN: the
@@ -49,7 +50,7 @@ import { authorRef } from '../config/author.js';
 import type { AuthorRef } from '../config/types.js';
 import { syncFileArrivalsTotal, type FILE_ARRIVAL_DOORS, type FILE_ARRIVAL_OUTCOMES } from '../metrics/registry.js';
 import { recordArrivedFile } from './file-meta.js';
-import { dispatchFileProcessing, readPriorProcessing, type DispatchResult } from './dispatch.js';
+import { recordAndDispatchFile, type DispatchResult } from './dispatch.js';
 import { peerFileKey } from './sandbox.js';
 import type { InputFormat } from './converters/pipeline.js';
 
@@ -103,14 +104,13 @@ export interface ArrivedBytes {
  */
 export async function recordArrivedBytes(spaceId: string, filePath: string, arrived: ArrivedBytes): Promise<DispatchResult> {
   const { key } = await peerFileKey(spaceId, filePath);
-  // BEFORE any write: the dispatcher compares the arriving hash with the row's PRIOR one (see the module docblock).
-  const prior = await readPriorProcessing(spaceId, key);
   try {
-    await recordArrivedFile(spaceId, key, arrived.sizeBytes, arrived.sha256, arrived.from ?? authorRef());
-    const dispatched = await dispatchFileProcessing(spaceId, key, {
-      bytes: arrived.sizeBytes, inputFormat: arrived.inputFormat ?? 'auto', sha256: arrived.sha256, prior, arrival: true,
+    // The row is read BEFORE it is written and the dispatcher compares the arriving hash with that PRIOR one: the sequence is
+    // `recordAndDispatchFile`'s, shared with a person's upload, and only the row write is this door's (see the module docblock).
+    const dispatched = await recordAndDispatchFile(spaceId, key, {
+      bytes: arrived.sizeBytes, inputFormat: arrived.inputFormat ?? 'auto', sha256: arrived.sha256, arrival: true,
       ...(arrived.contentType ? { contentType: arrived.contentType } : {}),
-    });
+    }, () => recordArrivedFile(spaceId, key, arrived.sizeBytes, arrived.sha256, arrived.from ?? authorRef()));
     countFileArrival(arrived.door, arrived.repair ? `repaired_${arrived.repair}` : 'recorded');
     return dispatched;
   } catch (err) {

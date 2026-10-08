@@ -1146,9 +1146,11 @@ export interface Config {
   /**
    * When true, deleting a file flags its metadata record as deleted
    * (`deletedAt = <now>`) instead of removing it, keeping an audit trail. Flagged
-   * records stay listed and searchable but are marked "deleted" in the UI, and only
-   * a flagged/orphaned record (one whose file no longer exists) may be purged — a
-   * metadata record whose file is still present cannot be deleted directly.
+   * records are LOCAL audit state: never offered to a peer (the deletion reaches peers as
+   * the file tombstone), never hashed, and absent from the file listing (`LIVE_FILE_ROW`,
+   * `files/live-file-row.ts`). Only a flagged/orphaned record (one whose file no longer
+   * exists) may be purged — a metadata record whose file is still present cannot be
+   * deleted directly.
    * Default false (delete the metadata record immediately, the historical behavior).
    * Derived records (conversion chunks / `_converted` / `_extracted`) are always
    * hard-removed regardless of this setting.
@@ -1874,8 +1876,9 @@ export interface FileMetaDoc {
    */
   seq?: number;
   /** Set when the file was deleted while `softDeleteFileMeta` is enabled: ISO8601
-   *  timestamp of the deletion. The record is retained (still listed/searchable, shown
-   *  as "deleted" in the UI) until purged. Absent for live files. */
+   *  timestamp of the deletion. The record is retained as LOCAL audit state until purged:
+   *  never offered to a peer, never hashed, absent from the file listing
+   *  (`LIVE_FILE_ROW`, `files/live-file-row.ts`). Absent for live files. */
   deletedAt?: string;
   embedding?: number[];
   embeddingModel?: string;

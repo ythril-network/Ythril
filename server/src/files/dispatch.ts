@@ -49,12 +49,14 @@ export interface PriorProcessing {
 }
 
 /**
- * Read a file's processing state as it is NOW, for {@link DispatchInput.prior}. Called BEFORE the write that records the new
+ * Read a file's processing state as it is NOW, for {@link DispatchInput.prior}. Private on purpose: it is read by
+ * {@link recordAndDispatchFile} and nowhere else, so no door can write a row first and read the prior one after. Called BEFORE
+ * the write that records the new
  * bytes — the one guard a hand-written sequence drops, and the cause of the defect it prevents: the dispatcher used to read the
  * row itself, after the write, and a changed file on a `complete` row was skipped and left `complete` under the new hash
  * with the old analysis (bundle-48, Q-260; probe A ran it). `null` when there is no row.
  */
-export async function readPriorProcessing(spaceId: string, filePath: string): Promise<PriorProcessing | null> {
+async function readPriorProcessing(spaceId: string, filePath: string): Promise<PriorProcessing | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: { sha256: 1, embeddingStatus: 1 } },
   ) as PriorProcessing | null;
@@ -220,4 +222,31 @@ export async function dispatchFileProcessing(
   // write responses and the tools have never carried one for it); the row says it.
   await setFileProcessingState(spaceId, normId, { embeddingStatus: 'skipped' });
   return { resolvedFormat };
+}
+
+/**
+ * Write a file's row for bytes that are on disk, then dispatch their processing — with the row read FIRST. The one sequence
+ * every door that records bytes goes through: a person's upload (`files/store-file.ts`) and a peer's arrival
+ * (`files/bytes-arrived.ts`), which differ only in HOW the row is written, and that is the one parameter.
+ *
+ * ## What it prevents
+ *
+ * The prior read. By the time the dispatcher runs, the row already holds the ARRIVING hash, so a dispatcher (or a caller) that
+ * reads it afterwards compares the new bytes with themselves: a changed file on a `complete` row was skipped and left `complete`
+ * under the new hash, with the old analysis (bundle-48, Q-260). The read was written out by hand at each door beside the row
+ * write, and the second door was the one that forgot it. Here it cannot be forgotten, because it is not a thing a caller does:
+ * `readPriorProcessing` is private to this module, and a caller cannot hand a `prior` of its own.
+ *
+ * `writeRow` is awaited between the read and the dispatch and its failure propagates, so a row that was not written is never
+ * dispatched. `input.sha256` is required: an unknown hash means "process" and the skip never fires.
+ */
+export async function recordAndDispatchFile(
+  spaceId: string,
+  filePath: string,
+  input: Omit<DispatchInput, 'prior' | 'sha256'> & { sha256: string },
+  writeRow: () => Promise<unknown>,
+): Promise<DispatchResult> {
+  const prior = await readPriorProcessing(spaceId, filePath);
+  await writeRow();
+  return await dispatchFileProcessing(spaceId, filePath, { ...input, sha256: input.sha256, prior });
 }

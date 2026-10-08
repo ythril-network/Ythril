@@ -198,6 +198,14 @@ In the space's settings panel, open the **Danger** tab and click **Delete space*
 
 In the **Danger** tab, click **Wipe all data**. A confirmation dialog shows how many items are in each collection and asks you to type the space ID before you proceed. The space itself (its settings, label, schema) is kept — only the data inside it is removed.
 
+### Keeping a record of deleted files
+
+Deleting a file removes its bytes and, by default, its record too. The **`softDeleteFileMeta`** setting keeps the record instead, flagged as deleted, as an audit trail. It is a top-level key of `config.json` (default `false`); there is no control for it in the app, and the file's own bytes and everything made from them (its text, thumbnails, search entries) are removed either way.
+
+**The kept record belongs to this instance alone.** It is not shown in the file list or counted in a space's file totals, and it is never sent to a peer or counted when instances compare their data, so keeping records never makes two synced instances look different. A restore from an export brings the flag back with the record. Writing the same path again, here or through a file a peer delivers, makes it a live file again and clears the flag.
+
+**Each instance follows its own setting.** A peer learns of a deletion from the removal notice, and applies it by *its* `softDeleteFileMeta`, whatever yours is: an instance with the setting on keeps a flagged record of a file a peer deleted, one with it off removes the record. The audit trail therefore exists exactly on the instances that switched it on.
+
 ---
 
 ## Settings — Tokens

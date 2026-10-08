@@ -601,9 +601,13 @@ export function removedFileMetaKeys(doc: Readonly<Record<string, unknown>>, { re
  * and to neither list fails the build rather than turning every pulled file into a strict-schema refusal. A chunk's
  * `parentFileId` is a wire key (declared `never`), so it is not here and a pulled chunk is refused, never stripped
  * into a top-level file.
+ *
+ * Exported for ONE reader: `the-file-field-sets-agree.test.js`, which holds this list equal to `localFileFields()`
+ * (`files/processing-state.ts`) — the same fact (the file-row keys that never travel) spelled from the wire side and from the
+ * hash side, so a field added to only one of them is caught rather than served or hashed wrongly.
  */
 type FileMetaWireKey = keyof typeof IncomingFileMetaDoc.shape;
-const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, FileMetaWireKey>, true>> = {
+export const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, FileMetaWireKey>, true>> = {
   excerpt: true, matchedText: true, sizeBytes: true, sha256: true, deletedAt: true, embedding: true,
   embeddingModel: true, chunkIndex: true, headingText: true, content: true, convertedFileId: true, chunkCount: true,
   conversionError: true, mediaType: true, embeddingStatus: true, chunkOffsetMs: true, chunkDurationMs: true,

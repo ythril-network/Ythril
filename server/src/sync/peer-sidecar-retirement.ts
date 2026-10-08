@@ -7,8 +7,8 @@
  * a conversion's sidecar is derived by each instance from the file, by that instance's own configuration, and no instance sends
  * or accepts one any more (`isInstanceLocalFile`, `sync/file-conflict.ts`). A peer's, held here, is a copy of ANOTHER
  * instance's conversion sitting where this instance's own would go: found beside the receiver's own conversion as a conflict copy,
- * or pushed over the publisher's. So each is retired — its bytes and its row, through the one removal every delete uses
- * (`removeFileHere`) — whatever the receiver's conversion setting: a receiver with conversion off holds no derived text at all.
+ * or pushed over the publisher's. So each is retired — its bytes and its row, through the one removal every peer-driven
+ * delete uses (`removeOneStoredFileHere`) — whatever the receiver's conversion setting: a receiver with conversion off holds no derived text at all.
  *
  * ## What it touches, and what it never does
  *
@@ -37,9 +37,8 @@ import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { CONVERTED_ROOT, EXTRACTED_ROOT } from '../files/moved-paths.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
-import { deleteStoredIfPresent } from '../files/stored-bytes.js';
-import { removeFileHere } from '../files/remove-file-here.js';
-import { invalidateUsageCache } from '../quota/quota.js';
+import { removeOneStoredFileHere } from '../files/remove-file-here.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { escapeRegex } from '../util/redos.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -55,8 +54,7 @@ async function retireInSpace(spaceId: string): Promise<number> {
   const self = getConfig().instanceId;
   const found = await col<{ _id: string }>(spaceCollection(spaceId, 'files')).find(asFilter<{ _id: string }>({
     _id: { $regex: `^(?:${escapeRegex(CONVERTED_ROOT)}|${escapeRegex(EXTRACTED_ROOT)})` },
-    parentFileId: { $exists: false },
-    deletedAt: { $exists: false },
+    ...LIVE_FILE_ROW,
     // A peer's: it delivered the bytes, or it wrote the row. A row this instance authored with nobody delivering is its own.
     $or: [{ deliveredBy: { $exists: true, $nin: ['', self] } }, { 'author.instanceId': { $exists: true, $ne: self } }],
   }), { projection: { _id: 1 } }).limit(RETIRE_PER_SPACE_PER_CYCLE).toArray();
@@ -64,14 +62,12 @@ async function retireInSpace(spaceId: string): Promise<number> {
 
   let retired = 0;
   await eachUnit(found.map(r => String(r._id)), async (rel) => {
-    // The bytes first (a path that is a directory is left alone), then the row and everything hanging off it: the row is the
-    // finder, so a failure here leaves what a later cycle needs to finish the job.
-    await deleteStoredIfPresent(await resolveSafePathChecked(spaceId, rel), { skipDirectory: true });
-    await removeFileHere(spaceId, rel, { failure: 'throw' });
+    // The bytes first (a path that is a directory is left alone), then the row and everything hanging off it, in the one order
+    // every peer-driven removal uses: the row is the finder, so a failure here leaves what a later cycle needs to finish the job.
+    await removeOneStoredFileHere(spaceId, rel, await resolveSafePathChecked(spaceId, rel));
     retired++;
   });
   if (retired > 0) {
-    invalidateUsageCache();   // freed disk
     log.info(`Retired ${retired} conversion sidecar(s) a peer delivered into space '${peerText(spaceId)}': sidecars are this instance's own now`);
   }
   return retired;

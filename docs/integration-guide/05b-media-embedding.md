@@ -52,9 +52,13 @@ this instance does, and the same bytes through the same pipeline cannot produce 
 
 Every uncertain case still processes, so this cannot leave a file unanalysed: a re-upload is re-run when the bytes
 differ, when the writer sends no hash, when the stored record has none (everything written before this release),
-and when the previous attempt was anything other than `"complete"` — `"failed"`, `"partial"`, `"pending"`,
-`"skipped"` and `"processing"` all re-run. **Re-uploading remains the way to retry a failed analysis.** To force a
-re-analysis of a file that succeeded, change the bytes, or delete it and upload it again.
+and when the previous attempt ended in anything but a settled state — `"failed"`, `"partial"` and `"skipped"` re-run.
+**Identical bytes whose job is `"pending"` or `"processing"` leave that job alone** (the answer is `"pending"`):
+resetting it threw away a half-finished analysis. **Re-uploading remains the way to retry a failed analysis.** To
+force a re-analysis of a file that succeeded, change the bytes, or delete it and upload it again. A **document**
+follows the same rule (identical bytes already converted, or being converted, are not converted again), and so does
+a file a peer delivers by push or sync: an arrival is processed by this instance's own rules, once. A file whose
+bytes change is analysed again even if its record said `"complete"`.
 
 While processing, the filemeta record on the file reflects the current status. Read it with
 `POST /api/filter` — `{"collection": "files", "path": "<path>", "limit": 1}`:

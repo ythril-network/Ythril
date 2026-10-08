@@ -554,7 +554,8 @@ sent on connect and every 30 s as a keep-alive.
   single-use (mint a fresh one per connect, including reconnects), expires in ~60 s, and is bound to this
   space's stream. A non-browser client that can set headers should just use `Authorization` directly.
 - **Scope:** events fire for writes made through the REST and MCP APIs on this instance. Changes applied
-  by the **sync engine** (pulled from a peer) are not emitted here — they appear on the next load.
+  by the **sync engine** — records pulled or pushed from a peer, and the bytes of a file a peer pushed or this
+  instance pulled — are not emitted here: no webhook fires for them either. They appear on the next load.
 - **Bounds:** at most **200** streams of this kind are open at once, instance-wide; the next is a `503` with
   `Retry-After`. A reader more than **256 KiB** behind is disconnected rather than buffered for. Reconnect with a
   FRESH ticket (the old one is spent) and re-read — every message means "something changed, re-read", so the
