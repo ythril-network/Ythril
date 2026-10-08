@@ -194,19 +194,25 @@ export async function stripFlaggedRowsOnce(spaceId: string, limit: number): Prom
   return r.modifiedCount;
 }
 
-/**
- * Is the file a DERIVED row belongs to still here? Read once per write, by the parent's id.
- *
- * A chunk, caption or face row carries no `deletedAt` of its own, so this is the only form of the question that means
- * anything for one. A parent that is absent (the delete removed it outright) and a parent that is flagged (the delete
- * kept its audit record) answer the same: no.
- */
 /** A derived row names the file it came from; without it there is no liveness question to ask. */
 function requireParent(parentFileId: string | undefined): string {
   if (parentFileId === undefined) throw new Error('writeDerivedFields: a derived row names the file it came from');
   return parentFileId;
 }
 
+/**
+ * Is the file a DERIVED row belongs to still here? Read once per write, by the parent's id.
+ *
+ * A chunk, caption or face row carries no `deletedAt` of its own, so this is the only form of the question that means
+ * anything for one. A parent that is absent (the delete removed it outright) and a parent that is flagged (the delete
+ * kept its audit record) answer the same: no.
+ *
+ * **The window it leaves, stated:** it is a read, then the write, and the check cannot move into the write's filter —
+ * the derived row is a different document from its parent. A delete removes a file's derived rows first and flags or
+ * removes the file after (`removeWhatSidecarsLeft`), so a write whose read came before the flag and whose write came
+ * after the children went leaves one derived row behind a parent that is gone. No default read reaches it (its parent
+ * is flagged or absent), and nothing removes it yet: Q-436.
+ */
 async function parentIsLive(spaceId: string, parentFileId: string): Promise<boolean> {
   const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: parentFileId, ...NOT_A_FLAGGED_ROW }), { projection: { _id: 1 } },
@@ -214,7 +220,7 @@ async function parentIsLive(spaceId: string, parentFileId: string): Promise<bool
   return parent !== null;
 }
 
-/** Every key a derived write may name: what `localFileFields` covers, less the processing-only marks' own refusals. */
+/** Refuse a derived write naming a key the hash covers: a derived field is this instance's own, a hashed one replicates. */
 function refuseHashed(where: string, keys: readonly string[]): void {
   for (const key of keys) {
     if (Object.hasOwn(FILE_HASH_PROJECTION, key)) {

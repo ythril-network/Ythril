@@ -53,9 +53,8 @@ import { applyDeleteFields } from '../brain/delete-fields.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
-import { isLocalFileField } from './derived-fields.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
-import { stripDerivedStages } from './derived-fields.js';
+import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 
 
 

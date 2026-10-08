@@ -496,7 +496,6 @@ async function serialiseMultipart(form: FormData): Promise<{ body: Buffer; conte
   return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-/** Replace a cross-realm FormData body with bytes plus an explicit Content-Type. Other bodies pass through. */
 /**
  * What {@link ssrfSafeFetch} takes: a `RequestInit`, except that `body` may be a FUNCTION returning a fresh body.
  *
@@ -507,6 +506,7 @@ export type SsrfRequestInit = Omit<RequestInit, 'body'>
   // one at run time. Named rather than cast at every call site, so the one place that knows this is this type.
   & { body?: RequestInit['body'] | (() => BodyInit | Readable) };
 
+/** Replace a cross-realm FormData body with bytes plus an explicit Content-Type. Other bodies pass through. */
 async function normaliseBody(init: RequestInit): Promise<RequestInit> {
   if (!isFormDataLike(init.body)) return init;
   const { body, contentType } = await serialiseMultipart(init.body as FormData);

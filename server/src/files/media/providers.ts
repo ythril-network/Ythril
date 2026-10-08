@@ -127,7 +127,6 @@ async function readHeader(src: ImageSource): Promise<Buffer> {
   try {
     const buf = Buffer.alloc(SNIFF_BYTES);
     const { bytesRead } = await fh.read(buf, 0, SNIFF_BYTES, 0);
-    void src;
     return buf.subarray(0, bytesRead);
   } finally {
     await fh.close().catch(() => { /* the read is what mattered */ });
@@ -201,6 +200,10 @@ export class OllamaVisionProvider implements VisionProvider {
         body: body.stream() as unknown as BodyInit,
         // undici demands it of a stream body, and the error it gives without it names neither the body nor this call.
         duplex: 'half',
+        // A stream is read once, so it cannot be sent again to a redirect's target (a 307/308 repeats the body; a
+        // 301/302 would turn the POST into a GET Ollama refuses anyway). Refused here, by name, rather than failing on
+        // an emptied body: an Ollama URL that redirects is a URL to correct in the media settings.
+        redirect: 'error',
         signal: AbortSignal.timeout(visionTimeout()),
       } as RequestInit);
     } catch (err) {
