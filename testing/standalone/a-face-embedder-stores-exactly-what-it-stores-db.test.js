@@ -89,7 +89,6 @@ function configure({ reprocessSyncedImages = true } = {}) {
 
 describe('the face path stores exactly what it stores today (real MongoDB, real sharp, external face provider stub)', { skip }, () => {
   before(async () => {
-    // own-listener: binds every interface so the LAN address answers, because the SSRF guard blocks loopback and the face provider is fetched through it
     faceServer = http.createServer((req, res) => {
       let body = '';
       req.on('data', c => { body += c; });
@@ -99,6 +98,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
         res.end(JSON.stringify(faceAnswer()));
       });
     });
+    // own-listener: binds every interface so the LAN address answers, because the SSRF guard blocks loopback and the face provider is fetched through it
     await new Promise((resolve) => faceServer.listen(0, '0.0.0.0', resolve));
 
     embedServer = http.createServer((req, res) => {
