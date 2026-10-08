@@ -38,8 +38,8 @@ const OWNER = 'server/src/files/tombstones.ts';
 const NOT_READERS = {
   // The registry: the name, built once. Opens nothing.
   'server/src/db/space-collection.ts': /fileTombstones:\s*'file_tombstones'/,
-  // A files wipe drops every tombstone of the space, pending or not; it reads none (`wipe-space-says-it-is-local`).
-  'server/src/spaces/lifecycle.ts': /col\(spaceCollection\(spaceId, 'fileTombstones'\)\)\.deleteMany\(\{\}\)/,
+  // (A files wipe used to be here: it dropped every tombstone from `spaces/lifecycle.ts` by hand. It is the module's now,
+  // `forgetFileTombstonesOf`, which marks the wipe so a publish in flight cannot re-create a row — bundle-71, Q-406.)
 };
 
 const NAMES_IT = () => /\bfileTombstones\b|file_tombstones/g;
@@ -54,6 +54,43 @@ function namers() {
   }
   return out;
 }
+
+/**
+ * The readers outside the module that take the PUBLISHED tombstones only, because what they decide is destructive and waits on
+ * acts: the stray drain discards a record on a tombstone's say-so, and a pending tombstone names an act that may not happen.
+ * Every OTHER arrival site asks the wider predicate (`decideArrivals`), which also counts a pending tombstone whose act has
+ * already removed the path's bytes (bundle-71, Q-348) — so a new site that reaches for `heldFileTombstones` instead is either
+ * a new published-only reader, declared here with its reason, or the narrower answer to "is this path deleted".
+ */
+const PUBLISHED_ONLY_READERS = {
+  'server/src/sync/stray-filemeta-drain.ts': 'discards a stray record on a tombstone, and waits on acts (bundle-30 I15)',
+};
+
+describe('the stray drain reads only published tombstones; every arrival site asks the wider predicate (Q-348)', () => {
+  it('only the module and the declared published-only readers call heldFileTombstones', () => {
+    const callers = new Set();
+    for (const f of trackedSources('server/src')) {
+      if (f === OWNER) continue;
+      if (/\bheldFileTombstones\s*\(/.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8')))) callers.add(f);
+    }
+    assert.ok(callers.size >= 1, 'no source calls heldFileTombstones — the derivation looks in the wrong place');
+    assert.deepEqual([...callers].sort(), Object.keys(PUBLISHED_ONLY_READERS).sort(),
+      'a source other than the declared published-only readers asks heldFileTombstones: an ARRIVAL asks decideArrivals / '
+      + 'shadowedArrivals / bytesShadowed, which also counts a pending delete whose bytes are already gone');
+  });
+
+  it('a published-only reader never asks the wider predicate, and heldFileTombstones reads only PUBLISHED rows', () => {
+    for (const f of Object.keys(PUBLISHED_ONLY_READERS)) {
+      const code = blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
+      assert.doesNotMatch(code, /\b(decideArrivals|shadowedArrivals|bytesShadowed)\b/,
+        `${f} is a published-only reader and asks the predicate that counts a pending delete too`);
+    }
+    const owner = blankComments(readFileSync(join(REPO_ROOT, OWNER), 'utf8'));
+    const body = /export async function heldFileTombstones\b[\s\S]*?\n\}\r?\n/.exec(owner)?.[0];
+    assert.ok(body, 'heldFileTombstones is not found in its module — the derivation looks in the wrong place');
+    assert.match(body, /\.\.\.PUBLISHED/, 'heldFileTombstones no longer reads PUBLISHED rows only');
+  });
+});
 
 describe('the file-tombstone collection is opened only by its module', () => {
   const found = namers();

@@ -406,7 +406,8 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     configure({ type: initial.type, myParentInstanceId: initial.myParentInstanceId ?? null, lateral: initial.lateral });
     if (files) {
       for (const s of [...spaces, ...extraSpaces, ...peerSpaces]) {
-        for (const part of ['file_tombstones', 'file_hashes']) await door.mongo.col(`${s}_${part}`).deleteMany({});
+        // `conflicts` too: a conflict copy a case's pull recorded is a row the next case's count would read.
+        for (const part of ['file_tombstones', 'file_hashes', 'conflicts']) await door.mongo.col(`${s}_${part}`).deleteMany({});
         fs.rmSync(path.join(loader.getDataRoot(), 'files', s), { recursive: true, force: true });
       }
     }

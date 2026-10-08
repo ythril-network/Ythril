@@ -3,8 +3,9 @@
  *
  * ## What it prevents
  *
- * A file is not a blob. It is bytes, a queued media job, a conversion's chunk and face rows and its `_converted/` and
- * `_extracted/` sidecars, a cached content hash, a figure in the usage cache and a metadata row. The local delete
+ * A file is not a blob. It is bytes, a queued media job, a conversion's chunk and face rows — to every level: an extracted
+ * image's caption and faces hang from the image — its `_converted/` and `_extracted/` sidecars with the rows and jobs an arrival
+ * made for them, a cached content hash, a figure in the usage cache and a metadata row. The local delete
  * (`deleteFileCascade`) removed all of them in one order; the media worker's `reconcileDeletedSource` hand-wrote a
  * second copy of the last three; and the two doors of a PEER's file tombstone each removed a different one of them — the
  * push route unlinked the bytes and left the row, the pull removed bytes and row and left the chunks, the job (retrying for
@@ -29,14 +30,13 @@
  * It does NOT remove the bytes (the callers hold them under their own locks and their own tombstone ordering) and it does
  * NOT touch tombstones (a tombstone is the act's, written before and published after it).
  */
-import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { cancelMediaJob } from './media/job-queue.js';
 import { deleteConversionArtifacts } from './converters/pipeline.js';
 import { forgetFileHashes } from './manifest.js';
-import { deleteFileMeta, markFileMetaDeleted } from './file-meta.js';
+import { retireFileMeta } from './file-meta.js';
 
 export type RemovalFailure = 'throw' | 'swallow';
 
@@ -52,7 +52,6 @@ export async function removeFileHere(spaceId: string, rel: string, { failure }: 
   await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
   await step('forgetFileHashes', () => forgetFileHashes(spaceId, [rel]));
   // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
-  // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta.
-  if (getConfig().softDeleteFileMeta === true) await step('markFileMetaDeleted', () => markFileMetaDeleted(spaceId, rel));
-  else await step('deleteFileMeta', () => deleteFileMeta(spaceId, rel));
+  // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta — as every sidecar row an arrival made went above.
+  await step('retireFileMeta', () => retireFileMeta(spaceId, rel));
 }

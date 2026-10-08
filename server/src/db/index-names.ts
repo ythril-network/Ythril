@@ -25,3 +25,18 @@ export async function indexNamesOf(collName: string): Promise<string[]> {
     throw err;
   }
 }
+
+/**
+ * Drop the indexes among `names` that the collection has, and answer the names left. An index already gone is the state
+ * wanted, so only a listed one is dropped, and a drop that fails any other way is the caller's failure — never caught on a
+ * guessed error code. `present` is a listing the caller already holds, so a pass that just built an index does not list twice.
+ * The one way a replaced index is dropped (the keyset pass's bare index, the file tombstones' settle index).
+ */
+export async function dropIndexesIfPresent(
+  collName: string, names: readonly string[], present?: readonly string[],
+): Promise<string[]> {
+  const listed = present ?? await indexNamesOf(collName);
+  const gone = names.filter(n => listed.includes(n));
+  for (const name of gone) await col(collName).dropIndex(name);
+  return listed.filter(n => !gone.includes(n));
+}

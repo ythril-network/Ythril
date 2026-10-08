@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, del, delWithBody, waitFor } from './helpers.js';
+import { INSTANCES, post, del, delWithBody, waitFor, pubsubNetwork } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -67,18 +67,10 @@ before(async () => {
   tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
   assert.equal((await post(INSTANCES.b, tokenB, '/api/spaces', { id: SPACE, label: SPACE })).status, 201);
-  const net = await post(INSTANCES.b, tokenB, '/api/networks', { label: `q68-${RUN}`, type: 'pubsub', spaces: [SPACE] });
-  assert.equal(net.status, 201, JSON.stringify(net.body));
-  networkId = net.body.id;
-  const k = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/invite`, {});
-  assert.ok(k.status < 300, JSON.stringify(k.body));
-  const j = await post(INSTANCES.a, tokenA, '/api/networks/join-by-key', {
-    publisherUrl: 'http://ythril-b:3200', inviteKey: k.body.inviteKey, myUrl: 'http://ythril-a:3200',
-  });
-  assert.equal(j.status, 200, JSON.stringify(j.body));
+  const net = await pubsubNetwork({ label: `q68-${RUN}`, spaces: [SPACE], publisher: [INSTANCES.b, tokenB, 'ythril-b'], subscriber: [INSTANCES.a, tokenA, 'ythril-a'] });
+  networkId = net.networkId;
   // The subscriber adopts the space on a cycle; the file steps below need it to exist there first.
-  await syncUntil(async () => (await fetch(`${INSTANCES.a}/api/spaces/${SPACE}/meta`, { headers: { Authorization: `Bearer ${tokenA}` } })).ok,
-    `space ${SPACE} was never adopted on A`);
+  await net.adopted(SPACE);
 });
 
 after(async () => {

@@ -8,8 +8,8 @@
  * ── Why this cannot reuse the seq floor ──────────────────────────────────────────────────────────────────
  *
  * `sync/served-watermark.ts` bounds record tombstones by the `sinceSeq` a peer pulls from. File tombstones have
- * **no seq at all** — they are keyed by `deletedAt`, and the peer pull is issued with no `since` — so there is
- * no served position to record.
+ * **no seq at all** — they are paged, acknowledged and pruned by this instance's own POSITION (`positionAt`,
+ * `files/tombstones.ts`), and the peer pull is issued with no `since` — so there is no served position to record.
  *
  * The confirmation comes from the PUSH instead, and it is a stronger signal than a pull watermark:
  * `POST /api/sync/file-tombstones` upserts each tombstone it receives (`$setOnInsert`) and re-propagates it
@@ -49,7 +49,7 @@ export type FileTombstoneFloor =
 export { isComparableIso };
 
 /**
- * The newest `deletedAt` every peer has acknowledged, or a reason not to prune.
+ * The newest POSITION every peer has acknowledged (the page the push sent, `ackedPositionFrom`), or a reason not to prune.
  *
  * Pure in `members` / `peerTokenIds` so every branch is checkable without a database. `direction` is
  * deliberately not consulted, for the same reason as the record half: it governs our outbound behaviour, not

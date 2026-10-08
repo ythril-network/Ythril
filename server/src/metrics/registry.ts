@@ -26,6 +26,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
+import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
@@ -646,20 +647,41 @@ export const embedProcessState = new Gauge({
 });
 
 /**
+ * A gauge with one series per space, read at scrape time: `read(spaceId)` for every space `concreteSpaces()` lists NOW. The series
+ * set is rebuilt on every scrape (`reset`), so a deleted space's series goes with the space — the half a hand-written collector
+ * drops, and a gauge that keeps a gone space's last value reports a hold nobody has. `read` is synchronous: nothing to await.
+ */
+function perSpaceGauge({ name, help, read }: { name: string; help: string; read: (spaceId: string) => number }): Gauge<'space'> {
+  return new Gauge({
+    name, help, labelNames: ['space'] as const, registers: [register],
+    collect() {
+      this.reset();
+      for (const space of concreteSpaces()) this.set({ space: space.id }, read(space.id));
+    },
+  });
+}
+
+/**
  * How long each space's oldest seq hold has been held (`Q-200`). A hold that does not end stops every seq-paged
  * reader of its space — a peer's pull is served nothing above it while each cycle reports success — and until this
- * nothing measured it. 0 for a space holding nothing; a deleted space's series goes with the space (rebuilt from
- * `concreteSpaces()` on every scrape). Read synchronously from `util/seq.ts`'s registry: nothing to await.
+ * nothing measured it. 0 for a space holding nothing. Read from `util/seq.ts`'s registry.
  */
-export const seqHorizonOldestHoldSeconds = new Gauge({
+export const seqHorizonOldestHoldSeconds = perSpaceGauge({
   name: 'ythril_seq_horizon_oldest_hold_seconds',
   help: 'Age in seconds of the oldest open seq hold per space (0 when none); a growing value means replication of the space is held',
-  labelNames: ['space'] as const,
-  registers: [register],
-  collect() {
-    this.reset();
-    for (const space of concreteSpaces()) this.set({ space: space.id }, oldestHoldAgeSeconds(space.id));
-  },
+  read: oldestHoldAgeSeconds,
+});
+
+/**
+ * The same for the file tombstones' position hold (`Q-346`): how long each space's oldest open position stamp has been held.
+ * A hold that does not end stops every page and prune of the space's file tombstones below its stamp — a peer is sent no
+ * deletion above it while each cycle reports success — and, as with the seq hold, nothing measured it. 0 for a space holding
+ * nothing; built like the seq gauge, so a deleted space's series goes with the space.
+ */
+export const fileTombstoneOldestHoldSeconds = perSpaceGauge({
+  name: 'ythril_file_tombstone_oldest_hold_seconds',
+  help: 'Age in seconds of the oldest open file-tombstone position hold per space (0 when none); a growing value means deletions of the space are not reaching peers',
+  read: oldestPositionHoldAgeSeconds,
 });
 
 export const embedWaitSeconds = new Histogram({

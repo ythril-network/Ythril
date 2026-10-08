@@ -5,7 +5,7 @@
  * ## What this covers
  *
  * `api/invite-sessions.ts` (the session purge, armed at import), `audit/change-retention.ts` (the six-hourly redaction),
- * `util/seq.ts` (the hold watchdog) and `metrics/space-activity-store.ts` (the usage flush) each wrote `setInterval(…).unref()`
+ * `util/horizon-holds.ts` (the hold watchdog) and `metrics/space-activity-store.ts` (the usage flush) each wrote `setInterval(…).unref()`
  * by hand. `intervalJob` owns that now: one tick at a time, a bounded database, a contained throw, a timer that does not hold the
  * process, a `stop` that clears. The webhook retry poll is the fifth site and has its own file
  * (`the-webhook-retry-poll-skips-an-overlap-and-delivers-four-at-a-time.test.js`), because it also changes how it delivers.
@@ -31,14 +31,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-let signals, wb, retention, seq, activity;
+let signals, wb, retention, holds, activity;
 const read = (p) => fs.readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 
 before(async () => {
   signals = await import('../../server/dist/util/housekeeping-signals.js');
   wb = await import('../../server/dist/db/write-bound.js');
   retention = await import('../../server/dist/audit/change-retention.js');
-  seq = await import('../../server/dist/util/seq.js');
+  holds = await import('../../server/dist/util/horizon-holds.js');
   activity = await import('../../server/dist/metrics/space-activity-store.js');
   await import('../../server/dist/api/invite-sessions.js');   // armed at import: every site's module is loaded before a label is asked for
 });
@@ -65,7 +65,7 @@ async function recording(fn) {
 describe('every timer site declares its job at construction', () => {
   it('each label is a declared interval job', () => {
     const declared = signals.declaredJobs();
-    for (const label of ['Invite session purge', 'Audit change retention', 'Seq hold watchdog', 'Space activity flush']) {
+    for (const label of ['Invite session purge', 'Audit change retention', 'Horizon hold watchdog', 'Space activity flush']) {
       assert.ok(declared.includes(label), `'${label}' is not a declared interval job (${declared.join(', ')}): its timer is a bare setInterval`);
     }
   });
@@ -105,15 +105,15 @@ describe('the audit change-retention sweep', () => {
   });
 });
 
-describe('the seq hold watchdog', () => {
+describe('the horizon hold watchdog', () => {
   it('ticks at a quarter of the hold warning, at least 250 ms, and re-reads the figure when it restarts', async () => {
     try {
       wb.setWriteBoundForTest({ holdDeadlineMs: 4_000 });          // warn at 2 000 ms -> every 500 ms
-      const first = await recording(() => { seq.startSeqHoldWatchdog(); seq.stopSeqHoldWatchdog(); });
+      const first = await recording(() => { holds.startHorizonHoldWatchdog(); holds.stopHorizonHoldWatchdog(); });
       wb.setWriteBoundForTest({ holdDeadlineMs: 8_000 });          // warn at 4 000 ms -> every 1 000 ms
-      const second = await recording(() => { seq.startSeqHoldWatchdog(); seq.stopSeqHoldWatchdog(); });
+      const second = await recording(() => { holds.startHorizonHoldWatchdog(); holds.stopHorizonHoldWatchdog(); });
       wb.setWriteBoundForTest({ holdDeadlineMs: 1_000 });          // a quarter would be 125 ms: floored at 250
-      const third = await recording(() => { seq.startSeqHoldWatchdog(); seq.stopSeqHoldWatchdog(); });
+      const third = await recording(() => { holds.startHorizonHoldWatchdog(); holds.stopHorizonHoldWatchdog(); });
       assert.deepEqual([first.made[0].ms, second.made[0].ms, third.made[0].ms], [500, 1_000, 250]);
       for (const r of [first, second, third]) {
         assert.equal(r.made.length, 1);
@@ -127,10 +127,10 @@ describe('the seq hold watchdog', () => {
     try {
       wb.setWriteBoundForTest({ holdDeadlineMs: 4_000 });
       const { made, cleared } = await recording(() => {
-        seq.startSeqHoldWatchdog();
+        holds.startHorizonHoldWatchdog();
         wb.setWriteBoundForTest({ holdDeadlineMs: 8_000 });
-        seq.startSeqHoldWatchdog();
-        seq.stopSeqHoldWatchdog();
+        holds.startHorizonHoldWatchdog();
+        holds.stopHorizonHoldWatchdog();
       });
       assert.deepEqual(made.map(h => h.ms), [500, 1_000]);
       assert.deepEqual(cleared, made, 'a restart left the first timer running');

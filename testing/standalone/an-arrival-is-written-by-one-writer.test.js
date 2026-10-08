@@ -88,9 +88,10 @@ const EXEMPT = {
   'server/src/files/file-meta.ts:markFileMetaDeleted':
     'file sync: a peer\'s file tombstone, on an instance that keeps deleted rows for audit (`softDeleteFileMeta`), flags the row '
     + 'deleted instead of removing it (`removeFileHere`, the steps of a local delete) — a delete, not an arrival',
-  'server/src/files/converters/pipeline.ts:deleteConversionArtifacts':
-    'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here (`removeFileHere`), as a '
-    + 'local delete does — rows no peer sends (`derived` in the writer), removed with the file they came from',
+  'server/src/files/converters/pipeline.ts:removeWhatSidecarsLeft':
+    'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here, at every level (`removeFileHere`, '
+    + 'through `deleteConversionArtifacts`, the step a directory\'s delete shares), as a local delete does — rows no peer sends '
+    + '(`derived` in the writer), removed with the file they came from',
   'server/src/sync/file-sync.ts:recordSyncBase':
     'file sync: the last-agreed hash a conflict is judged against, local bookkeeping on the file row',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':

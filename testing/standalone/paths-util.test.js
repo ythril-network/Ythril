@@ -14,12 +14,14 @@ import assert from 'node:assert/strict';
 import { toDocId, toSafeRelPath } from '../../server/dist/util/paths.js';
 
 describe('path normalisers', () => {
-  it('toDocId: backslashes → slashes, strips leading slashes, keeps `..`', () => {
+  it('toDocId: backslashes → slashes, strips leading slashes, collapses `..` that stays inside the root', () => {
     assert.equal(toDocId('foo\\bar.txt'), 'foo/bar.txt');
     assert.equal(toDocId('/foo/bar'), 'foo/bar');
     assert.equal(toDocId('///a/b'), 'a/b');
-    // toDocId is for keys, not filesystem paths — it must NOT alter `..` (that's the id).
-    assert.equal(toDocId('a/../b'), 'a/../b');
+    // The key is the path's one identity (a-space-relative-path-has-one-key.test.js holds the whole table): `a/../b` IS `b`.
+    assert.equal(toDocId('a/../b'), 'b');
+    // A `..` that would climb above the root is left in place — a key is not a filesystem path, and the sandbox refuses it.
+    assert.equal(toDocId('../b'), '../b');
   });
 
   it('toSafeRelPath: same normalisation PLUS strips `../` traversal segments', () => {

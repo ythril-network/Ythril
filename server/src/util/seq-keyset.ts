@@ -178,8 +178,10 @@ export const ISO_START_CURSOR: string = encodeIsoCursor({ at: '1970-01-01T00:00:
 /**
  * The two finds that read everything strictly after `after` in an instant-keyed collection, in `(field, _id)` order: `tie`
  * (the rest of the run at the cursor's own instant, or `null` when the cursor names no id) and `range` (every later
- * instant). The twin of {@link seqKeysetFilters}, with no horizon (an instant is never allocated ahead of its write) and
- * no readiness question: with the compound index the two finds are bounded scans, and without it — the window while it is
+ * instant). The twin of {@link seqKeysetFilters}, with no horizon of its own and no
+ * readiness question. An instant IS stamped ahead of its write (a file tombstone's position is taken before the write
+ * commits), so a reader of such a field caps itself through `extra` (`settledPositionCap`, `files/tombstones.ts`): one that does
+ * not reads straight through an open hold. With the compound index the two finds are bounded scans, and without it — the window while it is
  * built — each is a scan that keeps the same ties, because a tie is decided by the filters and not by the index. `extra`
  * narrows both, composed with `$and` as the seq filters compose it.
  */

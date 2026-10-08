@@ -57,7 +57,7 @@ import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { retireEmbedJobs } from './embed-queue.js';
-import { MAX_ANCESTRY } from './embed-record.js';
+import { rowsDerivedFrom } from '../files/derived-rows.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
@@ -203,16 +203,7 @@ const WITH_VECTOR = { embedding: { $exists: true } };
 export async function dropFileVectors(spaceId: string, fileIds: readonly string[]): Promise<string[]> {
   if (fileIds.length === 0) return [];
   const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
-  const reached = new Set(fileIds);
-  let frontier = [...reached];
-  for (let depth = 0; depth < MAX_ANCESTRY && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const part of inChunks(frontier, READ_CHUNK)) {
-      const rows = await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1 } }).toArray();
-      for (const r of rows) { const id = String(r['_id']); if (!reached.has(id)) { reached.add(id); next.push(id); } }
-    }
-    frontier = next;
-  }
+  const reached = await rowsDerivedFrom(spaceId, fileIds);
   // The ones that hold a vector, through the one by-id reader.
   const ids = [...(await readStoredById(spaceCollection(spaceId, 'files'), [...reached], {}, { filter: WITH_VECTOR })).keys()];
   for (const part of inChunks(ids, READ_CHUNK)) {

@@ -34,10 +34,10 @@
 import { moveFile, listFilesRecursive } from './files.js';
 import { hasLiveFileRecordAt, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
-import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
+import { movedId, movedSidecars, parentIdsUnder, type PathKind } from './moved-paths.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent } from './stored-bytes.js';
+import { bytesPresentAt, isStoredDirectory } from './stored-bytes.js';
 import { actUnderPendingTombstones, forgetFinishedMove, moveWasBegun, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
 import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
@@ -51,27 +51,27 @@ import { log, peerText } from '../util/log.js';
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * Whether a space-relative path has bytes on disk (`bytesPresent`): a path outside the sandbox is the caller's
- * `RangeError`, and a failure to look is thrown — never read as "absent", which would send a move into its
- * completion path (preship-3 P3-6).
- */
-const exists = async (spaceId: string, relPath: string): Promise<boolean> =>
-  bytesPresent(await resolveSafePathChecked(spaceId, relPath));
-
-/**
  * Every file path the move takes away, for the tombstones: the files themselves (`moved`, gone with the rename) and
  * their sidecars (`sidecars`, gone only once `afterTheBytesMoved` moves them, which can fail). Sync has no rename
  * detection, so a path without a tombstone is still advertised by a peer's manifest and comes back on the next pull.
  */
 async function pathsLeaving(spaceId: string, src: string, dst: string): Promise<{ moved: string[]; sidecars: string[] }> {
+  // What `src` IS decides which sidecars it owns, so it is read from the disk (`isStoredDirectory`), never inferred from whether it
+  // has children: an empty directory has none and is still a directory, whose trees are not a file's converted Markdown.
+  const kind = await kindAt(spaceId, src);
   const children = await listFilesRecursive(spaceId, src);
   const sidecars: string[] = [];
-  for (const { from } of movedSidecars(src, dst)) {
+  for (const { from } of await movedSidecars(spaceId, src, dst, kind)) {
     const under = await listFilesRecursive(spaceId, from);
     if (under.length > 0) sidecars.push(...under);
-    else if (await exists(spaceId, from)) sidecars.push(from);
+    else if (await bytesPresentAt(spaceId, from)) sidecars.push(from);
   }
   return { moved: children.length > 0 ? children : [src], sidecars };
+}
+
+/** What the path at `relPath` is on disk — a directory or, whatever else, a file: the kind its sidecars are asked by. */
+async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
+  return await isStoredDirectory(await resolveSafePathChecked(spaceId, relPath)) ? 'directory' : 'file';
 }
 
 /**
@@ -116,18 +116,20 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   // must not leave a tombstone behind it.
   await resolveSafePathChecked(spaceId, src);
   await resolveSafePathChecked(spaceId, dst);
-  if (!(await exists(spaceId, src))) {
+  if (!(await bytesPresentAt(spaceId, src))) {
     // The bytes already moved and the records did not: a move a store failure stopped after its bytes, completed —
     // but only a move begun HERE, which its marker says. Without it this is an orphan `src` beside whatever `dst` is.
-    const owed = await exists(spaceId, dst) && await moveWasBegun(spaceId, src, dst) && await hasLiveFileRecordAt(spaceId, src);
+    const owed = await bytesPresentAt(spaceId, dst) && await moveWasBegun(spaceId, src, dst) && await hasLiveFileRecordAt(spaceId, src);
     if (!owed) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
     // Its tombstones were written before those bytes moved; `afterTheBytesMoved` settles any its first attempt left
     // pending, once the sidecars have had their turn.
-    await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src));
+    // The bytes are at `dst`, so what the path IS is read there.
+    await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src, await kindAt(spaceId, dst)));
     emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
     return;
   }
   const { moved, sidecars } = await pathsLeaving(spaceId, src, dst);
+  const kind = await kindAt(spaceId, src);
 
   // The tombstones BEFORE the bytes move, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here
   // leaves the source where it was, so the retry repeats the move — written after, the retry found no source and the
@@ -138,7 +140,7 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   let held: string[] = [];
   await actUnderPendingTombstones(pending, async () => {
     try {
-      held = await holdJobsForMove(spaceId, src);
+      held = await holdJobsForMove(spaceId, src, kind);
       await moveFile(spaceId, src, dst);
     } catch (err) {
       await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
@@ -156,8 +158,10 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
  * it here. Each step finds its work at `src`, so a step that already ran finds none.
  */
 async function afterTheBytesMoved(spaceId: string, src: string, dst: string, held: string[]): Promise<void> {
-  for (const sidecar of movedSidecars(src, dst)) {
-    if (!(await exists(spaceId, sidecar.from))) continue;
+  // The bytes have moved, so what the path IS is read where they went.
+  const kind = await kindAt(spaceId, dst);
+  for (const sidecar of await movedSidecars(spaceId, src, dst, kind)) {
+    if (!(await bytesPresentAt(spaceId, sidecar.from))) continue;
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
       log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`));
   }
@@ -166,7 +170,7 @@ async function afterTheBytesMoved(spaceId: string, src: string, dst: string, hel
   // is dropped rather than published (preship-4 P4-3).
   await settleBegunMove(spaceId, src, dst);
   const at = `for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}`;
-  await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held));
+  await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held, kind));
   await unlessTheStoreFailed(`relocateDerivedFileMeta error ${at}`, () => relocateDerivedFileMeta(spaceId, src, dst));
   await unlessTheStoreFailed(`renameFileMeta error ${at}`, () => Promise.all([
     renameFileMeta(spaceId, src, dst),

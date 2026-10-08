@@ -20,6 +20,7 @@ import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { readFile } from '../../files/files.js';
+import { parentOfSidecar } from '../../files/moved-paths.js';
 import { log, peerText } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { getConfig } from '../../config/loader.js';
@@ -147,7 +148,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     .toArray() as FileMetaDoc[];
 
   const allImages = derived
-    .filter(d => d.path.startsWith('_extracted/'))
+    .filter(d => parentOfSidecar(d.path)?.role === 'extracted')
     .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
     .map(d => ({
       path: d.path,
@@ -165,7 +166,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   // The converted Markdown, read from the file store rather than from the record — the record carries
   // metadata, the bytes are the thing being inspected. Absent for formats that need no conversion
   // (`.md`/`.txt` are already Markdown and produce no `_converted/` copy).
-  const convertedRecord = derived.find(d => d.path.startsWith('_converted/'))
+  const convertedRecord = derived.find(d => parentOfSidecar(d.path)?.role === 'converted')
     ?? (parent.convertedFileId ? await getFileMeta(member, parent.convertedFileId) : null);
   let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string;
     markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null = null;

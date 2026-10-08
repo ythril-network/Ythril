@@ -17,10 +17,10 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { readStored, writeStored } from '../files/stored-bytes.js';
-import { resolveSafePathChecked } from '../files/sandbox.js';
+import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
 import { recordArrivedFile } from '../files/file-meta.js';
 import {
-  publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, shadowedArrivals,
+  publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, decideArrivals,
   LEGACY_FILE_TOMBSTONE_LIMIT,
 } from '../files/tombstones.js';
 import { applyPeerFileTombstones } from '../files/peer-tombstone-apply.js';
@@ -92,7 +92,9 @@ export async function syncFiles(
         if (ackResp.ok) {
           recordFileTombstoneAck(member.instanceId, spaceId, ackedPositionFrom(ourTombstones));
           // `refused` and `declined` are additive: an older peer sends neither. A re-send is refused or declined again, so the
-          // position advances past them, as the record push's does, and the lines below are what tell an operator.
+          // position advances past them, as the record push's does, and the lines below are what tell an operator. (A
+          // declined file tombstone met a row somebody authored: a row only arriving bytes created is authorless to the
+          // receiver's authority, `fileTargetOf`, Q-405, so the origin's deletion of it is applied.)
           const body = await boundedJson<{ refused?: unknown; declined?: unknown }>(ackResp, 'sync peer')
             .catch(() => ({}) as { refused?: unknown; declined?: unknown });
           refused += refusedCountOf(body);
@@ -129,28 +131,47 @@ export async function syncFiles(
     const dataRoot = getDataRoot();
     const spaceRoot = path.resolve(dataRoot, 'files', spaceId);
 
-    // The bytes a held file tombstone erased are not downloaded again (Q-229): asked ONCE for every entry that would be
-    // fetched, by the same predicate every other arrival of a file's bytes asks (`shadowedArrivals`).
-    const shadowed = doPull
-      ? await shadowedArrivals(spaceId, manifest
-        .filter(r => !isInstanceLocalFile(r.path) && decideFilePull(oursMap.get(r.path), r, bases.get(r.path)) !== 'skip')
-        .map(r => ({ id: r.path, path: r.path, kind: 'bytes' as const, sha256: r.sha256 })))
-      : new Set<string>();
-
+    // A peer's entry is a spelling of a path until it is resolved (Q-404): every lookup below — the local manifest, the sync
+    // base, the held tombstones, the file row — is made by the KEY, as the write is made at the resolved path. The peer's own
+    // text is used for one thing, asking the peer for the bytes it advertised under it. The key is derived lexically, with no
+    // disk (`fileKeyOf`): every entry of every manifest is keyed every cycle, and the symlink check is made by the write below,
+    // which is the only thing here that touches the filesystem, and only for an entry that is actually fetched.
+    const arriving: { remote: (typeof manifest)[number]; key: string }[] = [];
     if (doPull) for (const remote of manifest) {
-      if (isInstanceLocalFile(remote.path)) continue; // a peer's conflict copy or schema snapshot is the peer's own
-      const local = oursMap.get(remote.path);
+      try {
+        arriving.push({ remote, key: fileKeyOf(spaceId, remote.path).key });
+      } catch (err) {
+        // An entry that leaves the space (`../../other-space/x`) is skipped and touches nothing.
+        log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
+      }
+    }
+
+    // The bytes a tombstone erased are not downloaded again (Q-229, Q-348): asked ONCE for every entry that would be fetched,
+    // by the same predicate every other arrival of a file's bytes asks (`decideArrivals`). An entry it could not decide (the
+    // path of a pending delete cannot be looked at) waits for the next cycle, as a shadowed one is not fetched.
+    const wanted = (a: { remote: (typeof manifest)[number]; key: string }): boolean =>
+      !isInstanceLocalFile(a.key) && decideFilePull(oursMap.get(a.key), a.remote, bases.get(a.key)) !== 'skip';
+    const verdicts = await decideArrivals(spaceId, arriving.filter(wanted)
+      .map(a => ({ id: a.key, path: a.key, kind: 'bytes' as const, sha256: a.remote.sha256 })));
+    const notNow = new Set([...verdicts.shadowed, ...verdicts.undecided]);
+
+    for (const { remote, key } of arriving) {
+      if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
+      const local = oursMap.get(key);
       // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
       // records are. When ours is still the version this peer and we last agreed on, theirs replaces it (Q-66);
       // otherwise ours is kept and theirs lands beside it as a conflict copy.
-      const action = decideFilePull(local, remote, bases.get(remote.path));
+      const action = decideFilePull(local, remote, bases.get(key));
       if (action === 'skip') {
-        if (bases.get(remote.path) !== remote.sha256) await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
+        if (bases.get(key) !== remote.sha256) await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
         continue;
       }
-      if (shadowed.has(remote.path)) continue;
+      if (notNow.has(key)) continue;
 
       try {
+        // The one place this entry's path meets the disk: resolved WITH the symlink check, before a byte is fetched for a path
+        // the write would refuse (the key above is lexical).
+        const abs = await resolveSafePathChecked(spaceId, key);
         /*
          * Whole-file body, so it gets the TRANSFER budget — and until now it did not, whatever this
          * comment said.
@@ -176,27 +197,30 @@ export async function syncFiles(
         const sha = sha256Hex(buf);
         if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}`); continue; }
 
+        // The download took time, and a delete here may have begun since the cycle's first read: asked again, for this one path,
+        // right before the bytes are written (one indexed read). Decided or not, a path a deletion covers is not written.
+        const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: remote.sha256 }]);
+        if (again.shadowed.has(key) || again.undecided.has(key)) continue;
+
         pulledFiles++;
         if (!local || action === 'replace') {
-          // New here, or changed only on the peer since we last agreed: write it over the original path.
-          // The PEER's path, so it is resolved through the sandbox: a plain join let a manifest entry such as
-          // `../../other-space/x` write outside this space (the tombstone branch above always checked; this did not).
-          const absPath = await resolveSafePathChecked(spaceId, remote.path);
+          // New here, or changed only on the peer since we last agreed: write it over the original path (`abs`: the resolved
+          // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
           // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
           // when it has a master secret — under the path lock the migration job also takes (F-43).
-          await writeStored(absPath, buf);
+          await writeStored(abs, buf);
           // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143).
-          await recordArrivedFile(spaceId, remote.path, buf.length, sha, { instanceId: member.instanceId, instanceLabel: member.label })
+          await recordArrivedFile(spaceId, key, buf.length, sha, { instanceId: member.instanceId, instanceLabel: member.label })
             .catch(() => { /* best-effort */ });
-          await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
-          if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(remote.path)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
-          pulledPaths.push(remote.path);
+          await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
+          if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(key)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
+          pulledPaths.push(key);
         } else {
           // File exists locally with a different hash — keep local, save incoming
           // under a conflict-copy name so the user can decide which version to keep.
           // The peer's label reaches a filesystem path, so it is sanitised there — see
           // ./file-conflict.ts for why that is an allowlist rather than a strip-list.
-          const conflictRelPath = conflictCopyPath(remote.path, member.label, new Date());
+          const conflictRelPath = conflictCopyPath(key, member.label, new Date());
           const absConflictPath = await resolveSafePathChecked(spaceId, conflictRelPath);
           await writeStored(absConflictPath, buf);
 
@@ -204,7 +228,7 @@ export async function syncFiles(
           const conflictDoc: ConflictDoc = {
             _id: uuidv4(),
             spaceId,
-            originalPath: remote.path,
+            originalPath: key,
             conflictPath: conflictRelPath,
             peerInstanceId: member.instanceId,
             peerInstanceLabel: member.label,
@@ -213,7 +237,7 @@ export async function syncFiles(
           await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
 
           log.warn(
-            `FILE_CONFLICT: '${peerText(remote.path)}' from peer '${peerText(member.label)}' differs from local copy. ` +
+            `FILE_CONFLICT: '${peerText(key)}' from peer '${peerText(member.label)}' differs from local copy. ` +
             `Conflict copy saved as '${peerText(conflictRelPath)}'. Resolve in Settings → Conflicts.`,
           );
         }

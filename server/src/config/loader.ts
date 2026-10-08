@@ -8,6 +8,7 @@ import { normalizeDocExtractionMode } from './types.js';
 import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } from './secretbox.js';
 import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
+import { keyedLock } from '../util/keyed-lock.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 const SECRETS_PATH = path.join(path.dirname(CONFIG_PATH), 'secrets.json');
@@ -501,7 +502,9 @@ export function getConfig(): Config {
 let _writeGeneration = 0;   // bumped on every in-memory config mutation via save*
 let _flushedGeneration = 0; // highest generation already durably on disk
 let _flushScheduled = false;
-let _flushChain: Promise<void> = Promise.resolve();
+/** The coalesced flushes, one at a time in the order they were asked: two never race on the temp file. One key, because there is one file. */
+const _flushLock = keyedLock();
+const FLUSH_KEY = 'config.json flush';
 
 /**
  * Apply a small change to config.json without clobbering whatever else has landed
@@ -561,7 +564,9 @@ export function saveConfig(config: Config): void {
 
 let _configWatchActive = false;
 let _lastKnownMtimeMs = 0;
-let _reloadChain: Promise<void> = Promise.resolve();
+/** The watched reloads, one at a time in the order the changes were seen: a reload never starts over one still running. One key, because there is one file. */
+const _reloadLock = keyedLock();
+const RELOAD_KEY = 'config.json reload';
 
 /** Remember the mtime we just produced, so our own writes don't look foreign. */
 function recordConfigMtime(): void {
@@ -611,11 +616,13 @@ export function startConfigWatcher(
     // next edit changes the mtime and we try again.
     _lastKnownMtimeMs = curr.mtimeMs;
     log.info('config.json changed on disk — reloading');
-    _reloadChain = _reloadChain
-      .catch(() => { /* a prior failure must not break the chain */ })
-      .then(() => onExternalChange())
-      .then(() => { recordConfigMtime(); onReloadOutcome?.(true); })
-      .catch(err => {
+    // The lock never lets one reload's failure stop the next; the failure is handled inside, because nobody awaits it.
+    void _reloadLock.run(RELOAD_KEY, async () => {
+      try {
+        await onExternalChange();
+        recordConfigMtime();
+        onReloadOutcome?.(true);
+      } catch (err) {
         /*
          * A LOG LINE IS NOT ENOUGH HERE, and `Q-43` is why.
          *
@@ -629,7 +636,8 @@ export function startConfigWatcher(
          */
         onReloadOutcome?.(false);
         log.error(`Reload after external config change failed; keeping current config: ${err}`);
-      });
+      }
+    });
   });
 }
 
@@ -646,10 +654,9 @@ export function saveConfigSoon(config: Config): void {
   setImmediate(() => {
     _flushScheduled = false;
     // Serialize writes so two flushes never race on the temp file.
-    _flushChain = _flushChain
-      .catch(() => { /* a prior flush failure must not break the chain */ })
-      .then(() => writeConfigAsync())
-      .catch(err => log.error(`Async config flush failed: ${peerText(err)}`));
+    void _flushLock.run(FLUSH_KEY, async () => {
+      try { await writeConfigAsync(); } catch (err) { log.error(`Async config flush failed: ${peerText(err)}`); }
+    });
   });
 }
 
@@ -681,7 +688,7 @@ async function writeConfigAsync(): Promise<void> {
  * graceful shutdown so the last watermarks are persisted before exit.
  */
 export async function flushConfig(): Promise<void> {
-  await _flushChain.catch(() => { /* logged at the flush site */ });
+  await _flushLock.idle(FLUSH_KEY);   // a failed flush was logged at its own site
   // A saveConfigSoon may have run after the last scheduled flush started — make a
   // final durable pass if anything is still unwritten.
   if (_config && _writeGeneration > _flushedGeneration) {

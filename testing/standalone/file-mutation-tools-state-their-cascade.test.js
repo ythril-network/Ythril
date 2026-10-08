@@ -32,6 +32,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blockAfter } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
 // The cascade is two modules since bundle-51: the order and the tombstones are `delete-cascade.ts`'s, and what a file leaves
@@ -114,6 +115,49 @@ describe('delete_file describes the cascade it really performs', () => {
   it('and says a flagged or derived record is not found too (Q-343)', () => {
     assert.match(DELETE, /flagged deleted[^]*derived record[^]*not found too/,
       'a retried delete of a flagged or derived record answers 404 — the description must say so');
+  });
+});
+
+/*
+ * What a delete removes, as the cascade's list stands since bundle-71 (Q-349): everything a file LEFT, however deep, and whatever
+ * its sidecar's bytes became at a peer. Each sentence of `delete_file`'s description is pinned to the code that makes it true,
+ * and the description says the GUARANTEE ("no peer restores the file or anything derived from it") rather than a mechanism a
+ * later change would have to revisit.
+ *
+ * The cascade's pieces are read as one corpus: the order and the tombstones (`delete-cascade.ts`), the list of what a file leaves
+ * (`remove-file-here.ts`) and the remover of its conversion's records (`converters/pipeline.ts`). Derived: the module that says
+ * which sidecar paths belong to a path is the one that DEFINES `parentOfSidecar`, found in the tracked sources of `files/` and
+ * not named here, so renaming it for the question it answers (the plan allows it) does not stale this gate.
+ */
+describe('delete_file removes what its conversion and its sidecars left, however deep (Q-349)', () => {
+  const PIPELINE = stripComments(readFileSync('server/src/files/converters/pipeline.ts', 'utf8'));
+  const REMOVER = `${CASCADE}\n${PIPELINE}`;
+  const SIDECAR_MODULES = trackedSources(['server/src/files'], { ext: ['.ts'], floor: 20, specs: false, untracked: true })
+    .filter(f => /\bexport\s+(?:async\s+)?(?:function|const)\s+parentOfSidecar\b/.test(stripComments(readFileSync(f, 'utf8'))));
+
+  it('states the guarantee: no peer restores the file or anything derived from it', () => {
+    assert.match(DELETE, /no peer restores the file or anything derived from it/i,
+      'the description must promise the outcome a caller deleting a file cares about, not describe a mechanism');
+  });
+
+  it('removes the rows two levels down: the caption and face chunks of an extracted image are children of a sidecar, not of the file', () => {
+    assert.match(REMOVER, /parentFileId:\s*\{\s*\$in\s*:/,
+      'the remover reads only the rows whose parentFileId is the file itself; a row whose parent is one of the file\'s SIDECAR paths outlives it');
+  });
+
+  it('cancels the queued jobs of the extracted images, by the file\'s own path (the queue derives the trees a path owns)', () => {
+    assert.match(PIPELINE, /cancelJobsOwnedBy\(spaceId,\s*originalId,\s*'file'\)/,
+      'a queued job of an extracted image retries for ever against a tree the delete removed; the cascade must hand the queue the file\'s own path, not spell the extraction tree itself');
+    assert.doesNotMatch(PIPELINE, /cancelJobsOwnedBy\([^)]*_(?:extracted|converted)\//,
+      'the extraction tree\'s name is the queue\'s to derive (sidecarsOf); a literal here is the second copy of that rule');
+  });
+
+  it('one module answers which sidecar paths belong to a path (and the inverse), and the cascade reads it', () => {
+    assert.equal(SIDECAR_MODULES.length, 1, `exactly one tracked module under files/ must export parentOfSidecar (found ${SIDECAR_MODULES.length}): the rule has one home`);
+    const base = SIDECAR_MODULES[0].split('/').pop().replace(/\.ts$/, '');
+    const importsIt = new RegExp(`from\\s+'\\.{1,2}/(?:[\\w-]+/)*${base}\\.js'`);
+    assert.match(REMOVER, importsIt,
+      `the cascade does not import ${base}: it removes the sidecars by a list of its own, the second copy of "which sidecar paths belong to a path"`);
   });
 });
 

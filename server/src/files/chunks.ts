@@ -135,9 +135,36 @@ export async function assembleChunks(
   total: number,
   targetPath: string,
 ): Promise<string> {
-  const id = uploadId(spaceId, filePath, total);
-  const dir = uploadDir(spaceId, id);
+  const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
+  const sized = await tiledChunks(dir, filePath, total);
 
+  // Assemble sequentially: read each chunk, hash its PLAINTEXT, then stream it into the target. One chunk is
+  // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
+  // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
+  const hash = createHash('sha256');
+  const plaintextChunks = async function* () {
+    for await (const buf of verifiedChunks(dir, filePath, sized)) {
+      hash.update(buf);
+      yield buf;
+    }
+  };
+  await pipeToStored(targetPath, plaintextChunks());
+
+  const sha256 = hash.digest('hex');
+
+  // Clean up chunk directory
+  await removeTree(dir);
+
+  return sha256;
+}
+
+/**
+ * The staged chunks of an upload in offset order, verified to tile `[0, total)` exactly — contiguous, no gaps, no overlaps,
+ * summing to `total` — before anything is written or hashed. The ONE list-and-tile step: assembly and the hash pass
+ * ({@link hashStagedChunks}) both start here, so what one reads the other reads, and a set of chunks that does not tile is refused
+ * the same way (`RangeError`) by either.
+ */
+async function tiledChunks(dir: string, filePath: string, total: number): Promise<{ name: string; size: number }[]> {
   // List and sort chunk files by their start offset.
   const chunkFiles: { name: string; start: number; size: number }[] = [];
   for (const name of await fs.readdir(dir)) {
@@ -146,7 +173,6 @@ export async function assembleChunks(
   }
   chunkFiles.sort((a, b) => a.start - b.start);
 
-  // Verify the chunks tile [0, total) exactly before touching the target file.
   let expected = 0;
   const sized: { name: string; size: number }[] = [];
   for (const cf of chunkFiles) {
@@ -165,31 +191,38 @@ export async function assembleChunks(
       `the declared total ${total}.`,
     );
   }
+  return sized;
+}
 
-  // Assemble sequentially: read each chunk, hash its PLAINTEXT, then stream it into the target. One chunk is
-  // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
-  // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
-  const hash = createHash('sha256');
-  const plaintextChunks = async function* () {
-    for (const cf of sized) {
-      const buf = await readStored(path.join(dir, cf.name));
-      // The name promised this many bytes; a chunk that decodes to a different length would tile wrongly and
-      // assemble a corrupt file whose hash is nonetheless "correct".
-      if (buf.length !== cf.size) {
-        throw new RangeError(`Chunk ${cf.name} of '${filePath}' holds ${buf.length} bytes, not the ${cf.size} its name records.`);
-      }
-      hash.update(buf);
-      yield buf;
+/** The PLAINTEXT of each staged chunk in order, one in memory at a time, each checked against the length its name records. */
+async function* verifiedChunks(dir: string, filePath: string, sized: readonly { name: string; size: number }[]): AsyncGenerator<Buffer> {
+  for (const cf of sized) {
+    const buf = await readStored(path.join(dir, cf.name));
+    // The name promised this many bytes; a chunk that decodes to a different length would tile wrongly and
+    // assemble a corrupt file whose hash is nonetheless "correct".
+    if (buf.length !== cf.size) {
+      throw new RangeError(`Chunk ${cf.name} of '${filePath}' holds ${buf.length} bytes, not the ${cf.size} its name records.`);
     }
-  };
-  await pipeToStored(targetPath, plaintextChunks());
+    yield buf;
+  }
+}
 
-  const sha256 = hash.digest('hex');
+/**
+ * The sha256 of what {@link assembleChunks} WOULD write, computed from the staged chunks in one streaming pass and writing
+ * nothing — so a door can judge a peer's upload (is this content a delete erased?) BEFORE the target is touched. Assembled first and
+ * judged after, the upload overwrote a live file and the answer then deleted it (Q-348). The same tiling and per-chunk checks as
+ * assembly, so it refuses what assembly would (`RangeError`).
+ */
+export async function hashStagedChunks(spaceId: string, filePath: string, total: number): Promise<string> {
+  const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
+  const hash = createHash('sha256');
+  for await (const buf of verifiedChunks(dir, filePath, await tiledChunks(dir, filePath, total))) hash.update(buf);
+  return hash.digest('hex');
+}
 
-  // Clean up chunk directory
-  await removeTree(dir);
-
-  return sha256;
+/** Drop the staged chunks of an upload that is not to be assembled (the door's answer was `200 { tombstoned: true }`). */
+export async function discardStagedChunks(spaceId: string, filePath: string, total: number): Promise<void> {
+  await removeTree(uploadDir(spaceId, uploadId(spaceId, filePath, total)));
 }
 
 /** Get total received bytes for an upload. Returns 0 if upload doesn't exist. */

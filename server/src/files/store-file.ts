@@ -14,6 +14,7 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { writeFileBytes } from './files.js';
 import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
 import { bytesShadowed } from './tombstones.js';
+import { peerFileKey } from './sandbox.js';
 import { toDocId } from '../util/paths.js';
 import type { AuthorRef } from '../config/types.js';
 import { dispatchFileProcessing, type DispatchResult } from './dispatch.js';
@@ -27,12 +28,18 @@ import { emitWebhookEvent } from '../webhooks/dispatcher.js';
  * and answered by it `200 { tombstoned: true }` with nothing stored: an error status would be read by an older sender as a
  * failure, and it would upload the whole file again every cycle.
  *
- * `content` is the body (hashed here, and only when a tombstone for the path carries a hash to compare it with) or an already
- * known hash (a chunked upload's assembly). What it prevents: a peer that still holds a deleted file's bytes bringing them
- * back through the one door the manifest pull and the metadata writer do not guard.
+ * `content` is the body (hashed here) or a way to hash it later (a chunked upload's staged chunks) — either is read only when a
+ * tombstone for the path carries a hash to compare it with. The path is the PEER's text, resolved before anything is looked up
+ * by it ({@link peerFileKey}, Q-404): `x/../victim` is asked about as `victim`. A tombstone Q-348 counts too — a delete whose
+ * bytes are gone and whose publish has not landed — and a path that cannot be looked at throws a retryable `503`
+ * ({@link bytesShadowed}). What it prevents: a peer that still holds a deleted file's bytes bringing them back through the one
+ * door the manifest pull and the metadata writer do not guard.
+ *
+ * @throws RangeError when the path leaves the space — which the door answers `400`, as the write itself would have.
  */
-export async function peerBytesShadowed(spaceId: string, filePath: string, content: Buffer | { sha256: string }): Promise<boolean> {
-  return bytesShadowed(spaceId, toDocId(filePath), () => (Buffer.isBuffer(content) ? sha256Hex(content) : content.sha256));
+export async function peerBytesShadowed(spaceId: string, filePath: string, content: Buffer | { sha256Of: () => Promise<string> }): Promise<boolean> {
+  const { key } = await peerFileKey(spaceId, filePath);
+  return bytesShadowed(spaceId, key, () => (Buffer.isBuffer(content) ? sha256Hex(content) : content.sha256Of()));
 }
 
 export interface StoreFileMeta {
@@ -62,6 +69,11 @@ type StoreOpts = {
 export async function recordStoredFile(
   spaceId: string, filePath: string, sizeBytes: number, sha256: string, opts: StoreOpts = {},
 ): Promise<Stored> {
+  // A path is a spelling until it is keyed (Q-404): the row, the processing queue and the webhook all name the KEY — a peer's
+  // through the resolver, a local caller's through the one canonical key — so a webhook never names a path the listing lacks.
+  // Rebound on purpose, so no later line can name the spelling (the sequence reads `filePath` throughout, and
+  // `identical-bytes-skip-media-pipeline-db` holds it to that).
+  filePath = opts.arrivedFrom ? (await peerFileKey(spaceId, filePath)).key : toDocId(filePath);
   if (opts.arrivedFrom) await recordArrivedFile(spaceId, filePath, sizeBytes, sha256, opts.arrivedFrom);
   else await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
   const dispatched = await dispatchFileProcessing(spaceId, filePath, {

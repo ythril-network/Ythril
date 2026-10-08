@@ -26,7 +26,7 @@ import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
-import { ensureFileTombstoneIndexes } from '../files/tombstones.js';
+import { ensureFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { createKeysetIndexesFor } from './keyset-indexes.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
@@ -974,7 +974,9 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
 
   // File tombstones live in a separate collection — clear them when files is wiped.
   if (targets.has('files')) {
-    await col(spaceCollection(spaceId, 'fileTombstones')).deleteMany({});
+    // Through the tombstones module, which marks the wipe: a publish in flight would otherwise write its tombstone again into
+    // the emptied space (Q-406).
+    await forgetFileTombstonesOf(spaceId);
 
     // Delete the physical files directory, then recreate it empty.
     // Validate the resolved path stays within the expected data root to guard

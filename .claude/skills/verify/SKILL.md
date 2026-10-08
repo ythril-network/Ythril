@@ -44,6 +44,17 @@ $env:MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true'
 docker rm -f ythril-verify-mongo
 ```
 
+**The test stack's Mongo needs its credentials.** When the harness Mongo `ythril-mongo-a` is already up (127.0.0.1:27117,
+capped), a scratch server can use it with its own database name, but only with the test login:
+`mongodb://ythril:ythril-test-pw@127.0.0.1:27117/ythril_verify?authSource=admin`. Without it every call answers
+"requires authentication". Drop the database afterwards and leave the container running.
+
+**Two host-run instances cannot sync with each other.** A peer URL with a literal IP is refused when the member is
+added (private and loopback targets), and the machine's hostname resolves to a link-local address the use-time check
+blocks even with `SYNC_ALLOW_PRIVATE_PEERS`. Real sync cycles between instances run in the Docker test stack, whose
+service names resolve (`npm run test:sync`, and the CI Full run). On the host, drive one instance's sync doors with a
+peer token minted for a made-up member instead, and say that the engine's cycles were left to the sync suite.
+
 **Screenshot the element, not the page.** The app scrolls inside an inner container, so `fullPage: true` captures
 only the viewport; use `locator.screenshot()` for anything below the fold, and count elements in the DOM (for
 example `.alert-warning`) when the claim is that something appears once.

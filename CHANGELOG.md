@@ -156,8 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different text for one fact at one seq keep both (a fork), with the divergent copy's `createdAt` and `updatedAt`.
 - **Sync:** Strict-linkage violations are recorded for every landed edge and link on every door, once per dangling end after a pull
   or push is whole (one `link_violation.created`, none for a later target). A push no longer waits for the check; a part-way pull still checks what landed.
-- **Sync:** `GET /api/sync/file-tombstones` and the sync push serve a file tombstone only once its file is gone or moved, once per
-  path, retries included, so a failed delete or move, a conversion sidecar still here or a re-upload no longer deletes this copy on peers.
+- **Sync:** A file deletion reaches every peer once: its tombstone goes out only once the file is gone, once per path, is never pruned
+  before it is sent (gauge `ythril_file_tombstone_oldest_hold_seconds`), and is not lost to a wipe or to a peer that sent the bytes first.
 - **Sync:** A stalled write can no longer stop a space's replication (it ends within the write bound): gauge `ythril_seq_horizon_oldest_hold_seconds`,
   warning `seq horizon held <age>s …`. Seq-paged routes, the push loop and the scanners stop below any unfinished write.
 - **Sync:** A peer with more than 1000 deletions of one kind passes on all of them, by pull and push (a peer on 5.6.x pulls at most
@@ -175,15 +175,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
   refused element's seq can no longer move the position; against an older server it holds, as before.
 - **Sync:** A publisher's or parent's deletions, its retention sweep's included, now reach records it relayed from other instances; they were declined and never retried. A one-time re-read applies what the upstream still holds. A tombstone `instanceId` over 256 characters is refused.
-- **Sync:** A file deleted on one peer is removed on the others at the version it names, and a file re-created since is kept. File tombstones page past the cut a pull read and the one body a push sent; a push logs how many a peer refused. A deleted directory's cached hashes are dropped.
+- **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since (other bytes, or a newer version by its deleter) is kept. Tombstones page past a pull's cut; a push logs refusals; a deleted directory's cached hashes go.
 - **Files:** A file a publisher pushes is recorded as an arrival, so later description and tag edits are no longer skipped; arriving
   bytes revive a soft-deleted path and get this instance's file retention window. A file-metadata arrival no longer overwrites a newer copy.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered (audit `file.stray_filemeta.drain`), never over a
   row's own description or tags, waiting up to 30 days for a missing file; a wrong-typed key or any `parentFileId` is discarded and counted refused.
-- **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, `_converted/` and `_extracted/`
-  sidecars and links (`PATCH /api/files/:spaceId`, `move_file`). A retried move completes only a move it began; a directory delete needs `confirm: true`.
-- **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and the TTL sweep; `delete_file` no longer claims a missing path "succeeds quietly".
-- **Files:** A file a held deletion covers no longer returns from a peer by metadata, manifest download, byte push, the stray-metadata drain or a chunked upload; a deletion held from before the upgrade names no version and covers nothing.
+- **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, their queued
+  jobs and links (`PATCH /api/files/:spaceId`, `move_file`). A retried move completes only a move it began; a directory delete needs `confirm: true`.
+- **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and the TTL sweep; `delete_file` no longer claims a missing path "succeeds quietly". A file named outside Latin-1 (`日本.txt`) downloads; it answered `500`.
+- **Files:** A deleted file or its sidecars no longer return from a peer by any door, even before publish, unless re-created (other bytes, or a newer version by the deleter); a delete takes what derives from it. A file's id is its canonical path (NFC, no `.` or empty segments); peers reject others.
 - **Search:** Records matching a `recall` query equally well come back in a stable order (ties break by id), so paging with `skip`/`nextSkip` shows each once, on MCP and `POST /api/brain/recall`.
 - **Search:** `recall`, `similar` and the write-time duplicate check straight after a space's first write no longer answer `503`
   while its vector index initialises. `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, on REST and MCP.

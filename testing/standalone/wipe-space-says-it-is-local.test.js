@@ -83,8 +83,12 @@ describe('the claim matches the implementation', () => {
     // this fails and the warning above must come out.
     assert.match(LIFECYCLE, /col\(spaceCollection\(spaceId, 'tombstones'\)\)\.deleteMany/,
       'brain tombstones are cleared');
-    assert.match(LIFECYCLE, /col\(spaceCollection\(spaceId, 'fileTombstones'\)\)\.deleteMany/,
-      'file tombstones are cleared');
+    // Through the tombstones module (bundle-71, Q-406): it empties the collection and marks the wipe, so a publish in flight
+    // cannot write its tombstone into the emptied space. What it does is a delete, and the case below holds it to that.
+    assert.match(LIFECYCLE, /forgetFileTombstonesOf\(spaceId\)/, 'file tombstones are cleared');
+    const forgetting = stripComments(readFileSync('server/src/files/tombstones.ts', 'utf8'));
+    const forget = forgetting.slice(forgetting.indexOf('export async function forgetFileTombstonesOf'));
+    assert.match(forget.slice(0, forget.indexOf('\n}\n')), /tombstonesOf\(spaceId\)\.deleteMany\(\{\}\)/, 'and the module deletes them, rather than writing');
     const at = LIFECYCLE.indexOf('export async function wipeSpace');
     const body = LIFECYCLE.slice(at, LIFECYCLE.indexOf('\nexport ', at + 10));
     assert.doesNotMatch(body, /writePendingFileTombstones|writeFileTombstones|writeTombstone/,

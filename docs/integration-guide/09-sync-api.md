@@ -365,6 +365,8 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
 
 `filemeta.tombstoned` is the one counter that is **absent when it is zero** (above, a held file tombstone covered that many arrivals): read a missing one as zero.
 
+**A file's key is one string, whoever spelled the path.** The canonical key of a path is its Unicode NFC form with `/` separators, no leading slash, no empty or `.` segment, and a `..` that stays inside the space collapsed (`a/x/../b` is `a/b`); this instance keys every file row it writes itself by it, and keys what a peer sends (a manifest entry, a tombstone's path, an upload's `?path=`) by the path as it resolves in the space. A file-metadata document whose `_id` is not that key (`a/../b`, `./b`, `a//b`, a decomposed accented name, or a path that leaves the space) counts in `filemeta.rejected` and is not stored, and the receiver's log names the id: send the path's canonical spelling, which is the key every other door uses. A row an older release stored under another spelling keeps that id and is refused the same way by an upgraded peer; see [Upgrading](02b-upgrading.md).
+
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
 **A `503` from any push route means the receiver's store could not take the page in time** — every sync POST (the record and tombstone pages, file tombstones, members, votes, change notes, pairing) answers it alike — a write the bound ended (a lock held elsewhere, a stalled socket), a step-down, a dropped connection. The body carries `retryable: true` and words of the receiver's own, and the response a `Retry-After`; hold your watermark and send the page again. **A `500` means a fault that was not one document's and not the store's**, or a seq counter the receiver could not move past what you sent. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
@@ -602,12 +604,15 @@ answer is lost is read back while the hold is still held. On the serving instanc
   (part of `applied`). `refused` and `declined` are omitted when zero, so an older receiver's `{ applied }` reads
   alike. **A tombstone is applied only when its authority holds** (the same two grounds as a record's, with the
   file's record as the target) **and only to the version it names**: a file row whose seq is above `rowSeq` is a
-  re-creation made after the deletion and is kept. An element without `issuer` (an older peer's) is read as issued
-  by the peer that sent it. An id the receiver already holds is not applied again.
+  re-creation made after the deletion and is kept. **A row that arriving bytes created has no author for this purpose**:
+  when a peer delivers a file's bytes before its metadata, the receiver's row is a placeholder (seq 0, authored only by
+  the peer that delivered the bytes), and the file's origin deleting it is applied, not declined. A row anybody authored
+  (metadata at a seq above 0) is protected from another peer's tombstone as before. An element without `issuer` (an older
+  peer's) is read as issued by the peer that sent it. An id the receiver already holds is not applied again.
   **Your `200` is an acknowledgement, and no more than that.** The sender records the newest position in the pages
   you answered `200` to and eventually drops its own copies below the minimum across all members — so answer `200` only
-  once the tombstones are handled, applied or judged: a declined one will be declined again, so the sender may stop
-  sending it, and `{ applied: 0 }` is a valid acknowledgement for a page whose every element was already held. A
+  once the tombstones are handled, applied or judged: a declined one (a file row somebody authored, never the placeholder
+  that arriving bytes created) will be declined again, so the sender may stop sending it, and `{ applied: 0 }` is a valid acknowledgement for a page whose every element was already held. A
   non-2xx or a timeout means the sender keeps its copies, which is the safe direction. (It used to read
   *"durably recorded"*; a receiver that applies a deletion but keeps no copy, because it has no one to pass it on
   to, is correct.)
@@ -615,8 +620,15 @@ answer is lost is read back while the hold is still held. On the serving instanc
   the erased file back from a peer: metadata whose `seq` is at or below the tombstone's `rowSeq` is counted in
   `filemeta.tombstoned` (a higher `seq` is a newer version and is stored), and **bytes a peer uploads** to
   `POST /api/files/:spaceId` for that path, whose hash is the erased content's, are answered `200 { tombstoned: true }`
-  and not stored. A user's own upload is never refused, and a tombstone held from before the upgrade carries no
-  `rowSeq` and shadows nothing. See [Files API](05-files-api.md#delete-a-file).
+  and not stored. **A delete counts from the moment its bytes are gone, not from its publication**: a delete writes its
+  tombstone first and publishes it once the file is removed, and in between it shadows exactly as a published one does —
+  by version for metadata, by content hash for bytes, at the metadata writer, the manifest download (re-asked right
+  before the bytes are written) and both byte doors. A delete whose file is still there shadows nothing; one whose path
+  cannot be looked at is neither: the byte door answers a retryable `503` (the sender does not remember it) and the
+  manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written. A path a
+  peer supplies is resolved before it is looked up (`x/../file` is `file`). A user's own upload is never refused, and a
+  tombstone held from before the upgrade carries no `rowSeq` and shadows nothing. See
+  [Files API](05-files-api.md#delete-a-file).
 
 ### Merkle Consistency Check
 

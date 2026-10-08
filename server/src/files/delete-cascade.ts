@@ -34,17 +34,17 @@
  * (`parentFileId`) is not a delete still owed, so a retry of a delete that completed is not found — it used to
  * answer `204`, write a second tombstone, move the record's seq and fire a second `file.deleted`.
  */
-import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStoredIfPresent } from './stored-bytes.js';
-import { deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetFileHashesByPrefix } from './manifest.js';
-import { cancelMediaJobsByPrefix } from './media/job-queue.js';
+import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere } from './remove-file-here.js';
+import { sidecarsOf } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
 import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
@@ -96,10 +96,7 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   const tree = present
     ? await listFilesRecursive(spaceId, dirPath)
     : (await fileRecordPaths(spaceId, dirPath)).filter(p => p !== toDocId(dirPath));
-  const sidecars = (await Promise.all([
-    listFilesRecursive(spaceId, `_converted/${dirPath}`),
-    listFilesRecursive(spaceId, `_extracted/${dirPath}`),
-  ])).flat();
+  const sidecars = (await Promise.all(sidecarsOf(dirPath, 'directory').map(s => listFilesRecursive(spaceId, s.path)))).flat();
   // BEFORE the tree goes, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here leaves the tree in
   // place and the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
   // The tree's are published once the tree has gone, the sidecars' once THEY have — a later step, below (I16, P4-3) —
@@ -113,7 +110,7 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
   // Queued jobs under the folder would outlive their sources and retry forever against paths that no longer exist.
-  await unlessTheStoreFailed(`cancelMediaJobsByPrefix error ${at}`, () => cancelMediaJobsByPrefix(spaceId, dirPath));
+  await unlessTheStoreFailed(`cancelJobsOwnedBy error ${at}`, () => cancelJobsOwnedBy(spaceId, dirPath, 'directory'));
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
   // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.
@@ -123,9 +120,5 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   await settlePendingFileTombstones(pendingAmong(pending, sidecars));
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
-  if (getConfig().softDeleteFileMeta === true) {
-    await unlessTheStoreFailed(`markFileMetaDeletedByPrefix error ${at}`, () => markFileMetaDeletedByPrefix(spaceId, dirPath));
-  } else {
-    await unlessTheStoreFailed(`deleteFileMetaByPrefix error ${at}`, () => deleteFileMetaByPrefix(spaceId, dirPath));
-  }
+  await unlessTheStoreFailed(`retireFileMetaUnder error ${at}`, () => retireFileMetaUnder(spaceId, dirPath));
 }

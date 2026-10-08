@@ -333,6 +333,24 @@ export function heldTombstoneRefuses(
 }
 
 /**
+ * Is `row` a LATER version of the path a held tombstone deleted, written by the tombstone's own issuer? The ARRIVAL side of
+ * the question of whether deleted content came back (bundle-71, Q-349): a deleted file's sidecars are shadowed by their
+ * parent's tombstone until the parent is re-created, and a re-creation by the instance that deleted it is the one a version
+ * number can speak for.
+ *
+ * **Never the version alone, across authors**: two instances' seq counters are not one clock, so another author's higher
+ * number says nothing about whether the deleted content came back. A tombstone with no issuer or no version, or a row with no
+ * author or no version, names nothing to compare, so the answer is no.
+ */
+export function isNewerVersionByTheIssuer(
+  held: { issuer?: string; rowSeq?: number }, row: { author?: { instanceId?: string }; seq?: number },
+): boolean {
+  const author = row.author?.instanceId;
+  return !!held.issuer && held.issuer === author
+    && typeof row.seq === 'number' && typeof held.rowSeq === 'number' && isNewerCopy(row.seq, held.rowSeq);
+}
+
+/**
  * The upstream whose delivery supersedes `held`, or `undefined` when none does: the tombstone was stored for the very
  * peer now delivering a version of the record. It does not refuse that version (`tombSeqFor`) and it is DELETED once
  * the version lands (`tombstoneCleanups.via`) — otherwise this instance would go on serving a deletion of a record it

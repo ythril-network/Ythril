@@ -13,7 +13,7 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
 import { removeTree } from '../remove-tree.js';
-import { bytesPresent } from '../stored-bytes.js';
+import { bytesPresentAt } from '../stored-bytes.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -33,7 +33,11 @@ import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
-import { enqueueMediaJob } from '../media/job-queue.js';
+import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
+import { convertedFileOf, extractedTreeOf, idsUnder, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
+import { rowsDerivedFrom } from '../derived-rows.js';
+import { retireFileMeta } from '../file-meta.js';
+import { READ_CHUNK } from '../../db/read-by-id.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
@@ -340,7 +344,7 @@ export async function storeConversionResults(
   // 1. Write the full converted Markdown to disk (binary formats only)
   let convertedFileId: string | null = null;
   if (convertedMarkdown !== null) {
-    const convertedPath = `_converted/${originalId}.md`;
+    const convertedPath = convertedFileOf(originalId);
     await writeFile(spaceId, convertedPath, convertedMarkdown);
     convertedFileId = toDocId(convertedPath);
 
@@ -372,7 +376,7 @@ export async function storeConversionResults(
   let extractedBytesTotal = 0;
   if (extractedImages.length > 0) {
     for (const img of extractedImages) {
-      const imgPath = `_extracted/${originalId}/image-${img.index}.${img.ext}`;
+      const imgPath = `${extractedTreeOf(originalId)}/image-${img.index}.${img.ext}`;
       const imgId = toDocId(imgPath);
       try {
         const imgBytes = Buffer.from(img.base64, 'base64');
@@ -515,17 +519,20 @@ export async function storeConversionResults(
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
     // claim lost to stall recovery the file is still there, and the same paths now belong to the run that replaced us.
-    // Gone means the path does not exist (`bytesPresent`). A failure to look is NOT gone: it keeps the sidecars, which
+    // Gone means the path does not exist (`bytesPresentAt`). A failure to look is NOT gone: it keeps the sidecars, which
     // is what every case but a deleted source wants (preship-4 P4-5).
     let sourceGone = false;
     try {
-      sourceGone = !(await bytesPresent(await resolveSafePathChecked(spaceId, originalId)));
+      sourceGone = !(await bytesPresentAt(spaceId, originalId));
     } catch (lookErr) {
       log.warn(`Could not tell whether ${peerText(spaceId)}/${peerText(originalId)} is still here; its sidecars are kept: ${peerText(lookErr)}`);
     }
     if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
-      await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
-      await rmArtifactPath(spaceId, `_extracted/${originalId}`);
+      // For a caller with no failure to give: what cannot be looked at (a failure to tell whether a path is a directory means
+      // "not known to be the file's", which keeps it) is logged and the sidecars stay.
+      // Both steps inside the one catch: listing what the file owns can fail to look too, and must not replace `err`.
+      await sidecarsOwnedBy(spaceId, originalId, 'file').then(owned => removeSidecarBytes(spaceId, owned)).catch(cleanupErr =>
+        log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
     throw err;
   }
@@ -550,27 +557,79 @@ async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
 }
 
 /**
- * Delete every conversion artifact belonging to a single original file:
- * its chunk / `_converted/` / `_extracted/` filemeta records AND the mirrored
- * on-disk sidecar files (`_converted/<id>.md`, `_extracted/<id>/`).
+ * THE byte step of every sidecar removal: the bytes of `owned`, whatever cannot be removed logged and left (`rmArtifactPath`
+ * never throws). `deleteConversionArtifacts` and the directory's remover reach it through {@link removeWhatSidecarsLeft}; a
+ * conversion that lost its lease reaches it directly, for the sidecars it wrote.
+ */
+async function removeSidecarBytes(spaceId: string, owned: readonly Sidecar[]): Promise<void> {
+  for (const sidecar of owned) await rmArtifactPath(spaceId, sidecar.path);
+}
+
+/**
+ * Delete everything a single original file's conversion — and the peers that delivered its sidecars — left behind: the rows
+ * derived from it at EVERY level, the rows an ARRIVED sidecar made, the queued jobs of its extracted images, and the sidecar
+ * bytes (`_converted/<id>.md`, `_extracted/<id>/`; `sidecarsOwnedBy`, which spares a directory `<id>.md/`'s tree).
+ *
+ * ## What it takes, and why each is on the list (bundle-71, Q-349)
+ *
+ *  - **Rows derived at every level**: the file's chunk and sidecar rows (`parentFileId` = the file) AND the caption and face
+ *    rows of each extracted image, whose `parentFileId` is the image — two levels down (`rowsDerivedFrom`, the walk the vector
+ *    sweep reads too). The delete used to read the first level, so a deleted document left its images' captions and faces,
+ *    searchable, belonging to nothing.
+ *  - **The rows arrived sidecars made**: a peer that never converted holds a sidecar as an ordinary file — a top-level row, no
+ *    `parentFileId`, authored by whoever's bytes landed first — and derived rows never replicate, so nothing that removed
+ *    derived rows removed it. It takes the file's own treatment (`retireFileMeta`: flagged under `softDeleteFileMeta`, else
+ *    removed), and the rows beneath it go with it.
+ *  - **The extracted images' jobs**: a queued caption or face job retries for ever against a path nothing holds.
+ *
+ * The one list for a local delete, a peer's tombstone for the file, the media worker's reconcile and a re-conversion's clean-up
+ * (`removeFileHere`, `dispatch`, the worker), so the rows a peer's apply removes are the rows the owner's delete does.
  */
 export async function deleteConversionArtifacts(
   spaceId: string,
   originalFilePath: string,
 ): Promise<void> {
   const originalId = toDocId(originalFilePath);
-
-  // DB: all filemeta records with parentFileId = originalId (chunks, converted, extracted).
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
-    asFilter<FileMetaDoc>({ parentFileId: originalId }),
-  );
-
-  // Disk: the sidecar files those records described. deleteMany above does not touch disk,
-  // so without this the `_converted/`/`_extracted/` trees would be orphaned on the filesystem.
-  await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
-  await rmArtifactPath(spaceId, `_extracted/${originalId}`);
+  // The jobs go first, so none starts over what is being removed. The queue derives the trees a path owns (`_extracted/<id>/…`,
+  // an extracted image's jobs) from the path itself: the rule is its, and is not spelled a second time here.
+  await cancelJobsOwnedBy(spaceId, originalId, 'file');
+  await removeWhatSidecarsLeft(spaceId, [originalId], await sidecarsOwnedBy(spaceId, originalId, 'file'));
 
   log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
+}
+
+/**
+ * THE one step both removers share, for a file and for a directory's whole tree: take the rows and the bytes that `owned`
+ * sidecars and `roots` (the file rows they belong to) left behind.
+ *
+ *  1. **Every row derived from the roots or from a sidecar row, at every level** (`rowsDerivedFrom`): rows whose parent is one of
+ *     them, found by `parentFileId $in` — chunks, converted and extracted rows, and the caption and face rows beneath an image,
+ *     whose parent is the image and not the file.
+ *  2. **A derived row at a sidecar path whose parent is gone** (an orphan the walk cannot reach from a root), by id.
+ *  3. **The rows an arrival made** at a sidecar path — top-level, no `parentFileId` — each retired as the file's own row is
+ *     (`retireFileMeta`: flagged under `softDeleteFileMeta`, else removed). Their children went in step 1: they were roots of it.
+ *  4. **The sidecar bytes**: `deleteMany` does not touch disk, and the trees would otherwise be orphaned on the filesystem.
+ *
+ * A file's remover and a directory's used to each hand-write a part of this, one level deep, and each missed a different half:
+ * the file's left the arrivals' rows, the directory's left those and the rows two levels down (bundle-71, Q-349).
+ */
+async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  // The rows at the sidecars' own paths: a converted file by id, a tree by prefix (with its slash, so `d` is not `d2`).
+  const atSidecars = owned.length === 0 ? [] : await files.find(
+    asFilter<FileMetaDoc>({ $or: idsUnder(owned) }),
+    { projection: { _id: 1, parentFileId: 1 } },
+  ).toArray() as Array<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
+
+  const parents = [...await rowsDerivedFrom(spaceId, [...roots, ...atSidecars.map(r => r._id)])];
+  for (const part of inChunks(parents, READ_CHUNK)) {
+    await files.deleteMany(asFilter<FileMetaDoc>({ parentFileId: { $in: part } }));
+  }
+  const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
+  for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
+  for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);
+
+  await removeSidecarBytes(spaceId, owned);
 }
 
 /**
@@ -578,24 +637,23 @@ export async function deleteConversionArtifacts(
  * when a directory is deleted recursively. The sidecar records/files live under
  * the separate `_converted/<path>` and `_extracted/<path>` top-level prefixes,
  * so a `<dirPath>/`-only cleanup (deleteFileMetaByPrefix + fs.rm) leaves them
- * orphaned; this removes them by parent-path prefix and clears the sidecar trees.
+ * orphaned; this removes them — every row derived from a file under the folder at every level, the rows an arrival made under
+ * the sidecar trees, and the trees — by the same step a single file's delete takes (`removeWhatSidecarsLeft`).
  */
 export async function deleteConversionArtifactsByPrefix(
   spaceId: string,
   dirPath: string,
 ): Promise<void> {
-  const dir = toDocId(dirPath).replace(/\/?$/, '');
+  const dir = movedRoot(dirPath);
   if (!dir) return; // guard: empty path would match everything
-  const escaped = escapeRegex(dir + '/');
 
-  // DB: every child record whose parent lived under the folder.
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
-    asFilter<FileMetaDoc>({ parentFileId: { $regex: `^${escaped}` } }),
-  );
-
-  // Disk: the mirrored sidecar subtrees.
-  await rmArtifactPath(spaceId, `_converted/${dir}`);
-  await rmArtifactPath(spaceId, `_extracted/${dir}`);
+  // The roots: the file rows under the folder (with its slash, so `d` is not `d2`). What derives from them — chunks, the rows of
+  // their sidecars, the caption and face rows of an extracted image — is found by the walk the single file's remover shares.
+  const roots = (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
+    asFilter<FileMetaDoc>({ _id: { $regex: `^${escapeRegex(dir + '/')}` }, parentFileId: { $exists: false } }),
+    { projection: { _id: 1 } },
+  ).toArray()).map(r => r._id);
+  await removeWhatSidecarsLeft(spaceId, roots, sidecarsOf(dir, 'directory'));
 
   log.info(`Deleted conversion artifacts under ${spaceId}/${dir}/`);
 }

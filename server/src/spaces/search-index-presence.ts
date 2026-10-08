@@ -24,7 +24,7 @@
  * index, and a record written in between is left with no index to find it. The rule is three steps, in this
  * order, and each one is load-bearing:
  *
- *  1. **Per collection, one reconcile at a time** — a promise chain, so a drop and a create never interleave.
+ *  1. **Per collection, one reconcile at a time** — a keyed lock (`util/keyed-lock.ts`), so a drop and a create never interleave.
  *  2. **A reconcile marks the collection `settling` BEFORE it reads it.** From that moment, any write that is
  *     reported schedules another reconcile behind this one.
  *  3. **A write is reported only after it has committed** (the observer reports on settle, and a write in a
@@ -79,6 +79,7 @@
  *   a mongot refusing every create is not asked again on every write.
  */
 import { onRecordCollectionWrite } from '../db/mongo.js';
+import { keyedLock } from '../util/keyed-lock.js';
 import { EVERY_COLLECTION, type MethodEffect } from '../db/record-write-observer.js';
 import { log, peerText } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
@@ -111,8 +112,6 @@ const waiterKey = (name: string): string => `search-index:${name}`;
 
 interface CollectionState {
   belief?: Belief;
-  /** The serial chain every reconcile of this collection runs on. */
-  chain: Promise<unknown>;
   /** A write- or delete-triggered reconcile that is queued and has not started — later reports join it. */
   queued: Promise<Belief | undefined> | null;
   dropCheck?: ReturnType<typeof setTimeout>;
@@ -120,6 +119,8 @@ interface CollectionState {
 }
 
 const states = new Map<string, CollectionState>();
+/** One reconcile per collection at a time, in the order they were asked. */
+const reconciles = keyedLock();
 let armed = false;
 
 /** `<spaceId>_<suffix>` for a collection that carries search indexes, parsed — or null for any other name. */
@@ -131,7 +132,7 @@ export function parseIndexedCollection(name: string): { spaceId: string; suffix:
 
 function stateOf(name: string): CollectionState {
   let st = states.get(name);
-  if (!st) { st = { chain: Promise.resolve(), queued: null }; states.set(name, st); }
+  if (!st) { st = { queued: null }; states.set(name, st); }
   return st;
 }
 
@@ -146,12 +147,11 @@ interface ReconcileOpts {
 function schedule(name: string, opts: ReconcileOpts = {}): Promise<Belief | undefined> {
   const st = stateOf(name);
   if (!opts.explicit && st.queued) return st.queued;
-  const task = st.chain.then(async () => {
+  const task = reconciles.run(name, async () => {
     if (!opts.explicit) st.queued = null;
     return reconcileNow(name, st, opts);
   });
   if (!opts.explicit) st.queued = task;
-  st.chain = task.catch(() => undefined);
   return task;
 }
 
@@ -281,8 +281,8 @@ export function forgetSpaceSearchIndexWaiters(spaceId: string): void {
 /** Wait until every reconcile queued so far on a space's collections has finished. For tests and shutdown. */
 export async function searchIndexPresenceSettled(spaceId: string): Promise<void> {
   for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
-    const st = states.get(`${spaceId}_${suffix}`);
-    if (st) await st.chain;
+    const name = `${spaceId}_${suffix}`;
+    if (states.has(name)) await reconciles.idle(name);
   }
 }
 

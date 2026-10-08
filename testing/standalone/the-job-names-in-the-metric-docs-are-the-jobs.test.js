@@ -4,7 +4,7 @@
  *
  * ## The defect it prevents
  *
- * An operator alerting on a job that skips ticks writes `job="Seq hold watchdog"` from the metrics table. The label is the
+ * An operator alerting on a job that skips ticks writes `job="Horizon hold watchdog"` from the metrics table. The label is the
  * job's own name, and a job added without a docs row is a series nobody was told about; a job renamed leaves an alert that
  * matches nothing and never fires. `metric-docs-coverage` holds that the METRIC is documented, not its label values.
  *

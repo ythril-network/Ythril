@@ -16,6 +16,7 @@
  */
 import { build } from './_push-door.mjs';
 import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
+import { holdDocumentLock } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
@@ -42,6 +43,8 @@ export async function loadHolderModules() {
     tombstones: await import('../../server/dist/brain/tombstones.js'),
     commit: await import('../../server/dist/brain/write-plan/commit.js'),
     fileMeta: await import('../../server/dist/files/file-meta.js'),
+    // The file tombstones' module, whose position hold is the second instance of the horizon hold (`util/horizon-holds.ts`).
+    fileTombstones: await import('../../server/dist/files/tombstones.js'),
   };
 }
 
@@ -198,6 +201,33 @@ export function holderCases(ctx, S) {
     'server/src/files/file-meta.ts:markFileMetaDeleted': [{
       label: 'a file record marked deleted', lock: 'counter',
       run: () => ctx.mods.fileMeta.markFileMetaDeleted(S, HELD_FILE),
+    }],
+    // The file tombstones' POSITION hold (bundle-71, Q-346): the second instance of the horizon hold. A tombstone has no seq,
+    // so the stall is a document lock on the row the write waits for, and the hold is the module's own (`positionHold: true`
+    // — `lowestUncommittedPosition` answers whether one is open, where a seq hold is asked of `lowestUncommittedSeq`).
+    'server/src/files/tombstones.ts:publishSlice': [{
+      label: 'a file tombstone published: its position stamp, inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
+      lock: async () => {
+        // The act's pending row, written first; the publish's upsert of it is what waits behind the lock.
+        const pending = await ctx.mods.fileTombstones.writePendingFileTombstones(S, ['position.md']);
+        (ctx.pendings ??= new Map()).set(S, pending);
+        return holdDocumentLock((ctx.fixture ?? ctx.door).mongo, `${S}_file_tombstones`, { filter: { _id: pending.docs[0]._id } });
+      },
+      run: () => ctx.mods.fileTombstones.confirmFileTombstones(ctx.pendings.get(S)),
+    }],
+    'server/src/files/tombstones.ts:storeRelayedFileTombstones': [{
+      label: 'a relayed file tombstone kept to be passed on: its receive-time stamp, inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
+      lock: () => holdDocumentLock((ctx.fixture ?? ctx.door).mongo, `${S}_file_tombstones`,
+        { insert: { _id: 'relayed-lock', spaceId: S, path: 'relayed.md', deletedAt: T0 } }),
+      run: () => ctx.mods.fileTombstones.storeRelayedFileTombstones(S, [{ _id: 'relayed-lock', path: 'relayed.md', deletedAt: T0 }]),
+    }],
+    'server/src/files/tombstones.ts:positionLegacyFileTombstones': [{
+      label: 'a tombstone stored before positions existed, given its position: inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
+      lock: async () => {
+        await (ctx.fixture ?? ctx.door).coll(S, 'file_tombstones').insertOne({ _id: 'legacy-lock', spaceId: S, path: 'legacy-tomb.md', deletedAt: T0 });
+        return holdDocumentLock((ctx.fixture ?? ctx.door).mongo, `${S}_file_tombstones`, { filter: { _id: 'legacy-lock' } });
+      },
+      run: () => ctx.mods.fileTombstones.positionLegacyFileTombstones(S),
     }],
   };
 }

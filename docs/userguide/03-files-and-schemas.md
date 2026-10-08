@@ -43,6 +43,11 @@ succeeded, delete it and upload it again.
 | Rename | Click **Rename** |
 | Delete | Click ✕ and confirm |
 
+**A file has one name, however it was spelled.** An accented name typed or sent in its decomposed form (as some
+macOS apps do), a doubled slash (`docs//a.txt`) or a `./` is stored, listed and synced under one canonical name, so
+two spellings never become two files. A name in any script — `日本.txt`, an emoji — downloads and previews under its
+real name. Moving or renaming a document carries everything made from it, including work still queued for it.
+
 **A delete or a rename that fails on a database outage says so — it never reports success.** When the failure
 comes before the file is touched, nothing changed: the file is still there under its old name, and trying again
 is safe. When it comes after the file itself was removed or moved, the list already shows that (the row is gone,
@@ -64,6 +69,8 @@ and no second `file.deleted` webhook fires. So after a delete that timed out, a 
 first one did complete; check the file list before deleting again.
 
 **Which peers delete their copy when you delete a file.** Deleting a file, or moving it, tells synced peers, and a peer applies the notice only where the rule allows it: every peer that holds **a copy your instance wrote** deletes it, and on a **pub/sub network or a tree** everything *below* you does as well, including a file you only relayed from above. A file **another instance wrote**, deleted here on a club, closed or democratic network, is removed on your instance alone: the other peers keep it, and it stays gone here until the instance that wrote it changes the file again. A peer applies the notice to the version you deleted, so a file someone uploaded again to that path since is kept, and it removes the file's text, thumbnails and search entries with it. A peer that has no one below it applies the deletion and does not keep the file's name afterwards.
+
+**What a file's derived data does when the file is deleted.** Everything Ythril made from a file goes with it: the text it extracted, the images it pulled out of a document, and the captions, faces and search entries of those images — however many steps removed from the file they are. A peer that never converted the file may hold those extracted pieces as ordinary files; it removes them when it applies the deletion, and if it, or another peer, still offers them afterwards they are turned away, exactly as the deleted file itself would be. So no peer restores a deleted file or anything made from it. A file written again at the same path is a new file: it is converted afresh and its pieces are kept.
 
 **New folder:** Click **New folder** in the toolbar.
 

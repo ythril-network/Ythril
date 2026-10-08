@@ -40,6 +40,8 @@ import {
 } from '../config/secretbox.js';
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
+import { keyedLock } from '../util/keyed-lock.js';
+import { resolveSafePathChecked } from './sandbox.js';
 
 /** A stored file that exists but cannot be read back: a foreign or missing key, or altered bytes. */
 export class StoredFileUnreadable extends Error {
@@ -75,24 +77,14 @@ export function resetStoredKeyCacheForTests(): void { writer = null; resetChunke
 /** Where temporary files are written before the rename: same filesystem as the tree, never inside it. */
 export function storedTmpDir(): string { return path.join(getDataRoot(), '.stored-tmp'); }
 
-const locks = new Map<string, Promise<unknown>>();
+const pathLocks = keyedLock();
 
 /**
  * Run `fn` while no other writer in this process holds `abs`. Writers, the sync pull and the migration job all
  * take it, so a rewrite in place can re-check the file under the lock and never clobber a newer write.
  */
-export async function withPathLock<T>(abs: string, fn: () => Promise<T>): Promise<T> {
-  const key = path.resolve(abs);
-  const prior = locks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const held = new Promise<void>(r => { release = r; });
-  const chained = prior.then(() => held);
-  locks.set(key, chained);
-  await prior.catch(() => undefined);
-  try { return await fn(); } finally {
-    release();
-    if (locks.get(key) === chained) locks.delete(key);
-  }
+export function withPathLock<T>(abs: string, fn: () => Promise<T>): Promise<T> {
+  return pathLocks.run(path.resolve(abs), fn);
 }
 
 async function tmpPathFor(abs: string): Promise<string> {
@@ -194,6 +186,21 @@ export async function bytesPresent(abs: string): Promise<boolean> {
 }
 
 /**
+ * {@link bytesPresent} for a SPACE-RELATIVE path: resolved inside the space's sandbox first, symlink escape included
+ * (`resolveSafePathChecked`), then asked.
+ *
+ * ## What it prevents
+ *
+ * Every caller that asks "are the bytes here" for a path it was handed wrote `bytesPresent(await resolveSafePathChecked(spaceId, p))`
+ * by hand, and the half a copy drops is the resolve: an `abs` joined from a peer's text with `path.join` looks outside the space, or at a path the
+ * sandbox would have refused. A path outside the sandbox is the caller's `RangeError`; a failure to look is thrown, on the terms
+ * of {@link bytesPresent}.
+ */
+export async function bytesPresentAt(spaceId: string, relPath: string): Promise<boolean> {
+  return bytesPresent(await resolveSafePathChecked(spaceId, relPath));
+}
+
+/**
  * Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer,
  * and the one place a failure's code is read that way (`are-the-bytes-here-has-one-answer.test.js`).
  *
@@ -206,6 +213,16 @@ export const isMissingPath = (err: unknown): boolean => {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
+
+/**
+ * Whether what is at `abs` is a DIRECTORY: `false` for a regular file and for a path that does not exist, and any other
+ * failure to look is thrown (the same terms as {@link bytesPresent}). The one answer to "is this a tree", for a caller whose
+ * path could be either and must not act on a tree as if it were one file.
+ */
+export async function isStoredDirectory(abs: string): Promise<boolean> {
+  const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+  return stat !== null && stat.isDirectory();
+}
 
 /** Delete a stored file under its path lock. */
 export async function deleteStored(abs: string): Promise<void> {
@@ -227,10 +244,7 @@ export async function deleteStored(abs: string): Promise<void> {
  * an error, because an unlink of one fails anyway and a tree must never go with a single path's deletion.
  */
 export async function deleteStoredIfPresent(abs: string, { skipDirectory = false }: { skipDirectory?: boolean } = {}): Promise<void> {
-  if (skipDirectory) {
-    const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
-    if (stat === null || stat.isDirectory()) return;
-  }
+  if (skipDirectory && await isStoredDirectory(abs)) return;
   await deleteStored(abs).catch((err: unknown) => { if (!isMissingPath(err)) throw err; });
 }
 

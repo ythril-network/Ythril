@@ -22,10 +22,9 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
 import { decodeContent } from '../files/content-encoding.js';
-import { parseContentRange, storeChunk, assembleChunks } from '../files/chunks.js';
+import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
 import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
-import { deleteStored } from '../files/stored-bytes.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { primitivePropertyError } from '../brain/property-values.js';
@@ -124,14 +123,16 @@ export function registerUploadRoute(router: Router): void {
             // Assemble final file (symlink-checked before writing the target).
             const absTarget = resolveSafePath(targetSpace, filePath);
             await assertNoSymlinkEscape(targetSpace, absTarget);
-            const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
-            // A peer's bytes that a held file tombstone erased are not kept (Q-229): the assembled blob is removed and the
-            // answer is the one the single upload gives (`peerBytesShadowed`). A person's upload is never asked.
-            if (arrivedFrom && await peerBytesShadowed(targetSpace, filePath, { sha256 })) {
-              await deleteStored(absTarget);
+            // A peer's bytes that a tombstone erased are not kept (Q-229, Q-348), and are DECIDED BEFORE the target is written: the
+            // staged chunks are hashed in one streaming pass (only when a tombstone for the path carries a hash to compare), and
+            // on a shadow they are discarded and the answer is the one the single upload gives (`peerBytesShadowed`). Assembled
+            // first and removed after, an upload over a LIVE file overwrote it and then deleted it. A person's upload is never asked.
+            if (arrivedFrom && await peerBytesShadowed(targetSpace, filePath, { sha256Of: () => hashStagedChunks(targetSpace, filePath, range.total) })) {
+              await discardStagedChunks(targetSpace, filePath, range.total);
               res.status(200).json({ tombstoned: true });
               return;
             }
+            const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
             // Metadata, the processing queue and the webhook — the same sequence as every other door
             // (files/store-file.ts); the bytes are already assembled on disk.
             const ttlDays = parseTtlDaysQuery(req);

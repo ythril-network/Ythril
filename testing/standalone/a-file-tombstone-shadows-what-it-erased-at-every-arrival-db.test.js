@@ -13,9 +13,13 @@
  *   metadata:  shadowed when a held tombstone for the path has `rowSeq >= the arriving seq`; a HIGHER seq is a newer version,
  *              is admitted, and removes the held tombstones for its path. No `rowSeq` (a tombstone held from before the
  *              release): shadows no metadata.
- *   bytes:     shadowed when a held tombstone for the path has a `contentHash` equal to the arriving hash and no live row at
- *              the path is newer than it. Identical bytes re-created as a newer version arrive with their metadata first
- *              and pass. No `contentHash` (legacy): shadows no bytes.
+ *   bytes:     shadowed when a held tombstone for the path has a `contentHash` equal to the arriving hash and the path has not
+ *              been re-created since (`recreatedSince`, Q-407: a live row with other bytes, or a newer version BY THE
+ *              TOMBSTONE'S ISSUER — never another author's higher seq; its cases are in
+ *              `a-path-recreated-since-its-tombstone-is-one-question-db`). Identical bytes re-created by the issuer as a
+ *              newer version arrive with their metadata first and pass. No `contentHash` (legacy): shadows no bytes.
+ *              The re-created rows below name the issuer for that reason: before Q-407 an issuer-less tombstone was
+ *              outranked by any higher seq, whoever wrote it.
  *
  * ## What this file holds that the pure table cannot
  *
@@ -154,7 +158,7 @@ describe('a held file tombstone shadows what it erased, at every arrival', { ski
     it('does not download bytes a held tombstone erased, and downloads different bytes, a newer version\'s and a legacy path', async () => {
       await hold('m-held.bin', { rowSeq: 5, contentHash: sha(bytesOf.held) });
       await hold('m-other.bin', { rowSeq: 5, contentHash: sha('what was deleted was something else') });
-      await hold('m-newer.bin', { rowSeq: 5, contentHash: sha(bytesOf.newer) });
+      await hold('m-newer.bin', { rowSeq: 5, contentHash: sha(bytesOf.newer), issuer: PEER });
       await hold('m-legacy.bin');
       // The newer version's metadata arrived first: a live row at a seq above the tombstone's.
       await door.coll(S, 'files').insertOne(meta('m-newer.bin', 20, { sizeBytes: bytesOf.newer.length, sha256: sha(bytesOf.newer) }));
@@ -220,7 +224,7 @@ describe('a held file tombstone shadows what it erased, at every arrival', { ski
     });
 
     it('identical bytes re-created as a NEWER version are admitted: a live row above the tombstone\'s rowSeq', async () => {
-      await hold('b-newer.txt', { rowSeq: 5, contentHash: sha(DELETED) });
+      await hold('b-newer.txt', { rowSeq: 5, contentHash: sha(DELETED), issuer: PEER });
       await door.coll(S, 'files').insertOne(meta('b-newer.txt', 20, { sizeBytes: DELETED.length, sha256: sha(DELETED) }));
       const res = await single('b-newer.txt', peerToken(PEER));
       assert.ok([201, 202].includes(res.code) && res.body.tombstoned === undefined, `a re-created newer version was refused: ${JSON.stringify(res)}`);
@@ -228,7 +232,7 @@ describe('a held file tombstone shadows what it erased, at every arrival', { ski
     });
 
     it('identical bytes whose newer metadata arrives FIRST (a higher seq through the batch) are admitted', async () => {
-      await hold('b-first.txt', { rowSeq: 5, contentHash: sha(DELETED) });
+      await hold('b-first.txt', { rowSeq: 5, contentHash: sha(DELETED), issuer: PEER });
       const batch = await door.push('/batch-upsert', { filemeta: [meta('b-first.txt', 20)] }, { spaceId: S, token: peerToken(PEER) });
       assert.equal(batch.body.filemeta.upserted, 1, JSON.stringify(batch.body.filemeta));
       const res = await single('b-first.txt', peerToken(PEER));
