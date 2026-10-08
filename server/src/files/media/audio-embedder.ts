@@ -15,7 +15,7 @@ import { spawn } from 'child_process';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { scratchDir } from '../stored-bytes.js';
 import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -211,7 +211,9 @@ export async function embedAudio(
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-audio-'));
+  // Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a kill: a
+  // `finally` does not run when the process is killed, and an out-of-memory kill is this path's own failure mode.
+  const tmpDir = await scratchDir('ythril-audio');
   const inputPath = path.join(tmpDir, `input.${mimeTypeToExt(mimeType)}`);
 
   try {

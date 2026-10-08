@@ -12,7 +12,7 @@
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
+import { scratchDir } from '../stored-bytes.js';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -126,7 +126,9 @@ export async function embedVideo(
   // Asked ONCE for the job, at its entry, for the keyframe re-embed below; the audio stage asks for its own chunks. A
   // suppressed file's chunks are stored with their text and no vector, and the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-video-'));
+  // Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a kill — see
+  // `scratchDir`. A video job holds the largest plaintext of any, and its `finally` does not run when it is killed.
+  const tmpDir = await scratchDir('ythril-video');
   const videoExt = mimeTypeToVideoExt(mimeType);
   const videoPath = path.join(tmpDir, `input.${videoExt}`);
   const audioPath = path.join(tmpDir, 'audio.wav');
