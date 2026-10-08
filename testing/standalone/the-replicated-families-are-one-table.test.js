@@ -101,7 +101,11 @@ describe('one list of families, iterated by both directions', () => {
     const src = code(FAMILIES);
     const at = src.indexOf('REPLICATED_FAMILIES');
     const table = src.slice(at, src.indexOf('] as const', at));
-    assert.match(table, /parentFileId/,
+    // The row names the one live-file filter (bundle-48: parents only AND not soft-deleted); that filter must still hold
+    // the parents-only half, or naming it in the row would prove nothing.
+    assert.match(table, /payloadKey: 'filemeta'[^}]*pushFilter: LIVE_FILE_ROW/,
       'the parents-only filter is not in the family list, so it is a special case at a call site');
+    assert.match(code('server/src/files/live-file-row.ts'), /parentFileId:\s*Object\.freeze\(\{ \$exists: false \}\)/,
+      'the live-file filter the families table names no longer keeps chunks off the wire');
   });
 });

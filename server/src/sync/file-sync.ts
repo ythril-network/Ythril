@@ -15,10 +15,17 @@ import { boundedJson } from '../util/bounded-read.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
-import { buildFileManifest } from '../files/manifest.js';
-import { readStored, writeStored } from '../files/stored-bytes.js';
+import { readStored, writeStored, deleteStoredIfPresent } from '../files/stored-bytes.js';
 import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
-import { recordArrivedFile } from '../files/file-meta.js';
+import { buildFileManifest, forgetFileHashes } from '../files/manifest.js';
+import { recordArrivedBytes, countFileArrival, type FileRepairReason } from '../files/bytes-arrived.js';
+import { resolveInputFormat } from '../files/converters/pipeline.js';
+import { checkQuota, QuotaError, invalidateUsageCache } from '../quota/quota.js';
+import { withinHousekeepingBound } from '../db/write-bound.js';
+import { reportSpaceFailure, reportSpaceRecovered, SPACE_FAILURE_MAX_KEYS } from '../util/space-failure.js';
+import { LruMap } from '../util/lru-map.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
 import {
   publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, decideArrivals,
   LEGACY_FILE_TOMBSTONE_LIMIT,
@@ -33,6 +40,108 @@ import { declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from
 import { serverCursorOf } from './seq-run-pager.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
 import { noteToldTombstoned, wasToldTombstoned } from './told-tombstoned.js';
+
+/**
+ * The most files whose RECORD is brought up to date from bytes already held, per space per sync cycle: a row that names another
+ * hash than the disk's, no row at all, or processing that never ran on a class that processes (`repairReasonOf`). A file an
+ * earlier release pulled — bytes and row, no conversion — is repaired LAZILY, a few a cycle, never by a walk at boot: every
+ * repair is a document queued for conversion, and one cycle that queued the whole backlog of a space would be a boot-sized job
+ * inside a request-sized one, with the receiver's own models (and, where consented, an external one) paying for it at once.
+ * The rest wait their turn; a file is repaired once, because the repair leaves it with a state that is not a reason.
+ */
+export const MAX_FILE_REPAIRS_PER_CYCLE = 25;
+
+/** A usage measurement this young is reused by the quota check of a pull (the upload door's chunked path reads the same window). */
+const PULL_QUOTA_WINDOW_MS = 10_000;
+
+/** The names a failure of the pull's record, quota and repair steps is reported under: once per space and path per window. */
+const RECORD_STEP = declareStep('File pull record');
+const QUOTA_STEP = declareStep('File pull quota');
+const REPAIR_STEP = declareStep('File pull repair');
+const CLEANUP_STEP = declareStep('File pull cleanup');
+
+/**
+ * What the pull reads of a space's top-level file row, once per cycle (`heldRowsFor`): the hash and processing state the row
+ * records, whether it is soft-deleted, and the hash this instance and the peer last both held.
+ */
+interface HeldRow { sha256?: string; embeddingStatus?: string; deletedAt?: string; syncBase?: Record<string, string> }
+
+/**
+ * Why the bytes already on disk at `key` (hash `diskSha256`) need their record brought up to date — or `null` when they do not.
+ * Pure. The three reasons are the three ways an arrival leaves a file half-recorded: a row that says another hash than the disk
+ * (the write that records the arrival failed and was swallowed, or an older release stored the row and not the new bytes'), no row
+ * at all (the bytes are there and nothing names them), and a class that processes with no processing state (a release before
+ * the pull dispatched). A soft-deleted row is not repaired: the file is deleted here, and what is on disk is not its bytes.
+ */
+export function repairReasonOf(row: HeldRow | undefined, diskSha256: string, key: string): FileRepairReason | null {
+  if (!row) return 'missing_row';
+  if (row.deletedAt !== undefined) return null;
+  if (row.sha256 !== diskSha256) return 'stale_row';
+  if (row.embeddingStatus === undefined && resolveInputFormat(key) !== 'text') return 'unprocessed';
+  return null;
+}
+
+/**
+ * The top-level file rows of a space as the pull needs them, by id, read ONCE per call of `syncFiles` (the base of each path, the
+ * hash and state the row records) and replacing the per-peer base query that was the only read it made. Chunk and sidecar
+ * rows (`parentFileId`) are not files here. A full cursor, projected, under the store bound: a read that hangs ends at the bound
+ * and is the space's failure, reported by the caller's catch.
+ */
+async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string, HeldRow>> {
+  const baseKey = `syncBase.${peerId}`;
+  return withinHousekeepingBound(async () => {
+    const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
+      .find(asFilter<SyncedFileMeta>({ parentFileId: { $exists: false } }),
+        { projection: { _id: 1, sha256: 1, embeddingStatus: 1, deletedAt: 1, [baseKey]: 1 } }).toArray();
+    return new Map(docs.map(d => [String(d._id), {
+      ...(d.sha256 !== undefined ? { sha256: d.sha256 } : {}),
+      ...(d.embeddingStatus !== undefined ? { embeddingStatus: d.embeddingStatus } : {}),
+      ...(d.deletedAt !== undefined ? { deletedAt: d.deletedAt } : {}),
+      ...(d.syncBase?.[peerId] !== undefined ? { syncBase: { [peerId]: String(d.syncBase[peerId]) } } : {}),
+    } satisfies HeldRow]));
+  });
+}
+
+/**
+ * Say, once per window per space and path, that a pulled file was not recorded or could not be fetched (a quota refusal, a failed
+ * record write), through the shared reporter — never a line of the pull's own, which would say the same fact every cycle for as
+ * long as it lasts (`util/space-failure.ts`). The reporter counts every call, says the line once, and bounds the memory the
+ * peer's paths could otherwise grow. A store that is not answering is the step's stop line, not this space's.
+ */
+function sayPullFailure(step: string, spaceId: string, key: string, err: unknown): void {
+  failing.set(failingKey(step, spaceId, key), true);
+  reportSpaceFailure(step, spaceId, err, { unit: key, when: 'next cycle', ...(storeIsNotAnswering(err) ? { kind: 'store-down' as const } : {}) });
+}
+
+/**
+ * The (step, space, path) conditions this pull has said and not seen cleared, bounded like the reporter's own memory (the keys are a
+ * peer's paths). It exists because the reporter forgets by (step, space) and not by path: calling `recovered` after ANY file of the
+ * space succeeded would forget a still-failing sibling's line, and it would be said again every cycle. Only the path that failed
+ * is the one whose success is news.
+ */
+const failing = new LruMap<string, true>(SPACE_FAILURE_MAX_KEYS);
+const failingKey = (step: string, spaceId: string, key: string): string => `${step}\0${spaceId}\0${key}`;
+
+/** The file that failed `step` has now succeeded: its next failure is news again, and is said. */
+function pullRecovered(step: string, spaceId: string, key: string): void {
+  if (failing.delete(failingKey(step, spaceId, key))) reportSpaceRecovered(step, spaceId);
+}
+
+/**
+ * Take back the bytes a pull wrote when recording them failed: the file at `abs`, and the hash cached for it, under the stored-bytes
+ * door's path lock (`deleteStoredIfPresent`), so the next cycle finds the file MISSING and delivers it again with its true
+ * deliverer. A failure to remove them is said (once per window) and not thrown: the bytes are then held with no row, which the
+ * skip branch's repair records with no deliverer — the one case that repair exists for.
+ */
+async function removeJustWritten(spaceId: string, key: string, abs: string): Promise<void> {
+  try {
+    await deleteStoredIfPresent(abs);
+    await forgetFileHashes(spaceId, [key]);
+    invalidateUsageCache();   // freed disk: the next quota check must not charge for it
+  } catch (err) {
+    sayPullFailure(CLEANUP_STEP, spaceId, key, err);
+  }
+}
 
 export async function syncFiles(
   member: NetworkMember,
@@ -126,7 +235,13 @@ export async function syncFiles(
     // Build our manifest for comparison
     const ours = await buildFileManifest(spaceId);
     const oursMap = new Map(ours.map(e => [e.path, e]));
-    const bases = await syncBasesFor(spaceId, member.instanceId);
+    // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
+    // records of its bytes (`repairReasonOf`). Replaces the read that returned the bases alone.
+    const held = await heldRowsFor(spaceId, member.instanceId);
+    const bases = { get: (path: string): string | undefined => held.get(path)?.syncBase?.[member.instanceId] };
+    // Bytes this cycle has written, for the quota question of the next fetch: a cached measurement does not see them yet.
+    let pulledBytes = 0;
+    let repairs = 0;
 
     const dataRoot = getDataRoot();
     const spaceRoot = path.resolve(dataRoot, 'files', spaceId);
@@ -164,6 +279,23 @@ export async function syncFiles(
       const action = decideFilePull(local, remote, bases.get(key));
       if (action === 'skip') {
         if (bases.get(key) !== remote.sha256) await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
+        // The bytes are here, and "the same hash on both sides" is not "recorded": a file an earlier cycle (or release) stored and
+        // did not record, or recorded and never processed, is brought up to date from what is on disk, a few per cycle.
+        const reason = local && repairs < MAX_FILE_REPAIRS_PER_CYCLE ? repairReasonOf(held.get(key), local.sha256, key) : null;
+        if (local && reason) {
+          try {
+            // Asked FIRST, as for an arrival: a path a delete is waiting to publish, or one that cannot be looked at, is not recorded
+            // again — repairing it would bring back a file the operator deleted.
+            const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: local.sha256 }]);
+            if (again.shadowed.has(key) || again.undecided.has(key)) continue;
+            repairs++;
+            // No deliverer: nobody can be credited with bytes that were already here (`recordArrivedBytes`).
+            await recordArrivedBytes(spaceId, key, { sizeBytes: local.size, sha256: local.sha256, door: 'pull', repair: reason });
+            pullRecovered(REPAIR_STEP, spaceId, key);
+          } catch (err) {
+            sayPullFailure(REPAIR_STEP, spaceId, key, err);   // counted as `record_failed` by the recorder; tried again next cycle
+          }
+        }
         continue;
       }
       if (notNow.has(key)) continue;
@@ -172,6 +304,18 @@ export async function syncFiles(
         // The one place this entry's path meets the disk: resolved WITH the symlink check, before a byte is fetched for a path
         // the write would refuse (the key above is lexical).
         const abs = await resolveSafePathChecked(spaceId, key);
+        // The space quota, asked BEFORE the body is fetched, on the size the manifest declares: a pull used to fetch and write
+        // whatever the space held. The measurement may be a few seconds old, so the bytes this call has already written are added.
+        // A refusal is not a delivery: no base is written, and the file is asked for again once there is room.
+        try {
+          await checkQuota('files', pulledBytes + remote.size, { maxAgeMs: PULL_QUOTA_WINDOW_MS });
+        } catch (err) {
+          if (!(err instanceof QuotaError)) throw err;
+          countFileArrival('pull', 'quota');
+          sayPullFailure(QUOTA_STEP, spaceId, key, err);
+          continue;
+        }
+        pullRecovered(QUOTA_STEP, spaceId, key);
         /*
          * Whole-file body, so it gets the TRANSFER budget — and until now it did not, whatever this
          * comment said.
@@ -202,16 +346,29 @@ export async function syncFiles(
         const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: remote.sha256 }]);
         if (again.shadowed.has(key) || again.undecided.has(key)) continue;
 
-        pulledFiles++;
         if (!local || action === 'replace') {
           // New here, or changed only on the peer since we last agreed: write it over the original path (`abs`: the resolved
           // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
           // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
           // when it has a master secret — under the path lock the migration job also takes (F-43).
           await writeStored(abs, buf);
-          // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143).
-          await recordArrivedFile(spaceId, key, buf.length, sha, { instanceId: member.instanceId, instanceLabel: member.label })
-            .catch(() => { /* best-effort */ });
+          pulledBytes += buf.length;
+          try {
+            // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143) —
+            // and the file is DISPATCHED by this instance's own rules, as an upload to the door is (Q-260).
+            await recordArrivedBytes(spaceId, key, {
+              sizeBytes: buf.length, sha256: sha, door: 'pull', from: { instanceId: member.instanceId, instanceLabel: member.label },
+            });
+          } catch (err) {
+            // Bytes with no row naming them are skipped for ever by the next cycle (the same hash on both sides), and a row
+            // inserted later for them would credit this peer with a file it may never have sent. So the bytes this call wrote
+            // are removed, no base is written, and the next cycle delivers the file again with its true deliverer (Q-254).
+            await removeJustWritten(spaceId, key, abs);
+            sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
+            continue;
+          }
+          pulledFiles++;
+          pullRecovered(RECORD_STEP, spaceId, key);
           await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
           if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(key)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
           pulledPaths.push(key);
@@ -223,6 +380,8 @@ export async function syncFiles(
           const conflictRelPath = conflictCopyPath(key, member.label, new Date());
           const absConflictPath = await resolveSafePathChecked(spaceId, conflictRelPath);
           await writeStored(absConflictPath, buf);
+          pulledBytes += buf.length;
+          pulledFiles++;
 
           // Persist a conflict record so the UI can surface it to the user
           const conflictDoc: ConflictDoc = {
@@ -306,13 +465,6 @@ export async function syncFiles(
  * `fileMetaForWire` drops it) and never hashed (`FILE_HASH_PROJECTION` is an inclusion list).
  */
 type SyncedFileMeta = FileMetaDoc & { syncBase?: Record<string, string> };
-
-async function syncBasesFor(spaceId: string, peerId: string): Promise<Map<string, string>> {
-  const key = `syncBase.${peerId}`;
-  const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<SyncedFileMeta>({ [key]: { $exists: true } }), { projection: { _id: 1, [key]: 1 } }).toArray();
-  return new Map(docs.map(d => [String(d._id), String(d.syncBase?.[peerId] ?? '')]));
-}
 
 /**
  * Pull the peer's file tombstones, a page at a time, to the end, applying each page through the one apply

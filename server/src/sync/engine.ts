@@ -15,7 +15,7 @@
  *   and pulls from its parent.
  */
 
-import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
+import { getConfig, saveConfig, saveConfigSoon, getSecrets } from '../config/loader.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
@@ -37,9 +37,6 @@ import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
 import { adoptPeerRound } from '../networks/round-local-state.js';
-import { enqueueMediaJob } from '../files/media/job-queue.js';
-import { resolveInputFormat } from '../files/converters/pipeline.js';
-import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
@@ -454,24 +451,8 @@ async function runSyncForMember(
     if (shouldPull || shouldPush) {
       const fc = await syncFiles(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, shouldPull, shouldPush);
       pulled.files += fc.pulledFiles; pushed.files += fc.pushedFiles;
-
-      // Re-enqueue newly-pulled image files for face recognition so secondary
-      // instances can build their own gallery from synced content.
-      // Gated on faceRecognition.enabled && reprocessSyncedImages (default: true).
-      if (fc.pulledPaths.length > 0) {
-        const faceCfg = getFaceRecognitionConfig();
-        if (faceCfg.enabled && faceCfg.reprocessSyncedImages) {
-          for (const p of fc.pulledPaths) {
-            if (resolveInputFormat(p) === 'image') {
-              // Shared table. The inline copy here defaulted to `image/jpeg`, so a synced image whose
-              // extension it did not list was mislabelled rather than left unknown.
-              enqueueMediaJob(spaceId, p, mimeTypeForPath(p), 'image').catch(err =>
-                log.warn(`Face reprocess enqueue for ${peerText(spaceId)}/${peerText(p)}: ${peerText(err)}`),
-              );
-            }
-          }
-        }
-      }
+      // A pulled file is processed where it is recorded (`recordArrivedBytes`, `files/bytes-arrived.ts`): a pulled image gets its
+      // media job there, the one face path — no second job is queued for it here.
     }
 
     // Merkle integrity check (opt-in: network.merkle === true)

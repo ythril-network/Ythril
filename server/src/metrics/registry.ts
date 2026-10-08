@@ -996,6 +996,32 @@ export const syncTombstoneRereadsOwed = new Gauge({
 });
 syncTombstoneRereadsOwed.set(0);
 
+/**
+ * The two ways a peer's file BYTES arrive: `push` (the peer wrote to this instance's upload door, single or chunked) and `pull`
+ * (this instance fetched them by the manifest). The values of the `door` label, listed here so the series can be declared at 0.
+ */
+export const FILE_ARRIVAL_DOORS = ['push', 'pull'] as const;
+/**
+ * What became of a file's arrival, the values of the `outcome` label (`files/bytes-arrived.ts` counts every one, through one
+ * function): `recorded` (bytes, row and processing queue all written), `record_failed` (the row or the dispatch failed after the
+ * bytes landed; a pull removed the bytes and redoes the file next cycle), the three `repaired_*` (a file whose bytes were already
+ * here and whose record was brought up to date by a later cycle: its row held another hash, held no row at all, or its
+ * processing never ran), `quota` (refused before the body was fetched) and `ignored_instance_local` (a peer offered a path no
+ * instance sends, a conversion's sidecar, and nothing was stored).
+ */
+export const FILE_ARRIVAL_OUTCOMES = [
+  'recorded', 'record_failed', 'repaired_stale_row', 'repaired_missing_row', 'repaired_unprocessed', 'quota', 'ignored_instance_local',
+] as const;
+
+export const syncFileArrivalsTotal = new Counter({
+  name: 'ythril_sync_file_arrivals_total',
+  help: 'File byte arrivals by door (push, pull) and outcome (recorded, record_failed, repaired_stale_row, repaired_missing_row, repaired_unprocessed, quota, ignored_instance_local)',
+  labelNames: ['door', 'outcome'] as const,
+  registers: [register],
+});
+// Declared at 0, so a scrape before the first arrival reports 0 rather than nothing (`recallDegradedTotal`).
+for (const door of FILE_ARRIVAL_DOORS) for (const outcome of FILE_ARRIVAL_OUTCOMES) syncFileArrivalsTotal.labels({ door, outcome }).inc(0);
+
 // ── Media embedding ──────────────────────────────────────────────────────────
 // Pipeline that converts image / audio / video into text → embedding vector.
 // Counters are pre-initialised with `.inc(0)` so HELP/TYPE lines appear from

@@ -21,7 +21,9 @@
  *  2. **The path** is resolved through the sandbox by the one resolver of a peer's path (`peerFileKey`, which every door that
  *     looks a peer's path up shares, Q-404): a path that leaves the space, or goes through a link that does, is refused and
  *     touches nothing — never normalised into the tree. The row it names is keyed by the RESOLVED path, never by the
- *     sender's text.
+ *     sender's text. **A path this instance keeps for itself** (`isInstanceLocalFile`: a sidecar under a derived tree, a
+ *     conflict copy, a schema snapshot) is IGNORED — counted in `ignored`, never applied, stored or relayed: each instance
+ *     derives its own, so a peer's deletion of its copy says nothing about this one's.
  *  3. **An id already held is a no-op.** The pull reads every tombstone every cycle; one this instance holds has been
  *     applied, and applied again it deletes the file a peer has since re-created (which the next manifest pull downloads,
  *     which the next read deletes: a loop for as long as the tombstone is held).
@@ -71,6 +73,7 @@ import { peerFileKey, PathNamesTheSpaceError } from './sandbox.js';
 import { deleteStoredIfPresent } from './stored-bytes.js';
 import { removeFileHere } from './remove-file-here.js';
 import { recreatedSince } from './tombstone-shadow.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
 
 /** The longest path a tombstone may name. A path is a peer's text, and it reaches the file system and the database. */
@@ -104,6 +107,8 @@ export interface FileTombstoneApplyOutcome {
   refused: ArrivalRefusal[];
   /** Admitted elements the deletion authority declined: NOT stored, nothing deleted. */
   declined: ArrivalRefusal[];
+  /** Elements at a path this instance keeps for itself (`isInstanceLocalFile`): neither applied nor stored nor an error. */
+  ignored: number;
 }
 
 /** The row of a file as the apply reads it: what authority reads, the version and the content hash it erases. */
@@ -113,7 +118,7 @@ type HeldFile = Pick<FileMetaDoc, 'author' | 'seq' | 'sha256' | 'deletedAt'> & {
  * One element's admission: shape, seq, then the path through the sandbox. A refusal names the element by its id, never by
  * its path (a path is often personal in itself, and a refusal is logged).
  */
-async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{ ok: Admitted } | { refused: ArrivalRefusal }> {
+async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{ ok: Admitted } | { refused: ArrivalRefusal } | { ignored: true }> {
   const parsed = FileTombstoneShape.safeParse(raw);
   if (!parsed.success) return { refused: { _id: arrivalId(raw), reason: `not a file tombstone (${refusedFieldsOf(parsed.error)})` } };
   const t = parsed.data;
@@ -129,6 +134,10 @@ async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{
       : err instanceof RangeError ? 'its path leaves the space' : 'its path cannot be resolved here';
     return { refused: { _id: t._id, reason } };
   }
+  // A path this instance keeps for ITSELF (`isInstanceLocalFile`: a sidecar under a derived tree, a conflict copy, a schema
+  // snapshot) is no peer's to delete: each instance derives its own, so a peer's tombstone for one says nothing about this one's.
+  // Ignored — not stored, not relayed, not an error: an older sender still publishes the deletion of its own sidecars.
+  if (isInstanceLocalFile(resolved.key)) return { ignored: true };
   return { ok: { id: t._id, key: resolved.key, abs: resolved.abs, deletedAt: t.deletedAt > now ? now : t.deletedAt, issuer: t.issuer, rowSeq: t.rowSeq } };
 }
 
@@ -144,13 +153,14 @@ async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{
 export async function applyPeerFileTombstones(
   localSpaceId: string, raw: readonly unknown[], delivery: Delivery, where: string,
 ): Promise<FileTombstoneApplyOutcome> {
-  const out: FileTombstoneApplyOutcome = { applied: 0, refused: [], declined: [] };
+  const out: FileTombstoneApplyOutcome = { applied: 0, refused: [], declined: [], ignored: 0 };
   const now = new Date().toISOString();
   // Keyed in a Map, because an id is a peer's text; a repeated id in one page is applied once.
   const page = new Map<string, Admitted>();
   for (const r of raw) {
     const a = await admit(r, localSpaceId, now);
     if ('refused' in a) { out.refused.push(a.refused); continue; }
+    if ('ignored' in a) { out.ignored += 1; continue; }
     if (!page.has(a.ok.id)) page.set(a.ok.id, a.ok);
   }
   out.applied = page.size;

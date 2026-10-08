@@ -41,9 +41,19 @@ import { inChunks } from '../../util/chunks.js';
 
 export interface ExtractionWriters {
   bulk: (spaceId: string, input: BulkInput) => Promise<Pick<BulkResult, 'errors' | 'refs'>>;
-  storeFile: (spaceId: string, path: string, bytes: Buffer, opts: { meta: { tags: string[] } }) => Promise<unknown>;
+  storeFile: (spaceId: string, path: string, bytes: Buffer, opts: { meta: { tags: string[] }; actor: TranscriptActor }) => Promise<unknown>;
   linkFile: (spaceId: string, path: string, links: { linkEntities?: string[]; linkFacts?: string[] }) => Promise<unknown>;
 }
+
+/**
+ * Who a transcript is stored as. The file family follows the brain family's one rule — a write no user made emits nothing,
+ * neither a webhook nor a live-view event (`if (actor) emitWebhookEvent`) — and a run's transcript IS a user's act: a person
+ * (or their token) asked for the ingest, and the file it writes was announced before that rule was made explicit. A caller
+ * with no actor stores silently, so this one names itself, as the TTL sweep does for its deletes. A literal type rather than
+ * `WebhookActor` so it is accepted wherever a file writer takes an actor, whichever shape that one declares.
+ */
+type TranscriptActor = { tokenLabel: string };
+const TRANSCRIPT_ACTOR: TranscriptActor = { tokenLabel: 'ingest' };
 
 const DOOR: ExtractionWriters = {
   bulk: bulkWrite,
@@ -162,7 +172,7 @@ export async function writeExtraction(
     const linkEntities = [...new Set(said.flatMap(([c]) => idsOf(c.entities)))];
     const path = `transcripts/${extraction.conversationId}/${sessionKey}.md`;
     try {
-      await writers.storeFile(spaceId, path, Buffer.from(s.text, 'utf8'), { meta: { tags: ['transcript'] } });
+      await writers.storeFile(spaceId, path, Buffer.from(s.text, 'utf8'), { meta: { tags: ['transcript'] }, actor: TRANSCRIPT_ACTOR });
       if (linkFacts.length || linkEntities.length) {
         await writers.linkFile(spaceId, path, { ...(linkFacts.length ? { linkFacts } : {}), ...(linkEntities.length ? { linkEntities } : {}) });
       }

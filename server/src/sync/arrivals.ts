@@ -103,9 +103,10 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
-import { isLegacyReadSpill } from './file-conflict.js';
+import { isLegacyReadSpill, isInstanceLocalFile } from './file-conflict.js';
 import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 import { fileKeyOf } from '../files/sandbox.js';
+import { isComparableIso } from '../util/comparable-iso.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -159,7 +160,7 @@ export interface ArrivalOutcome {
   duplicates: string[];
   /** Refused, per document: a malformed id or seq, or a store refusal that repeated. */
   refused: ArrivalRefusal[];
-  /** Not written by rule: a file chunk or face record (derived from the blob here), or a legacy read spill. */
+  /** Not written by rule: a file chunk or face record (derived from the blob here), or a file this instance keeps for itself (`isInstanceLocalFile`). */
   derived: string[];
   /**
    * Not written: a held file tombstone covers this VERSION of the file (its `rowSeq` is at or above the arriving seq,
@@ -172,6 +173,11 @@ export interface ArrivalOutcome {
   complete: string[];
   /** `fillOnly`: no file row for it, so nothing was written — never created, because a stray record is old. */
   unstored: string[];
+  /**
+   * A RESTORE only: the file rows that landed carrying the `deletedAt` flag their backup held (`Q-257`) — soft-deleted files
+   * the restore brought back as the audit records they were, not as live rows.
+   */
+  flagKept: string[];
   /** The highest plausible seq received — what the counter has been bumped to at least. */
   maxReceived: number;
   /** Queue the landed records' embeddings, when `deferEnqueue` held it back; a no-op otherwise. */
@@ -291,9 +297,21 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   if (family === 'files') {
     // File metadata travels as its wire keys only: sizes, hashes and excerpts describe bytes this instance has.
     const kept = Object.fromEntries([...RESTORED_LOCAL_FIELDS].filter(f => doc[f] !== undefined).map(f => [f, doc[f]]));
-    doc = { ...fileMetaForWire(doc), ...kept } as Doc;
+    doc = { ...fileMetaForWire(doc), ...kept, ...(restore ? restoredFileFlag(doc) : {}) } as Doc;
   }
   return doc;
+}
+
+/**
+ * The flag a soft delete left on a file row, as a RESTORE keeps it (`Q-257`): `deletedAt` says THIS instance deleted the
+ * file and kept the row for audit, which is what an export of this instance's own space records, so restoring it live — a
+ * row with no bytes, offered to every peer — would turn every audited deletion into a phantom file. A files-only carry, named
+ * here and not added to `RESTORED_LOCAL_FIELDS`: that list is every family's, and is skipped at every nesting level by the
+ * hash. A peer's copy never carries it (`fileMetaForWire` drops it, and a flagged row is not offered), and a flag that is not
+ * an instant is not one.
+ */
+function restoredFileFlag(doc: Readonly<Doc>): { deletedAt?: string } {
+  return isComparableIso(doc['deletedAt']) ? { deletedAt: doc['deletedAt'] } : {};
 }
 
 /** D-9: the stamps this instance's policy gives a record created at `createdAt`, absent where it gives none. */
@@ -352,7 +370,7 @@ export async function writeArrivals(
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], collapsed: [],
-    complete: [], unstored: [], maxReceived: 0,
+    complete: [], unstored: [], flagKept: [], maxReceived: 0,
     enqueue: async () => {
       if (recordType === null || queued.length === 0) return;
       const batch = queued.splice(0);
@@ -369,8 +387,12 @@ export async function writeArrivals(
     const why = arrivalRefusal(raw, { seqOptional: family === 'files' });
     if (why) { out.refused.push({ _id: arrivalId(raw), reason: why }); continue; }
     const doc = raw as Doc;
-    // A chunk is derived from the blob here; a legacy read spill (`Q-92`) travels in neither direction.
-    if (family === 'files' && (isDerived(doc) || isLegacyReadSpill(doc._id))) { out.derived.push(doc._id); continue; }
+    // A chunk is derived from the blob here, and a file this instance derives for ITSELF travels in neither direction
+    // (`isInstanceLocalFile`, the one predicate every door asks: a legacy read spill `Q-92`, a conflict copy, a schema
+    // snapshot, and what lies under a derived tree — each receiver converts by its own configuration).
+    // A peer's row at such a path is ignored, never stored. A restore is this instance's OWN export, so its rows are not
+    // judged by it: only the legacy spill, which no instance keeps any more, is left out of one.
+    if (family === 'files' && (isDerived(doc) || (restore ? isLegacyReadSpill(doc._id) : isInstanceLocalFile(doc._id)))) { out.derived.push(doc._id); continue; }
     // A restore's ids are this instance's own export's, and it is never judged by a peer's rules; any other arrival is a peer's text.
     const keyWhy = family === 'files' && !restore ? fileKeyRefusal(spaceId, doc._id) : null;
     if (keyWhy) { out.refused.push({ _id: doc._id, reason: keyWhy }); continue; }
@@ -574,9 +596,20 @@ export async function writeArrivals(
   await bump(out.maxReceived);
   // A NEWER version of a file supersedes the tombstones held for its path (Q-229) — only once it has landed, so a write
   // that failed keeps the deletion. A restore replaces whatever is stored and judges nothing by a tombstone.
+  // Except onto a row this instance FLAGGED (`deletedAt`, `Q-257`): the merge does not clear the flag, so that row is still
+  // the deletion, and the tombstone that records it stays. No sender of this release offers a flagged row; an older one's
+  // is stripped of its flag on the wire, so this is the receiver's own guard, asked of the stored row, not of the document.
   if (family === 'files' && !restore) {
     const landedIds = new Set([...out.inserted, ...out.updated]);
-    await supersedeFileTombstones(spaceId, toWrite.filter(d => landedIds.has(d._id)).map(d => ({ path: d._id, seq: d.seq ?? 0 })));
+    const landedDocs = toWrite.filter(d => landedIds.has(d._id));
+    const stored = await readStoredById<{ deletedAt?: string }>(collName, landedDocs.map(d => d._id), { deletedAt: 1 });
+    await supersedeFileTombstones(spaceId, landedDocs.filter(d => stored.get(d._id)?.deletedAt === undefined)
+      .map(d => ({ path: d._id, seq: d.seq ?? 0 })));
+  }
+  if (family === 'files' && restore) {
+    const flagged = toWrite.filter(d => d['deletedAt'] !== undefined).map(d => d._id);
+    const landedIds = new Set([...out.inserted, ...out.updated]);
+    out.flagKept = flagged.filter(id => landedIds.has(id));
   }
 
   warnArrivalsNotStored(where, spaceId, family, 'refused', out.refused);

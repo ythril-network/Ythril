@@ -30,6 +30,9 @@
  *  - **What this instance derives is dropped**: the vector, its model and `matchedText` (re-embedded here),
  *    every file chunk and face record (re-derived from the blob), and every file-metadata key that is not on
  *    the wire — a size and a hash describe bytes this instance has not got.
+ *  - **A soft-deleted file stays flagged** (`Q-257`): the export holds this instance's own audit rows, and a row with
+ *    `deletedAt` is restored with it (`flagsKept` counts them) — never as a live row with no bytes, which every peer
+ *    would be offered. A flag is not a wire key, so only a restore brings one.
  *  - **A repeated id stores its highest seq**; **D-9**: a record with no stamp is stamped from its own
  *    `createdAt` by this instance's `schema > space` windows.
  *  - **The counter is bumped per landed chunk**, so a restored record never sorts above the next local write.
@@ -91,6 +94,11 @@ export interface ImportTypeResult {
   refused?: ImportRefusal[];
   /** File chunks and face records left out because this instance derives them from the blob. */
   derived?: number;
+  /**
+   * Files only: how many restored rows kept the `deletedAt` flag their backup carried (`Q-257`) — files this instance had
+   * soft-deleted, brought back as the audit records they were rather than as live rows with no bytes. Present only when any did.
+   */
+  flagsKept?: number;
   /**
    * The family's records were stored, and this instance's seq counter could not be moved past them (`Q-224`): the
    * next local write may sort below a restored record. Present only when it happened; run the import again (a
@@ -192,6 +200,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       result.refused = refused.slice(0, NAMED_IN_SUMMARY).map(r => ({ ...r, _id: peerText(r._id), reason: peerText(r.reason) }));
     }
     if (out.derived.length > 0) result.derived = out.derived.length;
+    if (out.flagKept.length > 0) result.flagsKept = out.flagKept.length;
     if (violations.length > 0) result.schemaViolations = violations;
 
     // A deletion this instance holds for a record the restore just brought back — named, never silently undone.
@@ -213,7 +222,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
       const tomb = r.restoredOverTombstoneTotal ?? 0;
-      return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}${tomb > 0 ? ` over-tombstone ${tomb}` : ''}`;
+      return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}${tomb > 0 ? ` over-tombstone ${tomb}` : ''}${r.flagsKept ? ` flagged ${r.flagsKept}` : ''}`;
     }), ', '),
   );
 

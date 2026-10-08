@@ -179,10 +179,15 @@ async function enqueueRetry(
 
 /**
  * Identifies the token that caused a mutation, for webhook attribution. Threaded from the
- * request/MCP surface down into the shared brain functions, which own webhook emission: a
- * shared mutating function emits when (and only when) it is given an actor — so user-facing
- * surfaces (REST, MCP) pass one and emit, while internal callers (sync, import, bulk) pass
- * none and stay silent. Centralises both the emit call AND its attribution in one place.
+ * request/MCP surface down into the shared writer functions, which own the emit: a
+ * shared mutating function emits when (and only when) it is given an actor — `if (actor)
+ * emitWebhookEvent(...)` — so user-facing surfaces (REST, MCP) pass one and emit, while
+ * internal callers (sync, import, bulk, a file's byte arrival) pass none and stay silent.
+ * That is ONE rule for the brain records and the file family alike, and it governs both
+ * halves of {@link emitWebhookEvent}: no actor means no webhook delivery AND no live-view
+ * (SSE) event, because the one function does both. An actor may carry no fields at all
+ * (`{}`, an unauthenticated session): it is still an actor, and the act is still a user's.
+ * Centralises both the emit call AND its attribution in one place.
  */
 export interface WebhookActor {
   tokenId?: string;
@@ -201,6 +206,10 @@ export interface EmitWebhookEventOptions {
  * Emit a webhook event. This is fire-and-forget — callers should not await.
  * Matching subscriptions are resolved, payloads signed, and HTTP POSTs
  * dispatched asynchronously. Failures are retried via the MongoDB retry queue.
+ *
+ * Callers gate this on having an actor (`if (actor)`, see {@link WebhookActor}); it is not
+ * split into a bus half and a webhook half, and a caller that wants one without the other
+ * has a second rule to explain.
  */
 export function emitWebhookEvent(opts: EmitWebhookEventOptions): void {
   // F12: mirror every brain mutation onto the in-process bus that drives live SSE updates. Done here,

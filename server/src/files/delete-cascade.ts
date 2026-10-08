@@ -26,7 +26,7 @@
  * tells the retry, and the TTL sweep, that this delete is still owed.
  *
  * **A file whose bytes are already gone and whose metadata remains** (removed out of band, or by a cascade a store
- * failure stopped) is COMPLETED here: tombstone, jobs, artifacts, metadata, webhook — rather than left for each door
+ * failure stopped) is COMPLETED here: tombstone, jobs, artifacts, metadata, the event (for a caller that has an actor) — rather than left for each door
  * to special-case. The REST door answered that case itself and wrote no tombstone, and the TTL sweep failed on it for
  * ever. **A path with neither bytes nor a LIVE file record** is a `NotFoundError`: `404` on REST, on `/api/delete_file`
  * and in MCP's error result — it used to reach MCP as the filesystem's `ENOENT`, carrying the absolute data path.
@@ -70,7 +70,9 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
   // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
   // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
   await removeFileHere(spaceId, filePath, { failure: 'throw' });
-  emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path: filePath }, ...(actor ?? {}) });
+  // The brain family's one rule (`if (actor) emitWebhookEvent`): a delete no user made — the TTL sweep passes its own
+  // actor, so it still reports; a caller with none is silent on the webhook AND the live view (bundle-48, Q-259).
+  if (actor) emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path: filePath }, ...actor });
 }
 
 /**

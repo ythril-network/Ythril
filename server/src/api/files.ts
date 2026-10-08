@@ -46,6 +46,7 @@ import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { contentDispositionOf } from '../util/content-disposition.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -143,8 +144,7 @@ async function dirAggregates(memberIds: string[], dirPath: string): Promise<Retu
     try {
       const rows = await col<FileMetaDoc>(spaceCollection(mid, 'files')).find(
         asFilter<FileMetaDoc>({
-          parentFileId: { $exists: false },
-          deletedAt: { $exists: false },
+          ...LIVE_FILE_ROW,
           // Indexed prefix range over `path` — files under this directory only (all files when root).
           // '￿' is the highest BMP code unit, so `[prefix, prefix+￿)` covers every path with
           // this prefix without a regex.

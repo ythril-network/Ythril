@@ -20,7 +20,9 @@ import express from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
+import { resolveSafePath, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
+import { isInDerivedTree } from '../sync/file-conflict.js';
+import { countFileArrival } from '../files/bytes-arrived.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
@@ -32,6 +34,16 @@ import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } f
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+
+/**
+ * The actor an upload is made by: the calling token for a person, and NOTHING for a peer. A peer's byte push is a synced write,
+ * not a user act, and the one rule for what emits is "no actor, no emit" (`if (actor)`, as every record family keeps it): a door
+ * that handed a peer's token over as the actor made `file.created` fire at the operator's integrators for a file a peer wrote.
+ * Both upload shapes (single, chunked) take it from here, so neither can pass the token to an arrival.
+ */
+function uploadActor(req: Request, arrivedFrom: unknown): { actor?: Record<string, unknown> } {
+  return arrivedFrom ? {} : { actor: webhookToken(req) as Record<string, unknown> };
+}
 
 /**
  * Attach the upload route to the file-store router.
@@ -71,6 +83,23 @@ export function registerUploadRoute(router: Router): void {
       // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
       const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
+
+      // A path inside a derived tree (a conversion's sidecar, `isInDerivedTree`: no instance sends one) is not stored when a PEER
+      // offers it — each instance converts by its own configuration. Answered `200`, not an error: an older sender reads
+      // an error as a failure and uploads the file again every cycle, and `200` is what lets it record a base and stop. Asked by the
+      // KEY (`x/../_converted/y` is `_converted/y`), before the body is looked at or anything is staged; a person's upload is never asked.
+      if (arrivedFrom) {
+        let key: string;
+        try { key = fileKeyOf(targetSpace, filePath).key; } catch (err) {
+          if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
+          throw err;
+        }
+        if (isInDerivedTree(key)) {
+          countFileArrival('push', 'ignored_instance_local');
+          res.status(200).json({ ignored: 'instance-local' });
+          return;
+        }
+      }
 
       // ── Chunked upload (Content-Range) ───────────────────────────────────
       const range = parseContentRange(req.headers['content-range'] as string | undefined);
@@ -140,7 +169,7 @@ export function registerUploadRoute(router: Router): void {
               targetSpace, filePath, range.total, sha256, {
                 meta: ttlDays !== undefined ? { ttlDays } : {},
                 ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
-                actor: webhookToken(req) as Record<string, unknown>,
+                ...uploadActor(req, arrivedFrom),
                 ...(arrivedFrom ? { arrivedFrom } : {}),
               });
             const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
@@ -225,7 +254,7 @@ export function registerUploadRoute(router: Router): void {
           stored = await storeFile(targetSpace, filePath, decoded!, {
             meta: metaOpts, inputFormat,
             ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
-            actor: webhookToken(req) as Record<string, unknown>,
+            ...uploadActor(req, arrivedFrom),
             ...(arrivedFrom ? { arrivedFrom } : {}),
           });
         } catch (err) {

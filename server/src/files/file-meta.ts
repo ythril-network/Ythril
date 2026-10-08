@@ -54,6 +54,7 @@ import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { isLocalFileField } from './processing-state.js';
+import { LIVE_FILE_ROW } from './live-file-row.js';
 
 
 
@@ -587,32 +588,31 @@ function liveFileRecords(path: string, scope: 'under' | 'exactly-at' | 'at-or-un
   if (!norm) return null;
   const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
   const reach = scope === 'under' ? under : scope === 'exactly-at' ? { _id: norm } : { $or: [{ _id: norm }, under] };
-  return asFilter<FileMetaDoc>({
-    ...reach,
-    parentFileId: { $exists: false },
-    deletedAt: { $exists: false },
-  });
+  return asFilter<FileMetaDoc>({ ...reach, ...LIVE_FILE_ROW });
 }
 
 /**
  * Soft-delete: flag a single file's metadata record as deleted (`deletedAt = now`)
  * instead of removing it. No-op if the record does not exist, **and for one already flagged**: a deletion that is
- * already recorded (and already paged to the peers by the seq it took) is not stamped again, so a second tombstone for
- * the same path — a peer's relayed one beside ours — cannot re-flag the row and bump its seq. Used when
- * `softDeleteFileMeta` is enabled so a deleted file leaves an auditable record.
+ * already recorded is not stamped again, so a second tombstone for the same path — a peer's relayed one beside ours —
+ * cannot re-flag the row. Used when `softDeleteFileMeta` is enabled so a deleted file leaves an auditable record.
+ *
+ * **The flag is LOCAL state, and it stamps no `seq` and no `updatedAt`** (`Q-257`). It used to take a seq "so a peer sees
+ * the flag", and a peer never saw one: `deletedAt` is not a wire key, so the row went out stripped of it and landed LIVE,
+ * removing the tombstone the peer held for the file — and its seq outranked the tombstone's `rowSeq`, so the file came back
+ * on a third peer. The deletion reaches peers as the file TOMBSTONE the delete writes, which each applies by its own
+ * setting; the flagged row is this instance's audit record, offered to nobody and hashed by nothing (`LIVE_FILE_ROW`).
+ * On a receiver whose bytes later revive the path, a seq of the flag's own would also outrank the publisher's next edit.
  */
 export async function markFileMetaDeleted(
   spaceId: string,
   filePath: string,
 ): Promise<void> {
   const normalised = toDocId(filePath);
-  await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: normalised, deletedAt: { $exists: false } }),
-    // `P-32`: a deletion is an authored change. The file TOMBSTONE carries the removal to a peer; this
-    // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
-    // that simply stopped changing.
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq } }),
-  ), 'file.delete');
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+    asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
+    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
+  );
 }
 
 /**
@@ -636,10 +636,11 @@ export async function retireFileMetaUnder(spaceId: string, dirPath: string): Pro
 }
 
 /**
- * Soft-delete a whole directory subtree: flag every top-level file record under
+ * Soft-delete a whole directory subtree: flag every live top-level file record under
  * `dirPath/` as deleted, and hard-remove the derived chunk records (which carry no
  * independent audit value). The `_converted`/`_extracted` sidecars are cleaned
- * separately by deleteConversionArtifactsByPrefix.
+ * separately by deleteConversionArtifactsByPrefix. As for one file ({@link markFileMetaDeleted}): a row already
+ * flagged keeps its first flag, and the flag stamps no `seq` and no `updatedAt` — it is local state.
  */
 export async function markFileMetaDeletedByPrefix(
   spaceId: string,
@@ -651,7 +652,7 @@ export async function markFileMetaDeletedByPrefix(
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // Flag the user-visible file records.
   await coll.updateMany(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }),
+    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }),
     asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
   );
   // Remove derived chunk records outright.

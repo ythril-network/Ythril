@@ -24,9 +24,13 @@ import { escapeRegex } from '../util/redos.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { isStoredDirectory } from './stored-bytes.js';
 
-/** The two sidecar roots a conversion writes under, mirroring the original file's path. */
-const CONVERTED_ROOT = '_converted/';
-const EXTRACTED_ROOT = '_extracted/';
+/**
+ * The two sidecar roots a conversion writes under, mirroring the original file's path. Exported for the one question that is
+ * about the TREE and not about a sidecar's parent: "is this path inside a derived tree" (`isInstanceLocalFile`,
+ * `sync/file-conflict.ts`), which {@link parentOfSidecar} cannot answer — it refuses `_converted/x`, a path no conversion writes.
+ */
+export const CONVERTED_ROOT = '_converted/';
+export const EXTRACTED_ROOT = '_extracted/';
 const SIDECAR_ROOTS = [CONVERTED_ROOT, EXTRACTED_ROOT] as const;
 
 /** A path as the stores key it, without a trailing slash — `a/b/` and `a/b` are the same move. */
