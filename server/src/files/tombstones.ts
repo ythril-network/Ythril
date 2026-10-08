@@ -110,6 +110,7 @@ import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { withinWriteBound } from '../db/write-bound.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { parentOfSidecar } from './moved-paths.js';
 import {
@@ -437,10 +438,10 @@ const wipeGenerationOf = (spaceId: string): number => wipeGenerations.get(spaceI
  * are one step on purpose — the delete alone is what a publish in flight undoes.
  */
 export async function forgetFileTombstonesOf(spaceId: string): Promise<void> {
-  await publishLock.run(spaceId, async () => {
+  await publishLock.run(spaceId, () => withinWriteBound(async () => {
     wipeGenerations.set(spaceId, wipeGenerationOf(spaceId) + 1);
     await tombstonesOf(spaceId).deleteMany({});
-  });
+  }));
 }
 
 /** One publisher per space at a time, from its read of a path's rows to its last write ({@link publishOnePerPath}). */
@@ -484,8 +485,9 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], ge
   if (docs.length === 0) return { published: 0, dropped: 0 };
   // One publisher per space, from its read of the rows to its last write: two that each read before the other wrote published
   // the path twice, the older delete stamped after the newer (Q-352). The wipe takes the same lock, so a publish that begins
-  // after a wipe sees the new generation and one in flight finishes before the delete (Q-406).
-  return publishLock.run(spaceId, async () => {
+  // after a wipe sees the new generation and one in flight finishes before the delete (Q-406). Inside the write bound, so its
+  // reads end too: an unbounded read under this lock held every delete of the space behind it.
+  return publishLock.run(spaceId, () => withinWriteBound(async () => {
     if (wipeGenerationOf(spaceId) !== generation) return { published: 0, dropped: docs.length };
     const byPath = new Map<string, ToPublish[]>();
     for (const d of docs) {
@@ -502,7 +504,7 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], ge
       dropped += done.dropped;
     }
     return { published, dropped };
-  });
+  }));
 }
 
 /** What {@link publishSlice} reads of the rows already stored for its paths. */
