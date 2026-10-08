@@ -122,6 +122,15 @@ describe('a space-relative path has one key', () => {
       }
     });
 
+    it('the bytes land where the key says: a spelling resolves to the same file as its key, on every platform', () => {
+      // On POSIX a backslash is a name character to the filesystem; the key reads it as a separator. Unless the sandbox
+      // reads it the same way, `a\..\b` writes the file literally named that while its row is `b`'s.
+      for (const [spelling, key] of FILES) {
+        assert.equal(sandbox.resolveSafePath(SPACE, spelling), sandbox.resolveSafePath(SPACE, key), JSON.stringify(spelling));
+      }
+      assert.equal(sandbox.resolveSafePath(SPACE, 'a\\..\\b'), sandbox.resolveSafePath(SPACE, 'b'));
+    });
+
     it('a path that names the space is no key, on both', async () => {
       for (const spelling of NAMES_THE_SPACE) {
         assert.throws(() => sandbox.fileKeyOf(SPACE, spelling), sandbox.PathNamesTheSpaceError, `fileKeyOf ${JSON.stringify(spelling)}`);
