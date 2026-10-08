@@ -44,6 +44,7 @@ import { deleteDirectoryCascade, deleteFileCascade, isUnfinishedDirectoryDelete 
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { contentTypeForDownload } from '../files/mime.js';
+import { contentDispositionOf } from '../util/content-disposition.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
@@ -312,14 +313,13 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     // types are forced to download and get a sandbox CSP so nothing executes
     // even if a browser renders them anyway. Passive types (images, pdf,
     // plain text) stay inline so previews keep working.
-    const filename = path.basename(normalised).replace(/[\r\n"\\]/g, '_');
     const isActive = ACTIVE_CONTENT_EXTS.has(ext);
     res
       .status(200)
       .setHeader('Content-Type', contentType)
       .setHeader('Content-Length', size)
       .setHeader('X-Content-Type-Options', 'nosniff')
-      .setHeader('Content-Disposition', `${isActive ? 'attachment' : 'inline'}; filename="${filename}"`);
+      .setHeader('Content-Disposition', contentDispositionOf(isActive ? 'attachment' : 'inline', path.basename(normalised)));
     if (isActive) {
       res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
     }
