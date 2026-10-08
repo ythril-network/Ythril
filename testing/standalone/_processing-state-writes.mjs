@@ -213,13 +213,18 @@ export function updateKeys(argsText, body) {
  * @returns {Array<{ key: string, file: string, fn: string, op: string, ordinal: number, name: string, collection: string,
  *   keys: Set<string>, unresolved: string[], hasUpdateOperator: boolean, args: string, bodyMentions: string[] }>}
  */
-export function fileRowWrites(index, records, { floor = 30 } = {}) {
+export function fileRowWrites(index, records, { floor = 30, includeComputed = false } = {}) {
   const processing = processingFields();
   const out = [];
+  // `includeComputed`: a space collection whose name is built at run time (`${spaceId}_${COLLECTION[recordType]}`, which
+  // `brain/embed-record.ts` writes through for every record kind, the file among them) MAY be the files collection, so a
+  // gate that asks about the files collection holds it to the rule rather than guessing it away (the rule `_record-writes.mjs`
+  // already applies to record collections). Off by default: the processing-state gate predates it and reads exactly what it did.
+  const isFilesSite = (s) => s.kind === 'space' && (s.collection === 'files' || (includeComputed && s.collection == null));
   for (const [key, entry] of index.bodies) {
     if (entry.alias) continue;
     const sites = (records.writers.byKey.get(key) ?? []).filter(s => MUTATORS.includes(s.op));
-    if (!sites.some(s => s.kind === 'space' && s.collection === 'files')) continue;
+    if (!sites.some(isFilesSite)) continue;
     const body = entry.body;
     const matches = [...body.matchAll(MUTATOR_CALL)];
     assert.ok(matches.length >= sites.length,
@@ -229,7 +234,7 @@ export function fileRowWrites(index, records, { floor = 30 } = {}) {
       if (!site) return;
       assert.equal(site.op, m[1],
         `${key}: mutator #${i + 1} of the body is '${m[1]}' and the index says '${site.op}' — the pairing is broken`);
-      if (site.kind !== 'space' || site.collection !== 'files') return;
+      if (!isFilesSite(site)) return;
       const at = m.index + m[0].length - 1;
       const args = argumentsOf(body, at, `${key} ${m[1]}`);
       const argsText = args.join(', ');
