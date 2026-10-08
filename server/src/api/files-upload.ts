@@ -215,7 +215,8 @@ export function registerUploadRoute(router: Router): void {
             // promised store nothing here, and the staged chunks that made them are dropped (below), so the next try starts clean.
             const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget, expectedSha256);
             // Metadata, the processing queue and the webhook — the same sequence as every other door
-            // (files/store-file.ts); the bytes are already assembled on disk.
+            // (files/store-file.ts); the bytes are already assembled on disk, and a record that fails takes them back there
+            // (`removeUnrecordedBytes`: a path with no row is left with no bytes), so this door has nothing to undo.
             const ttlDays = parseTtlDaysQuery(req);
             const { resolvedFormat: resolvedFmt, embeddingStatus: chunkedEmbeddingStatus } = await recordStoredFile(
               targetSpace, filePath, range.total, sha256, {

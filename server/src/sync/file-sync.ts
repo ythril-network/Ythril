@@ -18,13 +18,14 @@ import { log, logSafe, peerText } from '../util/log.js';
 import { StreamVerificationError } from '../util/sha256-tap.js';
 import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import {
-  deleteStoredIfPresent, stageStored, commitStaged, statStored, bytesPresent, isMissingPath, type StagedStoredFile,
+  stageStored, commitStaged, statStored, bytesPresent, isMissingPath, type StagedStoredFile,
 } from '../files/stored-bytes.js';
 import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
-import { buildFileManifest, forgetFileHashes, seedFileHash, type ManifestEntry } from '../files/manifest.js';
+import { buildFileManifest, seedFileHash, type ManifestEntry } from '../files/manifest.js';
 import { recordArrivedBytes, countFileArrival, type FileRepairReason } from '../files/bytes-arrived.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
-import { checkQuota, QuotaError, invalidateUsageCache, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
+import { removeUnrecordedBytes } from '../files/unrecorded-bytes.js';
+import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { withinHousekeepingBound } from '../db/write-bound.js';
 import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -59,7 +60,6 @@ export const MAX_FILE_REPAIRS_PER_CYCLE = 25;
 const RECORD_STEP = declareStep('File pull record');
 const QUOTA_STEP = declareStep('File pull quota');
 const REPAIR_STEP = declareStep('File pull repair');
-const CLEANUP_STEP = declareStep('File pull cleanup');
 
 /**
  * What the pull reads of a space's top-level file row, once per cycle (`heldRowsFor`): the hash and processing state the row
@@ -115,22 +115,6 @@ async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string,
  */
 function sayPullFailure(step: string, spaceId: string, key: string, err: unknown): void {
   reportSpaceFailure(step, spaceId, err, { unit: key, when: 'next cycle', ...(storeIsNotAnswering(err) ? { kind: 'store-down' as const } : {}) });
-}
-
-/**
- * Take back the bytes a pull wrote when recording them failed: the file at `abs`, and the hash cached for it, under the stored-bytes
- * door's path lock (`deleteStoredIfPresent`), so the next cycle finds the file MISSING and delivers it again with its true
- * deliverer. A failure to remove them is said (once per window) and not thrown: the bytes are then held with no row, which the
- * skip branch's repair records with no deliverer — the one case that repair exists for.
- */
-async function removeJustWritten(spaceId: string, key: string, abs: string): Promise<void> {
-  try {
-    await deleteStoredIfPresent(abs);
-    await forgetFileHashes(spaceId, [key]);
-    invalidateUsageCache();   // freed disk: the next quota check must not charge for it
-  } catch (err) {
-    sayPullFailure(CLEANUP_STEP, spaceId, key, err);
-  }
 }
 
 /**
@@ -401,8 +385,10 @@ export async function syncFiles(
             } catch (err) {
               // Bytes with no row naming them are skipped for ever by the next cycle (the same hash on both sides), and a row
               // inserted later for them would credit this peer with a file it may never have sent. So the bytes this call wrote
-              // are removed, no base is written, and the next cycle delivers the file again with its true deliverer (Q-254).
-              await removeJustWritten(spaceId, key, abs);
+              // are removed (`removeUnrecordedBytes`, the one answer every door that writes bytes gives: it keeps them only when a
+              // live row still names the path, an overwrite), no base is written, and the next cycle delivers the file again with
+              // its true deliverer (Q-254).
+              await removeUnrecordedBytes(spaceId, key, err);
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }
