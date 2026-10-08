@@ -16,12 +16,14 @@
  *
  *   A tombstone's path has been re-created when a LIVE row at it (a soft-deleted one is the deletion itself) has bytes whose hash
  *   differs from the tombstone's `contentHash`, or is a newer version by the tombstone's issuer (`isNewerVersionByTheIssuer`,
- *   seq compared only through `isNewerCopy`). Never the seq alone, across authors.
+ *   seq compared only through `isNewerCopy`). Never the seq alone, across authors. A tombstone with no content hash (one a peer
+ *   delivered: it names its issuer and the version it erased, never the bytes) is judged by the version half alone (Q-409).
  *
  * ## What this file holds
  *
  *   1. the pure table of `recreatedSince`;
- *   2. that BOTH sites ask the one function: neither compares a row's seq with a tombstone's by hand.
+ *   2. that EVERY caller asks the one function — the file's bytes, its sidecars, and the peer apply that deletes the stored file —
+ *      and that no source under `server/src` compares a row's seq with a tombstone's `rowSeq` by hand.
  *
  * Run: node --test testing/standalone/a-path-recreated-since-its-tombstone-is-one-question.test.js   (requires a prior `npm run build:server`)
  */
@@ -31,6 +33,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const HASH = sha('the bytes the tombstone erased');
@@ -81,25 +84,56 @@ describe('recreatedSince, the pure answer', () => {
   it('a row with no hash says nothing about the bytes', () => {
     assert.equal(recreated('no hash')(t, { seq: 3, author: STRANGER }), false);
   });
+
+  it('a tombstone that ARRIVED (no content hash) is judged by the version half alone, whatever hash the row holds (Q-409)', () => {
+    const r = recreated('arrived tombstone');
+    const arrived = { issuer: 'the-issuer', rowSeq: 5 };
+    for (const sha256 of [HASH, OTHER, undefined]) {
+      const hashed = sha256 === undefined ? {} : { sha256 };
+      assert.equal(r(arrived, { seq: 6, author: ISSUER, ...hashed }), true, `the issuer, newer (hash ${sha256 === undefined ? 'none' : 'held'})`);
+      assert.equal(r(arrived, { seq: 5, author: ISSUER, ...hashed }), false, 'the issuer, the erased version');
+      assert.equal(r(arrived, { seq: 4, author: ISSUER, ...hashed }), false, 'the issuer, older');
+      assert.equal(r(arrived, { seq: 999, author: STRANGER, ...hashed }), false, 'another author, however high');
+      assert.equal(r(arrived, { seq: 999, ...hashed }), false, 'no author at all, however high');
+    }
+    assert.equal(r({ ...arrived, contentHash: '' }, { seq: 5, sha256: OTHER, author: ISSUER }), false, 'an empty hash is no hash');
+    assert.equal(r({ rowSeq: 5 }, { seq: 99, sha256: OTHER, author: ISSUER }), false, 'no issuer names nobody to compare with');
+    assert.equal(r({ issuer: 'the-issuer' }, { seq: 99, sha256: OTHER, author: ISSUER }), false, 'no version names nothing to compare with');
+  });
 });
 
-describe('both sites ask the one function', () => {
-  const files = ['server/src/files/tombstones.ts', 'server/src/files/tombstone-shadow.ts'];
-  const code = Object.fromEntries(files.map(f => [f, stripComments(read(f))]));
+describe('every caller asks the one function', () => {
+  // The three places that decide whether a stored file is a version a tombstone did not erase: the file's own bytes, its
+  // sidecars (the definition's own file), and the peer apply that deletes the stored file (Q-409).
+  const callers = ['server/src/files/tombstones.ts', 'server/src/files/tombstone-shadow.ts', 'server/src/files/peer-tombstone-apply.ts'];
+  const code = Object.fromEntries(callers.map(f => [f, stripComments(read(f))]));
 
-  it('the bytes decision and the sidecar decision each call recreatedSince', () => {
-    assert.match(code[files[0]], /\brecreatedSince\(/, 'tombstones.ts (the file\'s own bytes) does not ask recreatedSince');
-    const shadow = code[files[1]];
+  it('the bytes decision, the sidecar decision and the peer apply each call recreatedSince', () => {
+    assert.match(code[callers[0]], /\brecreatedSince\(/, 'tombstones.ts (the file\'s own bytes) does not ask recreatedSince');
+    const shadow = code[callers[1]];
     const mentions = [...shadow.matchAll(/\brecreatedSince\(/g)].length;
     assert.ok(mentions >= 2, `tombstone-shadow.ts holds the definition and the sidecar rule's call; found ${mentions} mention(s)`);
     assert.match(shadow, /export function recreatedSince\(/);
+    assert.match(code[callers[2]], /\brecreatedSince\(/, 'peer-tombstone-apply.ts (the stored file a peer\'s tombstone would delete) does not ask recreatedSince');
   });
 
-  it('neither compares a live row\'s seq with a tombstone\'s by hand', () => {
-    for (const f of files) {
-      const hits = code[f].split('\n').map((l, i) => ({ l: l.trim(), n: i + 1 }))
-        .filter(({ l }) => /\brow\.seq\s*[<>]/.test(l) || /\.seq\s*>\s*erased\b/.test(l));
-      assert.deepEqual(hits, [], `${f} compares a seq by hand: the cross-author rule is back`);
+  it('no source under server/src compares a stored row\'s seq with a tombstone\'s rowSeq by hand', () => {
+    const sources = trackedSources('server/src', { floor: 300 });
+    const hand = [
+      /\b(?:row|target|stored|live|held|file)\.seq\s*[<>]=?\s*[\w.]*rowSeq\b/,
+      /\browSeq\s*[<>]=?\s*(?:row|target|stored|live|held|file)\.seq\b/,
+      /\brow\.seq\s*[<>]/, /\.seq\s*>\s*erased\b/,
+    ];
+    const hits = [];
+    for (const f of sources) {
+      stripComments(read(f)).split('\n').forEach((l, i) => { if (hand.some(re => re.test(l))) hits.push(`${f}:${i + 1}: ${l.trim()}`); });
     }
+    assert.deepEqual(hits, [], 'a seq is compared by hand: the cross-author rule is back');
+  });
+
+  it('the scan sees the apply site (a floor under the sweep: it must be able to find what it forbids)', () => {
+    assert.ok(trackedSources('server/src', { floor: 300 }).includes(callers[2]), `${callers[2]} is not among the swept sources`);
+    const baseLine = 'if (x === null || (a.rowSeq !== undefined && typeof target.seq === \'number\' && target.seq > a.rowSeq)) {';
+    assert.ok(/\b(?:row|target|stored|live|held|file)\.seq\s*[<>]=?\s*[\w.]*rowSeq\b/.test(baseLine), 'the sweep would not have caught the base\'s own comparison');
   });
 });

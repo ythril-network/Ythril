@@ -129,13 +129,18 @@ export const STORED_ROW_PROJECTION = { seq: 1, sha256: 1, deletedAt: 1, author: 
  * author's high number says nothing about whether the deleted content came back, and a peer's low-seq re-creation would otherwise
  * be outranked by this instance's high one for ever.
  *
+ * **A tombstone with no hash** ({@link erasedContent} is false: one that has just ARRIVED from a peer, which names an issuer and the
+ * version it erased but never the bytes — a hash is what THIS instance records when it removes a row) has nothing to compare a row's
+ * bytes with, so the byte half does not speak and the answer is the version half alone: a newer version by the issuer. Without that,
+ * every row with a hash would count as "re-created" for a tombstone that has none, and nothing would ever be deleted.
+ *
  * What it prevents: the file's byte decision compared seq across authors while the sidecar rule did not, so the same path under the
- * same tombstone was "re-created" for one and "not" for the other (Q-407). Only meaningful for a tombstone that erased real content
- * ({@link erasedContent}): one with no hash has nothing to compare a row's bytes with.
+ * same tombstone was "re-created" for one and "not" for the other (Q-407); and the peer apply (`applyPeerFileTombstones`) kept a file
+ * whose seq was above the tombstone's `rowSeq` whoever wrote it — the third copy of that comparison (Q-409).
  */
 export function recreatedSince(t: Pick<HeldFileTombstone, 'contentHash' | 'issuer' | 'rowSeq'>, row: StoredFileRow | undefined): boolean {
   if (row === undefined || row.deletedAt !== undefined) return false;
-  if (typeof row.sha256 === 'string' && row.sha256 !== t.contentHash) return true;
+  if (erasedContent(t) && typeof row.sha256 === 'string' && row.sha256 !== t.contentHash) return true;
   return isNewerVersionByTheIssuer(t, row);
 }
 

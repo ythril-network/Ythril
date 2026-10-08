@@ -31,8 +31,11 @@
  *     by its deliverer. A declined one is NOT stored; it is counted, named by reason in the answer's `declined`, and said
  *     once per (peer, space, reason) window. A file this instance holds no row for is stored and deletes nothing — a deletion
  *     may arrive before its file, and storing it lets this node relay it.
- *  5. **The version**: a row whose seq is above the tombstone's `rowSeq` is a RE-CREATION of the path and is kept. A tombstone
- *     with no `rowSeq` keeps today's behaviour: the file at the path goes.
+ *  5. **The version**: a row the tombstone's issuer re-created at a seq above the tombstone's `rowSeq` is a RE-CREATION of the path
+ *     and is kept — the question every arrival door asks (`recreatedSince`, `files/tombstone-shadow.ts`; a tombstone that arrives
+ *     carries no content hash, so only its version half speaks). A seq above `rowSeq` that ANOTHER author wrote says nothing about
+ *     the erased content coming back (two instances' counters are not one clock), so that row goes (Q-409). A tombstone with no
+ *     `rowSeq` keeps today's behaviour: the file at the path goes.
  *  6. **Removed completely** (`removeFileHere`): the bytes, then the job, the conversion artefacts and chunk rows, the cached
  *     hash, the usage figure and the row — the steps of the local delete, so a peer's deletion leaves what the owner's does.
  *     No webhook: a peer's deletion is not an act of a user here.
@@ -67,6 +70,7 @@ import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
 import { peerFileKey, PathNamesTheSpaceError } from './sandbox.js';
 import { deleteStoredIfPresent } from './stored-bytes.js';
 import { removeFileHere } from './remove-file-here.js';
+import { recreatedSince } from './tombstone-shadow.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
 
 /** The longest path a tombstone may name. A path is a peer's text, and it reaches the file system and the database. */
@@ -182,9 +186,10 @@ export async function applyPeerFileTombstones(
         continue;
       }
       const kept: RelayedFileTombstone = { _id: a.id, path: a.key, deletedAt: a.deletedAt, ...(issuer !== undefined ? { issuer } : {}), ...(a.rowSeq !== undefined ? { rowSeq: a.rowSeq } : {}) };
-      // Nothing held, or a row that is a RE-CREATION of the path (above the version the deletion saw): nothing to remove.
+      // Nothing held, or a row that is a RE-CREATION of the path (a newer version by the tombstone's issuer, `recreatedSince`: the
+      // one answer every arrival door gives, never a seq compared across authors): nothing to remove.
       // The deletion is still passed on — it is true of the older version, and a peer below may still hold it.
-      if (verdict.ground === 'absent' || target === null || (a.rowSeq !== undefined && typeof target.seq === 'number' && target.seq > a.rowSeq)) {
+      if (verdict.ground === 'absent' || target === null || recreatedSince({ issuer, rowSeq: a.rowSeq }, target)) {
         keep.push(kept);
         continue;
       }
