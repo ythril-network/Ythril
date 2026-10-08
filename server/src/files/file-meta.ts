@@ -351,8 +351,9 @@ export async function updateFileMeta(
   // `$set` UNCONDITIONALLY while every content field below is guarded by `opts.X !== undefined`. So two
   // concurrent writes to different fields both landed and lost no field — and each wrote a whole embedding
   // describing only its own view, leaving the stored vector describing a record that existed nowhere. There
-  // was nothing to notice it with: file-meta records carry no `seq`, so there is no precondition to violate
-  // and no lost-update counter, unlike the four brain types that had the identical defect.
+  // was nothing to notice it with: a file row's `seq` advances only on an AUTHORED write, so a derived-field
+  // write leaves it where it was and no precondition on it could have been violated — unlike the four brain
+  // types, whose seq advances on every write and which had the identical defect.
   const $set: Record<string, unknown> = { updatedAt: now };
   if (opts.description !== undefined) $set['description'] = opts.description;
   if (opts.descriptionSource !== undefined) $set['descriptionSource'] = opts.descriptionSource;

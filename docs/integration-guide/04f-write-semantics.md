@@ -323,9 +323,11 @@ Notes:
 - **MCP has no equivalent**, and this is a property of the transport rather than an oversight: MCP tools
   take arguments, not headers, so there is nothing for an `If-Match` to travel in. Agents that need a
   conditional write should use the REST route.
-- **File-metadata records are not covered**, and say so: they carry no `seq` to condition a write on, so
-  `PATCH /api/brain/spaces/:spaceId/files` **refuses** an `If-Match` with a `400` rather than accepting and
-  dropping it. Its search vector is still rebuilt from the record as stored, through the same background
+- **File-metadata records are not covered**, and say so. They do carry a `seq`, but it advances only on an
+  AUTHORED write: a change to a record's derived fields — the excerpt a conversion produced, a processing
+  state — leaves the number where it was. So it does not identify every version of the row, and a precondition
+  on it would pass over an edit you have not seen. `PATCH /api/brain/spaces/:spaceId/files` therefore
+  **refuses** an `If-Match` with a `400` rather than accepting and dropping it. Its search vector is still rebuilt from the record as stored, through the same background
   queue as everything else, so a concurrent edit cannot leave the record and its vector disagreeing — you
   simply cannot make *this* write conditional.
 

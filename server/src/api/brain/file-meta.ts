@@ -341,12 +341,14 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // The four brain record types honour `If-Match` against their `seq`. File-metadata records have no `seq`
-  // that a precondition can be checked against — so there is nothing here to condition a write on. Refused
-  // rather than ignored, because the failure mode of ignoring is the one this feature exists to prevent:
-  // the client asked for a guarantee and would be told, with a 200, that it held.
+  // The four brain record types honour `If-Match` against their `seq`, which advances on every write. A file
+  // row's `seq` does NOT: `updateFileMeta` stamps one only for an AUTHORED write, and a write touching only
+  // derived fields (the worker's excerpt, a processing state) leaves it where it was. So the number does not
+  // identify every version of the row, and a precondition on it would pass over an edit the caller has not
+  // seen. Refused rather than ignored, because the failure mode of ignoring is the one this feature exists to
+  // prevent: the client asked for a guarantee and would be told, with a 200, that it held.
   if (req.get('If-Match') !== undefined) {
-    res.status(400).json({ error: '`If-Match` is not supported on file metadata: these records carry no `seq` to condition a write on. It is honoured on `PATCH` for facts, entities, edges and chrono entries.' });
+    res.status(400).json({ error: '`If-Match` is not supported on file metadata: a file record\'s `seq` advances only on an authored write, so a change to its derived fields leaves it unchanged and a precondition on it would pass over an edit you have not seen. It is honoured on `PATCH` for facts, entities, edges and chrono entries.' });
     return;
   }
 
