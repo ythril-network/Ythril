@@ -55,6 +55,7 @@ import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { isLocalFileField } from './derived-fields.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
+import { stripDerivedStages } from './derived-fields.js';
 
 
 
@@ -572,39 +573,23 @@ export async function markFileMetaDeleted(
  * flagged row still holding its vector and its text, and nothing ever re-runs the strip: the second attempt sees a
  * row that is already flagged and does nothing. So the window is not small, it is permanent.
  *
- * ## Why it is a pipeline
- *
- * Because one of the removals is conditional and a plain `$unset` cannot ask a question. A `description` is the
- * person's when they wrote it and the file's own prose when a conversion produced it, and only the second is made
- * from bytes the space no longer has. `descriptionSource` is what tells them apart, so the description goes exactly
- * when that marker says `generated` or `extracted`, and the marker goes with it — it exists only in that case.
- *
  * ## What goes, and why each
  *
  * The vector and its model, and `matchedText`: the row must not be rankable or findable by text. `excerpt`: a
  * verbatim passage of a document whose bytes are deleted. `sha256`: a fingerprint of those same bytes.
  * `embeddingStatus`: left at `complete` it makes a re-upload of identical bytes skip reprocessing, so a revived path
- * would never be read again.
+ * would never be read again. A machine-made `description` goes with its marker; a person's stays, with `path`,
+ * `author`, `createdAt`, `deletedAt`, the retention stamp, `tags` and `properties` — what somebody deleted, not what
+ * the bytes produced.
  *
- * ## What stays, deliberately
+ * ## Why the removal itself is not spelled here
  *
- * The audit record: `path`, `author`, `createdAt`, `deletedAt`, the retention stamp, `tags`, `properties`, and a
- * description a person wrote. Those are what somebody deleted, not what the bytes produced.
+ * `stripDerivedStages` (`files/derived-fields.ts`) is the one definition of what the bytes made, and the one-off repair
+ * of rows flagged by a release before this write existed uses the same stages. Two spellings would differ by exactly
+ * one field on the day somebody adds one, and the repair would be the half that still held it.
  */
 function flagAndStrip(): object[] {
-  const MACHINE_MADE = ['generated', 'extracted'];
-  return [
-    { $set: { deletedAt: new Date().toISOString() } },
-    { $unset: ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha256', 'embeddingStatus'] },
-    {
-      $set: {
-        description: {
-          $cond: [{ $in: ['$descriptionSource', MACHINE_MADE] }, '$$REMOVE', '$description'],
-        },
-      },
-    },
-    { $unset: ['descriptionSource'] },
-  ];
+  return [{ $set: { deletedAt: new Date().toISOString() } }, ...stripDerivedStages()];
 }
 
 /**

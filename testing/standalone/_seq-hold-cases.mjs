@@ -43,6 +43,8 @@ export async function loadHolderModules() {
     tombstones: await import('../../server/dist/brain/tombstones.js'),
     commit: await import('../../server/dist/brain/write-plan/commit.js'),
     fileMeta: await import('../../server/dist/files/file-meta.js'),
+    // The writers of what a file's bytes made, including the one seq holder among them (bundle-89).
+    derivedFields: await import('../../server/dist/files/derived-fields.js'),
     // The file tombstones' module, whose position hold is the second instance of the horizon hold (`util/horizon-holds.ts`).
     fileTombstones: await import('../../server/dist/files/tombstones.js'),
   };
@@ -190,9 +192,12 @@ export function holderCases(ctx, S) {
       label: 'a file record created', lock: 'counter',
       run: () => ctx.mods.fileMeta.upsertFileMeta(S, 'new.md', 10),
     }],
-    'server/src/files/file-meta.ts:setDerivedDescriptionIfUnset': [{
+    // In `files/derived-fields.ts` since bundle-89, with the other writers of what the bytes produced. It takes its
+    // number only once its conditions are answered (`withSeqWhen`), so the row it is pointed at must be writable — a
+    // decline would take no number at all and the hold this case is about would never be entered.
+    'server/src/files/derived-fields.ts:setDerivedDescriptionIfUnset': [{
       label: 'a derived file description', lock: 'counter',
-      run: () => ctx.mods.fileMeta.setDerivedDescriptionIfUnset(S, HELD_FILE, 'derived'),
+      run: () => ctx.mods.derivedFields.setDerivedDescriptionIfUnset(S, HELD_FILE, 'derived'),
     }],
     'server/src/files/file-meta.ts:updateFileMeta': [{
       label: 'a file record updated', lock: 'counter',

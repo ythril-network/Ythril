@@ -130,6 +130,67 @@ export function isLocalFileField(key: string): boolean {
 /** What a write of derived fields did. `gone` is a success: the file was deleted, so there was nothing to record. */
 export type DerivedWriteOutcome = 'written' | 'superseded' | 'gone';
 
+/** A `description` this instance made from the bytes, which `descriptionSource` is the only way to tell from a person's. */
+const MACHINE_MADE = ['generated', 'extracted'];
+
+/** The fields a deleted file's row loses outright: what the bytes made, and the fingerprint of bytes that are gone. */
+const STRIPPED = ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha256', 'embeddingStatus'];
+
+/**
+ * REMOVE everything a file's bytes made from a row — the stages, so the flag write and the one-off repair below cannot
+ * disagree about what "everything" is.
+ *
+ * It is a pipeline because one removal is conditional and a plain `$unset` cannot ask a question. A `description` is the
+ * person's when they wrote it and the file's own prose when a conversion produced it, and only the second is made from
+ * bytes the space no longer has; `descriptionSource` tells them apart, so the description goes exactly when that marker
+ * says `generated` or `extracted`, and the marker goes with it — it exists only in that case.
+ *
+ * What stays, deliberately: `path`, `author`, `createdAt`, `deletedAt`, the retention stamp, `tags`, `properties`, and a
+ * description a person wrote. Those are what somebody deleted, not what the bytes produced.
+ */
+export function stripDerivedStages(): object[] {
+  return [
+    { $unset: STRIPPED },
+    { $set: { description: { $cond: [{ $in: ['$descriptionSource', MACHINE_MADE] }, '$$REMOVE', '$description'] } } },
+    { $unset: ['descriptionSource'] },
+  ];
+}
+
+/**
+ * Strip the rows of one space that were FLAGGED BEFORE the flag write started stripping — a bounded, idempotent repair.
+ *
+ * Strip-at-flag is forward-only. A row an earlier release flagged still holds the vector, the matched text, the excerpt,
+ * the content hash, the processing state and a machine-made description — bytes' worth of a deleted file, for ever on a
+ * space with no file retention window, where the reap never reaches it.
+ *
+ * **It needs no marker, and that is the design rather than an omission.** The work it has left is a QUERY: a flagged row
+ * that still holds any of those fields. Stripping one takes it out of the query for good, so a second pass over the same
+ * space matches nothing and writes nothing, and a pass interrupted halfway resumes by asking the same question. (A
+ * marker is for a repair whose query would re-match later writes — the delivered-by backfill is that kind; this is not.)
+ *
+ * The fields are LOCAL, so this is not the boot-time rewrite of synced data that rule warns about: nothing it removes
+ * was ever hashed or offered to a peer.
+ *
+ * @returns how many rows it stripped
+ */
+export async function stripFlaggedRowsOnce(spaceId: string, limit: number): Promise<number> {
+  const owed = {
+    deletedAt: { $exists: true },
+    $or: [
+      ...STRIPPED.map(f => ({ [f]: { $exists: true } })),
+      { descriptionSource: { $in: MACHINE_MADE } },
+    ],
+  };
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const page = await files.find(asFilter<FileMetaDoc>(owed as never), { projection: { _id: 1 }, limit }).toArray();
+  if (page.length === 0) return 0;
+  const r = await files.updateMany(
+    asFilter<FileMetaDoc>({ _id: { $in: page.map(d => String(d._id)) } }),
+    stripDerivedStages() as never,
+  );
+  return r.modifiedCount;
+}
+
 /**
  * Is the file a DERIVED row belongs to still here? Read once per write, by the parent's id.
  *
@@ -137,6 +198,12 @@ export type DerivedWriteOutcome = 'written' | 'superseded' | 'gone';
  * anything for one. A parent that is absent (the delete removed it outright) and a parent that is flagged (the delete
  * kept its audit record) answer the same: no.
  */
+/** A derived row names the file it came from; without it there is no liveness question to ask. */
+function requireParent(parentFileId: string | undefined): string {
+  if (parentFileId === undefined) throw new Error('writeDerivedFields: a derived row names the file it came from');
+  return parentFileId;
+}
+
 async function parentIsLive(spaceId: string, parentFileId: string): Promise<boolean> {
   const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: parentFileId, ...NOT_A_FLAGGED_ROW }), { projection: { _id: 1 } },
@@ -196,15 +263,24 @@ export async function writeDerivedFields(o: {
 }): Promise<DerivedWriteOutcome> {
   const { spaceId, collectionSuffix, tier, filter, parentFileId, set, unset } = o;
   refuseHashed('writeDerivedFields', [...Object.keys(set ?? {}), ...Object.keys(unset ?? {})]);
-  if (tier === 'derived') {
-    if (parentFileId === undefined) throw new Error('writeDerivedFields: a derived row names the file it came from');
-    if (!await parentIsLive(spaceId, parentFileId)) return 'gone';
-  }
+  /*
+   * A FILE THAT IS GONE DROPS WHAT A WRITE WOULD ADD AND KEEPS WHAT IT WOULD REMOVE.
+   *
+   * The guard exists to stop a job landing what the bytes made on a row whose file has been deleted. A REMOVAL is the
+   * opposite of that: a chunk whose parent is gone is an orphan, and taking its vector away is what a deleted file's
+   * own strip would have done had it been able to see the row. Refusing the whole write would leave the orphan
+   * searchable — which is how the first version of this guard turned the suppressed branch of the embed job, whose
+   * whole purpose is to remove a stale vector, into a no-op.
+   */
+  const live = tier !== 'derived' || await parentIsLive(spaceId, requireParent(parentFileId));
+  const adds = set && Object.keys(set).length > 0 ? set : undefined;
+  const removes = unset && Object.keys(unset).length > 0 ? unset : undefined;
+  if (!live && removes === undefined) return 'gone';
   const r = await col(spaceCollection(spaceId, collectionSuffix)).updateOne(
     asFilter({ ...filter, ...(tier === 'top-level' ? NOT_A_FLAGGED_ROW : {}) }),
     asUpdate({
-      ...(set && Object.keys(set).length > 0 ? { $set: set } : {}),
-      ...(unset && Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+      ...(live && adds ? { $set: adds } : {}),
+      ...(removes ? { $unset: removes } : {}),
     }),
   );
   return r.matchedCount === 0 ? 'superseded' : 'written';
@@ -255,8 +331,8 @@ export async function replaceDerivedFileRows(
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const { session } = opts;
   for (const slice of inChunks(docs, opts.batch)) {
-    await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: slice.map(d => d._id) } }), ...(session ? [{ session }] : []));
-    await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(d)), ...(session ? [{ session }] : []));
+    await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: slice.map(d => d._id) } }), { session });
+    await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(d)), { session });
   }
   return 'written';
 }
@@ -376,46 +452,51 @@ export async function setDerivedDescriptionIfUnset(
   descriptionSource?: 'generated' | 'extracted',
 ): Promise<boolean> {
   const _id = toDocId(filePath);
+  /**
+   * The conditions — ONE filter, used to read and then to write.
+   *
+   * Written once, deliberately. The first version of the pre-read below spelled them again as a JS predicate over the
+   * row, and the two disagreed immediately: a stored `author.instanceId` of `null` on an instance with none
+   * configured matches this filter (`{field: null}` matches null AND missing) and fails `===`, so every file was
+   * declined. One rule, two implementations.
+   */
+  const writable = asFilter<FileMetaDoc>({
+    _id,
+    // Never onto the audit record of a deleted file: the flag write strips a machine-made description, so a flagged
+    // row SATISFIES the "no description" condition below, and this write would put derived text back on it and stamp
+    // it a seq — which the flag itself deliberately does not do.
+    ...NOT_A_FLAGGED_ROW,
+    $and: [
+      { $or: [
+        { description: { $exists: false } },
+        { description: null },
+        // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is
+        // `^s*$` — the backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that
+        // here, and the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
+        { description: { $regex: /^\s*$/ } },
+      ] },
+      { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
+    ],
+  } as never);
+
   /*
    * ANSWERED BEFORE A NUMBER IS TAKEN (`withSeqWhen`). Every one of this write's four declines is routine — a person's
    * description is there, the row is another instance's, there is no row, the row is flagged — and the allocator moves
    * the counter before the write runs, so each decline used to leave the space counter naming a seq no record holds.
-   * The same conditions stay in the filter below: this read says whether a number is worth taking, the filter says
-   * whether it is still true at the instant of the write.
+   *
+   * The read asks whether a number is worth taking; the WRITE asks the same filter again, which is what decides the
+   * race a person's description can win in between.
    */
-  const writable = async (): Promise<boolean> => {
-    const row = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-      asFilter<FileMetaDoc>({ _id, ...NOT_A_FLAGGED_ROW }),
-      { projection: { description: 1, author: 1 } },
-    ) as Pick<FileMetaDoc, 'description' | 'author'> | null;
-    if (!row) return false;
-    const mine = row.author?.instanceId === undefined || row.author.instanceId === authorRef().instanceId;
-    return mine && (row.description === undefined || row.description === null || row.description.trim() === '');
-  };
-  const r = await withSeqWhen(spaceId, writable, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({
-      _id,
-      // Never onto the audit record of a deleted file: the flag write strips a machine-made description, so a flagged
-      // row SATISFIES the "no description" condition below, and this write would put derived text back on it and stamp
-      // it a seq — which the flag itself deliberately does not do.
-      ...NOT_A_FLAGGED_ROW,
-      $and: [
-        { $or: [
-          { description: { $exists: false } },
-          { description: null },
-          // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the
-          // backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and
-          // the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
-          { description: { $regex: /^\s*$/ } },
-        ] },
-        { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
-      ],
-    } as never),
-    asUpdate<FileMetaDoc>({
+  const r = await withSeqWhen(
+    spaceId,
+    async () => (await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+      .findOne(writable, { projection: { _id: 1 } })) !== null,
+    (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(writable, asUpdate<FileMetaDoc>({
       // `P-32`: an authored write, so it advances the space counter and pages to a peer.
       $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
       ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
-    }),
-  ), 'file.describe');
+    })),
+    'file.describe',
+  );
   return (r?.modifiedCount ?? 0) > 0;
 }

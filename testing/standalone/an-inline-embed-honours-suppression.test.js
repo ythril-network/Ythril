@@ -317,8 +317,10 @@ describe('every inline embed honours suppression', () => {
     assert.match(body, /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
     // Re-anchored for bundle-30 `R12`: the removal is the one constant `UNSET_VECTOR` (its fields are pinned by
     // `suppress-embeddings-wiring`), not a hand-spelled `$unset` of `embedding`.
+    // And again for bundle-89: the write is handed to the one writer of a derived field, so the constant is an
+    // argument (`unset: UNSET_VECTOR`) rather than an inline operator. It is still the removal, which is the rule.
     assert.match(
-      body, /\$unset:\s*UNSET_VECTOR\b/,
+      body, /unset:\s*UNSET_VECTOR\b/,
       'and must UNSET a stale vector rather than only skipping — that is what cleans up a record embedded '
       + 'before the flag was set',
     );

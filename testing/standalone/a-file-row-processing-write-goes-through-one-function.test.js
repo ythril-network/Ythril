@@ -166,16 +166,31 @@ describe('the one function exists and cannot stamp what it must not', () => {
       `${MODULE} updates no file row — it is not the writer`);
   });
 
-  it('no write inside it sets a field the hash sees, or bumps a seq', () => {
+  /**
+   * The ONE write in the module that may set a hashed field, named here rather than left to the loop below.
+   *
+   * A description derived from a file's bytes IS the file's description: it is hashed, it replicates, and it stamps a
+   * seq like any authored write — which is why it is restricted to a file this instance authored. It lives in this
+   * module because what it writes is derived from bytes, and because it was one of the writers that landed a
+   * description on a file somebody had deleted. Everything else here is local state and must stay that way.
+   */
+  const AUTHORED = { setDerivedDescriptionIfUnset: 'the derived description: hashed, replicated, and stamped like any authored write — restricted to a file this instance authored (`Q-143`)' };
+
+  it('no write inside it sets a field the hash sees, or bumps a seq — except the one authored write, which says so', () => {
     const inside = WRITES.filter(w => w.file === MODULE);
     // Not a vacuous pass while the module is missing: with nothing inside, "no write inside sets X" says nothing.
     assert.ok(inside.length >= 1, `${MODULE} holds no write to the files collection, so nothing here could be checked`);
     const hashed = new Set(hashedFileFields());
     const offenders = [];
     for (const w of inside) {
+      if (w.fn in AUTHORED) continue;
       for (const k of w.keys) if (hashed.has(k)) offenders.push(`${w.name} sets '${k}'`);
       if (/\bupdatedAt\b|\bnextSeq\b|\bbumpSeq\b|\bseq\b/.test(w.args)) offenders.push(`${w.name} names updatedAt or seq in its arguments`);
     }
     assert.deepEqual(offenders, [], 'a processing mark must not set a hashed field: that is the defect this module exists to remove');
+    // And the exception is spent: a function named here that no longer writes hashed fields is a row to delete, and a
+    // SECOND authored write would have to be argued for here rather than simply landing.
+    const spent = Object.keys(AUTHORED).filter(fn => !inside.some(w => w.fn === fn && [...w.keys].some(k => hashed.has(k))));
+    assert.deepEqual(spent, [], 'these are excused from the rule and no longer set a hashed field — delete the row');
   });
 });

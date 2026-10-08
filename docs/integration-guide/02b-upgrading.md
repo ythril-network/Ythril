@@ -154,6 +154,23 @@ collections — about half, on a measured production instance. An index comes ba
 first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`, default `60000`). A
 rollback needs nothing: the older build recreates every index at boot.
 
+**Upgrading past 5.6.8 strips the records of files deleted under `softDeleteFileMeta` by an earlier build.** The flag
+write removes everything the bytes made in the same operation now — the vector, its model, the matched text, the
+excerpt, `sha256`, `embeddingStatus`, and a machine-made `description` with its `descriptionSource` — but that is
+forward-only, so rows flagged before the upgrade still hold all of it. The retention sweep repairs them a bounded batch
+per space per cycle, in the background, with no boot step to run and nothing to wait for. It is query-defined and keeps
+no marker: a stripped row stops matching, so once the backlog is gone the repair costs one bounded read per space per
+cycle. Every field it removes is LOCAL — never hashed, never offered to a peer — so nothing it does can make two
+instances disagree, and a rollback needs nothing: the older build simply stops repairing. What it cannot do is bring
+back what it removed, which is the point of the setting.
+
+**And a kept record is now reaped, on its own clock.** A row flagged `deletedAt` is removed once the space's FILE
+retention window has passed SINCE THE DELETION — not since the file's own `_expireAt`, which would remove the audit
+record on the sweep after the one that made it. A space with no file window reaps none, ever. The purge is its own
+sweep unit (`TTL sweep: files-flagged`), so its failures are reported under their own step and a re-upload that revives
+the path between the sweep's read and its delete WINS: the row stays live and the loss is not reported as a failure.
+After the row is gone, the file TOMBSTONE is what stops a stale copy of the deleted file arriving from a peer.
+
 ## Rolling Back
 
 **A rollback to 5.6.x rebuilds `{ seq: 1 }` before it listens, and leaves the new indexes behind.** An older build creates

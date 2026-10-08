@@ -27,6 +27,7 @@
  * has already asked about, until the throttle is met, a page holds nothing new, or {@link ATTEMPT_CAP} ids have been tried.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { storeAnswers as defaultStoreAnswers } from '../db/store-answers.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
@@ -47,6 +48,9 @@ import { settleStalePendingFileTombstones } from '../files/tombstones.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
+import { spaceTtlDays } from './chrono-retention.js';
+import { findSpace } from '../spaces/proxy.js';
+import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 
 /** How often the sweep runs, ms. Cited by the docs (`doc-cited-constants`). */
@@ -63,11 +67,21 @@ type TtlCollection = (typeof TTL_COLLECTIONS)[number];
 const STEP = declareStep('TTL sweep');
 const SETTLE_STEP = declareStep('TTL sweep: settling file tombstones');
 const INDEX_STEP = declareStep('TTL sweep: indexes');
+const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
 /** The step a collection's READ failure is said under. */
-const readStep = (c: TtlCollection): string => `TTL sweep: ${c}`;
+/**
+ * The audit records of deleted files are their OWN unit, not a second pass of the `files` one.
+ *
+ * `sweepCollection` derives its read and delete steps from the unit it is given, and ends a clean run with
+ * `recovered(step, space)`. Sharing a step would let the live unit's clean finish erase the flagged unit's failing
+ * line, so a purge that keeps failing would say it once and then go quiet while it kept failing.
+ */
+const FLAGGED_UNIT = 'files-flagged';
+
+const readStep = (c: string): string => `TTL sweep: ${c}`;
 /** The step a collection's DELETE failures are said under, and counted by record under. */
-const deleteStep = (c: TtlCollection): string => `TTL sweep: ${c} delete`;
-for (const c of TTL_COLLECTIONS) { declareStep(readStep(c)); declareStep(deleteStep(c)); }
+const deleteStep = (c: string): string => `TTL sweep: ${c} delete`;
+for (const c of [...TTL_COLLECTIONS, FLAGGED_UNIT]) { declareStep(readStep(c)); declareStep(deleteStep(c)); }
 
 /** Actor recorded on TTL-driven deletions (tombstone author + webhook attribution). */
 const TTL_ACTOR: WebhookActor = { tokenLabel: 'ttl-sweep' };
@@ -98,6 +112,57 @@ async function expiredPage(spaceId: string, c: TtlCollection, now: Date, exclude
   return docs.map(d => d._id);
 }
 
+/**
+ * The audit records of deleted files that are DUE — `deletedAt` plus the space's FILE window.
+ *
+ * **Not `_expireAt`, and the difference is the whole item.** The sweep above FLAGS an expired file because its
+ * `_expireAt` has passed, so a purge asking the same question would remove the audit record on the very next cycle,
+ * about five minutes after it was made: the record destroyed by design, which is the opposite of keeping it. The
+ * flagged row's retention runs from the moment of the deletion.
+ *
+ * **No file window means nothing is reaped, ever.** With no window there is nothing to count from, and the operator was
+ * promised a record of deleted files — so it is kept. That is a deliberate end state, not an omission.
+ */
+async function flaggedPage(spaceId: string, _c: TtlCollection, now: Date, exclude: string[], limit: number): Promise<string[]> {
+  const space = findSpace(spaceId);
+  const days = space ? spaceTtlDays(space, 'file') : undefined;
+  if (days === undefined) return [];
+  const due = new Date(now.getTime() - days * 86_400_000).toISOString();
+  const filter = {
+    deletedAt: { $exists: true, $lte: due },
+    ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}),
+  };
+  const docs = await col(spaceCollection(spaceId, 'files')).find(asFilter(filter), { projection: { _id: 1 }, limit })
+    .toArray() as unknown as Array<{ _id: string }>;
+  return docs.map(d => d._id);
+}
+
+/**
+ * Remove one audit record — **only while it is still flagged**.
+ *
+ * A re-upload to the same path revives the row (`deletedAt` unset) and it is a live file again. The flag is therefore
+ * part of the delete's own filter rather than something checked before it: between the page and this call a person can
+ * re-upload, and a delete that did not ask would destroy the file they just wrote. Losing that race answers `false`,
+ * which `sweepCollection` reads with the `exists` check below.
+ */
+async function purgeFlagged(spaceId: string, _c: TtlCollection, id: string): Promise<boolean> {
+  const r = await col(spaceCollection(spaceId, 'files')).deleteOne(asFilter({ _id: id, deletedAt: { $exists: true } }));
+  return r.deletedCount > 0;
+}
+
+/**
+ * Is this row STILL FLAGGED? The flagged unit's reading of "the deleter matched nothing".
+ *
+ * The default check asks whether the row is still stored, and for this unit that is wrong in the one case that matters:
+ * a revive that won leaves the row stored and live, which is the correct outcome and not a failure. Reported as one it
+ * would put a failure line, a space failure and a records-failed count in front of an operator for a person
+ * re-uploading a file.
+ */
+async function stillFlagged(spaceId: string, _c: TtlCollection, id: string): Promise<boolean> {
+  return (await col(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter({ _id: id, deletedAt: { $exists: true } }), { projection: { _id: 1 } })) !== null;
+}
+
 /** Is the record still stored? */
 async function isStored(spaceId: string, c: TtlCollection, id: string): Promise<boolean> {
   // The same question as the page above, so the same narrowing: with `softDeleteFileMeta` a flagged row is what a
@@ -116,6 +181,13 @@ export interface SweepDeps {
   exists?: (spaceId: string, c: TtlCollection, id: string) => Promise<boolean>;
   storeAnswers?: () => Promise<boolean>;
   reporter?: SpaceFailureReporter;
+  /**
+   * What this run of the sweep IS, for its steps — defaults to the collection.
+   *
+   * A second unit over one collection needs its own: the steps are what the reporter keeps a line per, and what
+   * `recovered` clears. Two units sharing them means either one's clean finish erases the other's failing line.
+   */
+  unit?: string;
 }
 
 export interface SweepOutcome {
@@ -159,6 +231,7 @@ export async function sweepCollection(spaceId: string, c: TtlCollection, now: Da
   const exists = deps.exists ?? isStored;
   const storeAnswers = deps.storeAnswers ?? defaultStoreAnswers;
   const reporter = deps.reporter ?? defaultSpaceFailureReporter;
+  const unit = deps.unit ?? c;
 
   const attempted = new Set<string>();
   const failed: string[] = [];
@@ -191,10 +264,10 @@ export async function sweepCollection(spaceId: string, c: TtlCollection, now: Da
       const more = failed.length - SAMPLE_IDS;
       const ids = `ids: ${peerList(failed.slice(0, SAMPLE_IDS))}${more > 0 ? `, and ${more} more` : ''}`;
       const why = `${peerText(firstFailure)} (${ids})${capped ? `; ${failed.length}+ records keep failing; the rest wait for the next cycle` : ''}`;
-      reporter.spaceFailure(deleteStep(c), spaceId, new Error(why), { unit: c, when: 'next cycle', count: failed.length });
-      signalHousekeeping({ type: 'records-failed', step: deleteStep(c), count: failed.length });
+      reporter.spaceFailure(deleteStep(unit), spaceId, new Error(why), { unit, when: 'next cycle', count: failed.length });
+      signalHousekeeping({ type: 'records-failed', step: deleteStep(unit), count: failed.length });
     } else if (ended) {
-      reporter.recovered(deleteStep(c), spaceId);
+      reporter.recovered(deleteStep(unit), spaceId);
     }
   }
   return { deleted, failed: failed.length, capped: attempted.size >= ATTEMPT_CAP && deleted < SWEEP_BATCH && failed.length > 0 };
@@ -213,9 +286,21 @@ export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number;
     if (ok) deleted++;
     return ok;
   };
+  const countingPurge = async (spaceId: string, c: TtlCollection, id: string): Promise<boolean> => {
+    const ok = await purgeFlagged(spaceId, c, id);
+    if (ok) deleted++;
+    return ok;
+  };
   const walk = await eachSpace(STEP, concreteSpaces(), async (space, ctx) => {
-    await eachUnit(TTL_COLLECTIONS, async (c) => {
+    await eachUnit([...TTL_COLLECTIONS, FLAGGED_UNIT] as TtlCollection[], async (c) => {
       ctx.step = readStep(c);
+      // The audit records of deleted files: the same machinery — the batch, the attempt cap, the per-record failure
+      // handling — asking a different question of the same collection, under its own steps.
+      if (String(c) === FLAGGED_UNIT) {
+        await sweepCollection(space.id, 'files', now,
+          { unit: FLAGGED_UNIT, page: flaggedPage, remove: countingPurge, exists: stillFlagged });
+        return;
+      }
       await sweepCollection(space.id, c, now, { remove: counting });
     });
   });
@@ -224,6 +309,7 @@ export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number;
 
 /** Delete all records past their `_expireAt`, across every space. Returns the number deleted. */
 export async function sweepExpired(now: Date = new Date()): Promise<number> {
+  let strippedRows = 0;
   const { deleted: total } = await sweepExpiredRecords(now);
   if (total > 0) log.info(`TTL sweep deleted ${total} expired record(s)`);
 
@@ -246,6 +332,18 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219), a bounded amount per cycle. Each space is
   // contained inside it and logs its own failure by name; this catch is for what happens before any space.
   await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${peerText(err)}`));
+
+  // Rows flagged deleted by a release before the flag write stripped them still hold what the bytes made (Q-418). The
+  // repair is query-defined and keeps no marker — a stripped row leaves the query — so it costs one bounded read per
+  // space per cycle once there is nothing left to do, and a space that fails is passed over rather than stopping the
+  // ones behind it.
+  const stripped = await eachSpace(STRIP_STEP, concreteSpaces(), async space => {
+    strippedRows += await stripFlaggedRowsOnce(space.id, SWEEP_BATCH);
+  });
+  if (strippedRows > 0) {
+    log.info(`Stripped what the bytes made from ${strippedRows} file record(s) flagged deleted before this release.`);
+  }
+  void stripped;
 
   return total;
 }
