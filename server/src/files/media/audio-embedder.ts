@@ -133,11 +133,11 @@ function applyOverlap(
 }
 
 /** Get duration of an audio/video file in seconds using ffprobe. */
-async function getDurationSeconds(filePath: string): Promise<number> {
+async function getDurationSeconds(filePath: string, signal?: AbortSignal): Promise<number> {
   const result = await runFfmpeg([
     '-i', filePath,
     '-f', 'null', '-',
-  ]).catch(err => {
+  ], { signal }).catch(err => {
     // ffmpeg exits 1 for probe (no output) but stderr has duration
     return { stdout: Buffer.alloc(0), stderr: String(err) };
   });
@@ -158,6 +158,7 @@ async function extractSegment(
   startS: number,
   endS: number,
   outPath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const duration = endS - startS;
   await runFfmpeg([
@@ -168,7 +169,7 @@ async function extractSegment(
     '-ar', '16000',
     '-ac', '1',
     outPath,
-  ]);
+  ], { signal });
 }
 
 // ── Main export ───────────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ export async function embedAudio(
 
   try {
     // Step 1: total duration
-    const totalDurationS = await getDurationSeconds(inputPath);
+    const totalDurationS = await getDurationSeconds(inputPath, opts?.signal);
     if (totalDurationS <= 0) {
       log.warn(`Audio embedder: could not determine duration for ${fileId}, treating as single chunk`);
     }
@@ -244,7 +245,7 @@ export async function embedAudio(
       '-i', inputPath,
       '-af', 'silencedetect=n=-30dB:d=0.5',
       '-f', 'null', '-',
-    ]).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
+    ], { signal: opts?.signal }).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
 
     // The fallback duration is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), and the size now
     // comes from the handle's stat rather than from the length of a buffer nobody holds any more.
@@ -280,7 +281,7 @@ export async function embedAudio(
       const segPath = path.join(tmpDir, `seg${i}.wav`);
 
       try {
-        await extractSegment(inputPath, startS, endS, segPath);
+        await extractSegment(inputPath, startS, endS, segPath, opts?.signal);
         const segBytes = await fs.readFile(segPath);
 
         const sttResult = await stt.transcribe(segBytes, 'audio/wav');

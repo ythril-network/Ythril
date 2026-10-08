@@ -38,6 +38,11 @@ export interface MediaProgressOpts {
   /** True once this run has lost its claim — a loop stops rather than duplicating a recovered job. */
   shouldStop?: () => boolean;
   /**
+   * Aborted the moment this run loses its claim. `shouldStop` is polled BETWEEN steps; this reaches INTO one: every
+   * ffmpeg step takes it, so a recovered job's process is killed rather than left running to its ten-minute bound.
+   */
+  signal?: AbortSignal;
+  /**
    * Every stage this file's route will run, in order. Supplied by the caller that knows the whole route:
    * an audio file transcribes and embeds, a video does both of those AND captions between them.
    */

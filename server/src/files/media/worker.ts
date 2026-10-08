@@ -153,7 +153,7 @@ function hopBudgets(): Record<string, number | undefined> {
     // derived value, so the value now has a name (`render-budget.ts`) that both the call site and this list
     // use. `renderWindowMs` rather than a config key on purpose: it is what the detector must not fire inside.
     renderWindowMs: worstRenderWindowMs(doc),
-    // One ffmpeg step, bounded by the one wrapper that starts it (`files/media/ffmpeg.ts`). It is here for the same
+    // One ffmpeg step, bounded by the one wrapper that starts it (`files/media/transcode.ts`). It is here for the same
     // reason `renderWindowMs` is: a step the detector can fire inside is a job re-queued in the middle of work it was
     // allowed to do, which reaches the same step again.
     ffmpegStepMs: FFMPEG_STEP_TIMEOUT_MS,
@@ -410,10 +410,12 @@ async function processJob(
   // `false` on the next beat. `leaseLost` is what the long phases poll to stop early — without it a
   // recovered job runs twice, both runs writing the same chunk ids and competing for the same CPU.
   let leaseLost = false;
+  // The same loss, as a signal a running ffmpeg step can be killed by (`MediaProgressOpts.signal`).
+  const lease = new AbortController();
   const claim: JobClaim = { jobId: String(fileId), claimToken: job.claimToken };
   const heartbeat = (p?: StepProgress): void => {
     void touchJobProgress(spaceId, String(fileId), p, job.claimToken).then(stillOurs => {
-      if (!stillOurs) leaseLost = true;
+      if (!stillOurs) { leaseLost = true; lease.abort(); }
     });
   };
 
@@ -485,7 +487,7 @@ async function processJob(
         // discarded here, so an operator saw success over audio that was never transcribed — the
         // document path has modelled this correctly all along and audio simply never carried the number.
         const a = await embedAudio(spaceId, fileId, plaintext, mimeType, providers.stt, undefined,
-          { onProgress: heartbeat, shouldStop: () => leaseLost, steps: AUDIO_STEPS });
+          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: AUDIO_STEPS });
         if (a.failed > 0) {
           fileEmbeddingStatus = 'partial';
           log.warn(`Media worker: ${a.failed}/${a.total} audio chunks failed for ${spaceId}/${fileId} — recording partial`);
@@ -499,7 +501,7 @@ async function processJob(
         // Same rule as audio: a video whose spoken content partly failed to transcribe is not complete,
         // however good its keyframe captions are.
         const v = await embedVideo(spaceId, fileId, plaintext, mimeType, providers.vision, providers.stt, doKeyframes,
-          undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, steps: VIDEO_STEPS });
+          undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: VIDEO_STEPS });
         if (v.audioFailed > 0) {
           fileEmbeddingStatus = 'partial';
           log.warn(`Media worker: ${v.audioFailed}/${v.audioTotal} audio chunks failed for ${spaceId}/${fileId} — recording partial`);

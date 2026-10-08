@@ -27,7 +27,7 @@ const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
 /** Extract audio track to a temporary WAV file. Returns the path. */
-async function extractAudioTrack(videoPath: string, outPath: string): Promise<void> {
+async function extractAudioTrack(videoPath: string, outPath: string, signal?: AbortSignal): Promise<void> {
   await runFfmpeg([
     '-i', videoPath,
     '-vn',
@@ -35,7 +35,7 @@ async function extractAudioTrack(videoPath: string, outPath: string): Promise<vo
     '-ar', '16000',
     '-ac', '1',
     outPath,
-  ]);
+  ], { signal });
 }
 
 /** Extract keyframe JPEG bytes at regular intervals. Returns array of { timestampS, jpegBytes }. */
@@ -52,6 +52,7 @@ async function extractKeyframes(
   videoPath: string,
   tmpDir: string,
   intervalS: number,
+  signal?: AbortSignal,
 ): Promise<Array<{ timestampS: number; jpegBytes: Buffer }>> {
   // Output pattern: frame_NNNNNN.jpg
   const pattern = path.join(tmpDir, 'frame_%06d.jpg');
@@ -68,7 +69,7 @@ async function extractKeyframes(
     '-frames:v', String(MAX_KEYFRAMES),
     '-q:v', '4',
     pattern,
-  ]).catch(err => {
+  ], { signal }).catch(err => {
     log.warn(`Video embedder: keyframe extraction warning: ${err instanceof Error ? err.message : String(err)}`);
     return { stdout: Buffer.alloc(0), stderr: '' };
   });
@@ -138,7 +139,7 @@ export async function embedVideo(
 
   try {
     // Step 1: Extract audio + embed audio chunks
-    await extractAudioTrack(videoPath, audioPath);
+    await extractAudioTrack(videoPath, audioPath, opts?.signal);
     // Handed on as a PATH, with its own size: the wav was read whole here only to be written straight back to disk by
     // the audio stage, which is two copies of a file that can be twenty minutes of PCM.
     const audioStat = await fs.stat(audioPath);
@@ -173,7 +174,7 @@ export async function embedVideo(
     // Step 2: Extract keyframes
     const keyframesDir = path.join(tmpDir, 'keyframes');
     await fs.mkdir(keyframesDir, { recursive: true });
-    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS);
+    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS, opts?.signal);
 
     if (keyframes.length === 0) {
       log.debug(`Video embedder: no keyframes extracted for ${fileId}`);
