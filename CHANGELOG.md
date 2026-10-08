@@ -175,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
   refused element's seq can no longer move the position; against an older server it holds, as before.
 - **Sync:** A publisher's or parent's deletions, its retention sweep's included, now reach records it relayed from other instances; they were declined and never retried. A one-time re-read applies what the upstream still holds. A tombstone `instanceId` over 256 characters is refused.
-- **Sync:** A file deleted on one peer is removed on the others at the version it names, and a file re-created since is kept. File tombstones page past the cut a pull read and the one body a push sent; a push logs how many a peer refused. A deleted directory's cached hashes are dropped.
+- **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since (other bytes, or a newer version by its deleter) is kept. Tombstones page past a pull's cut; a push logs refusals; a deleted directory's cached hashes go.
 - **Files:** A file a publisher pushes is recorded as an arrival, so later description and tag edits are no longer skipped; arriving
   bytes revive a soft-deleted path and get this instance's file retention window. A file-metadata arrival no longer overwrites a newer copy.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered (audit `file.stray_filemeta.drain`), never over a
