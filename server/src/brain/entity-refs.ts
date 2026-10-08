@@ -15,6 +15,7 @@
  * validate this?" answerable by grep rather than by reading every handler.
  */
 import { readStoredById } from '../db/read-by-id.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
@@ -282,7 +283,11 @@ export async function assertRefsResolve(
 export async function missingRefs(spaceId: string, kind: RefKind, values: readonly string[]): Promise<string[]> {
   const unique = [...new Set(values)];
   if (unique.length === 0) return [];
-  const found = await readStoredById(`${spaceId}_${COLLECTION_FOR[kind]}`, unique, {});
+  // Only a FILE ref can name a flagged row, and a deleted file must not resolve: under strict linkage an edge or a
+  // link to it was accepted because the audit record answered "present". The any-tier predicate keeps today's answer
+  // for every derived path, so this refuses what is deleted and nothing else.
+  const found = await readStoredById(`${spaceId}_${COLLECTION_FOR[kind]}`, unique, {},
+    { filter: kind === 'file' ? NOT_A_FLAGGED_ROW : undefined });
   return unique.filter(id => !found.has(id));
 }
 

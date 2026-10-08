@@ -54,7 +54,7 @@ import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { isLocalFileField } from './processing-state.js';
-import { LIVE_FILE_ROW } from './live-file-row.js';
+import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
 
 
 
@@ -247,6 +247,10 @@ export async function setDerivedDescriptionIfUnset(
   const r = await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({
       _id,
+      // Never onto the audit record of a deleted file: the strip removes a machine-made description, so a flagged row
+      // SATISFIES the "no description" condition below, and this write would put derived text back on it and stamp it a
+      // seq — which the flag itself deliberately does not do.
+      ...NOT_A_FLAGGED_ROW,
       $and: [
         { $or: [
           { description: { $exists: false } },
@@ -283,7 +287,9 @@ export async function setDerivedDescriptionIfUnset(
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
+    // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
+    // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
+    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
 }
 
 export async function updateFileMeta(
@@ -339,7 +345,11 @@ export async function updateFileMeta(
   });
 
   const normalised = toDocId(filePath);
-  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
+  // The flag is read HERE, where the edit is decided, so every write below it is governed by one read: a flagged row
+  // returns null and the doors answer 404. Editing one would write a description, tags and properties onto an audit
+  // record, re-queue the embed job the strip removed, and reconcile links off a file that is gone.
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ _id: normalised, ...NOT_A_FLAGGED_ROW })) as FileMetaDoc | null;
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -545,7 +555,10 @@ export async function deleteFileMetaByPrefix(
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
   const filter = liveFileRecords(path, 'at-or-under');
   if (!filter) return [];
-  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(filter, { projection: { _id: 1 } }).toArray();
+  // `LIVE_FILE_ROW` here as well as in `liveFileRecords`: the predicate belongs to the READ, so a caller handing this
+  // function another filter cannot make it answer about a chunk or an audit row.
+  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<FileMetaDoc>({ ...filter, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray();
   return rows.map(r => String(r._id));
 }
 
@@ -576,7 +589,10 @@ export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Prom
 
 async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
   if (!filter) return false;
-  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(filter, { projection: { _id: 1 } })) !== null;
+  // The function is named for LIVE file records, so the predicate is inside it rather than in each caller's filter:
+  // every caller passes `liveFileRecords(...)`, and the one that forgets must not get a different answer.
+  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ ...filter, ...LIVE_FILE_ROW }), { projection: { _id: 1 } })) !== null;
 }
 
 /**
@@ -722,8 +738,10 @@ export async function renameFileMeta(
   const normDst = toDocId(dstPath);
   if (normSrc === normDst) return;
 
+  // A flagged source is not moved: the audit record of a deleted file belongs to the path it was deleted at, and
+  // re-keying it onto the destination would make it claim a path that now holds another file's bytes.
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: normSrc }),
+    asFilter<FileMetaDoc>({ _id: normSrc, ...NOT_A_FLAGGED_ROW }),
   );
   if (!existing) return;
 
@@ -799,7 +817,9 @@ export async function renameFileMetaByPrefix(
   // The files themselves only. Their derived records (chunks, sidecars) are re-rooted by `parentFileId` in
   // `move-cascade.ts`: renamed here by id, a chunk kept the `parentFileId` of a path that no longer existed.
   const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }))
+    // `LIVE_FILE_ROW` rather than the `parentFileId` half spelled out: the flagged audit rows under the old directory
+    // stay where they were recorded, and the half-spelling `live-file-row.ts` warns about is gone from here.
+    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }))
     .toArray() as FileMetaDoc[];
 
   if (docs.length === 0) return;

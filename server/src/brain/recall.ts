@@ -44,6 +44,7 @@ import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import { MAX_PER_TYPE_CANDIDATES, perTypeFetch, floorFetch, annCandidates } from './search-bounds.js';
 
 /**
@@ -418,8 +419,11 @@ export async function recall(
    * It was survivable while the scan was opt-in, because a caller combining the flag with a filter was
    * rare. Making the scan unconditional made it the common case, which is how it was found.
    */
+  // PER TYPE, because the predicate is now per type: one predicate for every active type would have applied the file
+  // clause to facts (harmless) or, far worse, left it off the files scan — which reads straight from the collection and
+  // is exactly where a flagged row with a vector would come back.
   await addFreshWrites(spaceId, activeTypes, embResult.vector, allResults,
-    t => KNOWLEDGE_COLLECTION[t], hydrateFreshHits, recallPredicate(tags, filter));
+    t => KNOWLEDGE_COLLECTION[t], hydrateFreshHits, t => recallPredicate(tags, filter, t));
 
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b));
 
@@ -502,11 +506,11 @@ async function applyLexicalFusion(
   // THE predicate `recallByType` applies, from the one function that builds it, so the two channels agree on
   // eligibility. It was assembled here a second time by spreading the filter over the tag clause, so a filter
   // naming `tags` replaced the caller's `tags` in this channel even after the vector path stopped doing so.
-  const match = recallPredicate(tags, filter) ?? {};
-
+  // Per type, for the reason given at the fresh-write scan: the predicate carries the file clause, and the type is
+  // what selects it.
   const limit = perTypeK * LEXICAL_LIMIT_MULTIPLIER;
   const perType = await Promise.all(
-    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, match)),
+    activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, recallPredicate(tags, filter, t) ?? {})),
   );
   // Each type stays in its own order (`lexicalSearch` sorts by its collection's text score): the hits of different
   // types are never compared by raw score, whose scale is each collection's own (`Q-159`, see `stampFusion`).
@@ -526,7 +530,7 @@ async function applyLexicalFusion(
     const hits = perType[i] ?? [];
     if (hits.length === 0) continue;
     const introduced = await introduceLexicalOnly(
-      spaceId, type, hits, queryVector, inPool, match, perTypeK,
+      spaceId, type, hits, queryVector, inPool, recallPredicate(tags, filter, type) ?? {}, perTypeK,
     );
     for (const rec of introduced) {
       pool.push(rec);
@@ -891,7 +895,7 @@ async function recallByType(
   const predicateSearch = async (): Promise<Record<string, unknown>[]> => {
     const out = await predicateRecall({
       collName, indexName, vectorPath: 'embedding', queryVector, topK,
-      predicate: recallPredicate(tags, filter) ?? {},
+      predicate: recallPredicate(tags, filter, knowledgeType) ?? {},
       shape: [{ $addFields: { _knowledgeType: knowledgeType } }, { $project: { ...commonProject, ...typeProject } }],
       remaining: () => deadline() ?? RECALL_BUDGET_MS,
       memo: budget?.memo,
@@ -906,10 +910,25 @@ async function recallByType(
   //    FIRST, then exhaustively scores only that subset. Exact results, cost ∝ matching set, not N.
   //  - non-declarable filter (dynamic properties / $exists) → `predicateSearch`: the nearest window, completed
   //    from the collection whenever the window cannot prove it held the answer.
+  /*
+   * A FILE recall takes the predicate path, whatever it was asked for (`Q-418`). The clause that excludes the audit
+   * record of a deleted file is `deletedAt: {$exists: false}`, and `$exists` is not one of the operators a native
+   * vector filter can carry — so the index cannot apply it, and applying it AFTER the window is the Q-102 failure in a
+   * new place: flagged rows crowd the nearest window and live rows are dropped with nothing saying so. The predicate
+   * path's window is completed from the collection when the window cannot prove it held the answer, which is the one
+   * path that can promise a filtered file recall misses nothing.
+   *
+   * The cost is stated rather than hidden: a file recall is now an exhaustive-capable search, and says so through the
+   * same `scanned` disclosure every other predicate recall uses, so `filterPath` tells a caller which path it got.
+   */
+  const fileRowsNarrowed = knowledgeType === 'file';
   let primary: () => Promise<Record<string, unknown>[]>;
   let usedNativeFilter = false;
-  if (!hasFilter && !hasTags) {
+  if (!hasFilter && !hasTags && !fileRowsNarrowed) {
     primary = () => run([annStage(), ...tail]);
+  } else if (fileRowsNarrowed) {
+    observe?.scanned();
+    primary = predicateSearch;
   } else {
     const declared = new Set(vectorFilterFieldsFor(spaceId, collSuffix));
     /*
@@ -1096,8 +1115,11 @@ async function enrichFileChunksWithParent(spaceId: string, results: RecallResult
   const parentIds = [...new Set(fileChunks.map(r => r.parentFileId as string))];
 
   // Batch-fetch parent file docs — projection only (no embedding field)
+  // A flagged parent attaches nothing: its path, description and tags are what the audit record keeps, and a chunk
+  // whose file was deleted must not carry them into an answer. The chunk is still returned — this closes the leak of
+  // the parent's retained fields, exactly as a hard-deleted parent already does.
   const parentMap = await readStoredById<{ _id: string; path?: string; description?: string; tags?: string[] }>(
-    spaceCollection(spaceId, 'files'), parentIds, { path: 1, description: 1, tags: 1 });
+    spaceCollection(spaceId, 'files'), parentIds, { path: 1, description: 1, tags: 1 }, { filter: NOT_A_FLAGGED_ROW });
 
   for (const chunk of fileChunks) {
     const parent = parentMap.get(chunk.parentFileId as string);
@@ -1211,7 +1233,9 @@ async function getEntryEmbedding(
   // `seq` too: the duplicate scanner records a pair at both records' seqs and skips it while they are unchanged,
   // and a source with no seq made that depend on which end was the seed — a refused pair re-merged on every scan.
   const doc = await col(collName).findOne(
-    asFilter({ _id: entryId, spaceId }),
+    // A deleted file is not a seed: `similar` would answer with the neighbours of a file that is gone, or — where the
+    // flag stripped its vector — with "not embedded yet, retry", which sends a caller back for ever.
+    asFilter({ _id: entryId, spaceId, ...(entryType === 'file' ? NOT_A_FLAGGED_ROW : {}) }),
     { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;

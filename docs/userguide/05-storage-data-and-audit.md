@@ -552,7 +552,8 @@ the file is next edited; the log of the instance that sends says so, once, namin
 **A file you deleted, with records kept, stays on your instance.** With the
 [record of deleted files](04-settings.md#keeping-a-record-of-deleted-files) switched on, the flagged record is not
 sent to other instances and not counted when instances compare their data: they get the deletion notice and each
-follows its own setting. A restore from an export brings the flag back. A restore also removes a description,
+follows its own setting. It is not a search result and not in any file count either; Brain → Query is where you read
+it, by asking the Files collection for records that carry a deletion time. A restore from an export brings the flag back. A restore also removes a description,
 tag or property the exported record did not have, as the export is a full copy, and the import summary
 counts those removals (`keysRemoved`).
 

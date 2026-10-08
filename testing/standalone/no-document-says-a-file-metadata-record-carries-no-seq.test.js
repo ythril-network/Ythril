@@ -44,7 +44,10 @@ const SELF = 'testing/standalone/no-document-says-a-file-metadata-record-carries
  * A fresh matcher per use (a shared global regex under-scans). A sentence (no full stop between) that names file metadata
  * and then says it carries or has no seq. `file-meta`, `file metadata`, `file-metadata` and `filemeta` all name it.
  */
-const staleClaim = () => /\bfile[- ]?meta(?:data)?\b[^.]{0,120}?\b(?:carr(?:y|ies)|ha(?:s|ve))\s+no\s+`?seq\b/gi;
+// The window between the subject and the claim is bounded by the SENTENCE — `[^.]` cannot cross a full stop — so
+// there is no character count to guess at. It carried a capped gap of a hundred-odd characters, which was a guess at
+// how long such a sentence is and would have missed a longer one in silence.
+const staleClaim = () => /\bfile[- ]?meta(?:data)?\b[^.]*?\b(?:carr(?:y|ies)|ha(?:s|ve))\s+no\s+`?seq\b/gi;
 
 /** Every "has/carries no seq", whatever its subject: the population the claim is picked out of. */
 const anyNoSeq = () => /\b(?:carr(?:y|ies)|ha(?:s|ve))\s+no\s+`?seq\b/gi;

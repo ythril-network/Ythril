@@ -58,6 +58,30 @@ const LIVE_MODULE = 'server/src/files/live-file-row.ts';
  * flag is never set on — the flag sits on the parent, and a flagged file's children are removed with it.
  */
 const EXEMPT = {
+  // ── it cannot reach a flagged row from here
+  'server/src/api/sync/docs.ts:oneById': 'the narrowing is the family\'s own `pushFilter`, which for file metadata IS `LIVE_FILE_ROW` (sync/replicated-families.ts), so a read by id serves exactly what a page would; naming it here would be a second copy and the other five families must not take it',
+  'server/src/brain/edge-endpoint-names.ts:resolveEndpointName': 'returns the id before its one read when the kind is `file` (a file endpoint\'s display name IS its path), so the collection it computes is never the files one',
+  'server/src/brain/lexical-search.ts:lexicalSearch': 'its `eligibility` argument IS the recall\'s own predicate for this type, built by `recallPredicate` (brain/recall-filter.ts) and carrying the any-tier clause for a file recall; a copy here would let this channel and the vector path disagree about what is eligible, which is the thing that one builder exists to stop',
+  'server/src/brain/recall.ts:recallByType': 'its eligibility predicate is `recallPredicate(tags, filter, knowledgeType)`, which carries the any-tier clause for a file recall (brain/recall-filter.ts) — the one place the vector path, the predicate path, the fresh-write scan and the lexical channel all read it from',
+  // ── it handles the collection, not the files in it
+  'server/src/app.ts:createApp': 'the app builder: it mounts the routers and reads no row of its own — its one read of a collection is the admin export handler below',
+  'server/src/files/media/job-queue.ts:fileCollection': 'hands the collection to one caller, which reads a single `sizeBytes` for a stalled-job WARN line and surfaces no row to anybody',
+  'server/src/auth/find-where-token-may.ts:findWhereTokenMay': 'a by-id lookup of review-state rows across the spaces a token reaches; every caller passes a conflicts or candidates collection, never files',
+  'server/src/api/spaces.ts:POST /api/spaces/:id/validate-schema': 'dry-runs a schema against the schema-bearing records; no file is a schema subject, and its computed collection name is only ever passed entities, edges, facts or chrono',
+  // ── it must SEE the flagged row, because the flag is what it decides on
+  'server/src/sync/file-sync.ts:heldRowsFor': 'the pull decides ON the flag: `HeldRow.deletedAt` is what makes `repairReasonOf` answer null ("a soft-deleted row is not repaired"), and a predicate would make a deleted file read as `missing_row` and take its bytes back',
+  'server/src/sync/push-reads.ts:readPushStored': 'the arrival planner compares the STORED seq, for every family; a hidden row reads as "nothing stored" and lets any arriving seq win over it. The flagged-row rule belongs to the writer (`writeArrivals`, above)',
+  'server/src/app.ts:GET /api/admin/spaces/:spaceId/export': 'a full snapshot carries the audit rows on purpose: a restore brings the flag back with the record (`restoredFileFlag`), and filtering here would drop deletion history out of every backup',
+  // ── the audit record has to be readable somewhere, and this is the door
+  'server/src/brain/query.ts:queryBrain': 'the `filter`/`query` door deliberately still reaches a flagged row: it is the one door left through which the audit record this setting exists to keep can be read, and it is neither the file list nor a total, which is all the userguide promises',
+  'server/src/brain/query.ts:countBrain': 'the count behind that same door, over whichever collection it was asked about: it counts what the door returns',
+  // ── the predicate reaches the read from one place, and a copy here would be the second
+  'server/src/brain/queue-embed-sweep.ts:countUnswept': 'its filter is `kindFilters` -> `candidates`, which applies the any-tier predicate for files in one place (`const live`, queue-embed-sweep.ts); a predicate here would be a second copy of it',
+  'server/src/brain/queue-embed-sweep.ts:queueEmbedSweep': 'the walk to that same count\'s filter: the predicate is in `candidates` for both, so neither reader can queue a job for a flagged row',
+  'server/src/brain/link-adjacency.ts:docsFromCollection': 'the narrowing is the link class\'s own `scope`, ANDed into the read, and for files that scope IS `LIVE_FILE_ROW` (`SCOPE`, link-adjacency.ts) — so a linked file node is never a chunk and never a flagged row',
+  'server/src/util/seq-keyset.ts:readAfterSeq': 'a generic keyset reader over the collection its caller names; the narrowing is the caller\'s `extra`, and the file sync family passes `LIVE_FILE_ROW` through it (`pushFilter`, sync/replicated-families.ts)',
+  'server/src/api/brain/file-meta.ts:GET /api/brain/spaces/:spaceId/files/extract': 'its own reads select CHILD rows by `parentFileId`, which a flag is never set on; whether the FILE is still here is the parent read, `getFileMeta`, which carries the predicate',
+  'server/src/brain/dupe-scanner.ts:recordMatchedText': 'reads `matchedText` alone, which the flag write strips, so a flagged row already answers the empty string a predicate would answer for it',
   // ── it handles the collection, not the files in it
   'server/src/spaces/lifecycle.ts:initSpace': 'creates the space\'s collections and indexes and samples a fact for the embedding model; reads no file for any caller',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'walks the typed record collections (`KnowledgeType`: entity, fact, edge, chrono — a file is none of them) to stamp a retention window; names a suffix, never the files collection',

@@ -33,6 +33,7 @@ import { embeddingSuppressedFor, recordNotSuppressedFilter, RECORD_SUPPRESS_FIEL
 import { TYPE_FIELD } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import type { KnowledgeType } from '../config/types-knowledge.js';
 import type { BrainEmbedRecordType } from '../config/types.js';
 
@@ -134,12 +135,19 @@ export interface SweepResult {
 /** The records of a kind a sweep considers at all, before suppression. */
 function candidates(kind: BrainEmbedRecordType, match: SweepOptions['match']): Record<string, unknown> {
   const topLevel = { parentFileId: { $exists: false } };
+  /*
+   * NEVER a row a soft delete flagged. The flag strips the vector, so a flagged file is a vectorless candidate for
+   * ever: a backfill queued a job for every deleted file on every pass, re-embedded the audit record, and inflated
+   * `total` and `remaining` with work nobody asked for. The any-tier predicate, because a chunk or caption row is a
+   * legitimate candidate — it is vacuous on one, which is correct: a flagged file's children go with it.
+   */
+  const live = kind === 'file' ? NOT_A_FLAGGED_ROW : {};
   if (match === 'vectorless') {
     const vectorless = { embedding: { $exists: false } };
-    return kind === 'file' ? { ...vectorless, $or: [topLevel, derivedHasText] } : vectorless;
+    return kind === 'file' ? { ...vectorless, ...live, $or: [topLevel, derivedHasText] } : vectorless;
   }
   return kind === 'file'
-    ? { $or: [topLevel, derivedHasText, { parentFileId: { $exists: true }, embedding: { $exists: true } }] }
+    ? { ...live, $or: [topLevel, derivedHasText, { parentFileId: { $exists: true }, embedding: { $exists: true } }] }
     : {};
 }
 

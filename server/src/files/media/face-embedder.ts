@@ -46,6 +46,7 @@ import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
 import type { Config as HumanConfig, Result } from '@vladmandic/human';
 import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from './face-external.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
 
@@ -432,7 +433,9 @@ export async function embedFaces(
   if (autoLabelEntityId) {
     try {
       const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-        asFilter<FileMetaDoc>({ _id: fileId }),
+        // The parent read decides the auto-label, so it asks whether the parent is still here: labelling links an
+        // entity to a file, and a deleted file takes no label.
+        asFilter<FileMetaDoc>({ _id: fileId, ...NOT_A_FLAGGED_ROW }),
         { projection: { _id: 1 } },
       ) as FileMetaDoc | null;
 

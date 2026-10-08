@@ -512,6 +512,7 @@ export const update_file_metaTool: ToolHandler = {
   description: 'Change a file record\'s description, tags, properties or links WITHOUT resending the file. '
     + '`write_file` can set those fields, but only together with new content, so correcting one tag used to '
     + 'mean re-uploading the bytes. Only the fields you pass are touched; omit one to leave it alone.\n\n'
+    + 'A FILE THIS INSTANCE HAS DELETED IS NOT A FILE TO EDIT. Where the operator keeps a record of deleted files, that record is refused here exactly as a path that never existed is — the same answer on the REST route — because an edit would put the file back into search and hang links off bytes that are gone.\n\n'
     + '`properties` MERGES, like every other record type: patch one key and the others survive. It REPLACED '
     + 'until 3.1, so a caller written against the old behaviour that resends the whole object is unaffected, '
     + 'while one that patches a single key now keeps what it did not name instead of destroying it.\n\n'

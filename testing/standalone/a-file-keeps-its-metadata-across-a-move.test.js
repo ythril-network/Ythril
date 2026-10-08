@@ -75,19 +75,28 @@ describe('a move carries the record whole', () => {
       + 'without it — with no error, because an insert of a partial document is a valid insert.');
   });
 
-  it('and it changes only the identity and the timestamp', () => {
+  it('and it changes only the identity — not the timestamp its version is read beside', () => {
     /*
      * The spread is only half the guarantee: an override after it would silently reset a field. Read the
-     * keys assigned alongside the spread and hold them to the three that MUST change — the two halves of
-     * the new identity, and the stamp that says when.
+     * keys assigned alongside the spread and hold them to the two that MUST change — the two halves of the
+     * new identity.
+     *
+     * **It used to be three, and `updatedAt` was the third (`Q-419`, bundle-89.)** A move deletes the row and
+     * re-inserts it under the new id, and that insert stamps NO seq — the row arrives with the seq it already
+     * had. Stamping a fresh `updatedAt` beside an unchanged seq is drift by construction, and on a
+     * peer-authored row it leaves another instance's seq and author next to this instance's clock, which no
+     * peer can order: measured at five weeks of drift from one move, reported every cycle by a merkle check
+     * for a space where nothing is wrong. The path is an authored field, so the write that changes it belongs
+     * to the authored path that stamps both, not to a re-key that stamps one of the two.
      */
     const body = bodyOf(SRC, 'renameFileMeta');
     const insert = /rekeyedRow\(\s*existing\s*,\s*\{([\s\S]*?)\}\)/.exec(body);
     assert.ok(insert, 'could not read the re-insert — re-anchor this case');
     const assigned = [...insert[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)].map(m => m[1]);
-    assert.deepEqual(assigned.sort(), ['_id', 'path', 'updatedAt'],
-      `the re-insert assigns ${assigned.join(', ')} on top of the existing document. Anything beyond the new id, the `
-      + 'new path and the stamp is a field a move silently rewrites.');
+    assert.deepEqual(assigned.sort(), ['_id', 'path'],
+      `the re-insert assigns ${assigned.join(', ')} on top of the existing document. Anything beyond the new id and `
+      + 'the new path is a field a move silently rewrites — `updatedAt` included, which is what this case was '
+      + 'changed to refuse.');
   });
 });
 

@@ -105,6 +105,8 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
         res.end(JSON.stringify({ faces: [{ embedding: Array.from({ length: FACE_DIMS }, (_, i) => (i + 1) / 200) }] }));
       });
     });
+    // own-listener: binds the host's private address, because the SSRF guard refuses loopback and the face provider
+    // is fetched through it
     await new Promise(r => faceServer.listen(0, host, r));
     const faceUrl = `http://${host}:${faceServer.address().port}/faces`;
 

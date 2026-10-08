@@ -81,18 +81,6 @@ const DELETERS: Record<TtlCollection, (spaceId: string, id: string, actor?: Webh
   files: (spaceId, id, actor) => deleteFileCascade(spaceId, id, actor).then(() => true),
 };
 
-/**
- * Extra filter for the sweep query, per collection. Files: only the file-level records — chunk and face records carry
- * `parentFileId` and never an `_expireAt` — and not already soft-deleted.
- *
- * That is exactly `LIVE_FILE_ROW`, and until bundle-89 it was spelled out here by hand, which is the copy
- * `live-file-row.ts` warns about in as many words: *"a site that spells `deletedAt: { $exists: false }` itself is the
- * next one to forget the half beside it."* It was the only such copy left.
- */
-const SWEEP_FILTER: Partial<Record<TtlCollection, Record<string, unknown>>> = {
-  files: { ...LIVE_FILE_ROW },
-};
-
 /** Delete one expired record through its normal deleter. False = the deleter matched nothing (see {@link sweepCollection}). */
 function removeExpired(spaceId: string, c: TtlCollection, id: string): Promise<boolean> {
   return DELETERS[c](spaceId, id, TTL_ACTOR);
@@ -100,7 +88,11 @@ function removeExpired(spaceId: string, c: TtlCollection, id: string): Promise<b
 
 /** Up to `limit` ids of the collection's expired records, none of them in `exclude`. */
 async function expiredPage(spaceId: string, c: TtlCollection, now: Date, exclude: string[], limit: number): Promise<string[]> {
-  const filter = { _expireAt: { $lte: now }, ...(SWEEP_FILTER[c] ?? {}), ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}) };
+  // Files: the file-level records only — a chunk or face row carries `parentFileId` and never an `_expireAt` — and
+  // never a row a soft delete already flagged. A flagged row's own retention is the separate question, run from
+  // `deletedAt` by its own unit; this one would hand the audit record to `deleteFileCascade` on the next sweep.
+  const files = c === 'files' ? LIVE_FILE_ROW : {};
+  const filter = { _expireAt: { $lte: now }, ...files, ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}) };
   // The deadline is the housekeeping scope's (`withinHousekeepingBound`), never chained on the cursor (Q-358).
   const docs = await col(`${spaceId}_${c}`).find(asFilter(filter), { projection: { _id: 1 }, limit }).toArray() as unknown as Array<{ _id: string }>;
   return docs.map(d => d._id);
@@ -108,7 +100,10 @@ async function expiredPage(spaceId: string, c: TtlCollection, now: Date, exclude
 
 /** Is the record still stored? */
 async function isStored(spaceId: string, c: TtlCollection, id: string): Promise<boolean> {
-  return (await col(`${spaceId}_${c}`).findOne(asFilter({ _id: id }), { projection: { _id: 1 } })) !== null;
+  // The same question as the page above, so the same narrowing: with `softDeleteFileMeta` a flagged row is what a
+  // successful file delete LEAVES, and reading it as "still stored" would report a clean delete as a stuck record.
+  return (await col(`${spaceId}_${c}`)
+    .findOne(asFilter({ _id: id, ...(c === 'files' ? LIVE_FILE_ROW : {}) }), { projection: { _id: 1 } })) !== null;
 }
 
 /**

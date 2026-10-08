@@ -37,6 +37,7 @@ import { LINK_CLASSES, legacyField } from './link-adjacency.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { isProxy } from '../spaces/proxy.js';
 
 /**
@@ -120,7 +121,9 @@ export async function stampFileMetaSeqs(spaceId: string): Promise<number> {
   let stamped = 0;
   for (;;) {
     const doc = await col<{ _id: string }>(spaceCollection(spaceId, 'files')).findOne(
-      asFilter<{ _id: string }>({ seq: { $exists: false }, parentFileId: { $exists: false } }),
+      // `LIVE_FILE_ROW`, which is the `parentFileId` half this spelled out plus the flag: stamping a seq on the audit
+      // record of a deleted file advances the space counter for a row no peer is ever offered.
+      asFilter<{ _id: string }>({ seq: { $exists: false }, ...LIVE_FILE_ROW }),
       { projection: { _id: 1 } },
     ) as { _id: string } | null;
     if (!doc) break;
@@ -188,7 +191,10 @@ export async function previewSpaceLinks(spaceId: string): Promise<ConversionPrev
    * every reader instead.
    */
   for (const c of LINK_CLASSES) {
-    const nonEmpty = asFilter({ [legacyField(c.toKind)]: { $exists: true, $ne: [] } });
+    // The preview counts what the conversion will convert, so it takes the same files narrowing (below): a count that
+    // included deleted files would promise link records the conversion then does not make.
+    const nonEmpty = asFilter({ [legacyField(c.toKind)]: { $exists: true, $ne: [] },
+      ...(c.collection === 'files' ? LIVE_FILE_ROW : {}) });
     out.records[c.label] = await col(`${spaceId}_${c.collection}`).countDocuments(nonEmpty);
     const grouped = await col(`${spaceId}_${c.collection}`).aggregate([
       { $match: nonEmpty },
@@ -234,7 +240,12 @@ async function convertSpaceInWalk(spaceId: string): Promise<ConversionReport> {
     let after: string | undefined;
 
     for (;;) {
-      const filter: Record<string, unknown> = after === undefined ? {} : { _id: { $gt: after } };
+      // A link record replicates, so converting a deleted file's legacy array would push a link whose source the peer
+      // holds a tombstone for. The preview above carries the same narrowing, so the two cannot disagree.
+      const filter: Record<string, unknown> = {
+        ...(suffix === 'files' ? LIVE_FILE_ROW : {}),
+        ...(after === undefined ? {} : { _id: { $gt: after } }),
+      };
       const docs = await col<{ _id: string }>(`${spaceId}_${suffix}`)
         .find(asFilter<{ _id: string }>(filter))
         .sort({ _id: 1 })

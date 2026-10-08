@@ -44,6 +44,7 @@ import { getConfig } from '../config/loader.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 
 /** One class of link: a record kind that names another record kind through one array field. */
 export interface LinkClass {
@@ -132,7 +133,10 @@ const COLLECTION: Record<LinkClass['kind'], LinkClass['collection']> = {
 
 /** See `LinkClass.scope`: chunks share the file collection with the files they came from. */
 const SCOPE: Record<LinkClass['kind'], Record<string, unknown>> = {
-  chrono: {}, fact: {}, file: { parentFileId: { $exists: false } },
+  // `LIVE_FILE_ROW` is this exclusion plus the flag — the half-spelling `live-file-row.ts` warns about was here.
+  // Every reader of a class's scope gets both halves at once: a linked file node is a live file, never a chunk and
+  // never the audit record of a deleted one.
+  chrono: {}, fact: {}, file: { ...LIVE_FILE_ROW },
 };
 
 /**
@@ -405,20 +409,3 @@ export async function docsFromCollection<T extends { _id: string }>(
     { filter: [scope, extra] });
 }
 
-/**
- * Narrow a set of FROM ids to the ones the class's `scope` admits, by reading the records themselves.
- *
- * This is the chunk exclusion after a link-record lookup, and it is the step that is easy to leave out: a
- * link row has no `parentFileId`, so a file link and a chunk link are indistinguishable in the links
- * collection. Without this a forty-passage document comes back as forty nodes carrying passage text — the
- * failure `LinkClass.scope` was written for, arriving through the new path instead of the old one.
- *
- * The read is not wasted: the caller wants the documents anyway, so this returns them with the class's
- * projection already applied.
- */
-export async function scopedDocs<T extends { _id: string }>(
-  spaceId: string, cls: LinkClass, ids: readonly string[],
-): Promise<T[]> {
-  if (ids.length === 0) return [];
-  return await readRowsById<T>(`${spaceId}_${cls.collection}`, ids, cls.projection, { filter: cls.scope });
-}

@@ -13,6 +13,7 @@ import { spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
@@ -90,6 +91,7 @@ export const space_statsTool: ToolHandler = {
   name: 'space_stats',
   description: 'Return counts of facts, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
     + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
+    + 'THE FILES NUMBER IS THE SPACE\'S FILES: not the passages a document was split into, and not the record a deleted file leaves behind where the operator keeps one. The REST stats route and a space\'s own shape answer that same number, so a count never depends on which door you asked.\n\n'
     + 'On a PROXY space the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -108,7 +110,10 @@ export const space_statsTool: ToolHandler = {
       entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
       edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
       chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
-      files: await col(spaceCollection(mid, 'files')).countDocuments(),
+      // LIVE files, as REST stats counts them (api/brain/search.ts): not the chunk rows a document is split into,
+      // and not the audit rows of deleted files. This door counted all three, so the same space answered two numbers
+      // depending on which door was asked.
+      files: await col(spaceCollection(mid, 'files')).countDocuments({ ...LIVE_FILE_ROW }),
     })));
     const facts = counts.reduce((s, c) => s + c.facts, 0);
     const entities = counts.reduce((s, c) => s + c.entities, 0);

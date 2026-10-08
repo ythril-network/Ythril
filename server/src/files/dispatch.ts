@@ -28,6 +28,7 @@ import { mimeTypeForPath } from './mime.js';
 import { toDocId } from '../util/paths.js';
 import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
 
 /** Embedding-pipeline state surfaced to the HTTP/MCP response after a write. */
 /**
@@ -58,7 +59,10 @@ export interface PriorProcessing {
  */
 async function readPriorProcessing(spaceId: string, filePath: string): Promise<PriorProcessing | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: { sha256: 1, embeddingStatus: 1 } },
+    // NOT a flagged row: a file flagged by a release before the strip can still hold `sha256` and `complete`, and
+    // "the same bytes are already processed" is then answered from the audit record of a DELETED file. No row means
+    // "unknown, so process", which is the direction this read already fails in.
+    asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: { sha256: 1, embeddingStatus: 1 } },
   ) as PriorProcessing | null;
 }
 

@@ -133,17 +133,33 @@ describe('a flagged file is not a result, a count or a link target', { skip }, (
     });
   });
 
-  describe('filter over files', () => {
+  /*
+   * THE ONE DOOR THAT STILL REACHES IT, and it is a decision rather than an omission.
+   *
+   * `softDeleteFileMeta` keeps the record "as an audit trail" (userguide 04-settings). Every other way of reaching it is
+   * closed by this bundle: the file list, the three totals, recall and the lexical channel, the graph walk, the link
+   * target check, `getFileMeta` and the extract route. If the structured-predicate door closed too, the setting would keep
+   * a row that nothing can read, which is not an audit trail — so `filter`/`query` stay open, and the gate carries that as
+   * a reasoned exemption rather than as a reader somebody forgot.
+   *
+   * What the operator is promised is the narrow thing, and these rows are what hold it: the flagged row is not in the
+   * file LIST, not in a space's TOTALS, never offered to a peer and never part of what instances compare. Asking a
+   * predicate door for it by id is not any of those.
+   */
+  describe('filter over files: the audit record is readable HERE and nowhere else', () => {
     for (const transport of TRANSPORTS) {
-      it(`${transport === 'mcp' ? 'MCP filter' : 'POST /api/filter'}: the flagged row is not a result, the live file is`, async () => {
+      it(`${transport === 'mcp' ? 'MCP filter' : 'POST /api/filter'}: the flagged row IS a result of the predicate door, with the live file`, async () => {
         const out = await tool(transport, 'filter', { collection: 'files', limit: 100 });
         assert.equal(out.isError, false, out.text.slice(0, 300));
         const ids = rowsOf(out).map(r => String(r._id));
         assert.ok(ids.includes(LIVE), `control: the live file is not in [${ids.join(', ')}] — the read looked in the wrong place: ${out.text.slice(0, 300)}`);
-        assert.ok(!ids.includes(GONE), `filter over files returned the soft-deleted row ${GONE}: [${ids.join(', ')}]`);
-        // Asked for by id, the flagged row is still not there: no predicate of the caller's finds an audit row.
+        assert.ok(ids.includes(GONE), `the audit record ${GONE} is not readable through the one door left for it: [${ids.join(', ')}]`);
+        // By id, which is how an operator asks about one deleted path.
         const asked = await tool(transport, 'filter', { collection: 'files', filter: { _id: GONE } });
-        assert.deepEqual(rowsOf(asked).map(r => r._id), [], `filter {_id: ${GONE}} returned the flagged row`);
+        assert.deepEqual(rowsOf(asked).map(r => String(r._id)), [GONE], `filter {_id: ${GONE}} did not answer with the audit record`);
+        // And it is still flagged, so a caller can tell an audit record from a file: the door does not hide the flag
+        // it is being asked about.
+        assert.equal(typeof rowsOf(asked)[0]?.['deletedAt'], 'string', 'the audit record came back without its deletion stamp');
       });
     }
   });

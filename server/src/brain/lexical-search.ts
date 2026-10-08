@@ -80,6 +80,8 @@ export async function lexicalSearch(
 
   try {
     const rows = await col(collName)
+      // `eligibility` is the recall's own predicate, built by `recallPredicate` FOR THIS TYPE — so for a file recall
+      // it already excludes the audit rows of deleted files, and this channel cannot rank one the vector path refused.
       .find({ ...eligibility, $text: { $search: q } }, { projection: { _id: 1, lexicalScore: { $meta: 'textScore' } } })
       // `_id` ends the sort, like every other ranking sort in recall (`byIdAsc`). A text score depends only on the
       // matched terms and the field length, so records written from one template tie EXACTLY, and the database

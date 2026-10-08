@@ -322,7 +322,18 @@ sidecars with it. The same holds for a move, whose old paths are tombstoned.
 `false`), deleting a file **retains** its metadata record and flags it `deletedAt = <timestamp>`
 instead of removing it. A flagged record is this instance's own audit record: it is left out of the file
 listing, **never offered to a peer** (not pushed, not served by the sync routes, not hashed by the Merkle check)
-and the flag stamps no `seq` or `updatedAt`. Bytes written to the same path again (an upload, or a file a peer
+and the flag stamps no `seq` or `updatedAt`.
+
+**What a flagged record is not, and the one door that still reaches it.** It is not a file the space has, so it is
+absent from the listing and from every file count (`GET /spaces/:spaceId/stats`, the MCP `space_stats` tool and a
+space's own shape all answer the same number); it is not a result of `recall` or `similar`, on either door, nor of the
+lexical half of a search; a graph walk does not reach it and attaches none of its fields; it is not a valid edge or
+link target, so a strict-linkage space refuses a reference to it exactly as it refuses a path that never existed; the
+by-path metadata read, the extract route and `PATCH`/`update_file_meta` answer `404` for it. **The exception is the
+structured query door**: `POST /api/filter` and `POST /api/query` over `collection: "files"` DO return it, because
+after all of the above nothing else would, and the record exists to be read. Filter on `deletedAt` to tell the two
+apart — `{"deletedAt": {"$exists": false}}` for the files the space has, `{"deletedAt": {"$exists": true}}` for what
+was deleted and when. Bytes written to the same path again (an upload, or a file a peer
 delivers) clear the flag. **The deletion reaches peers as the file tombstone, and each peer applies it by its
 own `softDeleteFileMeta`**, whatever this instance's setting: one keeps its flagged row, another removes it.
 A restore from an admin export keeps the flag its backup row carried (the import summary counts them in
