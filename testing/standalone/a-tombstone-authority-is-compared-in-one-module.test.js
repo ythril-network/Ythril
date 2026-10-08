@@ -57,6 +57,7 @@ const EXEMPT = new Map([
   ['server/src/sync/upsert-plan.ts', new Map([
     ['heldTombstoneRefuses', 'the ARRIVAL side: does a tombstone already held refuse a record or file version arriving now'],
     ['tombstoneGoverns', 'the one spelling of "same instance, or either unknown" that `authorises` and `heldTombstoneRefuses` share'],
+    ['convergesOnAuthorStamp', 'the equal-seq CONVERGENCE (Q-419), which deletes nothing: may a receiver adopt the timestamp on a file row it already holds at the same seq and with the same content. It compares a deliverer to an author, which is the same primitive and a different question — and `authorises` must NOT be used for it, because that admits an upstream relaying another author\'s record (ground `upstream`), while a relay serves its OWN stored timestamp with the author field intact: the a-b-a flip-flop this verdict exists to refuse'],
     ['isNewerVersionByTheIssuer', 'the ARRIVAL side again (bundle-71, Q-349): is a live row a later version of what a held tombstone deleted, by the tombstone\'s own issuer — what re-creates a deleted file, so that its sidecars stop being shadowed. It deletes nothing and judges no delivery; it lives beside `heldTombstoneRefuses` because `files/tombstones.ts` cannot import this module (a cycle through the space lifecycle)'],
   ])],
   ['server/src/files/file-meta.ts', new Map([

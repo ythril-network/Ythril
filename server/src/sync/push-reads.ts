@@ -16,11 +16,12 @@
  *    index (`spaces/lifecycle.ts`), which also names the forks already stored, and a **chain walk level by
  *    level** with `$in`, at most `MAX_FORK_DEPTH` reads.
  */
+import { FILE_HASH_PROJECTION, fileContentHash } from '../brain/merkle.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import type { TombstoneType } from '../config/types.js';
-import { forkCandidates, MAX_FORK_DEPTH, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
+import { forkCandidates, MAX_FORK_DEPTH, CONVERGE_BLANKED, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
 
 /**
  * The tombstone held per record id — its seq, its issuer and the upstream it was stored for (`storedVia`) — per
@@ -48,6 +49,25 @@ export async function readPageTombstones(
 export async function readPushStored(
   spaceId: string, family: PlannedFamily, docs: readonly ArrivalDoc[],
 ): Promise<Map<string, StoredCopy>> {
+  /*
+   * A FILE row is read with its AUTHORED half, not just its seq (`Q-419`).
+   *
+   * The planner has one more question to ask of a file than of any other family: an arriving copy at the seq we
+   * already hold, from the peer that authored both, identical but for the timestamp, is a drift to converge rather
+   * than a copy to skip. Deciding that needs the author, the timestamp, and a hash of everything else the wire
+   * carries — so the read asks for the hash's own projection and the hash is computed here, once per row, rather
+   * than handing the planner the fields and a second definition of what a file row's content is.
+   */
+  if (family === 'files') {
+    const rows = await readStoredById<Record<string, unknown>>(
+      spaceCollection(spaceId, family), docs.map(d => d._id), FILE_HASH_PROJECTION as unknown as Record<string, 1>);
+    return new Map([...rows].map(([id, row]) => [id, {
+      ...(typeof row['seq'] === 'number' ? { seq: row['seq'] } : {}),
+      ...(row['author'] !== undefined ? { author: row['author'] as { instanceId?: string } } : {}),
+      ...(typeof row['updatedAt'] === 'string' ? { updatedAt: row['updatedAt'] } : {}),
+      contentHash: fileContentHash(row, CONVERGE_BLANKED),
+    } satisfies StoredCopy]));
+  }
   const fields: Record<string, 1> = family === 'facts' ? { seq: 1, fact: 1, forkOf: 1 } : { seq: 1 };
   return readStoredById<StoredCopy>(spaceCollection(spaceId, family), docs.map(d => d._id), fields);
 }

@@ -322,6 +322,20 @@ and a metadata row or a file tombstone for such a path is dropped; each is count
 the other instance-local paths: a conflict copy, a schema snapshot and a legacy spill. Sidecars a peer
 delivered before this release are retired, bytes and row, by the retention sweep.
 
+**A file row at an EQUAL seq can now change one field: its `updatedAt`.** Two instances could hold one file row at the
+same `seq` with different `updatedAt` values — a hashed field, so `merkle: true` reported a divergence every cycle, and
+an equal-seq arrival was skipped, so nothing ever repaired it. A receiver now adopts the arriving `updatedAt` when all of
+this holds: the DELIVERING peer is the author named on both copies, that author is not the receiver, the authored content
+is identical (the hash projection, with `updatedAt` and `author` left out), and the two instants differ. A relay's
+delivery of somebody else's row never converges — a relay serves its own stored value with the author field intact, and
+adopting it would flip the row between two values for ever. Nothing else is written: no `seq` is stamped, `deliveredBy`
+is untouched, and no embedding is re-queued.
+
+**So `updatedAt` on `IncomingFileMetaDoc` is now CHECKED, and a bad one is a `400`.** It must be an ISO instant in the
+comparable fixed-width form and under 40 characters. It is the one timestamp a peer sends that can change a stored row,
+which is why it is the one that is validated; every other family's `updatedAt` arrives with a whole version and is still
+`z.string()`.
+
 **A soft-deleted file's row never syncs.** With `softDeleteFileMeta` on, a delete leaves its row flagged
 `deletedAt`: local audit state that stamps no `seq` and no `updatedAt`. `GET /api/sync/filemeta` does not page it,
 `GET /api/sync/filemeta/:id` answers `404` for it, a push never sends it, and no Merkle root hashes it. The

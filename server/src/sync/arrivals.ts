@@ -77,7 +77,7 @@
  * writer re-checks "strictly newer than stored" only AT the write, which agrees with every planned verdict. A
  * restore is not planned: it replaces what is stored.
  */
-import { col, asBulk } from '../db/mongo.js';
+import { col, asBulk, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import {
@@ -647,4 +647,60 @@ export async function writeArrivals(
     throw counter;
   }
   return out;
+}
+
+/**
+ * Adopt the AUTHOR's timestamp on file rows that already hold its content at its seq — the equal-seq convergence
+ * (`Q-419`), decided by `convergesOnAuthorStamp` and written here.
+ *
+ * ## Why it is in this file
+ *
+ * This is the one writer of an arriving record, and `an-arrival-is-written-by-one-writer` holds every door to it. A
+ * converge is an arrival's write even though it stores no record: a door that did it for itself would be the second
+ * writer of a record collection, which is the thing that gate exists to refuse.
+ *
+ * ## What it writes, and what it deliberately does not
+ *
+ * One field. No seq is stamped — the row keeps the author's, which is the whole point, and a seq of ours would outrank
+ * the author's next edit. `deliveredBy` is not rewritten: who delivered this row is not what changed. And it never
+ * reaches `landed`, so no embed job is queued for a row whose content is identical and no tombstone is superseded.
+ *
+ * ## The filter is the race
+ *
+ * Between the plan's read and this write a person can edit the row, a newer copy can arrive, or a delete can flag it.
+ * So the write carries everything the verdict rested on — the seq it was planned at, the author it named, the timestamp
+ * it meant to replace — and refuses a flagged row. Each clause is one way the verdict can go stale in the gap; a write
+ * that matched nothing simply did not converge, and the next cycle asks again.
+ */
+export async function convergeFileStamps(
+  spaceId: string,
+  rows: ReadonlyArray<{ _id: string; seq?: number; author?: { instanceId?: string }; updatedAt?: string }>,
+  storedStamps: ReadonlyMap<string, string | undefined>,
+): Promise<string[]> {
+  if (rows.length === 0) return [];
+  const coll = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
+  const converged: string[] = [];
+  /*
+   * ONE WRITE PER ROW, not a bulk write.
+   *
+   * A converge page holds only the rows that actually drifted, which is a handful on a space where this happens at
+   * all — and per row the driver's own `modifiedCount` IS the answer, so nothing has to be read back to learn which
+   * ones took the author's value. A bulk write would report a total and leave that question to a second read.
+   */
+  for (const d of rows) {
+    const r = await coll.updateOne(
+      asFilter({
+        _id: d._id,
+        seq: d.seq,
+        'author.instanceId': d.author?.instanceId,
+        updatedAt: storedStamps.get(d._id),
+        deletedAt: { $exists: false },
+      }),
+      asUpdate({ $set: { updatedAt: d.updatedAt } }),
+    );
+    // A filter that went stale in the gap wrote nothing, which is not an error: the row changed under the verdict and
+    // the next cycle asks again.
+    if (r.modifiedCount > 0) converged.push(d._id);
+  }
+  return converged;
 }

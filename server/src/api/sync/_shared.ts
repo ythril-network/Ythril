@@ -3,6 +3,7 @@
  * authorisation, cursor codec, and the fork-depth and implausible-seq guards.
  */
 import { z } from 'zod';
+import { isComparableIso } from '../../util/comparable-iso.js';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
@@ -83,6 +84,12 @@ export const IncomingFactDoc = z.object({
 /** How many authored keys, and how long a key name, a peer's `authoredKeys` may carry (a file has a handful today). */
 const MAX_AUTHORED_KEYS = 64;
 const MAX_AUTHORED_KEY_LENGTH = 64;
+/**
+ * The longest an arriving file timestamp may be: an ISO instant in the comparable form is 24 characters, and this
+ * leaves room for an offset spelling without leaving room for a payload. A bound as well as the format check, because
+ * the refusal is cheaper than the regex on a megabyte of text a sender had no business sending.
+ */
+const MAX_TIMESTAMP_LENGTH = 40;
 
 /**
  * A file's METADATA as a peer sends it — only the AUTHORED fields. Fields derived from the local blob
@@ -119,7 +126,18 @@ export const IncomingFileMetaDoc = z.object({
   authoredKeys: z.array(z.string().max(MAX_AUTHORED_KEY_LENGTH)).max(MAX_AUTHORED_KEYS).optional(),
   author: AuthorRefSchema,
   createdAt: z.string(),
-  updatedAt: z.string(),
+  /**
+   * CHECKED, unlike every other family's, because a file row's timestamp became a write power (`Q-419`).
+   *
+   * At an equal seq a receiver adopts the author's own `updatedAt`, so this string can now change a stored row — and it
+   * is a peer's string. A bare `z.string()` let a sender put anything in it: text that is not a date at all, a spelling
+   * no comparison can order, or a megabyte of it. It must be an ISO instant in the fixed-width comparable form, and
+   * bounded in length, before the convergence may write it.
+   *
+   * The other families keep `z.string()` deliberately: their `updatedAt` is replaced wholesale by a newer version and
+   * is never read to decide a write, so a malformed one is the sender's own problem with its own record.
+   */
+  updatedAt: z.string().max(MAX_TIMESTAMP_LENGTH).refine(isComparableIso, 'not a comparable ISO timestamp'),
   seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
   /** Present only on a CHUNK: `never()` so a chunk is refused rather than stripped into a file. */
   parentFileId: z.never().optional(),

@@ -35,6 +35,8 @@
 import { edgeIdFor } from '../brain/edge-id.js';
 import { derivedV4Id } from '../util/derived-id.js';
 import { linkIdFor } from '../brain/link-id.js';
+import { fileContentHash } from '../brain/merkle.js';
+import { authorRef } from '../config/author.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
@@ -153,6 +155,16 @@ export interface StoredCopy {
   seq?: number;
   fact?: string;
   forkOf?: string;
+  /**
+   * A FILE row's own fields, read for the equal-seq convergence (`Q-419`): who authored it, the timestamp two copies
+   * may disagree about, and the hash of everything else the wire carries.
+   *
+   * The hash, not the fields: the comparison belongs to `brain/merkle.ts`, which owns what a file row's authored half
+   * IS, and a planner holding the fields would be a second place to decide that.
+   */
+  author?: { instanceId?: string };
+  updatedAt?: string;
+  contentHash?: string;
 }
 
 /**
@@ -192,7 +204,7 @@ export interface ArrivalPlanInput {
  * than `_id`, a store refusal), and the door overwrites the winner's verdict with them.
  */
 export type ArrivalVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
-  | 'forkRefused' | 'unknownType' | 'duplicate' | 'rejected';
+  | 'forkRefused' | 'unknownType' | 'duplicate' | 'rejected' | 'converged';
 
 export interface ArrivalPlan<T extends ArrivalDoc> {
   /** One verdict per input document, in input order — what sequential processing would have answered. */
@@ -207,6 +219,15 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
   accepts: Map<string, Array<{ index: number; doc: T }>>;
   /** New forks to write, ids already derived, seqs still to be allocated. */
   forks: Array<{ index: number; doc: T }>;
+  /**
+   * File rows that CONVERGE: the arriving copy is the author's own, at the same seq and the same authored content, and
+   * only its timestamp differs (`convergesOnAuthorStamp`).
+   *
+   * Their own list rather than an `accepts` entry, because what the writer does with them is not what it does with an
+   * accepted version: one field is written, no seq is stamped, `deliveredBy` is not rewritten, and the row is never
+   * counted as landed — so no embed job is queued for a row whose content did not change.
+   */
+  converges: Array<{ index: number; doc: T }>;
   /**
    * Stale tombstones to delete: those below `below`. `onLanding` means only once the record lands — a tombstone
    * deleted before a write that then fails leaves the record absent and its deletion gone. Without it, the stored
@@ -268,6 +289,56 @@ export function forkCandidates(docs: readonly ArrivalDoc[], stored: ReadonlyMap<
     if (copies) copies.push(d); else seen.set(d._id, [d]);
   }
   return [...out];
+}
+
+/**
+ * Does a file row arriving at an EQUAL seq carry the author's own timestamp, so a receiver should adopt it?
+ *
+ * ## The drift this closes
+ *
+ * `updatedAt` is hashed and replicates, and an equal-seq arrival is otherwise skipped — so two instances holding one
+ * file row with different timestamps stay different for ever, and a network with `merkle: true` reports a divergence
+ * every cycle for a space where nothing is wrong. Nothing else can repair it: the row's content is identical, so no
+ * ordinary write will ever be made.
+ *
+ * ## Every clause, and what goes wrong without it
+ *
+ *  - **the deliverer IS the author.** A relay serves its OWN stored value with the author field intact, so a receiver
+ *    that adopted whatever arrived would flip a, b, a, b between the author and a drifted relay — each flip a write, a
+ *    divergence and a re-arm. Only the author's own delivery carries the author's value.
+ *  - **both copies name that author**, by `instanceId` alone: the hashed `author` object also carries a mutable
+ *    `instanceLabel`, and adopting a display name would make two instances that agree about everything disagree over
+ *    what a peer calls itself.
+ *  - **the author is not this instance.** Our own row is the author's copy; there is nothing to adopt.
+ *  - **the authored content is equal**, compared through the hash's own projection with the timestamp blanked
+ *    (`fileContentHash`). Without it a real edit at an equal seq — a divergence — would be flattened into a timestamp
+ *    change.
+ *  - **the timestamps differ.** Nothing to do otherwise, and a write that changes nothing is still a write.
+ *
+ * ## Where it does NOT converge, stated because the rule is not total
+ *
+ * A row whose author is not a member of this network, has left, or is not named at all has nobody to take a value
+ * from: it does not converge, and the repair reports that rather than retrying for ever.
+ */
+/**
+ * The keys the convergence does NOT compare: the timestamp it is about, and `author` — whose `instanceId` the rule
+ * compares itself and whose `instanceLabel` is a mutable display name. Exported so the two sides of the comparison (the
+ * stored row, hashed where it is read, and the arriving document, hashed here) cannot blank different sets.
+ */
+export const CONVERGE_BLANKED: readonly string[] = ['updatedAt', 'author'];
+
+export function convergesOnAuthorStamp(
+  doc: { _id: string; seq?: number; author?: { instanceId?: string }; updatedAt?: string },
+  copy: StoredCopy | undefined,
+  o: { deliveredBy: string | undefined; localInstanceId: string | undefined; contentHashOf: (d: object) => string },
+): boolean {
+  const author = doc.author?.instanceId;
+  if (author === undefined || author === '' || copy === undefined) return false;
+  if (o.deliveredBy !== author) return false;
+  if (copy.author?.instanceId !== author) return false;
+  if (author === o.localInstanceId) return false;
+  if (doc.updatedAt === undefined || copy.updatedAt === undefined || doc.updatedAt === copy.updatedAt) return false;
+  return copy.contentHash !== undefined && copy.contentHash === o.contentHashOf(doc);
 }
 
 /**
@@ -403,7 +474,7 @@ export function tombstoneGoverns(issuer: string | undefined, author: string | un
 export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: ArrivalPlanInput): ArrivalPlan<T> {
   const { kind, stored, tombstones } = input;
   const plan: ArrivalPlan<T> = {
-    verdicts: [], forkIds: [], accepts: new Map(), forks: [], tombstoneCleanups: new Map(),
+    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
   const overlay = new Map<string, T>();
@@ -483,6 +554,26 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       const holder = key === undefined ? undefined : keyOwner.get(key);
       if (holder !== undefined && holder !== doc._id) { plan.verdicts[i] = 'duplicate'; return; }
       return accept(i, doc, 'upserted', tomb, via);
+    }
+    /*
+     * A file row the AUTHOR delivered at the seq we already hold, identical but for its timestamp (`Q-419`).
+     *
+     * Decided here rather than at the writer because it is a verdict: the page says what became of every document, and
+     * "skipped" was the answer that left two instances different for ever. Asked AFTER the newer-copy branch, so an
+     * ordinary update is never routed through it, and only for files — no other family has a hashed field that one
+     * instance can move without the other.
+     */
+    if (kind === 'files' && convergesOnAuthorStamp(doc, cur, {
+      deliveredBy: input.deliveredBy,
+      localInstanceId: authorRef().instanceId,
+      // `author` is blanked with the timestamp, and compared by `instanceId` alone in the rule above: the hashed
+      // `author` object also carries a mutable `instanceLabel`, so a peer that renamed itself would otherwise read as
+      // different content — and the label is not what the receiver was asked to converge on.
+      contentHashOf: (d) => fileContentHash(d as Record<string, unknown>, CONVERGE_BLANKED),
+    })) {
+      plan.converges.push({ index: i, doc });
+      plan.verdicts[i] = 'converged';
+      return;
     }
     plan.verdicts[i] = 'skipped';
     // The stored copy is already above a tombstone the page still sees: a write landed and its cleanup did not.

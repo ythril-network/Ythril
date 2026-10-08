@@ -387,6 +387,14 @@ deletion would have removed is still here, and nothing marks it. To find such re
 the publisher's, or set `merkle: true` on the network (an integrator's setting, [Sync Protocol](../sync-protocol.md)): a space whose
 content differs after a sync is logged as `MERKLE_DIVERGENCE`, naming it. Delete what the publisher no longer has.
 
+**Two instances that hold the same file can disagree about when it was last changed, and that now settles itself.** A
+file record carries the moment it was last edited, and that moment is part of what instances compare — so a difference
+in it alone made them report their data as different when nothing about the file was. When the instance that WROTE the
+file sends you its copy, and everything else about the two copies is identical, yours takes the writer's moment and the
+disagreement is over. Only the writer's own delivery counts: a copy passed on by somebody in between carries that
+instance's moment, and taking it would make the two of you swap values for ever. Nothing else about the record changes,
+and nothing is re-indexed.
+
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
 clean-ups of old search-result files, stray file metadata, upload leftovers and expired tombstones, the duplicate and

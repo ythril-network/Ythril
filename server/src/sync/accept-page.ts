@@ -56,7 +56,7 @@ import { advanceCounterPast } from './counter-after-page.js';
 import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import { MAX_FORK_DEPTH } from '../api/sync/_shared.js';
 import type { LinkageCheck } from './linkage-check.js';
-import { writeArrivals, warnArrivalsNotStored, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
+import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
@@ -192,6 +192,21 @@ export async function acceptArrivingPage(
             landed.push({ key, doc: top.doc });
           }
           pending = next;
+        }
+        /*
+         * The file rows that CONVERGE (`Q-419`): the author's own copy, at the seq we hold and with the content we
+         * hold, differing only in the timestamp that `merkle` hashes — so the two instances report a divergence every
+         * cycle for a row nobody disagrees about. The verdict is the planner's; the write is the one arrival writer's.
+         *
+         * Outside the accepts loop above because it is not a version to store: nothing is stamped, nothing lands, and a
+         * row whose filter went stale in the gap simply did not converge and is asked again next cycle.
+         */
+        if (plan.converges.length > 0) {
+          const stamps = new Map([...plan.converges].map(c => [c.doc._id, stored.get(c.doc._id)?.updatedAt]));
+          const done = new Set(await convergeFileStamps(spaceId, plan.converges.map(c => c.doc), stamps));
+          for (const c of plan.converges) {
+            if (!done.has(c.doc._id)) res.verdicts[items[c.index]!.index] = 'skipped';
+          }
         }
         if (tombType !== undefined) {
           for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });

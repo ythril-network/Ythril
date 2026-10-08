@@ -72,6 +72,11 @@ const SYNC_ROUTES_DIR = 'server/src/api/sync/';
  * collection, fails — so this cannot outlive what it excuses.
  */
 const EXEMPT = {
+  'server/src/sync/arrivals.ts:convergeFileStamps':
+    'not the storage of an arriving record: it adopts the AUTHOR\'s timestamp on a file row this instance already holds at '
+    + 'that author\'s seq and with that author\'s content (Q-419). It stores no version — one field, no seq stamped, '
+    + '`deliveredBy` untouched, nothing counted as landed and no embed queued — and it lives in this module rather than at a '
+    + 'door because it IS an arrival\'s write, so no door may do it for itself',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones':
     'a peer\'s tombstones delete their records — POST /api/sync/tombstones and the pull\'s tombstone transfer, one '
     + 'apply for both doors (bundle-46). A delete, not an arrival',

@@ -140,6 +140,16 @@ function rows() {
       { name: `${key}: an equal, identical copy is skipped`, family: key, verdict: 'skipped',
         seed: (s) => ({ stored: [make(key, s, id, 5, t ? { [t]: 'same' } : {})] }),
         page: (s) => [make(key, s, id, 5, t ? { [t]: 'same' } : {})], check: (snap) => has(snap, id, 'seq', 5) },
+      // The equal-seq CONVERGENCE (Q-419), which only a file row has: the author's own copy, same seq, same authored
+      // content, a different timestamp — adopted on both doors or on neither. The deliverer of this table's pages IS
+      // `PEER`, and `make` authors them `PEER_AUTHOR`, so the row is the author delivering its own.
+      ...(key === 'filemeta' ? [{
+        name: `${key}: the author's own copy at an equal seq, differing only in updatedAt, converges`,
+        family: key, verdict: 'converged',
+        seed: (s) => ({ stored: [make(key, s, id, 5, { updatedAt: '2026-10-01T00:00:00.000Z' })] }),
+        page: (s) => [make(key, s, id, 5, { updatedAt: '2026-10-05T00:00:00.000Z' })],
+        check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'updatedAt', '2026-10-05T00:00:00.000Z') },
+      ] : []),
       { name: `${key}: a wrong-typed field is refused (Q-225)`, family: key, verdict: 'rejected',
         seed: () => ({}), page: (s) => [make(key, s, id, 5, { [wrongTypedField(key)]: 12345 })],
         check: (snap) => !has(snap, id) },
