@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.9] — 2026-10-08
+
+A patch: a file whose name has a character outside Latin-1 downloads and previews again.
+
+### Fixed
+
+- **Files:** A file named outside Latin-1 (`日本.txt`, an emoji, an accent sent decomposed) downloads and previews; it answered `500`.
+  The download names the file by `filename*` (RFC 6266) with an ASCII `filename` beside it for older clients.
+
 ## [5.6.8] — 2026-10-07
 
 Sync no longer skips records that share a sequence number at a page or batch boundary.

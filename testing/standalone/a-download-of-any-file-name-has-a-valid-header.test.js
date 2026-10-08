@@ -52,6 +52,13 @@ describe('a download of any file name has a valid Content-Disposition', () => {
     }
   });
 
+  it('a name holding a lone surrogate still yields a header (encodeURIComponent would throw on it)', () => {
+    for (const name of ['bad\uD800.txt', 'bad\uDC00.txt', 'ok📄.md']) {
+      const header = contentDispositionOf('inline', name);
+      assert.doesNotThrow(() => validateHeaderValue('Content-Disposition', header), header);
+    }
+  });
+
   it('the ASCII fallback is ASCII', () => {
     const header = contentDispositionOf('inline', '日本 café.txt');
     const quoted = /filename="([^"]*)"/.exec(header)?.[1] ?? '';
