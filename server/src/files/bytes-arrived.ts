@@ -39,6 +39,11 @@
  *
  * A pulled image is processed ONCE, by the media job the dispatcher queues for it. The sync engine used to queue a second one
  * for it (`sync/engine.ts`, gated on `reprocessSyncedImages`), which is gone: there is one path for a file's processing.
+ *
+ * **The job says it is an arrival** (`arrival: true` to the dispatcher), and that is how `faceRecognition.reprocessSyncedImages`
+ * reaches both doors: an arrived image is captioned as any image is and is analysed for faces only while the setting is true
+ * (`facesAreWithheldFor`, `files/media/image-embedder.ts`). Before, the push door ignored the setting and the pull obeyed it
+ * through a re-enqueue of its own. A person's upload passes no `arrival` and is never touched by it.
  */
 import { authorRef } from '../config/author.js';
 import type { AuthorRef } from '../config/types.js';
@@ -103,7 +108,7 @@ export async function recordArrivedBytes(spaceId: string, filePath: string, arri
   try {
     await recordArrivedFile(spaceId, key, arrived.sizeBytes, arrived.sha256, arrived.from ?? authorRef());
     const dispatched = await dispatchFileProcessing(spaceId, key, {
-      bytes: arrived.sizeBytes, inputFormat: arrived.inputFormat ?? 'auto', sha256: arrived.sha256, prior,
+      bytes: arrived.sizeBytes, inputFormat: arrived.inputFormat ?? 'auto', sha256: arrived.sha256, prior, arrival: true,
       ...(arrived.contentType ? { contentType: arrived.contentType } : {}),
     });
     countFileArrival(arrived.door, arrived.repair ? `repaired_${arrived.repair}` : 'recorded');

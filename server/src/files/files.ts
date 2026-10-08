@@ -3,7 +3,9 @@ import path from 'path';
 import { sha256Hex } from '../util/sha256-hex.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
-import { readStored, writeStored, statStored, moveStored } from './stored-bytes.js';
+import { StringDecoder } from 'node:string_decoder';
+import { openStoredRead, writeStored, statStored, moveStored } from './stored-bytes.js';
+import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export interface FileEntry {
@@ -33,16 +35,50 @@ export async function ensureSpaceFilesDir(spaceId: string): Promise<void> {
   await mkdirPrivate(spaceRoot(spaceId));
 }
 
-/** Read a text file — rejects if it's a directory or doesn't exist */
-export async function readFile(spaceId: string, filePath: string): Promise<string> {
+/**
+ * A WINDOW of a stored text file, read as a stream: the one function both doors that return a document's text call (`read_file`
+ * and `GET …/files/extract`), so neither holds the document to answer for a page of it.
+ *
+ * ## What it prevents
+ *
+ * Both doors read the whole file into one string and cut a window out of it, so reading one page of a large document cost the
+ * whole document in memory, once per page. Here the file streams through the stored-bytes door (decrypted as it goes) and only the
+ * window is kept: the text from `skip` on, up to the budget plus the one character `markdownWindow` needs to know a paragraph's end
+ * is past it. The rest is COUNTED, not kept, because `markdownChars` (how far a reader has read) is the document's length, so time per
+ * page stays proportional to the file's size and memory does not.
+ *
+ * The answer is `markdownWindow`'s, character for character, on the text a whole read would have given: it is computed by that
+ * function over the held prefix, and only the offsets (`skip`, `nextSkip`, `totalChars`) are put back in the document's terms.
+ *
+ * **An encrypted file's failure still refuses before any text is returned.** The window is returned only after the stream has been
+ * read to its end, so a chunk that fails its tag (or a foreign key, found when the file is opened) is a thrown `StoredFileUnreadable`
+ * and never a half answer. A path that is a directory or does not exist throws as a whole read did.
+ */
+export async function readFileWindow(
+  spaceId: string, filePath: string, req: { skip: number; maxChars: number; maxBytes: number | null },
+): Promise<MarkdownWindow> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  return (await readStored(abs)).toString('utf8');
-}
-
-/** Read a file as a Buffer (for binary files) */
-export async function readFileBytes(spaceId: string, filePath: string): Promise<Buffer> {
-  const abs = await resolveSafePathChecked(spaceId, filePath);
-  return readStored(abs);
+  const source = await openStoredRead(abs);
+  try {
+    const decoder = new StringDecoder('utf8');
+    const keep = req.maxChars + 1;
+    let total = 0;
+    let head = '';
+    const take = (piece: string): void => {
+      const from = total;
+      total += piece.length;
+      const first = Math.max(0, req.skip - from);
+      if (head.length >= keep || first >= piece.length) return;
+      head += piece.slice(first, first + (keep - head.length));
+    };
+    for await (const chunk of source) take(decoder.write(chunk as Buffer));
+    take(decoder.end());
+    const w = markdownWindow(head, 0, req.maxChars, req.maxBytes);
+    const skip = Math.min(req.skip, total);
+    return { ...w, skip, totalChars: total, ...(w.nextSkip !== undefined ? { nextSkip: skip + w.nextSkip } : {}) };
+  } finally {
+    source.destroy();
+  }
 }
 
 /** Write a text file, creating parent directories as needed */

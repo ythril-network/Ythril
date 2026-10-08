@@ -26,6 +26,15 @@
  *    arrives, and where it keeps its own path that path is a NAMED exemption below rather than an absence.
  *  - **The writer's own sites**: those in `sync/arrivals.ts` that `writeArrivals` itself reaches. A second writer
  *    written into the same file is not the writer.
+ *  - **The byte doors are doors too (bundle-48, D9).** A file's BYTES arrive by two roads that are not a record page: the
+ *    upload door (`POST /api/files/:spaceId`, single and chunked, where a peer's push is an arrival and a person's upload
+ *    is not) and the manifest pull (already in the pull engine above). Both record the arrival through ONE function,
+ *    `recordArrivedBytes` (`files/bytes-arrived.ts`), which stands for the rule where `writeArrivals` cannot: it records the
+ *    row naming the bytes (`recordArrivedFile`) and the status mark of the processing it queues
+ *    (`setFileProcessingState`). So a record write is the byte writer's when a door reaches it ONLY through that function:
+ *    the walk is run again with the function cut out, and what no longer appears is its own. A door that reached
+ *    `recordArrivedFile` another way — a second byte writer — would still appear, and fail. Before bundle-48 the
+ *    upload door was not a door here at all, and `recordArrivedFile` was a named exemption standing for both roads.
  *
  * ## Scope, stated rather than implied
  *
@@ -81,8 +90,16 @@ const EXEMPT = {
     + 'sets: it fills a row this instance made, or applies the seq accept at the write, and never creates a row',
   'server/src/sync/fill-file-meta.ts:fillReceiverMadeRow':
     'the fill half of fillFileMetaFromStray, above',
-  'server/src/files/file-meta.ts:recordArrivedFile':
-    'file sync: the BYTES of a file arrived, and the receiver records what it derived from them',
+  // `files/file-meta.ts:recordArrivedFile` was exempt here ("the BYTES of a file arrived") until bundle-48: it is the byte
+  // writer's own write now (`BYTE_WRITER`, below), reached only through `recordArrivedBytes`, and a door reaching it any
+  // other way fails instead of being excused.
+  'server/src/files/file-meta.ts:upsertFileMeta':
+    'the upload door\'s LOCAL branch: a person\'s upload is an authored write and is stamped as one. A peer\'s push never reaches '
+    + 'it — `recordStoredFile` takes the arrival branch first and returns (asserted below)',
+  'server/src/files/processing-state.ts:setFileProcessingState':
+    'a status mark on a row some writer already recorded — the byte writer\'s arrival, a person\'s upload through the same door, the '
+    + 'media worker: it sets only local processing fields (`embeddingStatus`...), which no peer sends and the hash does not see, and '
+    + 'stamps neither `updatedAt` nor `seq` by construction (`a-file-row-processing-write-goes-through-one-function`). Not an arrival write at any door',
   'server/src/files/file-meta.ts:deleteFileMeta':
     'file sync: a file tombstone removes the file and its metadata',
   'server/src/files/file-meta.ts:markFileMetaDeleted':
@@ -105,6 +122,25 @@ const EXEMPT = {
     + 'Q-395): it clears the entity\'s claim on face rows already held and stores no arriving document',
 };
 
+/**
+ * The one function a file's BYTES arrive through: the row, the processing queue by this instance's rules, the count.
+ *
+ * Exempt VIA the function rather than per write: the writes it makes are other modules' functions (`recordArrivedFile`,
+ * `setFileProcessingState`), and the thing that must not be bypassed is the function. A record write a door reaches ONLY
+ * through it is excused by the reason here; the same write reached any other way is not (`reachedRecordWrites`). Each row
+ * fails when it no longer excuses a write.
+ */
+const BYTE_WRITER = 'server/src/files/bytes-arrived.ts:recordArrivedBytes';
+const EXEMPT_VIA = {
+  [BYTE_WRITER]:
+    'file BYTES arrived (a peer\'s push to the upload door, or the manifest pull): it records the row that names them '
+    + '(`recordArrivedFile`: size, hash, the peer as deliverer, no seq stamp) and the processing state of what it queued '
+    + '(`setFileProcessingState`: a status mark that stamps no `updatedAt` and no `seq`), once, for both roads',
+};
+/** The upload door: a peer's push to it is an arrival, so it is a door of this rule though it is not under api/sync. */
+const BYTE_DOOR_FILE = 'server/src/api/files-upload.ts';
+const STORE_FILE_RECORD = 'server/src/files/store-file.ts:recordStoredFile';
+
 const INDEX = moduleIndex('server/src');
 const ROUTES = mountedRoutes();
 // Registered BEFORE the writers are derived, so a write inside an inline handler belongs to its route.
@@ -125,19 +161,39 @@ const ENGINE_ROOTS = [...INDEX.bodies.keys()].filter(k => k.startsWith(`${ENGINE
 /** The routes a single record or a batch of them is PUSHED to: every POST of the document router. */
 const PUSH_DOORS = SYNC_DOORS.filter(r => r.method === 'POST' && r.file === `${SYNC_ROUTES_DIR}docs.ts`);
 
+/** The upload door, single and chunked: where a peer's byte push arrives. A route of its file is a door of this rule. */
+const BYTE_DOORS = ROUTES.filter(r => r.file === BYTE_DOOR_FILE);
+
 const DOORS = [
-  ...[...SYNC_DOORS, ...IMPORT_DOORS].map(r => ({ name: `${r.method} ${r.path}`, roots: ROUTE_ROOTS.get(`${r.method} ${r.path}`) })),
+  ...[...SYNC_DOORS, ...IMPORT_DOORS, ...BYTE_DOORS].map(r => ({ name: `${r.method} ${r.path}`, roots: ROUTE_ROOTS.get(`${r.method} ${r.path}`) })),
   { name: 'the pull engine', roots: ENGINE_ROOTS },
 ];
 
-/** Every record-collection write site some door reaches, with the door and the path that reaches it. */
+/**
+ * The index with `fnKey`'s body emptied: a walk over it still REACHES the function and goes no further, which is how "reached
+ * only through it" is asked. (Removing the key would make the walk read an entry that is not there.)
+ */
+function indexCutAt(fnKey) {
+  assert.ok(INDEX.bodies.has(fnKey), `${fnKey} is not in the call-graph index — an EXEMPT_VIA row names a function that does not exist`);
+  const bodies = new Map(INDEX.bodies);
+  bodies.set(fnKey, { ...INDEX.bodies.get(fnKey), body: '' });
+  return { ...INDEX, bodies };
+}
+
+/**
+ * Every record-collection write site some door reaches, with the door and the path that reaches it. `exemptVia` names the
+ * EXEMPT_VIA function the site is reached ONLY through from that door (the writes the byte writer makes), else undefined.
+ */
 function reachedRecordWrites() {
   const out = [];
+  const cuts = Object.keys(EXEMPT_VIA).map(fn => [fn, indexCutAt(fn)]);
   for (const door of DOORS) {
     const { seen, parent } = reaches(door.roots);
+    const around = cuts.map(([fn, cut]) => [fn, walkFrom(cut, door.roots, { closures: true }).seen]);
     for (const key of seen) {
       for (const s of RECORDS.byKey.get(key) ?? []) {
-        out.push({ ...s, door: door.name, via: pathTo(parent, key).map(k => k.split(':').slice(1).join(':')).join(' > ') });
+        const exemptVia = around.find(([fn, reached]) => seen.has(fn) && !reached.has(key))?.[0];
+        out.push({ ...s, door: door.name, via: pathTo(parent, key).map(k => k.split(':').slice(1).join(':')).join(' > '), exemptVia });
       }
     }
   }
@@ -156,6 +212,7 @@ describe('the derivation works', () => {
     assert.ok(PUSH_DOORS.length >= 5, `only ${PUSH_DOORS.length} POST route(s) on the document router — re-anchor`);
     assert.ok(PUSH_DOORS.some(r => r.path === '/api/sync/batch-upsert'), 'the batch push route was not found — re-anchor');
     assert.ok(IMPORT_DOORS.length >= 1, `no route reaches ${IMPORTER} — the import door moved; re-anchor`);
+    assert.ok(BYTE_DOORS.length >= 1, `no route is mounted from ${BYTE_DOOR_FILE} — the upload door moved; re-anchor`);
     // 14 on 797dbb2e, and batchUpsertBySeq is the one that leaves.
     assert.ok(ENGINE_ROOTS.length >= 10,`only ${ENGINE_ROOTS.length} function(s) in ${ENGINE} — re-anchor`);
   });
@@ -184,9 +241,33 @@ describe('an arriving record is written by one writer', () => {
     assert.deepEqual(missing, [], 'these doors store arriving records without the arrival writer');
   });
 
-  it('every record-collection write a door reaches is the writer\'s, or a named exemption', () => {
+  it('every byte door reaches the byte writer: the upload door and the manifest pull record an arrival ONE way', () => {
+    assert.ok(INDEX.bodies.has(BYTE_WRITER), `${BYTE_WRITER} does not exist — bytes are recorded where they land again`);
+    const doors = [
+      ...BYTE_DOORS.map(r => ({ name: `${r.method} ${r.path}`, roots: ROUTE_ROOTS.get(`${r.method} ${r.path}`) })),
+      { name: 'the pull engine', roots: ENGINE_ROOTS },
+    ];
+    const missing = doors.filter(door => !reaches(door.roots).seen.has(BYTE_WRITER)).map(d => d.name);
+    assert.deepEqual(missing, [], 'these record arriving bytes without the byte writer: no prior read, no dispatch, no count');
+  });
+
+  it('a peer\'s push never reaches the authored writer: the arrival branch of recordStoredFile returns before it', () => {
+    // The upload door's LOCAL branch writes the row through `upsertFileMeta`, an authored write that stamps a seq. That is
+    // right for a person and wrong for a peer, so the one thing that keeps the exemption above honest is the order inside
+    // the function both come through: the arrival branch, ending in a return, ahead of the first authored write.
+    const body = INDEX.bodies.get(STORE_FILE_RECORD)?.body;
+    assert.ok(body, `${STORE_FILE_RECORD} is not in the index — re-anchor`);
+    const authored = body.indexOf('upsertFileMeta(');
+    assert.ok(authored > -1, 'recordStoredFile no longer calls upsertFileMeta — the exemption names a write that is not here; remove it');
+    const arrival = body.slice(0, authored);
+    assert.ok(/if \(opts\.arrivedFrom\)/.test(arrival) && arrival.includes('recordArrivedBytes(') && /\breturn\b/.test(arrival),
+      'the arrival branch (opts.arrivedFrom -> recordArrivedBytes -> return) does not precede the authored write: a peer\'s bytes '
+      + 'would be recorded as an upload and stamped with this instance\'s seq');
+  });
+
+  it('every record-collection write a door reaches is the writer\'s, the byte writer\'s, or a named exemption', () => {
     const unclaimed = reachedRecordWrites()
-      .filter(s => !writerOwns(s) && !(s.key in EXEMPT))
+      .filter(s => !writerOwns(s) && !s.exemptVia && !(s.key in EXEMPT))
       .map(s => `${s.key}:${s.line} ${s.op} (${s.collection ?? s.why}) — from ${s.door} via ${s.via}`);
     assert.deepEqual([...new Set(unclaimed)], [],
       'these store a record a door delivered outside writeArrivals, so they hold none of its preconditions (seq and '
@@ -202,8 +283,24 @@ describe('an arriving record is written by one writer', () => {
   });
 
   it('every exemption still excuses a write a door reaches', () => {
-    const live = new Set(reachedRecordWrites().map(s => s.key));
+    // A write reached only through an EXEMPT_VIA function is excused by that row, so a per-function row beside it excuses nothing.
+    const live = new Set(reachedRecordWrites().filter(s => !s.exemptVia).map(s => s.key));
     const stale = Object.keys(EXEMPT).filter(k => !live.has(k));
     assert.deepEqual(stale, [], 'exemptions for functions no door reaches, or that no longer write a record — delete them');
+  });
+
+  it('every function exempt via still stands for a write some door reaches only through it', () => {
+    const owned = new Set(reachedRecordWrites().filter(s => s.exemptVia).map(s => s.exemptVia));
+    const stale = Object.keys(EXEMPT_VIA).filter(k => !owned.has(k));
+    assert.deepEqual(stale, [], 'functions listed as an arrival\'s one writer that no door reaches a record write only through — delete the row, or the writer is bypassed');
+    // The write it must stand for: the row that names the arriving bytes. Reached by both byte doors only through the writer.
+    const mine = new Set(reachedRecordWrites().filter(s => s.exemptVia === BYTE_WRITER).map(s => s.key));
+    const row = 'server/src/files/file-meta.ts:recordArrivedFile';
+    assert.ok(mine.has(row), `${row} is not reached only through the byte writer by any door — it is written another way, or the writer stopped writing it`);
+    for (const door of [...BYTE_DOORS.map(r => `${r.method} ${r.path}`), 'the pull engine']) {
+      const doorSites = reachedRecordWrites().filter(s => s.door === door && s.key === row);
+      assert.ok(doorSites.length >= 1 && doorSites.every(s => s.exemptVia === BYTE_WRITER),
+        `${door} reaches ${row} ${doorSites.length ? 'around' : 'not at all, not even through'} the byte writer`);
+    }
   });
 });

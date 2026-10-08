@@ -1,18 +1,31 @@
 /**
- * Deleting a file removes EVERYTHING that follows it: its conversion's records two levels down, the sidecar rows a peer's
- * bytes created, the queued jobs of its extracted images — and nothing of what only looks like its own (bundle-71, Q-349).
+ * Deleting a file removes EVERYTHING that follows it: its conversion's records two levels down, its sidecars, the queued
+ * jobs of its extracted images — and nothing of what only looks like its own (bundle-71, Q-349; re-aimed by bundle-48).
  *
  * ## The defect
  *
  * The delete removes the rows whose `parentFileId` is the file, and the sidecar BYTES (`_converted/<f>.md`,
- * `_extracted/<f>/`). It does not remove:
+ * `_extracted/<f>/`). It did not remove:
  *
  *  - the caption chunk and the face chunks of an extracted image: their `parentFileId` is `_extracted/<f>/x.jpg`, the
  *    image, not the file — two levels down, found by nothing the delete looks at;
  *  - the TOP-LEVEL row an arrived sidecar made (`recordArrivedFile`: no `parentFileId`, seq 0, authored by the peer whose
- *    bytes landed first), because derived rows never replicate and a receiver that never converted holds the sidecar as an
+ *    bytes landed first), because derived rows never replicate and a receiver that never converted held the sidecar as an
  *    ordinary file;
  *  - the queued media job of an extracted image, which then retries for ever against a path nothing holds.
+ *
+ * ## What bundle-48 changed under it
+ *
+ * A sidecar is INSTANCE-LOCAL now (`isInstanceLocalFile`, `sync/file-conflict.ts`): no door stores a peer's, so the sidecars a
+ * file has here are the ones THIS instance's own conversion wrote, which are DERIVED rows (`parentFileId` set, this instance the
+ * author). The fixture is that, by default. The top-level row of an ARRIVED sidecar survives only on data held from before, and
+ * two things govern it:
+ *
+ *  - a file's delete still removes it with the file (the cascade keeps the branch), so the "arrived" variant of the fixture
+ *    stays, under the REST and MCP doors and under `softDeleteFileMeta`;
+ *  - the TTL sweep retires one with or without the file (`sync/peer-sidecar-retirement.ts`), which is why that door does not
+ *    carry the arrived variant: a sweep that deletes the file and retires its peer sidecars is two steps, and the second has a
+ *    test of its own below, with the rows it must NOT touch.
  *
  * And it removes too much in one case: a DIRECTORY `g.md/` has its sidecar tree at `_converted/g.md/`, which is exactly the
  * path the converted Markdown of a FILE `g` would have — the delete took the tree of a directory it never named.
@@ -75,31 +88,35 @@ const derived = (id, parentFileId, extra = {}) => build.filemeta(S, id, 4, { par
 const arrived = (id, extra = {}) => build.filemeta(S, id, 0, { author: ARRIVER, deliveredBy: ARRIVER.instanceId, sizeBytes: 9, ...extra });
 
 /**
- * File `f` as a converting instance that ALSO received a sidecar from a peer holds it. Returns every id the file owns,
- * by kind, so a failure names what was left.
+ * File `f` as the instance that converted it holds it: its chunk, its converted Markdown, two extracted images and the caption
+ * and face rows under the first — every sidecar row DERIVED, as this instance's own pipeline writes them. With
+ * `arrivedSidecars` the converted Markdown and the second image are instead the TOP-LEVEL rows a peer's bytes made before
+ * sidecars became instance-local (data held from an older release). Returns every id the file owns, by kind, so a failure names
+ * what was left.
  */
-async function seedFileWithEverything(f, { expired = false } = {}) {
+async function seedFileWithEverything(f, { expired = false, arrivedSidecars = false } = {}) {
   const bytes = `content of ${f}`;
   put(f, bytes);
   const converted = `_converted/${f}.md`;
   const img = `_extracted/${f}/x.jpg`;
-  const arrivedImg = `_extracted/${f}/arrived.png`;
-  put(converted); put(img); put(arrivedImg);
+  const secondImg = `_extracted/${f}/second.png`;
+  put(converted); put(img); put(secondImg);
   const ids = {
     file: f,
     chunk: `${f}#chunk-0`,                 // one level down: the delete already took these
-    converted,                              // an ARRIVED top-level row (the file has no conversion of its own at this instance)
+    converted,                              // derived (parentFileId = f), or an ARRIVED top-level row
     image: img,                             // derived: parentFileId = f
-    arrivedImage: arrivedImg,               // an ARRIVED top-level row
+    secondImage: secondImg,                 // derived, or an ARRIVED top-level row
     caption: `${img}#media-chunk0`,         // two levels down: parentFileId = the image
     face: `${img}#face-chunk0`,             // two levels down
   };
+  const sidecarRow = (id) => (arrivedSidecars ? arrived(id) : derived(id, f));
   await door.coll(S, 'files').insertMany([
     fileRow(f, bytes, expired ? { _expireAt: new Date('2026-01-01T00:00:00Z') } : {}),
     derived(ids.chunk, f),
-    arrived(converted),
+    sidecarRow(converted),
     derived(img, f),
-    arrived(arrivedImg),
+    sidecarRow(secondImg),
     derived(ids.caption, img, { content: 'a caption' }),
     derived(ids.face, img, { faceEmbedding: [0.1, 0.2] }),
   ]);
@@ -112,19 +129,19 @@ async function leftOf(ids, f) {
   const left = [];
   for (const [name, id] of Object.entries(ids)) if (await live(id)) left.push(`row:${name}`);
   if (onDisk(f)) left.push('bytes:file');
-  for (const rel of [ids.converted, ids.image, ids.arrivedImage]) if (onDisk(rel)) left.push(`bytes:${rel}`);
+  for (const rel of [ids.converted, ids.image, ids.secondImage]) if (onDisk(rel)) left.push(`bytes:${rel}`);
   if (await jobOf(ids.image)) left.push('job:image');
   return left;
 }
 
-/** A neighbour whose name merely starts with the file's: its sidecars, chunks and job must survive the delete. */
+/** A neighbour whose name merely starts with the file's: its sidecars, chunks and job must survive the delete. Its sidecars are its own conversion's: derived rows. */
 async function seedNeighbour(n) {
   put(n, `content of ${n}`);
   put(`_converted/${n}.md`); put(`_extracted/${n}/y.jpg`);
   const img = `_extracted/${n}/y.jpg`;
   const ids = [n, `${n}#chunk-0`, `_converted/${n}.md`, img, `${img}#media-chunk0`];
   await door.coll(S, 'files').insertMany([
-    fileRow(n, `content of ${n}`), derived(ids[1], n), arrived(ids[2]), derived(img, n), derived(ids[4], img),
+    fileRow(n, `content of ${n}`), derived(ids[1], n), derived(ids[2], n), derived(img, n), derived(ids[4], img),
   ]);
   await door.coll(S, 'media_jobs').insertOne({ _id: img, spaceId: S, status: 'pending' });
   return { ids, disk: [n, `_converted/${n}.md`, img], job: img };
@@ -185,7 +202,7 @@ describe('deleting a file removes what its conversion and its peers left, and on
         fileRow(g, 'content of g', d.seedOpts.expired ? { _expireAt: new Date('2026-01-01T00:00:00Z') } : {}),
         derived(`_extracted/${g}/own.jpg`, g),
         fileRow(dirFile, `bytes of ${dirFile}`),
-        arrived('_converted/docs/g.md/inner.txt.md'),
+        derived('_converted/docs/g.md/inner.txt.md', dirFile),
         derived('_extracted/docs/g.md/pic.jpg', dirFile),
       ]);
       await d.del(g);
@@ -197,20 +214,83 @@ describe('deleting a file removes what its conversion and its peers left, and on
     });
   }
 
-  it('with softDeleteFileMeta an arrived sidecar row is flagged like the file\'s own, and a derived row is removed', async () => {
-    loader.getConfig().softDeleteFileMeta = true;
-    const f = 'docs/soft.txt';
-    const ids = await seedFileWithEverything(f);
-    const a = await acts.del('REST', f);
-    assert.ok(!acts.failed(a), JSON.stringify(a.body));
-    const fileRowNow = await rowOf(f);
-    assert.equal(typeof fileRowNow?.deletedAt, 'string', 'fixture: the soft delete did not flag the file\'s own row');
-    // `live` reads a flagged row as gone, so what is listed is a row nobody flagged or removed, and bytes still on disk.
-    assert.deepEqual(await leftOf(ids, f), [],
-      'artefacts of the file survived a soft delete (an arrived sidecar row left LIVE, or a derived row two levels down)');
-    for (const id of [ids.chunk, ids.image, ids.caption, ids.face]) {
-      assert.equal(await rowOf(id), null, `the derived row ${id} was kept: derived rows are removed whatever the setting`);
-    }
+  for (const arrivedSidecars of [false, true]) {
+    it(`with softDeleteFileMeta ${arrivedSidecars
+      ? 'a sidecar row a peer delivered before sidecars were local is flagged like the file\'s own'
+      : 'the file\'s row is flagged and every row this instance derived, its sidecar rows included, is removed'}`, async () => {
+      loader.getConfig().softDeleteFileMeta = true;
+      const f = 'docs/soft.txt';
+      const ids = await seedFileWithEverything(f, { arrivedSidecars });
+      const a = await acts.del('REST', f);
+      assert.ok(!acts.failed(a), JSON.stringify(a.body));
+      const fileRowNow = await rowOf(f);
+      assert.equal(typeof fileRowNow?.deletedAt, 'string', 'fixture: the soft delete did not flag the file\'s own row');
+      // `live` reads a flagged row as gone, so what is listed is a row nobody flagged or removed, and bytes still on disk.
+      assert.deepEqual(await leftOf(ids, f), [],
+        'artefacts of the file survived a soft delete (an arrived sidecar row left LIVE, or a derived row two levels down)');
+      // A derived row is removed whatever the setting; a delivered top-level sidecar row is retired as the file's own is: flagged.
+      const derivedIds = [ids.chunk, ids.image, ids.caption, ids.face, ...(arrivedSidecars ? [] : [ids.converted, ids.secondImage])];
+      for (const id of derivedIds) assert.equal(await rowOf(id), null, `the derived row ${id} was kept: derived rows are removed whatever the setting`);
+      if (arrivedSidecars) {
+        for (const id of [ids.converted, ids.secondImage]) {
+          assert.equal(typeof (await rowOf(id))?.deletedAt, 'string', `the delivered sidecar row ${id} was not flagged like the file's own row`);
+        }
+      }
+    });
+  }
+
+  // The branch of the cascade that is left for data held from before sidecars became instance-local: the top-level row a peer's
+  // bytes made at a sidecar path. REST and MCP carry it; the sweep has its own step for it (below).
+  for (const name of ['REST', 'MCP']) {
+    it(`${name}: the top-level rows of sidecars a peer delivered before sidecars were local go with the file`, async () => {
+      const f = 'docs/held.txt';
+      const ids = await seedFileWithEverything(f, { arrivedSidecars: true });
+      const neighbour = await seedNeighbour('docs/held.txtx');
+      assert.equal((await leftOf(ids, f)).length, 7 + 4 + 1, 'fixture: the file does not have everything it is meant to');
+      await DOORS[name].del(f);
+      assert.deepEqual({ left: await leftOf(ids, f), neighbourLost: await lostOfNeighbour(neighbour) }, { left: [], neighbourLost: [] },
+        'a delivered sidecar\'s top-level row (or its bytes) outlived the file, or a neighbour\'s sidecars went with it');
+    });
+  }
+
+  describe('the TTL sweep retires a sidecar a PEER delivered, and nothing that is this instance\'s own', () => {
+    it('removes the bytes and the row of each delivered sidecar, publishes no tombstone, and leaves every other row alone', async () => {
+      const self = { instanceId: loader.getConfig().instanceId, instanceLabel: 'This instance' };
+      // What a peer delivered before sidecars were local: top-level rows (no `parentFileId`) under both roots, by deliverer or author.
+      const delivered = ['_converted/docs/peer.txt.md', '_extracted/docs/peer.txt/pic.jpg'];
+      put(delivered[0]); put(delivered[1]);
+      await door.coll(S, 'files').insertMany([
+        arrived(delivered[0]),
+        // delivered by the peer to a row this instance authored first: still the peer's bytes
+        { ...build.filemeta(S, delivered[1], 0, { author: self, deliveredBy: ARRIVER.instanceId, sizeBytes: 9 }) },
+      ]);
+      // What it must not touch: this instance's own conversion (derived rows), a top-level row it authored itself at a sidecar
+      // path (a person's choice), a user's file at `a/_converted/…` (not the ROOT tree), and an ordinary delivered file.
+      const own = [
+        { id: '_converted/docs/own.txt.md', row: derived('_converted/docs/own.txt.md', 'docs/own.txt', { author: self }) },
+        // A derived row is this instance's whatever its author field says (a row copied from a peer's record): only a TOP-LEVEL row is read.
+        { id: '_converted/docs/odd.txt.md', row: derived('_converted/docs/odd.txt.md', 'docs/odd.txt') },
+        { id: '_converted/docs/mine.md', row: build.filemeta(S, '_converted/docs/mine.md', 3, { author: self, sizeBytes: 9 }) },
+        { id: 'a/_converted/x.md', row: arrived('a/_converted/x.md') },
+        { id: 'docs/peer.txt', row: arrived('docs/peer.txt') },
+      ];
+      for (const o of own) put(o.id);
+      await door.coll(S, 'files').insertMany(own.map(o => o.row));
+      const tombstonesBefore = (await acts.raw()).length;
+
+      await ttl.sweepExpired(new Date());
+
+      for (const id of delivered) {
+        assert.equal(await rowOf(id), null, `the delivered sidecar row ${id} was kept: it is another instance's conversion in this one's place`);
+        assert.ok(!onDisk(id), `the delivered sidecar's bytes ${id} were kept`);
+      }
+      for (const o of own) {
+        assert.ok(await live(o.id), `the sweep took the row ${o.id}, which is not a peer's sidecar`);
+        assert.ok(onDisk(o.id), `the sweep took the bytes of ${o.id}, which is not a peer's sidecar`);
+      }
+      assert.equal((await acts.raw()).length, tombstonesBefore,
+        'retiring a delivered sidecar wrote a tombstone: the path is instance-local, so a deletion would be announced to peers that never received it');
+    });
   });
 
   it('the delete publishes one tombstone, for the file: its sidecars are its parent\'s deletion and get none (control)', async () => {

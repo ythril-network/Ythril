@@ -108,10 +108,19 @@ describe('the derivation finds the writes at all, so the rule cannot pass by fin
   it('found the files-collection writes, and read keys from them', () => {
     assert.ok(WRITES.length >= 30, `only ${WRITES.length} file-collection write(s) found`);
     const readable = WRITES.filter(w => w.keys.size > 0);
-    assert.ok(readable.length >= 12, `only ${readable.length} write(s) had readable keys — the key reader is broken`);
+    // The floor is read from the write sites' own text, not a number: a write whose arguments spell an inline operator
+    // block with a first key (`$set: { a: …`, `$unset: { 'b': …`) is one the reader MUST have read keys from. It was
+    // `readable.length >= 12`, a count of the tree as it stood before the processing writes moved into
+    // `setFileProcessingState`, whose own write builds its update from a typed argument and has no key to read; moving
+    // the writes took it to 10 and the count said "broken" about a reader that was fine. A count written here is a copy
+    // of a fact the tree holds, and this says what the tree holds.
+    const spelled = WRITES.filter(w => /\$(?:set|unset|setOnInsert)\s*:\s*\{\s*(?:\w|'|")/.test(w.args));
+    assert.ok(spelled.length >= 1, 'no write spells an inline $set / $unset block — the derivation is not looking at update documents');
+    assert.deepEqual(spelled.filter(w => w.keys.size === 0).map(w => w.name), [],
+      'these spell an inline operator block and the reader found no keys in it — the key reader is broken');
     // The reader must see a HASHED key being written, or "no hashed key" below passes by reading nothing.
     const hashed = new Set(hashedFileFields());
-    assert.ok(readable.some(w => [...w.keys].some(k => hashed.has(k))),
+    assert.ok(readable.length >= 1 && readable.some(w => [...w.keys].some(k => hashed.has(k))),
       'no write was read setting a hashed field (updatedAt, seq, description...) — the key reader is blind to them');
   });
 

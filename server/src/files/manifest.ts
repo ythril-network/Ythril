@@ -14,7 +14,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { createHash } from 'crypto';
+import { sha256OfStream } from '../util/sha256-tap.js';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { writeInOneCommands } from '../db/one-command.js';
@@ -57,10 +57,7 @@ function spaceFilesRoot(spaceId: string): string {
  * happens to keep on disk, so the hash is the same whether or not either side encrypts at rest (F-43).
  */
 async function hashFile(absPath: string): Promise<{ sha256: string; size: number }> {
-  const hash = createHash('sha256');
-  let size = 0;
-  for await (const chunk of await openStoredRead(absPath)) { hash.update(chunk as Buffer); size += (chunk as Buffer).length; }
-  return { sha256: hash.digest('hex'), size };
+  return sha256OfStream(await openStoredRead(absPath));
 }
 
 /**

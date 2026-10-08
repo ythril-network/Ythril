@@ -521,11 +521,19 @@ async function normaliseBody(init: RequestInit): Promise<RequestInit> {
  * implementation owns transport.
  *
  * Uses `redirect: 'manual'` internally regardless of any `init.redirect`.
+ *
+ * ## The body is buffered unless the caller says it will stream it
+ *
+ * Every response is read whole before it is returned (the connection is closed with it, and the common caller reads a status
+ * or a small JSON answer). A caller whose body can be a file passes `streamBody: true` and receives the response as the
+ * connection delivers it, every guard above unchanged (the address validated and pinned, every redirect re-validated): the pinned
+ * agent is told to close once the in-flight request finishes, which it does when the body is read to its end, cancelled or
+ * aborted. Such a caller MUST read, cancel or abort the body; a body it never touches holds the connection until its signal fires.
  */
 export async function ssrfSafeFetch(
   rawUrl: string,
   init: RequestInit = {},
-  opts: { maxRedirects?: number; lookup?: DnsLookup; fetchImpl?: typeof fetch; allowPrivate?: boolean } = {},
+  opts: { maxRedirects?: number; lookup?: DnsLookup; fetchImpl?: typeof fetch; allowPrivate?: boolean; streamBody?: boolean } = {},
 ): Promise<Response> {
   const maxRedirects = opts.maxRedirects ?? 3;
   const injected = opts.fetchImpl;
@@ -548,6 +556,12 @@ export async function ssrfSafeFetch(
     const location = resp.status >= 300 && resp.status < 400 ? resp.headers.get('location') : null;
     if (!location) {
       if (!agent) return resp;
+      if (opts.streamBody) {
+        // Not awaited: `close()` resolves when the request in flight has finished, and that is the caller's to finish by reading,
+        // cancelling or aborting the body. Awaiting it here would wait for the whole body before the caller got the response.
+        void agent.close().catch(() => { /* best-effort */ });
+        return resp;
+      }
       // Detach from the pinned connection: buffer the (small) body and close the
       // agent so no socket lingers past return. Webhook callers read only status.
       const buf = await resp.arrayBuffer().catch(() => new ArrayBuffer(0));

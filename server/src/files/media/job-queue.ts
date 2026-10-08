@@ -157,22 +157,35 @@ export async function getMediaJobCounts(spaceId: string): Promise<MediaJobCounts
  * for this file and is not in a terminal state, it is left unchanged.
  * A previously-failed job is reset to `pending` so a new upload re-triggers
  * processing.
+ *
+ * `opts.arrival` says the bytes came from a peer (`MediaJobDoc.arrival`); it is the whole of what the job carries about that,
+ * and it is stamped on EVERY enqueue (a reset included), so a later local write to the path is not held to the rule of the
+ * arrival that came before it.
  */
 export async function enqueueMediaJob(
   spaceId: string,
   filePath: string,
   mimeType: string,
   mediaType: 'image' | 'audio' | 'video',
+  opts: { arrival?: boolean } = {},
 ): Promise<void> {
   const id = toDocId(filePath);
   const now = new Date().toISOString();
+  const arrival = opts.arrival === true;
 
   const existing = await jobCollection(spaceId).findOne(
     asFilter<MediaJobDoc>({ _id: id }),
   ) as MediaJobDoc | null;
 
   if (existing && (existing.status === 'pending' || existing.status === 'processing')) {
-    // Already queued — do not disturb
+    // Already queued — do not disturb. One exception: a LOCAL write to a path whose queued job is an arrival's takes the
+    // arrival mark off, because the file is now one a person wrote and a person's image is analysed as a person's.
+    if (existing.arrival && !arrival) {
+      await jobCollection(spaceId).updateOne(
+        asFilter<MediaJobDoc>({ _id: id }),
+        asUpdate<MediaJobDoc>({ $set: { arrival: false } }),
+      );
+    }
     return;
   }
 
@@ -190,6 +203,7 @@ export async function enqueueMediaJob(
           updatedAt: now,
           mimeType,
           mediaType,
+          arrival,
         },
       }),
     );
@@ -200,6 +214,7 @@ export async function enqueueMediaJob(
       filePath: id,
       mimeType,
       mediaType,
+      ...(arrival ? { arrival } : {}),
       status: 'pending',
       attempts: 0,
       maxAttempts: MAX_ATTEMPTS,

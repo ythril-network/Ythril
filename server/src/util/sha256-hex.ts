@@ -8,8 +8,9 @@
  * `'base64'` digest away from a hash that equals nothing a peer holds, and it fails as "the file differs" or "the bytes do not
  * match", not as a bug. A string is hashed as UTF-8.
  *
- * Not for a hash of a stream (`files/manifest.ts` and the chunked upload feed a hash as they read) and not for a keyed or
- * namespaced digest (`brain/merkle.ts`, derived ids): those ask a different question and keep their own.
+ * Not for a hash of a stream: that is `sha256Tap` / `sha256OfStream` (`util/sha256-tap.ts`), which also holds the guards a stream
+ * needs (decided in `flush`, capped at the declared size). Not for a keyed or namespaced digest (`brain/merkle.ts`, derived ids):
+ * those ask a different question and keep their own.
  */
 import { createHash } from 'node:crypto';
 

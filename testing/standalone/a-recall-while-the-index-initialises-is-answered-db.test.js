@@ -15,10 +15,11 @@
  * ## Two cases, and why the second injects
  *
  *  1. **The real window.** Each attempt writes one record into a fresh space, creates the index, and recalls at once,
- *     SANDWICHED between two raw `$vectorSearch` queries: when both were refused, the recall's own query was refused
- *     too. It must not throw, and must return the record through the fresh-write channel. An attempt the sandwich did
- *     not catch is not counted; at least one must be caught, or the case fails rather than passing about a state it
- *     never produced.
+ *     with a pass-through spy on the recall's OWN `$vectorSearch` recording whether the real mongot refused it as not
+ *     queryable yet. It must not throw, and must return the record through the fresh-write channel. An attempt whose
+ *     recall was served is not counted; at least one must be caught, or the case fails rather than passing about a
+ *     state it never produced. (It once inferred the refusal from two raw queries SANDWICHING the recall; on CI's mongot
+ *     the build finished during the recall every time, so the query after it served and nothing was ever caught.)
  *  2. **The first wording, which this harness cannot hold open.** `not initialized` lasts tens of milliseconds on a
  *     warm mongot (measured: seen as the BEFORE query in one attempt of nine, never on both sides of a recall), so case
  *     1 almost always catches the later wordings. Case 2 lets every `$vectorSearch` aggregate reach the store and then
@@ -56,7 +57,7 @@ process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 process.env['YTHRIL_HYBRID_SEARCH'] = 'off';
 
-let mongo, recallMod, stub;
+let mongo, recallMod, stub, notQueryableYet;
 
 /** One raw query against the index recall reads: the refusal's message, or null when it served. */
 async function rawRefusal(space) {
@@ -77,6 +78,41 @@ async function writeFirstRecord(space) {
   await mongo.col(`${space}_entities`).insertOne({ _id: id, spaceId: space, name: id, type: 'thing', tags: [],
     properties: {}, embedding: queryAxis(DIMS), embeddingModel: 'stub', seq: 1, createdAt: now, updatedAt: now });
   return id;
+}
+
+/**
+ * What the REAL store answered to every `$vectorSearch` aggregate issued while it is installed: per collection, how many
+ * it refused as an index not queryable yet (the server's own recogniser, `isIndexNotQueryableYet`) and how many it
+ * served. A pass-through spy — the query, its answer and its error reach the caller unchanged — on the same seam the
+ * injection below uses, which every vector reader goes through (`toArray`; case 2 holds that).
+ *
+ * It is how case 1 knows the recall's OWN query landed inside the build window. It used to infer that from two raw
+ * queries around the recall, both refused: on CI's mongot the index finished during the recall in every attempt, so the
+ * query after it always served and the case failed without ever having been wrong about the recall (Q-423, main run
+ * 37728673657).
+ */
+function watchVectorSearch() {
+  const original = Collection.prototype.aggregate;
+  const seen = new Map();
+  const tally = (ns, key) => { const t = seen.get(ns) ?? { refused: 0, served: 0 }; t[key]++; seen.set(ns, t); };
+  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
+    const cursor = original.call(this, pipeline, ...rest);
+    if (!(Array.isArray(pipeline) && pipeline[0]?.['$vectorSearch'])) return cursor;
+    const ns = this.collectionName;
+    const toArray = cursor.toArray.bind(cursor);
+    cursor.toArray = async () => {
+      try {
+        const docs = await toArray();
+        tally(ns, 'served');
+        return docs;
+      } catch (err) {
+        if (notQueryableYet(err)) tally(ns, 'refused');
+        throw err;
+      }
+    };
+    return cursor;
+  };
+  return { of: (ns) => seen.get(ns) ?? { refused: 0, served: 0 }, restore: () => { Collection.prototype.aggregate = original; } };
 }
 
 /**
@@ -108,6 +144,7 @@ describe('a vector read while the index initialises is answered', { skip }, () =
     mongo = await openTestMongo('initwin');
     (await import('../../server/dist/config/loader.js')).loadConfig();
     recallMod = await import('../../server/dist/brain/recall.js');
+    ({ isIndexNotQueryableYet: notQueryableYet } = await import('../../server/dist/brain/index-not-queryable.js'));
     await mongo.checkVectorSearchAvailability();
   });
 
@@ -124,25 +161,31 @@ describe('a vector read while the index initialises is answered', { skip }, () =
       await mongo.col(`${space}_entities`).createSearchIndex({ name: `${space}_entities_embedding`, type: 'vectorSearch',
         definition: { fields: [{ type: 'vector', path: 'embedding', numDimensions: DIMS, similarity: 'cosine' }] } });
 
-      const before = await rawRefusal(space);
+      // The recall goes straight after the index is created: a raw query first would only spend the window it needs.
       let answer, thrown;
+      const watch = watchVectorSearch();
       try {
         answer = await recallMod.recall(space, 'Q', 10, undefined, ['entity']);
       } catch (err) {
         thrown = err instanceof Error ? err.message : String(err);
+      } finally {
+        watch.restore();
       }
+      const own = watch.of(`${space}_entities`);
       const after = await rawRefusal(space);
-      t.diagnostic(`${space}: before=${before ?? 'served'} | after=${after ?? 'served'} | recall ${thrown ? `threw ${thrown}` : 'answered'}`);
+      t.diagnostic(`${space}: the recall's own vector queries ${own.refused} refused, ${own.served} served | after=`
+        + `${after ?? 'served'} | recall ${thrown ? `threw ${thrown}` : 'answered'}`);
 
-      if (before !== null && after !== null) caught.push(space);
+      // Caught: the real mongot refused, as not queryable yet, a vector query the recall itself issued.
+      if (own.refused > 0) caught.push(space);
       // Whatever window it landed in, a recall here never throws: the index absent, initialising or serving.
       assert.equal(thrown, undefined, `recall in ${space} threw while the index was being built: ${thrown}`);
       assert.ok(answer.some(r => r._id === id),
         `recall in ${space} lost the record it was written with: ${JSON.stringify(answer.map(r => r._id))}`);
       if (caught.length >= 3) break;
     }
-    assert.ok(caught.length > 0, `none of ${ATTEMPTS} recalls was sandwiched between two refused raw queries, so this run `
-      + 'never produced the state it is about — the assertions above passed for an index that was already serving');
+    assert.ok(caught.length > 0, `in none of ${ATTEMPTS} attempts did the real store refuse a vector query the recall itself `
+      + 'issued, so this run never produced the state it is about — the assertions above passed for an index that was already serving');
   });
 
   it('"Index … not initialized" is answered by recall, findSimilar and checkDuplicates', async () => {

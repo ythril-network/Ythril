@@ -58,14 +58,12 @@ const COLLECTORS = ['Buffer.concat', 'consumers.buffer', 'buffer'];
  * Adding a row is the decision this gate exists to make visible: say why a window or a stream does not do.
  */
 const NAMED = [
-  { key: 'server/src/files/files.ts :: readFile :: readStored',
-    why: 'the wrapper itself: it reads whole by contract and every CALLER of it is a site of its own, named or failing here' },
-  { key: 'server/src/files/files.ts :: readFileBytes :: readStored',
-    why: 'the wrapper itself: it reads whole by contract and every CALLER of it is a site of its own, named or failing here' },
   { key: 'server/src/files/chunks.ts :: verifiedChunks :: readStored',
     why: 'one staged chunk at a time, each at most the upload body limit (maxUploadBodyBytes); the file is never held whole' },
   { key: 'server/src/files/media/worker.ts :: processJob :: readStored',
     why: 'the embedders of an image, a clip or a recording take a Buffer by their provider contract; held for the length of one job' },
+  { key: 'server/src/util/ssrf.ts :: ssrfSafeFetch :: arrayBuffer',
+    why: 'a control-plane response (a status, a small JSON answer) or a redirect hop is read whole so the pinned connection can close with it; the peer FILE download passes streamBody and is never buffered here' },
   { key: 'server/src/util/ssrf.ts :: serialiseMultipart :: arrayBuffer',
     why: 'an OUTBOUND multipart body is assembled in memory by contract: the blob was built from bytes its caller already holds' },
 ];
@@ -149,7 +147,7 @@ describe('a stored file is read whole only where a reason names it', () => {
     // A floor over what was DERIVED: an empty or broken scan passes every loop below.
     assert.ok(SOURCES.length >= 300, `only ${SOURCES.length} server sources listed`);
     assert.ok(sweep.length >= NAMED.length, `the detector found ${sweep.length} whole-read sites, fewer than the ${NAMED.length} named: it is not reaching the code`);
-    for (const key of ['server/src/files/files.ts :: readFile :: readStored', 'server/src/files/chunks.ts :: verifiedChunks :: readStored']) {
+    for (const key of ['server/src/files/media/worker.ts :: processJob :: readStored', 'server/src/files/chunks.ts :: verifiedChunks :: readStored']) {
       assert.ok(sweep.some(s => s.key === key), `the sweep did not find the site it must: ${key}`);
     }
   });

@@ -103,6 +103,11 @@ export interface DispatchInput {
   contentType?: string;
   /** Caller-declared `inputFormat` hint (`auto` when omitted). */
   inputFormat?: string;
+  /**
+   * The bytes ARRIVED from a peer (only `files/bytes-arrived.ts` says so). Carried on the media job, where it decides whether an
+   * image is analysed for faces (`MediaJobDoc.arrival`); nothing else in the dispatch changes with it.
+   */
+  arrival?: boolean;
 }
 
 export interface DispatchResult {
@@ -171,7 +176,7 @@ export async function dispatchFileProcessing(
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     await setMediaStatus('pending');
-    await enqueueMediaJob(spaceId, filePath, mimeType, mediaType).catch(err => {
+    await enqueueMediaJob(spaceId, filePath, mimeType, mediaType, { arrival: input.arrival === true }).catch(err => {
       log.warn(`enqueueMediaJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     return { resolvedFormat, embeddingStatus: 'pending' };

@@ -24,9 +24,11 @@
  * - **The media worker**, through the loop that claims a job (`processJob` is not exported): the "processing" mark and
  *   the completion of a document; and a document the pipeline refuses permanently, which marks the file `skipped`,
  *   then fails the job.
- * - **Coverage is derived, not asserted by count**: every function the tree writes processing state from (the call
- *   graph, `_processing-state-writes.mjs`) must be reached from an entry point a case drives, so a writer added next
- *   year that no case reaches fails here.
+ * - **Coverage is derived, not asserted by count**: every function that calls `setFileProcessingState` (the one
+ *   module a processing write goes through; found in the call graph, its floor the files that import it), the setter
+ *   itself, and any write to a files collection that touches a processing field outside it
+ *   (`_processing-state-writes.mjs`; empty on a healthy tree, the rule gate refuses one) must be reached from an entry
+ *   point a case drives, so a writer added next year that no case reaches fails here.
  *
  * ## Seen red
  *
@@ -48,7 +50,7 @@ import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
-import { moduleIndex, walkFrom } from './_call-graph.mjs';
+import { moduleIndex, walkFrom, callsIn } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { fileRowWrites, processingTouched, NOT_A_PROCESSING_MARK } from './_processing-state-writes.mjs';
 
@@ -61,6 +63,7 @@ const DIMS = 8;
 const POISON = '1999-01-01T00:00:00.000Z';
 const POISON_SEQ = 4242;
 const HASH = 'c'.repeat(64);
+const PROCESSING_STATE = 'server/src/files/processing-state.ts';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-procstate-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
@@ -276,10 +279,33 @@ describe('every writer of a file\'s processing state is driven by a case above',
     return import('../../server/dist/config/types.js').then(({ BRAIN_COLLECTIONS }) => {
       const records = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
       const writes = fileRowWrites(INDEX, records);
-      const writers = writes
-        .filter(w => processingTouched(w).fields.length > 0 && !(w.name in NOT_A_PROCESSING_MARK))
+      // A writer is one of two things, and both must be driven:
+      //  - a function that calls `setFileProcessingState` (the module every processing write goes through since D7), and
+      //  - a write to a files collection that touches a processing field OUTSIDE that module. The rule gate refuses such
+      //    a write, so the set is empty on a healthy tree; it is read here as well because a bypass that slipped past
+      //    that gate must still be one a case reaches.
+      const callers = [];
+      for (const [key, entry] of INDEX.bodies) {
+        if (entry.alias || entry.file === PROCESSING_STATE) continue;
+        if (callsIn(entry.body, { closures: true }).has('setFileProcessingState')) callers.push(key);
+      }
+      // The floor: derived from the imports, not a number. Every file that imports the setter must be found to call it,
+      // or the call scan is reading the wrong thing and an empty `callers` would pass every loop below.
+      const importers = [...INDEX.imports].filter(([file, names]) =>
+        file !== PROCESSING_STATE && [...names.values()].some(i => i.file === PROCESSING_STATE && i.exported === 'setFileProcessingState'))
+        .map(([file]) => file);
+      assert.ok(importers.length >= 1, 'no file imports setFileProcessingState — the derivation is broken');
+      for (const file of importers) {
+        assert.ok(callers.some(k => k.startsWith(`${file}:`)),
+          `${file} imports setFileProcessingState and no function of it was found calling it — the call scan is broken`);
+      }
+      assert.ok(INDEX.bodies.has(`${PROCESSING_STATE}:setFileProcessingState`),
+        'the setter is not in the call-graph index — re-anchor, or the walk cannot reach its write');
+      const outside = writes
+        .filter(w => w.file !== PROCESSING_STATE && processingTouched(w).fields.length > 0 && !(w.name in NOT_A_PROCESSING_MARK))
         .map(w => w.key);
-      assert.ok(writers.length >= 1, 'no writer of processing state found — the derivation is broken');
+      // The setter itself: reaching it proves the walk follows an import into the module that holds the one write.
+      const writers = [...callers, ...outside, `${PROCESSING_STATE}:setFileProcessingState`];
 
       const entries = [...new Set(CASES.flatMap(c => c.entries))];
       // The worker loop reaches `processJob` through a closure it hands the slot pool.

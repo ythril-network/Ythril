@@ -452,7 +452,7 @@ async function processJob(
     let fileEmbeddingStatus: 'complete' | 'partial' = 'complete';
     switch (mediaType) {
       case 'image':
-        derivedDescription = await embedImage(spaceId, fileId, fileBytes, mimeType, providers.vision);
+        derivedDescription = await embedImage(spaceId, fileId, fileBytes, mimeType, providers.vision, { arrival: job.arrival === true });
         // A caption IS model output, so the record says so. It was the reference point for the whole
         // complaint — the images carried generated captions while the parent carried a truncation — and it
         // had no provenance of its own either.

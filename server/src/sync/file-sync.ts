@@ -6,6 +6,8 @@
  * routes) and the conflict rule that follows it both belong here, beside the transfer they change.
  */
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { v4 as uuidv4 } from 'uuid';
 import { getDataRoot } from '../config/loader.js';
 import type { NetworkMember, ConflictDoc, FileMetaDoc } from '../config/types.js';
@@ -13,11 +15,13 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { log, logSafe, peerText } from '../util/log.js';
-import { sha256Hex } from '../util/sha256-hex.js';
+import { StreamVerificationError } from '../util/sha256-tap.js';
 import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
-import { readStored, writeStored, deleteStoredIfPresent } from '../files/stored-bytes.js';
+import {
+  deleteStoredIfPresent, stageStored, commitStaged, statStored, bytesPresent, isMissingPath, type StagedStoredFile,
+} from '../files/stored-bytes.js';
 import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
-import { buildFileManifest, forgetFileHashes } from '../files/manifest.js';
+import { buildFileManifest, forgetFileHashes, seedFileHash, type ManifestEntry } from '../files/manifest.js';
 import { recordArrivedBytes, countFileArrival, type FileRepairReason } from '../files/bytes-arrived.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { checkQuota, QuotaError, invalidateUsageCache } from '../quota/quota.js';
@@ -39,7 +43,8 @@ import { deliveryOfMember } from './deletion-authority.js';
 import { declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
 import { serverCursorOf } from './seq-run-pager.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
-import { noteToldTombstoned, wasToldTombstoned } from './told-tombstoned.js';
+import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpload } from './told-tombstoned.js';
+import { pushStoredFile, type SendUpload } from './file-push.js';
 
 /**
  * The most files whose RECORD is brought up to date from bytes already held, per space per sync cycle: a row that names another
@@ -140,6 +145,32 @@ async function removeJustWritten(spaceId: string, key: string, abs: string): Pro
     invalidateUsageCache();   // freed disk: the next quota check must not charge for it
   } catch (err) {
     sayPullFailure(CLEANUP_STEP, spaceId, key, err);
+  }
+}
+
+/**
+ * Whether the disk still holds what the pull decided on, asked under the path lock right before the rename (`commitStaged`): for a
+ * file new here, that nothing has appeared at the path; for one the peer's change replaces, that it is still the file the manifest
+ * described (the plaintext size and the modification time the manifest published), so a local edit that landed while the body was
+ * being fetched is never overwritten by the peer's version — it is a conflict, and the caller writes the bytes beside it.
+ */
+async function diskStillHolds(abs: string, local: ManifestEntry | undefined): Promise<boolean> {
+  if (!local) return !(await bytesPresent(abs));
+  const stat = await statStored(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+  return stat !== null && stat.size === local.size && stat.mtime.toISOString() === local.modifiedAt;
+}
+
+/**
+ * Hand the manifest's hash cache the hash the pull's tap just took, so the next manifest build does not read the whole file again to
+ * learn it (as the at-rest migration does for what it encrypts). A saving and never a rule: a failure leaves the cache as it was and
+ * the next build hashes the file.
+ */
+async function seedManifestHash(spaceId: string, key: string, abs: string, sha256: string, plainSize: number): Promise<void> {
+  try {
+    const stat = await statStored(abs);
+    await seedFileHash(spaceId, key, { size: stat.onDiskSize, mtimeMs: stat.mtimeMs, sha256, plainSize });
+  } catch (err) {
+    log.debug(`seed hash ${peerText(key)}: ${peerText(err)}`);
   }
 }
 
@@ -334,71 +365,98 @@ export async function syncFiles(
         const dl = await peerSafeFetch(
           `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(remote.path)}`,
           transferInit(opts()),
-          { timeoutMs: PEER_TRANSFER_TIMEOUT_MS },
+          { timeoutMs: PEER_TRANSFER_TIMEOUT_MS, streamBody: true },
         );
-        if (!dl.ok) { log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`); continue; }
-        const buf = Buffer.from(await dl.arrayBuffer());
-        const sha = sha256Hex(buf);
-        if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}`); continue; }
-
-        // The download took time, and a delete here may have begun since the cycle's first read: asked again, for this one path,
-        // right before the bytes are written (one indexed read). Decided or not, a path a deletion covers is not written.
-        const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: remote.sha256 }]);
-        if (again.shadowed.has(key) || again.undecided.has(key)) continue;
-
-        if (!local || action === 'replace') {
-          // New here, or changed only on the peer since we last agreed: write it over the original path (`abs`: the resolved
-          // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
-          // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
-          // when it has a master secret — under the path lock the migration job also takes (F-43).
-          await writeStored(abs, buf);
-          pulledBytes += buf.length;
-          try {
-            // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143) —
-            // and the file is DISPATCHED by this instance's own rules, as an upload to the door is (Q-260).
-            await recordArrivedBytes(spaceId, key, {
-              sizeBytes: buf.length, sha256: sha, door: 'pull', from: { instanceId: member.instanceId, instanceLabel: member.label },
-            });
-          } catch (err) {
-            // Bytes with no row naming them are skipped for ever by the next cycle (the same hash on both sides), and a row
-            // inserted later for them would credit this peer with a file it may never have sent. So the bytes this call wrote
-            // are removed, no base is written, and the next cycle delivers the file again with its true deliverer (Q-254).
-            await removeJustWritten(spaceId, key, abs);
-            sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
+        if (!dl.ok) {
+          await dl.body?.cancel().catch(() => undefined);   // a body nobody reads holds the connection until the signal fires
+          log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`);
+          continue;
+        }
+        /*
+         * The body STREAMS: through one tap, capped at the size the manifest DECLARED and checked against the hash it declared, into
+         * a temp file outside the path lock (`stageStored`). A peer chooses its body, and the cost of this pull was its to set when
+         * the whole body was read before it was looked at: now a body past its declared size is stopped at that size, a body that
+         * is not the declared hash fails in the tap's `flush`, and either leaves the stored file, its row and the temp dir as they
+         * were. Nothing reaches the tree before the re-check and the commit below.
+         */
+        let staged: StagedStoredFile;
+        try {
+          staged = await stageStored(abs, dl.body ? Readable.fromWeb(dl.body as WebReadableStream<Uint8Array>) : Readable.from([]), {
+            expect: { sha256: remote.sha256, size: remote.size },
+          });
+        } catch (err) {
+          if (err instanceof StreamVerificationError) {
+            log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}: ${err.code}`);
             continue;
           }
-          pulledFiles++;
-          pullRecovered(RECORD_STEP, spaceId, key);
-          await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
-          if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(key)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
-          pulledPaths.push(key);
-        } else {
-          // File exists locally with a different hash — keep local, save incoming
-          // under a conflict-copy name so the user can decide which version to keep.
-          // The peer's label reaches a filesystem path, so it is sanitised there — see
-          // ./file-conflict.ts for why that is an allowlist rather than a strip-list.
-          const conflictRelPath = conflictCopyPath(key, member.label, new Date());
-          const absConflictPath = await resolveSafePathChecked(spaceId, conflictRelPath);
-          await writeStored(absConflictPath, buf);
-          pulledBytes += buf.length;
-          pulledFiles++;
+          throw err;
+        }
+        try {
+          // The download took time, and a delete here may have begun since the cycle's first read: asked again, for this one path,
+          // right before the bytes are written (one indexed read). Decided or not, a path a deletion covers is not written.
+          const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: remote.sha256 }]);
+          if (again.shadowed.has(key) || again.undecided.has(key)) continue;
 
-          // Persist a conflict record so the UI can surface it to the user
-          const conflictDoc: ConflictDoc = {
-            _id: uuidv4(),
-            spaceId,
-            originalPath: key,
-            conflictPath: conflictRelPath,
-            peerInstanceId: member.instanceId,
-            peerInstanceLabel: member.label,
-            detectedAt: new Date().toISOString(),
-          };
-          await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
+          // New here, or changed only on the peer since we last agreed: renamed over the original path (`abs`: the resolved
+          // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
+          // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest when it has a master
+          // secret — and commits under the path lock the migration job also takes (F-43). Under that lock the path is resolved
+          // again and the disk is asked whether it still holds what this pull decided on: the stage took as long as the peer did,
+          // so a local edit may have landed meanwhile, and then the peer's bytes are a conflict, not a replacement.
+          const committed = (!local || action === 'replace')
+            && await commitStaged(abs, staged, { stillValid: async () => (await resolveSafePathChecked(spaceId, key)) === abs && await diskStillHolds(abs, local) });
+          if (committed) {
+            pulledBytes += staged.size;
+            try {
+              // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143) —
+              // and the file is DISPATCHED by this instance's own rules, as an upload to the door is (Q-260).
+              await recordArrivedBytes(spaceId, key, {
+                sizeBytes: staged.size, sha256: staged.sha256, door: 'pull', from: { instanceId: member.instanceId, instanceLabel: member.label },
+              });
+            } catch (err) {
+              // Bytes with no row naming them are skipped for ever by the next cycle (the same hash on both sides), and a row
+              // inserted later for them would credit this peer with a file it may never have sent. So the bytes this call wrote
+              // are removed, no base is written, and the next cycle delivers the file again with its true deliverer (Q-254).
+              await removeJustWritten(spaceId, key, abs);
+              sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
+              continue;
+            }
+            pulledFiles++;
+            pullRecovered(RECORD_STEP, spaceId, key);
+            await seedManifestHash(spaceId, key, abs, staged.sha256, staged.size);
+            await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
+            if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(key)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
+            pulledPaths.push(key);
+          } else {
+            // File exists locally with a different hash (or came to exist while the body was being fetched) — keep local, save
+            // incoming under a conflict-copy name so the user can decide which version to keep.
+            // The peer's label reaches a filesystem path, so it is sanitised there — see
+            // ./file-conflict.ts for why that is an allowlist rather than a strip-list.
+            const conflictRelPath = conflictCopyPath(key, member.label, new Date());
+            const absConflictPath = await resolveSafePathChecked(spaceId, conflictRelPath);
+            await commitStaged(absConflictPath, staged);
+            pulledBytes += staged.size;
+            pulledFiles++;
 
-          log.warn(
-            `FILE_CONFLICT: '${peerText(key)}' from peer '${peerText(member.label)}' differs from local copy. ` +
-            `Conflict copy saved as '${peerText(conflictRelPath)}'. Resolve in Settings → Conflicts.`,
-          );
+            // Persist a conflict record so the UI can surface it to the user
+            const conflictDoc: ConflictDoc = {
+              _id: uuidv4(),
+              spaceId,
+              originalPath: key,
+              conflictPath: conflictRelPath,
+              peerInstanceId: member.instanceId,
+              peerInstanceLabel: member.label,
+              detectedAt: new Date().toISOString(),
+            };
+            await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
+
+            log.warn(
+              `FILE_CONFLICT: '${peerText(key)}' from peer '${peerText(member.label)}' differs from local copy. ` +
+              `Conflict copy saved as '${peerText(conflictRelPath)}'. Resolve in Settings → Conflicts.`,
+            );
+          }
+        } finally {
+          await staged.discard();   // every exit: shadowed, committed (nothing left), refused, failed
         }
       } catch (err) {
         log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
@@ -415,38 +473,44 @@ export async function syncFiles(
       if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
       // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
       // A path the peer has told us it holds a tombstone for is not sent again while our hash for it is unchanged.
-      const told = wasToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256);
-      if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), told) === 'skip') continue;
+      // Two answers a peer has already given to exactly these bytes, and does not need asking again for: that it holds a tombstone
+      // that erased them, and that it refused them (`sync/told-tombstoned.ts`).
+      const answered = wasToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256)
+        || wasRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256);
+      if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), answered) === 'skip') continue;
       try {
         const absPath = path.join(spaceRoot, localPath);
+        // One request to the peer's upload door for THIS file. Whole-file body: BATCH_FETCH_TIMEOUT_MS is a control-plane budget
+        // and would abort any upload slower than a minute. Same reasoning as the download above — see PEER_TRANSFER_TIMEOUT_MS.
+        // What goes in it (one streamed body, or ranges under the peer's limit) is `pushStoredFile`'s to decide.
+        const send: SendUpload = async ({ headers: extra, body }) => {
+          const pushResp = await peerSafeFetch(
+            `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(localPath)}`,
+            {
+              method: 'POST',
+              headers: { Authorization: headers['Authorization'], 'Content-Type': 'application/octet-stream', ...extra },
+              body: body as unknown as BodyInit,
+              duplex: 'half',
+              signal: AbortSignal.timeout(PEER_TRANSFER_TIMEOUT_MS),
+            } as RequestInit,
+          );
+          const json = await boundedJson<Record<string, unknown>>(pushResp, 'sync peer').catch(() => ({}) as Record<string, unknown>);
+          return { status: pushResp.status, json: json !== null && typeof json === 'object' ? json : {} };
+        };
         // Plaintext on the wire, whatever this instance keeps at rest: the peer applies its own rules (F-43).
-        const bytes = await readStored(absPath);
-        const pushResp = await peerSafeFetch(
-          `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(localPath)}`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: headers['Authorization'],
-              'Content-Type': 'application/octet-stream',
-              'Content-Length': String(bytes.length),
-            },
-            body: bytes,
-            // Whole-file body: BATCH_FETCH_TIMEOUT_MS is a control-plane budget and would abort any
-            // upload slower than a minute. Same reasoning as the download below-- see
-            // PEER_TRANSFER_TIMEOUT_MS.
-            signal: AbortSignal.timeout(PEER_TRANSFER_TIMEOUT_MS),
-          },
-        );
-        if (!pushResp.ok) {
-          log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: HTTP ${pushResp.status}`);
-        } else if ((await boundedJson<{ tombstoned?: unknown }>(pushResp, 'sync peer').catch(() => ({}) as { tombstoned?: unknown })).tombstoned === true) {
+        const outcome = await pushStoredFile({ peerId: member.instanceId, abs: absPath, size: localEntry.size, sha256: localEntry.sha256, send });
+        if (outcome.kind === 'tombstoned') {
           // `200 { tombstoned: true }`: the peer holds a tombstone for exactly these bytes and stored nothing. Not a failure
           // (an older sender would read one as such and upload again), and not a delivery either — remembered, so the
           // next cycle does not send the same bytes to be refused the same way (`sync/told-tombstoned.ts`).
           noteToldTombstoned(member.instanceId, spaceId, localPath, localEntry.sha256);
-        } else {
+        } else if (outcome.kind === 'delivered') {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
+        } else {
+          log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: HTTP ${outcome.status}${outcome.error !== undefined ? `: ${peerText(outcome.error)}` : ''}`);
+          // A refusal of the BYTES is remembered: the same bytes of the same path would be refused again, after the whole file had been sent.
+          if (outcome.kind === 'refused') noteRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256);
         }
       } catch (err) {
         log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: ${peerText(err)}`);
