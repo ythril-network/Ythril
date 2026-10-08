@@ -128,7 +128,7 @@ encrypted on an instance that no longer has a secret — answers **`500`** with 
 can surface as an aborted transfer after the headers were sent; the client sees a failed download, never a short
 file that looks complete.
 
-Active-content types that can execute script when rendered in the browser (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`) are served with `Content-Disposition: attachment` and a `sandbox` Content-Security-Policy (stored-XSS guard). Passive types — images, PDF, plain text — are served `inline` and preview normally.
+Active-content types that can execute script when rendered in the browser (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`) are served with `Content-Disposition: attachment` and a `sandbox` Content-Security-Policy (stored-XSS guard). Passive types — images, PDF, plain text — are served `inline` and preview normally. The header names the file twice (RFC 6266): `filename*=UTF-8''…` carries the real name, percent-encoded, and `filename="…"` an ASCII stand-in for a client that reads only the old form, so a file of any name downloads — before this, a name with a character above U+00FF (`日本.txt`, an emoji, an accent sent decomposed) answered `500`.
 
 **A read spill's `path` is not a file here — deprecated, and removed at the next major.** `recall` and
 `similar` still send `path` on `remainder`, shaped `_tmp/results-<spillId>.json` (an older answer's

@@ -176,6 +176,18 @@ describe('File hardening (H8 + H9)', () => {
       const cd = r.headers.get('content-disposition') ?? '';
       assert.ok(!cd.includes('a"b'), `raw quote must not survive in header: ${cd}`);
     });
+
+    it('a name outside Latin-1 downloads, and the header names it (filename*)', async () => {
+      // Node refuses a header value above U+00FF, so this answered 500 with the bytes on disk (bundle-71 verify).
+      for (const name of ['日本.txt', 'café.txt', '📄 notes.md']) {
+        const r = await uploadAndFetch(name, `bytes of ${name}`, 'text/plain');
+        assert.equal(r.status, 200, `GET ${name}: ${r.status}`);
+        const cd = r.headers.get('content-disposition') ?? '';
+        const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+        assert.ok(star, `no filename* in: ${cd}`);
+        assert.equal(decodeURIComponent(star[1]).normalize('NFC'), name.normalize('NFC'), cd);
+      }
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════
