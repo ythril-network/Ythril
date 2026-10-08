@@ -314,7 +314,7 @@ export async function syncFiles(
               // their author and their deliverer, which a peer's file must never be (the derived-description guard and the
               // authorless-placeholder test both read `author == this instance`). So they are taken back, and the next cycle delivers
               // them as an ordinary arrival, with its true deliverer.
-              if (await removeUnrecordedBytes(spaceId, key)) countFileArrival('pull', 'repaired_missing_row');
+              if (await removeUnrecordedBytes(spaceId, key, null)) countFileArrival('pull', 'repaired_missing_row');
               continue;
             }
             // A row exists, so the author and deliverer it already has stay: only its size, hash and processing are brought up to date.
@@ -421,7 +421,7 @@ export async function syncFiles(
               // are removed (`removeUnrecordedBytes`, the one answer every door that writes bytes gives: it keeps them only when a
               // live row still names the path, an overwrite, or the lookup could not say), no base is written, and the next cycle delivers the file again with
               // its true deliverer (Q-254).
-              await removeUnrecordedBytes(spaceId, key);
+              await removeUnrecordedBytes(spaceId, key, err);
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }

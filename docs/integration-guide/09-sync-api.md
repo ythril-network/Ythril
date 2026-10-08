@@ -678,8 +678,9 @@ answer is lost is read back while the hold is still held. On the serving instanc
   is marked `skipped`), and **nothing is announced**: no `file.created` webhook and no live-view event, as for a synced
   record. A changed version replaces the previous version's passages. A peer's metadata in the upload body is ignored.
   A pull checks the space quota **before** it fetches a body (on the size the manifest declares), and a pull whose record
-  write fails removes the bytes it wrote and redoes the file next cycle; a file already held whose row names other bytes
-  than the disk's, has no row, or never went through processing is recorded by a later cycle, a few per space per cycle.
+  write fails removes the bytes it wrote (it keeps them when the database did not answer) and redoes the file next cycle;
+  a file already held with no row is taken back and delivered again, and one whose row names other bytes than the disk's
+  or that never went through processing is brought up to date, a few per space per cycle.
   `ythril_sync_file_arrivals_total{door,outcome}` counts them ([metrics](11-setup-api.md)).
 - **Pushing a file above the receiver's single-body limit goes through the chunked door.** The non-final `202` answer of
   `POST /api/files/:spaceId` with `Content-Range` carries `maxBodyBytes` besides `path` and `received`: the single-body

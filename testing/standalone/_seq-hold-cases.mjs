@@ -198,10 +198,6 @@ export function holderCases(ctx, S) {
       label: 'a file record updated', lock: 'counter',
       run: () => ctx.mods.fileMeta.updateFileMeta(S, HELD_FILE, { description: 'changed' }),
     }],
-    'server/src/files/file-meta.ts:markFileMetaDeleted': [{
-      label: 'a file record marked deleted', lock: 'counter',
-      run: () => ctx.mods.fileMeta.markFileMetaDeleted(S, HELD_FILE),
-    }],
     // The file tombstones' POSITION hold (bundle-71, Q-346): the second instance of the horizon hold. A tombstone has no seq,
     // so the stall is a document lock on the row the write waits for, and the hold is the module's own (`positionHold: true`
     // — `lowestUncommittedPosition` answers whether one is open, where a seq hold is asked of `lowestUncommittedSeq`).

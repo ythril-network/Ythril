@@ -105,7 +105,7 @@ export async function recordStoredFile(
     if (opts.actor) emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...opts.actor });
     return { sha256, sizeBytes, ...dispatched };
   } catch (err) {
-    await removeUnrecordedBytes(spaceId, givenPath);
+    await removeUnrecordedBytes(spaceId, givenPath, err);
     throw err;
   }
 }

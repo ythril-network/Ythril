@@ -98,8 +98,10 @@ const rowIds = (x) => spaceFootprint(x, space.id).fileIds;
  */
 function sidecarRow(x) {
   return mongoEval(x, `
+    // mongosh's findOne takes the projection ITSELF as its second argument: wrapped in { projection } (the Node driver's
+    // spelling) it projects a field named "projection", and every row read as top-level.
     const r = d.getCollection(${JSON.stringify(`${space.id}_files`)}).findOne({ _id: ${JSON.stringify(CONVERTED)} },
-      { projection: { _id: 1, parentFileId: 1, deliveredBy: 1 } });
+      { _id: 1, parentFileId: 1, deliveredBy: 1 });
     // '' is the back-fill's "nobody's" (a row that existed before the stamp): no peer delivered it either.
     print(JSON.stringify(r ? { present: true, parentFileId: r.parentFileId ?? null, deliveredBy: r.deliveredBy || null } : { present: false }));
   `);

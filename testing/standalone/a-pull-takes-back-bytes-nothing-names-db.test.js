@@ -16,7 +16,8 @@
  *  4. a repair candidate that a held tombstone shadows (or that cannot be looked at) costs a read, so it counts against the
  *     per-cycle cap: the reads of a cycle do not grow with the number of such paths
  *  5. `removeUnrecordedBytes` KEEPS the bytes when the lookup that would prove them unrecorded fails (the store is not answering),
- *     and says so once; it removes them only when the lookup answered "no row"
+ *     and says so once; it removes them only when the lookup answered "no row". When the failure that left the bytes unrecorded
+ *     was itself the store not answering, it does not ask at all (the read would retry inside its bound and hold the door's answer)
  *
  * ## Seen red
  *
@@ -226,7 +227,7 @@ describe('the pull takes back what nothing names, and says what it refuses', { s
 
     it('control: no row at all, the lookup answers, and the bytes are removed', async () => {
       door.writeLocalFile(S, KEPT, 'bytes with no row');
-      const removed = await removeUnrecordedBytes(S, KEPT);
+      const removed = await removeUnrecordedBytes(S, KEPT, null);
       assert.equal(onDisk(KEPT), false, 'bytes with no row stayed');
       assert.equal(removed, true, 'the answer does not say the bytes were taken back');
     });
@@ -240,7 +241,7 @@ describe('the pull takes back what nothing names, and says what it refuses', { s
       const lines = [];
       let answer;
       await withCollectionAsView(db, `${S}_files`, `${S}_files_src`, async () => {
-        const out = await door.logsDuring(async () => { answer = await removeUnrecordedBytes(S, KEPT); await removeUnrecordedBytes(S, KEPT); });
+        const out = await door.logsDuring(async () => { answer = await removeUnrecordedBytes(S, KEPT, null); await removeUnrecordedBytes(S, KEPT, null); });
         lines.push(...out.lines);
       }, { pipeline: [{ $addFields: { _x: { $toInt: '$junk' } } }] });
       await db.collection(`${S}_files_src`).drop().catch(() => {});
@@ -249,6 +250,24 @@ describe('the pull takes back what nothing names, and says what it refuses', { s
       const about = lines.filter(l => l.includes(S) && l.includes(KEPT));
       assert.equal(about.length, 1, `the failed lookup was said ${about.length} times for two calls (want once): ${JSON.stringify(lines)}`);
       assert.equal(await hasRowAfter(), false, 'fixture: the view was not put back');
+    });
+
+    it('the record failed because the store did not answer: the store is not asked, and the bytes stay', async () => {
+      door.writeLocalFile(S, KEPT, 'bytes whose record the store never answered');
+      const { MongoNetworkError } = await import('mongodb');
+      // No row names the path, so a cleanup that ASKED would be answered "no row" and remove the bytes: the bytes staying is
+      // what tells "not asked" apart. Asked, the read retries inside its bound against a store already known not to answer,
+      // and the door's answer waits that bound out.
+      const answer = await removeUnrecordedBytes(S, KEPT, new MongoNetworkError('connection closed'));
+      assert.equal(onDisk(KEPT), true, 'the bytes were removed: the cleanup asked a store that had just failed to answer');
+      assert.equal(answer, false, 'the answer says the bytes were taken back');
+    });
+
+    it('control: a failure that is not the store\'s (a refused write) still asks, and bytes no row names are removed', async () => {
+      door.writeLocalFile(S, KEPT, 'bytes whose record was refused');
+      const removed = await removeUnrecordedBytes(S, KEPT, new Error('a refused write'));
+      assert.equal(onDisk(KEPT), false, 'bytes with no row stayed');
+      assert.equal(removed, true, 'the answer does not say the bytes were taken back');
     });
   });
 });

@@ -25,6 +25,11 @@
  *    of an overwrite whose row exists leaves a row naming absent bytes. Bytes with no row are the lesser harm of the two, because
  *    they do not stay: the next pull whose peer offers the path takes them back (this function, once the store answers), and a
  *    person's retry of the upload rewrites them. Said once per window through the shared reporter.
+ *  - the failure that left the bytes unrecorded (`cause`) was ITSELF the store not answering: the bytes are KEPT, as above, and the
+ *    store is not asked, and nothing is said here (the caller reports the failure it holds). The lookup would go to the store that just failed, and a read retries inside its bound until the bound
+ *    ends, so the door's answer to a failure it already holds waited that bound out; under a fault that fails at once, the retries
+ *    spun hot enough to exhaust the process (the store-failure gate's `write_file` door, bundle-48 Full run). The cause is a
+ *    required argument so that a door cannot leave it out: one with no failure in hand (the pull's repair) passes `null`.
  *
  * It answers whether it took the bytes back, so a caller that counts the removal counts only a removal.
  *
@@ -53,10 +58,13 @@ function sayCleanupFailure(spaceId: string, key: string, err: unknown): void {
 
 /**
  * @param filePath the path as the door was given it (or the pull's key): resolved and symlink-checked here
+ * @param cause the failure of the record step that left the bytes unrecorded, or `null` when there is none (the pull's repair)
  * @returns whether the bytes were taken back: `false` when a live row names the path, and `false` when the lookup (or the removal)
- *   failed, which is said, never thrown
+ *   failed, which is said, never thrown, and `false` when the store was not asked because `cause` is the store not answering
  */
-export async function removeUnrecordedBytes(spaceId: string, filePath: string): Promise<boolean> {
+export async function removeUnrecordedBytes(spaceId: string, filePath: string, cause: unknown): Promise<boolean> {
+  // Not said here: the failure is the caller's, which rethrows or reports it, and a second line would log the store's text twice.
+  if (cause != null && storeIsNotAnswering(cause)) return false;
   let key = filePath;
   try {
     const resolved = await peerFileKey(spaceId, filePath);
