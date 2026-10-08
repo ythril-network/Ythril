@@ -504,6 +504,13 @@ export const CREATOR_GRANT_OPERATION = 'token.creator_grant';
  */
 export const STRAY_FILEMETA_DRAIN_OPERATION = 'file.stray_filemeta.drain';
 
+/**
+ * Conversion sidecars a peer delivered into a space, removed because a sidecar is now this instance's own and each instance
+ * converts by its own settings (bundle-48, `sync/peer-sidecar-retirement.ts`): one entry per space per cycle that retired any.
+ * The removal is of files no request named, so it is audited as the drain is.
+ */
+export const PEER_SIDECAR_RETIREMENT_OPERATION = 'file.peer_sidecar.retire';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

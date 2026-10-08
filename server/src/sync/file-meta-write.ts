@@ -51,11 +51,7 @@
  */
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { enqueueIngestedRecords } from '../brain/embed-queue.js';
-import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
-import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { removedFileMetaKeys, FILE_META_AUTHORED_KEYS } from '../api/sync/_shared.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
@@ -131,34 +127,6 @@ export async function authoredKeysRestoreRemoves(spaceId: string, docs: Readonly
   return counts;
 }
 
-/** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */
-export function holdsBlob(row: { sha256?: unknown; sizeBytes?: unknown } | undefined): boolean {
-  return row?.sha256 !== undefined || row?.sizeBytes !== undefined;
-}
-
-/**
- * Bring landed files' vectors in line with the RECEIVER's rules, after their metadata was written — one read for the
- * set, then:
- *  - **a file this instance suppresses** (its own flag as stored now, or the space: a file has two tiers) holds no
- *    vector, nor do the rows derived from it (`dropFileVectors`) — whoever set the flag, an arriving peer copy or the
- *    stray drain's fill. Queued instead, as the drain's copy of this did, it was claimed and discarded; skipped, as
- *    a suppression check alone would, the old vector stayed;
- *  - **any other file is queued** (one batched enqueue, background lane) when its bytes are here — metadata can
- *    arrive first, and the bytes enqueue the file when they land (`recordArrivedFile`) — or, on a restore, always:
- *    the export carries no bytes, and a restore's promise is that search comes back on its own.
- */
-export async function embedArrivedFiles(spaceId: string, ids: readonly string[], { restore = false }: { restore?: boolean } = {}): Promise<void> {
-  if (ids.length === 0) return;
-  const rows = await readStoredById<{ sha256?: string; sizeBytes?: number; suppressEmbeddings?: boolean }>(
-    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 });
-  const meta = getSpaceMeta(spaceId);
-  const quiet: string[] = [];
-  const wanted: Array<{ _id: string; suppressEmbeddings?: boolean }> = [];
-  for (const [_id, r] of rows) {
-    const doc = { _id, ...(r.suppressEmbeddings !== undefined ? { suppressEmbeddings: r.suppressEmbeddings } : {}) };
-    if (embeddingSuppressedFor(spaceId, 'file', doc, meta)) quiet.push(_id);
-    else if (restore || holdsBlob(r)) wanted.push(doc);
-  }
-  await dropFileVectors(spaceId, quiet);
-  await enqueueIngestedRecords(spaceId, 'file', wanted);
-}
+// The vector half of an arrival lives in its own module (its docblock says why: an import cycle through the wire schema);
+// re-exported so the merge's callers keep one import.
+export { holdsBlob, embedArrivedFiles } from './embed-arrived-files.js';

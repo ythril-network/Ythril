@@ -23,7 +23,7 @@ import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
-import { embedArrivedFiles } from '../sync/file-meta-write.js';
+import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 import { rekeyedRow, stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';

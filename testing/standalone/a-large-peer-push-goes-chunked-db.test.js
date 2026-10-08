@@ -105,6 +105,7 @@ async function openReceiver(real) {
     up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
     req.pipe(up);
   });
+  // own-listener: binds every interface, because the push reaches a peer only by its LAN address (loopback is refused)
   const server = await new Promise(resolve => { const s = app.listen(0, '0.0.0.0', () => resolve(s)); });
   return {
     uploads, url: `http://${privateHostAddress()}:${server.address().port}`,

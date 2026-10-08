@@ -43,6 +43,8 @@ import { escapeRegex } from '../util/redos.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { log, peerText } from '../util/log.js';
+import { logInternalAudit } from '../audit/audit.js';
+import { PEER_SIDECAR_RETIREMENT_OPERATION } from '../audit/middleware.js';
 
 const STEP = declareStep('Peer sidecar retirement');
 
@@ -51,6 +53,7 @@ export const RETIRE_PER_SPACE_PER_CYCLE = 200;
 
 /** Retire the peer-supplied sidecars of one space; returns how many were retired. Throws what ends the space's step. */
 async function retireInSpace(spaceId: string): Promise<number> {
+  const startedAt = Date.now();
   const self = getConfig().instanceId;
   const found = await col<{ _id: string }>(spaceCollection(spaceId, 'files')).find(asFilter<{ _id: string }>({
     _id: { $regex: `^(?:${escapeRegex(CONVERTED_ROOT)}|${escapeRegex(EXTRACTED_ROOT)})` },
@@ -69,6 +72,8 @@ async function retireInSpace(spaceId: string): Promise<number> {
   });
   if (retired > 0) {
     log.info(`Retired ${retired} conversion sidecar(s) a peer delivered into space '${peerText(spaceId)}': sidecars are this instance's own now`);
+    // Files no request named were removed: audited after the removal succeeded, as the stray drain's drop is.
+    logInternalAudit({ method: 'SWEEP', path: 'internal:peer-sidecar-retirement', spaceId, operation: PEER_SIDECAR_RETIREMENT_OPERATION, startedAt });
   }
   return retired;
 }

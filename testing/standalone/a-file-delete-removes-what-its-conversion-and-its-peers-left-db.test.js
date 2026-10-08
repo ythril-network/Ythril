@@ -290,6 +290,10 @@ describe('deleting a file removes what its conversion and its peers left, and on
       }
       assert.equal((await acts.raw()).length, tombstonesBefore,
         'retiring a delivered sidecar wrote a tombstone: the path is instance-local, so a deletion would be announced to peers that never received it');
+      // Files no request named were removed: one audit entry for the space, with no token (as the stray drain's drop).
+      const audit = await door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.peer_sidecar.retire' }).toArray();
+      assert.equal(audit.length, 1, `the retirement was audited ${audit.length} times (want once for the space): ${JSON.stringify(audit)}`);
+      assert.equal(audit[0].tokenId ?? null, null, 'the retirement was audited as a token\'s act');
     });
   });
 

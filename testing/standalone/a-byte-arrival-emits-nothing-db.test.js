@@ -58,6 +58,7 @@ import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { openByteDoor, USER_TOKEN } from './_byte-door.mjs';
 import { postWhole, postInHalves } from './_byte-door-uploads.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -82,12 +83,7 @@ const dispatchedFor = async (path) => (await dispatches()).filter(d => d.path ==
 
 /** Wait (bounded) until `predicate` holds; the dispatcher's hop is asynchronous and the control proves when it has ended. */
 async function until(predicate, what, ms = 10_000) {
-  const t0 = Date.now();
-  for (;;) {
-    if (await predicate()) return;
-    if (Date.now() - t0 > ms) assert.fail(`timed out after ${ms}ms waiting for ${what}`);
-    await new Promise(r => setTimeout(r, 50));
-  }
+  await waitFor(predicate, ms, 50, () => `timed out after ${ms}ms waiting for ${what}`);
 }
 
 /** The bus events for a path: what the live Files page would have been told. */

@@ -86,6 +86,7 @@ async function openFrontPeer(real) {
     up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
     req.pipe(up);
   });
+  // own-listener: binds every interface, because the pull reaches a peer only by its LAN address (loopback is refused)
   await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
   return {
     state, url: `http://${privateHostAddress()}:${server.address().port}`,

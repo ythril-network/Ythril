@@ -319,7 +319,9 @@ gives way to the sender's own wording. A file another instance described keeps t
 wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
 case the file still arrives. A record that is damaged (a value of the wrong kind, or a piece of a file rather than
 a file) is discarded instead of copied. Once nothing is left, the side collection is removed. That removal cannot be undone and
-appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
+appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token. In the same way, the
+converted and extracted files a peer delivered before each instance made its own are removed in the background, and each
+space that had any appears once as operation `file.peer_sidecar.retire`.
 
 **Exporting:** Download the current filtered view as JSON or CSV.
 

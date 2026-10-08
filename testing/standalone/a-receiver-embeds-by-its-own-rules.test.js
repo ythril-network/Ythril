@@ -276,7 +276,8 @@ describe('a merged file is queued in one place', () => {
      * directly and so skipped the receiver's suppression. Now one function decides — held bytes, or a restore —
      * and queues through `enqueueIngestedRecords`, for the writer and the drain alike.
      */
-    const files = src('server/src/sync/file-meta-write.ts');
+    // Moved out of sync/file-meta-write.ts into a module of its own (bundle-48: an import cycle through the wire schema).
+    const files = src('server/src/sync/embed-arrived-files.ts');
     const queue = bodyOf(files, 'embedArrivedFiles');
     assert.match(queue, /restore \|\| holdsBlob\(r\)/, 'embedArrivedFiles no longer decides on held bytes or a restore');
     assert.match(queue, /enqueueIngestedRecords\(spaceId, 'file', /, 'embedArrivedFiles queues past the receiver\'s suppression');
