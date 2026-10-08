@@ -32,6 +32,7 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
+import type { Readable } from 'node:stream';
 import { fetch as undiciFetch, Agent } from 'undici';
 import { log, peerText } from './log.js';
 
@@ -501,7 +502,10 @@ async function serialiseMultipart(form: FormData): Promise<{ body: Buffer; conte
  *
  * The function form is how a streamed body survives a redirect — see the note on `ssrfSafeFetch`.
  */
-export type SsrfRequestInit = Omit<RequestInit, 'body'> & { body?: RequestInit['body'] | (() => BodyInit) };
+export type SsrfRequestInit = Omit<RequestInit, 'body'>
+  // A Node `Readable` is what a streamed body is at this layer, and it is not in the DOM's `BodyInit`; undici takes
+  // one at run time. Named rather than cast at every call site, so the one place that knows this is this type.
+  & { body?: RequestInit['body'] | (() => BodyInit | Readable) };
 
 async function normaliseBody(init: RequestInit): Promise<RequestInit> {
   if (!isFormDataLike(init.body)) return init;

@@ -68,6 +68,21 @@ let embedStatus = 200;
 let onFaces = null;
 
 const files = (space = S) => mongo.col(`${space}_files`);
+
+/**
+ * Bytes as the PLAINTEXT HANDLE the four media embedders take (`files/plaintext-file.ts`): a path and a size, never
+ * the bytes.
+ *
+ * This file's subject is what a writer does when the parent is flagged mid-run, which does not depend on how the
+ * input arrives — but the CONTROL case does. A `Buffer` handed where a handle is expected throws before the provider
+ * is reached, which makes every absence case below pass for the wrong reason.
+ */
+let handleSeq = 0;
+const handleOf = (bytes, ext) => {
+  const p = path.join(tmpDir, `handle-${handleSeq++}.${ext}`);
+  fs.writeFileSync(p, bytes);
+  return { path: p, size: bytes.length, copied: true, dispose: async () => { /* the suite removes tmpDir */ } };
+};
 const counter = async (space = S) => (await mongo.col('ythril_counters').findOne({ _id: space }))?.seq ?? 0;
 
 /** A live file row, as an upload leaves it. */
@@ -145,7 +160,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
 
   it('the stand-ins answer: a job over a live parent writes its rows (control)', async () => {
     await seedFile('photos/live.png');
-    await imageMod.embedImage(S, 'photos/live.png', Buffer.from('png'), 'image/png', { caption: async () => 'a man at a whiteboard' });
+    await imageMod.embedImage(S, 'photos/live.png', handleOf(Buffer.from('png'), 'png'), 'image/png', { caption: async () => 'a man at a whiteboard' });
     assert.deepEqual(await derivedOf('photos/live.png'), ['photos/live.png#media-chunk0'],
       'control: with nothing flagged the caption chunk must be stored, or every case below proves nothing');
   });
@@ -155,7 +170,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       const parent = 'photos/caption.png';
       await seedFile(parent);
       const vision = { caption: async () => { await flag(parent); return 'a man at a whiteboard'; } };
-      await imageMod.embedImage(S, parent, Buffer.from('png'), 'image/png', vision);
+      await imageMod.embedImage(S, parent, handleOf(Buffer.from('png'), 'png'), 'image/png', vision);
       assert.deepEqual(await derivedOf(parent), [], `the caption job wrote a chunk for ${parent}, which was flagged deleted while it ran`);
     });
 
@@ -163,7 +178,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       const parent = 'calls/q3.wav';
       await seedFile(parent);
       const stt = { transcribe: async () => { await flag(parent); return { text: 'welcome to the quarterly call', segments: [] }; } };
-      await audioMod.embedAudio(S, parent, Buffer.from('wav'), 'audio/wav', stt);
+      await audioMod.embedAudio(S, parent, handleOf(Buffer.from('wav'), 'wav'), 'audio/wav', stt);
       assert.deepEqual(await derivedOf(parent), [], `the audio job wrote a chunk for ${parent}, which was flagged deleted while it ran`);
     });
 
@@ -173,7 +188,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       const stt = { transcribe: async () => ({ text: 'welcome to the quarterly call', segments: [] }) };
       // The audio pass stores its chunk while the parent is live; the keyframe captioning that follows is the slow step.
       const vision = { caption: async () => { await flag(parent); return 'a man at a whiteboard'; } };
-      await videoMod.embedVideo(S, parent, Buffer.from('mp4'), 'video/mp4', vision, stt, true);
+      await videoMod.embedVideo(S, parent, handleOf(Buffer.from('mp4'), 'mp4'), 'video/mp4', vision, stt, true);
       const rewritten = (await files().find({ parentFileId: parent, content: { $regex: '\\[visual at' } }, { projection: { _id: 1 } }).toArray()).map(r => r._id);
       assert.deepEqual(rewritten, [], `the video job re-embedded a chunk of ${parent} with caption text after the parent was flagged deleted`);
     });
@@ -187,7 +202,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       await seedFile(parent);
       let asked = 0;
       onFaces = async () => { asked++; };
-      await faceMod.embedFaces(S, parent, await png());
+      await faceMod.embedFaces(S, parent, handleOf(await png(), 'png'));
       assert.deepEqual({ asked, derived: await derivedOf(parent) }, { asked: 1, derived: [`${parent}#face-chunk0`] },
         'control: the face job must reach its provider and its write over a live parent, or the flagged case below proves nothing');
     });
@@ -196,7 +211,7 @@ describe('a job in flight never writes for a parent flagged deleted mid-run (E2,
       const parent = 'photos/faces.png';
       await seedFile(parent);
       onFaces = () => flag(parent);
-      await faceMod.embedFaces(S, parent, await png());
+      await faceMod.embedFaces(S, parent, handleOf(await png(), 'png'));
       assert.deepEqual(await derivedOf(parent), [], `the face job wrote a face chunk for ${parent}, which was flagged deleted while it ran`);
     });
   });

@@ -12,6 +12,7 @@
  */
 
 import { runFfmpeg } from './transcode.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -19,7 +20,6 @@ import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
-import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
@@ -205,8 +205,19 @@ export interface AudioEmbedResult {
 export async function embedAudio(
   spaceId: string,
   fileId: string,
-  audioBytes: Buffer,
-  mimeType: string,
+  /**
+   * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
+   *
+   * ffmpeg opens it several times over (the duration probe, the silence pass, one extract per segment), so a path is
+   * what it wanted all along: this used to be handed the whole file in memory and write it straight back to disk.
+   */
+  audio: PlaintextFile,
+  /**
+   * Unused since the input stopped being written here: ffmpeg guesses its demuxer from the handle's own extension,
+   * which the worker set when it opened it. Kept in the signature because it is what the JOB says the file is, and a
+   * caller that stops passing it is a caller that has stopped knowing.
+   */
+  _mimeType: string,
   stt: SttProvider,
   overlapMs = 5000,
   opts?: MediaProgressOpts,
@@ -214,14 +225,14 @@ export async function embedAudio(
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  // Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a kill: a
-  // `finally` does not run when the process is killed, and an out-of-memory kill is this path's own failure mode.
+  // The SEGMENTS still need somewhere to go; the input does not — it is the caller's handle, already a plaintext path
+  // under the swept scratch directory (or a hard link to the stored file, which is the snapshot ffmpeg needs across its
+  // several passes). Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a
+  // kill: a `finally` does not run when the process is killed, and an out-of-memory kill is this path's own failure mode.
   const tmpDir = await scratchDir('ythril-audio');
-  const inputPath = path.join(tmpDir, `input.${mimeTypeToExt(mimeType)}`);
+  const inputPath = audio.path;
 
   try {
-    await fs.writeFile(inputPath, audioBytes);
-
     // Step 1: total duration
     const totalDurationS = await getDurationSeconds(inputPath);
     if (totalDurationS <= 0) {
@@ -235,9 +246,12 @@ export async function embedAudio(
       '-f', 'null', '-',
     ]).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
 
-    const silences = parseSilenceDetect(stderr, totalDurationS || (audioBytes.length / 32000));
-    const rawChunks = silencesToChunks(silences, totalDurationS || (audioBytes.length / 32000));
-    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS || (audioBytes.length / 32000));
+    // The fallback duration is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), and the size now
+    // comes from the handle's stat rather than from the length of a buffer nobody holds any more.
+    const guessedS = audio.size / 32000;
+    const silences = parseSilenceDetect(stderr, totalDurationS || guessedS);
+    const rawChunks = silencesToChunks(silences, totalDurationS || guessedS);
+    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS || guessedS);
 
     // Step 3: for each chunk, extract audio → transcribe → embed → store
     const results: AudioChunkRecord[] = [];
@@ -352,13 +366,4 @@ export async function embedAudio(
 function buildTranscript(segments: SttSegment[], fallbackText: string): string {
   if (segments.length === 0) return fallbackText.trim();
   return segments.map(s => s.text.trim()).filter(Boolean).join(' ');
-}
-
-/**
- * Name the temp file ffmpeg reads. ffmpeg does probe content, so a wrong name is usually survivable —
- * but it picks the demuxer from the extension first, and `input.bin` (what an untyped job used to
- * produce) gives it nothing to go on.
- */
-function mimeTypeToExt(mimeType: string): string {
-  return extForMimeType(mimeType, 'bin');
 }

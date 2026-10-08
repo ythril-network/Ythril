@@ -10,13 +10,13 @@
  */
 
 import { runFfmpeg } from './transcode.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
-import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
 import { updateDerivedFileRow } from '../derived-fields.js';
@@ -110,8 +110,15 @@ async function extractKeyframes(
 export async function embedVideo(
   spaceId: string,
   fileId: string,
-  videoBytes: Buffer,
-  mimeType: string,
+  /**
+   * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
+   *
+   * A video is the largest file this pipeline handles and ffmpeg opens it repeatedly (the audio extract, the keyframe
+   * pass). Holding it in memory as well was the worst case of the seven-times-its-size shape this ticket is about.
+   */
+  video: PlaintextFile,
+  /** Unused since the input stopped being written here — see `embedAudio`. */
+  _mimeType: string,
   vision: VisionProvider,
   stt: SttProvider,
   doKeyframes = true,
@@ -124,18 +131,23 @@ export async function embedVideo(
   const vectors = await chunkVectorsFor(spaceId, fileId);
   // Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a kill — see
   // `scratchDir`. A video job holds the largest plaintext of any, and its `finally` does not run when it is killed.
+  // The EXTRACTED wav and the keyframes still need somewhere to go; the input does not — it is the caller's handle.
   const tmpDir = await scratchDir('ythril-video');
-  const videoExt = mimeTypeToVideoExt(mimeType);
-  const videoPath = path.join(tmpDir, `input.${videoExt}`);
+  const videoPath = video.path;
   const audioPath = path.join(tmpDir, 'audio.wav');
 
   try {
-    await fs.writeFile(videoPath, videoBytes);
-
     // Step 1: Extract audio + embed audio chunks
     await extractAudioTrack(videoPath, audioPath);
-    const audioBytes = await fs.readFile(audioPath);
-    const audioResult = await embedAudio(spaceId, fileId, audioBytes, 'audio/wav', stt, overlapMs,
+    // Handed on as a PATH, with its own size: the wav was read whole here only to be written straight back to disk by
+    // the audio stage, which is two copies of a file that can be twenty minutes of PCM.
+    const audioStat = await fs.stat(audioPath);
+    const audio: PlaintextFile = {
+      path: audioPath, size: audioStat.size, copied: true,
+      // The directory this lives in is disposed by the `finally` below, so the stage must not remove it early.
+      dispose: async () => { /* the video job owns this scratch */ },
+    };
+    const audioResult = await embedAudio(spaceId, fileId, audio, 'audio/wav', stt, overlapMs,
       // The video's route, not the audio one: `embedAudio` is a STAGE of this job, and a bar that swapped
       // its segment list halfway through would redraw mid-file.
       { ...opts, steps: opts?.steps ?? VIDEO_STEPS });
@@ -186,7 +198,7 @@ export async function embedVideo(
         break;
       }
       try {
-        const caption = await vision.caption(jpegBytes, 'image/jpeg');
+        const caption = await vision.caption({ bytes: jpegBytes }, 'image/jpeg');
         if (typeof caption === 'string' && caption.trim()) {
           captionedFrames.push({ timestampS, caption: caption.trim() });
         }
@@ -240,12 +252,3 @@ export async function embedVideo(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Name the temp file ffmpeg reads. The `mp4` fallback stays — it is the best guess for an unknown
- * video — but it is now only reached for genuinely unrecognised types, not for every job whose MIME
- * arrived as a byte blob.
- */
-function mimeTypeToVideoExt(mimeType: string): string {
-  return extForMimeType(mimeType, 'mp4');
-}

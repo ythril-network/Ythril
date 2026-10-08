@@ -20,6 +20,8 @@ import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-
 import { slotTimeoutMs, reasoningEffortBody } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 import { extForMimeType, isInformativeMimeType, sniffImageMimeType } from '../mime.js';
+import fsp from 'node:fs/promises';
+import { bodyAroundImage } from './image-body.js';
 import { chatUrlFor, transcriptionsUrlFor } from '../converters/vlm-endpoint.js';
 
 /**
@@ -108,6 +110,28 @@ const egressFetch = (external: boolean, slot: EgressSlot): typeof fetch => {
 };
 
 const MAX_VISION_RESPONSE_BYTES = 50 * 1024 * 1024;  // 50 MiB — caption JSON is small
+
+/** Enough of a file to recognise an image format by its magic bytes, and no more. */
+const SNIFF_BYTES = 32;
+
+/**
+ * The first bytes of a file, for a format sniff.
+ *
+ * A read of the HEADER, deliberately: the type is decided by a dozen magic bytes, and reading the whole image to learn
+ * it would put back the copy the streamed body exists to remove.
+ */
+async function readHeader(src: ImageSource): Promise<Buffer> {
+  if ('bytes' in src) return src.bytes.subarray(0, SNIFF_BYTES);
+  const fh = await fsp.open(src.path, 'r');
+  try {
+    const buf = Buffer.alloc(SNIFF_BYTES);
+    const { bytesRead } = await fh.read(buf, 0, SNIFF_BYTES, 0);
+    void src;
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close().catch(() => { /* the read is what mattered */ });
+  }
+}
 const MAX_STT_RESPONSE_BYTES    = 100 * 1024 * 1024; // 100 MiB — verbose_json with many segments
 
 // ── Shared types ──────────────────────────────────────────────────────────
@@ -125,9 +149,31 @@ export interface SttResult {
 
 // ── Provider interfaces ───────────────────────────────────────────────────
 
+/**
+ * The image a vision provider is asked about: a PATH and the size, never the bytes.
+ *
+ * Both wires send the image as base64 inside a JSON body, and building that from a `Buffer` cost the file four times
+ * over — in memory, as base64, as JSON, and again at the fetch encode — before the provider saw a byte (`Q-425`). From
+ * a path the body is a stream with an exact `Content-Length`, and the size is what makes the length exact.
+ */
+export type ImageSource =
+  /** A stored file: the big case, and the reason this is not a `Buffer` (`files/plaintext-file.ts`). */
+  | { path: string; size: number }
+  /**
+   * Bytes already in memory, for the two callers that legitimately hold a small image: the model-verify probe (a fixed
+   * test picture) and a video keyframe, which ffmpeg has just written and the job reads one at a time. Making those
+   * write a file to be read back would add a copy in order to remove one.
+   */
+  | { bytes: Buffer };
+
+/** The byte count of an image source, without reading it. */
+export function imageSourceSize(src: ImageSource): number {
+  return 'bytes' in src ? src.bytes.length : src.size;
+}
+
 export interface VisionProvider {
-  /** Generate a descriptive text caption for the given image bytes. */
-  caption(imageBytes: Buffer, mimeType: string): Promise<string>;
+  /** Generate a descriptive text caption for the image at this path. */
+  caption(image: ImageSource, mimeType: string): Promise<string>;
 }
 
 export interface SttProvider {
@@ -143,13 +189,25 @@ export interface SttProvider {
 export class OllamaVisionProvider implements VisionProvider {
   constructor(private readonly cfg: MediaProviderConfig) {}
 
-  async caption(imageBytes: Buffer, _mimeType: string): Promise<string> {
+  async caption(image: ImageSource, _mimeType: string): Promise<string> {
     const base = (this.cfg.baseUrl ?? 'http://ollama.ythril.svc.cluster.local:11434').replace(/\/$/, '');
     const model = this.cfg.model ?? 'moondream';  // `moondream2` is not a valid Ollama registry name
     // Same builder as every other slot, on the Ollama wire. Nothing was wrong with this one — it is here
     // so the rule has no exceptions to remember: a slot names its wire, not its route.
     const url = chatUrlFor('ollama', base);
-    const b64 = imageBytes.toString('base64');
+    // The body is the same OBJECT it always was, with the image's base64 streamed in where the marker sits — so the
+    // request a server reads is the one written here, and its length is computed rather than measured.
+    const body = bodyAroundImage(marker => ({
+      model,
+      stream: false,
+      messages: [
+        {
+          role: 'user',
+          content: 'Describe this image in detail. Focus on what is visually present.',
+          images: [marker],
+        },
+      ],
+    }), image);
 
     let res: Response;
     try {
@@ -157,21 +215,15 @@ export class OllamaVisionProvider implements VisionProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Computed, not chunked: a provider, or a proxy in front of one, may refuse an upload of unknown length.
+          'Content-Length': String(body.contentLength),
           ...(this.cfg.apiKey ? { Authorization: `Bearer ${this.cfg.apiKey}` } : {}),
         },
-        body: JSON.stringify({
-          model,
-          stream: false,
-          messages: [
-            {
-              role: 'user',
-              content: 'Describe this image in detail. Focus on what is visually present.',
-              images: [b64],
-            },
-          ],
-        }),
+        body: body.stream() as unknown as BodyInit,
+        // undici demands it of a stream body, and the error it gives without it names neither the body nor this call.
+        duplex: 'half',
         signal: AbortSignal.timeout(visionTimeout()),
-      });
+      } as RequestInit);
     } catch (err) {
       throw new Error(`Ollama vision unreachable (${url}): ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -194,14 +246,13 @@ export class OllamaVisionProvider implements VisionProvider {
 export class ExternalVisionProvider implements VisionProvider {
   constructor(private readonly cfg: MediaProviderConfig) {}
 
-  async caption(imageBytes: Buffer, mimeType: string): Promise<string> {
+  async caption(image: ImageSource, mimeType: string): Promise<string> {
     const base = (this.cfg.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '');
     const model = this.cfg.model ?? 'gpt-4o-mini';
     // Normalised: this appended `/chat/completions` bare, so vision was the one slot whose base HAD to
     // carry `/v1` — while the assist model and text embedding appended it themselves and so required the
     // opposite. One server, two base URLs, and a reporter configuring exactly that to keep both working.
     const url = chatUrlFor('openai', base);
-    const b64 = imageBytes.toString('base64');
     // A data URI must carry a real media type. `data:application/octet-stream;base64,…` is what a
     // strict OpenAI-compatible server (llama.cpp's llama-server among them) rejects outright:
     //
@@ -209,39 +260,46 @@ export class ExternalVisionProvider implements VisionProvider {
     //
     // The type is now correct upstream, but this path takes no chances: a job row queued by an older
     // build still carries the old value, and the bytes settle it either way.
+    // A HEADER read, not the file: sniffing needs the first bytes and nothing more, and reading the whole image to
+    // learn its type would put back the copy this change removes.
     const resolved = isInformativeMimeType(mimeType)
       ? mimeType
-      : sniffImageMimeType(imageBytes) ?? 'image/jpeg';
-    const dataUrl = `data:${resolved};base64,${b64}`;
+      : sniffImageMimeType(await readHeader(image)) ?? 'image/jpeg';
+
+    // The same OBJECT this always sent, with the image's base64 streamed in where the marker sits.
+    const body = bodyAroundImage(marker => ({
+      model,
+      // Only when the operator set one for this slot. The OLLAMA body above deliberately does not get
+      // this: its wire has no `reasoning_effort`, and a field a server does not know is either ignored
+      // silently or rejected — neither of which is a control.
+      ...reasoningEffortBody('vision', getModelSlots()),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe this image in detail. Focus on what is visually present.' },
+            { type: 'image_url', image_url: { url: `data:${resolved};base64,${marker}` } },
+          ],
+        },
+      ],
+      max_tokens: 500,
+    }), image);
 
     let res: Response;
     try {
-      // External endpoint → SSRF-guarded egress.
+      // External endpoint → SSRF-guarded egress. The body is a FACTORY: `ssrfSafeFetch` re-sends it on every
+      // redirect hop, and a one-shot stream would reach the second hop already consumed.
       res = await egressFetch(true, 'vision')(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Computed, not chunked: a provider, or a proxy in front of one, may refuse an upload of unknown length.
+          'Content-Length': String(body.contentLength),
           ...(this.cfg.apiKey ? { Authorization: `Bearer ${this.cfg.apiKey}` } : {}),
         },
-        body: JSON.stringify({
-          model,
-          // Only when the operator set one for this slot. The OLLAMA body above deliberately does not get
-          // this: its wire has no `reasoning_effort`, and a field a server does not know is either ignored
-          // silently or rejected — neither of which is a control.
-          ...reasoningEffortBody('vision', getModelSlots()),
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: 'Describe this image in detail. Focus on what is visually present.' },
-                { type: 'image_url', image_url: { url: dataUrl } },
-              ],
-            },
-          ],
-          max_tokens: 500,
-        }),
+        body: body.stream,
         signal: AbortSignal.timeout(visionTimeout()),
-      });
+      } as unknown as RequestInit);
     } catch (err) {
       throw new Error(`External vision unreachable (${url}): ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -390,12 +448,14 @@ class FallbackVisionProvider implements VisionProvider {
     private readonly fallback: VisionProvider,
   ) {}
 
-  async caption(imageBytes: Buffer, mimeType: string): Promise<string> {
+  async caption(image: ImageSource, mimeType: string): Promise<string> {
     try {
-      return await this.primary.caption(imageBytes, mimeType);
+      return await this.primary.caption(image, mimeType);
     } catch (err) {
       log.warn(`Vision primary failed, falling back to external: ${err instanceof Error ? err.message : String(err)}`);
-      return this.fallback.caption(imageBytes, mimeType);
+      // The SAME source, which is why it is a path or bytes and never a stream: the fallback leg has to be able to
+      // send the image again, exactly as a redirect hop does.
+      return this.fallback.caption(image, mimeType);
     }
   }
 }

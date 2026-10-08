@@ -67,14 +67,15 @@ import {
 } from '../../metrics/registry.js';
 import { stallTimeoutWithWarning } from './stall-floor.js';
 import { worstRenderWindowMs } from '../converters/render-budget.js';
-import { FFMPEG_STEP_TIMEOUT_MS } from './transcode.js';
+import { FFMPEG_STEP_TIMEOUT_MS, inputExtForDemuxer } from './transcode.js';
 import { providerHopMs } from './providers.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
 import { runSlotPool } from './slot-pool.js';
-import { bytesPresent, isMissingPath, readStored, StoredFileUnreadable } from '../stored-bytes.js';
+import { bytesPresent, isMissingPath, StoredFileUnreadable } from '../stored-bytes.js';
+import { openPlaintextFile, readPlaintext, type PlaintextFile } from '../plaintext-file.js';
 
 let running = false;
 /** Bumped by every start, so a pool left over from a stop that raced this start sees it is no longer the current one and winds down. */
@@ -416,13 +417,30 @@ async function processJob(
     });
   };
 
+  /**
+   * The job's plaintext handle, declared out here so the job's own `finally` can dispose it on every exit — a
+   * terminal failure, a lost lease and a thrown embedder all leave through it.
+   */
+  let plaintext: PlaintextFile | undefined;
+
   try {
-    // Load file bytes from disk
+    /*
+     * A PATH, not the bytes (`Q-425`).
+     *
+     * This read the whole file into a `Buffer` and passed it to the embedder, which wrote it back to disk for ffmpeg
+     * or built a request body from it as base64 and again as JSON. A 64 MiB image cost about seven times its own size
+     * before the provider saw a byte, and the first bounded container to meet a large file killed the instance.
+     *
+     * `openPlaintextFile` gives a path and costs nothing for an unencrypted file (a hard link, which is also the
+     * SNAPSHOT ffmpeg needs across its several passes) and one streamed copy for an encrypted one, under the swept
+     * scratch directory so a kill cannot leave plaintext behind.
+     */
     const absolutePath = resolveFilePath(spaceId, filePath);
-    let fileBytes: Buffer;
     try {
       // Through the file door: with a master secret the bytes on disk are ciphertext (F-43).
-      fileBytes = await readStored(absolutePath);
+      // Named for its MIME type, not for the stored path: the extension is what ffmpeg picks its demuxer from, and a
+      // stored file may have none or a wrong one (`inputExtForDemuxer`).
+      plaintext = await openPlaintextFile(absolutePath, `.${inputExtForDemuxer(mimeType, mediaType)}`);
     } catch (err) {
       // Present but undecodable — a foreign key, altered bytes, or no secret for an encrypted file. Rethrown as it
       // is, so the failure path below can see it is TERMINAL: no retry reads different bytes.
@@ -456,7 +474,7 @@ async function processJob(
     let fileEmbeddingStatus: 'complete' | 'partial' = 'complete';
     switch (mediaType) {
       case 'image':
-        derivedDescription = await embedImage(spaceId, fileId, fileBytes, mimeType, providers.vision, { arrival: job.arrival === true });
+        derivedDescription = await embedImage(spaceId, fileId, plaintext, mimeType, providers.vision, { arrival: job.arrival === true });
         // A caption IS model output, so the record says so. It was the reference point for the whole
         // complaint — the images carried generated captions while the parent carried a truncation — and it
         // had no provenance of its own either.
@@ -466,7 +484,7 @@ async function processJob(
         // A chunk that failed to transcribe makes this PARTIAL, never complete. The count used to be
         // discarded here, so an operator saw success over audio that was never transcribed — the
         // document path has modelled this correctly all along and audio simply never carried the number.
-        const a = await embedAudio(spaceId, fileId, fileBytes, mimeType, providers.stt, undefined,
+        const a = await embedAudio(spaceId, fileId, plaintext, mimeType, providers.stt, undefined,
           { onProgress: heartbeat, shouldStop: () => leaseLost, steps: AUDIO_STEPS });
         if (a.failed > 0) {
           fileEmbeddingStatus = 'partial';
@@ -480,7 +498,7 @@ async function processJob(
         const doKeyframes = videoDoesKeyframes(effectiveVideoLevel(spaceId));
         // Same rule as audio: a video whose spoken content partly failed to transcribe is not complete,
         // however good its keyframe captions are.
-        const v = await embedVideo(spaceId, fileId, fileBytes, mimeType, providers.vision, providers.stt, doKeyframes,
+        const v = await embedVideo(spaceId, fileId, plaintext, mimeType, providers.vision, providers.stt, doKeyframes,
           undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, steps: VIDEO_STEPS });
         if (v.audioFailed > 0) {
           fileEmbeddingStatus = 'partial';
@@ -503,7 +521,9 @@ async function processJob(
         // clock from the claim, so a long document is indistinguishable from a wedged one: it gets
         // requeued mid-flight, re-claimed, and killed again at the same page — forever.
         const { chunks, convertedMarkdown, extractedImages } = await runConversionPipeline(
-          fileBytes, filePath, resolvedFmt,
+          // The document path needs the content itself, and reads it through the handle — one copy, where
+          // `readStored` used to make three for an encrypted file.
+          await readPlaintext(plaintext), filePath, resolvedFmt,
           {
             mode: spaceMode,
             textLevel: spaceTextLevel,
@@ -669,6 +689,9 @@ async function processJob(
       log.warn(`Media worker: failJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`),
     );
   } finally {
+    // The scratch copy of an ENCRYPTED file is plaintext on disk, so it goes as soon as the job is done with it. The
+    // boot sweep is the backstop for a kill, which runs no `finally` at all; this is the normal path.
+    await plaintext?.dispose();
     endTimer();
   }
 }

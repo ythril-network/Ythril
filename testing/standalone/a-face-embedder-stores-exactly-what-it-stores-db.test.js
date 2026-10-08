@@ -47,6 +47,20 @@ const LOCAL = { instanceId: 'local-instance', instanceLabel: 'Local' };
 const T0 = '2026-08-01T00:00:00.000Z';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-b89c-face-'));
+
+/**
+ * Bytes as the PLAINTEXT HANDLE `embedFaces` takes since bundle-89 (`files/plaintext-file.ts`): a path and a size.
+ *
+ * The subject of this file is what the embedder STORES, and that did not change; what changed is that it is handed a
+ * path so a 100 MiB picture is not held in memory beside its own decode. The fixture therefore writes its bytes once
+ * and names them, which is also what the real worker does.
+ */
+let handleSeq = 0;
+const handleOf = (bytes) => {
+  const p = path.join(scratch, `fixture-${handleSeq++}.png`);
+  fs.writeFileSync(p, bytes);
+  return { path: p, size: bytes.length, copied: true, dispose: async () => { /* the suite removes its scratch */ } };
+};
 const CONFIG_PATH = path.join(scratch, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['DATA_ROOT'] = scratch;
@@ -158,7 +172,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
         { embedding: descriptor(3) },
       ] });
 
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
 
       const rows = await faceRows('photos/group.png');
       assert.deepEqual(rows.map(r => r._id), ['photos/group.png#face-chunk0', 'photos/group.png#face-chunk2'], 'chunkIndex is the face\'s index in the answer, not a count');
@@ -187,7 +201,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('what the provider is asked: the image as base64 in a JSON POST, nothing about the space or the file', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
       assert.equal(faceRequests.length, 1);
       assert.equal(faceRequests[0].method, 'POST');
       assert.equal(faceRequests[0].url, '/detect');
@@ -198,24 +212,24 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('a descriptor of the wrong width is dropped before anything is stored', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1).slice(0, 64), boxRaw: BIG }, { embedding: descriptor(2), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
       assert.deepEqual((await faceRows('photos/group.png')).map(r => r._id), ['photos/group.png#face-chunk0'], 'the surviving face takes the first index: the width filter runs inside the provider call');
     });
 
     it('no faces, or a provider that fails with the in-process fallback off (the default): nothing is stored and the call returns normally', async () => {
       await seedParent('photos/group.png');
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
       assert.equal((await faceRows('photos/group.png')).length, 0);
 
       faceStatus = 500;
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
       assert.equal((await faceRows('photos/group.png')).length, 0);
       assert.equal(faceRequests.length, 2, 'the provider was asked each time');
     });
 
     it('bytes that are not an image: nothing is stored, the provider is not asked, and the call returns normally', async () => {
       await seedParent('photos/not.png');
-      await faceMod.embedFaces(FACES, 'photos/not.png', Buffer.from('definitely not an image'));
+      await faceMod.embedFaces(FACES, 'photos/not.png', handleOf(Buffer.from('definitely not an image')));
       assert.equal((await faceRows('photos/not.png')).length, 0);
       assert.equal(faceRequests.length, 0);
     });
@@ -231,9 +245,9 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('a re-run replaces each row by id; it neither duplicates a row nor removes one the new run did not produce', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }, { embedding: descriptor(2), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
       faceAnswer = () => ({ faces: [{ embedding: descriptor(9), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', png);
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png));
 
       const rows = await faceRows('photos/group.png');
       assert.deepEqual(rows.map(r => [r._id, r.faceEmbedding[0]]), [['photos/group.png#face-chunk0', descriptor(9)[0]], ['photos/group.png#face-chunk1', descriptor(2)[0]]]);
@@ -247,7 +261,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('a local image gets its caption chunk AND its face rows; the caption is what is returned', async () => {
       await seedParent('photos/p.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }] });
-      const caption = await imageMod.embedImage(FACES, 'photos/p.png', png, 'image/png', vision);
+      const caption = await imageMod.embedImage(FACES, 'photos/p.png', handleOf(png), 'image/png', vision);
       assert.equal(caption, 'a grey square');
       assert.ok(await files().findOne({ _id: 'photos/p.png#media-chunk0' }));
       assert.deepEqual((await faceRows('photos/p.png')).map(r => r._id), ['photos/p.png#face-chunk0']);
@@ -257,13 +271,13 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
       await seedParent('photos/p.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }] });
       configure({ reprocessSyncedImages: false });
-      await imageMod.embedImage(FACES, 'photos/p.png', png, 'image/png', vision, SYNCED);
+      await imageMod.embedImage(FACES, 'photos/p.png', handleOf(png), 'image/png', vision, SYNCED);
       assert.equal(faceRequests.length, 0);
       assert.ok(await files().findOne({ _id: 'photos/p.png#media-chunk0' }));
       assert.equal((await faceRows('photos/p.png')).length, 0);
 
       configure({ reprocessSyncedImages: true });
-      await imageMod.embedImage(FACES, 'photos/p.png', png, 'image/png', vision, SYNCED);
+      await imageMod.embedImage(FACES, 'photos/p.png', handleOf(png), 'image/png', vision, SYNCED);
       assert.equal(faceRequests.length, 1);
       assert.equal((await faceRows('photos/p.png')).length, 1);
     });
@@ -272,7 +286,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
       await seedParent('photos/p.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }] });
       configure({ reprocessSyncedImages: false });
-      await imageMod.embedImage(FACES, 'photos/p.png', png, 'image/png', vision);
+      await imageMod.embedImage(FACES, 'photos/p.png', handleOf(png), 'image/png', vision);
       assert.equal(faceRequests.length, 1);
     });
 

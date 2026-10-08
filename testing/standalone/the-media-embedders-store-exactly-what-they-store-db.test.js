@@ -119,7 +119,7 @@ syncBuiltinESMExports();
 
 // ── the model endpoints ──────────────────────────────────────────────────────────────────────────────────────────
 
-let server, local, mongo, imageMod, audioMod, videoMod, progressMod;
+let server, local, mongo, imageMod, audioMod, videoMod, progressMod, transcodeMod;
 /** Every input the stub embed endpoint was asked for. */
 let seen = [];
 /** Every call the stub providers got. */
@@ -128,7 +128,14 @@ let sttCalls = [];
 /** What the stub vision provider answers; reset per case. */
 let captionOf, transcribeOf;
 
-const vision = { caption: async (bytes, mime) => { visionCalls.push({ bytes, mime }); return captionOf(bytes, mime, visionCalls.length); } };
+const vision = { caption: async (image, mime) => { visionCalls.push({ image, mime }); return captionOf(image, mime, visionCalls.length); } };
+/**
+ * The image a `caption` call was handed, as bytes, whichever of the two shapes it came in (`providers.ts :: ImageSource`).
+ *
+ * Which shape it is matters and each case says so itself: a stored file is a path, a keyframe ffmpeg has just written
+ * is bytes. This only answers "is it the right picture".
+ */
+const captionedBytes = (src) => ('bytes' in src ? src.bytes : fs.readFileSync(src.path));
 const stt = { transcribe: async (bytes, mime) => { sttCalls.push({ bytes, mime }); return transcribeOf(bytes, mime, sttCalls.length); } };
 const resetProviders = () => {
   seen = []; visionCalls = []; sttCalls = [];
@@ -146,10 +153,31 @@ const flagOf = (args, name) => { const i = args.indexOf(name); return i >= 0 ? a
 
 // ── the drivers: where a changed signature is edited (bundle-89 changes what an embedder is handed) ─────────────────
 
-const runImage = (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, bytes, mime, vision, opts);
-const runAudio = (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, bytes, mime, stt, overlapMs, opts);
+/**
+ * Bytes as the PLAINTEXT HANDLE the embedders take since bundle-89 (`files/plaintext-file.ts`): a path and a size,
+ * never the bytes themselves.
+ *
+ * The handle arrives already NAMED `input.<ext>` for the job's MIME type, because ffmpeg picks its demuxer from the
+ * extension and the embedders no longer write the file they are about to read. That naming is one line of the media
+ * worker (`inputExtForDemuxer`), and this fixture stands in for it so the ffmpeg cases below can keep asserting the
+ * literal name they always did.
+ */
+let handleSeq = 0;
+const handleOf = (bytes, mime, mediaType) => {
+  // A handle already made is passed straight through, so a case that needs to NAME the handle it gave (to assert
+  // ffmpeg opened that one and not a copy) still goes through this one adapter.
+  if (!Buffer.isBuffer(bytes)) return bytes;
+  const dir = path.join(scratch, `handle-${handleSeq++}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, `input.${transcodeMod.inputExtForDemuxer(mime, mediaType)}`);
+  fs.writeFileSync(p, bytes);
+  return { path: p, size: bytes.length, copied: true, dispose: async () => { /* the suite removes its scratch */ } };
+};
+
+const runImage = (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, handleOf(bytes, mime, 'image'), mime, vision, opts);
+const runAudio = (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, handleOf(bytes, mime, 'audio'), mime, stt, overlapMs, opts);
 const runVideo = (space, id, bytes = Buffer.from('mp4-bytes'), mime = 'video/mp4', { keyframes = true, overlapMs, intervalS, opts } = {}) =>
-  videoMod.embedVideo(space, id, bytes, mime, vision, stt, keyframes, overlapMs, intervalS, opts);
+  videoMod.embedVideo(space, id, handleOf(bytes, mime, 'video'), mime, vision, stt, keyframes, overlapMs, intervalS, opts);
 
 /** The keys a chunk row of each kind carries, exactly: a key added or dropped by a move into another writer is a finding. */
 const VECTOR = ['embedding', 'embeddingModel'];
@@ -189,6 +217,7 @@ describe('the media embedders store exactly what they store today (real MongoDB,
     audioMod = await import('../../server/dist/files/media/audio-embedder.js');
     videoMod = await import('../../server/dist/files/media/video-embedder.js');
     progressMod = await import('../../server/dist/files/media/progress.js');
+    transcodeMod = await import('../../server/dist/files/media/transcode.js');
   });
 
   after(async () => {
@@ -221,7 +250,11 @@ describe('the media embedders store exactly what they store today (real MongoDB,
 
       assert.equal(caption, 'a man at a whiteboard');
       assert.equal(visionCalls.length, 1);
-      assert.equal(visionCalls[0].bytes.toString(), 'png-bytes', 'the vision provider is handed the image bytes');
+      // Bundle-89: a PATH and a size, never the image in memory — that is what lets the request body stream with an
+      // exact `Content-Length`. What is pinned is unchanged: the provider is asked about this picture.
+      assert.ok(!('bytes' in visionCalls[0].image), 'the vision provider is handed the image in memory');
+      assert.equal(visionCalls[0].image.size, Buffer.byteLength('png-bytes'), 'the size it will measure the body by');
+      assert.equal(captionedBytes(visionCalls[0].image).toString(), 'png-bytes', 'the path holds the image');
       assert.equal(visionCalls[0].mime, 'image/png');
       assert.deepEqual(seen, ['a man at a whiteboard'], 'the caption itself is embedded, not a chunk-formatted text');
 
@@ -355,11 +388,15 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.deepEqual(seen, ['welcome to the quarterly call'], 'the transcript is what is embedded');
     });
 
-    it('what ffmpeg is asked: the bytes handed over are the input, probed, silence-detected, then cut at 16 kHz mono 16-bit PCM', async () => {
+    it('what ffmpeg is asked: the handle it was given is the input, probed, silence-detected, then cut at 16 kHz mono 16-bit PCM', async () => {
       await seedParent('calls/q3.wav');
-      await runAudio(OPEN, 'calls/q3.wav', Buffer.from('the-exact-audio-bytes'), 'audio/wav');
+      const handle = handleOf(Buffer.from('the-exact-audio-bytes'), 'audio/wav', 'audio');
+      await runAudio(OPEN, 'calls/q3.wav', handle, 'audio/wav');
 
       const [probe, silence, segment] = ff.calls;
+      // Bundle-89: ffmpeg opens the CALLER's path. The embedder used to write the bytes it was handed back to disk
+      // first, which is the copy this ticket removed, so a path of its own here would be that copy returning.
+      assert.equal(probe.inputPath, handle.path, 'ffmpeg opens the handle, not a copy the embedder made');
       // `-y` is no longer FIRST: the one wrapper puts its hardening flags in front of it (bundle-89), so this asks what
       // it always meant — that every call carries it — rather than where it sits.
       for (const c of ff.calls) assert.ok(c.args.includes('-y'), 'every call overwrites its output');
@@ -379,7 +416,15 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.equal(sttCalls[0].mime, 'audio/wav');
     });
 
-    it('the input takes its extension from the MIME type, and an unknown type is .bin', async () => {
+    it('the input takes its extension from the MIME type, an unknown audio type is .bin, and the embedder opens the handle as named', async () => {
+      // Bundle-89 MOVED this rule rather than changing it. The embedder no longer writes the file it reads, so the
+      // name comes with the handle, from one place both the audio and the video job reach (`inputExtForDemuxer`) —
+      // the two embedders used to decide it separately, and they disagreed on the fallback, which is the difference
+      // the shared rule had to keep.
+      assert.equal(transcodeMod.inputExtForDemuxer('audio/wav', 'audio'), 'wav');
+      assert.equal(transcodeMod.inputExtForDemuxer('audio/x-unknown-thing', 'audio'), 'bin', 'an untyped recording is sniffed');
+      assert.equal(transcodeMod.inputExtForDemuxer('video/x-unknown-thing', 'video'), 'mp4', 'an untyped video is assumed mp4');
+
       await seedParent('calls/a.bin');
       await runAudio(OPEN, 'calls/a.bin', Buffer.from('x'), 'audio/x-unknown-thing');
       assert.ok(ff.calls[0].inputPath.endsWith('input.bin'), ff.calls[0].inputPath);
@@ -541,7 +586,10 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.deepEqual([rows[0].chunkOffsetMs, rows[0].chunkDurationMs, rows[1].chunkOffsetMs, rows[1].chunkDurationMs], [0, 37_500, 37_500, 32_500],
         'the re-embed rewrites text and vector and keeps the audio chunk\'s window');
       assert.deepEqual(seen.slice(-2), [rows[0].content, rows[1].content], 'the combined text is what the model embeds the second time');
-      assert.deepEqual(visionCalls.map(c => [c.bytes.toString(), c.mime]), [['jpeg-1', 'image/jpeg'], ['jpeg-2', 'image/jpeg'], ['jpeg-3', 'image/jpeg']]);
+      // A keyframe is the in-memory half of `ImageSource` on purpose: ffmpeg has just written it and the job reads one
+      // at a time, so making it write a file to be read back would add a copy in order to remove one.
+      for (const c of visionCalls) assert.ok('bytes' in c.image, 'a keyframe is handed over as bytes, not as a path');
+      assert.deepEqual(visionCalls.map(c => [captionedBytes(c.image).toString(), c.mime]), [['jpeg-1', 'image/jpeg'], ['jpeg-2', 'image/jpeg'], ['jpeg-3', 'image/jpeg']]);
     });
 
     it('what ffmpeg is asked: the audio track first, then the audio pipeline on it, then the keyframe pass at fps=1/30', async () => {
@@ -557,7 +605,10 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.equal(flagOf(track.args, '-ar'), '16000');
       assert.equal(flagOf(track.args, '-ac'), '1');
       assert.equal(path.basename(track.last), 'audio.wav');
-      assert.equal(path.basename(probe.inputPath), 'input.wav', 'the audio pipeline runs on the extracted track, as audio/wav');
+      // Bundle-89: the extracted track is handed ON as a path, so the audio pipeline opens `audio.wav` itself. It used
+      // to be read back into memory and written out again as `input.wav` — a whole second copy of the soundtrack,
+      // because the audio embedder took bytes.
+      assert.equal(path.basename(probe.inputPath), 'audio.wav', 'the audio pipeline runs on the extracted track where ffmpeg left it');
       assert.equal(probe.input.toString(), 'wav:audio.wav');
       assert.equal(path.basename(keyframes.inputPath), 'input.mp4', 'the keyframes are cut from the video, not from the audio');
       assert.equal(flagOf(keyframes.args, '-vf'), 'fps=1/30');

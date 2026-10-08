@@ -32,6 +32,27 @@
  */
 import { spawn } from 'node:child_process';
 
+import { extForMimeType } from '../mime.js';
+
+/**
+ * What the input file must be CALLED for ffmpeg to pick the right demuxer, from the job's MIME type.
+ *
+ * ffmpeg does probe a file's contents, but it picks the demuxer from the EXTENSION first. So the name of the plaintext
+ * handle a job opens is not cosmetic — and this used to be decided inside each embedder, which only worked because
+ * each embedder also wrote the file it was about to read. The handle is opened before the embedder is chosen now, so
+ * the rule has to live where both can reach it.
+ *
+ * The fallback differs by media type, and that difference is why this takes one: an untyped audio job gets `.bin`, so
+ * ffmpeg sniffs it, while an untyped video job gets `.mp4`, which is what nearly every untyped video actually is.
+ * Falling back one way for both is what the two copies did separately.
+ *
+ * An image and a document job name their handle by the same rule although no ffmpeg reads it — a job's input is
+ * named for what it is, and a second rule for "the kinds where it does not matter" is a rule to get wrong later.
+ */
+export function inputExtForDemuxer(mimeType: string, mediaType: 'image' | 'audio' | 'video' | 'text'): string {
+  return extForMimeType(mimeType, mediaType === 'video' ? 'mp4' : 'bin');
+}
+
 /**
  * How long ONE ffmpeg step may take: a duration probe, a silence pass, a segment extract, a keyframe pass.
  *
