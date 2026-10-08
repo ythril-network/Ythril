@@ -88,9 +88,9 @@ A face that was detected but never labelled is untouched by either.
 
 #### Synced Image Reprocessing
 
-When `reprocessSyncedImages: true` (default), images received through a network sync are automatically enqueued for face processing if they have not yet been processed (`faceChunkCount` is `0`). This lets secondary instances build a full face gallery from synced images without requiring separate re-uploads.
+When `reprocessSyncedImages: true` (default), an image a peer delivers is analysed for faces by this instance's own media job, whether the peer pushed it to the upload door or this instance pulled it: each arrived image is processed once, and the job is queued with the arrival like any file's. This lets secondary instances build a full face gallery from synced images without requiring separate re-uploads.
 
-Set `reprocessSyncedImages: false` to restrict gallery building to images uploaded directly to each instance.
+Set `reprocessSyncedImages: false` to restrict gallery building to images uploaded directly to each instance: an arrived image is still captioned as any image is, and is not analysed for faces, on **both** doors (before, a pushed image ignored the setting). The setting is read when the job runs, so a change takes effect for jobs still waiting. An image uploaded here is always analysed.
 
 #### MongoDB Atlas Vector Index
 
@@ -206,7 +206,7 @@ Each field can also be **pinned by an infra admin** through the env var below, w
 | `minFaceSizeFraction` | `FACE_RECOGNITION_MIN_FACE_SIZE_FRACTION` | `0.05` | Minimum face bounding-box size as a fraction of the image's shorter side. Faces smaller than this are skipped (avoids noise from crowd shots or background faces). |
 | `modelPath` | `FACE_RECOGNITION_MODEL_PATH` | `"human-models"` | Path relative to `DATA_ROOT` where the BlazeFace and FaceRes model files are located. |
 | `personEntityTypes` | `FACE_RECOGNITION_PERSON_ENTITY_TYPES` | `["person"]` | Entity type names that qualify as people. Only entities with a `type` in this list are eligible to enter the face gallery. Extend this list if you use custom type names like `"contact"` or `"employee"`. **Comma-separated** as an env var: `FACE_RECOGNITION_PERSON_ENTITY_TYPES=person,employee`. |
-| `reprocessSyncedImages` | `FACE_RECOGNITION_REPROCESS_SYNCED_IMAGES` | `true` | When true, images received via network sync are automatically re-enqueued for face processing if they haven't been processed yet. Set to false to keep gallery building local-origin only. |
+| `reprocessSyncedImages` | `FACE_RECOGNITION_REPROCESS_SYNCED_IMAGES` | `true` | When true, an image a peer delivers (pushed to the upload door or pulled by the sync engine) is analysed for faces by its own media job, once. Set to false to keep gallery building local-origin only: such an image is captioned but not analysed for faces, on both doors. |
 
 > Booleans accept `true` or `1`; anything else reads as false. Pinning `FACE_RECOGNITION_ENABLED=false` is the way to guarantee no face processing happens on an instance regardless of what is in `config.json` — including after a restore from a backup taken on an instance where it was on.
 >

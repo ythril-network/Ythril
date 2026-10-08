@@ -19,6 +19,7 @@ import { rankOf } from '../../brain/recall-shape.js';
 import { statesRetryability } from './_read-failure.js';
 import { sendToolAnswer } from '../send-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
 
 /*
  * `MAX_GRAPH_NODES` lived here, private to this file, with a comment saying recall shared it. It did not: only
@@ -43,8 +44,8 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
     entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
     edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
     chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
-    // Exclude chunk records (parentFileId set) — count only top-level file records
-    files: await col(spaceCollection(mid, 'files')).countDocuments({ parentFileId: { $exists: false } }),
+    // The files the space has: not chunk records (parentFileId) and not the audit rows a soft delete leaves (deletedAt)
+    files: await col(spaceCollection(mid, 'files')).countDocuments({ ...LIVE_FILE_ROW }),
     // How much of the above is not searchable YET. Writes no longer wait for the embedding model, so a
     // record can exist and be absent from recall for a moment — and a caller asking "is this space ready"
     // could not tell that from "the model is down and nothing has embedded for an hour". Same shape as the

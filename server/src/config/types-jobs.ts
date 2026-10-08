@@ -24,6 +24,13 @@ export interface MediaJobDoc {
   mediaType: 'image' | 'audio' | 'video' | 'text';
   /** For text jobs: the resolved document format (md, txt, html, pdf, docx, epub). */
   resolvedFormat?: string;
+  /**
+   * True when the file's bytes ARRIVED from a peer (`files/bytes-arrived.ts`) rather than being written here by a person or a
+   * tool. The one thing it changes is face analysis: an arrived image is analysed for faces only while
+   * `faceRecognition.reprocessSyncedImages` is true (`image-embedder.ts:facesAreWithheldFor`). Read when the job RUNS, not
+   * when it is queued, so the setting is honoured as it stands at that moment. Absent means "written here".
+   */
+  arrival?: boolean;
   status: 'pending' | 'processing' | 'complete' | 'failed';
   attempts: number;
   maxAttempts: number;

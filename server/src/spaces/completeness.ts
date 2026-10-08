@@ -20,6 +20,7 @@ import { col } from '../db/mongo.js';
 import type { BrainCollection } from '../config/types.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 
 /** The knowledge collections a check can point at. `file` is not a `KnowledgeType` — it has no schema. */
 export type CompletenessScope = KnowledgeType | 'file' | 'space';
@@ -219,11 +220,11 @@ export async function gatherCompletenessFacts(memberIds: string[]): Promise<Comp
     }
 
     // A file is recallable if it carries its own embedding OR something chunked it. Chunk records
-    // (`parentFileId` set) are not files in their own right and are excluded from both sides.
-    const parentFilter = { parentFileId: { $exists: false } };
-    facts.files += await col(spaceCollection(sid, 'files')).countDocuments(parentFilter);
+    // (`parentFileId` set) and the audit rows a soft delete leaves (`deletedAt`) are not files the space has and are excluded
+    // from both sides.
+    facts.files += await col(spaceCollection(sid, 'files')).countDocuments({ ...LIVE_FILE_ROW });
     const [orphaned] = await col(spaceCollection(sid, 'files')).aggregate<{ n: number; sample: string[] }>([
-      { $match: { ...parentFilter, embedding: { $exists: false } } },
+      { $match: { ...LIVE_FILE_ROW, embedding: { $exists: false } } },
       { $lookup: { from: spaceCollection(sid, 'files'), localField: '_id', foreignField: 'parentFileId', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'chunks' } },
       { $match: { chunks: { $size: 0 } } },
       { $group: { _id: null, n: { $sum: 1 }, sample: { $firstN: { input: { $ifNull: ['$path', '$_id'] }, n: SAMPLE_CAP } } } },

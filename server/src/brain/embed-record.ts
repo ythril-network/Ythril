@@ -19,10 +19,9 @@ import { col, asFilter } from '../db/mongo.js';
 import { embed } from './embedding.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
-import { embeddingSuppressedFor, recordSuppression, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, fileEmbeddingSuppressed } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
-import { spaceCollection } from '../db/space-collection.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
 import type {
@@ -62,32 +61,6 @@ export const derivedHasText: Readonly<Record<string, unknown>> = {
   parentFileId: { $exists: true },
   content: { $type: 'string', $ne: '' },
 };
-
-/** How far up `parentFileId` a derived record looks for its owner. A caption chunk of an image extracted from a
- *  document is two levels down; nothing is deeper. */
-export const MAX_ANCESTRY = 3;
-
-/**
- * Whether a derived record's TOP-LEVEL file says its embeddings are suppressed.
- *
- * A chunk carries no flag of its own: its owner set one on the file. Read only one level up, the caption chunk of an
- * image extracted from a suppressed document would still embed, because the extracted image is the parent and the
- * document is the grandparent. A missing ancestor counts as suppressed — fail closed, because the alternative sends
- * the passage to an embedder that may be external, against a choice nobody can see any more.
- */
-async function ancestorSuppressed(spaceId: string, doc: Record<string, unknown>): Promise<boolean> {
-  let parentId = doc['parentFileId'];
-  for (let depth = 0; depth < MAX_ANCESTRY && typeof parentId === 'string'; depth++) {
-    const parent = await col(spaceCollection(spaceId, 'files')).findOne(
-      asFilter({ _id: parentId }),
-      { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
-    ) as Record<string, unknown> | null;
-    if (!parent) return true;
-    if (recordSuppression(parent) === true) return true;
-    parentId = parent['parentFileId'];
-  }
-  return false;
-}
 
 /**
  * The exact string this record's vector is built from.
@@ -233,7 +206,11 @@ export async function embedStoredRecord(
   // `matchedText` is what the lexical channel searches, so it is rewritten on EVERY outcome, not only when a vector is
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
-  if (embeddingSuppressedFor(spaceId, recordType, doc) || (isDerived(doc) && await ancestorSuppressed(spaceId, doc))) {
+  // A FILE row asks the file question (its two tiers, then its ancestors); every other kind has no ancestors.
+  const suppressed = recordType === 'file'
+    ? await fileEmbeddingSuppressed(spaceId, doc)
+    : embeddingSuppressedFor(spaceId, recordType, doc);
+  if (suppressed) {
     const r = await col(collName).updateOne(asRead, { $set: { matchedText: text }, $unset: UNSET_VECTOR });
     return r.matchedCount === 0 ? 'superseded' : 'excluded';
   }

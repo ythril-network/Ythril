@@ -43,8 +43,7 @@ import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch,
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
-import { col, asFilter } from '../../db/mongo.js';
-import type { FileMetaDoc } from '../../config/types.js';
+import { setFileProcessingState, type FileProcessingState } from '../processing-state.js';
 import { updateFileMeta, setDerivedDescriptionIfUnset } from '../file-meta.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
@@ -74,7 +73,6 @@ import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
-import { spaceCollection } from '../../db/space-collection.js';
 import { runSlotPool } from './slot-pool.js';
 import { bytesPresent, isMissingPath, readStored, StoredFileUnreadable } from '../stored-bytes.js';
 
@@ -438,11 +436,8 @@ async function processJob(
     }
 
     // Mark file as "processing" in file meta
-    const now = new Date().toISOString();
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-      asFilter<FileMetaDoc>({ _id: fileId }),
-      { $set: { embeddingStatus: 'processing', updatedAt: now } },
-    ).catch(() => {}); // non-fatal — job tracking is the source of truth
+    await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'processing' })
+      .catch(() => {}); // non-fatal — job tracking is the source of truth
 
     // Run the appropriate embedder
     let derivedDescription: string | undefined;
@@ -457,7 +452,7 @@ async function processJob(
     let fileEmbeddingStatus: 'complete' | 'partial' = 'complete';
     switch (mediaType) {
       case 'image':
-        derivedDescription = await embedImage(spaceId, fileId, fileBytes, mimeType, providers.vision);
+        derivedDescription = await embedImage(spaceId, fileId, fileBytes, mimeType, providers.vision, { arrival: job.arrival === true });
         // A caption IS model output, so the record says so. It was the reference point for the whole
         // complaint — the images carried generated captions while the parent carried a truncation — and it
         // had no provenance of its own either.
@@ -519,8 +514,8 @@ async function processJob(
             // commit itself: a claim a move took away while this ran leaves nothing written under the old path.
             { claim, onProgress: heartbeat, shouldStop: () => leaseLost },
           );
-          const metaUpdate: Record<string, unknown> = { chunkCount };
-          if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
+          const processed: FileProcessingState = { chunkCount };
+          if (convertedFileId) processed.convertedFileId = convertedFileId;
           // Give the PARENT record a summary, through the SAME path images already use.
           //
           // Reported: after a PDF converts, its filemeta carries `convertedFileId`, `chunkCount` and
@@ -552,10 +547,7 @@ async function processJob(
           //
           // Still not a throw: failing the job would retry a document whose analysis already succeeded and
           // re-pay for the model. What was missing is that the loss be VISIBLE.
-          await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-            asFilter<FileMetaDoc>({ _id: fileId }),
-            { $set: metaUpdate },
-          ).catch((err: unknown) => {
+          await setFileProcessingState(spaceId, fileId, processed).catch((err: unknown) => {
             log.warn(`Media worker: ${spaceId}/${fileId} described but the metadata write failed — the `
               + `description, excerpt and source from this run are lost and will not be recomputed: ${err}`);
           });
@@ -656,11 +648,8 @@ async function processJob(
       //
       // Logged rather than thrown for the same reason as the describe write: the job is already failing
       // permanently, and rethrowing would replace an honest terminal state with a retry loop.
-      await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-        asFilter<FileMetaDoc>({ _id: fileId }),
-        // `failed` for an unreadable file, not `skipped`: nothing was declined, the bytes could not be read.
-        { $set: { embeddingStatus: unreadable ? 'failed' : 'skipped' } },
-      ).catch((err: unknown) => {
+      // `failed` for an unreadable file, not `skipped`: nothing was declined, the bytes could not be read.
+      await setFileProcessingState(spaceId, fileId, { embeddingStatus: unreadable ? 'failed' : 'skipped' }).catch((err: unknown) => {
         log.warn(`Media worker: ${spaceId}/${fileId} failed permanently but its status could not be written `
           + `— the record will read 'processing' while the failure counter has already moved: ${err}`);
       });

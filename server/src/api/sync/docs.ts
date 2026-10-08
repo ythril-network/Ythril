@@ -19,7 +19,7 @@ import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../co
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
@@ -27,6 +27,15 @@ import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, familiesAfter, type Payl
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
 
 export const syncDocsRouter = Router();
+
+/**
+ * What a family's document gets on its way out, beyond the stored row: a file's metadata carries the authored keys this
+ * version knows (`Q-256`), so a puller reads an ABSENT key as removed and not as unmentioned. Computed at serve time by
+ * every instance — a relay serves what it holds with its own list, so a removal made two hops away still arrives. Applied
+ * to a whole document only: a listing is ids and seqs. An older puller strips the key it does not declare and removes
+ * nothing, which is the safe direction.
+ */
+const SERVED_AS: Partial<Record<PayloadKey, <D extends object>(doc: D) => D>> = { filemeta: withAuthoredKeys };
 
 /**
  * ONE paging read for every record family. It was written FOUR times, and `M-2` needed a fifth.
@@ -56,7 +65,8 @@ export const syncDocsRouter = Router();
  * once, on the page that reaches it. A listing (`full=false`, ids and seqs) carries none: it pays no tombstone read.
  *
  * `full=true` returns whole documents in one pass; without it a page is ids and seqs only. The pull engine
- * always asks for `full`, because the alternative is N per-document fetches over a WAN.
+ * always asks for `full`, because the alternative is N per-document fetches over a WAN. A whole document is served as
+ * its family says (`SERVED_AS`): a file's metadata carries `authoredKeys`, the read by id too.
  */
 /**
  * @param tombstoneType the brain tombstone type that rides in this page, or `null` for a collection whose
@@ -64,13 +74,15 @@ export const syncDocsRouter = Router();
  *   `/api/sync/file-tombstones` carries it, which is why `TOMBSTONE_TYPES` has no `file` member. Passing a
  *   type that matches nothing would have been the quiet alternative and it is a lie: it says deletions ride
  *   here and then carries none.
- * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve PARENTS
- * only — a chunk is derived from the blob and the receiver makes its own, with its own chunker and model.
+ * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve LIVE FILE ROWS
+ * only (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row) — a chunk is derived from the blob and the receiver makes its
+ * own, with its own chunker and model, and a soft delete reaches a peer as the file tombstone, never as its flagged row.
  * It comes from the family row rather than a parameter, so the page, the read by id and the push cannot
  * each be handed a different one.
  */
 function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tombstoneType: string | null) {
   const { collection, pushFilter: extraFilter = {} } = familyOf(key);
+  const serve = SERVED_AS[key];
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { spaceId, networkId, sinceSeq, limit, cursor, full: fullParam } = req.query as Record<string, unknown>;
@@ -115,7 +127,8 @@ function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tomb
         )
         .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
 
-      res.json({ items: [...items, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
+      const served = returnFull && serve ? items.map(d => serve(d)) : items;
+      res.json({ items: [...served, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
     } catch (err) {
       sendCaughtFailure(res, `sync GET /${collection}`, err);
     }
@@ -138,6 +151,7 @@ function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tomb
  */
 function oneById<T extends { _id: string }>(key: PayloadKey) {
   const { collection, pushFilter: extraFilter = {} } = familyOf(key);
+  const serve = SERVED_AS[key];
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { spaceId, networkId } = req.query as Record<string, string>;
@@ -154,7 +168,7 @@ function oneById<T extends { _id: string }>(key: PayloadKey) {
         { projection: LOCAL_ONLY_EXCLUSION },
       );
       if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
-      res.json(doc);
+      res.json(serve ? serve(doc) : doc);
     } catch (err) {
       sendCaughtFailure(res, `sync GET /${collection}/:id`, err);
     }
@@ -182,8 +196,8 @@ syncDocsRouter.get('/links', syncRateLimit, requireAuth, pageBySeq<LinkDoc>('lin
  * array it came from, so the graph on a peer showed the connection and the peer's own Files tab showed
  * none.
  *
- * PARENTS ONLY, and no tombstone rider: a chunk is derived locally, and a deleted file already has its own
- * tombstone route.
+ * LIVE FILE ROWS ONLY (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row), and no tombstone rider: a chunk is derived
+ * locally, and a deleted file already has its own tombstone route.
  */
 syncDocsRouter.get('/filemeta', syncRateLimit, requireAuth,
   /*

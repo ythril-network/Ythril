@@ -12,12 +12,14 @@
  */
 import { sha256Hex } from '../util/sha256-hex.js';
 import { writeFileBytes } from './files.js';
-import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
+import { upsertFileMeta } from './file-meta.js';
 import { bytesShadowed } from './tombstones.js';
 import { peerFileKey } from './sandbox.js';
 import { toDocId } from '../util/paths.js';
 import type { AuthorRef } from '../config/types.js';
-import { dispatchFileProcessing, type DispatchResult } from './dispatch.js';
+import { recordAndDispatchFile, type DispatchResult } from './dispatch.js';
+import { recordArrivedBytes } from './bytes-arrived.js';
+import { removeUnrecordedBytes } from './unrecorded-bytes.js';
 import type { InputFormat } from './converters/pipeline.js';
 import { checkQuota } from '../quota/quota.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
@@ -54,8 +56,9 @@ type StoreOpts = {
   meta?: StoreFileMeta; inputFormat?: InputFormat; contentType?: string; actor?: Record<string, unknown>;
   /**
    * The peer these bytes ARRIVED from, when a peer pushes a file to the upload door. Then the bytes are an arrival,
-   * not an upload: recorded by `recordArrivedFile` (size and hash, the peer as author of a record new here, and no
-   * seq stamp) and `meta` is ignored. Stored as an upload, the receiver's copy took this instance's next seq and
+   * not an upload: recorded by `recordArrivedBytes` (`files/bytes-arrived.ts`: size and hash, the peer as author of a
+   * record new here, no seq stamp, and the processing queue by this instance's rules) and `meta` and `actor` are ignored.
+   * Stored as an upload, the receiver's copy took this instance's next seq and
    * this instance as the author of a new file, so it tied or outranked the publisher's next description or tag
    * edit, which then never landed (`Q-143` fixed the pull half of the same rule; this is the push half).
    */
@@ -64,24 +67,47 @@ type StoreOpts = {
 
 /**
  * The half after the bytes are on disk: metadata, the processing queue, the webhook. For a door that wrote the
- * bytes itself — the chunked upload assembles them from parts — and for `storeFile` below.
+ * bytes itself — the chunked upload assembles them from parts — and for `storeFile` below. A peer's arrival takes the
+ * other road, `recordArrivedBytes`, the one function the manifest pull goes through as well.
+ *
+ * **When the record step fails, the bytes it was to name do not stay behind** (`removeUnrecordedBytes`, the one answer every door
+ * that writes bytes gives, the manifest pull's too): with no live row for the path they are removed, with one (an overwrite) they
+ * are kept, as they are when the store cannot say whether a row exists, and the failure is rethrown either way for the door to answer. This is the only place the cleanup is asked for, so
+ * `storeFile` and the chunked upload — the two callers — cannot leave it out; a door that wrote bytes and never calls this
+ * function owns the same duty.
  */
 export async function recordStoredFile(
   spaceId: string, filePath: string, sizeBytes: number, sha256: string, opts: StoreOpts = {},
 ): Promise<Stored> {
-  // A path is a spelling until it is keyed (Q-404): the row, the processing queue and the webhook all name the KEY — a peer's
-  // through the resolver, a local caller's through the one canonical key — so a webhook never names a path the listing lacks.
-  // Rebound on purpose, so no later line can name the spelling (the sequence reads `filePath` throughout, and
-  // `identical-bytes-skip-media-pipeline-db` holds it to that).
-  filePath = opts.arrivedFrom ? (await peerFileKey(spaceId, filePath)).key : toDocId(filePath);
-  if (opts.arrivedFrom) await recordArrivedFile(spaceId, filePath, sizeBytes, sha256, opts.arrivedFrom);
-  else await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
-  const dispatched = await dispatchFileProcessing(spaceId, filePath, {
-    bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256,
-    ...(opts.contentType ? { contentType: opts.contentType } : {}),
-  });
-  emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...(opts.actor ?? {}) });
-  return { sha256, sizeBytes, ...dispatched };
+  // The path as the door was given it: the cleanup in the `catch` resolves it itself, and `filePath` is rebound below.
+  const givenPath = filePath;
+  try {
+    // A path is a spelling until it is keyed (Q-404): the row, the processing queue and the webhook all name the KEY — a peer's
+    // through the resolver (inside `recordArrivedBytes`), a local caller's through the one canonical key — so a webhook never
+    // names a path the listing lacks. Rebound on purpose below, so no later line can name the spelling.
+    if (opts.arrivedFrom) {
+      // A peer's bytes: the one function every arrival goes through (the row, the processing queue by this instance's rules, the
+      // count). No webhook and nothing on the bus: a peer's write is not a user act, as a synced record is not (`if (actor)` below).
+      const dispatched = await recordArrivedBytes(spaceId, filePath, {
+        sizeBytes, sha256, door: 'push', from: opts.arrivedFrom, inputFormat: opts.inputFormat, contentType: opts.contentType,
+      });
+      return { sha256, sizeBytes, ...dispatched };
+    }
+    filePath = toDocId(filePath);
+    // The row is read BEFORE it is written and handed to the dispatcher, inside the one function both doors go through
+    // (`recordAndDispatchFile`: its docblock says why that read is the part a hand-written sequence drops).
+    const dispatched = await recordAndDispatchFile(spaceId, filePath, {
+      bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256,
+      ...(opts.contentType ? { contentType: opts.contentType } : {}),
+    }, () => upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 }));
+    // A write NO ONE made — a call with no actor — emits nothing, on the bus or to a webhook: the rule every record family keeps
+    // (`if (actor) emitWebhookEvent`). A person's upload and a tool call carry one.
+    if (opts.actor) emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...opts.actor });
+    return { sha256, sizeBytes, ...dispatched };
+  } catch (err) {
+    await removeUnrecordedBytes(spaceId, givenPath, err);
+    throw err;
+  }
 }
 
 /** The whole sequence: quota, bytes, then `recordStoredFile`. */

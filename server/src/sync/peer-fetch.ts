@@ -78,11 +78,14 @@ export function transferInit(init: RequestInit): RequestInit {
  * plaintext `http://` peer is refused outright; otherwise a plaintext peer that wasn't explicitly
  * opted into is allowed (back-compat for peers added before the https default) but warned once.
  * Throws `SsrfBlockedError` when the target (or a redirect hop) resolves to a blocked address.
+ *
+ * `streamBody: true` is for a body that can be a FILE (the pull's download): the response comes back as the connection delivers it
+ * instead of read whole first, with every guard above unchanged (`ssrfSafeFetch`). The caller then reads, cancels or aborts the body.
  */
 export function peerSafeFetch(
   rawUrl: string,
   init: RequestInit = {},
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; streamBody?: boolean } = {},
 ): Promise<Response> {
   let scheme = '';
   let host = rawUrl;
@@ -101,5 +104,5 @@ export function peerSafeFetch(
   // each call site because 18 of the 21 sites had forgotten it, which is what a default is for.
   // An explicit `signal` from the caller always wins; this only fills the gap.
   const signal = init.signal ?? AbortSignal.timeout(opts.timeoutMs ?? PEER_TIMEOUT_MS);
-  return ssrfSafeFetch(rawUrl, { ...init, signal }, { allowPrivate: allowPrivatePeers() });
+  return ssrfSafeFetch(rawUrl, { ...init, signal }, { allowPrivate: allowPrivatePeers(), ...(opts.streamBody ? { streamBody: true } : {}) });
 }

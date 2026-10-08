@@ -20,6 +20,7 @@
  */
 import path from 'node:path';
 import { spillIdFromPath } from '../brain/spill-path.js';
+import { CONVERTED_ROOT, EXTRACTED_ROOT } from '../files/moved-paths.js';
 
 /** The minimum a manifest entry needs for this decision. */
 export interface ManifestEntry {
@@ -94,19 +95,37 @@ export function decideFilePush(
  * - a LEGACY READ SPILL, `_tmp/graph-<uuid>.json` / `_tmp/results-<uuid>.json` at the root (`Q-92`): one caller's
  *   search result, written into the space by versions before 5.6.0. Spills now live outside every space; the copies
  *   older versions wrote are swept locally, and the ones older peers still offer are refused here.
+ * - a SIDECAR of a conversion, anything under the root `_converted/` or `_extracted/` (bundle-48, Q-260): each instance converts
+ *   a file by ITS OWN configuration (a receiver "applies its rules"), and a pdf, a docx or an epub converts differently by
+ *   mode, so a publisher's sidecar is not the receiver's. Travelling, it gave the receiver a conflict copy of its own conversion,
+ *   or pushed the receiver's over the publisher's. Anchored at the ROOT, as the pipeline writes it: `a/_converted/x` is a user's
+ *   file. The two roots are `files/moved-paths.ts`'s, so the place the pipeline writes and the place sync refuses are one fact.
  * Matched by name, so a copy an older peer still offers is refused on pull as well.
  */
 const CONFLICT_COPY = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9_-]{1,20}(\.[^/]*)?$/;
 const SCHEMA_SNAPSHOT = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
 export function isInstanceLocalFile(relPath: string): boolean {
-  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || isLegacyReadSpill(relPath);
+  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || isLegacyReadSpill(relPath) || isInDerivedTree(relPath);
 }
 
 /**
- * The spill half of `isInstanceLocalFile`, for the file-METADATA arrivals (the arrival writer and the stray drain):
- * a legacy read spill's metadata is refused there as its bytes are here. Named for its question, so the three
- * near-copies that spelled `spillIdFromPath` at a writer are one predicate (bundle-30 `R8`). Whether those arrivals
- * should refuse a conflict copy's or a schema snapshot's metadata as well is a behaviour change, filed, not folded in.
+ * Is this path inside a tree the conversion pipeline writes (`_converted/…`, `_extracted/…`, at the root)? The sidecar half of
+ * {@link isInstanceLocalFile}, for the file-METADATA and file-TOMBSTONE arrivals as well as the bytes: a peer's row or
+ * tombstone at such a path is ignored as its bytes are. Takes a resolved key (`peerFileKey`), never a peer's spelling.
+ */
+export function isInDerivedTree(relPath: string): boolean {
+  return relPath.startsWith(CONVERTED_ROOT) || relPath.startsWith(EXTRACTED_ROOT);
+}
+
+/**
+ * The spill half of `isInstanceLocalFile`: a path a legacy read spill (Q-92) wrote. Named for its question, so the three
+ * near-copies that spelled `spillIdFromPath` at a writer are one predicate (bundle-30 `R8`).
+ *
+ * Asked ALONE by one door: a RESTORE (an import of this instance's own export, `sync/arrivals.ts`), which is never judged by
+ * the peer rules and leaves out only the spill, which no instance keeps any more. Every PEER's file-metadata arrival
+ * (push, pull) asks the whole {@link isInstanceLocalFile}: a conflict copy's, a schema snapshot's, a sidecar's and a spill's
+ * row are all ignored, never stored, and counted (`ythril_sync_file_arrivals_total{door="metadata",
+ * outcome="ignored_instance_local"}`), as their bytes and tombstones are.
  */
 export function isLegacyReadSpill(relPath: string): boolean {
   return spillIdFromPath(relPath) !== null;

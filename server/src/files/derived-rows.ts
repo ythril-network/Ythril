@@ -12,7 +12,7 @@
  *
  * ## The rule
  *
- * The roots and every row beneath them down to `MAX_ANCESTRY` levels (`brain/embed-record.ts`: how far up `parentFileId` a
+ * The roots and every row beneath them down to `MAX_ANCESTRY` levels (`brain/suppress-embeddings.ts`: how far up `parentFileId` a
  * derived record looks for its owner, so nothing is deeper), read a level at a time by the `parentFileId` index, one `$in` per
  * `READ_CHUNK`. A row reached twice is counted once. A root that has no row, or no children, is still returned: the answer is
  * "these and what descends from them", whether or not they are stored.
@@ -21,7 +21,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
-import { MAX_ANCESTRY } from '../brain/embed-record.js';
+import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
 
 /** `roots` and the ids of every file row derived from them, however deep (to `MAX_ANCESTRY`). */
 export async function rowsDerivedFrom(spaceId: string, roots: readonly string[]): Promise<Set<string>> {

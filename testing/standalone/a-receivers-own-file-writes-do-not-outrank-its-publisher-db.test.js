@@ -46,7 +46,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-file-arrival-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-let mongo, meta, wire;
+let mongo, meta, wire, processing;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const stored = async () => await files().findOne({ _id: FILE });
@@ -73,6 +73,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     loader.loadConfig();
     meta = await import('../../server/dist/files/file-meta.js');
     wire = await import('../../server/dist/api/sync/_shared.js');
+    processing = await import('../../server/dist/files/processing-state.js');
   });
 
   after(async () => {
@@ -88,8 +89,10 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     // Derived from the ingest schema, so a field that starts replicating cannot stay on the local list unnoticed.
     const wireKeys = Object.keys(wire.IncomingFileMetaDoc.shape);
     assert.ok(wireKeys.length > 5, `the ingest schema declares ${wireKeys.length} keys — nothing is being checked`);
-    const local = [...(meta.LOCAL_FILE_FIELDS ?? [])];
-    assert.ok(local.length > 0, 'file-meta.ts exports no LOCAL_FILE_FIELDS');
+    // The set is DERIVED (FileMetaDoc keys the divergence hash does not see), so the floor says it is not empty.
+    const local = [...(processing.localFileFields?.() ?? [])];
+    assert.ok(local.length >= 10, `processing-state.ts derives ${local.length} local file field(s)`);
+    for (const k of ['sizeBytes', 'sha256', 'excerpt', 'embeddingStatus']) assert.ok(local.includes(k), `${k} is not local`);
     for (const f of local) assert.ok(!wireKeys.includes(f), `${f} is on the local list and also replicates`);
   });
 
@@ -133,10 +136,33 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
 
   it('the file-sync pull records arriving bytes as an arrival, never as an authored upload', () => {
     // The authored writer is still right for an upload, so the arrival path must not reach it — on base it did, and
-    // that call is what stamped the receiver's seq.
-    const src = stripComments(fs.readFileSync('server/src/sync/file-sync.ts', 'utf8'));
-    assert.ok(src.includes('recordArrivedFile('), 'file-sync.ts does not record arriving bytes through recordArrivedFile');
-    assert.ok(!src.includes('upsertFileMeta('), 'file-sync.ts writes arriving bytes through upsertFileMeta, the authored-upload writer');
+    // that call is what stamped the receiver's seq. Since bundle-48 the pull records through `recordArrivedBytes`
+    // (`files/bytes-arrived.ts`), the one function every arrival of bytes goes through, which calls `recordArrivedFile`.
+    // The rule is held at both links: the pull names the one function and no authored writer, and that function records
+    // an arrival and reaches no authored writer either.
+    const pull = stripComments(fs.readFileSync('server/src/sync/file-sync.ts', 'utf8'));
+    assert.ok(pull.includes('recordArrivedBytes('), 'file-sync.ts does not record arriving bytes through recordArrivedBytes');
+    assert.ok(!pull.includes('upsertFileMeta('), 'file-sync.ts writes arriving bytes through upsertFileMeta, the authored-upload writer');
+    assert.ok(!pull.includes('recordArrivedFile('),
+      'file-sync.ts records an arrival itself instead of through recordArrivedBytes: the pull would be a second door that '
+      + 'dispatches nothing, which is how a pulled document was never converted');
+    const one = stripComments(fs.readFileSync('server/src/files/bytes-arrived.ts', 'utf8'));
+    assert.ok(one.includes('recordArrivedFile('), 'bytes-arrived.ts does not record the arrival through recordArrivedFile');
+    assert.ok(!one.includes('upsertFileMeta('), 'bytes-arrived.ts writes arriving bytes through upsertFileMeta, the authored-upload writer');
+  });
+
+  it('bytes recorded through recordArrivedBytes (the pull\'s path) leave the publisher\'s stamp, and their deliverer is the peer', async () => {
+    // The behaviour behind the source check above: the function the pull calls, not the one it calls in turn.
+    const arrived = await import('../../server/dist/files/bytes-arrived.js');
+    assert.equal(typeof arrived.recordArrivedBytes, 'function', 'files/bytes-arrived.ts exports no recordArrivedBytes');
+    await peerAuthoredFile();
+    await arrived.recordArrivedBytes(SPACE, FILE, { sizeBytes: 40, sha256: 'c'.repeat(64), door: 'pull', from: PEER });
+    const d = await stored();
+    assert.equal(d.sizeBytes, 40);
+    assert.equal(d.sha256, 'c'.repeat(64));
+    assert.equal(d.seq, PEER_STAMP.seq, `the pull's record stamped seq ${d.seq}: the publisher's next edit would be skipped`);
+    assert.equal(d.updatedAt, PEER_STAMP.updatedAt, 'the pull\'s record moved updatedAt, which is hashed');
+    assert.deepEqual(d.author, PEER, 'the pull re-authored the file as this instance');
   });
 
   it('a derived description is not written on a file the publisher authored', async () => {

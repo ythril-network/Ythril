@@ -81,7 +81,11 @@ describe('the extract route', () => {
     // Q-128: the images page through the shared list rule and the Markdown comes in whole-paragraph windows. The
     // old spellings (`limit(MAX_DERIVED_RECORDS)`, `slice(0, MAX_CONVERTED_BYTES)`) were the cuts that said nothing.
     assert.match(handler, /pageList\(allImages,/);
-    assert.match(handler, /markdownWindow\(text, /);
+    // Q-296: the window is read through files.ts readFileWindow, which holds only the window in memory and answers with
+    // markdownWindow's own cut (asserted there), so the route names the windowed read, not a whole text it slices.
+    assert.match(handler, /readFileWindow\(member, convertedRecord\.path/);
+    assert.match(strip(readFileSync('server/src/files/files.ts', 'utf8')), /markdownWindow\(/,
+      'the windowed read no longer cuts by markdownWindow');
     assert.match(src, /const MAX_CONVERTED_CHARS = 256 \* 1024/);
     assert.doesNotMatch(handler, /\.slice\(0, MAX_CONVERTED/, 'the Markdown must never be cut mid-text again');
   });

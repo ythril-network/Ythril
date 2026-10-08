@@ -61,8 +61,10 @@ from disk — although the **Files** count still includes it. Delete it through 
 (`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
 told to remove their copy too (which ones apply it is explained next).
 
-**Deleting a file twice is not a second success.** Where the instance keeps a deleted file's record for audit, that
-record stays, flagged as deleted. A second delete of the same path, or a delete naming one of a file's pieces (a
+**Deleting a file twice is not a second success.** Where the instance keeps a deleted file's record for audit
+([Keeping a record of deleted files](04-settings.md#keeping-a-record-of-deleted-files)), that
+record stays, flagged as deleted: it is this instance's own, so it is not listed, is never sent to peers, and
+is not counted when instances compare their data. A second delete of the same path, or a delete naming one of a file's pieces (a
 chunk of a document or a face found in a picture) rather than the file, answers **404 not found** on the API and as
 an error from the MCP `delete_file` tool: nothing is deleted again, no second removal notice goes to synced peers
 and no second `file.deleted` webhook fires. So after a delete that timed out, a **404** on the retry can mean the
@@ -70,7 +72,9 @@ first one did complete; check the file list before deleting again.
 
 **Which peers delete their copy when you delete a file.** Deleting a file, or moving it, tells synced peers, and a peer applies the notice only where the rule allows it: every peer that holds **a copy your instance wrote** deletes it, and on a **pub/sub network or a tree** everything *below* you does as well, including a file you only relayed from above. A file **another instance wrote**, deleted here on a club, closed or democratic network, is removed on your instance alone: the other peers keep it, and it stays gone here until the instance that wrote it changes the file again. A peer applies the notice to the version you deleted, so a file someone uploaded again to that path since is kept, and it removes the file's text, thumbnails and search entries with it. A peer that has no one below it applies the deletion and does not keep the file's name afterwards.
 
-**What a file's derived data does when the file is deleted.** Everything Ythril made from a file goes with it: the text it extracted, the images it pulled out of a document, and the captions, faces and search entries of those images — however many steps removed from the file they are. A peer that never converted the file may hold those extracted pieces as ordinary files; it removes them when it applies the deletion, and if it, or another peer, still offers them afterwards they are turned away, exactly as the deleted file itself would be. So no peer restores a deleted file or anything made from it. A file written again at the same path is a new file: it is converted afresh and its pieces are kept.
+**What a file's derived data does when the file is deleted.** Everything Ythril made from a file goes with it: the text it extracted, the images it pulled out of a document, and the captions, faces and search entries of those images — however many steps removed from the file they are. Each instance makes its own text and images from a file, by its own settings, and they never travel to a peer (see below), so a peer removes its own pieces when it applies the deletion; pieces an older peer delivered before this release are retired by the next retention pass. So no peer restores a deleted file or anything made from it. A file written again at the same path is a new file: it is converted afresh and its pieces are kept.
+
+**A file a peer delivers is processed by your own settings, and the pieces are yours.** When a synced peer sends you a file — pushed to you, or fetched by your own sync — Ythril converts, chunks and analyses it the way it would an upload to this instance: the document mode, the models and, where you have confirmed an external one, the external assist model are your own, and a new version of the file replaces the passages of the old one. The converted text and extracted images are **not** sent to or from peers: a space with document conversion switched off holds no converted text of a file it was given, however the sender's instance is set up. After an upgrade, files a peer delivered earlier and your instance never converted are picked up by later sync cycles, a few at a time, so expect some conversion work (and external-model use, if you have confirmed one) for a while. A file that arrives from a peer is listed after the page is refreshed; the Files page does not move on its own for a change you did not make here.
 
 **New folder:** Click **New folder** in the toolbar.
 

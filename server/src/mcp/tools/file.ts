@@ -3,7 +3,7 @@ import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH } from
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
-import { createDir, listDir, readFile } from '../../files/files.js';
+import { createDir, listDir, readFileWindow } from '../../files/files.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
@@ -13,7 +13,7 @@ import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
-import { markdownWindow, resolveTextWindow } from '../../files/markdown-window.js';
+import { resolveTextWindow, type MarkdownWindow } from '../../files/markdown-window.js';
 import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 
@@ -55,21 +55,24 @@ export const read_fileTool: ToolHandler = {
         structuredContent: { path: filePath, content: spill.body } };
     }
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
-    let content: string | null = null;
+    let w: MarkdownWindow | null = null;
     for (const mid of memberIds) {
-      try { content = await readFile(mid, filePath); break; } catch (err) {
+      try {
+        // Only the window is held (`readFileWindow`), whatever the file's size; `markdownChars` is counted while it streams.
+        w = await readFileWindow(mid, filePath, { skip: window.skip, maxChars: window.budget.chars, maxBytes: window.budget.bytes });
+        break;
+      } catch (err) {
         // A file that EXISTS but cannot be decoded is not "not found": the same refusal the REST download gives,
         // so the two doors agree on a foreign key or altered bytes (F-43). Anything else tries the next member.
         if (err instanceof StoredFileUnreadable) throw new Error(err.message);
       }
     }
-    if (content === null) throw new Error(`File not found: ${filePath}`);
+    if (w === null) throw new Error(`File not found: ${filePath}`);
     /*
      * A WINDOW, held to the stated budget across both carriages (`Q-111`). The whole file went into `content` AND
      * `structuredContent`, unbudgeted: a 2 MB document crossed as 4.3 MB. A client reading only `content` must still
      * learn that there is more, so a cut window ends with one line saying where it continues.
      */
-    const w = markdownWindow(content, window.skip, window.budget.chars, window.budget.bytes);
     const stated = window.budget.stated ?? window.budget;
     const more = w.truncated ? `\n\n[read_file: ${w.skip + w.markdown.length} of ${w.totalChars} characters; `
       + `continue with markdownSkip: ${w.nextSkip}]` : '';

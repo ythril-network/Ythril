@@ -768,7 +768,9 @@ export interface FileMeta {
   /** Async embedding lifecycle status (text documents and media files).
    *  "pending" → queued; "processing" → being embedded; "complete" → done;
    *  "partial" → stored but some chunks failed to embed (retry-eligible);
-   *  "failed" → all retries exhausted; "skipped" / "disabled" → media-only states. */
+   *  "failed" → all retries exhausted; "skipped" → this instance does not analyse the file (a media class or the documents
+   *  turned off for the space, a media file over the size cap, or an extension nothing converts);
+   *  "disabled" → an older release's blanket off, no longer written but still shown. */
   embeddingStatus?: 'pending' | 'processing' | 'complete' | 'partial' | 'failed' | 'skipped' | 'disabled';
   /** The running stage and this document's full route, joined from its media job while it is in
    *  flight (absent once the job finishes, and while a claimed job has not reported a step yet). */

@@ -22,8 +22,9 @@
  *   pushed to peers as a real file.
  * - **One writer per path at a time** ({@link withPathLock}). The migration job rewrites files in place; without
  *   the lock it could rename an old ciphertext over a newer write, and sync would then publish the old version.
- * - **Large files stream** ({@link pipeToStored}, {@link openStoredRead}): uploads reach gigabytes, beyond what
- *   a Buffer holds.
+ * - **Large files stream** ({@link pipeToStored}, {@link stageStored}, {@link openStoredRead}): uploads reach gigabytes,
+ *   beyond what a Buffer holds. A write is STAGED outside the path lock (a network body can take as long as its sender
+ *   likes) and COMMITTED under it ({@link commitStaged}), after a re-check of what the caller decided on.
  * - **The size a caller sees is the plaintext size** ({@link statStored}), computed from the ciphertext length,
  *   so sizes stay what users uploaded and what peers compare.
  */
@@ -41,6 +42,7 @@ import {
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { sha256Tap, type TapExpectation } from '../util/sha256-tap.js';
 import { resolveSafePathChecked } from './sandbox.js';
 
 /** A stored file that exists but cannot be read back: a foreign or missing key, or altered bytes. */
@@ -137,25 +139,95 @@ async function writeUnlocked(abs: string, data: Buffer | string, opts: StoredWri
   }
 }
 
-/** Stream plaintext from `source` into a stored file, a chunk at a time, whatever its size. Locks as {@link writeStored}. */
-export async function pipeToStored(abs: string, source: Readable | AsyncIterable<Buffer>, opts: StoredWriteOptions = {}): Promise<void> {
-  await withPathLock(abs, () => pipeUnlocked(abs, source, opts));
+/**
+ * A stream written whole to a temporary file and NOT yet in the tree: what {@link stageStored} returns and
+ * {@link commitStaged} renames. `sha256` and `size` are the PLAINTEXT's, taken by the tap the bytes passed through.
+ *
+ * Whoever holds one removes it, on every exit ({@link StagedStoredFile.discard}, idempotent, a no-op once committed): a staged
+ * file that is neither committed nor discarded is a temp file nobody owns until the next boot sweeps it.
+ */
+export class StagedStoredFile {
+  constructor(readonly sha256: string, readonly size: number, private readonly tmp: string) {}
+  /** The temp file's path, for {@link commitStaged} only. */
+  tmpPath(): string { return this.tmp; }
+  /** Remove the temp file if it is still there (it is not once committed). */
+  async discard(): Promise<void> { await fsp.rm(this.tmp, { force: true }).catch(() => undefined); }
 }
 
-async function pipeUnlocked(abs: string, source: Readable | AsyncIterable<Buffer>, opts: StoredWriteOptions): Promise<void> {
+/** What a stage is expected to carry, checked in the tap's `flush`: see {@link TapExpectation}. */
+export interface StageOptions extends StoredWriteOptions {
+  expect?: TapExpectation;
+}
+
+/**
+ * Stream plaintext from `source` into a TEMPORARY file, hashing and counting it on the way, WITHOUT taking the path lock.
+ *
+ * ## Why it holds no lock
+ *
+ * A pull streams a peer's body for as long as the peer takes, and a lock held across a network read is a path nobody else can
+ * write, delete or migrate for as long as a stranger chooses. Nothing here touches the tree: the temp file is private to this call
+ * (`storedTmpDir`), so the lock is taken by {@link commitStaged}, for the rename alone.
+ *
+ * ## What it decides before it returns
+ *
+ * With `expect`, the tap fails the pipeline in its `flush` when the stream is not the size or the hash expected, and a stream past
+ * its declared size is stopped as it passes it (`util/sha256-tap.ts`): the temp file is then removed and the error thrown, so a body
+ * that does not verify has written nothing anywhere a reader looks. A source that fails midway is the same.
+ */
+export async function stageStored(abs: string, source: Readable | AsyncIterable<Buffer>, opts: StageOptions = {}): Promise<StagedStoredFile> {
   const secret = activeSecret();
   const tmp = await tmpPathFor(abs);
   try {
+    const tap = sha256Tap(opts.expect);
     const out = fs.createWriteStream(tmp, { mode: FILE_MODE });
     const src = source instanceof Readable ? source : Readable.from(source);
-    if (secret) await pipeline(src, createChunkedEncryptor(writerKey(secret)), out);
-    else await pipeline(src, out);
+    if (secret) await pipeline(src, tap, createChunkedEncryptor(writerKey(secret)), out);
+    else await pipeline(src, tap, out);
     const fh = await fsp.open(tmp, 'r+');
     try { await fh.sync(); } finally { await fh.close(); }
-    await finishWrite(tmp, abs, opts);
+    return new StagedStoredFile(tap.hex(), tap.size, tmp);
   } catch (err) {
     await fsp.rm(tmp, { force: true }).catch(() => undefined);
     throw err;
+  }
+}
+
+/**
+ * Rename a staged file into the tree at `abs`, UNDER the path lock — and `false`, with the staged file still its holder's, when
+ * `stillValid` (asked under that lock, immediately before the rename) says the write is no longer the one that was decided on.
+ *
+ * ## What the question is for
+ *
+ * The stage ran outside the lock, so the disk may have moved on since the caller decided what to do: a local edit landed over the file
+ * a pull meant to replace, the path became a symlink out of the space, a file appeared where there was none. The caller states what
+ * "still the write I decided on" means (as {@link encryptInPlace} re-checks inode, size and mtime before ITS rename) and this asks it
+ * where no other writer can change the answer; a `false` is the caller's to act on (a pull writes the bytes as a conflict copy).
+ * A `stillValid` that throws is a failure and nothing is renamed.
+ */
+export async function commitStaged(
+  abs: string, staged: StagedStoredFile, opts: StoredWriteOptions & { stillValid?: () => Promise<boolean> } = {},
+): Promise<boolean> {
+  return withPathLock(abs, async () => {
+    if (opts.stillValid && !await opts.stillValid()) return false;
+    await finishWrite(staged.tmpPath(), abs, opts);
+    return true;
+  });
+}
+
+/**
+ * Stream plaintext from `source` into a stored file, a chunk at a time, whatever its size: {@link stageStored}, then
+ * {@link commitStaged}, the temp file removed on every exit. Returns the PLAINTEXT's sha256 and size, counted on the way.
+ * With `expect`, a stream that is not what was expected stores nothing and throws a `StreamVerificationError`.
+ */
+export async function pipeToStored(
+  abs: string, source: Readable | AsyncIterable<Buffer>, opts: StageOptions = {},
+): Promise<{ sha256: string; size: number }> {
+  const staged = await stageStored(abs, source, opts);
+  try {
+    await commitStaged(abs, staged, opts);
+    return { sha256: staged.sha256, size: staged.size };
+  } finally {
+    await staged.discard();
   }
 }
 
@@ -285,12 +357,11 @@ export async function encryptInPlace(abs: string): Promise<EncryptInPlaceResult>
       throw err;
     }
     if (isChunkedEnvelope(head, before.size)) return { outcome: 'already-encrypted' as const };
-    const hash = crypto.createHash('sha256');
-    let plainSize = 0;
-    const tap = new Transform({ transform(c: Buffer, _e, done) { hash.update(c); plainSize += c.length; done(null, c); } });
+    const tap = sha256Tap();
     const tmp = await tmpPathFor(abs);
     try {
       await pipeline(fs.createReadStream(abs), tap, createChunkedEncryptor(writerKey(secret)), fs.createWriteStream(tmp, { mode: FILE_MODE }));
+      const plainSize = tap.size;
       const fh = await fsp.open(tmp, 'r+');
       try { await fh.sync(); } finally { await fh.close(); }
       // Gone meanwhile is an answer; a failure to look is the caller's, as the peek above has it.
@@ -302,7 +373,7 @@ export async function encryptInPlace(abs: string): Promise<EncryptInPlaceResult>
       }
       await finishWrite(tmp, abs, { mtime: before.mtime, noMkdir: true });
       const after = await fsp.stat(abs);
-      return { outcome: 'encrypted' as const, sha256: hash.digest('hex'), plainSize, onDiskSize: after.size, mtimeMs: after.mtimeMs };
+      return { outcome: 'encrypted' as const, sha256: tap.hex(), plainSize, onDiskSize: after.size, mtimeMs: after.mtimeMs };
     } catch (err) {
       await fsp.rm(tmp, { force: true }).catch(() => undefined);
       throw err;

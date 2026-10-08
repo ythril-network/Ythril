@@ -64,7 +64,7 @@ are hidden from browsing. Nothing in it is new data; every part is a record conv
 
 | field | what it is |
 |---|---|
-| `converted` | `{ path, markdown, truncated, sizeBytes, markdownSkip, markdownChars, markdownNextSkip? }` for the `_converted/<id>.md` sidecar, or `null` when the format needed no conversion (`.md`/`.txt`). **Whole, or in whole paragraphs** (`Q-128`): a document over 256K characters comes back as a window of whole paragraphs from `markdownSkip` (a character offset, default 0), `markdownNextSkip` is where the next window starts, and the windows joined are the document character for character — never a cut mid-sentence. `maxChars` / `maxBytes` / `maxTokens` set the window's size instead (`Q-111`), with the same meaning and the same refusals as on `read_file`, which pages a file's text by these same parameters; a single paragraph larger than the window is split at a line break rather than returned whole past it. `markdownChars` is the document's length. `unreadable` is present, holding the reason, when the sidecar exists but cannot be decoded. |
+| `converted` | `{ path, markdown, truncated, sizeBytes, markdownSkip, markdownChars, markdownNextSkip? }` for the `_converted/<id>.md` sidecar, or `null` when the format needed no conversion (`.md`/`.txt`). **Whole, or in whole paragraphs** (`Q-128`): a document over 256K characters comes back as a window of whole paragraphs from `markdownSkip` (a character offset, default 0), `markdownNextSkip` is where the next window starts, and the windows joined are the document character for character — never a cut mid-sentence. `maxChars` / `maxBytes` / `maxTokens` set the window's size instead (`Q-111`), with the same meaning and the same refusals as on `read_file`, which pages a file's text by these same parameters; a single paragraph larger than the window is split at a line break rather than returned whole past it. `markdownChars` is the document's length, counted while the file streams: only the requested window is held in memory, however large the document, but the file is read to its end for every page, so time per page stays proportional to its size. A stored file that fails its decryption check refuses before any text is returned. `unreadable` is present, holding the reason, when the sidecar exists but cannot be decoded. |
 | `chunks[]` | one page, always ordered by `chunkIndex`: `{ id, index, headingText, content, chunkOffsetMs, chunkDurationMs, embeddingStatus }`. Audio and video chunks carry the offset/duration; documents carry the heading they opened |
 | `chunkTotal` | total across all pages — page with `limit` (default 100, max 500) and `skip` |
 | `images[]` | the `_extracted/` images with `{ path, description, descriptionSource, sizeBytes, embeddingStatus }`, in numeric path order. Paged through the shared list rule under its own names (`Q-128`): `imagesLimit` (default and ceiling 200), `imagesSkip`, and `imagesTotal`, `imagesTruncated`, `imagesNextSkip` in the answer — it used to stop at 200 with no flag. |
@@ -147,6 +147,15 @@ Or force the bypass (no conversion):
 ```
 
 #### Stored artefacts
+
+**A file that arrives from a network peer is converted here, by this instance's own settings.** Bytes a peer
+pushes to the upload door and bytes this instance pulls by sync are queued exactly as an upload is: the mode,
+the models and, where this instance has consented to it, an external assist model are this instance's own, the
+work is done by the background worker (a backlog is worked off over sync cycles), and a changed version replaces
+the previous version's passages. The `_converted/` and `_extracted/` sidecars are instance-local and never
+travel, so a receiver with document conversion off holds no derived text of a file it was given. A file whose
+class this instance does not analyse, an extension the pipeline does not recognise included, ends with
+`embeddingStatus: "skipped"` on its record (the upload answer for such a file carries no status).
 
 Three things are stored for each converted file. Conversion artefacts are **hidden** from the file manager
 UI; through the API they are ordinary records and you exclude them yourself — see below:

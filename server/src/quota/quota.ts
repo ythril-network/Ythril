@@ -352,6 +352,16 @@ async function measureUsageUncached(): Promise<UsageGiB> {
 // ── Quota check ────────────────────────────────────────────────────────────
 
 /**
+ * How young a usage measurement a HOT, repeated quota check may reuse (`checkQuota`'s `maxAgeMs`): the later chunks of one
+ * chunked upload, and each file of one pull cycle.
+ *
+ * One constant, because two doors spelling `10_000` for the same decision drift: a window one door lengthens lets a burst of
+ * writes on that door overshoot a limit the other still holds, and nothing says the two were meant to agree. The first check
+ * of an upload (and a person's single write) stays exact; this is for a check that follows one that was.
+ */
+export const REPEATED_CHECK_USAGE_WINDOW_MS = 10_000;
+
+/**
  * Check quota limits for a write operation.
  *
  * @param area  'files' for file writes; 'brain' for fact/entity/edge writes

@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import { removeTree } from './remove-tree.js';
 import path from 'path';
 import { createHash } from 'crypto';
+import { sha256OfStream } from '../util/sha256-tap.js';
 import { getDataRoot } from '../config/loader.js';
 import { mkdirPrivate } from '../util/fs-modes.js';
 import { writeStored, readStored, statStored, pipeToStored, isMissingPath } from './stored-bytes.js';
@@ -123,34 +124,25 @@ export async function storeChunk(
  * chunks with a gap and a compensating overlap could report "complete" and
  * assemble into silently corrupt content.
  *
- * The sha256 is computed from the same buffers that are written, in order, so
- * it always matches the file on disk. The prior implementation hashed via a
- * `data` listener attached alongside `stream.pipeline`, which put the stream in
- * flowing mode and raced the pipeline's own consumption — the hash could cover
- * a different byte view than what was written.
+ * The sha256 is taken by the stored-bytes door's tap (`util/sha256-tap.ts`) on the same bytes that are written, in order, so
+ * it always matches the file on disk. With `expectedSha256` (the chunked door's `x-expected-sha256`, bound to the assembly) the tap
+ * decides in its `flush`, BEFORE the temp file is renamed: an assembly that is not the bytes it was promised throws a
+ * `StreamVerificationError` and stores nothing at the target. The staged chunks are left for the caller, who discards them.
  */
 export async function assembleChunks(
   spaceId: string,
   filePath: string,
   total: number,
   targetPath: string,
+  expectedSha256?: string,
 ): Promise<string> {
   const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
   const sized = await tiledChunks(dir, filePath, total);
 
-  // Assemble sequentially: read each chunk, hash its PLAINTEXT, then stream it into the target. One chunk is
+  // Assemble sequentially: read each chunk, then stream it into the target through the tap. One chunk is
   // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
   // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
-  const hash = createHash('sha256');
-  const plaintextChunks = async function* () {
-    for await (const buf of verifiedChunks(dir, filePath, sized)) {
-      hash.update(buf);
-      yield buf;
-    }
-  };
-  await pipeToStored(targetPath, plaintextChunks());
-
-  const sha256 = hash.digest('hex');
+  const { sha256 } = await pipeToStored(targetPath, verifiedChunks(dir, filePath, sized), { expect: { sha256: expectedSha256, size: total } });
 
   // Clean up chunk directory
   await removeTree(dir);
@@ -215,9 +207,7 @@ async function* verifiedChunks(dir: string, filePath: string, sized: readonly { 
  */
 export async function hashStagedChunks(spaceId: string, filePath: string, total: number): Promise<string> {
   const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
-  const hash = createHash('sha256');
-  for await (const buf of verifiedChunks(dir, filePath, await tiledChunks(dir, filePath, total))) hash.update(buf);
-  return hash.digest('hex');
+  return (await sha256OfStream(verifiedChunks(dir, filePath, await tiledChunks(dir, filePath, total)))).sha256;
 }
 
 /** Drop the staged chunks of an upload that is not to be assembled (the door's answer was `200 { tombstoned: true }`). */

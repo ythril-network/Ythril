@@ -37,6 +37,7 @@ import { LruMap } from '../util/lru-map.js';
 import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -167,8 +168,13 @@ const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...D
  * hashed is caught by `a-replicated-field-reaches-its-incoming-schema.test.js`, which compares the two.
  *
  * **The two lists must name the same fields.** That gate is what says so.
+ *
+ * Exported because the complement is the other half of the rule: every `FileMetaDoc` key NOT named here is local to
+ * this instance, and `files/processing-state.ts` derives its local-only set from this list instead of keeping a second
+ * one (`Q-240`). Gates parse the declaration below from this file's source: keep its spelling, and do not write that
+ * spelling anywhere above it, comments included.
  */
-const FILE_HASH_PROJECTION = {
+export const FILE_HASH_PROJECTION = {
   _id: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
   properties: 1,
   suppressEmbeddings: 1,
@@ -198,7 +204,10 @@ async function collectionLeaves(spaceId: string, collType: BrainCollection): Pro
   const cursor = col<Record<string, unknown>>(spaceCollection(spaceId, collType))
     // A CHUNK never replicates: it is derived from the blob and the receiver makes its own, with its own
     // chunker and its own model. Hashed, two correct instances report divergence whenever those differ.
-    .find(asFilter(collType === 'files' ? { parentFileId: { $exists: false } } : {}))
+    // And a row a soft delete FLAGGED is this instance's own audit record (`Q-257`): the deletion travels as a file
+    // tombstone and each receiver keeps or drops its row by its own setting, so hashed, a publisher that keeps the row
+    // and a receiver that removed it would report a divergence for ever between instances that hold the same data.
+    .find(asFilter(collType === 'files' ? LIVE_FILE_ROW : {}))
     // The same set as `DERIVED_FIELDS`, and it has to STAY the same set: this one decides what is fetched,
     // that one decides what is skipped while canonicalising. A field in only one of them is either hashed
     // when it must not be, or pulled out of MongoDB for nothing.

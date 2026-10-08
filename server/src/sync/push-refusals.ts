@@ -29,6 +29,10 @@
  */
 import { log, peerText } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
+import { LruMap } from '../util/lru-map.js';
+import { warnOnce } from '../util/warn-once.js';
+import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
+import { peerRunsAtLeast } from './peer-floor.js';
 
 /**
  * The per-type counters `batch-upsert` returns. `rejected` is every record of the family the peer neither stored nor
@@ -55,19 +59,81 @@ export async function reportPushRefusals(
   spaceId: string,
   batchSize: number,
 ): Promise<number> {
+  const refused = await countPushRefusals(resp, payloadKey, peerLabel, batchSize);
+  warnPushRefusals(payloadKey, peerLabel, spaceId, refused, batchSize);
+  return refused;
+}
+
+/**
+ * How many records of the family a peer's answer says it discarded — the read half of `reportPushRefusals`, for the
+ * caller that must decide before it says anything: a push that will OFFER the refused records again on another wire has
+ * not dropped them, and a warning that they "will not be offered again" would be false. Same swallowing, same bounds.
+ */
+export async function countPushRefusals(resp: Response, payloadKey: string, peerLabel: string, batchSize: number): Promise<number> {
   try {
     const body = await boundedJson<BatchUpsertReply>(
       resp, `batch-upsert ${payloadKey} response from ${peerLabel}`);
     const stats = body?.[payloadKey];
     // Clamped: a peer's number is a claim, and one larger than the batch must not make `pushed` negative.
-    const refused = Math.min(Math.max(0, Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0), batchSize);
-    if (refused > 0) {
-      log.warn(`Batch push ${peerText(payloadKey)} to ${peerText(peerLabel)}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
-        + `in space '${peerText(spaceId)}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
-        + 'its cap). They are not counted as pushed and will not be offered again — the log on the peer names the records.');
-    }
-    return refused;
+    return Math.min(Math.max(0, Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0), batchSize);
   } catch { return 0; /* a diagnostic must never fail a push the peer accepted */ }
+}
+
+/** The warning for records a peer discarded and that will not be offered again — said by `reportPushRefusals`. */
+export function warnPushRefusals(payloadKey: string, peerLabel: string, spaceId: string, refused: number, batchSize: number): void {
+  if (refused <= 0) return;
+  log.warn(`Batch push ${peerText(payloadKey)} to ${peerText(peerLabel)}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
+    + `in space '${peerText(spaceId)}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
+    + 'its cap). They are not counted as pushed and will not be offered again — the log on the peer names the records.');
+}
+
+// ── Which wire a peer takes (`Q-256`) ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Peers that refused the NEWER wire although the version they report takes it, by instance id, with the version they
+ * reported when they did. Kept in memory, bounded: it is a saving and a safeguard, never a rule — a restart forgets it
+ * and costs one refused page, re-offered on the older wire as the first time.
+ */
+const MAX_PEERS_REMEMBERED = 1_000;
+const refusedTheNewerWire = new LruMap<string, string>(MAX_PEERS_REMEMBERED);
+
+/** The version a member reports, as this module compares it: a change of the report (an upgrade, a rollback) is news. */
+const reportedVersion = (member: { version?: string | null }): string => member.version?.trim() ?? '';
+
+/**
+ * Does this peer take a wire introduced in `since`? It does when its reported version says so
+ * (`peerRunsAtLeast`: an unknown or unparseable version does NOT) and it has not REFUSED that wire at this version.
+ *
+ * **The second half is a rollback.** A version is self-reported and gossiped late: a peer rolled back to a release that
+ * refuses the newer keys still reports the newer version until the next exchange says otherwise, and a push in between
+ * would be refused whole per document and counted delivered. So a refusal marks the peer OLD until its reported version
+ * changes (`rememberRefusedTheNewerWire`), and the refused page is offered again on the older wire by the caller.
+ */
+export function peerTakesWireSince(member: { instanceId: string; version?: string | null }, since: string): boolean {
+  if (!peerRunsAtLeast(member, since)) return false;
+  return refusedTheNewerWire.peek(member.instanceId) !== reportedVersion(member);
+}
+
+/** The peer refused a page sent on the newer wire that the older wire then delivered: it does not take it, at this version. */
+export function rememberRefusedTheNewerWire(member: { instanceId: string; version?: string | null }): void {
+  refusedTheNewerWire.set(member.instanceId, reportedVersion(member));
+}
+
+/** Forget every peer that refused a wire. For tests. */
+export function forgetRefusedWires(): void { refusedTheNewerWire.clear(); }
+
+const olderWireSaid = warnOnce<string>({ every: SKIP_WARNING_WINDOW_MS });
+
+/**
+ * Say, once per peer per window, that this peer is sent the older wire — so an operator who removed a key and sees it
+ * survive on one peer reads why in this instance's log, and which version ends it. Through `peerText`: the label and the
+ * version are the peer's.
+ */
+export function warnOlderWire(member: { instanceId: string; label?: string | null; version?: string | null }, since: string, what: string): void {
+  olderWireSaid(member.instanceId, () => log.warn(
+    `Push to ${peerText(member.label ?? member.instanceId)}: ${peerText(what)} goes on the older wire, because this peer is not known to run `
+    + `${peerText(since)} or later (it reports ${member.version ? `'${peerText(member.version)}'` : 'no version'}, or refused the newer wire). `
+    + 'Keys removed here reach it on the file\'s next edit; nothing it does not understand is sent to it.'), reportedVersion(member));
 }
 
 /**

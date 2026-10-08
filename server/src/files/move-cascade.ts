@@ -125,7 +125,7 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
     // pending, once the sidecars have had their turn.
     // The bytes are at `dst`, so what the path IS is read there.
     await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src, await kindAt(spaceId, dst)));
-    emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
+    if (actor) emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...actor });
     return;
   }
   const { moved, sidecars } = await pathsLeaving(spaceId, src, dst);
@@ -148,7 +148,9 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
     }
   }, pendingAmong(pending, moved));
   await afterTheBytesMoved(spaceId, src, dst, held);
-  emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
+  // The brain family's one rule (`if (actor) emitWebhookEvent`), as in `deleteFileCascade`: no actor, no webhook and no
+  // live-view event (bundle-48, Q-259).
+  if (actor) emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...actor });
 }
 
 /**

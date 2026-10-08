@@ -446,7 +446,12 @@ Only `suppressEmbeddings` is read, on create and on update; the old name `exclud
 
 **A record with no vector and no `suppressEmbeddings` of its own is not a bug** — read `GET /api/spaces/:id/meta` before treating it as one, because a tier below
 is answering. Files have no type and therefore skip the middle tier entirely: a file is governed by the
-record flag or the space setting.
+record flag or the space setting. **That covers everything derived from the file**: a suppressed file's
+conversion passages, and the captions, transcripts and video chunks of its image, audio or video, are stored with
+their text (so lexical search finds them) and **no vector** — the embedder is not called, which matters for an
+external embedding endpoint — and so are the passages of a file a peer delivered, whose bytes this instance
+converts by its own settings. A passage or an extracted image whose parent file is suppressed, or gone, is
+suppressed as well.
 
 > **`suppressEmbeddings: false` means *not stated*, not *do embed*.** It falls through to the tiers
 > below instead of overriding them, so sending `false` **cannot** re-embed a record whose type or space

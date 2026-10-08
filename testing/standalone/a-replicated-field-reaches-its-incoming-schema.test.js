@@ -52,11 +52,26 @@
  * The hand-written version of this file did not name any of them, and would not have. That is the argument for
  * a derived rule in one sentence.
  *
+ * ## The other direction, and what the gate itself got wrong (bundle-48, `Q-256`)
+ *
+ * **Declared => hashed.** A field a schema declares travels; if the hash does not see it, two instances holding different
+ * values agree they match for ever. For a file that is one forgotten line, because its projection is an INCLUSION list.
+ * Exempt, each READ out of the code: a retagged key, a `z.never()` key (`parentFileId`), and a key that is no field of the
+ * document (the wire's own control keys, consumed at admission).
+ *
+ * **The extractor read past the schema it named.** `IncomingFileMetaDoc` closes with `}).strict();`, which the first
+ * `});` search skipped, so its keys included `IncomingEntityDoc`'s and a hashed file field an entity also declares could
+ * be deleted from the file schema with this gate green. And **a word in a comment inside the local-only set was read as a
+ * field name** (`fact`, `to`, `record`), so a field called that looked excluded from the hash. The last describe changes
+ * one line of the real sources in memory — for every hashed field of every replicated document — and asks whether the gate
+ * noticed; it is red on the old extractor and the old name reading and green on these.
+ *
  * Run: node --test testing/standalone/a-replicated-field-reaches-its-incoming-schema.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
 
 const TYPES = 'server/src/config/types.ts';
 const SHARED = 'server/src/api/sync/_shared.ts';
@@ -85,12 +100,45 @@ function docFields(src, name) {
   return [...body.matchAll(/^ {2}([a-zA-Z_]\w*)\??:/gm)].map(m => m[1]);
 }
 
-/** Keys of an `Incoming*` zod object. */
-function incomingKeys(src, name) {
+/**
+ * The text of an `Incoming*` zod object, from its declaration to the line that closes it.
+ *
+ * ## The close is a LINE, not the first `});` after the start
+ *
+ * The extractor stopped at the first `});` it met, and `IncomingFileMetaDoc` closes with `}).strict();` — which is no
+ * `});`. So its body ran on through the docblock and into `IncomingEntityDoc`, and every key of that schema was read
+ * as a key of the file's. The rule this file states ("a hashed field is declared by its schema") then held for a file's
+ * `description`, `tags`, `properties` and eight more because an ENTITY declares them: delete one from the file schema and
+ * the gate stayed green. It is the shape the repo's gate section describes — a title that claims the whole set, over a
+ * body that read something wider — and it was found by writing the mutation below (bundle-48).
+ *
+ * An object literal of these schemas closes on a line that STARTS with `})` — `});`, `}).strict();`, any chained call —
+ * and nothing inside one does, because every nested literal is indented.
+ */
+function incomingBody(src, name) {
   const at = src.indexOf(`export const ${name}`);
   if (at < 0) return null;
-  const body = src.slice(at, src.indexOf('});', at));
+  const rest = src.slice(at);
+  const close = rest.search(/^\}\)/m);
+  return close < 0 ? rest : rest.slice(0, close);
+}
+
+/** Keys of an `Incoming*` zod object. */
+function incomingKeys(src, name) {
+  const body = incomingBody(src, name);
+  if (body === null) return null;
   return [...body.matchAll(/^ {2}([a-zA-Z_]\w*):/gm)].map(m => m[1]);
+}
+
+/** The keys of an `Incoming*` object declared `z.never()`: present only so a document that carries them is REFUSED. */
+function neverKeys(body) {
+  return [...(body ?? '').matchAll(/^ {2}([a-zA-Z_]\w*): z\.never\(\)/gm)].map(m => m[1]);
+}
+
+/** The names in a `ReadonlySet<string>` constant of a source: `export const X: ReadonlySet<string> = new Set([...])`. */
+function setNamed(src, name) {
+  const m = src.match(new RegExp(`${name}: ReadonlySet<string> = new Set\\(\\[([^\\]]*)\\]\\)`));
+  return [...stripComments(m?.[1] ?? '').matchAll(/'([a-zA-Z_]\w*)'/g)].map(x => x[1]);
 }
 
 /**
@@ -118,8 +166,11 @@ function incomingKeys(src, name) {
  * the hash does not see.
  */
 function merkleExcluded(src, docName, listsSrc) {
-  const names = s => [...(s ?? '').matchAll(/([a-zA-Z_]\w*)/g)].map(m => m[1]).filter(n => n !== '0');
-  const listNamed = (name) => names(listsSrc.match(new RegExp(`${name}: ReadonlySet<string> = new Set\\(\\[([^\\]]*)\\]\\)`))?.[1]);
+  // Comments OUT before a word is read as a name. The set literals carry comments between their entries, and every word of
+  // one — `fact`, `to`, `record`, `file` — was read as a field the hash does not see, so a field of that name could never
+  // be reported hashed-but-undeclared. A set literal's names are its QUOTED entries and nothing else (bundle-48).
+  const names = s => [...stripComments(s ?? '').matchAll(/([a-zA-Z_]\w*)/g)].map(m => m[1]).filter(n => n !== '0');
+  const listNamed = (name) => setNamed(listsSrc, name);
   /*
    * WHICH lists `DERIVED_FIELDS` is made of, read from merkle.ts — re-anchored (bundle-30, `Q-307`) when the retagged
    * list joined the local-only one. A bare `= LOCAL_ONLY_FIELDS` (the shape before) reads as that one list.
@@ -189,11 +240,41 @@ function replicatedPairs(sharedSrc) {
   return pairs;
 }
 
+/**
+ * The rule, both directions, for one replicated document — over the sources it is handed, so a case can hand it a
+ * source with one line changed (the mutation cases below) and ask whether the gate would have SEEN the change.
+ *
+ *  - `undeclared`: a field the divergence hash sees and the document's `Incoming*` schema does not declare. Replicated
+ *    by pull and stripped on push, so the two peers hash it differently for ever.
+ *  - `declaredNotHashed`: a document field the schema DECLARES and the hash does not see. It travels, and two instances
+ *    holding different values agree they match for ever — the false NEGATIVE, and for a file the one that is easy to
+ *    reach, because its projection is an INCLUSION list: a field added to the schema and not to
+ *    `FILE_HASH_PROJECTION` is silently outside it. Three kinds of declared key are not a defect, and each is READ out
+ *    of the code rather than listed: a key the receiver retags (`RETAGGED_FIELDS`, `spaceId`), a key declared
+ *    `z.never()` (a chunk's `parentFileId`: it exists to be refused), and a key that is no field of the document at all
+ *    — the wire's own control keys, which are consumed at admission and never stored.
+ */
+function analyse({ types, shared, merkle, localOnly }, docName, incName) {
+  const fields = docFields(types, docName) ?? [];
+  const keys = incomingKeys(shared, incName) ?? [];
+  const view = merkleExcluded(merkle, docName, localOnly);
+  const { fromSet } = merkleExcluded(merkle, null, localOnly);
+  const hashes = f => (view.inclusive ? view.fromProjection.includes(f) : !view.fromProjection.includes(f));
+  const never = neverKeys(incomingBody(shared, incName));
+  const retagged = setNamed(localOnly, 'RETAGGED_FIELDS');
+  return {
+    fields, keys, never, retagged,
+    undeclared: fields.filter(f => hashes(f) && !keys.includes(f) && !fromSet.includes(f) && !(f in HASHED_BUT_NOT_REPLICATED)),
+    declaredNotHashed: keys.filter(k => fields.includes(k) && !never.includes(k) && !retagged.includes(k) && !hashes(k)),
+  };
+}
+
 describe('a hashed field replicates, and a non-replicated field is not hashed', () => {
   const types = readFileSync(TYPES, 'utf8');
   const shared = readFileSync(SHARED, 'utf8');
   const merkle = readFileSync(MERKLE, 'utf8');
   const localOnly = readFileSync(LOCAL_ONLY, 'utf8') + '\n' + readFileSync(RETAGGED, 'utf8');
+  const real = { types, shared, merkle, localOnly };
   // Per document, because the two projection shapes are read differently — see `merkleExcluded`.
   const { fromSet, fromProjection } = merkleExcluded(merkle, null, localOnly);
   const REPLICATED = replicatedPairs(shared);
@@ -227,17 +308,12 @@ describe('a hashed field replicates, and a non-replicated field is not hashed', 
 
   for (const [docName, incName] of REPLICATED) {
     it(`${docName}: every hashed field is declared by ${incName}`, () => {
-      const fields = docFields(types, docName);
-      const keys = incomingKeys(shared, incName);
-      const view = merkleExcluded(merkle, docName, localOnly);
       /*
        * An INCLUSIVE projection turns the question round: a field is hashed only if it is NAMED, so
        * everything else is out of the hash and needs no declaration. The rule is unchanged — hashed AND
-       * replicated, or neither — and this is the same rule read off the other shape.
+       * replicated, or neither — and `analyse` reads it off either shape.
        */
-      const hashes = f => view.inclusive ? view.fromProjection.includes(f) : !view.fromProjection.includes(f);
-      const undeclared = fields.filter(f =>
-        hashes(f) && !keys.includes(f) && !fromSet.includes(f) && !(f in HASHED_BUT_NOT_REPLICATED));
+      const { undeclared } = analyse(real, docName, incName);
       assert.deepEqual(undeclared, [],
         `${undeclared.join(', ')} on ${docName} is HASHED by the divergence check and STRIPPED on push. So `
         + `the two peers hash it differently for ever, so a network with merkle:true logs a MERKLE_DIVERGENCE `
@@ -279,4 +355,148 @@ describe('a hashed field replicates, and a non-replicated field is not hashed', 
         `IncomingEdgeDoc does not declare ${f}, so a pushed edge loses the kind of its own endpoints`);
     }
   });
+});
+
+/**
+ * ## The gate is held to its own title: it must SEE a field taken away (bundle-48, `Q-256`, plan D9)
+ *
+ * A gate that has never been seen failing is a claim. These cases change ONE line of the real sources, in memory, and ask
+ * the gate's own analysis whether it noticed — so they are the gate's own proof, over the set it ranges over (every field
+ * the file schema declares and the hash sees), not over a hand-picked one. The change is made by text, never by git, and the
+ * sources on disk are untouched.
+ *
+ * What they found on the first run: the schema extractor read past `}).strict();` into the next schema, so a file field
+ * that an ENTITY also declares could be deleted from `IncomingFileMetaDoc` with the gate still green.
+ */
+describe('the gate sees a field taken away from the schema or the hash', () => {
+  // Line endings normalised: a checkout with `core.autocrlf` has CRLF, and the one-line edits below match on `\n`.
+  const read = (file) => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  const real = {
+    types: read(TYPES),
+    shared: read(SHARED),
+    merkle: read(MERKLE),
+    localOnly: read(LOCAL_ONLY) + '\n' + read(RETAGGED),
+  };
+  const FILE = ['FileMetaDoc', 'IncomingFileMetaDoc'];
+
+  /** The region of a source from `start` to the next top-level declaration — bounded by structure, not by the extractor under test. */
+  function region(src, start, end) {
+    const at = src.indexOf(start);
+    assert.ok(at >= 0, `${start} not found — re-anchor the mutation`);
+    const stop = src.indexOf(end, at + start.length);
+    return { at, stop: stop < 0 ? src.length : stop };
+  }
+  /** `src` with the first line declaring `key:` inside the schema's region removed. */
+  function withoutSchemaKey(src, schema, key) {
+    const { at, stop } = region(src, `export const ${schema}`, '\nexport const ');
+    const body = src.slice(at, stop);
+    const line = new RegExp(`^ {2}${key}:[^\\n]*\\n`, 'm');
+    assert.ok(line.test(body), `${schema} declares no ${key} on a line of its own — re-anchor the mutation`);
+    return src.slice(0, at) + body.replace(line, '') + src.slice(stop);
+  }
+  /** `merkle` with `key: 1` removed from the file projection. */
+  function withoutProjected(merkle, key) {
+    const { at, stop } = region(merkle, 'const FILE_HASH_PROJECTION', '} as const;');
+    const body = merkle.slice(at, stop);
+    const entry = new RegExp(`\\b${key}: 1,?[ \\t]*`);
+    assert.ok(entry.test(body), `FILE_HASH_PROJECTION does not name ${key} — re-anchor the mutation`);
+    return merkle.slice(0, at) + body.replace(entry, '') + merkle.slice(stop);
+  }
+
+  const baseline = analyse(real, ...FILE);
+  const view = merkleExcluded(real.merkle, FILE[0], real.localOnly);
+  /** Every field the file schema declares, the document has, and the hash sees — what removing it must be noticed for. */
+  const hashedAndDeclared = baseline.keys.filter(k => baseline.fields.includes(k) && view.fromProjection.includes(k));
+
+  it('the set the cases range over is derived, with a floor', () => {
+    assert.ok(hashedAndDeclared.length >= 8,
+      `only ${hashedAndDeclared.length} file field(s) are hashed and declared (${hashedAndDeclared}) — the derivation is broken, and the cases below would range over nothing`);
+    assert.deepEqual(baseline.undeclared, [], 'the file schema is not clean before any change, so a mutation proves nothing');
+    assert.deepEqual(baseline.declaredNotHashed, [], 'the file hash is not clean before any change, so a mutation proves nothing');
+  });
+
+  it('a word in a comment inside a set literal is not a field the hash excludes', () => {
+    // The local-only set carries comments between its entries; every word of them (`fact`, `to`, `record`) was read as a
+    // field name, so a field called that could never be reported hashed-but-undeclared, nor declared-but-not-hashed.
+    const lists = "export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([\n  'embedding',\n  // the fact that a record goes to a peer\n  'syncBase',\n]);\n"
+      + "export const RETAGGED_FIELDS: ReadonlySet<string> = new Set(['spaceId']);\n";
+    const { fromSet } = merkleExcluded(real.merkle, null, lists);
+    assert.deepEqual([...fromSet].sort(), ['embedding', 'spaceId', 'syncBase'], 'a comment word was read as an excluded field');
+  });
+
+  it('the extractor ends a schema at the line that closes it: a strict one does not run on into the next', () => {
+    const src = 'export const A = z.object({\n  a: z.string(),\n  b: z.string(),\n}).strict();\n\n/** B */\nexport const B = z.object({\n  c: z.string(),\n});\n';
+    assert.deepEqual(incomingKeys(src, 'A'), ['a', 'b'], 'the keys of a schema closed by `}).strict();` include the next schema\'s');
+    assert.deepEqual(incomingKeys(src, 'B'), ['c']);
+    for (const [, inc] of replicatedPairs(real.shared)) {
+      assert.ok(!incomingBody(real.shared, inc).slice(1).includes('export const '), `the body of ${inc} runs into the next declaration`);
+    }
+  });
+
+  /*
+   * EVERY replicated document, not the file's alone: the extractor served all six, and a word in a comment inside the
+   * local-only set (`fact`, `to`, `record`) once made a field of that name look excluded from the hash, so the gate could
+   * not report it undeclared either.
+   */
+  const PAIRS = replicatedPairs(real.shared);
+  const sharedByDoc = PAIRS.map(([docName, incName]) => {
+    const seen = analyse(real, docName, incName);
+    const v = merkleExcluded(real.merkle, docName, real.localOnly);
+    const hashes = f => (v.inclusive ? v.fromProjection.includes(f) : !v.fromProjection.includes(f));
+    return { docName, incName, keys: seen.keys.filter(k => seen.fields.includes(k) && hashes(k)) };
+  });
+
+  it('the mutations range over every replicated document, with a floor', () => {
+    assert.ok(sharedByDoc.length >= 5, `only ${sharedByDoc.length} replicated document(s)`);
+    const total = sharedByDoc.reduce((n, d) => n + d.keys.length, 0);
+    assert.ok(total >= 40, `only ${total} hashed and declared field(s) across the replicated documents — the derivation is broken`);
+  });
+
+  for (const { docName, incName, keys } of sharedByDoc) {
+    for (const key of keys) {
+      it(`${docName}.${key}: taken out of ${incName}, the gate reports it undeclared (a neighbouring schema declaring it must not hide that)`, () => {
+        const mutated = { ...real, shared: withoutSchemaKey(real.shared, incName, key) };
+        assert.ok(!analyse(mutated, docName, incName).keys.includes(key), `the mutation did not remove ${key} from the keys read — the extractor reads another schema's`);
+        assert.ok(analyse(mutated, docName, incName).undeclared.includes(key),
+          `${key} was deleted from ${incName} and the gate says nothing: a hashed field is stripped on push and the roots differ for ever`);
+      });
+    }
+  }
+
+  for (const key of hashedAndDeclared.filter(k => !baseline.retagged.includes(k) && !baseline.never.includes(k))) {
+    it(`${key}: taken out of FILE_HASH_PROJECTION, the gate reports it declared and not hashed`, () => {
+      const mutated = { ...real, merkle: withoutProjected(real.merkle, key) };
+      assert.ok(analyse(mutated, ...FILE).declaredNotHashed.includes(key),
+        `${key} is declared by ${FILE[1]} and no longer hashed, and the gate says nothing: two instances holding different values agree they match`);
+    });
+  }
+
+  it('a key the wire consumes and never stores (it is no field of the document) is not a defect', () => {
+    const mutated = { ...real, shared: real.shared.replace('export const IncomingFileMetaDoc = z.object({\n', 'export const IncomingFileMetaDoc = z.object({\n  authoredKeys: z.array(z.string()).optional(),\n') };
+    assert.notEqual(mutated.shared, real.shared, 'the mutation changed nothing — re-anchor it');
+    const seen = analyse(mutated, ...FILE);
+    assert.ok(seen.keys.includes('authoredKeys'), 'the mutation did not reach the keys read');
+    assert.deepEqual(seen.declaredNotHashed, [], 'a wire-control key was reported as an unhashed document field');
+    assert.deepEqual(seen.undeclared, []);
+  });
+
+  it('a document field the schema declares and the hash does not name IS a defect', () => {
+    const mutated = {
+      ...real,
+      types: real.types.replace('export interface FileMetaDoc {', 'export interface FileMetaDoc {\n  aFieldNobodyHashed?: string;'),
+      shared: real.shared.replace('export const IncomingFileMetaDoc = z.object({\n', 'export const IncomingFileMetaDoc = z.object({\n  aFieldNobodyHashed: z.string().optional(),\n'),
+    };
+    assert.notEqual(mutated.types, real.types, 'the types mutation changed nothing — re-anchor it');
+    assert.deepEqual(analyse(mutated, ...FILE).declaredNotHashed, ['aFieldNobodyHashed'],
+      'a field added to the document and the wire schema and not to FILE_HASH_PROJECTION went unreported');
+  });
+
+  for (const [docName, incName] of replicatedPairs(real.shared)) {
+    it(`${docName}: every field ${incName} declares is hashed, unless it is retagged, refused or wire-only`, () => {
+      const { declaredNotHashed } = analyse(real, docName, incName);
+      assert.deepEqual(declaredNotHashed, [],
+        `${declaredNotHashed.join(', ')} is declared by ${incName} and travels, and the divergence hash does not see it: two instances `
+        + 'that disagree about it report themselves identical for ever. Add it to the hash (FILE_HASH_PROJECTION for a file), or stop declaring it.');
+    });
+  }
 });

@@ -336,7 +336,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `chrono.created` | A new chrono entry is created |
 | `chrono.updated` | A chrono entry is updated |
 | `chrono.deleted` | A chrono entry is deleted |
-| `file.created` | A file is written (new or overwrite) |
+| `file.created` | A file is written (new or overwrite) by a person or a token on this instance. **A file a peer delivers — its bytes pushed to this instance's upload door, or pulled by the sync engine — fires nothing** (it used to fire for a push, with the peer's token as the actor) |
 | `file.updated` | A file is moved/renamed |
 | `file.deleted` | A file is deleted |
 | `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. |
@@ -346,7 +346,8 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 
 > Events fire for **both** REST API and MCP (agent) writes — emission lives in the shared
 > brain/file functions, so an agent creating a fact or entity delivers the same events a REST
-> client would. Internal writes (sync replication, space import) do not emit.
+> client would. Internal writes (sync replication, file bytes included, and space import) do not emit, and the
+> same rule decides the live-view stream: a write no user made emits neither a webhook nor a stream event.
 
 ### Create Subscription
 

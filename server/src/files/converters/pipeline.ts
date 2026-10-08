@@ -26,7 +26,7 @@ import { ConversionUnavailableError } from './types.js';
 import { writeFile, writeFileBytes } from '../files.js';
 import { resolveSafePathChecked } from '../sandbox.js';
 import { col, asFilter, asDoc } from '../../db/mongo.js';
-import { embed } from '../../brain/embedding.js';
+import { chunkVectorsFor } from '../chunk-vectors.js';
 import { chunkEmbedText } from '../../brain/embed-text.js';
 import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../../config/loader.js';
 import { vlmExtractDocument } from './vlm-extract.js';
@@ -335,6 +335,10 @@ export async function storeConversionResults(
   },
 ): Promise<{ chunkCount: number; convertedFileId: string | null; embedFailures: number }> {
   const originalId = toDocId(originalFilePath);
+  // Asked ONCE for the job, before anything is embedded: `suppressEmbeddings` is the absence of a vector, so a
+  // suppressed file's passages are stored below with their text and no vector, and the embedder is asked nothing
+  // (Q-255). A file that is no longer there counts as suppressed and is not an embed failure.
+  const vectors = await chunkVectorsFor(spaceId, originalId);
   const now = new Date().toISOString();
   let embedFailures = 0;
   // Every record this run derives, committed together at the end — see the fence in the docblock.
@@ -458,14 +462,11 @@ export async function storeConversionResults(
     // The one builder a rebuild uses too (`buildEmbedText`), so a reindexed chunk embeds this exact string.
     const embedText = chunkEmbedText(chunk.headingText, chunk.content);
 
+    // A suppressed file keeps the text the lexical channel searches (`matchedText`, the queue path's rule, Q-94) and
+    // holds no vector: the model is not called and nothing is counted as failed.
     let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
     try {
-      const embResult = await embed(embedText);
-      embeddingFields = {
-        embedding: embResult.vector,
-        embeddingModel: embResult.model,
-        matchedText: embedText,
-      };
+      embeddingFields = { ...(await vectors.fieldsFor(embedText)), matchedText: embedText };
     } catch (err) {
       embedFailures++;
       log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);

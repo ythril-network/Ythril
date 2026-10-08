@@ -41,11 +41,21 @@ with no extension.
 { "path": "reports/q1.pdf", "sha256": "a1b2c3...", "embeddingStatus": "pending" }
 ```
 
-A **media** re-upload whose bytes are unchanged answers `"complete"` instead: the analysis it already has
-is kept rather than re-run. See [Media Embedding](05b-media-embedding.md#upload-response) for when a
-re-upload does re-analyse — which is every case except that one.
+A **media or document** re-upload whose bytes are unchanged answers `"complete"` instead (or `"pending"` while
+its job is still under way): the analysis it already has, or is doing, is kept rather than re-run or reset. See
+[Media Embedding](05b-media-embedding.md#upload-response) for when a re-upload does re-analyse — every case
+except those. A file with an extension the pipeline does not recognise is stored as it is; the answer carries no
+`embeddingStatus` for it, and its record says `skipped`.
+
+**An upload whose record cannot be written answers `5xx` and leaves nothing behind for a new path:** the bytes it
+stored are removed, so nothing is listed or offered to a peer; send it again. For a path that already has a record, the
+bytes are kept and the next upload rewrites the record. When the database itself did not answer (`503`, retryable), the
+bytes are kept as well, because nothing can say whether a record exists; the retry rewrites them, and a pull that is offered the
+path takes back bytes no record names once the database answers.
 
 **A peer's upload of a file this instance deleted is not stored.** Sync pushes a file's bytes to this route with a peer token. When this instance holds a deletion for that path, the path has not been re-created since (a live file there with other bytes, or a newer version written by the instance that issued the deletion — another author's higher version number does not count), and the arriving bytes are the content the deletion erased, the answer is `200 { "tombstoned": true }` and nothing is written, so the file does not come back from a peer that has not heard of the deletion yet. **A deletion counts from the moment its bytes are gone**, not from the moment its tombstone is published: a delete writes its tombstone first and publishes it once the file is removed, and an upload that arrives in between is answered the same `200 { "tombstoned": true }`. A deletion whose file is still there shadows nothing. If this instance cannot look at the path to tell which of the two it is (a file-system fault other than "it does not exist"), the answer is a retryable `503` with `Retry-After`, nothing is stored, and the sender does not remember it; it uploads again on its next cycle. It is a `200` on purpose: a sender that took it for a failure would upload the same bytes every cycle. Identical bytes re-created by the issuer as a newer version arrive with their metadata first and are stored. A user's own upload, with any other token, is **never** refused this way, and a chunked upload is decided before its target is written (see [Chunked Upload](#chunked-upload-content-range)). The `path` is resolved before anything is looked up by it, so `x/../file` is the deletion of `file` however it is spelled. A deletion held from before the upgrade names no version and shadows nothing. See [Sync API → File Sync Artifacts](09-sync-api.md#file-sync-artifacts).
+
+**What else a peer's upload does differently.** Bytes a peer token delivers are recorded as an **arrival**, by the one function the manifest pull also records through: size and hash, the peer as author of a row new here, no seq of its own, then processing by THIS instance's rules (conversion, chunking, the media pipeline; an image's face analysis follows `reprocessSyncedImages`). The body's `description`, `tags` and `properties` are ignored (they come by metadata sync), and **nothing is announced**: a peer's push fires no `file.created` webhook and no live-view event, as a synced record fires none (a person's upload, with a user or API token, still fires one). **A path inside a conversion tree** (`_converted/…` or `_extracted/…` at the root of the space) is not stored when a peer offers it, and is answered `200 { "ignored": "instance-local" }`, single or chunked (each instance converts by its own settings; an older sender reads the `200` as delivered and stops). A person's upload to such a path is never asked.
 
 ### Upload a File (JSON / base64)
 
@@ -87,8 +97,12 @@ Authorization: Bearer ythril_…
 Intermediate chunks return **202**:
 
 ```json
-{ "path": "large-file.zip", "received": 5242880 }
+{ "path": "large-file.zip", "received": 5242880, "maxBodyBytes": 52428800 }
 ```
+
+`maxBodyBytes` is the single-body limit this door enforces (`maxUploadBodyBytes`), so a client that does not know it can size its next chunk under it. The sync engine learns a peer's limit from it.
+
+**`x-expected-sha256`** — optional, on any chunk: the SHA-256 (64 hex digits) of the **whole** file. When it is sent, the assembled file is verified against it before it is renamed into place; a different assembly stores nothing, drops the staged chunks and answers **`422`**. A value that is not 64 hex digits is `400`, never read as absent. The sync engine sends it on every chunk of a push above the receiver's single-body limit (before this, such a file was answered `413` on every cycle).
 
 The final chunk (where `end === total - 1`) returns **201** with the full file hash:
 
@@ -96,7 +110,7 @@ The final chunk (where `end === total - 1`) returns **201** with the full file h
 { "path": "large-file.zip", "sha256": "a1b2c3..." }
 ```
 
-**A peer's chunked upload is decided before the target is written.** When the final chunk arrives from a peer token and some deletion held for the path carries a content hash (published, or pending with its file already gone — see [above](#upload-a-file-raw-bytes)), the staged chunks are hashed in one streaming pass first. If the hash is the erased content's, the staged chunks are discarded, the answer is `200 { "tombstoned": true }`, and the file at the path — whether there is one or not — is never touched. A path nobody deleted costs no extra pass. A user's own chunked upload is never asked.
+**A peer's chunked upload is decided before the target is written.** When the final chunk arrives from a peer token and some deletion held for the path carries a content hash (published, or pending with its file already gone — see [above](#upload-a-file-raw-bytes)), the staged chunks are hashed in one streaming pass first. If the hash is the erased content's, the staged chunks are discarded, the answer is `200 { "tombstoned": true }`, and the file at the path — whether there is one or not — is never touched. A path nobody deleted costs no extra pass. **When the peer promised the file's hash (`x-expected-sha256`), the same question is asked at the FIRST chunk, by path and promised hash**, so a shadowed file is turned away before any chunk is staged or counted against the quota; the final chunk's check of the staged bytes stays the authoritative one. A user's own chunked upload is never asked.
 
 Duplicate ranges are silently accepted (idempotent). The `maxUploadBodyBytes` config limit applies per-chunk; the declared `Content-Range` total is bounded by `maxChunkedUploadBytes` (default 10 GiB → **413** when exceeded). Every chunk is also checked against the storage quota — the first chunk projects the full declared total — and returns **507** when the files hard limit would be exceeded. Bytes staged under `.chunks` count toward measured file usage.
 
@@ -287,8 +301,8 @@ Deleting a file cascades: its metadata record, any queued embedding job, and all
 artifacts — chunk records plus the on-disk `_converted/<id>.md` and `_extracted/<id>/` sidecars —
 are removed from the file store. **Everything derived from the file goes with it, however deep:** the records of an
 extracted image's caption and faces hang from the image, not from the file, and are removed too; so are the metadata rows
-a peer's copy of a sidecar made on this instance (a peer that never converted the file holds its sidecars as ordinary
-files), flagged or removed as the file's own record is (`softDeleteFileMeta`), and the queued jobs of the extracted images.
+a sidecar left on this instance (one an older peer delivered before sidecars became instance-local included),
+flagged or removed as the file's own record is (`softDeleteFileMeta`), and the queued jobs of the extracted images.
 A directory `<id>.md/` standing beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never
 touched by the file's delete. Deleting a **directory** does the same for every file beneath it,
 including the `_converted/<path>` and `_extracted/<path>` subtrees, and writes a sync **tombstone**
@@ -306,9 +320,14 @@ sidecars with it. The same holds for a move, whose old paths are tombstoned.
 
 **Soft-delete (`softDeleteFileMeta`).** With this top-level config flag set to `true` (default
 `false`), deleting a file **retains** its metadata record and flags it `deletedAt = <timestamp>`
-instead of removing it. Flagged records stay listed and searchable but are shown as "deleted" in the
-UI; re-uploading the same path clears the flag. Derived records (conversion chunks / `_converted` /
-`_extracted`) are always hard-removed regardless of the setting.
+instead of removing it. A flagged record is this instance's own audit record: it is left out of the file
+listing, **never offered to a peer** (not pushed, not served by the sync routes, not hashed by the Merkle check)
+and the flag stamps no `seq` or `updatedAt`. Bytes written to the same path again (an upload, or a file a peer
+delivers) clear the flag. **The deletion reaches peers as the file tombstone, and each peer applies it by its
+own `softDeleteFileMeta`**, whatever this instance's setting: one keeps its flagged row, another removes it.
+A restore from an admin export keeps the flag its backup row carried (the import summary counts them in
+`flagsKept`). Derived records (conversion chunks / `_converted` / `_extracted`) are always hard-removed
+regardless of the setting.
 
 **A second delete of a flagged record is `404`, never a second success.** A delete that names a record already flagged `deletedAt`, or a derived record (a chunk of a document, a face found in a picture) rather than the file, answers `404` on `DELETE /api/files/:spaceId`, `POST /api/delete_file` and the MCP `delete_file` tool alike (an error result in MCP): no second tombstone is written, no second `file.deleted` webhook fires, and `seq` does not move. A first delete that was interrupted (a store failure, a restart in between) still completes on retry, because its record is not flagged yet. So after a delete that timed out, a `404` on the retry can mean the first one did complete: list the files before deleting again. With `softDeleteFileMeta` off the record is gone after the first delete, and the retry answers `404` for that reason.
 
@@ -346,15 +365,14 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   written, rather than publish a second. A retried act used to end with two, and the later one deleted a
   re-upload of that path made in between. A tombstone now also names the version it deleted, so a peer keeps a
   later one, but a second tombstone is still noise nobody needs.
-- **A file's sidecars follow the file; they get no tombstone of their own.** Deleting one file writes ONE tombstone, for
-  that file. A peer that applies it removes the file's derived records and sidecars (the list above), and a peer that still
-  offers a sidecar afterwards — its bytes by `POST /api/files` (single or chunked) or in a manifest, its metadata in a batch or a
-  pull — is refused it exactly as the file would be: `200 { "tombstoned": true }` at the byte door, no download from a
-  manifest, counted as `tombstoned` in a metadata batch. The deciding tombstone is the **parent's**, and it counts when it erased
-  content here (it carries the hash of the file it removed — one stored for a path nobody held does not shadow anything) and the
-  file has not been re-created since (a live row whose content hashes differently, or a newer version written by the instance that issued the deletion). A
-  person's upload to a sidecar path is never asked. A deleted file that is written again at the same path is a new file, whose
-  conversion writes its sidecars afresh.
+- **A file's sidecars follow the file; they get no tombstone of their own, and no peer holds or sends one.** Deleting one
+  file writes ONE tombstone, for that file. A peer that applies it removes the file's derived records and sidecars (the
+  list above) by its own cascade: a conversion's sidecar (`_converted/…`, `_extracted/…`) is that instance's own and never
+  travels, so there is none of this instance's to refuse. An older peer that still offers a sidecar — its bytes by
+  `POST /api/files` (single or chunked) or in a manifest, its metadata in a batch or a pull — is ignored without a
+  refusal: `200 { "ignored": "instance-local" }` at the byte door, no download from a manifest, a metadata row or a file
+  tombstone for the path dropped. A person's upload to a sidecar path is never asked. A deleted file that is written
+  again at the same path is a new file, whose conversion writes its sidecars afresh.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
   the file at `destination`, the record at the old path and the mark its first attempt left with its

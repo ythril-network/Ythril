@@ -319,7 +319,9 @@ gives way to the sender's own wording. A file another instance described keeps t
 wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
 case the file still arrives. A record that is damaged (a value of the wrong kind, or a piece of a file rather than
 a file) is discarded instead of copied. Once nothing is left, the side collection is removed. That removal cannot be undone and
-appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
+appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token. In the same way, the
+converted and extracted files a peer delivered before each instance made its own are removed in the background, and each
+space that had any appears once as operation `file.peer_sidecar.retire`.
 
 **Exporting:** Download the current filtered view as JSON or CSV.
 
@@ -534,7 +536,25 @@ it. The two views disagreed, and which one you believed depended on where you lo
 
 **What each instance keeps its own copy of** is everything it worked out from the file itself — the size,
 the checksum, the extracted text and the search vector. Those are never overwritten by another instance,
-because each one computed them from its own copy of the bytes.
+because each one computed them from its own copy of the bytes. That includes the **converted text and the
+images pulled out of a document**: they never travel. Each instance converts a file it is given by its own
+settings (the document mode, its models, an external assist model only if you have confirmed one), so an
+instance with conversion switched off holds no converted text of a file a peer sent. After an upgrade a
+backlog of files your instance was sent and never converted is worked off over the next sync cycles, a few at
+a time.
+
+**Taking something away travels too.** Remove a file's description, a tag, a property or its search
+suppression, and the removal reaches the synced instances running this release or later, so they no longer
+keep the value you took away (before, it stayed on every other instance for good, and the instances
+reported different data). An instance still on older software keeps the old value until it is upgraded and
+the file is next edited; the log of the instance that sends says so, once, naming the peer.
+
+**A file you deleted, with records kept, stays on your instance.** With the
+[record of deleted files](04-settings.md#keeping-a-record-of-deleted-files) switched on, the flagged record is not
+sent to other instances and not counted when instances compare their data: they get the deletion notice and each
+follows its own setting. A restore from an export brings the flag back. A restore also removes a description,
+tag or property the exported record did not have, as the export is a full copy, and the import summary
+counts those removals (`keysRemoved`).
 
 > **Connections convert themselves on the first 5.0 start, and there is nothing to run.** A connection —
 > a fact about an entity, a file about a timeline entry — used to be a list of ids kept on the record

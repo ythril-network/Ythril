@@ -1,20 +1,40 @@
 /**
- * A deleted file's sidecar comes back to NONE of the peers that held it, down a chain A - B - C (bundle-71, Q-349).
+ * A deleted file's sidecar comes back to NONE of the instances of a chain A - B - C, because no sidecar ever travels: each
+ * instance converts the file by its OWN pipeline and holds its OWN sidecar (bundle-71, Q-349; re-aimed by bundle-48 D1/D9).
  *
- * ## The defect
+ * ## The defect it began with
  *
  * A converts an `.html` upload in-process: it writes `_converted/<f>.md` and derived rows for it. Derived rows never
- * replicate, but the sidecar's BYTES do, as an ordinary file: B pulls them from A and keeps a top-level row for them
- * (seq 0, authored by the peer whose bytes landed first), and C does the same from B. When A deletes `<f>`, its tombstone names
- * `<f>` only. B and C remove the sidecar's bytes with the file (`removeFileHere`) but not the row that arrived with them, and any
- * instance that still holds the sidecar bytes re-advertises them while nothing refuses them: the deleted file's text outlives it.
+ * replicate, but the sidecar's BYTES did, as an ordinary file: B pulled them from A and kept a top-level row for them
+ * (seq 0, authored by the peer whose bytes landed first), and C did the same from B. When A deleted `<f>`, its tombstone named
+ * `<f>` only. B and C removed the sidecar's bytes with the file (`removeFileHere`) but not the row that arrived with them, and any
+ * instance that still held the sidecar bytes re-advertised them while nothing refused them: the deleted file's text outlived it.
+ *
+ * ## Why this file was re-aimed, and what it would have said if it was not
+ *
+ * Sidecars are instance-local now (`isInstanceLocalFile` takes the root-anchored `_converted/` and `_extracted/` trees, so the
+ * manifest, the byte door, the metadata door and the merkle hash all leave them out): nothing a peer holds of a conversion reaches
+ * another instance. The old assertions would still pass, and vacuously. "Every instance holds a row for the sidecar" is true
+ * because every instance now writes its OWN, and "after the delete nobody holds anything" is true because each instance's own
+ * cascade removes its own sidecar — so the test would be green without ever following an ARRIVED sidecar, which is the thing it
+ * was written to follow. It now says what is true: the starting state is that every instance holds its sidecar as a DERIVED row
+ * of the file (a `parentFileId`, no deliverer: its own conversion made it), and the end state is the same as before, reached
+ * because each instance applies the file's tombstone to its own sidecar and no peer can bring one back.
  *
  * ## The rule
  *
- * A file's deletion takes its sidecars with it on EVERY instance: after A deletes `<f>` and the three instances have synced
- * until nothing more moves, none of A, B or C holds `<f>`, its `_converted/` Markdown, or a row for either — and they still do not
- * after more rounds. "Not yet" is told from "never" by a sentinel written on A AFTER the delete: once it has reached C, every
- * round that could have carried a sidecar back has run.
+ * 1. A sidecar is each instance's own: after B and C hold the file, the `_converted/<f>.md` each holds is a derived row of `<f>`
+ *    produced by that instance's conversion — never a top-level row a peer's bytes made.
+ * 2. A file's deletion takes its sidecars with it on EVERY instance: after A deletes `<f>` and the three instances have synced
+ *    until nothing more moves, none of A, B or C holds `<f>`, its `_converted/` Markdown, or a row for either — and they still do not
+ *    after more rounds. "Not yet" is told from "never" by a sentinel written on A AFTER the delete: once it has reached C, every
+ *    round that could have carried a sidecar back has run.
+ *
+ * ## Not run where it was written
+ *
+ * This file needs the three-instance test stack (`npm run test:up` with the c instance), which was not available when it was
+ * re-aimed: it has been read against the helpers it uses and against the server it targets, and NOT executed. Its first run is the
+ * Full run on CI. The rows it reads out of each instance's Mongo go through `mongoEval`, the helper the footprint check uses.
  *
  * ## Which file type
  *
@@ -38,7 +58,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INSTANCES, post, reqJson, delWithBody, createTestSpace, pubsubNetwork, waitFor } from './helpers.js';
-import { spaceFootprint } from '../_shared/space-footprint.mjs';
+import { spaceFootprint, mongoEval } from '../_shared/space-footprint.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -72,6 +92,20 @@ async function hasBytes(base, token, p) {
 }
 /** The rows the instance's own store holds for the space, read out of its Mongo (the listing hides derived trees). */
 const rowIds = (x) => spaceFootprint(x, space.id).fileIds;
+/**
+ * The sidecar's row on instance `x` as the store holds it: whether it is a DERIVED row (this instance's own conversion made it:
+ * `parentFileId` is the file) and who delivered it (a peer's bytes that landed first leave a top-level row with a deliverer).
+ */
+function sidecarRow(x) {
+  return mongoEval(x, `
+    // mongosh's findOne takes the projection ITSELF as its second argument: wrapped in { projection } (the Node driver's
+    // spelling) it projects a field named "projection", and every row read as top-level.
+    const r = d.getCollection(${JSON.stringify(`${space.id}_files`)}).findOne({ _id: ${JSON.stringify(CONVERTED)} },
+      { _id: 1, parentFileId: 1, deliveredBy: 1 });
+    // '' is the back-fill's "nobody's" (a row that existed before the stamp): no peer delivered it either.
+    print(JSON.stringify(r ? { present: true, parentFileId: r.parentFileId ?? null, deliveredBy: r.deliveredBy || null } : { present: false }));
+  `);
+}
 /** The file's own row, its chunks and its sidecars' rows: every id that names the file. */
 const mine = (ids) => ids.filter(id => id.includes(FILE));
 
@@ -115,19 +149,22 @@ after(async () => {
 });
 
 describe('a deleted file\'s sidecar reaches no peer of the chain', () => {
-  it('the file and its converted Markdown reach B from A, and C from B (the starting state is reached)', async () => {
+  it('the file reaches B from A, and C from B, and EACH instance converts it itself: its sidecar is its own derived row, none arrived (the starting state is reached)', async () => {
     const up = await upload(INSTANCES.a, tA, FILE, { content: Buffer.from(HTML).toString('base64'), encoding: 'base64', inputFormat: 'html' });
     assert.equal(up.status, 202, `upload on A: ${JSON.stringify(up.body)}`);
     // A converts in-process; the sidecar's bytes exist on A once the conversion has run.
     await waitFor(() => hasBytes(INSTANCES.a, tA, CONVERTED), 90_000, 1_000, () => `A never wrote ${CONVERTED}: the conversion did not run, so there is no sidecar to follow`,
       { what: `A's conversion of ${FILE} to write ${CONVERTED}` });
+    // B and C hold the file, and then convert it by their own pipelines: the sidecar is theirs, not a copy of A's.
     await converge(async () => {
       const h = await holdings();
       return ['b', 'c'].every(x => h[x].bytes.includes(FILE) && h[x].bytes.includes(CONVERTED) && h[x].rows.includes(CONVERTED));
-    }, `${FILE} and ${CONVERTED} (bytes and a row) on B and on C`);
-    const h = await holdings();
-    for (const x of ['b', 'c']) {
-      assert.ok(h[x].rows.includes(CONVERTED), `${x}: no row for the arrived sidecar — the case this test is about was not reached: ${JSON.stringify(h[x])}`);
+    }, `${FILE} and its OWN conversion ${CONVERTED} (bytes and a row) on B and on C`);
+    for (const x of ['a', 'b', 'c']) {
+      const r = sidecarRow(x);
+      assert.deepEqual(r, { present: true, parentFileId: FILE, deliveredBy: null },
+        `${x}: the sidecar is not this instance's own derived row of the file (${JSON.stringify(r)}). A top-level row with a deliverer means a peer's `
+        + 'bytes landed first — a sidecar travelled, and nothing in this test would have followed it');
     }
   });
 

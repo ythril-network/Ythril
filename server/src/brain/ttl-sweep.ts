@@ -46,6 +46,7 @@ import { settleStalePendingFileTombstones } from '../files/tombstones.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
+import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 
 /** How often the sweep runs, ms. Cited by the docs (`doc-cited-constants`). */
 export const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min
@@ -238,6 +239,7 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // Read spills older versions wrote into spaces (Q-92), on the same clock and every cycle: older peers keep
   // sending them until they upgrade. The catch is the last resort, as above.
   await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${peerText(err)}`));
+  await retirePeerSidecars().catch(err => log.warn(`Peer sidecar retirement: ${peerText(err)}`));
 
   // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219), a bounded amount per cycle. Each space is
   // contained inside it and logs its own failure by name; this catch is for what happens before any space.

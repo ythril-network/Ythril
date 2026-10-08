@@ -1,5 +1,6 @@
 import type { BrainCollection, RecordType } from '../config/types-knowledge.js';
 import { RECORD_TYPES, RECORD_COLLECTION } from '../config/types-knowledge.js';
+import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 
 /**
  * The replicated record families, as one list.
@@ -33,6 +34,11 @@ import { RECORD_TYPES, RECORD_COLLECTION } from '../config/types-knowledge.js';
  * is derived from the blob and the receiver makes its own, with its own chunker and its own model —
  * sent, it would carry passage text and a vector another instance cannot rank. That is a property of the
  * family, not of the moment it happens to be pushed.
+ *
+ * **And it offers LIVE FILES only (`LIVE_FILE_ROW`).** With `softDeleteFileMeta` on, a deleted file leaves a row flagged
+ * `deletedAt`: this instance's own audit record, never a peer's. The deletion reaches a peer as the file TOMBSTONE the delete
+ * wrote; the flagged row, offered, would land LIVE there (the flag is not a wire key) and remove the tombstone the peer holds
+ * (`Q-257`). The same filter governs `GET /filemeta` and `GET /filemeta/:id`, which share this family's filter.
  */
 /**
  * One row's shape. Declared rather than inferred, because `as const` alone gives each row its OWN
@@ -72,7 +78,7 @@ export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
   { payloadKey: 'facts', collection: 'facts' },
   { payloadKey: 'entities', collection: 'entities' },
   { payloadKey: 'chrono', collection: 'chrono' },
-  { payloadKey: 'filemeta', collection: 'files', pushFilter: { parentFileId: { $exists: false } } },
+  { payloadKey: 'filemeta', collection: 'files', pushFilter: LIVE_FILE_ROW },
   { payloadKey: 'edges', collection: 'edges' },
   { payloadKey: 'links', collection: 'links' },
 ] as const;

@@ -255,7 +255,7 @@ These are set in `config.json` under `mediaEmbedding.faceRecognition`, or pinned
 | `confidenceThreshold` | `0.6` | How similar a face must be to a gallery entry to be auto-labeled (0–1). Start conservative; increase as your gallery grows. |
 | `minFaceSizeFraction` | `0.05` | Minimum face size (as a fraction of the image's shorter side). Smaller faces in crowd shots are ignored. |
 | `personEntityTypes` | `["person"]` | Entity types considered as people. Only entities of these types can enter the face gallery. In the admin UI (**Settings → Media Processing → Face recognition**) these are **picked from your Schema Library's entity types**, shown as removable chips; any value already stored stays selectable even if it's no longer in the library. |
-| `reprocessSyncedImages` | `true` | When true, images received from other instances via sync are queued for face recognition automatically. |
+| `reprocessSyncedImages` | `true` | When true, an image another instance delivers (it pushed it to you, or your sync fetched it) is queued for face recognition automatically, once. When false it is captioned but not analysed for faces, whichever way it arrived; an image uploaded here is always analysed. |
 
 #### Configuring an external face service asks you to confirm it — once, at the right moment
 

@@ -37,6 +37,7 @@ import { cancelMediaJob } from './media/job-queue.js';
 import { deleteConversionArtifacts } from './converters/pipeline.js';
 import { forgetFileHashes } from './manifest.js';
 import { retireFileMeta } from './file-meta.js';
+import { deleteStoredIfPresent } from './stored-bytes.js';
 
 export type RemovalFailure = 'throw' | 'swallow';
 
@@ -54,4 +55,23 @@ export async function removeFileHere(spaceId: string, rel: string, { failure }: 
   // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
   // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta — as every sidecar row an arrival made went above.
   await step('retireFileMeta', () => retireFileMeta(spaceId, rel));
+}
+
+/**
+ * Remove ONE file a PEER's act (or this instance's own housekeeping of what a peer delivered) condemns: its bytes, then everything
+ * it left, failing with the store's failure.
+ *
+ * ## What it prevents
+ *
+ * The same two lines — the unlink of ONE path, a directory there left alone, then {@link removeFileHere} with `'throw'` — were
+ * written by a peer's file tombstone and again by the retirement of a peer's sidecars, each a place to forget that the path came
+ * from outside and means one file. Dropping the `skipDirectory` half lets one peer-chosen path take a whole tree with it; putting
+ * the row before the bytes loses the marker a retry needs. Here the order and the guard are written once.
+ *
+ * `abs` is the path the caller resolved and holds the tombstone ordering for (a peer's tombstone resolves it up front, with the
+ * rest of its page). A path that is already gone is not an error, and the row and its leavings are removed all the same.
+ */
+export async function removeOneStoredFileHere(spaceId: string, rel: string, abs: string): Promise<void> {
+  await deleteStoredIfPresent(abs, { skipDirectory: true });
+  await removeFileHere(spaceId, rel, { failure: 'throw' });
 }

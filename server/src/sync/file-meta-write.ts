@@ -9,6 +9,22 @@
  * size and hash for bytes this instance derived itself, so the authored keys are `$set` and nothing is `$unset` that
  * the sender merely did not mention — an older peer cannot erase a field it does not know.
  *
+ * ## What is removed, and only by the sender's word (`Q-256`)
+ *
+ * Absence on its own says nothing, so the merge never removed an authored key, and a key the operator REMOVED at the
+ * publisher (a description, its source, the properties, the tags, a suppression mark) stayed on every other instance
+ * for ever, hashed on both and different. A sender now lists the authored keys its version knows (`authoredKeys`, which
+ * is consumed here and never stored), and the SAME update `$unset`s each key that is listed, that this version also
+ * authors, and that the document lacks (`removedFileMetaKeys`). Three things keep that from erasing more than was said:
+ *  - **a key the sender does not list is never touched** — an older sender has no word on keys it never heard of, and
+ *    no list at all (an older sender, the stray drain) removes nothing;
+ *  - **a name that is no authored key here is never unset**, whatever the list says — the check is against the set
+ *    this version derives from its own wire schema, so `sha256`, `sizeBytes`, `deletedAt` and the rest of what this
+ *    instance holds about its own bytes are out of reach, and no name a peer picks reaches the update;
+ *  - **the write guard is the arrival writer's own**: a copy that loses on its seq is not written at all, removal included.
+ * A RESTORE carries no list because an export is a full record: every authored key its document lacks is removed, and the import
+ * summary counts the ones the replaced rows had (`authoredKeysRestoreRemoves`).
+ *
  * ## What each copy had dropped
  *
  * The merge was written twice — the arrival writer's per-document `ingestFileMeta` and the stray drain's
@@ -35,10 +51,7 @@
  */
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { enqueueIngestedRecords } from '../brain/embed-queue.js';
-import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
-import { dropFileVectors } from '../brain/suppression-sweep.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { removedFileMetaKeys, FILE_META_AUTHORED_KEYS } from '../api/sync/_shared.js';
 import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
@@ -60,8 +73,9 @@ export interface FileMetaUpdateOptions {
 }
 
 /**
- * The update PIPELINE that merges an arriving file's authored keys into its row — see the module docblock. `doc` is
- * the document as the writer prepared it: wire keys only, plus, on a restore, the backup's record-tier fields.
+ * The update PIPELINE that merges an arriving file's authored keys into its row, and removes those its sender says
+ * were removed — see the module docblock. `doc` is the document as the writer prepared it: wire keys only, plus, on a
+ * restore, the backup's record-tier fields. One update per document, whatever it removes.
  */
 export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: FileMetaUpdateOptions = {}): object[] {
   const { defaults = {}, restore = false, suppressed = false } = opts;
@@ -70,7 +84,8 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   const carried = carriedFields({ restore, suppressed });
   const set: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(doc)) {
-    if (k === '_id' || v === undefined || LOCAL_ONLY_FIELDS.has(k)) continue;
+    // `authoredKeys` is wire control: read below for what it removes, and never written to the row.
+    if (k === '_id' || k === 'authoredKeys' || v === undefined || LOCAL_ONLY_FIELDS.has(k)) continue;
     set[k] = { $literal: v };
   }
   for (const f of LOCAL_ONLY_FIELDS) {
@@ -86,37 +101,32 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   // Who delivered THIS version: its own step, after the loop above, so no carried value can stand in for it.
   // Absent for a caller that is not an arrival from a peer (the stray drain's fill): the stored stamp is left alone.
   if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
-  return [{ $set: set }];
-}
-
-/** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */
-export function holdsBlob(row: { sha256?: unknown; sizeBytes?: unknown } | undefined): boolean {
-  return row?.sha256 !== undefined || row?.sizeBytes !== undefined;
+  const removed = removedFileMetaKeys(doc, { restore });
+  return removed.length > 0 ? [{ $set: set }, { $unset: removed }] : [{ $set: set }];
 }
 
 /**
- * Bring landed files' vectors in line with the RECEIVER's rules, after their metadata was written — one read for the
- * set, then:
- *  - **a file this instance suppresses** (its own flag as stored now, or the space: a file has two tiers) holds no
- *    vector, nor do the rows derived from it (`dropFileVectors`) — whoever set the flag, an arriving peer copy or the
- *    stray drain's fill. Queued instead, as the drain's copy of this did, it was claimed and discarded; skipped, as
- *    a suppression check alone would, the old vector stayed;
- *  - **any other file is queued** (one batched enqueue, background lane) when its bytes are here — metadata can
- *    arrive first, and the bytes enqueue the file when they land (`recordArrivedFile`) — or, on a restore, always:
- *    the export carries no bytes, and a restore's promise is that search comes back on its own.
+ * How many authored keys a restore of `docs` takes off the rows it replaces, per file id (an id that loses none is absent): the
+ * keys `removedFileMetaKeys` says the update removes (`fileMetaUpdate` asks the same function of the same document) that the
+ * stored row HAS — a key the row never had is removed from nothing. Read BEFORE the write, because the write replaces the row.
+ *
+ * Asked by the arrival writer for a restore and no other door: a peer's arrival removes only what its sender lists, and an
+ * operator is told of a restore's removals because an export is a full record and an older backup over newer edits is silent loss.
  */
-export async function embedArrivedFiles(spaceId: string, ids: readonly string[], { restore = false }: { restore?: boolean } = {}): Promise<void> {
-  if (ids.length === 0) return;
-  const rows = await readStoredById<{ sha256?: string; sizeBytes?: number; suppressEmbeddings?: boolean }>(
-    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 });
-  const meta = getSpaceMeta(spaceId);
-  const quiet: string[] = [];
-  const wanted: Array<{ _id: string; suppressEmbeddings?: boolean }> = [];
-  for (const [_id, r] of rows) {
-    const doc = { _id, ...(r.suppressEmbeddings !== undefined ? { suppressEmbeddings: r.suppressEmbeddings } : {}) };
-    if (embeddingSuppressedFor(spaceId, 'file', doc, meta)) quiet.push(_id);
-    else if (restore || holdsBlob(r)) wanted.push(doc);
+export async function authoredKeysRestoreRemoves(spaceId: string, docs: ReadonlyArray<Readonly<Record<string, unknown>> & { _id: string }>): Promise<Map<string, number>> {
+  const lacking = new Map(docs.map(d => [d._id, removedFileMetaKeys(d, { restore: true })] as const).filter(([, keys]) => keys.length > 0));
+  const counts = new Map<string, number>();
+  if (lacking.size === 0) return counts;
+  const rows = await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, 'files'), [...lacking.keys()],
+    Object.fromEntries([...FILE_META_AUTHORED_KEYS].map(k => [k, 1 as const])));
+  for (const [id, keys] of lacking) {
+    const row = rows.get(id);
+    const n = row === undefined ? 0 : keys.filter(k => row[k] !== undefined).length;
+    if (n > 0) counts.set(id, n);
   }
-  await dropFileVectors(spaceId, quiet);
-  await enqueueIngestedRecords(spaceId, 'file', wanted);
+  return counts;
 }
+
+// The vector half of an arrival lives in its own module (its docblock says why: an import cycle through the wire schema);
+// re-exported so the merge's callers keep one import.
+export { holdsBlob, embedArrivedFiles } from './embed-arrived-files.js';

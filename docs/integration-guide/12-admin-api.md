@@ -147,7 +147,10 @@ What the import stores of each document:
 - **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); every file chunk and face record
   (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
   (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
-  onto what is stored, as sync merges it.
+  onto what is stored, as sync merges it — except that an export is a full record, so every authored key
+  (the description, tags and properties, for example) the exported row lacks is **removed** from the row it
+  replaces. A row the export carries flagged `deletedAt` (a file this instance had soft-deleted) is restored
+  flagged, never as a live file (`flagsKept` below). The summary counts what a restore removed this way (`keysRemoved`).
 - The space's seq counter is moved past every imported seq, chunk by chunk, so the next local write sorts above
   every restored record.
 
@@ -174,6 +177,8 @@ Per family, alongside the counts, and each present only when it has something to
 |---|---|
 | `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a family) every document after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
 | `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
+| `flagsKept` | files only: how many restored rows kept the `deletedAt` flag their export carried (files this instance had soft-deleted, brought back as the audit records they were rather than as live rows with no bytes). Present only when any did |
+| `keysRemoved` | files only: how many authored keys (a description, its source, the properties, the tags, a suppression mark) the restored rows lost because their export row lacks them. It counts the keys the replaced rows held, so a key a row never had is not counted. Present only when any were removed |
 | `counterBehind` | `true` when the family's records were stored and this instance's seq counter could not be moved past them: the next local write may take a seq below a restored record. What was stored is still counted in `inserted`/`updated`. **Run the import again** — a restore replaces, so it is safe, and the re-run moves the counter |
 | `restoredOverTombstone` | ids of records restored over a deletion this instance holds **and that deletion would still apply to** (judged by the same [deletion rule](../sync-protocol.md#tombstone-deletion-authorisation) sync uses: the issuer wrote the record, or this instance's upstream delivered it) — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
 | `schemaViolations` | documents stored despite breaking the space's schema (below) |

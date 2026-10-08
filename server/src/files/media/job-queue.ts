@@ -20,6 +20,7 @@ import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
+import { setFileProcessingState } from '../processing-state.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -156,22 +157,35 @@ export async function getMediaJobCounts(spaceId: string): Promise<MediaJobCounts
  * for this file and is not in a terminal state, it is left unchanged.
  * A previously-failed job is reset to `pending` so a new upload re-triggers
  * processing.
+ *
+ * `opts.arrival` says the bytes came from a peer (`MediaJobDoc.arrival`); it is the whole of what the job carries about that,
+ * and it is stamped on EVERY enqueue (a reset included), so a later local write to the path is not held to the rule of the
+ * arrival that came before it.
  */
 export async function enqueueMediaJob(
   spaceId: string,
   filePath: string,
   mimeType: string,
   mediaType: 'image' | 'audio' | 'video',
+  opts: { arrival?: boolean } = {},
 ): Promise<void> {
   const id = toDocId(filePath);
   const now = new Date().toISOString();
+  const arrival = opts.arrival === true;
 
   const existing = await jobCollection(spaceId).findOne(
     asFilter<MediaJobDoc>({ _id: id }),
   ) as MediaJobDoc | null;
 
   if (existing && (existing.status === 'pending' || existing.status === 'processing')) {
-    // Already queued — do not disturb
+    // Already queued — do not disturb. One exception: a LOCAL write to a path whose queued job is an arrival's takes the
+    // arrival mark off, because the file is now one a person wrote and a person's image is analysed as a person's.
+    if (existing.arrival && !arrival) {
+      await jobCollection(spaceId).updateOne(
+        asFilter<MediaJobDoc>({ _id: id }),
+        asUpdate<MediaJobDoc>({ $set: { arrival: false } }),
+      );
+    }
     return;
   }
 
@@ -189,6 +203,7 @@ export async function enqueueMediaJob(
           updatedAt: now,
           mimeType,
           mediaType,
+          arrival,
         },
       }),
     );
@@ -199,6 +214,7 @@ export async function enqueueMediaJob(
       filePath: id,
       mimeType,
       mediaType,
+      ...(arrival ? { arrival } : {}),
       status: 'pending',
       attempts: 0,
       maxAttempts: MAX_ATTEMPTS,
@@ -280,10 +296,7 @@ export async function enqueueTextJob(
 
   // Reflect pending status on the file meta record immediately so the UI
   // can show an "embedding" indicator without waiting for the worker.
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: id }),
-    { $set: { embeddingStatus: 'pending', updatedAt: now } },
-  ).catch(err => {
+  await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' }).catch(err => {
     log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
   });
 }
@@ -412,10 +425,7 @@ export async function completeJob(
     asFilter<MediaJobDoc>({ _id: fileId }),
     asUpdate<MediaJobDoc>({ $set: { status: 'complete', claimedAt: null, updatedAt: now } }),
   );
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: fileId }),
-    { $set: { embeddingStatus: fileEmbeddingStatus, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: fileEmbeddingStatus });
 }
 
 export async function failJob(
@@ -463,10 +473,7 @@ export async function failJob(
         },
       }),
     );
-    await fileCollection(spaceId).updateOne(
-      asFilter<FileMetaDoc>({ _id: fileId }),
-      { $set: { embeddingStatus: 'failed', mediaJobError: safeError || undefined, updatedAt: now } },
-    );
+    await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'failed', mediaJobError: safeError || undefined });
     log.warn(`Media job ${spaceId}/${fileId} exhausted retries: ${errorMessage}`);
   }
 }
@@ -814,10 +821,7 @@ export async function retryJob(
       },
     }),
   );
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: fileId }),
-    { $set: { embeddingStatus: 'pending', mediaJobError: undefined, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
   // A manual retry must be picked up promptly — announce it, or the claim walk would not
   // probe this space until the next full scan (up to 30 s of the user staring at "pending").
   markSpaceMayHaveWork(spaceId);
@@ -843,10 +847,7 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
       $set: { status: 'pending', attempts: 0, lastError: null, claimedAt: null, claimableAfter: null, updatedAt: now },
     }),
   );
-  await fileCollection(spaceId).updateMany(
-    asFilter<FileMetaDoc>({ _id: { $in: failed.map(f => f._id) } }),
-    { $set: { embeddingStatus: 'pending', mediaJobError: undefined, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, failed.map(f => f._id), { embeddingStatus: 'pending', mediaJobError: undefined });
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);
   return failed.length;

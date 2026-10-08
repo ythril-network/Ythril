@@ -138,11 +138,12 @@ describe('a record arriving by sync is queued in the BACKGROUND lane', () => {
    */
   /*
    * Re-anchored for `Q-107` part 2: `ingestFileMeta` (the `ingest…` export above) is gone, and file metadata is
-   * queued by `embedArrivedFiles` (sync/file-meta-write.ts), which the writer and the stray drain share — so that
-   * file's exported queuers are the second writer this reads, beside `writeArrivals`.
+   * queued by `embedArrivedFiles` (sync/embed-arrived-files.ts since bundle-48, which moved it out of file-meta-write.ts to
+   * break an import cycle), which the writer and the stray drain share — so that file's exported queuers are the second
+   * writer this reads, beside `writeArrivals`.
    */
   const ARRIVALS = SOURCES.find(s => s.file === 'server/src/sync/arrivals.ts');
-  const FILE_META = SOURCES.find(s => s.file === 'server/src/sync/file-meta-write.ts');
+  const FILE_META = SOURCES.find(s => s.file === 'server/src/sync/embed-arrived-files.ts');
   const WRITERS = [
     ...(SYNC ? [...SYNC.code.matchAll(/^export\s+async\s+function\s+(ingest\w*)/gm)].map(m => ({ src: SYNC, name: m[1] })) : []),
     ...(FILE_META ? [...FILE_META.code.matchAll(/^export\s+async\s+function\s+(embedArrivedFiles)\b/gm)].map(m => ({ src: FILE_META, name: m[1] })) : []),

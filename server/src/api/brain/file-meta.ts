@@ -19,7 +19,7 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
-import { readFile } from '../../files/files.js';
+import { readFileWindow } from '../../files/files.js';
 import { parentOfSidecar } from '../../files/moved-paths.js';
 import { log, peerText } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
@@ -34,7 +34,7 @@ import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { markdownWindow, resolveTextWindow } from '../../files/markdown-window.js';
+import { resolveTextWindow } from '../../files/markdown-window.js';
 import { pageList } from '../../brain/list-page.js';
 import { NEVER_RETURNED_PROJECTION } from '../../brain/read-projection.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
@@ -172,8 +172,9 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null = null;
   if (convertedRecord) {
     try {
-      const text = await readFile(member, convertedRecord.path);
-      const w = markdownWindow(text, textWindow.skip, textWindow.budget.chars, textWindow.budget.bytes);
+      // Only the window is held (`readFileWindow`, the function `read_file` reads with): `markdownChars` is counted while it streams.
+      const w = await readFileWindow(member, convertedRecord.path,
+        { skip: textWindow.skip, maxChars: textWindow.budget.chars, maxBytes: textWindow.budget.bytes });
       converted = {
         path: convertedRecord.path,
         markdown: w.markdown,

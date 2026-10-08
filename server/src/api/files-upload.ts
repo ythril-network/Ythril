@@ -20,10 +20,13 @@ import express from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
+import { resolveSafePath, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
+import { countFileArrival } from '../files/bytes-arrived.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
-import { checkQuota, QuotaError } from '../quota/quota.js';
+import { StreamVerificationError } from '../util/sha256-tap.js';
+import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
@@ -32,6 +35,43 @@ import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } f
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+
+/**
+ * The actor an upload is made by: the calling token for a person, and NOTHING for a peer. A peer's byte push is a synced write,
+ * not a user act, and the one rule for what emits is "no actor, no emit" (`if (actor)`, as every record family keeps it): a door
+ * that handed a peer's token over as the actor made `file.created` fire at the operator's integrators for a file a peer wrote.
+ * Both upload shapes (single, chunked) take it from here, so neither can pass the token to an arrival.
+ */
+function uploadActor(req: Request, arrivedFrom: unknown): { actor?: Record<string, unknown> } {
+  return arrivedFrom ? {} : { actor: webhookToken(req) as Record<string, unknown> };
+}
+
+/** The single-body limit when `maxUploadBodyBytes` is not configured (what the raw parser has always defaulted to: 50 MiB). */
+const DEFAULT_UPLOAD_BODY_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The size of one request body this door accepts: the raw parser's limit, and what every chunked answer tells the sender
+ * (`maxBodyBytes`), so a peer pushing a file above it can size its ranges under the limit instead of finding it by a `413`
+ * (`sync/file-push.ts`). One definition, so the number a caller is told is the number that is enforced.
+ */
+function uploadBodyLimit(): number {
+  return getConfig().maxUploadBodyBytes ?? DEFAULT_UPLOAD_BODY_BYTES;
+}
+
+/** The header a chunked upload carries the sha256 of the WHOLE file in: 64 hex digits, or the request is malformed. */
+const EXPECTED_HASH_HEADER = 'x-expected-sha256';
+
+/**
+ * The hash a chunked upload promises (`x-expected-sha256`), lowercase: `undefined` when the header is absent (any client that
+ * does not promise one is assembled as before), `null` when it is present and is not a sha256 — a malformed promise is refused,
+ * not read as no promise, or a typo would switch the check off.
+ */
+function expectedHashOf(req: Request): string | null | undefined {
+  const raw = req.headers[EXPECTED_HASH_HEADER];
+  if (raw === undefined) return undefined;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === 'string' && /^[0-9a-fA-F]{64}$/.test(value.trim()) ? value.trim().toLowerCase() : null;
+}
 
 /**
  * Attach the upload route to the file-store router.
@@ -52,7 +92,7 @@ export function registerUploadRoute(router: Router): void {
     // Raw-body capture for non-JSON content types
     (req: Request, res: Response, next: NextFunction): void => {
       if (req.is('application/json')) { next(); return; }
-      express.raw({ type: '*/*', limit: getConfig().maxUploadBodyBytes ?? '50mb' })(req, res, next);
+      express.raw({ type: '*/*', limit: uploadBodyLimit() })(req, res, next);
     },
     async (req, res) => {
       const spaceId = req.params['spaceId'] as string;
@@ -71,6 +111,24 @@ export function registerUploadRoute(router: Router): void {
       // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
       const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
+
+      // A path that is instance-local (`isInstanceLocalFile`: a conversion's sidecar, a conflict copy, a schema snapshot, a legacy
+      // read spill — no instance sends one) is not stored when a PEER offers it — each instance derives them by its own
+      // configuration. Answered `200`, not an error: an older sender reads
+      // an error as a failure and uploads the file again every cycle, and `200` is what lets it record a base and stop. Asked by the
+      // KEY (`x/../_converted/y` is `_converted/y`), before the body is looked at or anything is staged; a person's upload is never asked.
+      if (arrivedFrom) {
+        let key: string;
+        try { key = fileKeyOf(targetSpace, filePath).key; } catch (err) {
+          if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
+          throw err;
+        }
+        if (isInstanceLocalFile(key)) {
+          countFileArrival('push', 'ignored_instance_local');
+          res.status(200).json({ ignored: 'instance-local' });
+          return;
+        }
+      }
 
       // ── Chunked upload (Content-Range) ───────────────────────────────────
       const range = parseContentRange(req.headers['content-range'] as string | undefined);
@@ -93,6 +151,14 @@ export function registerUploadRoute(router: Router): void {
           return;
         }
 
+        // The hash the sender promises for the WHOLE file, bound to the assembly below (a malformed promise is refused, never read
+        // as none: a typo would otherwise switch the check off).
+        const expectedSha256 = expectedHashOf(req);
+        if (expectedSha256 === null) {
+          res.status(400).json({ error: `${EXPECTED_HASH_HEADER} must be the 64-hex-digit sha256 of the whole file` });
+          return;
+        }
+
         // Storage quota check on every chunk (mirrors the single-request path —
         // each chunk is its own POST). The FIRST chunk projects the full declared
         // total against an EXACT measurement for precise early rejection; later chunks
@@ -100,11 +166,24 @@ export function registerUploadRoute(router: Router): void {
         // check on chunk 0 already validated the whole upload fits, so re-walking the
         // files tree per chunk is pure overhead.
         const firstChunk = range.start === 0;
+        // A peer's bytes that a tombstone erased are asked about at the FIRST range, by the path and the hash it promises, so a file
+        // the receiver would only discard at its last range is turned away before any range is staged or counted against the
+        // quota (the last range's own check, below, stays: it hashes what was actually staged and is the authoritative one).
+        try {
+          if (arrivedFrom && firstChunk && expectedSha256 !== undefined
+            && await peerBytesShadowed(targetSpace, filePath, { sha256Of: async () => expectedSha256 })) {
+            res.status(200).json({ tombstoned: true });
+            return;
+          }
+        } catch (err) {
+          if (err instanceof RangeError) { res.status(400).json({ error: (err as Error).message }); return; }
+          throw err;
+        }
         try {
           await checkQuota(
             'files',
             firstChunk ? range.total : req.body.length,
-            firstChunk ? {} : { maxAgeMs: 10_000 },
+            firstChunk ? {} : { maxAgeMs: REPEATED_CHECK_USAGE_WINDOW_MS },
           );
         } catch (err) {
           if (err instanceof QuotaError) {
@@ -132,15 +211,18 @@ export function registerUploadRoute(router: Router): void {
               res.status(200).json({ tombstoned: true });
               return;
             }
-            const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
+            // With a promised hash the assembly is verified BEFORE its rename (`assembleChunks`): bytes that are not the file that was
+            // promised store nothing here, and the staged chunks that made them are dropped (below), so the next try starts clean.
+            const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget, expectedSha256);
             // Metadata, the processing queue and the webhook — the same sequence as every other door
-            // (files/store-file.ts); the bytes are already assembled on disk.
+            // (files/store-file.ts); the bytes are already assembled on disk, and a record that fails takes them back there
+            // (`removeUnrecordedBytes`: a path with no row is left with no bytes), so this door has nothing to undo.
             const ttlDays = parseTtlDaysQuery(req);
             const { resolvedFormat: resolvedFmt, embeddingStatus: chunkedEmbeddingStatus } = await recordStoredFile(
               targetSpace, filePath, range.total, sha256, {
                 meta: ttlDays !== undefined ? { ttlDays } : {},
                 ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
-                actor: webhookToken(req) as Record<string, unknown>,
+                ...uploadActor(req, arrivedFrom),
                 ...(arrivedFrom ? { arrivedFrom } : {}),
               });
             const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
@@ -149,11 +231,17 @@ export function registerUploadRoute(router: Router): void {
             if (chunkedEmbeddingStatus !== undefined) chunkedResponse['embeddingStatus'] = chunkedEmbeddingStatus;
             res.status(chunkedStatusCode).json(chunkedResponse);
           } else {
-            res.status(202).json({ path: filePath, received });
+            // `maxBodyBytes`: the single-body limit this door enforces, so a peer pushing a file above it sizes its ranges under it.
+            res.status(202).json({ path: filePath, received, maxBodyBytes: uploadBodyLimit() });
           }
         } catch (err) {
           if (err instanceof RangeError) {
             res.status(400).json({ error: (err as Error).message });
+            return;
+          }
+          if (err instanceof StreamVerificationError) {
+            await discardStagedChunks(targetSpace, filePath, range.total).catch(() => undefined);
+            res.status(422).json({ error: `The assembled upload is not the file promised in ${EXPECTED_HASH_HEADER}; nothing was stored (${err.code})` });
             return;
           }
           sendCaughtFailure(res, `Chunked upload error for space ${targetSpace}, path ${filePath}`, err, { error: 'Chunked upload failed' });
@@ -225,7 +313,7 @@ export function registerUploadRoute(router: Router): void {
           stored = await storeFile(targetSpace, filePath, decoded!, {
             meta: metaOpts, inputFormat,
             ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
-            actor: webhookToken(req) as Record<string, unknown>,
+            ...uploadActor(req, arrivedFrom),
             ...(arrivedFrom ? { arrivedFrom } : {}),
           });
         } catch (err) {
