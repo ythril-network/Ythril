@@ -365,7 +365,7 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
 
 `filemeta.tombstoned` is the one counter that is **absent when it is zero** (above, a held file tombstone covered that many arrivals): read a missing one as zero.
 
-A file-metadata document whose `_id` is not its path as this instance resolves it (`a/../b`, `./b`, or a path that leaves the space) counts in `filemeta.rejected` and is not stored: send the path's plain spelling, which is the key every other door uses.
+**A file's key is one string, whoever spelled the path.** The canonical key of a path is its Unicode NFC form with `/` separators, no leading slash, no empty or `.` segment, and a `..` that stays inside the space collapsed (`a/x/../b` is `a/b`); this instance keys every file row it writes itself by it, and keys what a peer sends (a manifest entry, a tombstone's path, an upload's `?path=`) by the path as it resolves in the space. A file-metadata document whose `_id` is not that key (`a/../b`, `./b`, `a//b`, a decomposed accented name, or a path that leaves the space) counts in `filemeta.rejected` and is not stored, and the receiver's log names the id: send the path's canonical spelling, which is the key every other door uses. A row an older release stored under another spelling keeps that id and is refused the same way by an upgraded peer; see [Upgrading](02b-upgrading.md).
 
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
