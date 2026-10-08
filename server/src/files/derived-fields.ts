@@ -64,6 +64,9 @@ import { FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import { withSeqWhen } from '../util/seq.js';
+import { warnOnce } from '../util/warn-once.js';
+import { log, peerText } from '../util/log.js';
+import { deliveredByAPeer, notDeliveredByAPeer } from '../sync/delivered-by.js';
 import { authorRef } from '../config/author.js';
 import { toDocId } from '../util/paths.js';
 import { inChunks } from '../util/chunks.js';
@@ -413,12 +416,20 @@ export async function setFileProcessingState(
 }
 
 /**
+ * The decline {@link setDerivedDescriptionIfUnset} says out loud, keyed per space and row: a retry of the same job does not
+ * repeat it, a different row is said again, and a restart says each once more. A boolean latch would mute every row after
+ * the first, which is the one-row-reported-and-the-rest-invisible shape a `warnOnce` exists to prevent.
+ */
+const saidPeerDelivered = warnOnce<string>();
+
+/**
  * Store a description DERIVED from a file's bytes, only where the operator has not written one — decided by the
  * DATABASE, in one operation. The one derived write of a field the hash sees.
  *
  * Returns whether it wrote, so a caller can log the difference rather than infer it. **False is routine, not a
- * failure**, and it has four reasons: a person's description is already there, the file was authored by another
- * instance, there is no row for the path, or the row is the audit record of a deleted file.
+ * failure**: a person's description is already there, the file was authored by another instance, it has no author
+ * and a peer delivered it, there is no row for the path, or the row is the audit record of a deleted file. Only the
+ * author-less peer-delivered case is said, because it is the only one with nothing else to show for it.
  *
  * ## Why this is not `updateFileMeta` with a read in front of it
  *
@@ -452,35 +463,45 @@ export async function setDerivedDescriptionIfUnset(
   descriptionSource?: 'generated' | 'extracted',
 ): Promise<boolean> {
   const _id = toDocId(filePath);
+  const self = authorRef().instanceId ?? null;
   /**
-   * The conditions — ONE filter, used to read and then to write.
+   * The conditions — built from named PARTS, and every filter below is a combination of them.
    *
    * Written once, deliberately. The first version of the pre-read below spelled them again as a JS predicate over the
    * row, and the two disagreed immediately: a stored `author.instanceId` of `null` on an instance with none
    * configured matches this filter (`{field: null}` matches null AND missing) and fails `===`, so every file was
    * declined. One rule, two implementations.
    */
-  const writable = asFilter<FileMetaDoc>({
-    _id,
-    // Never onto the audit record of a deleted file: the flag write strips a machine-made description, so a flagged
-    // row SATISFIES the "no description" condition below, and this write would put derived text back on it and stamp
-    // it a seq — which the flag itself deliberately does not do.
-    ...NOT_A_FLAGGED_ROW,
-    $and: [
-      { $or: [
-        { description: { $exists: false } },
-        { description: null },
-        // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is
-        // `^s*$` — the backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that
-        // here, and the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
-        { description: { $regex: /^\s*$/ } },
-      ] },
-      { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
-    ],
-  } as never);
+  // Never onto the audit record of a deleted file: the flag write strips a machine-made description, so a flagged row
+  // SATISFIES the "no description" condition, and this write would put derived text back on it and stamp it a seq —
+  // which the flag itself deliberately does not do.
+  const thisRow = { _id, ...NOT_A_FLAGGED_ROW };
+  const noDescription = { $or: [
+    { description: { $exists: false } },
+    { description: null },
+    // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the backslash is
+    // dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and the whitespace-only
+    // assertion is what caught it. A RegExp literal cannot lose the escape.
+    { description: { $regex: /^\s*$/ } },
+  ] };
+  /*
+   * WHOSE ROW IT IS. This instance's by authorship, or — for a row with no author at all, written before authorship was
+   * stamped — this instance's only when no PEER delivered it (E4 item 3, `Q-280`). An author-less row a peer delivered
+   * is the publisher's, and a description derived on it here is the `Q-143` defect: it stamps a seq that outranks the
+   * publisher's next edit, or never replicates and reports a divergence for ever.
+   *
+   * `deliveredBy`, not `syncBase`: any peer metadata arrival sets `deliveredBy`, while `syncBase` is set only by the
+   * bytes pull, so a row whose metadata arrived and whose bytes never did carries one and not the other. And through
+   * `sync/delivered-by.ts`, because `''` is "nobody's delivery" — the back-fill stamps it on every author-less local row
+   * — and a hand-written `$exists: false` would decline every one of those.
+   */
+  const unauthored = { author: { $exists: false } };
+  const ours = { $or: [{ 'author.instanceId': self }, { ...unauthored, ...notDeliveredByAPeer(self) }] };
+
+  const writable = asFilter<FileMetaDoc>({ ...thisRow, $and: [noDescription, ours] } as never);
 
   /*
-   * ANSWERED BEFORE A NUMBER IS TAKEN (`withSeqWhen`). Every one of this write's four declines is routine — a person's
+   * ANSWERED BEFORE A NUMBER IS TAKEN (`withSeqWhen`). Every one of this write's declines is routine — a person's
    * description is there, the row is another instance's, there is no row, the row is flagged — and the allocator moves
    * the counter before the write runs, so each decline used to leave the space counter naming a seq no record holds.
    *
@@ -489,8 +510,29 @@ export async function setDerivedDescriptionIfUnset(
    */
   const r = await withSeqWhen(
     spaceId,
-    async () => (await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-      .findOne(writable, { projection: { _id: 1 } })) !== null,
+    async () => {
+      const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+      if (await files.findOne(writable, { projection: { _id: 1 } }) !== null) return true;
+      /*
+       * One decline is SAID, the one the narrowing above introduced: an author-less row a peer delivered. Every other
+       * decline existed before and is routine; this one turns an old peer-delivered file into one that stays
+       * description-less on this instance with nothing to read, so an operator wondering why needs the line. Asked
+       * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
+       */
+      const peerDelivered = asFilter<FileMetaDoc>(
+        { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
+      );
+      // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
+      const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 } }) as { deliveredBy?: unknown } | null;
+      if (theirs) {
+        saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
+          `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
+          + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `
+          + `publisher's own description arrives by sync; a person can still write one here.`,
+        ));
+      }
+      return false;
+    },
     (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(writable, asUpdate<FileMetaDoc>({
       // `P-32`: an authored write, so it advances the space counter and pages to a peer.
       $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
