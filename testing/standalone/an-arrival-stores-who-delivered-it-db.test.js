@@ -42,6 +42,8 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, FAMILIES, familiesCarriedByBatch, peerToken, ADMIN_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
+import { openByteDoor } from './_byte-door.mjs';
+import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -52,16 +54,28 @@ const OTHER = 'another-instance-that-pushes';
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link', filemeta: 'filemeta' };
 const THIRD = { instanceId: 'third-party-author', instanceLabel: 'Third' };
 
-let door, LOCAL;
+let door, LOCAL, bytes;
 
 const idFor = (key, tag) => (key === 'filemeta' ? `docs/${tag}.md` : `${key}-${tag}`);
 const make = (key, id, seq, extra = {}) => build[KIND[key]](S, id, seq, { author: THIRD, ...extra });
 const families = () => Object.entries(FAMILIES).map(([key, f]) => ({ key, ...f }));
 const stamp = async (fam, id) => (await door.coll(S, fam.coll).findOne({ _id: id }))?.deliveredBy;
+/**
+ * bundle-89 (Q-280): an ARRIVAL stores the version and the author the SENDER wrote, never this instance's own — a receiver seq
+ * outranks the publisher's next edit, and a receiver author makes the file this instance's to delete. Asked of every arrival
+ * door below, beside the stamp it already asks for. The doors it covers are ARRIVAL doors only (see section 6).
+ */
+const sentVersionOnly = async (fam, id, seq, who = THIRD) => {
+  const d = await door.coll(S, fam.coll).findOne({ _id: id });
+  assert.ok(d, `${fam.key}: ${id} did not land`);
+  assert.equal(d.seq, seq, `${fam.key}: an arrival stored seq ${d.seq}, not the sender's ${seq}`);
+  assert.equal(d.author?.instanceId, who.instanceId, `${fam.key}: an arrival stored author ${d.author?.instanceId}, not the sender's ${who.instanceId}`);
+};
 
 describe('an arrival stores who delivered it', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'tsdeliv', spaces: [S] });
+    bytes = await openByteDoor();
     LOCAL = await import('../../server/dist/sync/local-only-fields.js');
   });
   after(async () => { await door?.close(); });
@@ -117,6 +131,7 @@ describe('an arrival stores who delivered it', { skip }, () => {
         const r = await door.push('/batch-upsert', { [fam.key]: [make(fam.key, id, 5)] }, { spaceId: S, token: peerToken(DELIVERER) });
         assert.equal(r.code, 200, JSON.stringify(r.body));
         assert.equal(await stamp(fam, id), DELIVERER, `${fam.key}: a batch push did not store who pushed it`);
+        await sentVersionOnly(fam, id, 5);
       });
 
       if (fam.single) {
@@ -125,6 +140,7 @@ describe('an arrival stores who delivered it', { skip }, () => {
           const r = await door.push(fam.single, make(fam.key, id, 5), { spaceId: S, token: peerToken(DELIVERER) });
           assert.equal(r.code, 200, JSON.stringify(r.body));
           assert.equal(await stamp(fam, id), DELIVERER, `${fam.key}: a single push did not store who pushed it`);
+          await sentVersionOnly(fam, id, 5);
         });
       }
 
@@ -133,6 +149,7 @@ describe('an arrival stores who delivered it', { skip }, () => {
         door.state.records[S] = { [fam.key]: [make(fam.key, id, 5)] };
         await door.sync();
         assert.equal(await stamp(fam, id), PEER, `${fam.key}: a pulled record did not store the member it came from`);
+        await sentVersionOnly(fam, id, 5);
       });
     }
   });
@@ -202,6 +219,78 @@ describe('an arrival stores who delivered it', { skip }, () => {
       const out = await updateEdgeById(S, old._id, { label: 'knew' });
       assert.ok(out && out._id !== old._id, `fixture: the label change did not re-key the edge (${out?._id})`);
       assert.equal(await stamp(FAMILIES.edges, out._id), '', 'a re-keyed edge carried the old row\'s stamp: it is a new record written here');
+    });
+  });
+
+  /*
+   * 6. bundle-89 (Q-280): NO ARRIVAL DOOR stamps this instance's seq or author onto a file row.
+   *
+   * THIS COVERS ARRIVAL DOORS ONLY, and says so on purpose. The doors: push batch and pull (sections 1 and 3 above, every family;
+   * a file's metadata has no single route), the byte doors (a peer's upload, one request or chunked — `UPLOAD_DOORS`, which
+   * rev 2 of the plan omitted although they are the doors that CREATE a row from bytes), and the admin import. Three writers
+   * outside it DO stamp, and a pin that read "no door stamps" would be believed about them too:
+   *   - `renameFileMeta` / `renameFileMetaByPrefix` (`files/file-meta.ts`): a move keeps the old seq and author under a new
+   *     `updatedAt` — held by `a-move-of-a-peers-file-keeps-its-updatedat-db`, and fixed by E3's forward half;
+   *   - `upsertFileMeta`'s existing-row branch (`files/file-meta.ts`): a LOCAL re-upload of a peer-authored row stamps a local seq
+   *     — not pinned here, because pinning it would pin the behaviour Q-280 reports;
+   *   - `stampFileMetaSeqs` (`brain/links-conversion.ts`): operator-invoked, stamps this instance's seq on any seq-less row.
+   * The person doors of `UPLOAD_DOORS` are run as the CONTROL: a person's upload to a new path IS authored here, so a pin that
+   * passed them too would be asserting nothing about arrivals.
+   */
+  describe('6. an arrival door stamps no receiver seq or author on a file row (arrival doors only)', () => {
+    const DELIVERED_BY = 'byte-door-peer';
+    const rowOf = (rel) => door.coll(S, 'files').findOne({ _id: rel });
+
+    it('the doors are derived: both arrival and person shapes, single and chunked', () => {
+      assert.ok(UPLOAD_DOORS.filter(u => u.arrival).length >= 2 && UPLOAD_DOORS.filter(u => !u.arrival).length >= 2,
+        'UPLOAD_DOORS lost an arrival or a person shape');
+      assert.ok(UPLOAD_DOORS.some(u => u.chunked) && UPLOAD_DOORS.some(u => !u.chunked), 'UPLOAD_DOORS lost a shape');
+    });
+
+    for (const upload of UPLOAD_DOORS) {
+      const tag = upload.name.replace(/\W+/g, '-');
+      if (upload.arrival) {
+        it(`byte door, ${upload.name}: bytes for a path whose row a peer authored leave its seq and author`, async () => {
+          const rel = `bytes/${tag}-held.txt`;
+          await door.coll(S, 'files').insertOne(make('filemeta', rel, 7, { sizeBytes: 3, sha256: 'a'.repeat(64) }));
+          const r = await upload.send(bytes, { space: S, path: rel, content: `bytes of ${upload.name} over a held row`, peer: DELIVERED_BY });
+          assert.ok([200, 201, 202].includes(r.code), `fixture: the upload was refused: ${JSON.stringify(r)}`);
+          const row = await rowOf(rel);
+          assert.equal(row.seq, 7, `${upload.name}: the byte door stamped seq ${row.seq} on a row the peer authored at 7`);
+          assert.equal(row.author?.instanceId, THIRD.instanceId, `${upload.name}: the byte door re-authored the row as ${row.author?.instanceId}`);
+        });
+
+        it(`byte door, ${upload.name}: bytes for a path with no row make a placeholder at seq 0, authored by the peer that sent them`, async () => {
+          const rel = `bytes/${tag}-new.txt`;
+          const r = await upload.send(bytes, { space: S, path: rel, content: `bytes of ${upload.name} for a new path`, peer: DELIVERED_BY });
+          assert.ok([200, 201, 202].includes(r.code), `fixture: the upload was refused: ${JSON.stringify(r)}`);
+          const row = await rowOf(rel);
+          assert.ok(row, 'fixture: no row was made for the arriving bytes');
+          assert.equal(row.seq, 0, `${upload.name}: a placeholder at seq ${row.seq} would outrank the publisher's first metadata`);
+          assert.equal(row.author?.instanceId, DELIVERED_BY, `${upload.name}: the placeholder is authored by ${row.author?.instanceId}, not the peer that sent the bytes`);
+          assert.notEqual(row.author?.instanceId, door.instanceId, `${upload.name}: this instance authored a file a peer sent`);
+        });
+      } else {
+        it(`control — byte door, ${upload.name}: a person's upload to a new path IS authored here (the pin is about arrivals)`, async () => {
+          const rel = `bytes/${tag}-person.txt`;
+          const r = await upload.send(bytes, { space: S, path: rel, content: `bytes of ${upload.name}` });
+          assert.ok([200, 201, 202].includes(r.code), `fixture: the upload was refused: ${JSON.stringify(r)}`);
+          const row = await rowOf(rel);
+          assert.equal(row?.author?.instanceId, door.instanceId, 'a person\'s upload was not authored by this instance, so the arrival cases prove nothing about who stamps');
+          assert.ok(row.seq > 0, 'a person\'s upload carries no seq of its own');
+        });
+      }
+    }
+
+    it('admin import: a restored row keeps the export\'s seq and author, over a row this instance held', async () => {
+      const { writeArrivals } = await import('../../server/dist/sync/arrivals.js');
+      const rel = 'import/held.md';
+      await door.coll(S, 'files').insertOne(make('filemeta', rel, 3, { author: { instanceId: door.instanceId, instanceLabel: 'me' } }));
+      const out = await writeArrivals(S, 'files', 'file', [make('filemeta', rel, 7)], { restore: true });
+      await out.enqueue();
+      const row = await rowOf(rel);
+      assert.equal(row.seq, 7, `the import stored seq ${row.seq}, not the export's 7`);
+      assert.equal(row.author?.instanceId, THIRD.instanceId, `the import stored author ${row.author?.instanceId}, not the export's`);
     });
   });
 });
