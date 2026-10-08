@@ -204,6 +204,38 @@ export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', co
 }
 
 /**
+ * A pub/sub network the PUBLISHER creates for `spaces` and the SUBSCRIBER joins by invite key, both by their own doors: the shape
+ * in which an instance's deletions, and those it relays from above, apply on the instance below it (the deletion authority's
+ * "direct upstream" — on a closed network a deletion applies only when its issuer delivers it, so a chain of closed networks
+ * cannot carry one past its first hop). The subscriber adopts the spaces on its first cycles; call `adopted()` to wait for it.
+ *
+ * `publisher` and `subscriber` are `[baseUrl, token, container]`; the container name is the host the other reaches it by.
+ *
+ * @returns {Promise<{ networkId: string, adopted: (spaceId: string, timeoutMs?: number) => Promise<void>, remove: () => Promise<void> }>}
+ */
+export async function pubsubNetwork({ label, spaces, publisher, subscriber }) {
+  const [basePub, tokenPub, hostPub] = publisher, [baseSub, tokenSub, hostSub] = subscriber;
+  const must = (r, what) => { if (r.status >= 300) throw new Error(`${what}: ${r.status} ${JSON.stringify(r.body)}`); return r; };
+  const net = must(await post(basePub, tokenPub, '/api/networks', { label, type: 'pubsub', spaces }), 'pubsub network on the publisher');
+  const networkId = net.body.id;
+  const key = must(await post(basePub, tokenPub, `/api/networks/${networkId}/invite`, {}), 'invite key');
+  must(await post(baseSub, tokenSub, '/api/networks/join-by-key', {
+    publisherUrl: `http://${hostPub}:3200`, inviteKey: key.body.inviteKey, myUrl: `http://${hostSub}:3200`,
+  }), 'subscriber joins by key');
+  const adopted = async (spaceId, timeoutMs = 60_000) => {
+    await waitFor(async () => {
+      await post(baseSub, tokenSub, `/api/networks/${networkId}/sync?wait=true`, {});
+      return (await fetch(`${baseSub}/api/spaces/${spaceId}/meta`, { headers: { Authorization: `Bearer ${tokenSub}` } })).ok;
+    }, timeoutMs, 1_000, () => `the subscriber at ${hostSub} never adopted ${spaceId}`, { what: `${hostSub} adopting ${spaceId}` });
+  };
+  const remove = async () => {
+    await del(baseSub, tokenSub, `/api/networks/${networkId}`).catch(() => {});
+    await del(basePub, tokenPub, `/api/networks/${networkId}`).catch(() => {});
+  };
+  return { networkId, adopted, remove };
+}
+
+/**
  * A space of the test's own, created on every instance it names, and the function that removes it again (`Q-75`).
  *
  * A sync test never syncs `general`: every suite writes into it, so a new network carrying it first pushes whatever

@@ -23,8 +23,11 @@
  *
  * ## Shape
  *
- * Two mirrored closed networks sharing B (`mirroredNetwork` with `containers`): A-B and B-C. C never talks to A, so what C
- * holds of the sidecar came from B, and what it must lose it loses through B.
+ * Two pub/sub networks sharing B (`pubsubNetwork`): A publishes to B, and B publishes to C. C never talks to A, so what C holds
+ * of the sidecar came from B, and what it must lose it loses through B. Pub/sub and not closed, because the deletion authority
+ * lets a deletion apply below its issuer only through the direct upstream: on a closed network C applies a deletion only when
+ * its issuer delivers it, so a chain of two closed networks stops A's deletion at B — by design (the first Full run of this test
+ * showed C declining it as `not_issuer`).
  *
  * Run: node --test --test-concurrency=1 testing/sync/a-deleted-files-sidecar-reaches-no-peer.test.js
  * Pre-requisite: the test stack up (`npm run test:up`), with the c instance set up.
@@ -34,7 +37,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, reqJson, createTestSpace, mirroredNetwork, waitFor } from './helpers.js';
+import { INSTANCES, post, reqJson, delWithBody, createTestSpace, pubsubNetwork, waitFor } from './helpers.js';
 import { spaceFootprint } from '../_shared/space-footprint.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,17 +97,21 @@ async function holdings() {
 
 before(async () => {
   [tA, tB, tC] = ['a', 'b', 'c'].map(read);
-  space = await createTestSpace('sidecar-chain', [[INSTANCES.a, tA], [INSTANCES.b, tB], [INSTANCES.c, tC]]);
-  netAB = await mirroredNetwork({ label: `sidecar-ab-${RUN}`, spaces: [space.id], a: [INSTANCES.a, tA], b: [INSTANCES.b, tB] });
-  netBC = await mirroredNetwork({
-    label: `sidecar-bc-${RUN}`, spaces: [space.id], a: [INSTANCES.b, tB], b: [INSTANCES.c, tC], containers: ['ythril-b', 'ythril-c'],
-  });
+  // The space is A's: B adopts it from A, and C from B, each as a subscriber does.
+  space = await createTestSpace('sidecar-chain', [[INSTANCES.a, tA]]);
+  netAB = await pubsubNetwork({ label: `sidecar-ab-${RUN}`, spaces: [space.id], publisher: [INSTANCES.a, tA, 'ythril-a'], subscriber: [INSTANCES.b, tB, 'ythril-b'] });
+  await netAB.adopted(space.id);
+  netBC = await pubsubNetwork({ label: `sidecar-bc-${RUN}`, spaces: [space.id], publisher: [INSTANCES.b, tB, 'ythril-b'], subscriber: [INSTANCES.c, tC, 'ythril-c'] });
+  await netBC.adopted(space.id);
 });
 
 after(async () => {
   await netBC?.remove();
   await netAB?.remove();
   await space?.remove();
+  for (const [base, token] of [[INSTANCES.b, tB], [INSTANCES.c, tC]]) {
+    await delWithBody(base, token, `/api/spaces/${space?.id}`, { confirm: true }).catch(() => {});
+  }
 });
 
 describe('a deleted file\'s sidecar reaches no peer of the chain', () => {
