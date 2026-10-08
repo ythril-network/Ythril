@@ -9,7 +9,6 @@ import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
 import { writeInOneCommands } from '../../db/one-command.js';
 import { readStoredById } from '../../db/read-by-id.js';
 import { toDocId } from '../../util/paths.js';
-import { escapeRegex } from '../../util/redos.js';
 import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
 import { log, peerText } from '../../util/log.js';
@@ -20,7 +19,7 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { jobIdsUnder, movedId, movedRoot, sidecarsOf } from '../moved-paths.js';
+import { idsUnder, jobIdsUnder, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -680,19 +679,21 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
 }
 
 /**
- * Delete every media job for files under `dirPath/` — including the jobs for
- * document-conversion sidecars (`_converted/<dir>/`, `_extracted/<dir>/`), whose
- * job ids do not share the folder prefix. Called on recursive directory delete.
+ * Delete every queued job of what `p` owns, as a `kind`: a directory's subtree, and every sidecar `sidecarsOf` names for `p` — a
+ * sidecar FILE by its id, a sidecar TREE by its prefix. Called by a file's and a directory's delete, so neither spells the sidecar
+ * paths itself. **A file's OWN job is not among them** (`cancelMediaJob` takes it): the text job of a file clears that file's
+ * sidecars from inside itself (`deleteConversionArtifacts`, before it re-chunks), and would cancel its own lease.
+ *
+ * What it prevents: a job outliving its source, retrying for ever against a path nothing holds — or, worse, finishing after the
+ * delete's cascade and writing a row of the deleted content. A peer that never converts holds `_converted/<f>.md` as an ordinary
+ * file with a text job of its own, which is neither the file's id nor under a tree; the file's delete read only the trees, so that
+ * job ran on and left a chunk of the deleted file's text, searchable, belonging to nothing (bundle-71 verify).
  */
-export async function cancelMediaJobsByPrefix(spaceId: string, dirPath: string): Promise<void> {
-  const dir = movedRoot(dirPath);
-  if (!dir) return; // guard: empty path would match everything
-  // The folder's own jobs and the jobs of its sidecar trees. Read as a directory's, which is also right for the extracted tree of a
-  // FILE (`_extracted/<f>/`): that is the one sidecar tree of a file a job can sit under, and the file's own `<f>/` matches nothing.
-  const prefixes = [dir, ...sidecarsOf(dir, 'directory').map(s => s.path)].map(p => `${p}/`);
-  await jobCollection(spaceId).deleteMany(
-    asFilter<MediaJobDoc>({ $or: prefixes.map(p => ({ _id: { $regex: `^${escapeRegex(p)}` } })) }),
-  );
+export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKind): Promise<void> {
+  const root = movedRoot(p);
+  if (!root) return; // guard: an empty path would match everything
+  const owned = [...(kind === 'directory' ? [{ path: root, shape: 'tree' as const }] : []), ...sidecarsOf(root, kind)];
+  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ $or: idsUnder(owned) }));
 }
 
 // ── Move (a file or directory changes path) ────────────────────────────────

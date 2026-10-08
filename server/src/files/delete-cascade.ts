@@ -41,7 +41,7 @@ import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent, deleteStoredIfPresent } from './stored-bytes.js';
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetFileHashesByPrefix } from './manifest.js';
-import { cancelMediaJobsByPrefix } from './media/job-queue.js';
+import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere } from './remove-file-here.js';
 import { sidecarsOf } from './moved-paths.js';
@@ -110,7 +110,7 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
   // Queued jobs under the folder would outlive their sources and retry forever against paths that no longer exist.
-  await unlessTheStoreFailed(`cancelMediaJobsByPrefix error ${at}`, () => cancelMediaJobsByPrefix(spaceId, dirPath));
+  await unlessTheStoreFailed(`cancelJobsOwnedBy error ${at}`, () => cancelJobsOwnedBy(spaceId, dirPath, 'directory'));
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
   // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.

@@ -73,6 +73,15 @@ export function sidecarsOf(p: string, kind: PathKind): Sidecar[] {
 }
 
 /**
+ * The `_id` clauses that match what `paths` hold, for an `$or`: a `file` by its id, a `tree` by its prefix WITH the slash, so
+ * `d` never takes `d2`. One spelling for every store keyed by path (file rows, the job queue), so a remover cannot match a
+ * sidecar file as a tree or drop the slash.
+ */
+export function idsUnder(paths: ReadonlyArray<Pick<Sidecar, 'path' | 'shape'>>): Array<{ _id: string | { $regex: string } }> {
+  return paths.map(s => s.shape === 'file' ? { _id: s.path } : { _id: { $regex: `^${escapeRegex(`${s.path}/`)}` } });
+}
+
+/**
  * The sidecars of `p` that are really its own: {@link sidecarsOf}, less the one the disk says belongs to somebody else.
  *
  * For a FILE `g` the converted Markdown is `_converted/g.md` — which is also the converted TREE of a directory `g.md/`

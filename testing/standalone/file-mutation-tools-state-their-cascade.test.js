@@ -146,9 +146,9 @@ describe('delete_file removes what its conversion and its sidecars left, however
   });
 
   it('cancels the queued jobs of the extracted images, by the file\'s own path (the queue derives the trees a path owns)', () => {
-    assert.match(PIPELINE, /cancelMediaJobsByPrefix\(spaceId,\s*originalId\)/,
+    assert.match(PIPELINE, /cancelJobsOwnedBy\(spaceId,\s*originalId,\s*'file'\)/,
       'a queued job of an extracted image retries for ever against a tree the delete removed; the cascade must hand the queue the file\'s own path, not spell the extraction tree itself');
-    assert.doesNotMatch(PIPELINE, /cancelMediaJobsByPrefix\([^)]*_extracted\//,
+    assert.doesNotMatch(PIPELINE, /cancelJobsOwnedBy\([^)]*_(?:extracted|converted)\//,
       'the extraction tree\'s name is the queue\'s to derive (sidecarsOf); a literal here is the second copy of that rule');
   });
 

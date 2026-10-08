@@ -33,8 +33,8 @@ import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
-import { enqueueMediaJob, cancelMediaJobsByPrefix } from '../media/job-queue.js';
-import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
+import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
+import { convertedFileOf, extractedTreeOf, idsUnder, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
 import { rowsDerivedFrom } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
@@ -592,7 +592,7 @@ export async function deleteConversionArtifacts(
   const originalId = toDocId(originalFilePath);
   // The jobs go first, so none starts over what is being removed. The queue derives the trees a path owns (`_extracted/<id>/…`,
   // an extracted image's jobs) from the path itself: the rule is its, and is not spelled a second time here.
-  await cancelMediaJobsByPrefix(spaceId, originalId);
+  await cancelJobsOwnedBy(spaceId, originalId, 'file');
   await removeWhatSidecarsLeft(spaceId, [originalId], await sidecarsOwnedBy(spaceId, originalId, 'file'));
 
   log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
@@ -617,7 +617,7 @@ async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[],
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The rows at the sidecars' own paths: a converted file by id, a tree by prefix (with its slash, so `d` is not `d2`).
   const atSidecars = owned.length === 0 ? [] : await files.find(
-    asFilter<FileMetaDoc>({ $or: owned.map(s => s.shape === 'file' ? { _id: s.path } : { _id: { $regex: `^${escapeRegex(`${s.path}/`)}` } }) }),
+    asFilter<FileMetaDoc>({ $or: idsUnder(owned) }),
     { projection: { _id: 1, parentFileId: 1 } },
   ).toArray() as Array<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
 
