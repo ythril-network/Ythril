@@ -35,7 +35,9 @@ import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
-const S = 'reread';
+/** Not `reread`: the cap's assertions count lines matching /re-?read/ that name the space, and every MERKLE_DIVERGENCE
+ *  warning names it — a space called that would make each one count as the re-read speaking. */
+const S = 'drift';
 const CREATED_AT = '2026-08-01T00:00:00.000Z';
 /** What this instance holds: a timestamp the author's copy does not have. */
 const DRIFTED_AT = '2026-10-01T00:00:00.000Z';

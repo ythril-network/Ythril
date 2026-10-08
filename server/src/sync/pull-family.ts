@@ -43,7 +43,8 @@ const PULL_MAX_PAGE = 500;
 /** Requests one transfer makes per cycle before it stops as capped; the next cycle resumes from where this one is complete. */
 const PULL_MAX_PAGES = 50;
 
-export type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
+/** `converged`: file rows whose drifted timestamp took the author's (`Q-419`) — counted apart, since nothing was stored. */
+export type PullResult = { count: number; converged: number; highSeq: number; maxSeq: number } & TransferOutcome;
 
 type ServedPage = { items?: unknown; nextCursor?: unknown };
 
@@ -65,7 +66,7 @@ export async function pullFamily(o: {
   const key = family.payloadKey;
   const peerLabel = member.label ?? member.instanceId;
   const outcome: TransferOutcome = { deliveredThrough: sinceSeq, truncated: false };
-  let count = 0, highSeq = sinceSeq, maxSeq = 0;
+  let count = 0, converged = 0, highSeq = sinceSeq, maxSeq = 0;
 
   await pageSeqRuns({
     outcome,
@@ -100,6 +101,7 @@ export async function pullFamily(o: {
       }
       for (const [i, doc] of docs.entries()) {
         if (written.verdicts[i] === 'rejected') continue;
+        if (written.verdicts[i] === 'converged') converged++;
         count++;
         if (doc.seq > maxSeq) maxSeq = doc.seq;
         if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
@@ -109,5 +111,5 @@ export async function pullFamily(o: {
     // A transfer that stopped has more to give, so it caps the watermark AND keeps making progress next cycle.
     stopped: (why, heldAt) => log.warn(peerText(truncationWarn(`Pull ${key} from`, member.label ?? '', spaceId, why, heldAt))),
   });
-  return { count, highSeq, maxSeq, ...outcome };
+  return { count, converged, highSeq, maxSeq, ...outcome };
 }

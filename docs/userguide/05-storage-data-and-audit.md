@@ -400,6 +400,15 @@ disagreement is over. Only the writer's own delivery counts: a copy passed on by
 instance's moment, and taking it would make the two of you swap values for ever. Nothing else about the record changes,
 and nothing is re-indexed.
 
+**A record that already disagreed is fetched again — when the network compares content.** An ordinary sync only asks for
+what changed since the last one, so a file that drifted before is never sent again. With `merkle: true` on the network,
+a sync that finds the content differs makes the next sync ask that peer for all of its file records once more, and
+each drifted one settles as above. It is said in one info line per peer and space when it has read them all (how many
+it read, how many settled), and `ythril_sync_file_meta_rereads_owed` counts the ones still to make. If a few full
+re-reads leave the content still different, a warning says so once, naming how many, and it stops asking: what is left is not a
+timestamp it can take from the writer — a file whose writer has left the network, or a real difference to look at.
+Without `merkle: true` nothing is re-read, and such a file settles at its next edit.
+
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
 clean-ups of old search-result files, stray file metadata, upload leftovers and expired tombstones, the duplicate and

@@ -331,6 +331,11 @@ delivery of somebody else's row never converges — a relay serves its own store
 adopting it would flip the row between two values for ever. Nothing else is written: no `seq` is stamped, `deliveredBy`
 is untouched, and no embedding is re-queued.
 
+**A drifted row is delivered again by a re-read, not by the ordinary pull.** The ordinary pull asks from the receive
+watermark, and a row that drifted is behind it. With `merkle: true`, a check that finds the roots differ makes the next
+cycle ask the same peer for `GET /api/sync/filemeta?sinceSeq=0` and page to the end, through the same accept; it has its
+own cursor and never moves the receive watermark. A peer serving the file rows already serves everything this needs.
+
 **So `updatedAt` on `IncomingFileMetaDoc` is now CHECKED, and a bad one is a `400`.** It must be an ISO instant in the
 comparable fixed-width form and under 40 characters. It is the one timestamp a peer sends that can change a stored row,
 which is why it is the one that is validated; every other family's `updatedAt` arrives with a whole version and is still

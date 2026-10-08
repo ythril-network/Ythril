@@ -40,6 +40,8 @@ import { adoptPeerRound } from '../networks/round-local-state.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
+import { checkMerkleWithPeer } from './merkle-check.js';
+import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
 import {
   syncCyclesTotal,
   syncItemsPulledTotal,
@@ -439,6 +441,8 @@ async function runSyncForMember(
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
       pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono; pulled.links += pc.links;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
+      // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
+      await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts });
     }
     if (shouldPush) {
       const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
@@ -455,9 +459,9 @@ async function runSyncForMember(
       // media job there, the one face path — no second job is queued for it here.
     }
 
-    // Merkle integrity check (opt-in: network.merkle === true)
+    // Merkle integrity check (opt-in: network.merkle === true); its verdict arms or clears the file-row re-read.
     if (net.merkle) {
-      await checkMerkleWithPeer(net, member, spaceId, remoteSpaceId, fetchOpts);
+      recordFileMetaMerkleComparison(member, spaceId, await checkMerkleWithPeer(net, member, spaceId, remoteSpaceId, fetchOpts));
     }
   }
 
@@ -784,9 +788,9 @@ async function pullFromPeer(
    * running them together multiplies the concurrent load on the side of the cycle that is already slow,
    * and interleaves the writes a truncated transfer's watermark has to reason about.
    *
-   * NOT ALL BRAIN COLLECTIONS: `files` is absent from the list because a file arrives as blob plus manifest, not as a
-   * document on this path. `links` is present — a collection missing here is one a peer never sends us, and nothing
-   * reports that, because a peer holding no links hashes none either.
+   * EVERY BRAIN COLLECTION: `files` as the `filemeta` family (its metadata; the bytes arrive as blob plus manifest in
+   * `syncFiles`), and `links` — a collection missing here is one a peer never sends us, and nothing reports that, because
+   * a peer holding no links hashes none either.
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
   try {
@@ -885,8 +889,8 @@ async function pushToPeer(
    * Sequential for the same reason as the pull, and the parents-only filter comes from the row rather than from a
    * special case here — see `REPLICATED_FAMILIES`.
    *
-   * NOT ALL BRAIN COLLECTIONS — `files` is absent because a file crosses the wire as blob plus manifest, not as a
-   * document in this batch. Every other collection is here, `links` included: a collection missing from this union is
+   * EVERY BRAIN COLLECTION — `files` as the `filemeta` family (its METADATA; the bytes cross as blob plus manifest in
+   * `syncFiles`), and `links` included: a collection missing from this union is
    * written locally and never offered to a peer, which for a record type whose entire purpose is to be shared ships the
    * feature and none of it. And it would not even be reported: `brain/merkle.ts` hashes the links collection, so the two
    * roots would differ for ever — except that a peer which never RECEIVES a link has nothing to hash either, so both
@@ -960,59 +964,3 @@ async function pushToPeer(
 
 // Silence unused import warning — resolveSafePath may be used by future file push refinement
 void resolveSafePath;
-
-// ── Merkle integrity check ──────────────────────────────────────────────────
-
-/**
- * After a full space sync with a peer, fetch the peer's Merkle root and compare
- * it to our own locally-computed root.  Any divergence is logged as a prominent
- * MERKLE_DIVERGENCE warning — it does NOT block the sync or modify data.
- *
- * This is a best-effort, non-fatal check.  Failures (e.g. peer doesn't support
- * the endpoint yet, network timeout) are logged at warn level and swallowed.
- */
-async function checkMerkleWithPeer(
-  net: NetworkConfig,
-  member: NetworkMember,
-  spaceId: string,
-  remoteSpaceId: string,
-  opts: () => RequestInit,
-): Promise<void> {
-  try {
-    const { computeMerkleRoot } = await import('../brain/merkle.js');
-    const [localResult, peerResp] = await Promise.all([
-      computeMerkleRoot(spaceId),
-      peerSafeFetch(
-        `${member.url}/api/sync/merkle?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(net.id)}`,
-        opts(),
-      ),
-    ]);
-
-    if (!peerResp.ok) {
-      log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': peer returned HTTP ${peerResp.status} — skipping`);
-      return;
-    }
-
-    const peerResult = await boundedJson<{ root?: string; leafCount?: number }>(peerResp, 'sync peer');
-    const peerRoot = peerResult.root;
-
-    if (!peerRoot) {
-      log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': peer response missing 'root' field`);
-      return;
-    }
-
-    if (localResult.root !== peerRoot) {
-      log.warn(
-        `MERKLE_DIVERGENCE: space '${peerText(spaceId)}', peer '${peerText(member.label)}' (${peerText(member.instanceId)}), ` +
-        `network '${peerText(net.label)}'. ` +
-        `local root=${peerText(localResult.root)} (${localResult.leafCount} leaves), ` +
-        `peer root=${peerText(peerRoot)} (${peerResult.leafCount ?? '?'} leaves). ` +
-        `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
-      );
-    } else {
-      log.info(`Merkle OK: space '${peerText(spaceId)}', peer '${peerText(member.label)}' root=${peerText(localResult.root.slice(0, 12))}…`);
-    }
-  } catch (err) {
-    log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': ${peerText(err)}`);
-  }
-}

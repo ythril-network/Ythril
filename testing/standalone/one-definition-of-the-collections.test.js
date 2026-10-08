@@ -191,10 +191,13 @@ describe('a collection list derives from the one tuple, or declares itself a sub
     // was a subset and said so. `P-32` made a file's metadata replicate, so every brain collection is now
     // hashed and the list IS the tuple — it derives from `BRAIN_COLLECTIONS` rather than declaring itself a
     // subset of it. An exemption whose reason has expired is the thing this file is about.
+    //
+    // **`sync/engine.ts` came off for the same reason.** Its two comments said `files` was absent from the
+    // pull and the push; the `filemeta` family has carried a file's metadata through both since `P-32`, the
+    // loops run over `REPLICATED_FAMILIES`, and the file writes no collection list at all any more.
     for (const f of [
       'server/src/spaces/vector-index.ts',
       'client/src/app/pages/brain/brain-tabs.ts',
-      'server/src/sync/engine.ts',
       'server/src/spaces/ensure-query-indexes.ts',
       'server/src/metrics/registry.ts',
     ]) {
