@@ -727,15 +727,21 @@ export async function renameFileMeta(
   );
   if (!existing) return;
 
-  const now = new Date().toISOString();
   // MongoDB does not allow updating _id; delete + re-insert with new path.
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
   // `rekeyedRow`: a row under a NEW id is written here, so it is stamped as nobody's delivery and carries none of what this
   // instance agreed with its peers about the OLD path (`syncBase`) — a peer that delivered the old path cannot retire the new one.
+  //
+  // **It keeps the stored `updatedAt`** (`Q-419`). This insert stamps no `seq`: the row arrives under a new id with the
+  // seq it already had. Writing a fresh `updatedAt` beside an unchanged seq is precisely the drift this bundle exists to
+  // remove — and it is worse on a PEER-authored row, where it leaves another instance's seq and author next to this
+  // instance's clock, which no peer can order and a merkle check reports every cycle for a space where nothing is wrong.
+  // Measured before the fix: a move of a peer-authored row moved `updatedAt` by five weeks while its seq stood still.
+  // One rule for every row rather than a branch on who authored it, because the argument does not depend on the author:
+  // a write that does not stamp a version must not move the timestamp that version is read beside.
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(rekeyedRow(existing, {
     _id: normDst,
     path: normDst,
-    updatedAt: now,
   })));
 
   await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
@@ -798,17 +804,16 @@ export async function renameFileMetaByPrefix(
 
   if (docs.length === 0) return;
 
-  const now = new Date().toISOString();
   // Delete existing records and re-insert with updated paths.
   const oldIds = docs.map(d => d._id);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ _id: { $in: oldIds } }),
   );
-  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery.
+  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery, and
+  // keeping its stored `updatedAt` for the reason given at the single-file rename — this insert stamps no seq.
   const updated = docs.map(d => rekeyedRow(d, {
     _id: dstPrefix + d._id.slice(srcPrefix.length),
     path: dstPrefix + d.path.slice(srcPrefix.length),
-    updatedAt: now,
   }));
   const filesColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
