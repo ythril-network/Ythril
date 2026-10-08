@@ -42,6 +42,7 @@ import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
 import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
+import { readMemberSpaceMark } from './member-space-mark.js';
 import {
   syncCyclesTotal,
   syncItemsPulledTotal,
@@ -766,10 +767,7 @@ async function pullFromPeer(
   batchOpts: () => RequestInit,
 ): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
   let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0, pulledChrono = 0, pulledLinks = 0;
-  const cfg = getConfig();
-  const freshNet = cfg.networks.find(n => n.id === networkId);
-  const memberState = freshNet?.members.find(m => m.instanceId === member.instanceId);
-  const sinceSeq = memberState?.lastSeqReceived?.[spaceId] ?? 0;
+  const sinceSeq = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqReceived') ?? 0;
 
   // Tombstones first, so deletions apply before anything that would re-upsert a deleted doc. Both directions
   // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
@@ -870,8 +868,7 @@ async function pushToPeer(
   let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0, pushedChrono = 0, pushedLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
-  const memberState = freshNet?.members.find(m => m.instanceId === member.instanceId);
-  const lastSeqPushed = memberState?.lastSeqPushed?.[spaceId] ?? 0;
+  const lastSeqPushed = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqPushed') ?? 0;
 
   // Tombstones first — paged, with no hard cap, since one would silently drop deletions after a long absence.
   const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts });
