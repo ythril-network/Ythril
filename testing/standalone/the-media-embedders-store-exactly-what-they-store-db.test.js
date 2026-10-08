@@ -360,7 +360,9 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       await runAudio(OPEN, 'calls/q3.wav', Buffer.from('the-exact-audio-bytes'), 'audio/wav');
 
       const [probe, silence, segment] = ff.calls;
-      for (const c of ff.calls) assert.equal(c.args[0], '-y', 'every call overwrites its output');
+      // `-y` is no longer FIRST: the one wrapper puts its hardening flags in front of it (bundle-89), so this asks what
+      // it always meant — that every call carries it — rather than where it sits.
+      for (const c of ff.calls) assert.ok(c.args.includes('-y'), 'every call overwrites its output');
       assert.ok(probe.inputPath.endsWith('input.wav'), `the input is named for its MIME: ${probe.inputPath}`);
       assert.equal(probe.input.toString(), 'the-exact-audio-bytes', 'ffmpeg reads exactly the bytes the embedder was handed');
       assert.equal(silence.inputPath, probe.inputPath);
