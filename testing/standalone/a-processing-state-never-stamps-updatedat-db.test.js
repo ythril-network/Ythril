@@ -243,8 +243,12 @@ describe('recording a file\'s processing state never stamps its authored half (r
       await files().updateOne({ _id: id }, { $set: { updatedAt: POISON, seq: POISON_SEQ, embeddingStatus: 'pending' } });
       worker.startMediaEmbeddingWorker();
       try {
-        await waitFor(async () => ['complete', 'failed'].includes((await jobs().findOne({ _id: id }))?.status),
-          30_000, 100, async () => `the worker never finished the job for ${id}: ${JSON.stringify(await jobs().findOne({ _id: id }))}`);
+        // Terminal on BOTH rows: the job's status and the file's are two writes, the job's first, so a read between them sees a
+        // finished job and a file still `processing` (it failed that way when the machine was busy).
+        await waitFor(async () => ['complete', 'failed'].includes((await jobs().findOne({ _id: id }))?.status)
+          && !['pending', 'processing'].includes((await files().findOne({ _id: id }))?.embeddingStatus),
+          30_000, 100, async () => `the worker never finished the job for ${id}: ${JSON.stringify(await jobs().findOne({ _id: id }))} `
+            + `/ file ${JSON.stringify(await files().findOne({ _id: id }, { projection: { embeddingStatus: 1 } }))}`);
       } finally {
         worker.stopMediaEmbeddingWorker();
       }

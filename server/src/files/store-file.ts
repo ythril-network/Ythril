@@ -72,7 +72,7 @@ type StoreOpts = {
  *
  * **When the record step fails, the bytes it was to name do not stay behind** (`removeUnrecordedBytes`, the one answer every door
  * that writes bytes gives, the manifest pull's too): with no live row for the path they are removed, with one (an overwrite) they
- * are kept, and the failure is rethrown either way for the door to answer. This is the only place the cleanup is asked for, so
+ * are kept, as they are when the store cannot say whether a row exists, and the failure is rethrown either way for the door to answer. This is the only place the cleanup is asked for, so
  * `storeFile` and the chunked upload — the two callers — cannot leave it out; a door that wrote bytes and never calls this
  * function owns the same duty.
  */
@@ -105,7 +105,7 @@ export async function recordStoredFile(
     if (opts.actor) emitWebhookEvent({ event: 'file.created', spaceId, entry: { path: filePath, sha256 }, ...opts.actor });
     return { sha256, sizeBytes, ...dispatched };
   } catch (err) {
-    await removeUnrecordedBytes(spaceId, givenPath, err);
+    await removeUnrecordedBytes(spaceId, givenPath);
     throw err;
   }
 }

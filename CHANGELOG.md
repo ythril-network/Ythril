@@ -99,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tie-safe meanwhile, only slower. Rolling back to 5.6.x rebuilds the old `seq` index before the server listens.
 - **Sync:** Each record stores which peer delivered it (`deliveredBy`: local, never sent, not shown by REST or MCP); records stored earlier are stamped once, at their space's first sync.
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`; a declined deletion is said once per peer, space and reason; a page applying upstream deletions logs one line, the re-read one per space.
-- **Sync:** New `ythril_sync_file_arrivals_total{door,outcome}` counts file arrivals, record failures, repairs, quota refusals and ignored offers.
+- **Sync:** New `ythril_sync_file_arrivals_total{door,outcome}` counts arrivals, record failures, repairs, refused bodies, quota refusals and ignored offers.
 - **Embedding:** The bundled model runs in a supervised child process, so embedding no longer blocks the server (`/health` stays fast in bulk imports) and a native fault no longer takes it down; it exits after ten idle minutes (next embed pays a 1-2 s load).
 - **Embedding:** `mem_limit` or a pod memory limit now counts both processes. The child gets a minimal environment (never the Mongo URI, master key or an API token). A lost process is replaced after a growing delay; a record that kills it three times is `failed`, the crash in its `lastError`.
 - **Embedding:** A model that cannot load stays failed until it or an offline flag changes, or a restart.
@@ -166,10 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** Records that share a sequence number are no longer skipped at a page or batch boundary, on pull, push and the duplicate and
   contradiction scans.
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
-  refused element's seq can no longer move the position; against an older server it holds, as before.
+  refused element's seq no longer moves it; against an older server it holds, as before.
 - **Sync:** A publisher's or parent's deletions, its retention sweep's included, now reach the records it relayed (declined and never retried before); a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since (other bytes, or a newer version by its deleter) is kept. Tombstones page past a pull's cut; a push logs refusals; a deleted directory's cached hashes go.
-- **Sync:** A removed file description, source, property, tag or suppression mark now reaches peers, and an admin restore removes what its backup lacks. A soft-deleted file's row is no longer pushed live, where it retired the peer's tombstone.
+- **Sync:** A removed file description, source, property, tag or suppression mark now reaches peers, and an admin restore removes what its backup lacks (`keysRemoved`). A soft-deleted file's row is no longer pushed live (it retired the peer's tombstone).
 - **Files:** A file a peer pushes or this instance pulls is processed by this instance's rules (converted, chunked, media); a new version replaces the old passages; a failed record write leaves no new file behind, and a pull retries it.
 - **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path and get this instance's retention window; a metadata arrival no longer overwrites a newer copy.
 - **Files:** A file's processing status no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again.
@@ -180,7 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** A file whose bytes are gone but whose metadata remains is completed by REST delete, MCP `delete_file` and the TTL sweep.
 - **Files:** A deleted file no longer returns from a peer by any door, even before publish, unless re-created (other bytes, or a newer version by the deleter); a delete takes what derives from it. A file's id is its canonical path (NFC, no `.` or empty segments); peers reject others.
 - **Search:** Records matching a `recall` query equally well come back in a stable order (ties break by id), so paging with `skip`/`nextSkip` shows each once, on MCP and `POST /api/brain/recall`.
-- **Search:** `recall`, `similar` and the write-time duplicate check straight after a space's first write no longer answer `503`
+- **Search:** `recall`, `similar` and the write-time duplicate check right after a space's first write no longer answer `503`
   while its vector index initialises. `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, on REST and MCP.
 - **Records:** A small entity merges into a hub of any size (it failed with ~80 000 edges); a too-large refusal says *more than* the
   bound and `relinks` is a lower bound. A merge whose reply was lost after commit is answered as merged and still queues edges and sends webhooks.
@@ -246,10 +246,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A record pushed with its author's own peer token is no longer refused as `tombstoned` by a tombstone another instance planted; pushed by anyone else, a record with a deleted id is still refused.
 - **Sync:** A negative `limit` on a sync read no longer returns the whole collection, and a read by id (`/api/sync/<family>/:id`)
   no longer returns a record's vector, matched text or retention stamps, nor a file chunk.
-- **Sync:** A peer can no longer stop other members' deletions by planting more than 5000 tombstones at one seq, for pullers on this release; a puller on an older release stays stuck there until it upgrades.
+- **Sync:** A peer can no longer stop other members' deletions by planting more than 5000 tombstones at one seq, for pullers on this release; a puller on an older release stays stuck until it upgrades.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's on a pub/sub network or a tree, for what it delivered.
 - **Sync:** A peer's file tombstone needs the issuer's own authority or the upstream's (any admitted peer could delete the bytes before), and a relayed one keeps its issuer. A held one refuses a later copy only as a record tombstone would, so a peer cannot block a path.
-- **Sync:** A pull no longer fetches a file past the space quota, and stores nothing from a body that is not as declared.
+- **Sync:** A pull no longer fetches a file past the space quota, stores nothing from a body that is not as declared, and takes back bytes no row names.
 
 ## [5.6.9] — 2026-10-08
 

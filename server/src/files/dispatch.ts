@@ -121,8 +121,15 @@ export interface DispatchResult {
 /**
  * Decide and enqueue the embedding work for a just-written file, and record media state on its
  * metadata record. Returns the resolved format (so the caller can pick a 202/201 status code) and
- * the embedding status (for the response body). Never throws for enqueue/DB hiccups — those are
- * logged and swallowed so a transient worker/queue error can't fail the write itself.
+ * the embedding status (for the response body).
+ *
+ * **What throws and what does not.** A failure to ENQUEUE the job (`enqueueMediaJob`, `enqueueTextJob`) and to clear a document's
+ * stale conversion artifacts is logged and swallowed, so a transient worker or queue error cannot fail the write itself. The
+ * processing STATE of the file's row is written with an awaited write (`setFileProcessingState`: `pending`, or the terminal
+ * `skipped` of every class this function declines, plain text included) and is NOT guarded: a store failure there throws out of
+ * this function. That is deliberate — a row left with no state is one the pull's lazy repair would offer for ever — and the caller
+ * is the door's record step (`recordAndDispatchFile`), whose failure takes the bytes back (`removeUnrecordedBytes`) and is
+ * answered or retried by that door.
  *
  * Every class it declines is left in a terminal state (`skipped`: an unknown extension, a media file over the size cap, a media
  * class or the documents turned off for the space), and identical bytes whose processing settled are not processed again

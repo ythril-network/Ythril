@@ -14,23 +14,25 @@
  *
  * ## The rule
  *
- * Called by a door in the `catch` of its record step, with the error it is about to rethrow:
+ * Called by a door in the `catch` of its record step, and by the pull's repair for bytes it finds held with no row:
  *
- *  - NO live row for the path afterwards: the bytes are removed (under the stored-bytes door's lock), their cached hash is
- *    forgotten, and the usage cache is invalidated so the next quota check does not charge for the freed disk.
- *  - a live row for the path afterwards (an OVERWRITE whose row write failed): the bytes are KEPT. Removing them would leave a row
- *    that names a file that is not there, and the next upload of the path rewrites the row; the failure is the door's to rethrow,
- *    which is what the caller does either way.
- *  - the store is not answering (`cause`), or the row cannot be read: it cannot be told whether a row exists, and then the bytes
- *    are removed. The failure that left them is nearly always this one, bytes with no row are the worse state of the two, and the
- *    caller answered an error, so the sender sends the file again.
+ *  - the lookup ANSWERED, and no live row names the path: the bytes are removed (under the stored-bytes door's lock), their cached
+ *    hash is forgotten, and the usage cache is invalidated so the next quota check does not charge for the freed disk.
+ *  - the lookup answered, and a live row names the path (an OVERWRITE whose row write failed): the bytes are KEPT. Removing them
+ *    would leave a row that names a file that is not there, and the next upload of the path rewrites the row; the failure is the
+ *    door's to rethrow, which is what the caller does either way.
+ *  - the lookup FAILED (the store is not answering): the bytes are KEPT. It cannot prove they are unrecorded, and removing the bytes
+ *    of an overwrite whose row exists leaves a row naming absent bytes. Bytes with no row are the lesser harm of the two, because
+ *    they do not stay: the next pull whose peer offers the path takes them back (this function, once the store answers), and a
+ *    person's retry of the upload rewrites them. Said once per window through the shared reporter.
+ *
+ * It answers whether it took the bytes back, so a caller that counts the removal counts only a removal.
  *
  * The path is resolved HERE (`peerFileKey`) from the caller's spelling, so a caller cannot hand over a key and an absolute path
  * that disagree. A soft-deleted row (`LIVE_FILE_ROW`) is not a record of these bytes.
  *
- * **It never throws.** It runs inside the `catch` of the failure being reported and must not replace it. A failure to remove the
- * bytes is said once per window through the shared reporter, with the path as its unit; the bytes are then held with no row, which
- * the pull's repair records with no deliverer.
+ * **It never throws.** It runs inside the `catch` of the failure being reported and must not replace it. A failure to look the row
+ * up or to remove the bytes is said once per window through the shared reporter, with the path as its unit.
  */
 import { deleteStoredIfPresent } from './stored-bytes.js';
 import { forgetFileHashes } from './manifest.js';
@@ -50,31 +52,21 @@ function sayCleanupFailure(spaceId: string, key: string, err: unknown): void {
 }
 
 /**
- * Whether a live row names `key`. A read that fails answers `false`: the caller then removes the bytes, as it does when the store
- * is known not to be answering.
- */
-async function isRecorded(spaceId: string, key: string): Promise<boolean> {
-  try {
-    return await withinWriteBound(() => hasLiveFileRecordExactlyAt(spaceId, key));
-  } catch {
-    return false;
-  }
-}
-
-/**
  * @param filePath the path as the door was given it (or the pull's key): resolved and symlink-checked here
- * @param cause the error the record step threw, which the caller rethrows; a store that is not answering is not asked for the row
+ * @returns whether the bytes were taken back: `false` when a live row names the path, and `false` when the lookup (or the removal)
+ *   failed, which is said, never thrown
  */
-export async function removeUnrecordedBytes(spaceId: string, filePath: string, cause: unknown): Promise<void> {
+export async function removeUnrecordedBytes(spaceId: string, filePath: string): Promise<boolean> {
   let key = filePath;
   try {
     const resolved = await peerFileKey(spaceId, filePath);
     key = resolved.key;
-    if (!storeIsNotAnswering(cause) && await isRecorded(spaceId, key)) return;
+    // A lookup that throws is NOT "no row": it lands in the catch below with the bytes still on disk.
+    if (await withinWriteBound(() => hasLiveFileRecordExactlyAt(spaceId, key))) return false;
     await deleteStoredIfPresent(resolved.abs);
   } catch (err) {
     sayCleanupFailure(spaceId, key, err);
-    return;
+    return false;
   }
   invalidateUsageCache();   // freed disk: the next quota check must not charge for it
   try {
@@ -82,4 +74,5 @@ export async function removeUnrecordedBytes(spaceId: string, filePath: string, c
   } catch (err) {
     sayCleanupFailure(spaceId, key, err);   // a stale cache entry for a missing file is pruned by the next full manifest walk
   }
+  return true;
 }

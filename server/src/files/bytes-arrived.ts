@@ -60,8 +60,10 @@ export type FileArrivalDoor = (typeof FILE_ARRIVAL_DOORS)[number];
 export type FileArrivalOutcome = (typeof FILE_ARRIVAL_OUTCOMES)[number];
 
 /**
- * Why a file whose bytes were already here is recorded now: its row held another hash than the disk's (`stale_row`), no row at all
- * (`missing_row`), or processing never ran on a class that processes (`unprocessed`). The three repairs of `sync/file-sync.ts`.
+ * Why `sync/file-sync.ts` repairs a file whose bytes were already here: its row held another hash than the disk's (`stale_row`), no
+ * row at all (`missing_row`), or processing never ran on a class that processes (`unprocessed`). Only the two that HAVE a row are
+ * recorded through {@link recordArrivedBytes}; bytes with no row are taken back instead, so the next cycle delivers them as an
+ * ordinary arrival with its true deliverer (a row inserted here would name this instance their author).
  */
 export type FileRepairReason = 'stale_row' | 'missing_row' | 'unprocessed';
 
@@ -79,10 +81,9 @@ export interface ArrivedBytes {
   sha256: string;
   door: FileArrivalDoor;
   /**
-   * The peer that delivered the bytes: the author of a row NEW here, whose deliverer stamp it carries. Absent for bytes that were
-   * already here and are being recorded now (a repair): nobody can be credited with delivering them, so the row is this
-   * instance's own placeholder, which the first authored metadata to arrive replaces, and no peer is handed the power an
-   * upstream's deletion stands on (`sync/deletion-authority.ts`) over a file it may never have sent.
+   * The peer that delivered the bytes: the author of a row NEW here, whose deliverer stamp it carries. Absent for a repair, which
+   * only ever brings an EXISTING row up to date: that row keeps the author and deliverer it already has, so no peer is handed the
+   * power an upstream's deletion stands on (`sync/deletion-authority.ts`) over a file it may never have sent.
    */
   from?: AuthorRef;
   /** Set when this is a repair of a file already held: counted under its reason instead of `recorded`. */

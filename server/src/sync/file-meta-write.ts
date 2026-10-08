@@ -22,7 +22,8 @@
  *    this version derives from its own wire schema, so `sha256`, `sizeBytes`, `deletedAt` and the rest of what this
  *    instance holds about its own bytes are out of reach, and no name a peer picks reaches the update;
  *  - **the write guard is the arrival writer's own**: a copy that loses on its seq is not written at all, removal included.
- * A RESTORE carries no list because an export is a full record: every authored key its document lacks is removed.
+ * A RESTORE carries no list because an export is a full record: every authored key its document lacks is removed, and the import
+ * summary counts the ones the replaced rows had (`authoredKeysRestoreRemoves`).
  *
  * ## What each copy had dropped
  *
@@ -53,7 +54,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
-import { removedFileMetaKeys } from '../api/sync/_shared.js';
+import { removedFileMetaKeys, FILE_META_AUTHORED_KEYS } from '../api/sync/_shared.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
@@ -106,6 +107,28 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
   const removed = removedFileMetaKeys(doc, { restore });
   return removed.length > 0 ? [{ $set: set }, { $unset: removed }] : [{ $set: set }];
+}
+
+/**
+ * How many authored keys a restore of `docs` takes off the rows it replaces, per file id (an id that loses none is absent): the
+ * keys `removedFileMetaKeys` says the update removes (`fileMetaUpdate` asks the same function of the same document) that the
+ * stored row HAS — a key the row never had is removed from nothing. Read BEFORE the write, because the write replaces the row.
+ *
+ * Asked by the arrival writer for a restore and no other door: a peer's arrival removes only what its sender lists, and an
+ * operator is told of a restore's removals because an export is a full record and an older backup over newer edits is silent loss.
+ */
+export async function authoredKeysRestoreRemoves(spaceId: string, docs: ReadonlyArray<Readonly<Record<string, unknown>> & { _id: string }>): Promise<Map<string, number>> {
+  const lacking = new Map(docs.map(d => [d._id, removedFileMetaKeys(d, { restore: true })] as const).filter(([, keys]) => keys.length > 0));
+  const counts = new Map<string, number>();
+  if (lacking.size === 0) return counts;
+  const rows = await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, 'files'), [...lacking.keys()],
+    Object.fromEntries([...FILE_META_AUTHORED_KEYS].map(k => [k, 1 as const])));
+  for (const [id, keys] of lacking) {
+    const row = rows.get(id);
+    const n = row === undefined ? 0 : keys.filter(k => row[k] !== undefined).length;
+    if (n > 0) counts.set(id, n);
+  }
+  return counts;
 }
 
 /** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */

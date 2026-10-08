@@ -1008,18 +1008,20 @@ export const FILE_ARRIVAL_DOORS = ['push', 'pull', 'metadata', 'tombstone'] as c
  * What became of a file's arrival, the values of the `outcome` label (`files/bytes-arrived.ts` counts every one, through one
  * function): `recorded` (bytes, row and processing queue all written), `record_failed` (the row or the dispatch failed after the
  * bytes landed; a pull removed the bytes and redoes the file next cycle), the three `repaired_*` (a file whose bytes were already
- * here and whose record was brought up to date by a later cycle: its row held another hash, held no row at all, or its
- * processing never ran), `quota` (refused before the body was fetched) and `ignored_instance_local` (a peer offered a path no
- * instance sends — a conversion's sidecar, a conflict copy, a schema snapshot, a legacy spill — by ANY door, bytes, metadata or
- * tombstone, and nothing was stored).
+ * here, found by a later cycle: its row held another hash or its processing never ran, and the record was brought up to date;
+ * or it held no row at all, and the bytes were taken back to be delivered again with their true deliverer), `refused_body` (a
+ * pulled body that was not what the manifest declared: another hash, longer or shorter than its size; nothing was stored),
+ * `quota` (refused before the body was fetched) and `ignored_instance_local` (a peer offered a path no instance sends — a
+ * conversion's sidecar, a conflict copy, a schema snapshot, a legacy spill — by ANY door, bytes, metadata or tombstone, and
+ * nothing was stored).
  */
 export const FILE_ARRIVAL_OUTCOMES = [
-  'recorded', 'record_failed', 'repaired_stale_row', 'repaired_missing_row', 'repaired_unprocessed', 'quota', 'ignored_instance_local',
+  'recorded', 'record_failed', 'repaired_stale_row', 'repaired_missing_row', 'repaired_unprocessed', 'refused_body', 'quota', 'ignored_instance_local',
 ] as const;
 
 export const syncFileArrivalsTotal = new Counter({
   name: 'ythril_sync_file_arrivals_total',
-  help: 'File arrivals by door (push, pull, metadata, tombstone) and outcome (recorded, record_failed, repaired_stale_row, repaired_missing_row, repaired_unprocessed, quota, ignored_instance_local)',
+  help: 'File arrivals by door (push, pull, metadata, tombstone) and outcome (recorded, record_failed, repaired_stale_row, repaired_missing_row, repaired_unprocessed, refused_body, quota, ignored_instance_local)',
   labelNames: ['door', 'outcome'] as const,
   registers: [register],
 });

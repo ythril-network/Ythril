@@ -47,19 +47,24 @@ import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpl
 import { pushStoredFile, type SendUpload } from './file-push.js';
 
 /**
- * The most files whose RECORD is brought up to date from bytes already held, per space per sync cycle: a row that names another
- * hash than the disk's, no row at all, or processing that never ran on a class that processes (`repairReasonOf`). A file an
- * earlier release pulled — bytes and row, no conversion — is repaired LAZILY, a few a cycle, never by a walk at boot: every
- * repair is a document queued for conversion, and one cycle that queued the whole backlog of a space would be a boot-sized job
- * inside a request-sized one, with the receiver's own models (and, where consented, an external one) paying for it at once.
- * The rest wait their turn; a file is repaired once, because the repair leaves it with a state that is not a reason.
+ * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
+ * disk's, processing that never ran on a class that processes (the record is brought up to date), or no row at all (the bytes are
+ * taken back and delivered again) — `repairReasonOf`. A file an earlier release pulled — bytes and row, no conversion — is repaired
+ * LAZILY, a few a cycle, never by a walk at boot: every repair is a document queued for conversion, and one cycle that queued the
+ * whole backlog of a space would be a boot-sized job inside a request-sized one, with the receiver's own models (and, where
+ * consented, an external one) paying for it at once. The rest wait their turn; a file is repaired once, because the repair leaves
+ * it with a state that is not a reason.
+ *
+ * A candidate counts the moment it is looked at, whatever the verdict: one a held tombstone shadows, or that cannot be looked at,
+ * cost its read too, and a space holding many of them must not pay that read for every one of them every cycle.
  */
 export const MAX_FILE_REPAIRS_PER_CYCLE = 25;
 
-/** The names a failure of the pull's record, quota and repair steps is reported under: once per space and path per window. */
+/** The names a failure of the pull's record, quota, repair and body-verification steps is reported under: once per space and path per window. */
 const RECORD_STEP = declareStep('File pull record');
 const QUOTA_STEP = declareStep('File pull quota');
 const REPAIR_STEP = declareStep('File pull repair');
+const BODY_STEP = declareStep('File pull body');
 
 /**
  * What the pull reads of a space's top-level file row, once per cycle (`heldRowsFor`): the hash and processing state the row
@@ -71,7 +76,8 @@ interface HeldRow { sha256?: string; embeddingStatus?: string; deletedAt?: strin
  * Why the bytes already on disk at `key` (hash `diskSha256`) need their record brought up to date — or `null` when they do not.
  * Pure. The three reasons are the three ways an arrival leaves a file half-recorded: a row that says another hash than the disk
  * (the write that records the arrival failed and was swallowed, or an older release stored the row and not the new bytes'), no row
- * at all (the bytes are there and nothing names them), and a class that processes with no processing state (a release before
+ * at all (the bytes are there and nothing names them: they are taken back, never recorded, because a row made here for them
+ * would name this instance their author and deliverer), and a class that processes with no processing state (a release before
  * the pull dispatched). A soft-deleted row is not repaired: the file is deleted here, and what is on disk is not its bytes.
  */
 export function repairReasonOf(row: HeldRow | undefined, diskSha256: string, key: string): FileRepairReason | null {
@@ -270,6 +276,21 @@ export async function syncFiles(
       .map(a => ({ id: a.key, path: a.key, kind: 'bytes' as const, sha256: a.remote.sha256 })));
     const notNow = new Set([...verdicts.shadowed, ...verdicts.undecided]);
 
+    // The files the skip branch below would bring up to date (held here with the peer's hash, their row stale, missing or never
+    // processed) are asked the same deletion question ONCE, together, before any is repaired: a path a delete is waiting to
+    // publish, or one that cannot be looked at, is not recorded again — repairing it would bring back a file the operator deleted.
+    // Asked one by one, every such path cost its own read every cycle, and enough of them that stay shadowed used up the cycle's
+    // repair budget before a repairable file was reached, so it never was.
+    const repairable = arriving.filter(a => {
+      const onDisk = oursMap.get(a.key);
+      return onDisk && !isInstanceLocalFile(a.key) && decideFilePull(onDisk, a.remote, bases.get(a.key)) === 'skip'
+        && repairReasonOf(held.get(a.key), onDisk.sha256, a.key) !== null;
+    });
+    const repairVerdicts = repairable.length > 0
+      ? await decideArrivals(spaceId, repairable.map(a => ({ id: a.key, path: a.key, kind: 'bytes' as const, sha256: oursMap.get(a.key)!.sha256 })))
+      : { shadowed: new Set<string>(), undecided: new Set<string>() };
+    const notRepairedNow = new Set([...repairVerdicts.shadowed, ...repairVerdicts.undecided]);
+
     for (const { remote, key } of arriving) {
       if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       const local = oursMap.get(key);
@@ -281,15 +302,22 @@ export async function syncFiles(
         if (bases.get(key) !== remote.sha256) await recordSyncBase(spaceId, key, member.instanceId, remote.sha256);
         // The bytes are here, and "the same hash on both sides" is not "recorded": a file an earlier cycle (or release) stored and
         // did not record, or recorded and never processed, is brought up to date from what is on disk, a few per cycle.
-        const reason = local && repairs < MAX_FILE_REPAIRS_PER_CYCLE ? repairReasonOf(held.get(key), local.sha256, key) : null;
+        // A candidate the deletion question above shadowed or could not decide is not repaired and does not use the budget.
+        const reason = local && repairs < MAX_FILE_REPAIRS_PER_CYCLE && !notRepairedNow.has(key)
+          ? repairReasonOf(held.get(key), local.sha256, key) : null;
         if (local && reason) {
           try {
-            // Asked FIRST, as for an arrival: a path a delete is waiting to publish, or one that cannot be looked at, is not recorded
-            // again — repairing it would bring back a file the operator deleted.
-            const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: local.sha256 }]);
-            if (again.shadowed.has(key) || again.undecided.has(key)) continue;
             repairs++;
-            // No deliverer: nobody can be credited with bytes that were already here (`recordArrivedBytes`).
+            if (reason === 'missing_row') {
+              // Bytes with no row and a peer that offers the path: bytes whose record failed (today's pull takes such bytes back; an
+              // earlier release swallowed the failure and left them). A row inserted for them here would name this instance as
+              // their author and their deliverer, which a peer's file must never be (the derived-description guard and the
+              // authorless-placeholder test both read `author == this instance`). So they are taken back, and the next cycle delivers
+              // them as an ordinary arrival, with its true deliverer.
+              if (await removeUnrecordedBytes(spaceId, key)) countFileArrival('pull', 'repaired_missing_row');
+              continue;
+            }
+            // A row exists, so the author and deliverer it already has stay: only its size, hash and processing are brought up to date.
             await recordArrivedBytes(spaceId, key, { sizeBytes: local.size, sha256: local.sha256, door: 'pull', repair: reason });
             reportSpaceRecovered(REPAIR_STEP, spaceId, key);
           } catch (err) {
@@ -355,11 +383,16 @@ export async function syncFiles(
           });
         } catch (err) {
           if (err instanceof StreamVerificationError) {
-            log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}: ${err.code}`);
+            // A body that is not what the manifest declared (another hash, past its size, short of it): nothing was stored, the peer
+            // is asked again next cycle. Counted every time and said once per window, as the quota refusal and the record failure are:
+            // a peer that serves wrong bodies is otherwise a line per cycle for ever, and invisible on the counter.
+            countFileArrival('pull', 'refused_body');
+            sayPullFailure(BODY_STEP, spaceId, key, err);
             continue;
           }
           throw err;
         }
+        reportSpaceRecovered(BODY_STEP, spaceId, key);
         try {
           // The download took time, and a delete here may have begun since the cycle's first read: asked again, for this one path,
           // right before the bytes are written (one indexed read). Decided or not, a path a deletion covers is not written.
@@ -386,9 +419,9 @@ export async function syncFiles(
               // Bytes with no row naming them are skipped for ever by the next cycle (the same hash on both sides), and a row
               // inserted later for them would credit this peer with a file it may never have sent. So the bytes this call wrote
               // are removed (`removeUnrecordedBytes`, the one answer every door that writes bytes gives: it keeps them only when a
-              // live row still names the path, an overwrite), no base is written, and the next cycle delivers the file again with
+              // live row still names the path, an overwrite, or the lookup could not say), no base is written, and the next cycle delivers the file again with
               // its true deliverer (Q-254).
-              await removeUnrecordedBytes(spaceId, key, err);
+              await removeUnrecordedBytes(spaceId, key);
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }

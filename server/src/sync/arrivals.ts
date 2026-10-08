@@ -102,7 +102,7 @@ import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
-import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
+import { fileMetaUpdate, embedArrivedFiles, authoredKeysRestoreRemoves } from './file-meta-write.js';
 import { isLegacyReadSpill, isInstanceLocalFile } from './file-conflict.js';
 import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 import { fileKeyOf } from '../files/sandbox.js';
@@ -179,6 +179,12 @@ export interface ArrivalOutcome {
    * the restore brought back as the audit records they were, not as live rows.
    */
   flagKept: string[];
+  /**
+   * A RESTORE only: how many authored keys the rows that landed lost because their backup row lacks them (an export is a full
+   * record). Counted from the stored rows read before the write (`authoredKeysRestoreRemoves`), so a key the replaced row never had
+   * is not counted.
+   */
+  keysRemoved: number;
   /** The highest plausible seq received — what the counter has been bumped to at least. */
   maxReceived: number;
   /** Queue the landed records' embeddings, when `deferEnqueue` held it back; a no-op otherwise. */
@@ -371,7 +377,7 @@ export async function writeArrivals(
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], collapsed: [],
-    complete: [], unstored: [], flagKept: [], maxReceived: 0,
+    complete: [], unstored: [], flagKept: [], keysRemoved: 0, maxReceived: 0,
     enqueue: async () => {
       if (recordType === null || queued.length === 0) return;
       const batch = queued.splice(0);
@@ -436,6 +442,14 @@ export async function writeArrivals(
     [d._id, recordType === null || fillOnly ? {} as Doc : receiverStamps(d, recordType, space)]));
   const suppressed = new Set(recordType === null || fillOnly ? []
     : toWrite.filter(d => embeddingSuppressedFor(spaceId, recordType, d, meta)).map(d => d._id));
+  // A restore tells the operator what it removes: read BEFORE the write, which replaces the rows. A count is a diagnostic, so a read
+  // that fails leaves it unsaid and never fails the restore (the writes below fail, and say so, if the store is not answering).
+  const removable = family === 'files' && restore
+    ? await authoredKeysRestoreRemoves(spaceId, toWrite).catch((err: unknown) => {
+      log.debug(`${logSafe(where)}: the keys this restore removes could not be counted: ${logSafe(String(err))}`);
+      return new Map<string, number>();
+    })
+    : new Map<string, number>();
   const filterOf = (d: Doc): Record<string, unknown> => (restore ? { _id: d._id } : seqGuard(d._id, d.seq));
   const updateOf = (d: Doc): unknown => {
     const quiet = suppressed.has(d._id);
@@ -616,6 +630,7 @@ export async function writeArrivals(
     const flagged = toWrite.filter(d => d['deletedAt'] !== undefined).map(d => d._id);
     const landedIds = new Set([...out.inserted, ...out.updated]);
     out.flagKept = flagged.filter(id => landedIds.has(id));
+    out.keysRemoved = [...removable].reduce((n, [id, keys]) => n + (landedIds.has(id) ? keys : 0), 0);
   }
 
   warnArrivalsNotStored(where, spaceId, family, 'refused', out.refused);
