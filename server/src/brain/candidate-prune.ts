@@ -45,7 +45,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
@@ -127,7 +127,7 @@ async function pruneCandidateCollection(spaceId: string, suffix: (typeof CANDIDA
     // "gone" would delete a human dismissal. A flagged top-level row read as gone is the point — the finding it leaves
     // behind is the stranded one this module exists to remove.
     const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {},
-      { filter: recSuffix === 'files' ? NOT_A_FLAGGED_ROW : undefined });
+      { filter: notFlaggedIfFile(recSuffix) });
     existing.set(type, new Set(found.keys()));
   }
 

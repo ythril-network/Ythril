@@ -27,7 +27,7 @@ import { readRowsById } from '../db/read-by-id.js';
 import { collectionForRefKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
 import { readRecordsById, type RecordsById } from './walk-reads.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
@@ -219,7 +219,7 @@ export async function endpointRecordsByKind(
       // The walk's own node resolver: a flagged file is not a node, so an edge pointing at a deleted file reaches
       // nothing rather than emitting it. Per kind, since the collection is the kind's.
       const docs = await byId<{ _id: string }>(spaceCollection(mid, collectionForRefKind(kind)), [...ids],
-        { spaceId: mid, ...(kind === 'file' ? NOT_A_FLAGGED_ROW : {}) });
+        { spaceId: mid, ...notFlaggedIfFile(kind) });
       for (const d of docs) out.set(String(d['_id']), { doc: d as unknown as EndpointDoc, kind });
     }
   }

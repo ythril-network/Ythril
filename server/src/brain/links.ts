@@ -39,7 +39,7 @@
  * includes `link` for exactly this, and it is the reason that tuple exists rather than the knowledge one.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
 import { linksStartingFrom } from './link-adjacency.js';
@@ -252,7 +252,7 @@ async function sourceDoc(spaceId: string, suffix: string, id: string): Promise<R
   // A deleted file is not a link source: the read-back is what tells `addLink` the subject is there, and a flagged
   // row answering yes writes a link record off a file that is gone.
   return await col(`${spaceId}_${suffix}`)
-    .findOne(asFilter({ _id: id, spaceId, ...(suffix === 'files' ? NOT_A_FLAGGED_ROW : {}) })) as Record<string, unknown> | null;
+    .findOne(asFilter({ _id: id, spaceId, ...notFlaggedIfFile(suffix) })) as Record<string, unknown> | null;
 }
 
 /**

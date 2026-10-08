@@ -21,7 +21,7 @@
  */
 import { col, asFilter } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { NOT_A_FLAGGED_ROW } from '../../files/live-file-row.js';
+import { notFlaggedIfFile } from '../../files/live-file-row.js';
 import { readRecordsById, type RecordsById } from '../walk-reads.js';
 import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
@@ -80,7 +80,7 @@ export class ReadSet {
       // The batch door's twin of `missingRefs`: without the predicate a batch accepts a deleted file as a link
       // target where the single-write doors refuse it.
       const docs = await this.read<StoredRecord>(spaceCollection(this.spaceId, RECORD_COLLECTION[kind]), missing,
-        kind === 'file' ? { ...NOT_A_FLAGGED_ROW } : undefined);
+        (guard => guard && { ...guard })(notFlaggedIfFile(kind)));
       for (const id of missing) held.set(id, null);
       for (const d of docs) held.set(String(d._id), d);
     }

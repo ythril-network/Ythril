@@ -16,7 +16,7 @@
  */
 
 import { col, asFilter } from '../db/mongo.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { writeDerivedFields, type FileRowTier } from '../files/derived-fields.js';
 import type { SpacePart } from '../db/space-collection.js';
 import { embed } from './embedding.js';
@@ -174,7 +174,7 @@ export async function embedStoredRecord(
   // against the row anyway would write all three back onto the audit record of a deleted file. Per kind, because the
   // collection is the kind's, and the any-tier predicate because a chunk or caption row is a legitimate subject here.
   const doc = await col(collName).findOne(
-    asFilter({ _id: recordId, ...(recordType === 'file' ? NOT_A_FLAGGED_ROW : {}) })) as Record<string, unknown> | null;
+    asFilter({ _id: recordId, ...notFlaggedIfFile(recordType) })) as Record<string, unknown> | null;
   if (!doc) return 'gone';
   /** The version this job read: every write below lands on it or on nothing. */
   const asRead = asFilter(atReadSeq(recordId, readSeqOf(doc)));

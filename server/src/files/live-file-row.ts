@@ -46,3 +46,16 @@ export const LIVE_FILE_ROW = Object.freeze({
 export const NOT_A_FLAGGED_ROW = Object.freeze({
   deletedAt: Object.freeze({ $exists: false }),
 });
+
+/**
+ * The guard a read of a record of `kind` carries so a soft-deleted file's record is not found: {@link NOT_A_FLAGGED_ROW}
+ * for a file, nothing for any other kind. `kind` is the record kind (`'file'`) or its collection suffix (`'files'`) —
+ * both spellings reach the reads that ask, and a read that tested one while holding the other would silently skip the
+ * guard. Spread it into a filter (`{ ...notFlaggedIfFile(kind) }`) or pass it where a filter is optional.
+ *
+ * The one place the choice is made: `a-kind-chooses-the-flagged-row-guard-in-one-place` refuses a read that compares a
+ * kind with the file kind to pick the guard itself.
+ */
+export function notFlaggedIfFile(kind: string | undefined): typeof NOT_A_FLAGGED_ROW | undefined {
+  return kind === 'file' || kind === 'files' ? NOT_A_FLAGGED_ROW : undefined;
+}

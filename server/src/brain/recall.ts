@@ -44,7 +44,7 @@ import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { NOT_A_FLAGGED_ROW, notFlaggedIfFile } from '../files/live-file-row.js';
 import { MAX_PER_TYPE_CANDIDATES, perTypeFetch, floorFetch, annCandidates } from './search-bounds.js';
 
 /**
@@ -1235,7 +1235,7 @@ async function getEntryEmbedding(
   const doc = await col(collName).findOne(
     // A deleted file is not a seed: `similar` would answer with the neighbours of a file that is gone, or — where the
     // flag stripped its vector — with "not embedded yet, retry", which sends a caller back for ever.
-    asFilter({ _id: entryId, spaceId, ...(entryType === 'file' ? NOT_A_FLAGGED_ROW : {}) }),
+    asFilter({ _id: entryId, spaceId, ...notFlaggedIfFile(entryType) }),
     { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;

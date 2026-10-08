@@ -30,7 +30,7 @@
  */
 import { sanitizeFilter } from './query.js';
 import { andPredicates } from '../db/and-predicates.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { validateFilterExpression, buildMongoFilter, type FilterExpression } from './filter.js';
 
 /**
@@ -236,7 +236,7 @@ export function recallPredicate(
   return andPredicates(
     tags && tags.length > 0 ? { tags: { $all: tags } } : undefined,
     filter == null ? undefined : isRawFilter(filter) ? filter.__raw : buildMongoFilter(filter as FilterExpression),
-    knowledgeType === 'file' ? NOT_A_FLAGGED_ROW : undefined,
+    notFlaggedIfFile(knowledgeType),
   );
 }
 

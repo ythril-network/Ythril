@@ -141,7 +141,12 @@ function livePredicates() {
   const src = blankComments(readFileSync(join(REPO_ROOT, LIVE_MODULE), 'utf8'));
   const names = [...src.matchAll(/export const (\w+)\s*=\s*Object\.freeze\(/g)].map(m => m[1]);
   assert.ok(names.includes('LIVE_FILE_ROW'), `${LIVE_MODULE} no longer exports LIVE_FILE_ROW — re-anchor`);
-  return names;
+  // A function the module exports that RETURNS one of those predicates (`notFlaggedIfFile`) is a predicate too: a read
+  // that calls it carries the guard. Derived from what its body returns, so a helper that stops returning one drops out.
+  const fns = [...src.matchAll(/export function (\w+)\s*\([^)]*\)[^{]*\{([^}]*)\}/g)]
+    .filter(m => names.some(n => new RegExp(`\\breturn\\b[^;]*\\b${n}\\b`).test(m[2])))
+    .map(m => m[1]);
+  return [...names, ...fns];
 }
 const PREDICATES = livePredicates();
 

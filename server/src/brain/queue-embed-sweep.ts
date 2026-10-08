@@ -33,7 +33,7 @@ import { embeddingSuppressedFor, recordNotSuppressedFilter, RECORD_SUPPRESS_FIEL
 import { TYPE_FIELD } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import type { KnowledgeType } from '../config/types-knowledge.js';
 import type { BrainEmbedRecordType } from '../config/types.js';
 
@@ -141,7 +141,7 @@ function candidates(kind: BrainEmbedRecordType, match: SweepOptions['match']): R
    * `total` and `remaining` with work nobody asked for. The any-tier predicate, because a chunk or caption row is a
    * legitimate candidate — it is vacuous on one, which is correct: a flagged file's children go with it.
    */
-  const live = kind === 'file' ? NOT_A_FLAGGED_ROW : {};
+  const live = notFlaggedIfFile(kind) ?? {};
   if (match === 'vectorless') {
     const vectorless = { embedding: { $exists: false } };
     return kind === 'file' ? { ...vectorless, ...live, $or: [topLevel, derivedHasText] } : vectorless;

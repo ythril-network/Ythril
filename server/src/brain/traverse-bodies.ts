@@ -21,7 +21,7 @@
  */
 import { readRowsById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { collectionForRefKind } from './entity-refs.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
 import { RECALL_RECORD_DIAGNOSTICS, NEVER_RETURNED_FIELDS } from './recall-shape.js';
@@ -99,7 +99,7 @@ export async function withTraverseBodies(
       // A flagged file's body is not attached to a node: it would carry the path, description and tags the audit
       // record keeps into a walk's answer. Per kind, since the collection is the kind's.
       const docs = await readRowsById<IdDoc>(spaceCollection(space, collectionForRefKind(kind)), ids, 'all',
-        { filter: kind === 'file' ? NOT_A_FLAGGED_ROW : undefined });
+        { filter: notFlaggedIfFile(kind) });
       for (const d of docs) if (!nodeDocs.has(d._id)) nodeDocs.set(d._id, d);
     }),
     (async () => {
