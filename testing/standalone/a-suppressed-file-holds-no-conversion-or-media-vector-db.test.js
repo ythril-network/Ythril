@@ -174,7 +174,9 @@ const TIERS = {
   'nothing suppressed (control)': { space: OPEN, parent: {}, embedded: true },
   'record tier: the file itself is suppressed': { space: OPEN, parent: { suppressEmbeddings: true }, embedded: false },
   'space tier: the space suppresses everything': { space: QUIET, parent: {}, embedded: false },
-  'record false over a suppressing space (record > space)': { space: QUIET, parent: { suppressEmbeddings: false }, embedded: true },
+  // `false` means "not stated" and falls through to the tier below (04f-write-semantics.md, `recordSuppression`), so a
+  // suppressing space still wins over it: the record cannot re-embed what its space withholds.
+  'record false over a suppressing space (false is not stated)': { space: QUIET, parent: { suppressEmbeddings: false }, embedded: false },
   'the parent row is missing (fail closed)': { space: OPEN, parent: null, embedded: false },
 };
 

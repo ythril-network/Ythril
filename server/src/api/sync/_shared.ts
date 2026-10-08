@@ -80,6 +80,10 @@ export const IncomingFactDoc = z.object({
   forkOf: z.string().optional(),
 });
 
+/** How many authored keys, and how long a key name, a peer's `authoredKeys` may carry (a file has a handful today). */
+const MAX_AUTHORED_KEYS = 64;
+const MAX_AUTHORED_KEY_LENGTH = 64;
+
 /**
  * A file's METADATA as a peer sends it — only the AUTHORED fields. Fields derived from the local blob
  * (`sizeBytes`, `sha256`, `excerpt`, `embedding`, `chunkCount`, `embeddingStatus`, `conversionError`,
@@ -87,6 +91,18 @@ export const IncomingFactDoc = z.object({
  *
  * `.strict()` deliberately: an undeclared key fails the push with a 400 instead of being stripped, because
  * a stripped `parentFileId` would turn a chunk into a top-level file.
+ *
+ * **A key the sender REMOVED is a key its document lacks, and absence says nothing on its own** (`Q-256`). The merge
+ * only ever sets (`sync/file-meta-write.ts`), so an older sender's document means "these keys, and I have no word on
+ * the others". `authoredKeys` is the word: the authored keys the SENDER'S version knows (`FILE_META_AUTHORED_KEYS`), so
+ * a key listed and absent is a key removed, and a key it never heard of is left alone. It is wire control, never
+ * stored and never re-served as stored: every sender computes it afresh from what it holds. A peer that predates it
+ * REFUSES it (`.strict()`), which is why a push sends it only to a peer known to run the version that declares it
+ * (`sync/push-family.ts`).
+ *
+ * `tags` is optional for the same reason: an operator who removes the tags leaves a row with no `tags` key, and
+ * requiring one refused that file whole, so none of its other edits arrived either. An older receiver still requires
+ * it, so a push to one carries `tags: []` for a row that has none.
  */
 export const IncomingFileMetaDoc = z.object({
   // The path IS the id. Both are carried, as the document does.
@@ -95,10 +111,12 @@ export const IncomingFileMetaDoc = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   descriptionSource: z.enum(['generated', 'extracted']).optional(),
-  tags: z.array(z.string()).max(MAX_TAGS),
+  tags: z.array(z.string()).max(MAX_TAGS).optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */
   suppressEmbeddings: z.boolean().optional(),
+  /** The authored keys the sender's version knows — see above. Bounded: it is a peer's list, read once per document. */
+  authoredKeys: z.array(z.string().max(MAX_AUTHORED_KEY_LENGTH)).max(MAX_AUTHORED_KEYS).optional(),
   author: AuthorRefSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -515,6 +533,64 @@ const FILE_META_WIRE_KEYS = Object.keys(IncomingFileMetaDoc.shape);
 export function fileMetaForWire(doc: object): Record<string, unknown> {
   const src = doc as Record<string, unknown>;
   return Object.fromEntries(FILE_META_WIRE_KEYS.filter(k => src[k] !== undefined).map(k => [k, src[k]]));
+}
+
+/** What identifies and orders a file's metadata record: on the wire, never AUTHORED, never removable. */
+const FILE_META_IDENTITY_KEYS: readonly string[] = ['_id', 'spaceId', 'path', 'author', 'createdAt', 'updatedAt', 'seq', 'parentFileId'];
+
+/**
+ * What a document says ABOUT itself on the wire rather than a field of the record: consumed at admission, never stored,
+ * so never authored and never removable.
+ */
+export const FILE_META_WIRE_CONTROL_KEYS: readonly string[] = ['authoredKeys'];
+
+/**
+ * The AUTHORED keys of a file's metadata, as this version knows them — read out of the wire schema, never listed: the
+ * optional keys of `IncomingFileMetaDoc` less identity, order and the wire's own control keys. A key added to the schema is
+ * authored (and removable) from that release on; `sha256`, `sizeBytes`, `deletedAt` and every other local-only key are
+ * outside it by construction, because the schema does not declare them.
+ *
+ * A `Set`, not a list kept to match: a peer's names are checked against it (`has`), so no name a peer chooses reaches an
+ * update — `__proto__` and `constructor` included.
+ */
+export const FILE_META_AUTHORED_KEYS: ReadonlySet<string> = new Set(
+  Object.entries(IncomingFileMetaDoc.shape)
+    .filter(([k, schema]) => !FILE_META_IDENTITY_KEYS.includes(k) && !FILE_META_WIRE_CONTROL_KEYS.includes(k)
+      && schema.safeParse(undefined).success)
+    .map(([k]) => k));
+
+/**
+ * A file's metadata with the word that makes its ABSENCES mean something: the authored keys this version knows
+ * (`authoredKeys` on `IncomingFileMetaDoc`). Every SENDER applies it — a push to a peer that takes it, and the page and
+ * the read by id a peer pulls — relays included, so a removal made at A reaches C through B, who holds the document
+ * without the key and says so. Never stored: the receiver consumes it (`fileMetaUpdate`).
+ */
+export function withAuthoredKeys<T extends object>(wire: T): T & { authoredKeys: string[] } {
+  return { ...wire, authoredKeys: [...FILE_META_AUTHORED_KEYS] };
+}
+
+/**
+ * A file's metadata in the shape EVERY version accepts, for a peer not known to take `authoredKeys`: the keys it
+ * declares, and `tags: []` for a row with none — a v5.6.9 receiver requires `tags`, and refuses the document whole
+ * without it, which drops every other edit the push carried for the file. A file whose tags were removed reaches such a
+ * peer as an empty list, the one shape it can apply.
+ */
+export function fileMetaForOlderPeer(wire: Record<string, unknown>): Record<string, unknown> {
+  const { authoredKeys: _consumed, ...rest } = wire;
+  return rest['tags'] === undefined ? { ...rest, tags: [] } : rest;
+}
+
+/**
+ * The authored keys an arriving document REMOVES here: those its sender lists, that this version also authors, that the
+ * document lacks. A key the sender does not list is never touched (an older sender has no word on keys it never
+ * heard of), and a name that is not an authored key here (`sha256`, `deletedAt`, `$where`, anything) is never returned,
+ * whatever the list says.
+ *
+ * A RESTORE is a full record: every authored key its document lacks is removed, and it carries no list.
+ */
+export function removedFileMetaKeys(doc: Readonly<Record<string, unknown>>, { restore = false }: { restore?: boolean } = {}): string[] {
+  const listed = restore ? [...FILE_META_AUTHORED_KEYS] : Array.isArray(doc['authoredKeys']) ? doc['authoredKeys'] as unknown[] : [];
+  return [...new Set(listed)].filter((k): k is string => typeof k === 'string' && FILE_META_AUTHORED_KEYS.has(k) && doc[k] === undefined);
 }
 
 /**

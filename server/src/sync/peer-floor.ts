@@ -126,6 +126,27 @@ function parseable(v: string): boolean {
 }
 
 /**
+ * Is this peer KNOWN to run `since` or later? The one question every "send the new shape only to a peer that
+ * understands it" gate asks (a vote's bound signature, a file's removal list), so no site spells its own version
+ * comparison or its own reading of "no version".
+ *
+ * **Unknown, absent and unparseable are all OLD, so this answers `false`, and that is the opposite of
+ * `peerFloorRefusal` on purpose.** The floor protects the network from a peer that may mishandle data, and an
+ * unparseable claim is not evidence of being current, so it refuses. This is a gate on what we SEND: a peer we cannot
+ * show runs the newer version must get the shape every version accepts, because the newer one is refused by an older
+ * receiver (a strict schema discards the document, and the push counts it delivered). Failing open here would send
+ * every unknown peer a payload it may drop. Self is not a member and is the caller's own check.
+ *
+ * Takes the version string or the member that carries one, so a caller holding a `NetworkMember` is not made to
+ * unwrap it (and forget that `version` is optional).
+ */
+export function peerRunsAtLeast(versionOrMember: string | { version?: string | null } | null | undefined, since: string): boolean {
+  const version = typeof versionOrMember === 'string' ? versionOrMember : versionOrMember?.version;
+  if (typeof version !== 'string' || !parseable(version.trim())) return false;
+  return comparePeerVersions(version, since) >= 0;
+}
+
+/**
  * `null` if this peer may sync, otherwise the refusal to send back.
  *
  * **The message names both numbers on purpose.** The instance being refused is the one that has to be

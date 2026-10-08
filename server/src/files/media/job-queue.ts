@@ -20,6 +20,7 @@ import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
+import { setFileProcessingState } from '../processing-state.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -280,10 +281,7 @@ export async function enqueueTextJob(
 
   // Reflect pending status on the file meta record immediately so the UI
   // can show an "embedding" indicator without waiting for the worker.
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: id }),
-    { $set: { embeddingStatus: 'pending', updatedAt: now } },
-  ).catch(err => {
+  await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' }).catch(err => {
     log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
   });
 }
@@ -412,10 +410,7 @@ export async function completeJob(
     asFilter<MediaJobDoc>({ _id: fileId }),
     asUpdate<MediaJobDoc>({ $set: { status: 'complete', claimedAt: null, updatedAt: now } }),
   );
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: fileId }),
-    { $set: { embeddingStatus: fileEmbeddingStatus, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: fileEmbeddingStatus });
 }
 
 export async function failJob(
@@ -463,10 +458,7 @@ export async function failJob(
         },
       }),
     );
-    await fileCollection(spaceId).updateOne(
-      asFilter<FileMetaDoc>({ _id: fileId }),
-      { $set: { embeddingStatus: 'failed', mediaJobError: safeError || undefined, updatedAt: now } },
-    );
+    await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'failed', mediaJobError: safeError || undefined });
     log.warn(`Media job ${spaceId}/${fileId} exhausted retries: ${errorMessage}`);
   }
 }
@@ -814,10 +806,7 @@ export async function retryJob(
       },
     }),
   );
-  await fileCollection(spaceId).updateOne(
-    asFilter<FileMetaDoc>({ _id: fileId }),
-    { $set: { embeddingStatus: 'pending', mediaJobError: undefined, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
   // A manual retry must be picked up promptly — announce it, or the claim walk would not
   // probe this space until the next full scan (up to 30 s of the user staring at "pending").
   markSpaceMayHaveWork(spaceId);
@@ -843,10 +832,7 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
       $set: { status: 'pending', attempts: 0, lastError: null, claimedAt: null, claimableAfter: null, updatedAt: now },
     }),
   );
-  await fileCollection(spaceId).updateMany(
-    asFilter<FileMetaDoc>({ _id: { $in: failed.map(f => f._id) } }),
-    { $set: { embeddingStatus: 'pending', mediaJobError: undefined, updatedAt: now } },
-  );
+  await setFileProcessingState(spaceId, failed.map(f => f._id), { embeddingStatus: 'pending', mediaJobError: undefined });
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);
   return failed.length;

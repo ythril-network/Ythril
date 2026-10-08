@@ -15,7 +15,10 @@
  *
  * The read PROJECTS `LOCAL_ONLY_EXCLUSION`: a vector, its model name, `matchedText` and the retention stamps never travel
  * (the receiver strips them and the docs promise it), and they were the bulk of every batch. A file's metadata goes through
- * `fileMetaForWire` besides, which keeps only the keys the receiver's schema declares (`Q-69`).
+ * `fileMetaForWire` besides, which keeps only the keys the receiver's schema declares (`Q-69`), and then onto the wire the
+ * PEER takes (`FILE_META_REMOVAL_SINCE`): the authored keys this version knows, so a key removed here is removed there, or
+ * for a peer not known to take them, the older shape. A peer reporting the newer version that still refuses the page is
+ * offered it once more on the older wire and treated as older until its reported version changes (`push-refusals.ts`).
  *
  * ## `deliveredThrough` and `maxSeq` answer different questions
  *
@@ -32,19 +35,30 @@
  */
 import type { Document } from 'mongodb';
 import { peerSafeFetch } from './peer-fetch.js';
-import { reportPushRefusals } from './push-refusals.js';
+import {
+  reportPushRefusals, countPushRefusals, peerTakesWireSince, rememberRefusedTheNewerWire, warnOlderWire,
+} from './push-refusals.js';
 import { pushSeqRuns } from './push-seq-runs.js';
 import { LOCAL_ONLY_EXCLUSION } from './local-only-fields.js';
 import { truncationWarn, type TransferOutcome } from './watermark.js';
 import { readAfterSeq } from '../util/seq-keyset.js';
 import { andPredicates } from '../db/and-predicates.js';
-import { fileMetaForWire } from '../api/sync/_shared.js';
+import { fileMetaForWire, fileMetaForOlderPeer, withAuthoredKeys } from '../api/sync/_shared.js';
 import { log, peerText } from '../util/log.js';
 import type { ReplicatedFamily } from './replicated-families.js';
 import type { NetworkMember, FileMetaDoc } from '../config/types.js';
 
 /** Docs pushed per batch-upsert request (caps per-request payload size). */
 const PUSH_BATCH_SIZE = 200;
+
+/**
+ * The first release that declares `authoredKeys` and an optional `tags` on a file's metadata (`Q-256`; 5.7.0 is the
+ * next minor above every published 5.6.x). A peer known to run it or later is sent the removal list and the row as it
+ * is; any other — a lower version, none reported, one that does not parse, or one that refused the newer wire — is sent
+ * what every version accepts: no new key, and `tags: []` for a row with none. A released v5.6.9 receiver refuses a
+ * document with a key it does not declare, or without `tags`, and discards it while answering 200.
+ */
+export const FILE_META_REMOVAL_SINCE = '5.7.0';
 
 type Row = Document & { _id: string; seq: number; author?: { instanceId?: string } };
 
@@ -80,12 +94,34 @@ export async function pushFamily(o: {
       // the cursor is already past it" are a healthy cycle and a permanent data loss, and nothing else tells them apart.
       log.debug(`Push ${key} to ${peerText(peerLabel)} space '${peerText(spaceId)}': ${batch.length} doc(s) after seq `
         + `${outcome.deliveredThrough} (through ${batch[batch.length - 1]?.seq})`);
-      const resp = await peerSafeFetch(endpoint, {
+      // A file's metadata goes on the wire this peer takes (`Q-256`); every other family is sent as stored.
+      const newer = key === 'filemeta' && peerTakesWireSince(member, FILE_META_REMOVAL_SINCE);
+      if (key === 'filemeta' && !newer) warnOlderWire(member, FILE_META_REMOVAL_SINCE, 'file metadata');
+      const offer = (onNewerWire: boolean) => peerSafeFetch(endpoint, {
         ...o.requestInit(), method: 'POST',
-        body: JSON.stringify({ [key]: key === 'filemeta' ? batch.map(d => fileMetaForWire(d as unknown as FileMetaDoc)) : batch }),
+        body: JSON.stringify({ [key]: key === 'filemeta' ? batch.map(d => {
+          const wire = fileMetaForWire(d as unknown as FileMetaDoc);
+          return onNewerWire ? withAuthoredKeys(wire) : fileMetaForOlderPeer(wire);
+        }) : batch }),
       });
+      const resp = await offer(newer);
       if (!resp.ok) { await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
-      const r = await reportPushRefusals(resp, key, peerLabel, spaceId, batch.length);
+      let r: number;
+      if (!newer) r = await reportPushRefusals(resp, key, peerLabel, spaceId, batch.length);
+      else {
+        r = await countPushRefusals(resp, key, peerLabel, batch.length);
+        if (r > 0) {
+          // A peer that reports the newer version and refused documents may have been rolled back to one that refuses
+          // the keys it was sent. The peer says how many it dropped and not which, so the page is offered ONCE more on
+          // the wire every version takes (receivers keep the newer copy they hold, so a document that landed is a no-op).
+          // Refusals that stand on the older wire are the documents' own, and are reported as any push's.
+          const again = await offer(false);
+          if (!again.ok) { await again.body?.cancel().catch(() => {}); return `the peer answered ${again.status}`; }
+          const stood = await reportPushRefusals(again, key, peerLabel, spaceId, batch.length);
+          if (stood < r) { rememberRefusedTheNewerWire(member); warnOlderWire(member, FILE_META_REMOVAL_SINCE, 'file metadata'); }
+          r = stood;
+        }
+      }
       pushed += batch.length - r; refused += r; // Q-59: what the peer refused was not pushed
       for (const doc of batch) if (doc.author?.instanceId === o.instanceId && doc.seq > localMaxSeq) localMaxSeq = doc.seq;
       return null;

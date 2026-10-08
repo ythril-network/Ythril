@@ -53,6 +53,7 @@ import { applyDeleteFields } from '../brain/delete-fields.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
+import { isLocalFileField } from './processing-state.js';
 
 
 
@@ -67,16 +68,6 @@ import { spaceCollection } from '../db/space-collection.js';
  * On first write `createdAt` is set; subsequent writes update `updatedAt` and
  * `sizeBytes`.  `description`, `tags`, and `properties` are only updated when supplied.
  */
-/**
- * The fields this module writes that never replicate: derived from THIS instance's copy of the bytes (`Q-143`).
- *
- * A write that touches only these is not an authored write, so it advances neither `seq` nor `updatedAt`. Both are
- * how a file's metadata replicates and both are hashed: stamping them for local machinery made a receiver's copy
- * outrank the publisher's, so the publisher's next description edit was skipped on arrival, and it faked a Merkle
- * divergence on the way. A gate derives the ingest schema's keys and holds this set disjoint from them.
- */
-export const LOCAL_FILE_FIELDS: ReadonlySet<string> = new Set(['sizeBytes', 'sha256', 'excerpt']);
-
 export async function upsertFileMeta(
   spaceId: string,
   filePath: string,
@@ -420,11 +411,12 @@ export async function updateFileMeta(
 
   // `P-32`: the only writer of a file's three link arrays, its tags, its description and its properties —
   // every one of them authored, so a write touching any of them advances the space counter and pages the record to
-  // a peer. A write touching only LOCAL_FILE_FIELDS (the media worker's excerpt) is not authored and stamps nothing:
-  // on a receiver, a stamp made its copy outrank the publisher's next edit (`Q-143`).
+  // a peer. A write touching only local fields (`isLocalFileField`: what the hash does not see, such as the media
+  // worker's excerpt) is not authored and stamps nothing: on a receiver, a stamp made its copy outrank the publisher's
+  // next edit (`Q-143`).
   const linksGiven = opts.linkEntities !== undefined || opts.linkFacts !== undefined || opts.linkChronos !== undefined;
   const authored = linksGiven
-    || [...Object.keys($set), ...Object.keys($unset)].some(k => k !== 'updatedAt' && !LOCAL_FILE_FIELDS.has(k));
+    || [...Object.keys($set), ...Object.keys($unset)].some(k => k !== 'updatedAt' && !isLocalFileField(k));
   if (!authored) delete $set['updatedAt'];
   const write = (seq?: number) => {
     const set = seq === undefined ? $set : { ...$set, seq };

@@ -9,6 +9,7 @@
 import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { authorRef } from '../../config/author.js';
 import { embed } from '../../brain/embedding.js';
+import { storedFileEmbeddingSuppressed } from '../../brain/suppress-embeddings.js';
 import { getMediaEmbeddingConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -27,6 +28,9 @@ export async function embedImage(
   mimeType: string,
   vision: VisionProvider,
 ): Promise<string> {
+  // Asked ONCE for the job, at its entry. A suppressed file (or an image extracted from a suppressed document) keeps its
+  // caption as text and holds no vector; the embedder is asked nothing (Q-255).
+  const suppressed = await storedFileEmbeddingSuppressed(spaceId, fileId);
   const caption = await vision.caption(imageBytes, mimeType);
 
   // Hard guard: embedding input MUST be a string — never a raw vector
@@ -34,7 +38,7 @@ export async function embedImage(
     throw new Error('Vision provider returned a non-string or empty caption; refusing to embed');
   }
 
-  const embResult = await embed(caption);
+  const embResult = suppressed ? null : await embed(caption);
   const now = new Date().toISOString();
   const chunkId = `${fileId}#media-chunk0`;
 
@@ -52,8 +56,7 @@ export async function embedImage(
     // Store the caption text in `content` (parallel to text chunk records)
     content: caption,
     matchedText: caption,
-    embedding: embResult.vector,
-    embeddingModel: embResult.model,
+    ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
   };
 
   // Upsert: a retry may re-run this after a partial failure

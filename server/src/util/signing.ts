@@ -21,7 +21,7 @@
 import crypto from 'node:crypto';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
-import { comparePeerVersions } from '../sync/peer-floor.js';
+import { peerRunsAtLeast } from '../sync/peer-floor.js';
 import type { NetworkConfig, NetworkMember, VoteRound, VoteCast } from '../config/types.js';
 
 export interface InstanceKeypair {
@@ -357,9 +357,7 @@ function voterSignsBound(net: NetworkConfig, voterInstanceId: string): boolean {
   let selfId: string | undefined;
   try { selfId = getConfig().instanceId; } catch { selfId = undefined; }
   if (voterInstanceId === selfId) return true;
-  const v = net.members.find(m => m.instanceId === voterInstanceId)?.version;
-  if (!v || !/^\d+\.\d+\.\d+/.test(v.trim())) return false;
-  return comparePeerVersions(v, BOUND_CASTS_SINCE) >= 0;
+  return peerRunsAtLeast(net.members.find(m => m.instanceId === voterInstanceId), BOUND_CASTS_SINCE);
 }
 
 /**

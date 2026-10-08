@@ -26,6 +26,12 @@
  * the compiler holds complete); a key that is neither a wire key nor part of a file row is still refused, on both
  * doors alike — push and pull.
  *
+ * A file's document may carry `authoredKeys` (`Q-256`): the authored keys its sender's version knows, which is what makes
+ * an ABSENT key mean "removed". It is a declared key of the schema, so it is checked here (an array of short names, bounded)
+ * on every door, and then it travels with the admitted document to the one writer that reads it
+ * (`fileMetaUpdate`, `sync/file-meta-write.ts`): consumed there, never stored, and never served as stored. A name in it that
+ * is no authored key of this version is dropped there, so nothing a peer lists reaches an update unchecked.
+ *
  * **The stray-filemeta drain is not a door, and hands this its records' WIRE keys only** (`fileMetaForWire`, before
  * the call). Its records are rows an OLD pull stored whole, from senders of any version since 4.0, so a key that is
  * neither is a field a version since retired. Refused, the record would be deleted as answered and the publisher's

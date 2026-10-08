@@ -167,8 +167,13 @@ const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...D
  * hashed is caught by `a-replicated-field-reaches-its-incoming-schema.test.js`, which compares the two.
  *
  * **The two lists must name the same fields.** That gate is what says so.
+ *
+ * Exported because the complement is the other half of the rule: every `FileMetaDoc` key NOT named here is local to
+ * this instance, and `files/processing-state.ts` derives its local-only set from this list instead of keeping a second
+ * one (`Q-240`). Gates parse the declaration below from this file's source: keep its spelling, and do not write that
+ * spelling anywhere above it, comments included.
  */
-const FILE_HASH_PROJECTION = {
+export const FILE_HASH_PROJECTION = {
   _id: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
   properties: 1,
   suppressEmbeddings: 1,

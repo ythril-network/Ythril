@@ -46,7 +46,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-file-arrival-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-let mongo, meta, wire;
+let mongo, meta, wire, processing;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const stored = async () => await files().findOne({ _id: FILE });
@@ -73,6 +73,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     loader.loadConfig();
     meta = await import('../../server/dist/files/file-meta.js');
     wire = await import('../../server/dist/api/sync/_shared.js');
+    processing = await import('../../server/dist/files/processing-state.js');
   });
 
   after(async () => {
@@ -88,8 +89,10 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     // Derived from the ingest schema, so a field that starts replicating cannot stay on the local list unnoticed.
     const wireKeys = Object.keys(wire.IncomingFileMetaDoc.shape);
     assert.ok(wireKeys.length > 5, `the ingest schema declares ${wireKeys.length} keys — nothing is being checked`);
-    const local = [...(meta.LOCAL_FILE_FIELDS ?? [])];
-    assert.ok(local.length > 0, 'file-meta.ts exports no LOCAL_FILE_FIELDS');
+    // The set is DERIVED (FileMetaDoc keys the divergence hash does not see), so the floor says it is not empty.
+    const local = [...(processing.localFileFields?.() ?? [])];
+    assert.ok(local.length >= 10, `processing-state.ts derives ${local.length} local file field(s)`);
+    for (const k of ['sizeBytes', 'sha256', 'excerpt', 'embeddingStatus']) assert.ok(local.includes(k), `${k} is not local`);
     for (const f of local) assert.ok(!wireKeys.includes(f), `${f} is on the local list and also replicates`);
   });
 

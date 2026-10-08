@@ -9,6 +9,21 @@
  * size and hash for bytes this instance derived itself, so the authored keys are `$set` and nothing is `$unset` that
  * the sender merely did not mention — an older peer cannot erase a field it does not know.
  *
+ * ## What is removed, and only by the sender's word (`Q-256`)
+ *
+ * Absence on its own says nothing, so the merge never removed an authored key, and a key the operator REMOVED at the
+ * publisher (a description, its source, the properties, the tags, a suppression mark) stayed on every other instance
+ * for ever, hashed on both and different. A sender now lists the authored keys its version knows (`authoredKeys`, which
+ * is consumed here and never stored), and the SAME update `$unset`s each key that is listed, that this version also
+ * authors, and that the document lacks (`removedFileMetaKeys`). Three things keep that from erasing more than was said:
+ *  - **a key the sender does not list is never touched** — an older sender has no word on keys it never heard of, and
+ *    no list at all (an older sender, the stray drain) removes nothing;
+ *  - **a name that is no authored key here is never unset**, whatever the list says — the check is against the set
+ *    this version derives from its own wire schema, so `sha256`, `sizeBytes`, `deletedAt` and the rest of what this
+ *    instance holds about its own bytes are out of reach, and no name a peer picks reaches the update;
+ *  - **the write guard is the arrival writer's own**: a copy that loses on its seq is not written at all, removal included.
+ * A RESTORE carries no list because an export is a full record: every authored key its document lacks is removed.
+ *
  * ## What each copy had dropped
  *
  * The merge was written twice — the arrival writer's per-document `ingestFileMeta` and the stray drain's
@@ -38,6 +53,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
+import { removedFileMetaKeys } from '../api/sync/_shared.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { carriedFields, stampOfArrival, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
@@ -60,8 +76,9 @@ export interface FileMetaUpdateOptions {
 }
 
 /**
- * The update PIPELINE that merges an arriving file's authored keys into its row — see the module docblock. `doc` is
- * the document as the writer prepared it: wire keys only, plus, on a restore, the backup's record-tier fields.
+ * The update PIPELINE that merges an arriving file's authored keys into its row, and removes those its sender says
+ * were removed — see the module docblock. `doc` is the document as the writer prepared it: wire keys only, plus, on a
+ * restore, the backup's record-tier fields. One update per document, whatever it removes.
  */
 export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: FileMetaUpdateOptions = {}): object[] {
   const { defaults = {}, restore = false, suppressed = false } = opts;
@@ -70,7 +87,8 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   const carried = carriedFields({ restore, suppressed });
   const set: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(doc)) {
-    if (k === '_id' || v === undefined || LOCAL_ONLY_FIELDS.has(k)) continue;
+    // `authoredKeys` is wire control: read below for what it removes, and never written to the row.
+    if (k === '_id' || k === 'authoredKeys' || v === undefined || LOCAL_ONLY_FIELDS.has(k)) continue;
     set[k] = { $literal: v };
   }
   for (const f of LOCAL_ONLY_FIELDS) {
@@ -86,7 +104,8 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   // Who delivered THIS version: its own step, after the loop above, so no carried value can stand in for it.
   // Absent for a caller that is not an arrival from a peer (the stray drain's fill): the stored stamp is left alone.
   if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
-  return [{ $set: set }];
+  const removed = removedFileMetaKeys(doc, { restore });
+  return removed.length > 0 ? [{ $set: set }, { $unset: removed }] : [{ $set: set }];
 }
 
 /** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */

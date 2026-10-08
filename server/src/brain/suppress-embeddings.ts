@@ -2,6 +2,8 @@ import { TYPE_FIELD } from './ttl.js';
 import type { KnowledgeType, BrainEmbedRecordType } from '../config/types.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { RECORD_SUPPRESS_FIELD, parseRecordFlag } from './record-flag.js';
+import { col, asFilter } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * Should this record be embedded at all?
@@ -200,4 +202,71 @@ export function embeddingSuppressedFor(
       : meta?.typeSchemas?.[knowledgeType]?.[schemaKey],
     space: meta?.suppressEmbeddings === true,
   });
+}
+
+/** How far up `parentFileId` a derived record looks for its owner. A caption chunk of an image extracted from a
+ *  document is two levels down; nothing is deeper. */
+export const MAX_ANCESTRY = 3;
+
+/**
+ * Whether a derived record's ANCESTORS say its embeddings are suppressed — the half of {@link fileEmbeddingSuppressed}
+ * that reads other rows.
+ *
+ * A chunk carries no flag of its own: its owner set one on the file. Read only one level up, the caption chunk of an
+ * image extracted from a suppressed document would still embed, because the extracted image is the parent and the
+ * document is the grandparent. A missing ancestor counts as suppressed — fail closed, because the alternative sends
+ * the passage to an embedder that may be external, against a choice nobody can see any more.
+ */
+async function ancestorSuppressed(spaceId: string, file: Record<string, unknown>): Promise<boolean> {
+  let parentId = file['parentFileId'];
+  for (let depth = 0; depth < MAX_ANCESTRY && typeof parentId === 'string'; depth++) {
+    const parent = await col(spaceCollection(spaceId, 'files')).findOne(
+      asFilter({ _id: parentId }),
+      { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
+    ) as Record<string, unknown> | null;
+    if (!parent) return true;
+    if (recordSuppression(parent) === true) return true;
+    parentId = parent['parentFileId'];
+  }
+  return false;
+}
+
+/**
+ * Would this FILE row hold a vector? The one answer for every writer of a vector onto a file row: the embed queue
+ * (`embedStoredRecord`) and the producers that turn a file into passages (`storeConversionResults`, the image, audio
+ * and video embedders), through {@link storedFileEmbeddingSuppressed}.
+ *
+ * ## What this prevents
+ *
+ * `suppressEmbeddings` is implemented AS the absence of a vector. The queue honoured it, and the four producers
+ * above did not (Q-255): a file the operator had retired from meaning-ranked search kept a vector on every passage its
+ * conversion or media job produced — found by exactly the mechanism the flag exists to switch off, and sent to an
+ * embedder that may be external. The ancestor walk lived privately in the queue, so a producer that wanted it would
+ * have written a second copy; it is here, once.
+ *
+ * A file has TWO tiers (record, space) — no type, so no type schema — which `embeddingSuppressedFor` already
+ * resolves for `'file'`. On top of that a DERIVED row (a chunk, a converted or extracted copy, a caption chunk) is
+ * suppressed when any ancestor is, up to {@link MAX_ANCESTRY}, or when an ancestor is missing.
+ *
+ * @param file the file row, or the fields a decision reads: its own `suppressEmbeddings` and its `parentFileId`.
+ */
+export async function fileEmbeddingSuppressed(spaceId: string, file: Record<string, unknown>): Promise<boolean> {
+  if (embeddingSuppressedFor(spaceId, 'file', file)) return true;
+  return typeof file['parentFileId'] === 'string' && await ancestorSuppressed(spaceId, file);
+}
+
+/**
+ * {@link fileEmbeddingSuppressed} for the file a JOB was claimed for, which is all a producer is given: its id.
+ *
+ * The row is read HERE, so a producer cannot decide from a copy it kept across the job. **A row that is not there
+ * counts as suppressed** — the same fail-closed rule as a missing ancestor — and is not an embed failure: the job
+ * did nothing wrong and a retry could not change it. A producer asks ONCE at its entry (one job, one answer), never
+ * per chunk or per segment.
+ */
+export async function storedFileEmbeddingSuppressed(spaceId: string, fileId: string): Promise<boolean> {
+  const row = await col(spaceCollection(spaceId, 'files')).findOne(
+    asFilter({ _id: fileId }),
+    { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
+  ) as Record<string, unknown> | null;
+  return row === null || await fileEmbeddingSuppressed(spaceId, row);
 }

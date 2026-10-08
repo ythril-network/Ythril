@@ -66,8 +66,11 @@ const SEQ_NEW = 9;
 const NEWER = '99.0.0';
 const OLD_VERSIONS = [undefined, '5.6.9'];
 
-/** What is wired and never an authored key: the identity and the order of a record (plan D3). */
-const NOT_AUTHORED = ['_id', 'spaceId', 'path', 'author', 'createdAt', 'updatedAt', 'seq', 'parentFileId'];
+/**
+ * What is wired and never an authored key: the identity and the order of a record, and the wire's own word about the
+ * document (`authoredKeys`, consumed at admission, never stored) (plan D3).
+ */
+const NOT_AUTHORED = ['_id', 'spaceId', 'path', 'author', 'createdAt', 'updatedAt', 'seq', 'parentFileId', 'authoredKeys'];
 /** What the receiver derived from its own bytes, and a removal must never touch. */
 const LOCAL = { sizeBytes: 4242, sha256: 'f'.repeat(64) };
 /** Everything authored a publisher's first version carried. */
