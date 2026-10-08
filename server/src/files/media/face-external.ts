@@ -7,7 +7,7 @@ import { log } from '../../util/log.js';
 import { egressConsented } from '../../config/egress-consent.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { bodyAroundImage } from './image-body.js';
-import type { ImageSource } from './providers.js';
+import type { ImageSource } from './image-source.js';
 import { getModelSlots } from '../../config/loader.js';
 
 /** One detected face, in exactly the shape the in-process recogniser produces. */

@@ -130,7 +130,7 @@ let captionOf, transcribeOf;
 
 const vision = { caption: async (image, mime) => { visionCalls.push({ image, mime }); return captionOf(image, mime, visionCalls.length); } };
 /**
- * The image a `caption` call was handed, as bytes, whichever of the two shapes it came in (`providers.ts :: ImageSource`).
+ * The image a `caption` call was handed, as bytes, whichever of the two shapes it came in (`image-source.ts :: ImageSource`).
  *
  * Which shape it is matters and each case says so itself: a stored file is a path, a keyframe ffmpeg has just written
  * is bytes. This only answers "is it the right picture".

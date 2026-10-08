@@ -25,7 +25,7 @@
  */
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
-import { imageSourceSize, type ImageSource } from './providers.js';
+import { imageSourceSize, type ImageSource } from './image-source.js';
 
 /** The encoded length of `n` bytes of base64, which is exact and not an estimate. */
 export function base64Length(n: number): number {
