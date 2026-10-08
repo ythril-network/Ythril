@@ -84,6 +84,16 @@ first one did complete; check the file list before deleting again.
 
 **Status & tags:** each file row also shows its **embedding status** (a pill: *Embedded*, *Embedding*, *Partial*, *Failed*, *Skipped*…) and its **tags**, pulled from the file's metadata — so a space's file-processing state is visible right in the list. (This is the file manager and the *File Meta* tab coming together into one view.)
 
+**What the pills mean, and the two that are easy to misread:**
+
+| pill | what happened |
+|---|---|
+| *Embedded* | fully indexed; the file is findable by meaning |
+| *Embedding* | work in progress — a stage bar replaces the pill while it runs (below) |
+| *Partial* | **some of it is findable and some is not.** A long recording whose transcription failed for a few of its pieces, or a document where some pages did not convert. The file stays retry-eligible, so **Retry** is worth pressing |
+| *Failed* | nothing was indexed and the reason was not a refusal — most often a file whose stored bytes could not be read. Retrying reads the same bytes, so a *Failed* file usually needs the cause fixed first |
+| *Skipped* | **nothing was indexed because Ythril declined, not because anything broke.** Either the file is larger than the instance's size limit, or this kind of media is switched **Off** for the space (Settings → Media Processing). The file itself is stored and downloadable either way — only the indexing was skipped |
+
 **While a file is being processed**, the Status column shows a **stage bar** instead of the pill: a segment
 per stage of *that file's own route* — a PDF might run render → VLM → repair, an audio file transcribe →
 embed, a video transcribe → caption → embed — with

@@ -78,6 +78,22 @@ three; on it, `medium` cuts the wait by about a third.
 If you have a second model, pointing the slot at one that does not think is better still. This setting is for
 when you have one model and need it to answer faster.
 
+### What a long recording or a large picture costs the machine
+
+**A job works on a piece at a time, not on the whole file.** A recording is cut at its silences into segments of
+**at most 5 minutes** each — so an hour of unbroken speech becomes at least twelve pieces, not one — and a video's
+keyframes are captioned one frame at a time. The machine therefore needs room for the largest piece, not for the
+largest file, and a 2 GB video does not need 2 GB of memory to index.
+
+**One exception, and it is the one worth sizing for: face recognition.** Finding faces needs the whole picture
+decoded into pixels, which is about `width × height × 4` bytes — roughly 200 MB for a 50-megapixel photo,
+whatever the file on disk weighs. If you turn face recognition on and your users upload large photographs, that
+is the number to give the machine.
+
+**How many run at once is `workerConcurrency`**, on this screen, and it is **2** unless your infrastructure
+administrator pinned it. Multiply by the figures above to size the machine. Raising it does not make one file index
+faster — it indexes more files at the same time, and each one wants its own room.
+
 ### Locked fields
 
 Fields shown with an **env** badge cannot be changed from the UI — they are pinned by an environment variable set by your infrastructure administrator. This is normal in managed deployments where credentials are injected by Kubernetes secrets or similar.

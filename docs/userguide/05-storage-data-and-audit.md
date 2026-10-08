@@ -162,6 +162,11 @@ There is no setting in the UI — the secret is the switch.
 - **Syncing to another instance sends the file itself**, and that instance stores it by its own setting — two
   instances in one network do not need the same secret.
 - **What stays readable on disk:** file and folder names, and roughly how large each file is.
+- **Indexing an encrypted file needs disk, briefly.** To read a picture, a recording or a document, the indexer first
+  writes itself a decrypted copy in the storage folder's own scratch area, and removes it when the job ends. So leave
+  room for one copy of your largest file for each indexing job that can run at once — that number is
+  `workerConcurrency` under Settings → Media Processing. Files stored WITHOUT a master secret need no copy at all. A
+  leftover copy from a server that was killed mid-job is cleared the next time the server starts.
 
 The server's security report (`GET /api/about/security`, and the boot log) shows the state as `atRest.files`. The
 full operator reference, including rollback and Kubernetes notes, is
