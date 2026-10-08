@@ -35,7 +35,7 @@ import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import {
-  resolveMasterSecret, deriveKey, resetChunkedKeyCache, encryptChunked, decryptChunked, isChunkedEnvelope,
+  resolveMasterSecret, deriveKey, resetChunkedKeyCache, encryptChunked, isChunkedEnvelope,
   chunkedHeaderLength, chunkedPlaintextSizeFor, createChunkedEncryptor, createChunkedDecryptor, checkChunkedKey,
   ChunkedEnvelopeError, CHUNKED_MAX_HEADER_BYTES, type DerivedKey, type MasterSecret,
 } from '../config/secretbox.js';
@@ -460,9 +460,35 @@ const unreadable = (abs: string, err: unknown): unknown =>
 
 /** Read a whole stored file as plaintext. Throws {@link StoredFileUnreadable} when it cannot be decoded. */
 export async function readStored(abs: string): Promise<Buffer<ArrayBuffer>> {
-  const bytes = await fsp.readFile(abs);
-  if (!isChunkedEnvelope(bytes)) return bytes;
-  try { return decryptChunked(bytes, activeSecret()); } catch (err) { throw unreadable(abs, err); }
+  const { size, encrypted } = await statStored(abs);
+  // Plaintext: the platform's own read is already one buffer of the file's size.
+  if (!encrypted) return await fsp.readFile(abs);
+  /*
+   * ONE buffer, sized before the bytes arrive (`Q-425`). This used to read the whole ciphertext, decrypt it into an
+   * array of chunks and concatenate them — three copies of the file for a function whose answer is one of them, which
+   * is 2.40x measured on a 96 MiB file. Now the decryptor streams into a buffer the size the envelope promises.
+   *
+   * `alloc`, not `allocUnsafe`: a buffer sized from a stat can only be got wrong one way, by returning it when LESS
+   * than its length was decrypted, and `allocUnsafe` would then hand the caller whatever the heap held. Zeros would
+   * be a quieter version of the same lie, so the count is checked as well and a short or over-long decrypt is
+   * `StoredFileUnreadable` — the same answer a flipped bit gets.
+   */
+  const out = Buffer.alloc(size);
+  const stream = await openStoredRead(abs);
+  let at = 0;
+  try {
+    for await (const chunk of stream) {
+      const c = chunk as Buffer;
+      if (at + c.length > size) throw new Error(`decrypted more than the ${size} byte(s) the envelope promised`);
+      c.copy(out, at);
+      at += c.length;
+    }
+  } catch (err) {
+    stream.destroy();
+    throw err instanceof StoredFileUnreadable ? err : unreadable(abs, err);
+  }
+  if (at !== size) throw unreadable(abs, new Error(`decrypted ${at} of the ${size} byte(s) the envelope promised`));
+  return out;
 }
 
 /** A plaintext stream of a stored file, whatever its size. Errors with {@link StoredFileUnreadable}. */

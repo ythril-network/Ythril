@@ -43,8 +43,12 @@ const BODY = crypto.randomBytes(300 * 1024);
 
 /** The body, as a stream that can be read once: what a streamed upload is. */
 const oneShotBody = () => Readable.from((function* () { for (let i = 0; i < BODY.length; i += 65536) yield BODY.subarray(i, i + 65536); })());
-/** THE line to change when `ssrfSafeFetch` takes a body factory: hands BODY in, in the form under test. */
-const bodyInput = (form) => (form === 'stream' ? oneShotBody() : Buffer.from(BODY));
+/**
+ * THE line the docblock said would change when `ssrfSafeFetch` took a body factory. It has: a streaming caller hands in
+ * a FUNCTION returning a fresh body, and each hop calls it. The one-shot stream is still what the function returns —
+ * the point is that the second hop gets a NEW one, not the first hop's.
+ */
+const bodyInput = (form) => (form === 'stream' ? () => oneShotBody() : Buffer.from(BODY));
 
 /** Read a hop's body the way a socket would: to its end, whatever form it is in. */
 async function readBody(body) {

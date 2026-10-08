@@ -103,7 +103,10 @@ describe('every start of ffmpeg under server/src is bounded and can be killed', 
 
   it('every site is bounded', () => {
     const sites = readTrackedSources(['server/src'], { floor: 100 }).flatMap(({ file, text }) => ffmpegStartSites(file, text));
-    assert.ok(sites.length >= 2, `only ${sites.length} ffmpeg start(s) found: the scan is looking in the wrong place (the unchanged code has two)`);
+    // The floor is ONE since bundle-89, and the reason is the fix: the two wrappers were line for line the same and
+    // became one (`files/media/ffmpeg.ts`). A floor of two would now fail for the opposite of the defect it guards —
+    // and the rule below is what matters, since it holds every site the scan finds, however many that becomes.
+    assert.ok(sites.length >= 1, `only ${sites.length} ffmpeg start(s) found: the scan is looking in the wrong place`);
     const unbounded = sites.filter(s => !s.bounded).map(s => `${s.key} (${s.why})`);
     assert.deepEqual(unbounded, [],
       'ffmpeg is started here with no timeout and no kill: a wedged process holds a worker slot until the stall floor, and recovery starts a second one beside it');

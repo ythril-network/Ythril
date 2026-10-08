@@ -67,6 +67,7 @@ import {
 } from '../../metrics/registry.js';
 import { stallTimeoutWithWarning } from './stall-floor.js';
 import { worstRenderWindowMs } from '../converters/render-budget.js';
+import { FFMPEG_STEP_TIMEOUT_MS } from './transcode.js';
 import { providerHopMs } from './providers.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
@@ -151,6 +152,10 @@ function hopBudgets(): Record<string, number | undefined> {
     // derived value, so the value now has a name (`render-budget.ts`) that both the call site and this list
     // use. `renderWindowMs` rather than a config key on purpose: it is what the detector must not fire inside.
     renderWindowMs: worstRenderWindowMs(doc),
+    // One ffmpeg step, bounded by the one wrapper that starts it (`files/media/ffmpeg.ts`). It is here for the same
+    // reason `renderWindowMs` is: a step the detector can fire inside is a job re-queued in the middle of work it was
+    // allowed to do, which reaches the same step again.
+    ffmpegStepMs: FFMPEG_STEP_TIMEOUT_MS,
     /*
      * The media provider calls, as CHAINS rather than as legs.
      *

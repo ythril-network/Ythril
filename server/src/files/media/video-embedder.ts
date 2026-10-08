@@ -9,7 +9,7 @@
  *      temporally, then re-embed the combined text.
  */
 
-import { spawn } from 'child_process';
+import { runFfmpeg } from './transcode.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
@@ -26,25 +26,9 @@ const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
-function ffmpegSpawn(args: string[]): Promise<{ stdout: Buffer; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const stdout: Buffer[] = [];
-    const stderrChunks: string[] = [];
-    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    proc.stdout.on('data', (d: Buffer) => stdout.push(d));
-    proc.stderr.on('data', (d: Buffer) => stderrChunks.push(d.toString()));
-    proc.on('error', reject);
-    proc.on('close', code => {
-      const stderr = stderrChunks.join('');
-      if (code !== 0) reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
-      else resolve({ stdout: Buffer.concat(stdout), stderr });
-    });
-  });
-}
-
 /** Extract audio track to a temporary WAV file. Returns the path. */
 async function extractAudioTrack(videoPath: string, outPath: string): Promise<void> {
-  await ffmpegSpawn([
+  await runFfmpeg([
     '-i', videoPath,
     '-vn',
     '-acodec', 'pcm_s16le',
@@ -55,6 +39,15 @@ async function extractAudioTrack(videoPath: string, outPath: string): Promise<vo
 }
 
 /** Extract keyframe JPEG bytes at regular intervals. Returns array of { timestampS, jpegBytes }. */
+/**
+ * The most frames one keyframe pass may extract, however long the video is.
+ *
+ * A CHOSEN ceiling rather than a measured one, and a generous one: at one frame per 30 s it is more than eight hours of
+ * video, so nothing an operator uploads to be captioned hits it by accident — while the twelve-hour recording that used
+ * to ask for 1 440 frames, and caption every one of them in a single step, is bounded.
+ */
+const MAX_KEYFRAMES = 1000;
+
 async function extractKeyframes(
   videoPath: string,
   tmpDir: string,
@@ -64,10 +57,15 @@ async function extractKeyframes(
   const pattern = path.join(tmpDir, 'frame_%06d.jpg');
   // fps=1/{intervalS} selects one frame per interval
   // select='eq(pict_type,I)' additionally prefers I-frames (ignored when fps is used)
-  await ffmpegSpawn([
+  //
+  // `-frames:v` is the BOUND, and it is ffmpeg's own: one frame per interval over the whole video is 1 440 JPEGs for a
+  // twelve-hour recording — every one of them read into one array, and every one of them a vision call in a single job
+  // step. Capping after the extraction would still have written them all to disk, so the cap is the ask.
+  await runFfmpeg([
     '-i', videoPath,
     '-vf', `fps=1/${intervalS}`,
     '-vsync', 'vfr',
+    '-frames:v', String(MAX_KEYFRAMES),
     '-q:v', '4',
     pattern,
   ]).catch(err => {

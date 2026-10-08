@@ -59,7 +59,11 @@ describe('ffmpeg is only ever a separate process', () => {
 
   it('found the code that uses ffmpeg (guards against a vacuous pass)', () => {
     // If a refactor reduced this to zero, every assertion below would pass by examining nothing.
-    assert.ok(touching.length >= 2, `expected ffmpeg use in at least 2 files, found ${touching.length}`);
+    // ONE file since bundle-89, and that is the fix rather than a loss of coverage: the audio and the video embedder
+    // had a wrapper each, line for line the same and neither bounded, and they became `files/media/transcode.ts`. The
+    // floor is what stops a vacuous pass, so it follows the code down; the rule below still holds every file that
+    // names the binary, however many there come to be.
+    assert.ok(touching.length >= 1, `expected ffmpeg use in at least 1 file, found ${touching.length}`);
   });
 
   it('every invocation is a child process, never a linked module', () => {

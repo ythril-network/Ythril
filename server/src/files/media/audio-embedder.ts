@@ -11,7 +11,7 @@
  *   5. Store one FileMetaDoc chunk record per segment.
  */
 
-import { spawn } from 'child_process';
+import { runFfmpeg } from './transcode.js';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -28,28 +28,11 @@ import { upsertDerivedFileRow } from '../derived-fields.js';
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
 /**
- * Run ffmpeg with the given args and return { stdout, stderr }.
- * Rejects if ffmpeg exits non-zero.
+ * The longest audio a single segment may carry, in seconds — the number the chunk loop's own comment has promised all
+ * along. A CHOSEN bound, not a measured one: five minutes of speech is a transcription call of a size every provider
+ * takes, and a segment is read into memory twice on its way to one.
  */
-function ffmpeg(args: string[]): Promise<{ stdout: Buffer; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const stdout: Buffer[] = [];
-    const stderrChunks: string[] = [];
-
-    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    proc.stdout.on('data', (d: Buffer) => stdout.push(d));
-    proc.stderr.on('data', (d: Buffer) => stderrChunks.push(d.toString()));
-    proc.on('error', reject);
-    proc.on('close', code => {
-      const stderr = stderrChunks.join('');
-      if (code !== 0) {
-        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
-      } else {
-        resolve({ stdout: Buffer.concat(stdout), stderr });
-      }
-    });
-  });
-}
+const MAX_SEGMENT_S = 300;
 
 interface SilenceBoundary {
   start: number;  // seconds
@@ -107,7 +90,28 @@ function silencesToChunks(
   if (chunks.length === 0) {
     chunks.push({ startS: 0, endS: totalDurationS });
   }
-  return chunks;
+  return chunks.flatMap(c => splitToCap(c));
+}
+
+/**
+ * Cut one span into pieces no longer than {@link MAX_SEGMENT_S}, covering all of it.
+ *
+ * A silence is what the segmenter looks for, and a recording can simply not have one: a lecture, a meeting, music, a
+ * phone call. Those became ONE segment of the whole recording, which is then extracted to a wav, read whole into a
+ * buffer and copied again into a request body — the memory this bundle is about, on the commonest input rather than a
+ * corner case. The 300 s the comment above the loop promised was never in the code.
+ *
+ * Covering all of it is the half to be careful about: a cap that drops audio is not a cap, it is a loss. The last piece
+ * ends where the span ended, whatever that leaves it shorter by.
+ */
+function splitToCap(c: { startS: number; endS: number }): Array<{ startS: number; endS: number }> {
+  const span = c.endS - c.startS;
+  if (span <= MAX_SEGMENT_S) return [c];
+  const out: Array<{ startS: number; endS: number }> = [];
+  for (let at = c.startS; at < c.endS; at += MAX_SEGMENT_S) {
+    out.push({ startS: at, endS: Math.min(at + MAX_SEGMENT_S, c.endS) });
+  }
+  return out;
 }
 
 /**
@@ -130,7 +134,7 @@ function applyOverlap(
 
 /** Get duration of an audio/video file in seconds using ffprobe. */
 async function getDurationSeconds(filePath: string): Promise<number> {
-  const result = await ffmpeg([
+  const result = await runFfmpeg([
     '-i', filePath,
     '-f', 'null', '-',
   ]).catch(err => {
@@ -156,7 +160,7 @@ async function extractSegment(
   outPath: string,
 ): Promise<void> {
   const duration = endS - startS;
-  await ffmpeg([
+  await runFfmpeg([
     '-ss', String(startS),
     '-t', String(duration),
     '-i', inputPath,
@@ -225,7 +229,7 @@ export async function embedAudio(
     }
 
     // Step 2: silence detection
-    const { stderr } = await ffmpeg([
+    const { stderr } = await runFfmpeg([
       '-i', inputPath,
       '-af', 'silencedetect=n=-30dB:d=0.5',
       '-f', 'null', '-',
