@@ -226,6 +226,10 @@ Content-Type: application/json
 { "from": "reports/draft.docx", "to": "reports/final.docx" }
 ```
 
+A move carries what belongs to the path: the metadata, the derived records, the conversion sidecars (`_converted/<id>.md`
+and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing
+beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never touched by the file's move.
+
 #### A file is identified by its PATH, and that is the one record type where it is
 
 Entities, facts, edges and chrono entries all carry a UUID. **A file's metadata record does not**: its
@@ -348,7 +352,7 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   pull — is refused it exactly as the file would be: `200 { "tombstoned": true }` at the byte door, no download from a
   manifest, counted as `tombstoned` in a metadata batch. The deciding tombstone is the **parent's**, and it counts when it erased
   content here (it carries the hash of the file it removed — one stored for a path nobody held does not shadow anything) and the
-  file has not been re-created since (a live row whose content hashes differently, or a newer version by the same author). A
+  file has not been re-created since (a live row whose content hashes differently, or a newer version written by the instance that issued the deletion). A
   person's upload to a sidecar path is never asked. A deleted file that is written again at the same path is a new file, whose
   conversion writes its sidecars afresh.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
