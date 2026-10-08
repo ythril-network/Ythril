@@ -433,7 +433,14 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     // version of the path. A sender reads it as delivered (the deletion is the answer); an older receiver omits it, and so does
     // this one when none was covered, so the answer of a page nothing shadowed is the one it always was.
     const fileTombstoned = count('filemeta', 'tombstoned');
-    const fileMetaStats = { upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped'), ...(fileTombstoned > 0 ? { tombstoned: fileTombstoned } : {}) };
+    // `converged` is additive the same way: a file row whose drifted timestamp took its author's (`Q-419`) — nothing
+    // stored, so not `upserted`, and something written, so not `skipped`. Without it the row was in no counter at all.
+    const fileConverged = count('filemeta', 'converged');
+    const fileMetaStats = {
+      upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped'),
+      ...(fileTombstoned > 0 ? { tombstoned: fileTombstoned } : {}),
+      ...(fileConverged > 0 ? { converged: fileConverged } : {}),
+    };
 
     // X-20: a 200 says the batch was accepted, not that a record was stored. What each document became is in the
     // counters, and the seq range says WHICH records they refer to — with DEBUG on, beside the sender's own line.

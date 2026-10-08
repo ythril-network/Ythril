@@ -194,6 +194,7 @@ async function pushAs(token, docs) {
   const r = await door.push('/batch-upsert', { filemeta: docs }, { spaceId: S, token });
   assert.equal(r.code, 200, JSON.stringify(r.body));
   await door.settled();
+  return r.body;
 }
 const read = (id) => files().findOne({ _id: id });
 
@@ -260,6 +261,19 @@ describe('an equal-seq file row converges on its author\'s updatedAt (real Mongo
       assert.equal(first.updatedAt, EARLIER, 'the first delivery did not converge the row');
       await pushAs(peerToken(AUTHOR.instanceId), [arrivingDoc(id, { updatedAt: EARLIER })]);
       assert.deepStrictEqual(await read(id), first);
+    });
+
+    it('the batch answer counts every file row it was sent once — a converged row as `converged`', async () => {
+      const converging = freshId('count-conv');
+      const fresh = freshId('count-new');
+      await files().insertOne(storedRow(converging, { updatedAt: STORED_AT }));
+      const sent = [arrivingDoc(converging, { updatedAt: EARLIER }), arrivingDoc(fresh, { updatedAt: EARLIER })];
+      const body = await pushAs(peerToken(AUTHOR.instanceId), sent);
+      assert.equal((await read(converging)).updatedAt, EARLIER, 'the control did not converge, so the count below proves nothing');
+      const fm = body.filemeta ?? {};
+      const counted = Object.entries(fm).filter(([k]) => k !== 'schemaViolations').reduce((n, [, v]) => n + (Number(v) || 0), 0);
+      assert.equal(fm.converged, 1, `a converged row is in no counter: ${JSON.stringify(fm)}`);
+      assert.equal(counted, sent.length, `${sent.length} rows sent, ${counted} counted: ${JSON.stringify(fm)}`);
     });
 
     it('two equal-seq copies of one id in one page collapse to the EARLIER copy before the verdict', async () => {
