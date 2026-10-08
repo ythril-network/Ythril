@@ -42,7 +42,9 @@ export function resolveSafePath(spaceId: string, userPath: string): string {
   //    '/Screenshot 2024.png' are treated as relative.  An absolute path
   //    passed directly to path.resolve() would silently discard spaceRoot,
   //    causing the prefix check below to fire as a false-positive traversal.
-  const relative = normalized.replace(/^\/+/, '');
+  //    A backslash is a separator here as it is in the key (`toDocId`): on POSIX it is a name character, so `a\..\b`
+  //    was the file literally named that while its key was `b` — the row of another file.
+  const relative = normalized.replace(/\\/g, '/').replace(/^\/+/, '');
 
   // 4. Resolve to absolute
   const resolved = path.resolve(spaceRootDir, relative);

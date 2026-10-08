@@ -43,6 +43,11 @@ succeeded, delete it and upload it again.
 | Rename | Click **Rename** |
 | Delete | Click ✕ and confirm |
 
+**A file has one name, however it was spelled.** An accented name typed or sent in its decomposed form (as some
+macOS apps do), a doubled slash (`docs//a.txt`) or a `./` is stored, listed and synced under one canonical name, so
+two spellings never become two files. A name in any script — `日本.txt`, an emoji — downloads and previews under its
+real name. Moving or renaming a document carries everything made from it, including work still queued for it.
+
 **A delete or a rename that fails on a database outage says so — it never reports success.** When the failure
 comes before the file is touched, nothing changed: the file is still there under its old name, and trying again
 is safe. When it comes after the file itself was removed or moved, the list already shows that (the row is gone,

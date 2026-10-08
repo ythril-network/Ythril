@@ -15,6 +15,7 @@ import { writeFileBytes } from './files.js';
 import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
 import { bytesShadowed } from './tombstones.js';
 import { peerFileKey } from './sandbox.js';
+import { toDocId } from '../util/paths.js';
 import type { AuthorRef } from '../config/types.js';
 import { dispatchFileProcessing, type DispatchResult } from './dispatch.js';
 import type { InputFormat } from './converters/pipeline.js';
@@ -68,13 +69,13 @@ type StoreOpts = {
 export async function recordStoredFile(
   spaceId: string, filePath: string, sizeBytes: number, sha256: string, opts: StoreOpts = {},
 ): Promise<Stored> {
-  // A peer's path is a spelling until it is resolved (Q-404): the row, the processing queue and the webhook all name the KEY.
-  if (opts.arrivedFrom) {
-    // Rebound on purpose, so no later line can name the spelling (the sequence reads `filePath` throughout, and
-    // `identical-bytes-skip-media-pipeline-db` holds it to that).
-    filePath = (await peerFileKey(spaceId, filePath)).key;
-    await recordArrivedFile(spaceId, filePath, sizeBytes, sha256, opts.arrivedFrom);
-  } else await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
+  // A path is a spelling until it is keyed (Q-404): the row, the processing queue and the webhook all name the KEY — a peer's
+  // through the resolver, a local caller's through the one canonical key — so a webhook never names a path the listing lacks.
+  // Rebound on purpose, so no later line can name the spelling (the sequence reads `filePath` throughout, and
+  // `identical-bytes-skip-media-pipeline-db` holds it to that).
+  filePath = opts.arrivedFrom ? (await peerFileKey(spaceId, filePath)).key : toDocId(filePath);
+  if (opts.arrivedFrom) await recordArrivedFile(spaceId, filePath, sizeBytes, sha256, opts.arrivedFrom);
+  else await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
   const dispatched = await dispatchFileProcessing(spaceId, filePath, {
     bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256,
     ...(opts.contentType ? { contentType: opts.contentType } : {}),

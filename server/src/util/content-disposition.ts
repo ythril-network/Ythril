@@ -17,7 +17,11 @@ export function contentDispositionOf(disposition: 'attachment' | 'inline', name:
   return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987(name)}`;
 }
 
-/** RFC 5987 `value-chars`: UTF-8 percent-encoding, which `encodeURIComponent` does except for the five it leaves bare. */
+/**
+ * RFC 5987 `value-chars`: UTF-8 percent-encoding, which `encodeURIComponent` does except for the five it leaves bare. A lone
+ * surrogate has no UTF-8 form and would throw there — a `500` for one odd name — so it is replaced first, as the encoders do.
+ */
 function encodeRfc5987(value: string): string {
-  return encodeURIComponent(value).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const wellFormed = value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+  return encodeURIComponent(wellFormed).replace(/['()*!]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }

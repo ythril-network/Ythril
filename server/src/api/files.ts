@@ -319,7 +319,7 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
       .setHeader('Content-Type', contentType)
       .setHeader('Content-Length', size)
       .setHeader('X-Content-Type-Options', 'nosniff')
-      .setHeader('Content-Disposition', contentDispositionOf(isActive ? 'attachment' : 'inline', path.basename(normalised)));
+      .setHeader('Content-Disposition', contentDispositionOf(isActive ? 'attachment' : 'inline', path.basename(abs)));
     if (isActive) {
       res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
     }
