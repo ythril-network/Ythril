@@ -17,7 +17,7 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { readStored, writeStored } from '../files/stored-bytes.js';
-import { resolveSafePathChecked, peerFileKey } from '../files/sandbox.js';
+import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
 import { recordArrivedFile } from '../files/file-meta.js';
 import {
   publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, decideArrivals,
@@ -133,11 +133,13 @@ export async function syncFiles(
 
     // A peer's entry is a spelling of a path until it is resolved (Q-404): every lookup below — the local manifest, the sync
     // base, the held tombstones, the file row — is made by the KEY, as the write is made at the resolved path. The peer's own
-    // text is used for one thing, asking the peer for the bytes it advertised under it.
-    const arriving: { remote: (typeof manifest)[number]; key: string; abs: string }[] = [];
+    // text is used for one thing, asking the peer for the bytes it advertised under it. The key is derived lexically, with no
+    // disk (`fileKeyOf`): every entry of every manifest is keyed every cycle, and the symlink check is made by the write below,
+    // which is the only thing here that touches the filesystem, and only for an entry that is actually fetched.
+    const arriving: { remote: (typeof manifest)[number]; key: string }[] = [];
     if (doPull) for (const remote of manifest) {
       try {
-        arriving.push({ remote, ...await peerFileKey(spaceId, remote.path) });
+        arriving.push({ remote, key: fileKeyOf(spaceId, remote.path).key });
       } catch (err) {
         // An entry that leaves the space (`../../other-space/x`) is skipped and touches nothing.
         log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
@@ -153,7 +155,7 @@ export async function syncFiles(
       .map(a => ({ id: a.key, path: a.key, kind: 'bytes' as const, sha256: a.remote.sha256 })));
     const notNow = new Set([...verdicts.shadowed, ...verdicts.undecided]);
 
-    for (const { remote, key, abs } of arriving) {
+    for (const { remote, key } of arriving) {
       if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       const local = oursMap.get(key);
       // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
@@ -167,6 +169,9 @@ export async function syncFiles(
       if (notNow.has(key)) continue;
 
       try {
+        // The one place this entry's path meets the disk: resolved WITH the symlink check, before a byte is fetched for a path
+        // the write would refuse (the key above is lexical).
+        const abs = await resolveSafePathChecked(spaceId, key);
         /*
          * Whole-file body, so it gets the TRANSFER budget — and until now it did not, whatever this
          * comment said.
@@ -200,7 +205,7 @@ export async function syncFiles(
         pulledFiles++;
         if (!local || action === 'replace') {
           // New here, or changed only on the peer since we last agreed: write it over the original path (`abs`: the resolved
-          // path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
+          // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
           // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
           // when it has a master secret — under the path lock the migration job also takes (F-43).
           await writeStored(abs, buf);

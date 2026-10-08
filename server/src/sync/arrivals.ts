@@ -105,7 +105,7 @@ import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { isLegacyReadSpill } from './file-conflict.js';
 import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
-import { peerFileKey } from '../files/sandbox.js';
+import { fileKeyOf } from '../files/sandbox.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -200,7 +200,9 @@ export function arrivalRefusal(doc: unknown, { seqOptional }: { seqOptional: boo
 
 /**
  * Why a file-metadata document's `_id` cannot be the key of a file row, or `null` when it can: the id must BE the key its path
- * resolves to (`peerFileKey`), which is what every other door looks the file up by (bundle-71, Q-404).
+ * resolves to (`fileKeyOf`, the same key `toDocId` gives a local write), which is what every other door looks the file up by
+ * (bundle-71, Q-404). A key comparison needs no disk, so none is read: this runs per arriving file row, and a symlink is the
+ * business of whatever later reads or writes bytes at the path, which resolves it with the symlink check.
  *
  * ## What it prevents
  *
@@ -209,12 +211,12 @@ export function arrivalRefusal(doc: unknown, { seqOptional }: { seqOptional: boo
  * `victim` never saw the arrival. Refused as a shape violation, counted with every other, rather than keyed for the writer: the
  * peer's record for `victim` arrives under its own id, and one for a path that leaves the space is no file of this one.
  *
- * Reasons carry no text of the peer's: they travel to a log line and back in an answer. Anything but a refused path (a failure
- * to look at the disk) is thrown, so the page fails and is retried rather than a document being refused for a fault of ours.
+ * Reasons carry no text of the peer's: they travel to a log line and back in an answer. Anything but a refused path is thrown,
+ * so the page fails and is retried rather than a document being refused for a fault of ours.
  */
-async function fileKeyRefusal(spaceId: string, id: string): Promise<string | null> {
+function fileKeyRefusal(spaceId: string, id: string): string | null {
   try {
-    return (await peerFileKey(spaceId, id)).key === id ? null : '_id is not the canonical key of its path';
+    return fileKeyOf(spaceId, id).key === id ? null : '_id is not the canonical key of its path';
   } catch (err) {
     if (err instanceof RangeError) return '_id is not a path inside the space';
     throw err;
@@ -370,7 +372,7 @@ export async function writeArrivals(
     // A chunk is derived from the blob here; a legacy read spill (`Q-92`) travels in neither direction.
     if (family === 'files' && (isDerived(doc) || isLegacyReadSpill(doc._id))) { out.derived.push(doc._id); continue; }
     // A restore's ids are this instance's own export's, and it is never judged by a peer's rules; any other arrival is a peer's text.
-    const keyWhy = family === 'files' && !restore ? await fileKeyRefusal(spaceId, doc._id) : null;
+    const keyWhy = family === 'files' && !restore ? fileKeyRefusal(spaceId, doc._id) : null;
     if (keyWhy) { out.refused.push({ _id: doc._id, reason: keyWhy }); continue; }
     const seq = doc.seq ?? 0;
     if (seq > out.maxReceived) out.maxReceived = seq;

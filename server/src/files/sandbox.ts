@@ -128,8 +128,34 @@ export class PathNamesTheSpaceError extends RangeError {
 }
 
 /**
- * THE one resolver for a path a PEER supplied (a manifest entry, a tombstone's path, an upload's `?path=`): the sandbox-resolved
- * absolute path, and the KEY every lookup is made by — the resolved path relative to the space's root, as a document id.
+ * The KEY of a path inside a space, and the absolute path it resolves to, derived WITHOUT the disk: the lexical half of
+ * {@link peerFileKey}. The key is the sandbox-resolved path relative to the space's root, as a document id — the same string
+ * `toDocId` gives the caller's own spelling, which is what a local write keys its row by, so the two cannot disagree.
+ *
+ * ## What it prevents
+ *
+ * A question about keys (is this manifest entry the one we hold? is this arriving row's `_id` the key of its path?) used to be
+ * asked through {@link peerFileKey}, whose symlink check walks the real path on disk: one realpath walk per manifest entry per
+ * peer per cycle, and per arriving file row, to compare two strings. Anything that goes on to TOUCH the filesystem with the
+ * result must still resolve through {@link resolveSafePathChecked} (or call {@link peerFileKey}); this one never reads the disk
+ * and so never sees a symlink.
+ *
+ * @throws RangeError when the path leaves the space; {@link PathNamesTheSpaceError} (also a `RangeError`) when it resolves to
+ *   the space's root, which no file has as its key.
+ */
+export function fileKeyOf(spaceId: string, userPath: string): { abs: string; key: string } {
+  const abs = resolveSafePath(spaceId, userPath);
+  const key = toDocId(path.relative(spaceRoot(spaceId), abs));
+  if (key === '' || key === '.') throw new PathNamesTheSpaceError(userPath);
+  // A name that only looks like a parent step to the key (a backslash is a name character on a POSIX filesystem) is no file here.
+  if (key === '..' || key.startsWith('../')) throw new RangeError(`Path traversal attempt: '${userPath}'`);
+  return { abs, key };
+}
+
+/**
+ * THE one resolver for a path a PEER supplied (a manifest entry, a tombstone's path, an upload's `?path=`) when the answer is
+ * going to touch the filesystem: {@link fileKeyOf}, and the symlink check on the path it resolved. The KEY every lookup is
+ * made by is the resolved path relative to the space's root, as a document id.
  *
  * ## What it prevents (bundle-71, Q-404)
  *
@@ -144,10 +170,9 @@ export class PathNamesTheSpaceError extends RangeError {
  *   is thrown as it came.
  */
 export async function peerFileKey(spaceId: string, userPath: string): Promise<{ abs: string; key: string }> {
-  const abs = await resolveSafePathChecked(spaceId, userPath);
-  const key = toDocId(path.relative(spaceRoot(spaceId), abs));
-  if (key === '' || key === '.') throw new PathNamesTheSpaceError(userPath);
-  return { abs, key };
+  const resolved = fileKeyOf(spaceId, userPath);
+  await assertNoSymlinkEscape(spaceId, resolved.abs);
+  return resolved;
 }
 
 /** Return the absolute data root for a space's files */
