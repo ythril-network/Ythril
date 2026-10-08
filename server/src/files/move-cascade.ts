@@ -123,11 +123,13 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
     if (!owed) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
     // Its tombstones were written before those bytes moved; `afterTheBytesMoved` settles any its first attempt left
     // pending, once the sidecars have had their turn.
-    await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src));
+    // The bytes are at `dst`, so what the path IS is read there.
+    await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src, await kindAt(spaceId, dst)));
     emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
     return;
   }
   const { moved, sidecars } = await pathsLeaving(spaceId, src, dst);
+  const kind = await kindAt(spaceId, src);
 
   // The tombstones BEFORE the bytes move, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here
   // leaves the source where it was, so the retry repeats the move — written after, the retry found no source and the
@@ -138,7 +140,7 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   let held: string[] = [];
   await actUnderPendingTombstones(pending, async () => {
     try {
-      held = await holdJobsForMove(spaceId, src);
+      held = await holdJobsForMove(spaceId, src, kind);
       await moveFile(spaceId, src, dst);
     } catch (err) {
       await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
@@ -157,7 +159,8 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
  */
 async function afterTheBytesMoved(spaceId: string, src: string, dst: string, held: string[]): Promise<void> {
   // The bytes have moved, so what the path IS is read where they went.
-  for (const sidecar of await movedSidecars(spaceId, src, dst, await kindAt(spaceId, dst))) {
+  const kind = await kindAt(spaceId, dst);
+  for (const sidecar of await movedSidecars(spaceId, src, dst, kind)) {
     if (!(await bytesPresentAt(spaceId, sidecar.from))) continue;
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
       log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`));
@@ -167,7 +170,7 @@ async function afterTheBytesMoved(spaceId: string, src: string, dst: string, hel
   // is dropped rather than published (preship-4 P4-3).
   await settleBegunMove(spaceId, src, dst);
   const at = `for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}`;
-  await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held));
+  await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held, kind));
   await unlessTheStoreFailed(`relocateDerivedFileMeta error ${at}`, () => relocateDerivedFileMeta(spaceId, src, dst));
   await unlessTheStoreFailed(`renameFileMeta error ${at}`, () => Promise.all([
     renameFileMeta(spaceId, src, dst),

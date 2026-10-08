@@ -139,14 +139,19 @@ export function movedId(id: string, src: string, dst: string): string | null {
 }
 
 /**
- * The regexes that select, by `_id`, every JOB belonging to `src` — the file(s) and any extracted image. Chunks and
- * converted Markdown are never queued, and a `#` rule here would sweep in a real file whose name happens to begin
- * with `src#`.
+ * The paths whose JOBS belong to `p`, as a `kind`: the path itself — a FILE's own id, a DIRECTORY's subtree — and every sidecar
+ * {@link sidecarsOf} names for it. Fed to {@link idsUnder} for a job's `_id`. The one answer to "which job ids does this path
+ * own", asked by the delete that cancels them and the move that holds and re-keys them, so the two cannot disagree about a
+ * sidecar again: a peer that never converts holds `_converted/<f>.md` as an ordinary file with a job of its own, which only
+ * a rule that names sidecar FILES can reach.
+ *
+ * Chunks are never queued, and a `#` rule here would sweep in a real file whose name happens to begin with `p#`. An empty path
+ * owns nothing.
  */
-export function jobIdsUnder(src: string): RegExp[] {
-  const from = escapeRegex(movedRoot(src));
-  if (!from) return [];
-  return [new RegExp(`^${from}(/|$)`), new RegExp(`^${escapeRegex(extractedTreeOf(src))}/`)];
+export function jobPathsOf(p: string, kind: PathKind): Array<Pick<Sidecar, 'path' | 'shape'>> {
+  const root = movedRoot(p);
+  if (!root) return [];
+  return [{ path: root, shape: kind === 'directory' ? 'tree' : 'file' }, ...sidecarsOf(root, kind)];
 }
 
 /** The regex that selects, by `parentFileId`, every DERIVED record of a file at or under `src`. */

@@ -19,7 +19,7 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { idsUnder, jobIdsUnder, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
+import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -681,7 +681,8 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
 /**
  * Delete every queued job of what `p` owns, as a `kind`: a directory's subtree, and every sidecar `sidecarsOf` names for `p` — a
  * sidecar FILE by its id, a sidecar TREE by its prefix. Called by a file's and a directory's delete, so neither spells the sidecar
- * paths itself. **A file's OWN job is not among them** (`cancelMediaJob` takes it): the text job of a file clears that file's
+ * paths itself; the set is `jobPathsOf`, the one a move holds and re-keys, so delete and move cannot disagree about whose a job
+ * is. **A file's OWN job is not among them** (`cancelMediaJob` takes it): the text job of a file clears that file's
  * sidecars from inside itself (`deleteConversionArtifacts`, before it re-chunks), and would cancel its own lease.
  *
  * What it prevents: a job outliving its source, retrying for ever against a path nothing holds — or, worse, finishing after the
@@ -692,7 +693,8 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
 export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKind): Promise<void> {
   const root = movedRoot(p);
   if (!root) return; // guard: an empty path would match everything
-  const owned = [...(kind === 'directory' ? [{ path: root, shape: 'tree' as const }] : []), ...sidecarsOf(root, kind)];
+  // The same set a move holds (`jobPathsOf`), less a FILE's own job, which `cancelMediaJob` takes.
+  const owned = kind === 'directory' ? jobPathsOf(root, kind) : sidecarsOf(root, kind);
   await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ $or: idsUnder(owned) }));
 }
 
@@ -713,12 +715,16 @@ const MOVE_HOLD_MS = 10 * 60_000;
  * missing asks whether it still holds the claim before it "reconciles a deleted source" — which, mid-move, would
  * delete the very job and records the move is carrying (`holdsClaim`). Held first, the answer is already "no" by the
  * time anything can see the file gone. Held after, both windows stay open.
+ *
+ * "Belonging to `src`" is `jobPathsOf(src, kind)`, the rule the delete cancels by — `kind` is what `src` IS, read from the disk
+ * by the caller — so a sidecar's job (a peer's converted Markdown has one of its own) is held with its file and not left to run at
+ * the old path.
  */
-export async function holdJobsForMove(spaceId: string, src: string): Promise<string[]> {
-  const regexes = jobIdsUnder(src);
-  if (regexes.length === 0) return [];
+export async function holdJobsForMove(spaceId: string, src: string, kind: PathKind): Promise<string[]> {
+  const owned = idsUnder(jobPathsOf(src, kind));
+  if (owned.length === 0) return [];
   const open = asFilter<MediaJobDoc>({
-    $or: regexes.map(r => ({ _id: { $regex: r } })),
+    $or: owned,
     status: { $in: ['pending', 'processing'] },
   });
   const ids = (await jobCollection(spaceId).find(open, { projection: { _id: 1 } }).toArray()).map(j => String(j._id));
@@ -748,13 +754,14 @@ export async function releaseMoveHold(spaceId: string, heldIds: string[]): Promi
 /**
  * Re-key every job belonging to `src` onto its path under `dst`, releasing the ones `holdJobsForMove` held so they
  * run again where the file now is. A job's `_id` IS its path, so this is a delete and a re-insert — the same shape as
- * the metadata it follows. A finished job keeps its state: it describes bytes that moved unchanged.
+ * the metadata it follows. A finished job keeps its state: it describes bytes that moved unchanged. The jobs are the ones
+ * `holdJobsForMove` holds, by the same `kind`.
  */
-export async function rekeyJobsForMove(spaceId: string, src: string, dst: string, heldIds: string[]): Promise<void> {
-  const regexes = jobIdsUnder(src);
-  if (regexes.length === 0) return;
+export async function rekeyJobsForMove(spaceId: string, src: string, dst: string, heldIds: string[], kind: PathKind): Promise<void> {
+  const owned = idsUnder(jobPathsOf(src, kind));
+  if (owned.length === 0) return;
   const jobs = await jobCollection(spaceId).find(
-    asFilter<MediaJobDoc>({ $or: regexes.map(r => ({ _id: { $regex: r } })) }),
+    asFilter<MediaJobDoc>({ $or: owned }),
   ).toArray() as MediaJobDoc[];
   const held = new Set(heldIds);
   const now = new Date().toISOString();
