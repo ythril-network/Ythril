@@ -461,7 +461,8 @@ export function mintedSubject(id: string, type: string | null): EdgeSubject {
  */
 export async function connectionSubject(
   spaceId: string,
-  kind: RefKind,
+  // Never `file`: a file write's connections are not asked here, so the read below never reaches the `files` collection.
+  kind: Exclude<RefKind, 'file'>,
   body: unknown,
   at: { stored?: { _id: string; type?: string } | null; id?: string; type?: string },
 ): Promise<EdgeSubject | null> {

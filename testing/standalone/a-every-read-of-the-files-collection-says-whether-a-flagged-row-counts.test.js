@@ -59,6 +59,7 @@ const LIVE_MODULE = 'server/src/files/live-file-row.ts';
  */
 const EXEMPT = {
   // ── it cannot reach a flagged row from here
+  'server/src/brain/write-connections.ts:connectionSubject': 'reads the stored record an entity, fact or chrono write is about; its `kind` excludes `file` by type, so the computed collection is never `files`',
   'server/src/api/sync/docs.ts:oneById': 'the narrowing is the family\'s own `pushFilter`, which for file metadata IS `LIVE_FILE_ROW` (sync/replicated-families.ts), so a read by id serves exactly what a page would; naming it here would be a second copy and the other five families must not take it',
   'server/src/brain/edge-endpoint-names.ts:resolveEndpointName': 'returns the id before its one read when the kind is `file` (a file endpoint\'s display name IS its path), so the collection it computes is never the files one',
   'server/src/brain/lexical-search.ts:lexicalSearch': 'its `eligibility` argument IS the recall\'s own predicate for this type, built by `recallPredicate` (brain/recall-filter.ts) and carrying the any-tier clause for a file recall; a copy here would let this channel and the vector path disagree about what is eligible, which is the thing that one builder exists to stop',

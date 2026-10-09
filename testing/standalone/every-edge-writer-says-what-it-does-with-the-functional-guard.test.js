@@ -59,7 +59,7 @@ const WRITERS = {
   'server/src/sync/arrivals.ts:writeArrivals':
     { marker: 'carry-if-unchanged', why: 'a peer arrival never brings a marker; the replacement keeps this instance\'s own only while from and label are the stored ones' },
 
-  'server/src/brain/embed-record.ts:embedStoredRecord': { marker: 'none-by-design', why: 'stores a vector on a record already written; from and label are untouched, and the marker is not derived so it is never unset' },
+  'server/src/files/derived-fields.ts:writeDerivedFields': { marker: 'none-by-design', why: 'the embed job\'s write of derived fields onto a record already written; it refuses any hashed key, so from and label are never touched, and the marker is not derived so it is never unset' },
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': { marker: 'none-by-design', why: 'removes vectors only' },
   'server/src/brain/tombstones.ts:removeWithTombstones': { marker: 'none-by-design', why: 'a delete frees the marker with the row' },
   'server/src/spaces/lifecycle.ts:wipeSpace': { marker: 'none-by-design', why: 'the space wipe deletes every row, markers included' },
