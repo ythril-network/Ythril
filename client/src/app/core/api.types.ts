@@ -843,6 +843,33 @@ export interface VoteRound {
   deadline: string;
   status: 'open' | 'passed' | 'failed';
   votes: { instanceId: string; vote: 'yes' | 'veto'; }[];
+  /** What a meta_change round proposes, and the one-sentence form the server wrote of it. Absent when the round sends none. */
+  metaChangedFields?: string[];
+  changedTypes?: string[];
+  keptTypes?: string[];
+  proposesLayer?: boolean;
+  summary?: string;
+}
+
+/** How a round ended, as this instance read it. `ended` is the client's own word for a round recorded without a reason. */
+export type VoteOutcome = 'passed' | 'vetoed' | 'expired';
+export type VoteOutcomeLabel = VoteOutcome | 'ended';
+
+/** One entry of `GET /api/networks/:id/vote-outcomes` — a round that concluded, kept by this instance. */
+export interface VoteOutcomeEntry {
+  roundId: string;
+  type: string;
+  space?: string;
+  subjectLabel?: string;
+  openedAt?: string;
+  deadline?: string;
+  /** Absent on a round that concluded before outcomes were recorded. */
+  concludedAt?: string;
+  outcome: string;
+  yes?: number;
+  veto?: number;
+  eligible?: number;
+  summary?: string;
 }
 
 export interface ConflictRecord {

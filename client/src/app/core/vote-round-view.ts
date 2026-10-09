@@ -29,7 +29,40 @@ export interface ServerVoteRound {
   concluded?: boolean;
   passed?: boolean;
   votes?: { instanceId: string; vote: 'yes' | 'veto' }[];
+  /** What a meta_change round proposes — the page shows a voter what they are asked to approve. */
+  metaChangedFields?: string[];
+  changedTypes?: string[];
+  keptTypes?: string[];
+  proposesLayer?: boolean;
+  /** One sentence naming what the round does, written by the server for a voter. Plain text: peer-authored. */
+  summary?: string;
 }
+
+/** What a round is about, as a voter reads it: the space first ("add notes" says more than "add brain-a"), then who. */
+export function roundSubject(space: string | undefined, who: string): string {
+  return space ? (who ? `${space} (${who})` : space) : who;
+}
+
+/** Yes and veto counts for the tally every surface shows beside a round — one counting, not one per page. */
+export function voteTally(round: Pick<VoteRound, 'votes'>): { yes: number; veto: number } {
+  return {
+    yes: round.votes.filter(v => v.vote === 'yes').length,
+    veto: round.votes.filter(v => v.vote === 'veto').length,
+  };
+}
+
+/**
+ * The translation key of a round type's label. ONE spelling for every surface that names a round — the vote row, the
+ * Overview panel, the decisions list and the toasts — so the wire value (`space_addition`) is never what a person reads.
+ */
+export const roundTypeKey = (type: string): string => `networks.roundType.${type}`;
+
+/** How a round ended, as the client words it: a value the server records, or `ended` for anything it does not know. */
+export type OutcomeWord = 'passed' | 'vetoed' | 'expired' | 'ended';
+const OUTCOME_WORDS: readonly string[] = ['passed', 'vetoed', 'expired'];
+export const outcomeWord = (outcome: string | undefined): OutcomeWord =>
+  outcome !== undefined && OUTCOME_WORDS.includes(outcome) ? (outcome as OutcomeWord) : 'ended';
+export const outcomeKey = (outcome: string | undefined): string => `networks.decisions.outcome.${outcomeWord(outcome)}`;
 
 export function voteRoundFromServer(networkId: string, r: ServerVoteRound): VoteRound {
   const who = r.subjectLabel || r.subjectInstanceId || '';
@@ -37,14 +70,16 @@ export function voteRoundFromServer(networkId: string, r: ServerVoteRound): Vote
     id: r.roundId,
     networkId,
     type: r.type,
-    // A round about a space names the space first: "add notes" says more than "add brain-a".
-    subject: (() => {
-      const space = r.localSpaceId ?? r.spaceId;
-      return space ? (who ? `${space} (${who})` : space) : who;
-    })(),
+    subject: roundSubject(r.localSpaceId ?? r.spaceId, who),
     openedAt: r.openedAt,
     deadline: r.deadline,
     status: !r.concluded ? 'open' : r.passed ? 'passed' : 'failed',
     votes: r.votes ?? [],
+    // Copied only when sent: a round that proposes nothing carries none of them, not empty stand-ins.
+    ...(r.metaChangedFields !== undefined ? { metaChangedFields: r.metaChangedFields } : {}),
+    ...(r.changedTypes !== undefined ? { changedTypes: r.changedTypes } : {}),
+    ...(r.keptTypes !== undefined ? { keptTypes: r.keptTypes } : {}),
+    ...(r.proposesLayer !== undefined ? { proposesLayer: r.proposesLayer } : {}),
+    ...(r.summary !== undefined ? { summary: r.summary } : {}),
   };
 }

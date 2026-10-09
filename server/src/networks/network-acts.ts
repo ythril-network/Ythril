@@ -41,6 +41,7 @@ import { concludeRoundIfReady } from '../sync/governance.js';
 import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, recordSpaceAlias } from '../sync/space-map.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from './round-local-state.js';
+import { roundIsOpen, MAX_VOTING_DEADLINE_HOURS } from './round-state.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
@@ -53,9 +54,9 @@ export type NetworkActResult =
   /**
    * `code`, when present, is the machine name of the refusal a client translates by (`NETWORK_REFUSAL_CODES`). It
    * is additive: the sentence in `error` is unchanged, and both doors carry it — REST in the body, MCP in its
-   * structured content.
+   * structured content. `deadline` rides with `round_expired` alone: when the round's voting closed, as the round carries it.
    */
-  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode }
+  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode; deadline?: string }
   /**
    * What ANOTHER instance answered, relayed as it came: a join's apply or finalize refused by the inviter. REST
    * sends `upstream` verbatim, as it always has; MCP reads `error` — the inviter's own sentence when it gave one.
@@ -67,7 +68,7 @@ export const CreateNetworkBody = z.object({
   label: z.string().min(1).max(200),
   type: z.enum(['closed', 'democratic', 'club', 'braintree', 'pubsub']),
   spaces: z.array(z.string().min(1)).min(1).max(MAX_SPACE_IDS),
-  votingDeadlineHours: z.number().int().min(1).max(72).default(24),
+  votingDeadlineHours: z.number().int().min(1).max(MAX_VOTING_DEADLINE_HOURS).default(24),
   syncSchedule: z.string().optional(),
   merkle: z.boolean().optional(),
   requireSignedVotes: z.boolean().optional(),  // strict mode: reject unsigned governance votes
@@ -82,7 +83,10 @@ export const UpdateNetworkBody = z.object({
 
 /** A network as any caller may see it: no credential of any kind, and each member's version verdict. */
 export function networkView(net: NetworkConfig): Record<string, unknown> {
-  const { inviteKeyHash: _ikh, introductions, ...rest } = net;
+  // `pendingRounds` and `roundOutcomes` are read where they belong (`GET /votes`, `GET /vote-outcomes`): a join round carries the
+  // hash of an invite key still in use and its candidate's credential record, and a body that says it hands out no credential
+  // cannot also hand out the rounds.
+  const { inviteKeyHash: _ikh, introductions, pendingRounds: _rounds, roundOutcomes: _outcomes, ...rest } = net;
   // What this instance is in the network, and who that role acts on (F-38.1), by instance id into `members`.
   const role = networkRole(net);
   const myRole = {
@@ -243,7 +247,8 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   const inUse = spaceNameInUseRefusal([net], spaceId);
   if (inUse) return { status: 409, error: inUse, code: 'space_name_in_use' };
   const networkSpaceId = localToRemote(net, spaceId);
-  if (net.pendingRounds.some(r => r.type === 'space_addition' && !r.concluded && r.spaceId === networkSpaceId)) {
+  const proposedAt = Date.now();
+  if (net.pendingRounds.some(r => r.type === 'space_addition' && roundIsOpen(r, proposedAt) && r.spaceId === networkSpaceId)) {
     return { status: 409, error: `A vote to add '${spaceId}' to this network is already open.` };
   }
 
@@ -459,7 +464,7 @@ export async function inviteKeyAct(caller: Caller, id: string): Promise<NetworkA
 export const ForkNetworkBody = z.object({
   label: z.string().min(1).max(200),
   type: z.enum(['closed', 'club']).default('closed'),
-  votingDeadlineHours: z.number().int().min(1).max(72).optional(),
+  votingDeadlineHours: z.number().int().min(1).max(MAX_VOTING_DEADLINE_HOURS).optional(),
   spaces: z.array(z.string().min(1)).max(MAX_SPACE_IDS).optional(),
 });
 

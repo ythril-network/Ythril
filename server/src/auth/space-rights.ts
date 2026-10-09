@@ -420,6 +420,7 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   { route: '/api/networks/:id/members/:instanceId/revert-parent', why: 'braintree topology — instance-admin' },
   { route: '/api/networks/:id/votes', why: 'the network\'s governance rounds: an instance votes, not a space — instance-admin' },
   { route: '/api/networks/:id/votes/:roundId', why: 'casting this instance\'s vote in a round — instance-admin' },
+  { route: '/api/networks/:id/vote-outcomes', why: 'how the network\'s governance rounds ended on this instance: the network\'s decisions, not a view of any space\'s data — instance-admin, like the open rounds' },
   { route: '/api/networks/:id/sync', why: 'starting a sync cycle is instance operations (it spends the instance\'s bandwidth and every peer\'s), not a view of a space — instance-admin, like MCP network_sync' },
   { route: '/api/networks/peers/:peerId/sync', why: 'syncing with one peer: instance operations — instance-admin' },
   { route: '/api/networks/:id/sync-history', why: 'the instance\'s sync telemetry for a network, not a view of any space\'s data — instance-admin' },

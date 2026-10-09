@@ -12,7 +12,8 @@ import { uuidSchema } from './shared.js';
 import {
   readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, resolvePendingSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
-import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
+import { MAX_VOTING_DEADLINE_HOURS } from '../../networks/round-state.js';
+import { castVoteAct, listOpenVotesAct, syncHistoryAct, voteOutcomesAct, VOTE_OUTCOMES_DEFAULT_LIMIT, VOTE_OUTCOMES_MAX_LIMIT } from '../../networks/vote-acts.js';
 import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
@@ -25,9 +26,10 @@ export function toResult(r: NetworkActResult, done: string): ToolResult {
   if ('error' in r) {
     // The refusal code rides in structuredContent, as it rides in the REST body (Q-133); the text is unchanged.
     const code = 'code' in r && r.code ? r.code : undefined;
+    const deadline = 'deadline' in r && r.deadline ? r.deadline : undefined;
     return {
       content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true,
-      ...(code ? { structuredContent: { error: r.error, code } } : {}),
+      ...(code ? { structuredContent: { error: r.error, code, ...(deadline ? { deadline } : {}) } } : {}),
     };
   }
   if (r.status === 204) return { content: [{ type: 'text' as const, text: done }], structuredContent: { ok: true } };
@@ -70,7 +72,7 @@ export const network_createTool: ToolHandler = {
         description: 'How joins and changes are governed: closed (unanimous), democratic (majority, any veto blocks), '
           + 'club (the inviter decides), braintree (every ancestor up to the root), pubsub (publisher pushes, anyone subscribes).' },
       spaces: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries — each must exist, and you need the right on EVERY one, or the whole create is refused naming the short ones.' },
-      votingDeadlineHours: { type: 'integer', minimum: 1, maximum: 72, default: 24, description: 'Hours a vote round stays open (1-72, default 24); a round nobody concludes by then fails.' },
+      votingDeadlineHours: { type: 'integer', minimum: 1, maximum: MAX_VOTING_DEADLINE_HOURS, default: 24, description: `Hours a vote round stays open (1-${MAX_VOTING_DEADLINE_HOURS}, default 24); a round nobody concludes by then fails.` },
       syncSchedule: { type: 'string', description: 'A cron expression, e.g. "*/15 * * * *". Omit for manual sync only. One the scheduler cannot run is refused.' },
       merkle: { type: 'boolean', description: 'Compare a Merkle root with each peer every cycle and warn on divergence.' },
       requireSignedVotes: { type: 'boolean', description: 'Refuse any unsigned governance vote. Turn it on only once every member has synced once, or their votes are refused.' },
@@ -193,11 +195,12 @@ export const network_leaveTool: ToolHandler = {
 
 export const network_votesTool: ToolHandler = {
   name: 'network_votes',
-  description: 'List the vote rounds still open on a network: joins, removals, space deletions and wipes, space '
+  description: 'List the vote rounds open on a network: joins, removals, space deletions and wipes, space '
     + 'additions and meta changes, each with its deadline and the casts so far. Same answer as '
     + '`GET /api/networks/:id/votes`. Requires instance-admin rights.\n\n'
-    + 'A ROUND IS HOW A NETWORK APPROVES A CHANGE. Cast on one with `network_vote`; a round nobody concludes by its '
-    + 'deadline fails.',
+    + 'A ROUND IS HOW A NETWORK APPROVES A CHANGE. Cast on one with `network_vote`. A round past its deadline is never '
+    + 'listed as open, and a round nobody concluded by its deadline failed: how it ended is `network_vote_outcomes`. '
+    + 'A schema change is listed with a `summary` saying what it would change, not the proposal itself.',
   admin: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,
@@ -214,14 +217,16 @@ export const network_voteTool: ToolHandler = {
     + 'instance-admin rights.\n\n'
     + 'A CAST CAN CONCLUDE THE ROUND, and a concluded round takes effect here at once: a passed join admits the '
     + 'member, a passed removal ejects one, a passed space deletion or wipe empties the space on this instance, a '
-    + 'passed space addition adds it. A single veto stops a deletion or wipe. Voting again replaces your earlier cast.',
+    + 'passed space addition adds it. A single veto stops a deletion or wipe. Voting again replaces your earlier cast.\n\n'
+    + 'A CAST ON A ROUND PAST ITS DEADLINE IS REFUSED (409, code `round_expired`) naming the deadline, and nothing is '
+    + 'recorded; a round already concluded, or one that does not exist, is a 404.',
   admin: true,
   mutating: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',
     properties: {
       id: networkIdSchema,
-      roundId: uuidSchema('The round to vote on — `roundId` from `network_votes`. A round already concluded is refused (404).'),
+      roundId: uuidSchema('The round to vote on — `roundId` from `network_votes`. A round already concluded is refused (404), and one past its deadline is refused (409) naming the deadline.'),
       vote: { type: 'string', enum: ['yes', 'veto'], description: 'Your vote: `yes` carries the change as the network type decides, `veto` stops it.' },
     },
     required: ['id', 'roundId', 'vote'],
@@ -230,6 +235,30 @@ export const network_voteTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, roundId, ...body } = ctx.args;
     return toResult(castVoteAct(String(id), String(roundId), body), '');
+  },
+};
+
+export const network_vote_outcomesTool: ToolHandler = {
+  name: 'network_vote_outcomes',
+  description: 'Read how this instance\'s vote rounds on a network ended, newest first: each entry says which kind of '
+    + 'round it was, what it was about, when it opened, was to close and did conclude, whether it passed, was vetoed or '
+    + 'expired, and the yes count, veto count and eligible voters it ended with. Same answer as '
+    + '`GET /api/networks/:id/vote-outcomes`: `{ outcomes, total }`. Requires instance-admin rights.\n\n'
+    + 'THE LOG IS THIS INSTANCE\'S OWN READING, the newest 50 per network, and it decides nothing: an outcome you do not '
+    + 'recognise means the change did not take effect. `total` is the whole log, so a page shorter than `limit` with a '
+    + 'larger `total` is a page that was cut, not a log that ended. Rounds still open are `network_votes`.',
+  admin: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      limit: { type: 'integer', minimum: 1, maximum: VOTE_OUTCOMES_MAX_LIMIT, default: VOTE_OUTCOMES_DEFAULT_LIMIT, description: `How many outcomes to return, newest first: 1-${VOTE_OUTCOMES_MAX_LIMIT}, default ${VOTE_OUTCOMES_DEFAULT_LIMIT}.` },
+    },
+    required: ['id'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(voteOutcomesAct(String(ctx.args['id']), ctx.args['limit']), '');
   },
 };
 
@@ -313,7 +342,7 @@ export const network_forkTool: ToolHandler = {
       id: networkIdSchema,
       label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name for the new network, 1-200 characters.' },
       type: { type: 'string', enum: ['closed', 'club'], default: 'closed', description: 'The new network\'s governance: closed (unanimous) or club (the organiser decides). Default closed.' },
-      votingDeadlineHours: { type: 'integer', minimum: 1, maximum: 72, description: 'Hours a vote stays open, 1-72; omitted, the source network\'s value, or 24.' },
+      votingDeadlineHours: { type: 'integer', minimum: 1, maximum: MAX_VOTING_DEADLINE_HOURS, description: `Hours a vote stays open, 1-${MAX_VOTING_DEADLINE_HOURS}; omitted, the source network's value, or 24.` },
       spaces: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries; omitted, the source network\'s. Required when the source is no longer here.' },
     },
     required: ['id', 'label'],

@@ -35,6 +35,7 @@ function makeNetworksApi() {
   return {
     listNetworks: vi.fn(() => of({ networks: [] as Network[] })),
     listVotes: vi.fn(() => of({ rounds: [] as VoteRound[] })),
+    listVoteOutcomes: vi.fn(() => of({ outcomes: [], total: 0 })),
     createNetwork: vi.fn((body: unknown) => of(net({ id: 'new', label: (body as { label: string }).label }))),
     leaveNetwork: vi.fn(() => of({})),
     generateInvite: vi.fn(() => of({ handshakeId: 'h', inviteUrl: 'u', networkId: 'n1' })),

@@ -25,6 +25,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { InstantComponent } from '../../shared/instant.component';
 import { InstantPipe } from '../../core/date-format.service';
 import { RouterLink } from '@angular/router';
+import { roundTypeKey, voteTally } from '../../core/vote-round-view';
 import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity } from '../../core/api.types';
 import type { ReindexRunState } from '../../core/embed-ops.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
@@ -149,6 +150,8 @@ import { ReindexNotesComponent } from './reindex-notes.component';
     .vote-top .vt { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono, monospace); }
     .vote-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 11.5px; color: var(--text-secondary); flex-wrap: wrap; }
     .vote-meta .tally { font-variant-numeric: tabular-nums; }
+    /* The proposal in words: wraps, keeps its line breaks and is never cut off — a voter must be able to read all of it. */
+    .vote-summary { margin-top: 4px; font-size: 11.5px; color: var(--text-secondary); white-space: pre-line; overflow-wrap: anywhere; }
     .tok-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
     .tok-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
     .tok-list .tn { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -492,7 +495,7 @@ import { ReindexNotesComponent } from './reindex-notes.component';
       }
 
       <!-- ── Governance (open votes) ────────────────────────────────── -->
-      @if (openVotes().length) {
+      @if (openVotes().length || networks().length) {
         <section class="panel">
           <header class="panel-h">
             <span class="ic"><ph-icon name="broadcast" [size]="16"/></span>
@@ -500,20 +503,28 @@ import { ReindexNotesComponent } from './reindex-notes.component';
               <p>{{ 'brain.overview.govHint' | transloco }}</p></div>
           </header>
           <div class="panel-b">
+            @if (openVotes().length) {
             <ul class="vote-list">
               @for (v of openVotes(); track v.id) {
                 <li>
-                  <div class="vote-top"><span class="vs" [title]="v.subject">{{ v.subject }}</span><span class="vt">{{ v.type }}</span></div>
+                  <div class="vote-top"><span class="vs" [title]="v.subject">{{ v.subject }}</span><span class="vt">{{ (roundTypeKey(v.type)) | transloco }}</span></div>
                   <div class="vote-meta">
                     <span>{{ 'brain.overview.gov.deadline' | transloco }}: <app-instant [value]="v.deadline" variant="datetime"/></span>
-                    <span class="tally">{{ tallyYes(v) }} {{ 'brain.overview.gov.yes' | transloco }} · {{ tallyVeto(v) }} {{ 'brain.overview.gov.veto' | transloco }}</span>
+                    <span class="tally">{{ 'brain.overview.gov.yes' | transloco }}: {{ tallyYes(v) }} · {{ 'brain.overview.gov.veto' | transloco }}: {{ tallyVeto(v) }}</span>
                   </div>
+                  @if (v.summary) { <div class="vote-summary">{{ v.summary }}</div> }
                 </li>
               }
             </ul>
             <a class="btn btn-sm btn-secondary" routerLink="/settings/networks" style="margin-top:12px; display:inline-flex; align-items:center; gap:5px;">
               <ph-icon name="broadcast" [size]="14"/> {{ 'brain.overview.gov.review' | transloco }}
             </a>
+            } @else {
+            <p class="muted">{{ 'brain.overview.gov.none' | transloco }}</p>
+            <a class="btn btn-sm btn-secondary" routerLink="/settings/networks" style="display:inline-flex; align-items:center; gap:5px;">
+              <ph-icon name="broadcast" [size]="14"/> {{ 'brain.overview.gov.decisions' | transloco }}
+            </a>
+            }
           </div>
         </section>
       }
@@ -746,8 +757,9 @@ export class OverviewTabComponent {
   }
 
   /** Running vote tallies for the Governance panel. */
-  tallyYes(v: VoteRound): number { return v.votes.filter(x => x.vote === 'yes').length; }
-  tallyVeto(v: VoteRound): number { return v.votes.filter(x => x.vote === 'veto').length; }
+  tallyYes(v: VoteRound): number { return voteTally(v).yes; }
+  tallyVeto(v: VoteRound): number { return voteTally(v).veto; }
+  readonly roundTypeKey = roundTypeKey;
 
   /** Space.indexStatus is optional (proxy/legacy spaces have none) → 'none'. */
   indexState(): 'ready' | 'building' | 'waiting' | 'failed' | 'none' {

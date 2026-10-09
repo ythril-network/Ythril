@@ -3,10 +3,20 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { voteRoundFromServer, type ServerVoteRound } from './vote-round-view';
 import type {
-  Network, InviteBundle, VoteRound, SyncHistoryRecord,
+  Network, InviteBundle, VoteRound, VoteOutcomeEntry, SyncHistoryRecord,
   LocalAgentStatus, LocalAgentBootstrapResult, LocalAgentEnableNetworksResult,
 } from './api.types';
 import type { ChangeNote } from './change-note.types';
+
+/**
+ * What a cast answers: whether it concluded the round, and the round as this instance now holds it. `outcome` is how
+ * it ended and is present only once `concluded` is true — it is not part of `ServerVoteRound`, which is what an OPEN
+ * round looks like.
+ */
+export interface CastVoteResult {
+  concluded: boolean;
+  round: ServerVoteRound & { outcome?: string; concludedAt?: string };
+}
 
 /** Networks, sync scheduling/triggering, governance votes, invites, and the local agent. */
 @Injectable({ providedIn: 'root' })
@@ -100,8 +110,8 @@ export class NetworksApi {
     return this.http.get<{ notes: ChangeNote[] }>(`/api/networks/${networkId}/change-notes?direction=${direction}&limit=${limit}`);
   }
 
-  castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Observable<void> {
-    return this.http.post<void>(`/api/networks/${networkId}/votes/${roundId}`, { vote });
+  castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Observable<CastVoteResult> {
+    return this.http.post<CastVoteResult>(`/api/networks/${networkId}/votes/${roundId}`, { vote });
   }
 
   /** The rounds in the pages' shape — see `vote-round-view.ts` for why the translation cannot live anywhere else. */
@@ -109,6 +119,11 @@ export class NetworksApi {
     return this.http.get<{ rounds: ServerVoteRound[] }>(`/api/networks/${networkId}/votes`).pipe(
       map(({ rounds }) => ({ rounds: (rounds ?? []).map(r => voteRoundFromServer(networkId, r)) })),
     );
+  }
+
+  /** The rounds this instance has seen conclude on a network, newest first; `total` says whether the page is short. */
+  listVoteOutcomes(networkId: string, limit = 20): Observable<{ outcomes: VoteOutcomeEntry[]; total: number }> {
+    return this.http.get<{ outcomes: VoteOutcomeEntry[]; total: number }>(`/api/networks/${networkId}/vote-outcomes?limit=${limit}`);
   }
 
   // ── Local agent ─────────────────────────────────────────────────────────

@@ -15,6 +15,8 @@ export const NETWORK_REFUSAL_CODES = [
   'invalid_answer',
   /** Another space already syncs under this id in one of this instance's networks. */
   'space_name_in_use',
+  /** A cast on a round whose deadline has passed: the round closed by the clock, and the body's `deadline` says when. */
+  'round_expired',
 ] as const;
 
 export type NetworkRefusalCode = typeof NETWORK_REFUSAL_CODES[number];

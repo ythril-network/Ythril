@@ -42,6 +42,14 @@
  * `noteClaimed` decision needs. A claim that the bound ended cannot land (a plain write is ended by the SERVER first); what remains
  * is a reply lost on the network, which burns an attempt that the stall reset returns.
  *
+ * ## `eachNetwork`: the same promise for work on the CONFIG
+ *
+ * A per-network job (the vote-round expiry) touches no database: it reads the config, changes it and saves it, in one synchronous
+ * step so a reload cannot land between the read and the save. {@link eachNetwork} gives it the half of this file that still
+ * applies — isolation (a unit that throws is reported and the walk goes on) and one failure line per label per window — and none
+ * of the half that does not: no bound, no quarantine, no store question, because there is no database operation for them to end,
+ * and an `await` would open the window a reload lands in.
+ *
  * ## What it does not do
  *
  * It does not choose the spaces: the caller passes `concreteSpaces()` or `concreteSpaceIds()`. It does not bound what is not a
@@ -54,8 +62,10 @@ import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js'
 import { storeAnswers as defaultStoreAnswers } from '../db/store-answers.js';
 import { endpointCooldown, type EndpointCooldown } from './endpoint-cooldown.js';
 import { signalHousekeeping } from './housekeeping-signals.js';
-import { peerText } from './log.js';
+import { log, peerText } from './log.js';
 import { mapLimit } from './map-limit.js';
+import { SKIP_WARNING_WINDOW_MS } from './single-flight.js';
+import { warnOnce } from './warn-once.js';
 import {
   defaultSpaceFailureReporter, failureReason, walkVerdict, type BoundNote, type SpaceFailureReporter,
 } from './space-failure.js';
@@ -385,3 +395,41 @@ export const eachSpace: HousekeepingWalk['eachSpace'] = shared.eachSpace;
 export const liftQuarantine: HousekeepingWalk['liftQuarantine'] = shared.liftQuarantine;
 /** {@link HousekeepingWalk.quarantinedSpaces} on the process-wide runner. */
 export const quarantinedSpaces: HousekeepingWalk['quarantinedSpaces'] = shared.quarantinedSpaces;
+
+/** One line per label per window, however many units fail under it: the failures are counted by the caller, the line is the explanation. */
+const unitFailureSaid = warnOnce<string>({ max: 200, every: SKIP_WARNING_WINDOW_MS });
+
+/** A unit as its failure line names it: the text itself, or a record's `label`, `name`, `id` or `roundId`. */
+function configUnitName(unit: unknown, index: number): string {
+  if (typeof unit === 'string') return unit;
+  const named = unit as { label?: unknown; name?: unknown; id?: unknown; roundId?: unknown } | null;
+  for (const v of [named?.label, named?.name, named?.id, named?.roundId]) if (typeof v === 'string' && v) return v;
+  return `unit ${index}`;
+}
+
+/**
+ * Run `fn` over each of `units` — networks, or the rounds inside one — with a failure contained, SYNCHRONOUSLY: it has returned
+ * when `eachNetwork` does, so a caller reads the config and saves it with no `await` between (see the section above).
+ *
+ * What a hand-written `for` with a `try` drops, and this does not let a caller drop: the `try` PER UNIT (one poison unit never stops
+ * the rest), the failure line (said once per `label` per window, naming the unit and the reason, through `peerText` because both are
+ * written by peers), and the answer — the failures are RETURNED, so the caller that counts them has them and a failed unit is never
+ * mistaken for a quiet one. `label` is the head of the line and the key of the throttle: put what must be said separately in it
+ * (the network, when the units are its rounds).
+ */
+export function eachNetwork<U>(
+  label: string, units: readonly U[], fn: (unit: U, index: number) => void,
+): { failed: { unit: string; reason: string }[] } {
+  const failed: { unit: string; reason: string }[] = [];
+  for (const [index, unit] of units.entries()) {
+    try {
+      fn(unit, index);
+    } catch (err) {
+      const name = configUnitName(unit, index);
+      const reason = peerText(err);
+      failed.push({ unit: name, reason });
+      unitFailureSaid(label, () => log.error(`${peerText(label)} failed for ${peerText(name)}: ${reason}; the other units were done, and it is tried again next tick`));
+    }
+  }
+  return { failed };
+}

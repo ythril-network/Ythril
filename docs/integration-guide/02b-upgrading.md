@@ -191,6 +191,10 @@ sweep unit (`TTL sweep: files-flagged`), so its failures are reported under thei
 the path between the sweep's read and its delete WINS: the row stays live and the loss is not reported as a failure.
 After the row is gone, the file TOMBSTONE is what stops a stale copy of the deleted file arriving from a peer.
 
+**Upgrading past 5.6.9 concludes every vote round that is past its deadline, within about a minute of starting, and revokes the credentials of a failed join.** Until now a round past its deadline stayed open in the list until a cast or a sync happened to touch it. The first tick of the new `Vote round expiry` job concludes all of them at once, on every network: a round with a veto ends as vetoed and the rest as expired, so none of them passes and none applies anything. Each is recorded on [Vote Outcomes](08-networks-api.md#vote-outcomes), audited as `network.round.expired`, and then pruned; a round that had already concluded before the upgrade is recorded as `ended`, with the reason not recorded. One consequence is not a no-op and is **irreversible**: a join whose round expired or was vetoed leaves the credentials provisioned for that joiner orphaned, and they are revoked (the peer's token here and the one this instance holds for it), unless another network, or another open round, still references that instance. A joiner that polls afterwards is told `403`. Nothing needs configuring.
+
+**Mixed versions.** A peer on an older build still serves an expired round as open and still adopts one; the older build concludes it as a failure the first time anything touches it. A member on this version never adopts an expired round and refuses a cast on one, so the two ends agree on the result and differ only in how long the round shows as open on the older one.
+
 ## Rolling Back
 
 **A rollback to 5.6.x rebuilds `{ seq: 1 }` before it listens, and leaves the new indexes behind.** An older build creates
@@ -223,6 +227,8 @@ lists them under `staleGuards` in `validate-schema`.
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
 keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and
 recall on it answers empty until it is ready. Nothing is lost; the records are untouched.
+
+**A rollback past 5.6.9 keeps the vote-round keys the new build wrote, and does not undo a revocation.** Each network holds a `roundOutcomes` log and a concluded round holds `outcome` and `concludedAt`; an older build neither reads nor removes them, so the log simply stops being kept and the next upgrade finds it as it was. What a rollback cannot give back is a credential the first tick revoked for a failed join: restoring it needs the `config.json` **and** the `secrets.json` copied before the upgrade, because the peer's token lives in both. The rounds the job concluded are open again in a restored copy, and conclude again on the next upgrade.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of

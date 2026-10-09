@@ -134,6 +134,7 @@ export const CAPABILITIES = [
   ['Networks', 'network_pending_space', 'POST /api/networks/:id/pending-spaces'],
   ['Networks', 'network_votes', 'GET /api/networks/:id/votes'],
   ['Networks', 'network_vote', 'POST /api/networks/:id/votes/:roundId'],
+  ['Networks', 'network_vote_outcomes', 'GET /api/networks/:id/vote-outcomes'],
   ['Networks', 'network_sync_history', 'GET /api/networks/:id/sync-history'],
   ['Networks', 'network_change_notes', 'GET /api/networks/:id/change-notes'],
   ['Networks', 'network_invite', 'POST /api/networks/:id/invite'],

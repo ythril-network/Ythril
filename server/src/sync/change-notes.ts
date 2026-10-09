@@ -166,12 +166,27 @@ export async function attachSyncNote(
 export function metaChangeNote(
   proposer: string, networkLabel: string, spaceId: string,
   change: { fields?: readonly string[]; changedTypes?: readonly string[]; keptTypes?: readonly string[] },
+  { tense = 'applied' }: { tense?: 'applied' | 'proposed' } = {},
 ): string {
-  const lines = [`${proposer} updated the schema of '${spaceId}' in '${networkLabel}'.`];
-  if (change.changedTypes?.length) lines.push(`Types added or changed: ${change.changedTypes.join(', ')}.`);
-  const others = (change.fields ?? []).filter(f => f !== 'typeSchemas');
-  if (others.length) lines.push(`Also changed: ${others.join(', ')}.`);
-  if (change.keptTypes?.length) lines.push(`Left out of the new definition, and KEPT on every member (nothing is removed by a network update): ${change.keptTypes.join(', ')}. Retire them locally if you no longer use them.`);
+  // A list is read only where it IS one, and only its text: this runs over what a peer wrote into a round, and one
+  // malformed round must not throw the whole list it is printed in.
+  const textsOf = (list: unknown): string[] => (Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
+  const changed = textsOf(change.changedTypes);
+  const others = textsOf(change.fields).filter(f => f !== 'typeSchemas');
+  const kept = textsOf(change.keptTypes);
+  const proposed = tense === 'proposed';
+  // Every line is rewritten for a voter, not only the first: a proposal that opens "proposes" and goes on to say what "was"
+  // changed and what "KEPT" reads as a note about something that already happened.
+  const lines = [proposed
+    ? `${proposer} proposes to update the schema of '${spaceId}' in '${networkLabel}'.`
+    : `${proposer} updated the schema of '${spaceId}' in '${networkLabel}'.`];
+  if (changed.length) lines.push(`${proposed ? 'Types it would add or change' : 'Types added or changed'}: ${changed.join(', ')}.`);
+  if (others.length) lines.push(`${proposed ? 'It would also change' : 'Also changed'}: ${others.join(', ')}.`);
+  if (kept.length) {
+    lines.push(proposed
+      ? `It leaves out of the new definition, and every member would KEEP (nothing is removed by a network update): ${kept.join(', ')}.`
+      : `Left out of the new definition, and KEPT on every member (nothing is removed by a network update): ${kept.join(', ')}. Retire them locally if you no longer use them.`);
+  }
   return lines.join('\n');
 }
 

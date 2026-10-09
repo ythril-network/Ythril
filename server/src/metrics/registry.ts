@@ -417,6 +417,17 @@ export const intervalTickSkippedTotal = new Counter({
 });
 
 /**
+ * Vote rounds (or whole networks) the expiry job could not conclude or prune, and config saves it could not make
+ * (`networks/round-expiry.ts`). A count of failures, not of ticks: the one line per network per window says what failed,
+ * this says how often. Declared at 0 by its own construction — an unlabelled counter is exported before its first event.
+ */
+export const roundExpiryFailuresTotal = new Counter({
+  name: 'ythril_round_expiry_failures_total',
+  help: 'Vote rounds or networks the round expiry job failed to conclude or prune, and config saves it failed to make',
+  registers: [register],
+});
+
+/**
  * Spaces housekeeping is passing over right now because they timed out. Written by the walk's signal (an absolute count, not
  * an increment) and never by a collector, so it needs no scrape to be current. 0 when nothing is in quarantine.
  */

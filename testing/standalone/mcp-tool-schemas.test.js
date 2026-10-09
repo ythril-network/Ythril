@@ -122,7 +122,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // `POST /api/spaces/:id/file-stamp-report`: `admin: true` (it names peers and spends this instance's peer credentials, so
     // instance-admin like the network sync tools), not mutating, `spaceRequired`, an audit-map entry under
     // `file.stamps.reported`, a capability-map row, and `16-mcp.md` rows.
-    assert.equal(ALL_TOOLS.length, 74);
+    // 74 -> 75: `network_vote_outcomes` (Q-429), the door onto `voteOutcomesAct` like `GET /api/networks/:id/vote-outcomes`:
+    // `admin: true` as the route's `requireAdmin`, not mutating, an audit-map entry (null), a `NOT_AREA_SCOPED` row, a
+    // capability-map row, and `16-mcp.md` rows.
+    assert.equal(ALL_TOOLS.length, 75);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

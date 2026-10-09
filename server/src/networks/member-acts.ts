@@ -23,6 +23,8 @@ import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 import { openRoundHere } from './round-local-state.js';
+import { roundIsOpen } from './round-state.js';
+import { joinOutcomesAbout, joinWasDenied } from './round-outcomes.js';
 import { stampAdmission, recordRemoval, acceptIntroduction } from './member-introductions.js';
 
 export const AddMemberBody = z.object({
@@ -207,14 +209,17 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
   if (!keyValid) {
     // Vote-governed joins consume the network's invite key when the round opens
     // and preserve the validated hash on the round record. Re-presenting the
-    // same key lets the joiner poll the outcome of its own round.
+    // same key lets the joiner poll the outcome of its own round — while the
+    // round is kept, and afterwards from the entry that records how it ended.
+    const now = Date.now();
     for (let i = net.pendingRounds.length - 1; i >= 0; i--) {
       const round = net.pendingRounds[i]!;
       if (round.type !== 'join' || !round.inviteKeyHash) continue;
       if (round.subjectInstanceId !== parsed.data.instanceId) continue;
       if (!await bcrypt.compare(parsed.data.inviteKey, round.inviteKeyHash)) continue;
 
-      if (!round.concluded) {
+      // Open means before its deadline: a round past it takes no vote, so "pending" would be a promise nothing keeps.
+      if (roundIsOpen(round, now)) {
         return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
       }
       if (!round.passed) {
@@ -235,6 +240,17 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
         saveConfig(freshCfg);
       }
       return { status: 200, body: { status: 'joined', members: safeMemberList(freshNet, parsed.data.instanceId), networkId: freshNet.id } };
+    }
+    // The round was pruned: the log of how it ended answers for it. A joiner whose round did not pass is told so, as it was
+    // before the prune — never "no active invite key", which says nobody was asked. That includes an entry whose reason was
+    // never recorded (`ended`): a round that had passed would have made the joiner a member, and a member is not asked here.
+    if (!net.members.some(m => m.instanceId === parsed.data.instanceId)) {
+      for (const entry of joinOutcomesAbout(net, parsed.data.instanceId)) {
+        if (!await bcrypt.compare(parsed.data.inviteKey, entry.inviteKeyHash!)) continue;
+        if (joinWasDenied(entry)) {
+          return { status: 403, error: 'Join was denied by network governance (vetoed or expired)' };
+        }
+      }
     }
     if (!net.inviteKeyHash) {
       return { status: 400, error: 'No active invite key — generate one first via POST /invite' };

@@ -163,8 +163,9 @@ describe('this instance\'s round state never crosses the wire', () => {
     assert.equal(served.roundId, 'r');
     assert.deepEqual(served.votes, [yes(SELF)].map(v => ({ ...v, castAt: served.votes[0].castAt })));
   });
-  it('names both local fields — a list that lost one would pass every loop above', () => {
-    assert.deepEqual([...localState.LOCAL_ROUND_FIELDS].sort(), ['appliedHere', 'proposedHere']);
+  it('names every local field — a list that lost one would pass every loop above', () => {
+    // How a round ended here (outcome, concludedAt) is this instance's own reading, like whether it applied the round.
+    assert.deepEqual([...localState.LOCAL_ROUND_FIELDS].sort(), ['appliedHere', 'concludedAt', 'outcome', 'proposedHere']);
   });
 });
 

@@ -502,15 +502,23 @@ flowchart TD
     C -- no --> FAIL1([Key rejected])
     C -- yes --> D[Voting round opens\ndeadline starts]
     D --> E[Eligible voters notified\nvia gossip on next sync]
-    E --> F{Before deadline}
-    F --> G[Members cast yes / veto\nvia Settings → Networks]
+    E --> G[Members cast yes / veto\nvia Settings → Networks]
     G --> H{Pass conditions met?}
     H -- yes --> PASS([Candidate admitted\nKey consumed\nSync begins])
-    H --> I{Deadline reached?}
-    I -- yes --> FAIL2([Round dismissed\nKey consumed\nFresh key needed])
-    I -- no --> F
-    H -- no & not expired --> F
+    H -- veto --> FAIL3([Round vetoed\nKey consumed\nFresh key needed])
+    H -- not yet --> I{Deadline passed?}
+    I -- no --> G
+    I -- yes --> FAIL2([Round expires on its own\nKey consumed\nFresh key needed])
 ```
+
+**A round is open until its deadline — at the deadline instant itself it still is — and never after it.** Once the
+deadline has passed the round is not listed as open, a cast on it is refused naming the deadline, and the instance
+concludes it as *expired* by itself, whether or not any member or peer touches it (a veto cast before then ends it as
+*vetoed* instead). An expired round passes nothing and applies nothing: a join admits nobody, a removal removes
+nobody, a space deletion or wipe touches no space, and the credentials provisioned for a failed joiner are revoked.
+The instance keeps how each of its recent rounds ended — outcome, tally and dates, the newest 50 per network — under
+**Recent decisions** on the network card; it is that instance's own reading and is never sent to a peer. A member that
+was offline past a deadline never learns of a round that ended without it.
 
 ---
 
@@ -531,7 +539,7 @@ Regardless of network type:
   **Deleted records travel too, on a rule of their own.** On a club, closed or democratic network a peer's deletion applies only to a record that peer wrote. On a pub/sub network or a tree, your upstream's deletion also applies to what it delivered to you, whoever wrote it, and never to a record you wrote yourself. A record's author and the instance that delivered it are the only two things that decide it.
 
   **It acts only on a round that passed, and only on a space that network carries.** A round that expires without
-  enough yes changes nothing, a round naming a space the network does not share is ignored however it arrives, and
+  enough yes is concluded at its deadline and changes nothing, a round naming a space the network does not share is ignored however it arrives, and
   each member acts on a concluded round once.
 
   **A proposer votes like any member.** The instance that opens a deletion, wipe, space addition or schema change is

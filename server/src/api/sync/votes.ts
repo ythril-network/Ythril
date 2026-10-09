@@ -8,12 +8,12 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
-import { log, peerText } from '../../util/log.js';
-import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
-import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
-import { applyPassedJoin } from '../../networks/member-introductions.js';
+import { concludeRoundIfReady } from '../../sync/governance.js';
+import { roundIsOpen } from '../../networks/round-state.js';
+import { roundToVoteOn } from '../../networks/vote-acts.js';
+import { applyRoundConclusion } from '../../networks/round-conclusion.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncVotesRouter = Router();
@@ -21,7 +21,8 @@ export const syncVotesRouter = Router();
 
 /**
  * GET /api/sync/networks/:networkId/votes
- * Return current open vote rounds for this network.
+ * Return the vote rounds a peer may act on: those still open — before their deadline, not concluded — and the PASSED
+ * `space_addition` and `meta_change` rounds a member that joined later has to learn of.
  */
 syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, async (req, res) => {
   try {
@@ -31,9 +32,11 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
 
     // Open rounds, and PASSED space_addition and meta_change rounds (F-38.4, F-39.4): on a club the organiser's own
     // yes concludes one the moment it opens, so a member would never see it otherwise. The receiver re-decides it from the casts under its own rule
-    // — it adopts the round as open and never takes "passed" on a peer's word.
+    // — it adopts the round as open and never takes "passed" on a peer's word. A round past its deadline is not open
+    // whether or not anything has concluded it yet: serving it would hand a peer a round nobody can vote on.
+    const now = Date.now();
     const open = net.pendingRounds
-      .filter(r => !r.concluded || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
+      .filter(r => roundIsOpen(r, now) || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
         // This instance's own state never leaves (S-7, S-9).
@@ -82,8 +85,15 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
-    const round = net.pendingRounds.find(r => r.roundId === req.params['roundId'] && !r.concluded);
-    if (!round) { res.status(404).json({ error: 'Round not found or concluded' }); return; }
+    // One `now` for the check and the conclusion. The refusal is the operator act's own, word for word (`roundToVoteOn`).
+    const now = Date.now();
+    const found = roundToVoteOn(net, req.params['roundId'] as string, now);
+    if ('refusal' in found) {
+      const { status, ...body } = found.refusal;
+      res.status(status).json(body);
+      return;
+    }
+    const { round } = found;
 
     /*
      * Vote forgery prevention. A signed cast is accepted from any reporter — its signature proves the voter
@@ -112,23 +122,10 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     if (existing >= 0) { round.votes[existing] = cast; }
     else { round.votes.push(cast); }
 
-    // Check if the round should auto-conclude
-    concludeRoundIfReady(net, round);
-
-    // Deletion, wipe and addition, through the function the other two conclusion sites call (X-5, F-38.4). A peer's
-    // yes can be the one that carries the round, so this path must apply it too — the half a per-site copy misses.
-    applyConcludedSpaceRounds(net, [round], 'peer vote');
-
-    // If a remove round just passed, notify the ejected member
-    if (round.concluded && round.passed && round.type === 'remove') {
-      sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
-    }
-
-    // If a join round just passed via this vote relay, add the pending member.
-    // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154).
-    if (applyPassedJoin(net, cfg.instanceId, round) === 'admitted') {
-      log.info(`Join round ${peerText(round.roundId)} passed via vote relay — added ${peerText(round.subjectLabel)} to network ${peerText(net.id)}`);
-    }
+    // Check if the round should auto-conclude, and apply what its conclusion does here. A peer's yes can be the one that
+    // carries the round, so this path must apply it too — through the one function every conclusion site calls.
+    concludeRoundIfReady(net, round, now);
+    applyRoundConclusion(net, cfg, [round], 'peer vote');
 
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });
