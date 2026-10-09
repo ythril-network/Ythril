@@ -339,11 +339,15 @@ describe('the insert half is the same relationship, not a new one', () => {
      * a server fault on one door and a caller error on the other, which is the parity defect this repo
      * produces most, arriving through an error path rather than a parameter.
      */
-    const route = src('server/src/api/brain/edges.ts');
-    assert.match(route, /err instanceof EdgeIdentityTaken/,
-      'REST answers 500 for a caller naming a relationship that already exists');
-    assert.match(route, /status\(409\)/,
-      'a taken identity is a conflict, not a server fault');
+    // Caught on BOTH doors through the one answer: the MCP dispatcher once fell through to a codeless 400 while REST said
+    // 409 edge_identity_taken (bundle-96 verify).
+    for (const [door, file] of [['REST', 'server/src/api/brain/edges.ts'], ['MCP', 'server/src/mcp/call-tool.ts']]) {
+      assert.match(src(file), /edgeIdentityTakenAnswer\(err\)/,
+        `${door} does not answer a taken identity through edgeIdentityTakenAnswer, so the two doors can answer it differently`);
+    }
+    const answer = src('server/src/brain/edge-rekey.ts');
+    assert.match(answer, /status: 409, body: \{ error: 'edge_identity_taken'/,
+      'a taken identity is a conflict with its own code, not a server fault');
     // And it must be thrown BEFORE anything is written, or a refused re-key leaves the edge deleted.
     assert.ok(b.indexOf('EdgeIdentityTaken') < b.search(/\bdelete(One|Many)\(|removeWithTombstones\(/),
       'the check runs after the delete, so a taken identity destroys the edge it refused to move');

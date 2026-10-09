@@ -42,6 +42,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
+import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { NotFoundError } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
@@ -361,6 +362,11 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     const merge = mergeRefusal(err);
     if (merge) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
+    }
+    // A relabel onto an identity another edge holds: the REST route's 409 and body (`edgeIdentityTakenAnswer`).
+    const taken = edgeIdentityTakenAnswer(err);
+    if (taken) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...taken.body } }, status: taken.status, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {

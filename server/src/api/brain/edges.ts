@@ -12,7 +12,7 @@ import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById } from '../../brain/edges.js';
-import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
+import { edgeIdentityTakenAnswer } from '../../brain/edge-rekey.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import {
@@ -332,13 +332,10 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
        * A label change moves the edge onto the id its new identity derives, and that id may already be
        * taken by another edge. It is a CALLER error — they named a relationship that exists — so it is a
        * 409, not the 500 an unhandled throw would produce. `04b-graph-api.md` promises this is "refused with
-       * an explanatory error rather than surfaced as an index violation"; without this the promise held on
-       * the MCP door alone, where a thrown Error becomes the tool's own message.
+       * an explanatory error rather than surfaced as an index violation. The MCP door answers the same.
        */
-      if (err instanceof EdgeIdentityTaken) {
-        res.status(409).json({ error: 'edge_identity_taken', message: err.message, existingId: err.existingId });
-        return;
-      }
+      const taken = edgeIdentityTakenAnswer(err);
+      if (taken) { res.status(taken.status).json(taken.body); return; }
       throw err;
     }
     if (updated) {

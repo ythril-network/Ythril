@@ -100,6 +100,16 @@ export class EdgeIdentityTaken extends Error {
 }
 
 /**
+ * The one answer to {@link EdgeIdentityTaken}, on every door: `409 edge_identity_taken` naming the edge in the way.
+ * The REST route and the MCP dispatcher both call it, so a relabel onto a held identity is not a 409 with a code on one
+ * door and a codeless `400` on the other; `undefined` for any other error.
+ */
+export function edgeIdentityTakenAnswer(err: unknown): { status: 409; body: { error: 'edge_identity_taken'; message: string; existingId: string } } | undefined {
+  if (!(err instanceof EdgeIdentityTaken)) return undefined;
+  return { status: 409, body: { error: 'edge_identity_taken', message: err.message, existingId: err.existingId } };
+}
+
+/**
  * Move an edge onto the id `(from, to, label)` derives, when that is not the id it is already under — one move
  * through `rekeyEdges`, which is the one implementation (see its docblock for the rules).
  *
