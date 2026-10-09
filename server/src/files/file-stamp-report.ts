@@ -41,7 +41,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { col, asFilter } from '../db/mongo.js';
-import { withinHousekeepingBound } from '../db/write-bound.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { authorRef } from '../config/author.js';
 import { getSecrets } from '../config/loader.js';
@@ -474,8 +473,14 @@ function rowOf(doc: CandidateDoc, verdict: StampVerdict, evidence: readonly Peer
 
 /**
  * The candidates, ascending by path: LIVE files this instance authored that record a sync base for some peer that currently
- * shares the space. `take` is the limit plus one, so a full page that ends the space is not called truncated. A read under the
- * store bound: `syncBase` is not indexed, so `take` bounds the rows returned and not the rows scanned.
+ * shares the space. `take` is the limit plus one, so a full page that ends the space is not called truncated. `syncBase` is not
+ * indexed, so `take` bounds the rows returned and not the rows scanned: the read carries the run's own budget as its server
+ * deadline (`maxTimeMS`).
+ *
+ * **Not inside `withinHousekeepingBound`, and that is the point.** A bound scope puts a driver `timeoutMS` on a read, and a read
+ * with `timeoutMS` is retried by the driver for as long as it lasts when the store fails it at once (a cleared pool, a missing
+ * server): one retry straight after another for the scope's whole figure, with no I/O between them for a timer to fire in. A
+ * report is a request, and a request's read has its deadline as an OPTION of the read, like every other read a door makes.
  */
 async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number): Promise<CandidateDoc[]> {
   if (peerIds.length === 0) return [];
@@ -489,14 +494,14 @@ async function readCandidates(spaceId: string, self: string, peerIds: readonly s
     _id: 1, seq: 1, createdAt: 1, updatedAt: 1, sha256: 1, description: 1, descriptionSource: 1, tags: 1, properties: 1,
     ...Object.fromEntries(peerIds.map(p => [syncBasePath(p), 1])),
   };
-  return withinHousekeepingBound(() => col<CandidateDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<CandidateDoc>(filter), { projection }).sort({ _id: 1 }).limit(take).toArray() as Promise<CandidateDoc[]>);
+  return col<CandidateDoc>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<CandidateDoc>(filter), { projection, maxTimeMS: FILE_STAMP_REPORT_DEADLINE_MS }).sort({ _id: 1 }).limit(take).toArray() as Promise<CandidateDoc[]>;
 }
 
 /** The ids among `ids` that are still live files of this instance: a row deleted or replaced since it was read is not reported. */
 async function stillCandidates(spaceId: string, self: string, ids: readonly string[]): Promise<Set<string>> {
-  const rows = await withinHousekeepingBound(() => col<{ _id: string }>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<{ _id: string }>({ ...LIVE_FILE_ROW, 'author.instanceId': self, _id: { $in: ids } }), { projection: { _id: 1 } }).toArray());
+  const rows = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<{ _id: string }>({ ...LIVE_FILE_ROW, 'author.instanceId': self, _id: { $in: ids } }), { projection: { _id: 1 }, maxTimeMS: FILE_STAMP_REPORT_DEADLINE_MS }).toArray();
   return new Set(rows.map(r => String(r._id)));
 }
 
