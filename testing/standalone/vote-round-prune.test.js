@@ -7,7 +7,8 @@
  * can no longer influence any decision (every peer concludes them independently once the
  * deadline passes) and need no further propagation. These tests pin the retention rule:
  * open rounds and within-deadline concluded rounds are always kept; only concluded +
- * expired rounds are removed; a malformed deadline is kept (never prune on doubt).
+ * expired rounds are removed; a concluded round whose deadline cannot be read counts as past, so it is
+ * removed too (and recorded first) — an open one is never removed whatever its deadline says.
  *
  * Run: node --test testing/standalone/vote-round-prune.test.js  (requires server build)
  */
@@ -47,8 +48,16 @@ describe('vote-round retention — isRoundPrunable', () => {
     assert.equal(isRoundPrunable(round({ concluded: false, deadline: future }), NOW), false);
   });
 
-  it('malformed deadline → kept (never prune on doubt)', () => {
-    assert.equal(isRoundPrunable(round({ concluded: true, deadline: 'not-a-date' }), NOW), false);
+  it('concluded with a deadline nobody can read → prunable: an undatable round counts as past (its outcome is recorded first)', () => {
+    // Was "kept (never prune on doubt)". A round that cannot be dated is read as past everywhere else now (`round-state.ts`), so
+    // keeping it here would hold a concluded round for ever; nothing is lost, because the prune records how it ended.
+    for (const deadline of ['not-a-date', '', undefined]) {
+      assert.equal(isRoundPrunable(round({ concluded: true, deadline }), NOW), true, `deadline ${JSON.stringify(deadline)}`);
+    }
+  });
+
+  it('open with a deadline nobody can read → still kept: only a CONCLUDED round is ever pruned', () => {
+    assert.equal(isRoundPrunable(round({ concluded: false, deadline: 'not-a-date' }), NOW), false);
   });
 });
 

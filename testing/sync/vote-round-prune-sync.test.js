@@ -5,8 +5,9 @@
  * `pendingRounds`, so the array would grow for the life of the network. The sync engine
  * now prunes rounds that are concluded AND past their deadline, once per cycle. This test
  * proves the wiring end-to-end against a running instance: inject three rounds directly
- * into A's config — one concluded+expired (must be pruned), one concluded-but-future and
- * one open+expired (both must survive) — run a sync cycle, and assert the outcome.
+ * into A's config — one concluded+expired (must be pruned), one concluded-but-future (must
+ * survive) and one open+expired (the expiry job concludes it, records it, and it is pruned) —
+ * run sync cycles, and assert the outcome and the record of how each ended.
  *
  * The prune runs post-member-loop and unconditionally, so a reachable peer is not
  * required; the injected peer only exists so the network has a member to iterate.
@@ -20,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, del, delWithBody, waitFor, makeTriggerProbe } from './helpers.js';
+import { dockerExec, INSTANCES, post, del, delWithBody, waitFor, makeTriggerProbe, patchContainerNetwork } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -30,11 +31,7 @@ let tokenA, instanceIdA, networkId, testSpaceId;
 function readConfig(c) {
   return JSON.parse(dockerExec(`docker exec ${c} node -e "const fs=require('fs');process.stdout.write(fs.readFileSync('/config/config.json','utf8'))"`).toString());
 }
-function patch(c, netId, fnBody) {
-  const b64 = Buffer.from(fnBody, 'utf8').toString('base64');
-  const s = `const fs=require('fs');const p='/config/config.json';const cfg=JSON.parse(fs.readFileSync(p,'utf8'));const n=cfg.networks.find(x=>x.id==='${netId}');const patch=new Function('n','cfg',Buffer.from('${b64}','base64').toString('utf8'));patch(n,cfg);fs.writeFileSync(p,JSON.stringify(cfg,null,2),{mode:0o600});process.stdout.write('ok');`;
-  dockerExec(`docker exec ${c} node -e "${s}"`);
-}
+const patch = patchContainerNetwork;
 
 function roundIds(c, netId) {
   const net = readConfig(c).networks.find(n => n.id === netId);
@@ -68,7 +65,7 @@ describe('Expired vote rounds are pruned during sync', () => {
     }
   });
 
-  it('prunes concluded+expired rounds and keeps concluded-future and open-expired rounds', async () => {
+  it('prunes concluded+expired rounds, concludes and records open-expired ones, and keeps concluded-future ones', async () => {
     const pastDeadline = new Date(Date.now() - 60_000).toISOString();       // 1 min ago
     const futureDeadline = new Date(Date.now() + 3_600_000).toISOString();  // 1 h ahead
     const mk = (roundId, concluded, deadline) => ({
@@ -90,16 +87,25 @@ describe('Expired vote rounds are pruned during sync', () => {
     assert.ok(before.has('keep-concluded-future'));
     assert.ok(before.has('keep-open-expired'));
 
-    // Trigger sync cycles on A until the expired round is pruned from its on-disk config.
+    // Trigger sync cycles on A until both expired rounds are gone from its on-disk config. The first is pruned by the sync
+    // cycle; the second is open on paper, so the expiry job (a tick a minute) has to conclude it before anything can prune it.
     const triggerA = makeTriggerProbe(INSTANCES.a, tokenA, networkId, 'A');
     await waitFor(async () => {
       await triggerA();
-      return !roundIds('ythril-a', networkId).has('drop-concluded-expired');
-    }, 60_000, 2_000, triggerA.diagnose);
+      const held = roundIds('ythril-a', networkId);
+      return !held.has('drop-concluded-expired') && !held.has('keep-open-expired');
+    }, 120_000, 2_000, triggerA.diagnose);
 
     const after = roundIds('ythril-a', networkId);
     assert.ok(!after.has('drop-concluded-expired'), 'concluded+expired round must be pruned');
     assert.ok(after.has('keep-concluded-future'), 'concluded-but-within-deadline round must survive (may still need to propagate)');
-    assert.ok(after.has('keep-open-expired'), 'open round must survive even when past deadline (still live governance)');
+    // Concluded by the job (not left open until a cast or a peer touches it), recorded, and then pruned like any other.
+    assert.ok(!after.has('keep-open-expired'), 'an open round past its deadline is concluded by the expiry job and pruned, not kept as live governance');
+
+    const log = Object.fromEntries((readConfig('ythril-a').networks.find(n => n.id === networkId)?.roundOutcomes ?? []).map(e => [e.roundId, e]));
+    assert.equal(log['keep-open-expired']?.outcome, 'expired', 'the round the job ended is recorded as expired — pruning must not lose how it ended');
+    assert.ok(log['keep-open-expired']?.concludedAt, 'and dated');
+    assert.equal(log['drop-concluded-expired']?.outcome, 'ended', 'a round concluded before the outcome was recorded is kept as ended, reason not recorded');
+    assert.equal(log['keep-concluded-future'], undefined, 'a round that is still held has not been recorded as past');
   });
 });

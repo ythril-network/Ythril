@@ -35,7 +35,8 @@ function net(overrides = {}) {
 }
 const member = (consecutiveFailures = 0) => ({ instanceId: 'peer', label: 'Peer', consecutiveFailures });
 /** An open round awaiting everyone (no votes cast, open to all members) by default. */
-const round = (extra = {}) => ({ roundId: 'r1', concluded: false, votes: [], ...extra });
+// A deadline in the far future: a round with none (or an unreadable one) is past its deadline, and a past round asks nobody to vote.
+const round = (extra = {}) => ({ roundId: 'r1', concluded: false, votes: [], deadline: '2099-01-01T00:00:00.000Z', ...extra });
 const neverSyncing = () => false;
 const alwaysSyncing = () => true;
 const info = (networks, spaceId = 'work', isSyncing = neverSyncing, me = ME) =>
@@ -85,6 +86,13 @@ describe('spaceNetworkInfo (F8 space-chip status)', () => {
 
   it('ignores concluded rounds', () => {
     assert.equal(info([net({ pendingRounds: [round({ concluded: true })] })]).networkStatus, 'idle');
+  });
+
+  it('ignores a round past its deadline that nothing has concluded yet: nobody can vote on it', () => {
+    for (const deadline of ['2020-01-01T00:00:00.000Z', 'whenever', '', undefined]) {
+      assert.equal(info([net({ pendingRounds: [round({ deadline })] })]).networkStatus, 'idle',
+        `a round with deadline ${JSON.stringify(deadline)} still asked the operator to vote`);
+    }
   });
 
   it('a space-scoped round only affects its own space', () => {

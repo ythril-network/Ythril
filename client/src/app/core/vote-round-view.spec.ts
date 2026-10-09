@@ -33,6 +33,29 @@ describe('voteRoundFromServer', () => {
     expect(voteRoundFromServer('n', server({ spaceId: 'y-twin' })).subject, 'an older server sends no localSpaceId')
       .toBe('y-twin (brain-a)');
   });
+  it('carries what a meta_change round proposes and the sentence the server wrote about it', () => {
+    /*
+     * The server has always sent `metaChangedFields`, `changedTypes`, `keptTypes` and `proposesLayer` on a
+     * meta_change round, and the page could not show them: the type declared none of them and this mapping copies
+     * only what it names, so a voter was asked to approve "meta_change: notes" with nothing about what changes.
+     * `summary` is the one-sentence form the list now adds. All five must survive the translation.
+     */
+    const r = voteRoundFromServer('n', server({
+      type: 'meta_change', metaChangedFields: ['schemas', 'description'], changedTypes: ['entity:Task'],
+      keptTypes: ['fact:Note'], proposesLayer: true, summary: 'Proposed: Task gains a due date.',
+    }));
+    expect(r.metaChangedFields).toEqual(['schemas', 'description']);
+    expect(r.changedTypes).toEqual(['entity:Task']);
+    expect(r.keptTypes).toEqual(['fact:Note']);
+    expect(r.proposesLayer).toBe(true);
+    expect(r.summary).toBe('Proposed: Task gains a due date.');
+  });
+  it('a round that proposes nothing carries none of them, rather than empty stand-ins', () => {
+    const r = voteRoundFromServer('n', server());
+    for (const key of ['metaChangedFields', 'changedTypes', 'keptTypes', 'proposesLayer', 'summary'] as const) {
+      expect(r[key], `${key} appeared on a round that did not send it`).toBeUndefined();
+    }
+  });
   it('carries the network and the casts', () => {
     const r = voteRoundFromServer('net-1', server());
     expect(r.networkId).toBe('net-1');

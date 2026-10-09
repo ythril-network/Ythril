@@ -45,6 +45,19 @@ export function readContainerSecrets(container) {
   return JSON.parse(dockerExec(`docker exec ${container} node -e "const fs=require('fs');process.stdout.write(fs.readFileSync('/config/secrets.json','utf8'))"`));
 }
 
+/**
+ * Change one network in a container's config.json from the outside: `fnBody` is the body of `(n, cfg) => …`, run on the network
+ * with `networkId`. The caller reloads the instance (`POST /api/admin/reload-config`) for it to take effect. The body travels as
+ * base64, so quotes and `$` in it survive the shell and the `docker exec` that carries it.
+ */
+export function patchContainerNetwork(container, networkId, fnBody) {
+  const b64 = Buffer.from(fnBody, 'utf8').toString('base64');
+  const script = `const fs=require('fs');const p='/config/config.json';const cfg=JSON.parse(fs.readFileSync(p,'utf8'));`
+    + `const n=cfg.networks.find(x=>x.id==='${networkId}');const patch=new Function('n','cfg',Buffer.from('${b64}','base64').toString('utf8'));`
+    + `patch(n,cfg);fs.writeFileSync(p,JSON.stringify(cfg,null,2),{mode:0o600});process.stdout.write('ok');`;
+  dockerExec(`docker exec ${container} node -e "${script}"`);
+}
+
 /** Read a container's instanceId from its config (resilient to write races). */
 export function getInstanceId(container) {
   return dockerExec(`docker exec ${container} node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('/config/config.json','utf8'));process.stdout.write(c.instanceId)"`).trim();
