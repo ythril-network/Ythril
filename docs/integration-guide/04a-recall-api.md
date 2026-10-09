@@ -615,7 +615,9 @@ filtered recall cannot silently miss a matching record. If an answer could not b
 costs what an unfiltered recall costs. Any other filter — an undeclared property, `exists`, `ne`, `$or`,
 `$regex` — costs a pass over the space's matching records. Declare a heavily filtered property in the space
 schema to keep it fast. `filterPath` in the response says which this answer took: `prefilter` (the index
-applied it) or `exhaustive` (the index could not; the answer is still complete).
+applied it) or `exhaustive` (the index could not; the answer is still complete). A filtered recall over **files**
+always says `exhaustive`: file records also carry this instance's exclusion of deleted files, which the index cannot
+apply. An unfiltered recall reports no `filterPath` at all.
 
 **Two grammars are accepted.** The operator-object form below takes one operator object per key, AND-ed across
 keys. **Raw MongoDB is also accepted** — the same operators `query` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`,

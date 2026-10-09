@@ -918,8 +918,11 @@ async function recallByType(
    * path's window is completed from the collection when the window cannot prove it held the answer, which is the one
    * path that can promise a filtered file recall misses nothing.
    *
-   * The cost is stated rather than hidden: a file recall is now an exhaustive-capable search, and says so through the
-   * same `scanned` disclosure every other predicate recall uses, so `filterPath` tells a caller which path it got.
+   * `filterPath` is about the CALLER's filter, so it is reported only when the caller sent one: a filtered file recall
+   * says `exhaustive`, because its filter never reaches the index; an unfiltered one says nothing, because the only
+   * filter it carries is this guard, and "an unfiltered recall reports no path" is the contract
+   * (`recall-filters-what-filter-filters`). The guard's own cost is the predicate path's: the nearest window, completed
+   * from the collection only when deleted files' records crowd it.
    */
   const fileRowsNarrowed = knowledgeType === 'file';
   let primary: () => Promise<Record<string, unknown>[]>;
@@ -927,7 +930,7 @@ async function recallByType(
   if (!hasFilter && !hasTags && !fileRowsNarrowed) {
     primary = () => run([annStage(), ...tail]);
   } else if (fileRowsNarrowed) {
-    observe?.scanned();
+    if (hasFilter || hasTags) observe?.scanned();
     primary = predicateSearch;
   } else {
     const declared = new Set(vectorFilterFieldsFor(spaceId, collSuffix));
