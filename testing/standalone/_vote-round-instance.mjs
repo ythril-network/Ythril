@@ -46,11 +46,15 @@ export function removeInstanceDir(dir) {
 
 /**
  * Write a config the loader will accept and load it, plus the peer-token secrets. Returns the loader module.
- * `networks` are written as given: a test that needs a key MISSING simply leaves it out.
+ * `networks` are written as given: a test that needs a key MISSING simply leaves it out. A config write still pending
+ * from an earlier boot is drained first, so it cannot replace this one.
  */
 export async function bootInstance(dir, { instanceId, networks = [], spaces, tokens = [], peerTokens = {}, extra = {} }) {
   assert.equal(process.env['CONFIG_PATH'], path.join(dir, 'config.json'), 'call tempInstanceDir before importing the loader');
   const loader = await import('../../server/dist/config/loader.js');
+  // A sync cycle saves its bookkeeping through the deferred write, whose rename runs on a pool thread. Left pending, the
+  // previous scenario's config lands on disk between this write and the load below, and the load reads the old one.
+  await loader.flushConfig();
   fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
     instanceId, instanceLabel: 'self', tokens, networks,
     spaces: spaces ?? [{ id: 'general', label: 'General', builtIn: true, folders: [] }],
