@@ -110,7 +110,8 @@ describe('a peer label cannot forge a governance log line', { skip }, () => {
       if (req.method === 'GET' && req.path.endsWith('/votes')) {
         res.json({ rounds: [{
           roundId: forged(ROUND), type: 'join', subjectInstanceId: 'subject-1', subjectLabel: 'Subject',
-          subjectUrl: 'https://subject.example', deadline, createdAt: new Date().toISOString(),
+          // A live round as a peer sends one: gossip adopts only a round it can date, so `openedAt` is what reaches the adopt line.
+          subjectUrl: 'https://subject.example', deadline, openedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
           votes: [{ instanceId: forged(VOTER), vote: 'yes' }],
         }] });
         return;

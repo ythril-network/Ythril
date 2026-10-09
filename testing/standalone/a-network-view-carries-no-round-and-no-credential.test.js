@@ -61,6 +61,20 @@ describe('the doors are derived from the tree', () => {
     const unknown = callers.filter(f => !DRIVEN.includes(f));
     assert.deepEqual(unknown, [], `these serve a network body through a door this test does not drive: ${unknown.join(', ')}`);
   });
+
+  // The derivation above finds a door by its CALL to networkView, so a door that answers a network without calling it is
+  // invisible to it — the fork act did exactly that. This finds a door by what it ANSWERS: an act's body is always built
+  // (a call or an object literal), never a variable handed over as it stands, because the variable is the stored record.
+  it('no network act answers a stored object as it stands', () => {
+    const files = trackedSources('server/src/networks', { untracked: true, floor: 5 }).filter(f => /-acts\.ts$/.test(f));
+    assert.ok(files.length >= 2, `only ${files.length} act file(s) found`);
+    const bare = [];
+    for (const f of files) {
+      const src = stripComments(fs.readFileSync(f, 'utf8'));
+      for (const m of src.matchAll(/\bstatus:\s*\d{3}\s*,\s*body:\s*([A-Za-z_$][\w$]*)\s*(?:[,}]|\bas\b)/g)) bare.push(`${f}: body: ${m[1]}`);
+    }
+    assert.deepEqual(bare, [], `an act answers a stored object unprojected:\n${bare.join('\n')}`);
+  });
 });
 
 describe('what a caller who may read a network is handed', () => {
@@ -118,6 +132,16 @@ describe('what a caller who may read a network is handed', () => {
     const res = await callRoute(crudRouter, 'get', '/:id', { params: { id: 'n' }, authToken: ADMIN });
     assert.equal(res.code, 200);
     verify('GET /api/networks/:id', res.body);
+  });
+
+  it('forkNetworkAct (REST POST /:id/fork and MCP network_fork)', async () => {
+    const { forkNetworkAct } = await import('../../server/dist/networks/network-acts.js');
+    const res = forkNetworkAct('n', { label: 'Net', type: 'closed' });
+    assert.equal(res.status, 201, JSON.stringify(res));
+    for (const forbidden of ['pendingRounds', 'roundOutcomes', 'inviteKeyHash']) {
+      assert.ok(!(forbidden in res.body), `the fork answer carries ${forbidden}: a network is answered through networkView`);
+    }
+    assert.ok(res.body.myRole, 'the fork answer is not a network view');
   });
 
   it('the fixture would have been caught: the unredacted record does carry the hashes', () => {

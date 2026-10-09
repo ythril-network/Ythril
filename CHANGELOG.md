@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Each edges collection gains a unique index (background pass; a restore rebuilds it, answering `edgeIndexes.failed`) | Races refused once the pass has run |
 | A second edge to the same `to` of another kind under a `functional` label is refused; `validate-schema` adds `staleGuards`; a relabel onto a held identity answers `409 edge_identity_taken`, was `500` | Read `staleGuards`; handle `409` |
 | A webhook or live-view `entry` no longer carries instance-local fields (`_expireAt`, `_contentExpireAt`, `syncBase`, `deliveredBy`, `matchedText`) | Fetch the record if you read them |
-| A cast on a round past its deadline answers `409` `round_expired` naming it (it was taken) and the round is never listed as open; `GET /api/networks` carries no `pendingRounds` (it held a join round's invite-key hash) | Handle `409`; read rounds on `/votes` |
+| A cast on a round past its deadline answers `409` `round_expired` naming it (it was taken) and the round is never listed as open; `GET /api/networks` and a fork's answer carry no `pendingRounds` (it held a join round's invite-key hash) | Handle `409`; read rounds on `/votes` |
 | The first minute after upgrade concludes every round already past its deadline, and a failed join's orphaned peer credentials are revoked, which cannot be undone | Read the upgrade notes before upgrading a network with old rounds |
 
 ### Added

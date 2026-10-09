@@ -497,5 +497,5 @@ export function forkNetworkAct(sourceId: string, input: unknown): NetworkActResu
   cfg.networks.push(forkedNet);
   saveConfig(cfg);
   log.info(`Forked network ${peerText(sourceId)} → new network ${peerText(forkedNet.id)} ('${peerText(forkedNet.label)}')`);
-  return { status: 201, body: forkedNet as unknown as Record<string, unknown> };
+  return { status: 201, body: networkView(forkedNet) };
 }

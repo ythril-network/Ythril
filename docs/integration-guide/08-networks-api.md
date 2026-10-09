@@ -698,7 +698,7 @@ Creates a new independent network from your local copy of the data.
 - **Ejected** — source config is deleted on `member_removed`; `spaces` must be supplied explicitly.
 - **Unknown ID** — `404`.
 
-The fork gets a fresh UUID, no members, no pending rounds. You become the root.
+The fork gets a fresh UUID, no members, no pending rounds. You become the root. The `201` answer is the new network in the same shape as `GET /api/networks/:id`: no credential, no rounds, and `myRole`.
 
 ---
 
