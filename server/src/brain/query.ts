@@ -9,7 +9,7 @@
 import { col } from '../db/mongo.js';
 import { BUDGET_REQUEST_FIELDS } from './result-budget.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
-import { normaliseProjection, toMongoProjection } from './projection.js';
+import { normaliseProjection, toMongoProjection, withoutWriteGuard } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
@@ -393,7 +393,8 @@ export async function queryBrain(
     // projection rather than applied as a second `.project()` — a second call
     // replaces the first in the MongoDB driver, which previously discarded the
     // caller's projection entirely.
-    .project(mergeEmbeddingExclusion(projection) as Record<string, never>);
+    // The write guard (`_functionalGuard`) is withheld the same way: a projection that names it is not honoured (`withoutWriteGuard`).
+    .project(withoutWriteGuard(mergeEmbeddingExclusion(projection)) as Record<string, never>);
   if (!read) return cursor.toArray();
   const { rows, cut } = await readWithinBound(cursor, read.bound);
   if (cut) read.onCut();

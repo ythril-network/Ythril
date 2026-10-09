@@ -5,14 +5,14 @@
  */
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
-import { assertRefsResolve, edgeEndpointKind } from '../../brain/entity-refs.js';
+import { assertRefs, assertRefsResolve, edgeEndpointKind } from '../../brain/entity-refs.js';
 import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
-import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
+import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById } from '../../brain/edges.js';
+import { edgeIdentityTakenAnswer } from '../../brain/edge-rekey.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import {
@@ -22,7 +22,7 @@ import {
   findFirstAcrossMembers,
 } from '../../spaces/proxy.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { sendReadFailure } from './_read-failure.js';
@@ -78,12 +78,13 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   }
   if (isStrictLinkage(wt.target)) {
     try {
-      // Each endpoint is resolved in the collection its own kind names. Passing `'entity'` here regardless —
-      // which is what this did — would refuse every file-ended edge with "expects entity IDs (UUID v4)".
-      await assertRefsResolve(wt.target, 'from', edgeEndpointKind(fromKind as RefKind | undefined), [from as string]);
-      await assertRefsResolve(wt.target, 'to', edgeEndpointKind(toKind as RefKind | undefined), [to as string]);
+      // Each endpoint is held to the shape its own kind names. Passing `'entity'` here regardless — which is what
+      // this did — would refuse every file-ended edge with "expects entity IDs (UUID v4)". That the ends EXIST is
+      // `edgeRefusal`'s, asked inside `upsertEdge` with the schema, so this door, the MCP tool, the batch and an
+      // inline edge refuse a dangling end by one function.
+      assertRefs('from', edgeEndpointKind(fromKind as RefKind | undefined), [from as string]);
+      assertRefs('to', edgeEndpointKind(toKind as RefKind | undefined), [to as string]);
     } catch (err) {
-      // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
       sendReadFailure(res, 'brain POST /spaces/:spaceId/edges (reference check)', err);
       return;
     }
@@ -132,7 +133,9 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     return;
   }
   /*
-   * The schema check lives in `upsertEdge` now, not here.
+   * The schema check lives in `upsertEdge` now, not here — and so does a missing end under `strictLinkage`, one
+   * refusal (`edgeRefusal`) with the schema's, so a dangling end answers the documented `schema_violation` body
+   * (`connectionRefusalAnswer`, below) rather than this route's own `{ error }`.
    *
    * It sat at this route and at the MCP tool — one rule written twice, and reachable around both:
    * `api/contradictions.ts` and `brain/bulk.ts` called `upsertEdge` directly and were never checked. Owner's
@@ -164,11 +167,8 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       },
     );
   } catch (err) {
-    if (err instanceof EdgeSchemaViolation) {
-      const c = err.check;
-      res.status(400).json({ error: 'schema_violation', message: c.message, violations: c.all, introduced: c.introduced, preExisting: c.preExisting });
-      return;
-    }
+    const refused = connectionRefusalAnswer(err, 'create');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
     throw err;
   }
   const result: Record<string, unknown> = { ...edge };
@@ -326,24 +326,16 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
       updated = await updateEdgeById(mid, id, updates, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq,
         c => { updateCheck = c; });
     } catch (err) {
-      if (err instanceof SchemaViolationError) {
-        res.status(422).json({
-          error: 'schema_violation', message: err.check.message, violations: err.check.all,
-          introduced: err.check.introduced, preExisting: err.check.preExisting,
-        });
-        return;
-      }
+      const refused = connectionRefusalAnswer(err, 'update');
+      if (refused) { res.status(refused.status).json(refused.body); return; }
       /*
        * A label change moves the edge onto the id its new identity derives, and that id may already be
        * taken by another edge. It is a CALLER error — they named a relationship that exists — so it is a
        * 409, not the 500 an unhandled throw would produce. `04b-graph-api.md` promises this is "refused with
-       * an explanatory error rather than surfaced as an index violation"; without this the promise held on
-       * the MCP door alone, where a thrown Error becomes the tool's own message.
+       * an explanatory error rather than surfaced as an index violation. The MCP door answers the same.
        */
-      if (err instanceof EdgeIdentityTaken) {
-        res.status(409).json({ error: 'edge_identity_taken', message: err.message, existingId: err.existingId });
-        return;
-      }
+      const taken = edgeIdentityTakenAnswer(err);
+      if (taken) { res.status(taken.status).json(taken.body); return; }
       throw err;
     }
     if (updated) {

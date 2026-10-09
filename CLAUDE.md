@@ -316,12 +316,21 @@ retention losing records after the sender's seven days, with nothing logged on e
 **The list is `sync/local-only-fields.ts`, with one reason.** `merkle.ts` excludes them from the hash; the
 arrival writer drops them from whatever arrives, by push or by pull, and decides per document what of the
 receiver's own values crosses the replace (`carriedFields`): every local-only field for an ordinary arrival (a
-peer's edit used to erase this instance's vector and retention stamps); the record tier only, no vector, model or
-`matchedText`, for an arrival this instance suppresses (Q-230); NOTHING from the replaced copy for a restore, which
-keeps the backup's own record-tier half (`RESTORED_LOCAL_FIELDS`: the stamps and `syncBase`) and never the derived
-half (Q-234). The
+peer's edit used to erase this instance's vector and retention stamps); the record tier and the write guard, no vector,
+model or `matchedText`, for an arrival this instance suppresses (Q-230); NOTHING from the replaced copy for a restore,
+which keeps the backup's own record-tier half (`RESTORED_LOCAL_FIELDS`: `_expireAt`, `_contentExpireAt`, `syncBase`
+and `deliveredBy`) and never the derived half (`embedding`, `embeddingModel`, `matchedText`; Q-234). The
 equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
 replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
+
+**The third class is the write guard (`WRITE_GUARD_FIELDS`: `_functionalGuard`, Q-439).** It is local-only like the
+rest and a different thing: a lock in THIS instance's unique index, not a fact about the record. Never restored (a
+backup's copy could hold a second marker for a subject, or one for an edge since relabelled) and never derived (an
+embed must not clear it). **Its invariant: the marker is `functionalSubjectKey(from, label)`, so every writer that
+changes either drops it, restamps it, or carries it only while both are unchanged.** A marker that no longer names its
+edge holds a subject's slot for ever and refuses every legitimate write under it, with a duplicate-key error nobody can
+explain. `every-edge-writer-says-what-it-does-with-the-functional-guard` derives the writers and holds each to one of
+the three; `healStaleMarker` is the one place a phantom is cleared.
 
 **What to take from it, because the shape recurs:** the gate protecting this asserted that the receiver
 does not trust an arriving vector, and it was scoped to the ingest ROUTER. The second ingest site was

@@ -33,6 +33,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 const TOOL = stripComments(readFileSync('server/src/mcp/tools/bulk.ts', 'utf8'));
 const CORE = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
@@ -138,8 +139,11 @@ describe('the reference-checking asymmetry is stated — and that it is GONE', (
      * pin the old behaviour — what has to hold is that the description states the condition, so the claim
      * and the code cannot drift apart.
      */
-    // Existence is answered from the batch's read set, in `assertRefsResolve`'s words (`missingRefsRefusal`).
-    assert.match(CORE, /missingRefsRefusal\(/, 'and existence, which is no longer conditional');
+    // Existence is answered from the batch's read set, in `assertRefsResolve`'s words (`missingRefsRefusal`) — for a
+    // top-level edge's ends by `edgeRefusal` (`Q-170`), the one function every edge door asks, which the batch calls
+    // and which words the refusal; for an item's links by `refuseLinks`, as before.
+    assert.match(CORE, /\bedgeRefusal\(/, 'and existence, which is no longer conditional, asked of the edge by the one function');
+    assert.match(writePlanFunction('edgeRefusal').body, /missingRefsRefusal\(/, 'in the words every door gives for a dangling reference');
     assert.match(DESC, /CONVERTED SPACE/i,
       'the description must say what the condition USED to be, or a caller written against 4.x has no way '
       + 'to tell that their dangling-link trade is gone');

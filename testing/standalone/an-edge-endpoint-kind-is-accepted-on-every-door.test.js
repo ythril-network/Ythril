@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, blockAfter } from './_structural-window.mjs';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 const { REF_KINDS } = await import('../../server/dist/config/types-knowledge.js');
 const { edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } = await import('../../server/dist/brain/entity-refs.js');
@@ -126,10 +127,20 @@ describe('the REST door reads them and passes them on', () => {
   it('and both endpoints are resolved against the kind, not against entity', () => {
     // The half that makes the field mean anything. `assertRefsResolve(..., 'entity', ...)` on a file endpoint
     // refuses a legitimate path with a message about UUIDs, which is how a supported field ships unusable.
-    assert.doesNotMatch(route, /assertRefsResolve\([^)]*'entity'/,
+    //
+    // Two halves since `Q-170`: the route holds each end to the SHAPE its kind names (`assertRefs`), and that the end
+    // EXISTS is `edgeRefusal`'s (asked inside `upsertEdge`, with the schema), which looks each one up in the collection
+    // its kind names. Both are held to the declared kind; neither may fall back to `entity`.
+    assert.doesNotMatch(route, /assertRefs(?:Resolve)?\([^)]*'entity'/,
       'a REST endpoint is still resolved as an entity regardless of the kind it declares');
-    assert.match(route, /assertRefsResolve\([^)]*edgeEndpointKind\(/,
-      'the REST route does not resolve its endpoints against the declared kind');
+    assert.match(route, /assertRefs\([^)]*edgeEndpointKind\(/,
+      'the REST route does not hold its endpoints to the shape of the declared kind');
+    const { body } = writePlanFunction('edgeRefusal');
+    for (const side of ['from', 'to']) {
+      assert.match(body, new RegExp(`edgeEndpointKind\\(opts\\?\\.${side}Kind\\)`),
+        `edgeRefusal does not resolve \`${side}\` against the declared kind, so a ${side} end of another kind is looked up as an entity`);
+    }
+    assert.doesNotMatch(body, /'entity'/, 'edgeRefusal names `entity` itself — an end is looked up in the collection its kind names');
   });
 });
 

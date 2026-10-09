@@ -56,6 +56,12 @@ declare global {
        */
       auditSnapshots?: { before?: unknown; after?: unknown };
       /**
+       * The record a request acted on when the PATH cannot name it — a create has no id in its URL, and a create
+       * whose record landed and whose connections then failed is still a write of that record (`Q-170`). Set by the
+       * error handler that answers it; the audit middleware prefers it to the path's own.
+       */
+      auditEntryId?: string;
+      /**
        * Whether a recall actually came back with something, and how good the best hit was.
        *
        * Set by the recall handler, read by the audit middleware on `res.finish` for the per-space usefulness

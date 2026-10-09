@@ -17,7 +17,16 @@
  */
 import { ReadSet, type ReadWant } from './read-set.js';
 import { commitPlans } from './commit.js';
+import { healStaleMarker } from './heal-stale-marker.js';
+import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
 import { WriteConflict, type CommitOutcome, type WritePlan } from './types.js';
+
+/** The write guard an INSERT plan carries (an edge under a functional label in a space that refuses), or `undefined`. */
+function guardOf(plan: WritePlan): string | undefined {
+  if (plan.kind !== 'edge' || plan.op !== 'insert' || plan.doc === undefined) return undefined;
+  const guard = plan.doc[FUNCTIONAL_GUARD];
+  return typeof guard === 'string' ? guard : undefined;
+}
 
 /** A commit outcome, or the conflict a write is answered with once its attempts are spent. */
 export type PlannedOutcome = CommitOutcome | { readonly ok: false; readonly reason: string; readonly conflict: WriteConflict };
@@ -33,12 +42,24 @@ export async function planAndCommit<R extends { plan: WritePlan }>(
   planOne: (view: ReadSet) => Promise<R>,
   attempts: number,
 ): Promise<{ planned: R; outcome: PlannedOutcome }> {
+  /*
+   * ONE extra retry, for a write guard that turned out to be a phantom (`Q-439`): clearing it makes the same insert land, which
+   * is not a lost race and must not be charged as one. Decided HERE, the one place a lost race becomes a conflict, so the
+   * budget of every door is the same: its attempts, plus this one.
+   */
+  let healed = false;
   for (let attempt = 1; ; attempt++) {
     const view = new ReadSet(spaceId);
     await view.load(want);
     const planned = await planOne(view);
     const [outcome] = await commitPlans(spaceId, [planned.plan]);
     if (outcome!.ok || !outcome!.stale) return { planned, outcome: outcome! };
+    const guard = guardOf(planned.plan);
+    if (guard !== undefined && !healed && (await healStaleMarker(spaceId, guard, planned.plan.id)) === 'healed') {
+      healed = true;
+      attempt--;
+      continue;
+    }
     if (attempt >= attempts) {
       const conflict = new WriteConflict(planned.plan.kind, planned.plan.id);
       return { planned, outcome: { ok: false, reason: conflict.message, conflict } };

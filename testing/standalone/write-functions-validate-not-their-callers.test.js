@@ -18,32 +18,52 @@
  * carrying an index, which a thrown refusal reports with less structure. What must not happen again is the
  * function being reachable WITHOUT the rule — so the rule is pinned where it now lives, and callers are free.
  *
+ * ## The refusal is its own function (`Q-170`)
+ *
+ * The refusal half of `planEdge` is `edgeRefusal` — the one place the triplet, the defaults, the resolved ends and
+ * the classifier meet — so a door can ask it BEFORE the record an inline edge hangs off is written, and `planEdge`
+ * asks it first. The rule is pinned where it now lives; and `planEdge` holds no second copy of it, because a refusal
+ * written twice is the defect this file is about. Where it lives is DERIVED (`_write-plan-sources.mjs`), and a
+ * missing function fails every case here rather than resolving to an empty body.
+ *
  * Run: node --test testing/standalone/write-functions-validate-not-their-callers.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, balancedFrom } from './_structural-window.mjs';
+import { balancedFrom } from './_structural-window.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 // The edge write DECIDES in its planner since `Q-99` part 3 — `upsertEdge` and the bulk door both plan through
-// `planEdge` and the commit writes — so the planner is "the function that reaches the collection" for this rule.
-const EDGES = 'server/src/brain/write-plan/plan-edge.ts';
-const FN = 'planEdge';
-const edges = stripComments(readFileSync(EDGES, 'utf8'));
+// `planEdge` and the commit writes — and the REFUSAL half of that decision is `edgeRefusal` (`Q-170`), which
+// `planEdge` calls first and the inline-edge doors call before their record is written.
+const refusal = () => writePlanFunction('edgeRefusal');
+const planner = () => writePlanFunction('planEdge');
+
+/** The one source file that declares `class EdgeSchemaViolation`, comment-stripped. */
+function violationClassSource() {
+  const homes = trackedSources('server/src', { floor: 100, untracked: true })
+    .map(file => ({ file, src: stripComments(readFileSync(join(REPO_ROOT, file), 'utf8')) }))
+    .filter(f => /\bclass EdgeSchemaViolation\b/.test(f.src));
+  assert.equal(homes.length, 1, `EdgeSchemaViolation is declared in ${homes.length} files — re-point this gate`);
+  return homes[0].src;
+}
 
 describe('the write function validates, not its callers', () => {
-  it('upsertEdge classifies the record it will produce', () => {
-    const body = bodyOf(edges, FN);
+  it('edgeRefusal classifies the record the write will produce', () => {
+    const { body } = refusal();
     assert.match(
       body, /classifyEdgeUpsertAgainst\(/,
-      'upsertEdge does not validate, so every caller must remember to — and two did not. The rule belongs in '
+      'the edge refusal does not validate, so every caller must remember to — and two did not. The rule belongs in '
       + 'the function that reaches the collection.',
     );
   });
 
   it('and REFUSES rather than merely reporting', () => {
-    const body = bodyOf(edges, FN);
+    const { body } = refusal();
     assert.match(
       body, /blocked/,
       'the classification must be acted on: computing it and writing anyway is the defect with extra steps',
@@ -52,6 +72,23 @@ describe('the write function validates, not its callers', () => {
       body, /throw new EdgeSchemaViolation/,
       'a blocked write must throw, so a caller that ignores the result still cannot store the record',
     );
+  });
+
+  it('planEdge asks edgeRefusal, and holds no second copy of the rule', () => {
+    /*
+     * The inline-edge doors ask `edgeRefusal` before the record is written; the writer asks it again before it
+     * decides. That is one rule asked twice, which is fine — a rule WRITTEN twice is not. The planner keeps no
+     * classifier call, no defaults call and no end-resolution of its own, so the two askers cannot disagree.
+     */
+    const { body } = planner();
+    assert.match(body, /\bedgeRefusal\(/,
+      'planEdge does not call edgeRefusal, so the refusal it enforces is not the one the doors ask');
+    for (const copy of [
+      /classifyEdgeUpsertAgainst\(/, /applyPropertyDefaults\(/, /\bresolvedEnds\(/, /throw new EdgeSchemaViolation/,
+    ]) {
+      assert.doesNotMatch(body, copy,
+        `planEdge still holds its own ${copy.source} — a second copy of the refusal beside edgeRefusal, the one that drifts`);
+    }
   });
 
   it('the refusal carries the whole classification, not a sentence', () => {
@@ -64,8 +101,8 @@ describe('the write function validates, not its callers', () => {
      * `onValidation?: (check: UpdateValidation) => void` sits a few lines below and supplied the word.
      * An unbounded gap matches the rest of the file.
      */
+    const edges = violationClassSource();
     const at = edges.indexOf('class EdgeSchemaViolation');
-    assert.notEqual(at, -1, 'EdgeSchemaViolation is gone — re-point this gate');
     const classBody = balancedFrom(edges, edges.indexOf('{', at), 'the EdgeSchemaViolation body');
     assert.match(
       classBody, /UpdateValidation/,
@@ -74,16 +111,18 @@ describe('the write function validates, not its callers', () => {
     );
   });
 
-  it('validation happens BEFORE the collection is touched', () => {
+  it('validation happens BEFORE anything is decided or embedded', () => {
     // A planner writes nothing (`a-write-planner-touches-no-collection`); what it must not do is DECIDE before
-    // validating — record the plan in the read set, after which a later batch item treats the edge as written.
-    const body = bodyOf(edges, FN);
-    const checkAt = body.indexOf('classifyEdgeUpsertAgainst(');
-    const writeAt = body.indexOf('noteWritten(');
-    assert.notEqual(writeAt, -1, `no decision found in ${FN} — re-point this gate`);
-    assert.ok(
-      checkAt !== -1 && checkAt < writeAt,
-      'validating after the write would refuse a record the store already holds',
-    );
+    // validating — record the plan in the read set, after which a later batch item treats the edge as written —
+    // or start the embedding for a record that is about to be refused. `planEdge` asks the refusal first.
+    const { body } = planner();
+    const askAt = body.search(/\bedgeRefusal\(/);
+    assert.notEqual(askAt, -1, 'planEdge does not call edgeRefusal');
+    for (const later of ['noteWritten(', 'vectorBeforeWrite(']) {
+      const laterAt = body.indexOf(later);
+      assert.notEqual(laterAt, -1, `no ${later} found in planEdge — re-point this gate`);
+      assert.ok(askAt < laterAt,
+        `planEdge asks edgeRefusal AFTER ${later} — validating after the decision refuses a record the plan already holds`);
+    }
   });
 });

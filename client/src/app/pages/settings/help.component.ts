@@ -116,6 +116,7 @@ export const HELP_DOCS = [
       'decisions/04-a-result-row-is-whole-or-absent.md',
       'decisions/05-an-upstream-may-delete-what-it-relayed.md',
       'decisions/06-what-an-instance-derives-or-audits-stays-local.md',
+      'decisions/07-a-functional-label-is-held-by-a-local-marker-and-a-unique-index.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

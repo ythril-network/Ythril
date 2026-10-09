@@ -631,6 +631,20 @@ export function getSpaceMeta(spaceId: string): SpaceMeta | undefined {
 }
 
 /**
+ * Whether this space REFUSES a write that breaks its schema — `validationMode: 'strict'`, and nothing else.
+ *
+ * ## What it prevents
+ *
+ * What `strict` means was spelled where it was needed, and the functional guard (`Q-439`) needs it at two more sites:
+ * the planner's stamp on an edge insert and the relabel's. A site that spelled it for itself drifts from
+ * `applyValidation` — a space flipped to `warn` that still refuses a second manager, or a strict one that stamps nothing.
+ * `applyValidation`, the planner and the relabel all ask this, and the comparison is written nowhere else.
+ */
+export function validationRefuses(meta: SpaceMeta | undefined): boolean {
+  return meta?.validationMode === 'strict';
+}
+
+/**
  * Apply schema validation to a write operation.
  * Returns { blocked: true, violations } when strict mode rejects the write.
  * Returns { blocked: false, warnings } when warn mode lets the write through.
@@ -645,7 +659,7 @@ export function applyValidation(
   if (!meta || !meta.validationMode || meta.validationMode === 'off' || violations.length === 0) {
     return { blocked: false, warnings: [] };
   }
-  if (meta.validationMode === 'strict') {
+  if (validationRefuses(meta)) {
     return { blocked: true, warnings: violations };
   }
   // warn mode

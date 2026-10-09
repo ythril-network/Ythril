@@ -57,7 +57,7 @@ Click **Create New Space**. Fill in:
 - **Purpose** — optional description of what this space is for. Visible to AI assistants.
 - **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all"). A proxy stores nothing of its own, so it gets no collections, is never embedded, scanned or swept, and deleting it removes only its entry. A space whose `config.json` entry says `"proxyFor": []` (only a hand edit writes one) is an ordinary space: the server removes the empty list when it reads the file and logs a warning naming the space.
 - **Validation mode** — the schema-validation posture for the new space: `off`, `warn`, or `strict`.
-- **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link to something that is not there. Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
+- **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link or an edge to something that is not there, whatever kind of item it points at and including an edge saved together with its record (nothing is saved then, the record included). Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
 
 > **New spaces start strict.** A freshly created space defaults to **`strict` validation** *and*
 > **strict linkage** — it enforces its schema and referential integrity from day one. You can relax
@@ -99,19 +99,20 @@ member. Your own definitions are not changed. It needs the Networks right at wri
 
 **Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 
-- **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely.
+- **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely, and an edge saved together with its record counts: a refused edge stops the record too.
   > **Editing is checked too.** The record **as it will be** — yours plus the existing fields — is checked
   > before it saves, so an edit cannot save a value the same space would reject on create.
   >
   > **`strict` refuses what your edit breaks, not what was already broken.** A record can be invalid before
   > you touch it — written before you tightened the schema, imported, or synced from another brain. That is
   > reported, not refused: the problem is already saved, so blocking your edit would not fix it, it would
-  > only stop you maintaining the record.
+  > only stop you maintaining the record. An edge you add in the same edit is judged afresh, and a refused one
+  > stops the whole edit rather than saving the rest.
   >
   > The message says which is which — *"the change violates…"* versus *"this record was already
   > non-compliant before your change…"* — so you are not sent looking at the wrong field. Validation is of
   > the result, so fixing the named field in any later save repairs the record.
-- **Strict linkage** — when on, references between items must be valid IDs and deletion of referenced items is blocked.
+- **Strict linkage** — when on, references between items must be valid IDs of items that exist, and deletion of referenced items is blocked. That covers every link and every edge, including the far end of an edge saved together with its record, whether it points at an entity, a fact, a chrono entry or a file.
 - **Type schemas** — define per-type rules under each knowledge type (entity, fact, edge, chrono). For each named type you can set:
   - **Naming pattern** — a regex the name must match. Refused on save if it could run exponentially
     (typically a repeated group like `(,abc)*`); the message names what to change.
@@ -120,7 +121,8 @@ member. Your own definitions are not changed. It needs the Networks right at wri
     - A type **linked to the Schema Library** has no retention of its own: a library entry cannot carry a window (it would apply to every space using it). **Unlink** first, or set the window on the space-wide default instead. Saving a type *to* the library also leaves its window behind, and says so when it does.
   - **Permitted ends** — **edge types only**: which entity types may sit at each end of a link with this
     label, and whether an entity may have more than one. Two lists (**From** and **To**) plus **At most one
-    edge with this label per source entity**. A list left untouched means any entity type — unticking the last
+    edge with this label per source entity** (whatever it points at; in a strict space two writes at the same moment
+    cannot both store one). A list left untouched means any entity type — unticking the last
     box returns that end to *any*, never to *none*. **The lists are not paired**: every From type combines with
     every To type, so the tab states how many combinations that is and lists them. **no type at all** is a
     pickable choice in both lists, for entities carrying no type. Breaking a rule is reported or refused

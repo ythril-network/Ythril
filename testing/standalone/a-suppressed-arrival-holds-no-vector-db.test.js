@@ -12,8 +12,10 @@
  * not queued for embedding either, so nothing ever cleans it up.
  *
  * So: when the receiver suppresses the arriving record (`record > schema > space` on THIS instance; a file has two
- * tiers), only the record-tier local fields (`RESTORED_LOCAL_FIELDS`) cross the replace — `embedding`,
+ * tiers), only the record-tier local fields (`RESTORED_LOCAL_FIELDS`) and the write guard (`WRITE_GUARD_FIELDS`, an
+ * edge's `_functionalGuard`: suppression is not a change of subject) cross the replace — `embedding`,
  * `embeddingModel` and `matchedText` are dropped — and a file's chunk rows (`parentFileId`) lose their vectors too.
+ * The admin import is a restore and takes nothing from the replaced copy, the guard included.
  * A record the receiver does NOT suppress keeps every local-only field (the existing pin, held here per door).
  *
  * ## The table
@@ -58,7 +60,19 @@ const LOCAL_VALUES = {
   // Who delivered the stored version (bundle-51): a fixture so the table covers it, and the one local-only field an arrival
   // REPLACES rather than keeps — it names who delivered THIS version, so the new delivery's stamp wins (`BY_THE_ARRIVAL`).
   deliveredBy: 'the-earlier-deliverer',
+  // The write guard (`Q-439`): this instance's lock on an edge's subject. A literal, because the table is about whether it
+  // CROSSES an arrival, not about what it is a function of.
+  _functionalGuard: 'a-subject-key-this-instance-stamped',
 };
+/**
+ * The local-only fields that exist on ONE family only: a write guard is an edge's marker, and a fact or an entity has no
+ * `(from, label)` for it to be a function of. The stored copy of any other family is seeded without it, and the arrival is
+ * not expected to keep it.
+ */
+const ONLY_ON = { _functionalGuard: 'edges' };
+const heldBy = (fam, field) => !(field in ONLY_ON) || ONLY_ON[field] === fam.collection;
+/** The write guard crosses a peer's replace — suppressed or not — because suppression is not a change of subject; a restore takes nothing. */
+const GUARD_FIELD = '_functionalGuard';
 /** Local-only fields a peer's arrival replaces by its own delivery instead of carrying across: what a "keeps" check leaves out. */
 const BY_THE_ARRIVAL = new Set(['deliveredBy']);
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', filemeta: 'filemeta' };
@@ -78,7 +92,7 @@ const contentField = (fam) => ({ facts: 'fact', entities: 'name', edges: 'descri
 
 /** The stored copy before the arrival: the receiver's own local fields on it, and for a file, an embedded chunk. */
 async function seedStored(fam, space, id, tier) {
-  const stored = { ...build[KIND[fam.key]](space, id, 5, { author: { ...PEER_AUTHOR } }), ...LOCAL_VALUES };
+  const stored = { ...build[KIND[fam.key]](space, id, 5, { author: { ...PEER_AUTHOR } }), ...Object.fromEntries(Object.entries(LOCAL_VALUES).filter(([f]) => heldBy(fam, f))) };
   if (tier === 'schema') stored[TYPE_FIELD[fam.recordType]] = MUTED;
   await door.coll(space, fam.collection).insertOne(stored);
   if (fam.key === 'filemeta') {
@@ -150,6 +164,11 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
           if (after?.seq !== 6) { wrong.push(`${fam.key}: fixture check — the arrival did not land (${JSON.stringify(after)})`); continue; }
           const kept = DERIVED.filter(f => f in after);
           if (kept.length) wrong.push(`${fam.key}: kept ${kept.join(', ')} from the content it replaced`);
+          // What a suppressed arrival DOES keep of the write guard: it is not derived from content, so only a restore drops it.
+          if (heldBy(fam, GUARD_FIELD)) {
+            const expected = via === 'import' ? undefined : LOCAL_VALUES[GUARD_FIELD];
+            if (after[GUARD_FIELD] !== expected) wrong.push(`${fam.key}: the write guard is ${JSON.stringify(after[GUARD_FIELD])}, expected ${JSON.stringify(expected)}`);
+          } else if (GUARD_FIELD in after) wrong.push(`${fam.key}: carries a write guard, which only an edge has`);
           if (fam.key === 'filemeta') {
             const chunks = await door.coll(space, 'files').find({ parentFileId: id }).toArray();
             const vectored = chunks.filter(c => 'embedding' in c || 'embeddingModel' in c).map(c => c._id);
@@ -173,7 +192,7 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
         await deliver(via, fam, OPEN, arriving(fam, OPEN, id, 6, 'none'));
         const after = await door.coll(OPEN, fam.collection).findOne({ _id: id });
         if (after?.seq !== 6) { wrong.push(`${fam.key}: fixture check — the arrival did not land`); continue; }
-        const lost = [...LOCAL_ONLY].filter(f => !BY_THE_ARRIVAL.has(f) && !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
+        const lost = [...LOCAL_ONLY].filter(f => heldBy(fam, f) && !BY_THE_ARRIVAL.has(f) && !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
         if (lost.length) wrong.push(`${fam.key}: lost ${lost.join(', ')}`);
       }
       assert.deepEqual(wrong, [], `${via}: a peer's edit of a record this instance still embeds erased its own fields`);

@@ -31,6 +31,8 @@ import { restoreDatabase } from '../db/restore.js';
 import { reportDatabaseReplaced } from '../db/mongo.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { concreteSpaces } from '../spaces/proxy.js';
+import { ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
+import { ensureEdgeGuardIndex, edgeIndexFailure } from '../spaces/edge-guard-index.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
@@ -408,14 +410,26 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
     const spaces = concreteSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
     const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
+      /*
+       * The edges' unique indexes (`Q-439`, `Q-445`): the identity index and the write guard's. The restore dropped every
+       * collection, and a collection reloaded by `insertMany` has no index but `_id`, so until the next boot two edges of one
+       * identity could be stored and a functional label raced. Rebuilt here, inside the maintenance window, and every failure
+       * is NAMED in the answer: a restore that reports `ok` over an unguarded edges collection is the failure this prevents.
+       * A failure to build one never stops the other, nor the vector rebuild below.
+       */
+      const edgeIndexFailures: string[] = [];
+      try { await ensureEdgeIdentityIndex(space.id); }
+      catch (err) { edgeIndexFailures.push(edgeIndexFailure(space.id, 'identity index', err, 'next boot')); }
+      try { await ensureEdgeGuardIndex(space.id); }
+      catch (err) { edgeIndexFailures.push(edgeIndexFailure(space.id, 'guard index', err, 'next index pass')); }
       try {
         // The restore wrote through its own client, which the index lifecycle does not observe — so this forced
         // reconcile is what gives each restored collection that holds a record its indexes (Q-165).
         await reconcileSpaceSearchIndexes(space.id, { waitForReady: false, force: true });
-        return { id: space.id, ok: true as const };
+        return { id: space.id, ok: true as const, edgeIndexFailures };
       } catch (err) {
         log.error(`restore: failed to rebuild vector indexes for space '${space.id}': ${err}`);
-        return { id: space.id, ok: false as const };
+        return { id: space.id, ok: false as const, edgeIndexFailures };
       }
     });
     const rebuilt = outcomes.filter(o => o.ok).map(o => o.id);
@@ -423,7 +437,8 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     if (failed.length > 0) {
       log.warn(`restore: ${failed.length} space(s) have no vector index — semantic recall will return empty for them until rebuilt`);
     }
-    res.json({ ok: true, vectorIndexes: { rebuilding: rebuilt, failed } });
+    const edgeIndexesFailed = outcomes.filter(o => o.edgeIndexFailures.length > 0).map(o => ({ id: o.id, failures: o.edgeIndexFailures }));
+    res.json({ ok: true, vectorIndexes: { rebuilding: rebuilt, failed }, edgeIndexes: { failed: edgeIndexesFailed } });
   } catch (err) {
     sendCaughtFailure(res, `POST /api/admin/data/restore`, err, { error: err instanceof Error ? err.message : String(err) });
   } finally {

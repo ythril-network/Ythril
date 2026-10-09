@@ -44,11 +44,21 @@
 import { REF_KINDS, LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { DesiredLinks } from './links.js';
-import { invalidRefsMessage, edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  invalidRefsMessage, edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef, collectionForRefKind, ReferenceRefusal,
+} from './entity-refs.js';
+import { readStoredById } from '../db/read-by-id.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { isStrictLinkage } from '../spaces/proxy.js';
+import { resultingEntityType, EdgeSchemaViolation } from './write-validation.js';
+import { ReadSet, mergeWants } from './write-plan/read-set.js';
+import { edgeWant, edgeRefusal, type EdgeSubject } from './write-plan/plan-edge.js';
 import { primitivePropertyError } from './property-values.js';
 import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
 import { upsertEdge } from './edges.js';
+import { ConnectionsNotWritten, writtenRecord } from './connections-not-written.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
@@ -118,8 +128,9 @@ export function linkFieldsFrom(body: unknown): Record<string, string[]> {
  * a lax space stored `entityIds: ['created-later']` on purpose. Checking the shape of the ID regardless
  * would close that door while the setting still claimed it was open.
  *
- * It does NOT check that the targets exist: that is `assertRefsResolve`'s job at the writer, where it can
- * be done in one query against the records being written rather than once per door — and a door that
+ * It does NOT check that the targets exist: that is `assertDesiredLinks`' job, asked by `assertConnections`
+ * before the record is written and by the writer again, where it can be done in one query against the
+ * records being written rather than once per door — and a door that
  * checked existence itself would be the second implementation this module exists to avoid.
  *
  * ## The message comes from `entity-refs.ts`
@@ -217,7 +228,9 @@ function linkInputSchemasForKinds(kinds: readonly RefKind[]): Record<string, unk
  * ## The other end must already EXIST, and that is what makes this simpler than the batch
  *
  * A single-record write has exactly one new record in it, so there is nothing to correlate: every `to` names
- * something already stored. No `$ref`, no ordering, no derived kind. The batch case — creating a post and
+ * something already stored — and a space with `strictLinkage` REFUSES one that is not, for a far end of every kind
+ * (`edgeRefusal`, asked before the record is written, so a refusal stores nothing); a lax space stores it. No
+ * `$ref`, no ordering, no derived kind. The batch case — creating a post and
  * three labelled relationships to records the same call minted — is the correlation key in `save_bulk`, and
  * it stays there.
  *
@@ -254,7 +267,13 @@ export function edgeInputSchema(): Record<string, unknown> {
       + 'edge is ever removed by this field — an edge carries a label, properties and possibly another '
       + "author, so clearing the set would delete work nobody asked to delete. Use `delete_edge` for that. "
       + 'Contrast `linkEntities` and its siblings, which DO replace, because an unlabelled link set is '
-      + 'something one record owns wholesale.',
+      + 'something one record owns wholesale. '
+      + 'On a space with strict linkage a far end that names nothing is REFUSED, whichever `toKind` it has; a '
+      + 'space with strict linkage off stores it. A refused entry — that, or a label or end the space schema '
+      + 'does not allow — writes NOTHING, the record included, and the reason names the entry (`edges[1]`): a '
+      + 'create answers 400 and an update 422, and an MCP tool a structured `schema_violation`. A failure AFTER '
+      + 'the record was stored is not a refusal: the answer carries `written` and is not to be retried, because '
+      + 'the record exists — send the connections that did not land as an update to `written.id`.',
     items: {
       type: 'object',
       additionalProperties: false,
@@ -271,9 +290,9 @@ export function edgeInputSchema(): Record<string, unknown> {
         },
         type: {
           type: 'string',
-          description: 'Optional edge type, validated against the space schema exactly like a record type. '
-            + 'On a strict space an unknown type is refused, so this is the field that turns a typo into a '
-            + '400 rather than into an edge nobody queries.',
+          description: 'Optional edge type (e.g. `causal`). Free text: it is stored as given and nothing '
+            + 'refuses an unknown one, so a typo is a different type, not an error. What a space\'s schema '
+            + 'constrains on an edge is its `label` — the types allowed at each end and how many.',
         },
         description: {
           type: 'string',
@@ -307,9 +326,9 @@ export function edgeInputsFrom(body: unknown): EdgeInput[] | null {
 /**
  * Why this body's `edges` cannot be honoured, or `null`.
  *
- * Shape and well-formedness only. Existence is checked at the writer, against the space, in one query per
- * kind — a door that checked it itself would be the second implementation this module exists to avoid, and
- * `assertRefsResolve` is already that one implementation.
+ * Shape and well-formedness only. That the far end EXISTS, and that the space's schema allows the edge, is
+ * `edgeRefusal`'s — asked by `assertConnections` before the record is written and by the writer again before it
+ * decides — so a door that checked it itself would be the second implementation this module exists to avoid.
  */
 export function edgeInputError(body: unknown): string | null {
   const edges = edgeInputsFrom(body);
@@ -419,26 +438,103 @@ export async function linkAuditSnapshots(
 }
 
 /**
+ * The subject of a record that does not exist yet: `id` is whatever the edges' `from` is for it (a placeholder no
+ * collection holds), `type` the type the write names. The one place `minted: true` is spelled, so a door cannot build a
+ * subject whose `minted` and whose id disagree (`EdgeSubject`).
+ */
+export function mintedSubject(id: string, type: string | null): EdgeSubject {
+  return { id, type, minted: true };
+}
+
+/**
+ * What a record write's inline edges hang off, built ONE way for every door (`Q-170`) — or `null` when the body names no
+ * edges, so nothing needs deciding and nothing is read.
+ *
+ * - **A record that is stored** (an update, or a create whose caller `id` names one): its own id and the type it will
+ *   have AFTER this write — `resultingEntityType`, the expression `updateEntityById` validates the record by. An edge
+ *   judged by the type the record is leaving would refuse the call that re-types it and accept the one that breaks it.
+ *   `stored` is the door's own read when it has one (an update door locates the record before it can answer `404`);
+ *   without it, a create's caller `id` is looked up, through the one by-id reader.
+ * - **Otherwise** a record about to be minted: a placeholder id no collection holds and the type the write names.
+ *
+ * A subject that is not an entity has no type (`null`): `endpoints` is a vocabulary of entity types.
+ */
+export async function connectionSubject(
+  spaceId: string,
+  // Never `file`: a file write's connections are not asked here, so the read below never reaches the `files` collection.
+  kind: Exclude<RefKind, 'file'>,
+  body: unknown,
+  at: { stored?: { _id: string; type?: string } | null; id?: string; type?: string },
+): Promise<EdgeSubject | null> {
+  if (edgeInputsFrom(body) === null) return null;
+  const stored = at.stored !== undefined ? at.stored
+    : at.id === undefined ? null
+      : (await readStoredById<{ _id: string; type?: string }>(
+        spaceCollection(spaceId, collectionForRefKind(kind)), [at.id], { type: 1 })).get(at.id) ?? null;
+  if (!stored) return mintedSubject(uuidv4(), kind === 'entity' ? at.type ?? null : null);
+  const resulting: string | undefined = kind === 'entity' ? resultingEntityType(stored as { type: string }, { type: at.type }) : undefined;
+  return { id: stored._id, type: typeof resulting === 'string' ? resulting : null, minted: false };
+}
+
+/**
+ * Ask `refuse` of each inline edge in order, handing it the edges of this body that already passed, and name the edge a
+ * refusal is about (`edges[1]`). The one place that owns the order and the naming, so the single-record doors and the batch
+ * door, which each call their own `edgeRefusal`, cannot number the edges differently or forget to hand over what passed.
+ */
+export function refuseEachEdge(
+  edges: readonly EdgeWriteInput[],
+  refuse: (edge: EdgeWriteInput, passed: readonly EdgeWriteInput[]) => void,
+): void {
+  const passed: EdgeWriteInput[] = [];
+  for (const [i, edge] of edges.entries()) {
+    try {
+      refuse(edge, passed);
+    } catch (err) {
+      throw err instanceof EdgeSchemaViolation ? err.named(`edges[${i}]`) : err;
+    }
+    passed.push(edge);
+  }
+}
+
+/**
  * Refuse what can be refused about this body's connections BEFORE the record is written.
  *
  * ## Why a door needs this when the writer already asserts
  *
  * `applyConnections` runs AFTER the record exists — it has to, because a link needs both ends and the
- * `from` is what was just minted. So a link id naming nothing is refused with the record already stored:
- * the caller gets a `400` and a row they did not ask for, which is the silent unlinked write made noisy
- * rather than fixed.
+ * `from` is what was just minted. So a link id naming nothing, or an inline edge the schema refuses, was
+ * refused with the record already stored: the caller got an error and a row they did not ask for, and a
+ * retry stored a second one.
  *
  * The writers assert too, and that is not a duplicate for the sake of it: `files/media/face-embedder.ts`
  * and the conversion reach a writer directly, past every door there is. This is the same assertion asked
  * one step earlier, where the answer can still be *nothing happened*.
+ *
+ * ## What one call asks
+ *
+ * The SHAPE of every connection field (so a door that never ran `connectionInputError` — every MCP tool, and the REST
+ * PATCH of an entity or a chrono entry — refuses what REST POST refuses), then the link set, then each inline edge
+ * through `edgeRefusal`, the function the writer asks again before it decides. The subject is the record the edges hang
+ * off (`connectionSubject`), `null` only when the body names no edges.
  */
 export async function assertConnections(
   spaceId: string,
   fromKind: RefKind,
+  subject: EdgeSubject | null,
   body: unknown,
 ): Promise<void> {
+  const malformed = connectionInputError(body, { strict: isStrictLinkage(spaceId) });
+  if (malformed) throw new ReferenceRefusal(malformed);
   const desired = desiredLinksFrom(body);
   if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
+
+  const edges = edgeInputsFrom(body);
+  if (edges === null || edges.length === 0) return;
+  if (!subject) throw new Error('assertConnections: the body carries edges and no subject — build it with connectionSubject');
+  const asked = connectionsOf(body, subject.id, fromKind).edges;
+  const view = new ReadSet(spaceId);
+  await view.load(mergeWants(asked.map(e => edgeWant(spaceId, e, subject))));
+  refuseEachEdge(asked, (edge, passed) => { edgeRefusal(spaceId, edge, view, subject, passed); });
 }
 
 /**
@@ -456,6 +552,12 @@ export async function assertConnections(
  *    asked to delete — removal is `delete_edge`, a deliberate act with its own door.
  *
  * Returns what it did, so a door can report it without counting again.
+ *
+ * **Every throw out of either half leaves as `ConnectionsNotWritten`, once.** The record is stored by the time this
+ * runs, so whatever fails here — the writer's second planning run refusing in the window, a store failure, the links
+ * half — must not reach a door as an ordinary refusal or a retryable `503`: a caller told "not written" about a record
+ * that is retries it. The wrapper names the record and the ids of the edges that landed before the failure
+ * (`connections-not-written.ts`).
  */
 export async function applyConnections(
   spaceId: string,
@@ -466,17 +568,21 @@ export async function applyConnections(
   actor?: WebhookActor,
 ): Promise<{ links: number; edges: number }> {
   const asked = connectionsOf(body, from, fromKind);
-  const links = asked.desired ? (await reconcileLinks(spaceId, from, fromKind, asked.desired, author)).added : 0;
+  const landed: string[] = [];
+  try {
+    const links = asked.desired ? (await reconcileLinks(spaceId, from, fromKind, asked.desired, author)).added : 0;
 
-  let edges = 0;
-  for (const e of asked.edges) {
-    await upsertEdge(
-      spaceId, e.from, e.to, e.label, e.weight, e.type, e.description, e.properties, e.tags,
-      actor, undefined, e.opts,
-    );
-    edges++;
+    for (const e of asked.edges) {
+      const stored = await upsertEdge(
+        spaceId, e.from, e.to, e.label, e.weight, e.type, e.description, e.properties, e.tags,
+        actor, undefined, e.opts,
+      );
+      landed.push(stored._id);
+    }
+    return { links, edges: landed.length };
+  } catch (err) {
+    throw new ConnectionsNotWritten(writtenRecord(fromKind, from, landed), err);
   }
-  return { links, edges };
 }
 
 /**

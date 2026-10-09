@@ -120,7 +120,7 @@ operation a write issues while it holds its sequence number is bounded (`YTHRIL_
 and a message of ours: the driver's text names internal collections and is never returned. The REST record routes,
 `POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
 the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
-the remedy. Any other store failure on a write (a step-down, a dropped connection, a connection pool the driver
+the remedy — with one exception, an answer carrying `written`, below. Any other store failure on a write (a step-down, a dropped connection, a connection pool the driver
 cleared, a pool checkout that timed out, a closed connection pool) answers as a read does — the store's condition,
 with its `code` and `codeName` where the store supplied them — on every REST route and on MCP alike; one function
 builds the answer and one sender puts it on the wire, so no route answers a store failure with a `500` of its own.
@@ -130,6 +130,13 @@ was a fault to report — and a checkout only times out where `waitQueueTimeoutM
 holds for the acts that decide refusals — renaming a space, creating one, adding a link: a store failure there is a
 `503`, no longer the `404`, `409` or `422` in the database driver's words that these answered when the driver's
 message was read before the store was asked.
+
+**An answer carrying `written` is not a retry, whatever its status.** A write that stores a record and then its
+connections is two steps, and a failure in the second — the store failing, a far end deleted since the check —
+answers with the status of that failure but with `retryable: false`, no `Retry-After`, and
+`written: { kind, id, edges }`: the record that was stored and the edges that landed. The record exists, so sending
+a create again stores another; send the connections that did not land as an update to `written.id`. See
+[A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing). On MCP the same fields arrive in `structuredContent`.
 
 **The one store-side answer that is not retryable is a write concern the deployment can never meet** — more
 acknowledgements than the replica set has members, a named concern it does not define, or a `w` above `1` on a

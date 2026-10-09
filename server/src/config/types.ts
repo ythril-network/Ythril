@@ -1609,6 +1609,13 @@ export interface EdgeDoc extends StampSkewable {
   embeddingModel?: string;
   /** Absolute expiry (F10) — see FactDoc._expireAt. */
   _expireAt?: Date;
+  /**
+   * The write guard of a functional label in a strict space (`Q-439`): `functionalSubjectKey(from, label)`, set only on an
+   * INSERT this instance planned and carried only while `from` and `label` are unchanged. The unique partial index on it
+   * is what refuses the second concurrent writer. Local to this instance (`WRITE_GUARD_FIELDS`): never hashed, sent,
+   * exported or taken from an arrival.
+   */
+  _functionalGuard?: string;
 }
 
 /**

@@ -497,8 +497,12 @@ rules, including what a key means on a space that uses link records.
 **An item also carries its own `link*` fields and `edges`**, the same ones its single-record endpoint takes
 and through the same code. Those name records that already exist; a `$ref` in an item's `edges` is refused
 and points you at the top-level array, which runs late enough to resolve one. A connection that cannot be
-honoured is reported against the item's index and the record is not written. See
-[An item carries its own relationships](04-brain-api.md#an-item-carries-its-own-relationships).
+honoured — a refused edge, or on a `strictLinkage` space a far end that does not exist — is refused before the
+record is written: it is reported against the item's index, the reason names the entry (`edges[1]`), and the record
+is not written. If the record was written and its edges then failed, the `errors` row carries `written`
+(`{ kind, id, edges }`: the record and the edges that landed) and the item is not to be sent again as a create. See
+[An item carries its own relationships](04-brain-api.md#an-item-carries-its-own-relationships) and
+[A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing).
 
 Each array is capped at 500 entries. Per-item validation failures are recorded in `errors` without aborting the remaining items.
 
@@ -534,12 +538,12 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 - `inserted` — count of NEW documents written per type.
 - `updated` — count of existing documents a write converged on, per type: a fact, entity or chrono item carrying the `id` of an existing record, and an edge whose identity — `(from, to, label)` and the kind of each end — is already stored. Before 5.7 a converging fact or chrono item was counted under `inserted`.
 - `connections` — what the ITEMS' own `link*` and `edges` fields attached. **A different question from `inserted.edges`**, which counts the top-level `edges` array: that one is a collection you wrote, these are relationships hung off records you wrote. Folded together the number could not be reconciled against the payload you sent. `links` is the rows that were added; `edges` is the upserts, and this door does not tell a new one from an updated one for an item's own edges.
-- `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present. An item that depends on another item of the same call that was not written — an edge from a `$ref` whose item was refused — fails with a reason naming that item's failure. An item whose record another request changed while this one was being applied is re-tried once against what the record now says; if that also loses, it fails with a reason saying so, and resending it is the remedy.
+- `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`; plus `written`, `{ kind, id, edges }`, on a row whose record WAS stored and whose connections then failed — the item exists, so send its missing edges as an update instead of sending it again). Valid items are still written even when errors are present. An item that depends on another item of the same call that was not written — an edge from a `$ref` whose item was refused — fails with a reason naming that item's failure. An item whose record another request changed while this one was being applied is re-tried once against what the record now says; if that also loses, it fails with a reason saying so, and resending it is the remedy.
 - `refs` — the id each `$ref` key was given, keyed by the key, with the kind of record it names. Only keys whose item was written appear. It is how you learn the ids a batch minted, for a second batch or a file's links, without reading them back.
 
 Fact, entity and chrono items accept an optional `id` field (UUID v4). If `id` names an existing record, the item converges onto it (tags union, properties merge) and is counted under `updated`; a batch resent after a timeout therefore converges instead of duplicating. An `id` that names nothing does not become a new record's id — the record is minted as if no id were sent. If `id` is omitted, a new record is always inserted. See [Upsert an Entity](04b-graph-api.md#upsert-an-entity) for full identity semantics.
 
-**One read and one write per kind.** The whole batch is read at once and written in one block per kind, so a batch of 500 costs a handful of database round trips rather than several per item. Items are still decided in order and see the earlier items of the same call as written — a repeated edge identity becomes one edge and an update, a `functional` label counts the batch's earlier edges, the duplicate-name warning sees the batch's earlier entities. An item that addresses something an earlier item of the same call also writes (the same `id`, the same edge) is applied after it, exactly as two separate calls would be.
+**One read and one write per kind.** The whole batch is read at once and written in one block per kind, so a batch of 500 costs a handful of database round trips rather than several per item. Items are still decided in order and see the earlier items of the same call as written — a repeated edge identity becomes one edge and an update, a `functional` label counts the batch's earlier edges and any other writer's (an item that loses a race to another writer's edge under the label is decided again and refused like one that came after it), the duplicate-name warning sees the batch's earlier entities. An item that addresses something an earlier item of the same call also writes (the same `id`, the same edge) is applied after it, exactly as two separate calls would be.
 
 **Schema validation:** When the target space has `validationMode` set to `strict` or `warn`, each item is validated against the space schema before writing. In strict mode, violating items are skipped and recorded in `errors` (e.g. `"schema_violation: not in entityTypes allowlist: Person, Service"`). In warn mode, violations are recorded as warnings but the item is written. See [Schema Validation](06a-schema-api.md#schema-validation) for the full schema specification.
 
@@ -585,7 +589,7 @@ read them from `data` instead.
 |-------|----------|-------------|
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`) |
-| `projection` | — | Projection object (`1` include / `0` exclude) |
+| `projection` | — | Projection object (`1` include / `0` exclude). A field a read never sends cannot be asked for by name: the vector and an edge's write guard are withheld, and an inclusion naming only withheld fields answers the `_id` alone |
 | `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and on a PROXY space a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first. `links` sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|

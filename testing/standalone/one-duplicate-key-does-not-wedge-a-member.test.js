@@ -118,7 +118,11 @@ describe('one duplicate key does not wedge a member', () => {
     // Dup pass: arrivals.ts carried its own `err.code` reader beside db/write-errors.ts's, and the two shapes a
     // driver reports a code in (on the error, or on its `err`) were known to one of them. Seen red by mutation,
     // restored by hand: the inline `(err as { code?: unknown })?.code` reader put back.
-    assert.match(writerSrc, /writeErrorCode\(err\) === DUPLICATE_KEY/, 'the writer no longer reads codes through writeErrorCode');
+    // The single-write question is one predicate of the shared module (`isDuplicateKey`, which reads through writeErrorCode).
+    assert.match(writerSrc, /isDuplicateKey\(err\)/, 'the writer no longer asks the shared module whether a single write was a duplicate');
+    assert.match(stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8')),
+      /function isDuplicateKey\(err: unknown\): boolean \{\s*return writeErrorCode\(err\) === DUPLICATE_KEY;/,
+      'isDuplicateKey no longer reads codes through writeErrorCode');
     assert.doesNotMatch(writerSrc, /\?\.code\b|\.code\s*===|as \{ code\?/, 'the writer reads an error code by hand again');
     const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
     assert.match(shared, /export function writeErrorCode\(/, 'the shared code reader is gone');

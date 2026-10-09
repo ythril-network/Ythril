@@ -44,6 +44,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 const ROOT = process.cwd();
 
@@ -69,18 +70,26 @@ describe('strict linkage is enforced by existence on every edge write surface', 
   });
 
   it('both surfaces check that `from` AND `to` EXIST', () => {
+    /*
+     * `Q-170`: existence has ONE home, `edgeRefusal`, which `upsertEdge` asks with the schema — the REST route, the MCP
+     * tool, the batch and an inline edge all refuse a dangling end by that one function, where each door used to call
+     * `assertRefsResolve` on its own and the inline edge path called nothing. So the rule is asserted in two halves: the
+     * refusal checks BOTH ends under strict linkage, and every surface writes through the function that asks it.
+     */
+    const { body } = writePlanFunction('edgeRefusal');
+    assert.match(body, /isStrictLinkage\(/, 'edgeRefusal does not condition existence on strict linkage');
+    assert.match(body, /view\.missing\(/, 'edgeRefusal never asks whether an end exists');
     const missing = [];
+    for (const side of ['from', 'to']) {
+      if (!new RegExp(`'${side}'`).test(body)) missing.push(`edgeRefusal.${side}`);
+    }
     for (const [surface, file] of Object.entries(EDGE_WRITE_SURFACES)) {
-      const src = code(file);
-      for (const side of ['from', 'to']) {
-        const re = new RegExp(`assertRefsResolve\\([^)]*'${side}'`);
-        if (!re.test(src)) missing.push(`${surface}.${side}`);
-      }
+      if (!/(?<![.\w])upsertEdge\(/.test(code(file))) missing.push(`${surface} never writes through upsertEdge`);
     }
     assert.deepEqual(missing, [],
       'A UUID v4 that names a chrono passes a shape check and stores an edge that every graph query '
-      + 'ignores — the caller gets an id for a link that does not exist. Shape is not existence: use '
-      + 'assertRefsResolve on BOTH endpoints, as the REST route always has.');
+      + 'ignores — the caller gets an id for a link that does not exist. Shape is not existence: both endpoints '
+      + 'are asked in edgeRefusal, and every edge surface writes through the function that asks it.');
   });
 
   it('and each endpoint is looked up in the collection its own KIND names', () => {
@@ -93,23 +102,26 @@ describe('strict linkage is enforced by existence on every edge write surface', 
      */
     for (const [surface, file] of Object.entries(EDGE_WRITE_SURFACES)) {
       const src = code(file);
-      assert.doesNotMatch(src, /assertRefsResolve\([^)]*'(from|to)'[^)]*'entity'/,
+      assert.doesNotMatch(src, /assertRefs(?:Resolve)?\([^)]*'(from|to)'[^)]*'entity'/,
         `${surface} resolves an edge endpoint as an entity regardless of the kind the edge declares`);
-      for (const side of ['from', 'to']) {
-        const re = new RegExp(`assertRefsResolve\\([^)]*'${side}',\\s*(${side}Kind|edgeEndpointKind\\()`);
-        assert.match(src, re,
-          `${surface} does not pass the declared kind when resolving \`${side}\``);
-      }
     }
+    // And the one place existence is asked (`Q-170`) looks each end up by the kind it declares.
+    const { body } = writePlanFunction('edgeRefusal');
+    for (const side of ['from', 'to']) {
+      assert.match(body, new RegExp(`edgeEndpointKind\\(opts\\?\\.${side}Kind\\)`),
+        `edgeRefusal does not pass the declared kind when resolving \`${side}\``);
+    }
+    assert.doesNotMatch(body, /'entity'/, 'edgeRefusal hardcodes a kind instead of asking the one the end declares');
   });
 
   it('a shape check alone is never the whole guard', () => {
     // The specific regression to prevent: someone removes the existence call and leaves the UUID test,
-    // which still looks like validation at a glance.
+    // which still looks like validation at a glance. Existence is asked by `edgeRefusal`, inside `upsertEdge`
+    // (`Q-170`), so a surface that shape-checks must still write through it, or call the assertion itself.
     for (const [surface, file] of Object.entries(EDGE_WRITE_SURFACES)) {
       const src = code(file);
       if (!/UUID_V4_RE\.test\((from|to)\)/.test(src)) continue;
-      assert.match(src, /assertRefsResolve/,
+      assert.match(src, /assertRefsResolve|(?<![.\w])upsertEdge\(/,
         `${surface} shape-checks an edge endpoint but never asks whether it exists`);
     }
   });

@@ -39,6 +39,7 @@ import { SEQ_KEYSET_INDEXES } from '../util/seq-keyset.js';
 import { buildKeysetIndex, type KeysetBuild } from './keyset-indexes.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { ensureEdgeGuardIndex } from './edge-guard-index.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { ensureFileTombstoneIndexes, positionLegacyFileTombstones } from '../files/tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -102,6 +103,9 @@ export async function ensureQueryIndexes(): Promise<number> {
         name: `links ${Object.keys(ix.keys).join(',')} index`,
         ensure: () => col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {}),
       })),
+      // The write guard's index (`Q-439`): the same call `initSpace` makes, so a space whose edges existed before the index did
+      // is guarded too. A build over duplicate markers thins them and says so (`spaces/edge-guard-index.ts`).
+      { name: 'edges write guard index', ensure: () => ensureEdgeGuardIndex(space.id) },
       // The file tombstones' indexes, the same call `initSpace` makes (bundle-30 I16).
       { name: 'file tombstone indexes', ensure: () => ensureFileTombstoneIndexes(space.id) },
       // The local position a tombstone stored before positions existed lacks (bundle-51): the paged read and the push read it.

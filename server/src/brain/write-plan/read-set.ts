@@ -26,7 +26,9 @@ import { readRecordsById, type RecordsById } from '../walk-reads.js';
 import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
 import { tripletClause } from '../edge-lookup.js';
+import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
+import { missingRefs } from '../entity-refs.js';
 import { RECORD_COLLECTION, type RefKind } from '../../config/types-knowledge.js';
 import type { EdgeDoc } from '../../config/types.js';
 import type { PlanKind } from './types.js';
@@ -43,6 +45,12 @@ export interface Triplet { from: string; to: string; label: string; fromKind?: R
 /** Everything a batch will ask about, named up front. */
 export interface ReadWant {
   records?: Partial<Record<ReadKind, readonly string[]>>;
+  /**
+   * Ids whose EXISTENCE is all that is asked — an edge's far end of a kind whose type no rule reads. Answered with the
+   * ids-only read every reference check makes (`missingRefs`), so a fact or a chrono entry is not read whole to learn
+   * that it is there. An id also named in `records` is answered from that read.
+   */
+  exist?: Partial<Record<RefKind, readonly string[]>>;
   triplets?: readonly Triplet[];
   /** Subjects whose edges under a functional label are counted. */
   functional?: ReadonlyArray<{ from: string; label: string }>;
@@ -55,14 +63,43 @@ const CHUNK = 500;
 
 /** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
 export const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, t.fromKind, t.toKind);
-const subjectKey = (from: string, label: string) => `${from}\u0000${label}`;
 const nameTypeKey = (name: string, type: string) => `${name}\u0000${type}`;
+/**
+ * Several wants as one — a batch's single `load`, and an inline edge set's.
+ *
+ * Here, beside the type it merges, because two callers asked for it (the batch door and the single-record doors'
+ * pre-write check) and the second spelling is how the two would come to disagree about which of the four wants a
+ * merge forgets.
+ */
+export function mergeWants(wants: readonly ReadWant[]): ReadWant {
+  const records: NonNullable<ReadWant['records']> = {};
+  const exist: NonNullable<ReadWant['exist']> = {};
+  const triplets: NonNullable<ReadWant['triplets']>[number][] = [];
+  const functional: NonNullable<ReadWant['functional']>[number][] = [];
+  const nameTypes: NonNullable<ReadWant['nameTypes']>[number][] = [];
+  for (const w of wants) {
+    for (const [kind, ids] of Object.entries(w.records ?? {}) as Array<[keyof typeof records, readonly string[]]>) {
+      records[kind] = [...(records[kind] ?? []), ...ids];
+    }
+    for (const [kind, ids] of Object.entries(w.exist ?? {}) as Array<[keyof typeof exist, readonly string[]]>) {
+      exist[kind] = [...(exist[kind] ?? []), ...ids];
+    }
+    triplets.push(...(w.triplets ?? []));
+    functional.push(...(w.functional ?? []));
+    nameTypes.push(...(w.nameTypes ?? []));
+  }
+  return { records, exist, triplets, functional, nameTypes };
+}
 
 export class ReadSet {
   private readonly records = new Map<ReadKind, Map<string, StoredRecord | null>>();
+  /** Per kind: whether an id names a stored record, for the ids only asked about (`ReadWant.exist`). */
+  private readonly existence = new Map<RefKind, Map<string, boolean>>();
   private readonly triplets = new Map<string, EdgeDoc | null>();
-  /** Per functional subject: the edges under that label, by identity, with their `to`. */
-  private readonly subjectEdges = new Map<string, Map<string, string>>();
+  /** The edges held under functional labels, by subject and identity — the one counting definition (`functional-subject.ts`). */
+  private readonly subjectEdges = new SubjectEdges();
+  /** The functional subjects whose stored edges were read; asking about any other is a bug, not a zero. */
+  private readonly loadedSubjects = new Set<string>();
   private readonly nameTypeCounts = new Map<string, number>();
   /** Ids this batch minted — records that cannot appear in any stored edge or link. */
   private readonly mintedIds = new Set<string>();
@@ -85,6 +122,15 @@ export class ReadSet {
       for (const d of docs) held.set(String(d._id), d);
     }
 
+    for (const [kind, ids] of Object.entries(want.exist ?? {}) as Array<[RefKind, readonly string[]]>) {
+      const known = this.existenceOf(kind);
+      const held = this.recordsOf(kind);
+      const asked = [...new Set(ids)].filter(id => !known.has(id) && !held.has(id));
+      if (asked.length === 0) continue;
+      const absent = new Set(await missingRefs(this.spaceId, kind, asked));
+      for (const id of asked) known.set(id, !absent.has(id));
+    }
+
     // An end this batch minted has no stored edge, so its triplet and its subject are answered without a read —
     // the rule `triplet()` and `otherEdgesFromSubject()` apply. Reading them anyway costs one query per edge on
     // the commonest batch: records and the edges between them in one call.
@@ -100,14 +146,14 @@ export class ReadSet {
       for (const e of found) this.triplets.set(tripletKey(e), e);
     }
 
-    const subjectsWanted = (want.functional ?? []).filter(s => !this.subjectEdges.has(subjectKey(s.from, s.label))
+    const subjectsWanted = (want.functional ?? []).filter(s => !this.loadedSubjects.has(functionalSubjectKey(s.from, s.label))
       && !this.mintedIds.has(s.from));
     for (const chunk of inChunks(subjectsWanted, CHUNK)) {
       const found = await edges.find(asFilter<EdgeDoc>({
         $or: chunk.map(s => ({ from: s.from, label: s.label })),
       } as never), { projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } }).toArray() as EdgeDoc[];
-      for (const s of chunk) this.subjectEdges.set(subjectKey(s.from, s.label), new Map());
-      for (const e of found) this.subjectEdges.get(subjectKey(e.from, e.label))?.set(tripletKey(e), e.to);
+      for (const s of chunk) this.loadedSubjects.add(functionalSubjectKey(s.from, s.label));
+      for (const e of found) this.subjectEdges.add(e);
     }
 
     const namesWanted = (want.nameTypes ?? []).filter(n => !this.nameTypeCounts.has(nameTypeKey(n.name, n.type)));
@@ -131,9 +177,31 @@ export class ReadSet {
     return held.get(id)!;
   }
 
-  /** Every id among `ids` that names no record — the read set's answer to `assertRefsResolve`. */
+  /**
+   * Every id among `ids` that names no record — the read set's answer to `assertRefsResolve`. A record this batch
+   * has planned counts as there; an id asked about by existence only (`ReadWant.exist`) is answered by that read.
+   * Throws when an id was never asked about, as `stored` does.
+   */
   missing(kind: ReadKind, ids: readonly string[]): string[] {
-    return [...new Set(ids)].filter(id => this.stored(kind, id) === null);
+    return [...new Set(ids)].filter(id => !this.exists(kind, id));
+  }
+
+  private exists(kind: ReadKind, id: string): boolean {
+    const held = this.recordsOf(kind);
+    if (held.get(id)) return true;
+    const known = this.existence.get(kind as RefKind)?.get(id);
+    if (known !== undefined) return known;
+    if (held.has(id)) return false;
+    throw new Error(`read set: ${kind} '${id}' was asked about but never loaded`);
+  }
+
+  /**
+   * Say that this id belongs to a record nobody has stored — an inline edge's subject before its record is written.
+   * Nothing stored can be an edge from it, so its triplets and its functional count are answered without a read.
+   * Not a note that anything is written: the id appears in no collection and in no plan.
+   */
+  mint(id: string): void {
+    this.mintedIds.add(id);
   }
 
   /**
@@ -152,26 +220,32 @@ export class ReadSet {
   /** Forget what is held for these records and triplets, so the next `load` reads them as they now stand. */
   forget(records: Partial<Record<ReadKind, readonly string[]>>, triplets: readonly Triplet[] = []): void {
     for (const [kind, ids] of Object.entries(records) as Array<[ReadKind, readonly string[]]>) {
-      for (const id of ids) this.recordsOf(kind).delete(id);
+      for (const id of ids) {
+        this.recordsOf(kind).delete(id);
+        this.existence.get(kind as RefKind)?.delete(id);
+      }
     }
     for (const t of triplets) this.triplets.delete(tripletKey(t));
   }
 
   /**
-   * How many OTHER edges carry `label` from `from` — stored or planned in this batch, counted ONCE each by
+   * How many OTHER edges carry `edge.label` from `edge.from` — stored or planned in this batch, counted ONCE each by
    * identity, so an earlier item that updates a stored edge is not counted twice. The edge being written is
-   * excluded by its `to`, as `resolveEdgeEndsForWrite` excludes it: an edge is not its own duplicate.
+   * excluded by its identity, as `resolveEdgeEndsForWrite` excludes it: an edge is not its own duplicate. The count is
+   * `SubjectEdges`' (`functional-subject.ts`), the one the store's guard agrees with.
    */
-  otherEdgesFromSubject(from: string, label: string, to: string): number {
+  otherEdgesFromSubject(edge: Triplet, sameBody: readonly Triplet[] = []): number {
     // A subject minted by this batch has no stored edges; only this batch's own can count.
-    if (!this.subjectEdges.has(subjectKey(from, label)) && this.mintedIds.has(from)) {
-      this.subjectEdges.set(subjectKey(from, label), new Map());
+    if (!this.loadedSubjects.has(functionalSubjectKey(edge.from, edge.label)) && !this.mintedIds.has(edge.from)) {
+      throw new Error(`read set: functional subject ${edge.from} -${edge.label}-> was never loaded`);
     }
-    const edges = this.subjectEdges.get(subjectKey(from, label));
-    if (!edges) throw new Error(`read set: functional subject ${from} -${label}-> was never loaded`);
-    let n = 0;
-    for (const target of edges.values()) if (target !== to) n++;
-    return n;
+    /*
+     * `sameBody`: the edges of the one write that already passed, which no read set has noted — a refusal records
+     * nothing, so a second edge under the label in the same body would otherwise meet a count that cannot see the
+     * first. Counted by the same identity and the same arithmetic as a stored one, so an edge both stored and
+     * repeated in the body is one edge, and the edge being asked about is still not its own duplicate.
+     */
+    return this.subjectEdges.others(edge, sameBody);
   }
 
   /** How many entities named `name` with `type` exist — stored, plus this batch's earlier inserts. */
@@ -192,15 +266,20 @@ export class ReadSet {
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
       this.triplets.set(tripletKey(e), e);
-      const sk = subjectKey(e.from, e.label);
-      // A subject this batch minted was never read (it has no stored edges), so its count starts here.
-      if (!this.subjectEdges.has(sk) && this.mintedIds.has(e.from)) this.subjectEdges.set(sk, new Map());
-      this.subjectEdges.get(sk)?.set(tripletKey(e), e.to);
+      // A subject this batch minted was never read (it has no stored edges), so its count starts here; one that was
+      // read counts what this batch plans from then on. A subject nobody asked about is held too, and read by nobody.
+      this.subjectEdges.add(e);
     }
     if (kind === 'entity' && inserted) {
       const k = nameTypeKey(String(doc['name']), String(doc['type']));
       if (this.nameTypeCounts.has(k)) this.nameTypeCounts.set(k, this.nameTypeCounts.get(k)! + 1);
     }
+  }
+
+  private existenceOf(kind: RefKind): Map<string, boolean> {
+    let m = this.existence.get(kind);
+    if (!m) { m = new Map(); this.existence.set(kind, m); }
+    return m;
   }
 
   private recordsOf(kind: ReadKind): Map<string, StoredRecord | null> {

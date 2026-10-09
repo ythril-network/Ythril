@@ -38,6 +38,8 @@ import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { ReferenceRefusal } from './entity-refs.js';
+import { WriteConflict } from './write-plan/types.js';
 
 /**
  * Identity of a violation for before/after comparison.
@@ -195,6 +197,95 @@ export class SchemaViolationError extends Error {
 
 export function assertUpdateAllowed(check: UpdateValidation): void {
   if (check.blocked) throw new SchemaViolationError(check);
+}
+
+/**
+ * An edge write refused — by the space's schema, or by an end that names nothing — carrying the whole classification.
+ *
+ * It is a `SchemaViolationError`, one class family with the record's own refusal, and that is the point (`Q-170`): every
+ * catch and mapper that already answers a record's schema refusal (the REST record routes' `connectionRefusalAnswer`,
+ * `callTool`'s structured 422) answers an INLINE edge's refusal with the same status and the same body, with no branch of
+ * its own to forget. When it stood alone the routes did not know it, and a refused inline edge was a `500` on REST and a
+ * plain `400` on MCP.
+ *
+ * `at` names the edge of a body it was asked about (`edges[1]`) once a caller that knows the position has said so
+ * (`named`); a refusal raised for one edge on its own (a `POST /edges`) has none.
+ */
+export class EdgeSchemaViolation extends SchemaViolationError {
+  constructor(check: UpdateValidation, readonly at?: string) {
+    super(check);
+    this.name = 'EdgeSchemaViolation';
+  }
+
+  /** The same refusal, saying which edge of the body it is about: every violation's field and the sentence gain the position. */
+  named(at: string): EdgeSchemaViolation {
+    const prefixed = (vs: SchemaViolation[]) => vs.map(v => ({ ...v, field: `${at}.${v.field}` }));
+    return new EdgeSchemaViolation({
+      ...this.check,
+      introduced: prefixed(this.check.introduced),
+      preExisting: prefixed(this.check.preExisting),
+      all: prefixed(this.check.all),
+      warnings: prefixed(this.check.warnings),
+      message: `${at}: ${this.check.message}`,
+    }, at);
+  }
+}
+
+/**
+ * The classification of a reference that names nothing: one blocking violation on the field that holds it.
+ *
+ * Existence is a different question from the schema's, and a different rule (`strictLinkage`, not `validationMode`), but
+ * it is refused as the same kind of thing — the caller named something the space does not hold — so it travels in the
+ * same body. `message` is the one sentence every door gives for a missing reference (`missingRefsRefusal`).
+ */
+export function danglingReferenceCheck(field: string, value: string, message: string): UpdateValidation {
+  const violation: SchemaViolation = { field, value, reason: message };
+  return { blocked: true, introduced: [violation], preExisting: [], all: [violation], warnings: [violation], message };
+}
+
+/**
+ * What a record write refused for its connections, or its own schema, answers on REST — the status and the body, from
+ * ONE place; `null` when the failure is none of those and the route answers it as it always has.
+ *
+ * - **A schema refusal** (the record's own, or an inline edge's, which is the same class family): the documented body
+ *   (`toStructured`), and the status the verb gives it — a create answers `400`, an update `422`. The two have always
+ *   differed, and a status is part of a caller's contract even when the pair looks inconsistent.
+ * - **A reference refusal** (a link id or a shape the connection fields cannot honour): `400`, `{ error }`.
+ *
+ * Nine routes each built that body by hand and the smallest of them left three keys out, which is how a refused fact
+ * answered differently from every other record.
+ */
+export function connectionRefusalAnswer(
+  err: unknown, verb: 'create' | 'update',
+): { status: number; body: Record<string, unknown> } | null {
+  if (err instanceof SchemaViolationError) return { status: verb === 'create' ? 400 : 422, body: err.toStructured() };
+  if (err instanceof ReferenceRefusal) return { status: 400, body: { error: err.message } };
+  return null;
+}
+
+/**
+ * What a write that did not land answers when the cause is a refusal OR a conflict — the status, from ONE place.
+ *
+ * `connectionRefusalAnswer`'s two refusals, and a {@link WriteConflict} (another write kept moving the record; nothing was
+ * written; retry) as `409`, `{ error }`. The app's error handler, `callTool`'s catch and `connectionsNotWrittenAnswer`
+ * each spelled this mapping, so a status changed in one was changed in two of three. A route that answers its own
+ * conflict differently keeps calling `connectionRefusalAnswer`; this is the question the three SHARED mappers ask.
+ */
+export function writeRefusalAnswer(
+  err: unknown, verb: 'create' | 'update',
+): { status: number; body: Record<string, unknown> } | null {
+  if (err instanceof WriteConflict) return { status: 409, body: { error: err.message } };
+  return connectionRefusalAnswer(err, verb);
+}
+
+/**
+ * The type an entity has AFTER a patch: the one it names, else the one it has. One expression, because it decides which
+ * type schema the record is validated against (`updateEntityById`) and which type an inline edge's `endpoints` rule is
+ * judged by (`connectionSubject`) — a patch that re-types a record and attaches an edge in one call has to be judged by
+ * the type it LEAVES, and two spellings of "the new type" are two chances to judge by the type it is leaving.
+ */
+export function resultingEntityType(stored: { type: string }, patch: { type?: string }): string {
+  return patch.type ?? stored.type;
 }
 
 /**

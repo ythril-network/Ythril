@@ -25,6 +25,7 @@ import type express from 'express';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import type { ToolCallOutcome } from '../mcp/call-tool.js';
 import { reportServerFailure } from '../util/report-failure.js';
+import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -34,6 +35,20 @@ import { reportServerFailure } from '../util/report-failure.js';
 export function sendStoreFailure(res: express.Response, answer: StoreFailureAnswer, envelope?: Record<string, unknown>): void {
   if (answer.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(answer.retryAfterSeconds));
   res.status(answer.status).json(envelope ?? answer.body);
+}
+
+/**
+ * Put the answer for a write whose record landed and whose connections did not on the wire (`Q-170`): the cause's status,
+ * `written`, no `Retry-After` and `retryable: false` — and the write audited as a write of the record it stored, which a
+ * create's path cannot name (`req.auditEntryId`, read by `audit/middleware.ts`).
+ *
+ * One sender for the app's error handler and for `sendCaughtFailure`, so a route that catches its own failures cannot
+ * answer a stored record as a `500` that reads "nothing happened".
+ */
+export function sendConnectionsNotWritten(res: express.Response, err: ConnectionsNotWritten, where: string): void {
+  const answer = connectionsNotWrittenAnswer(err, where);
+  res.req.auditEntryId = err.written.id;
+  res.status(answer.status).json(answer.body);
 }
 
 /**
@@ -55,6 +70,8 @@ export function sendStoreFailure(res: express.Response, answer: StoreFailureAnsw
 export function sendCaughtFailure(res: express.Response, where: string, err: unknown,
   fallback: Record<string, unknown> = { error: 'Internal server error' }): void {
   if (res.headersSent) { reportServerFailure(where, err); return; }
+  // First, for the reason `sendConnectionsNotWritten` gives: the record is stored, and the store's answer to its cause is a retry.
+  if (err instanceof ConnectionsNotWritten) { sendConnectionsNotWritten(res, err, where); return; }
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
   reportServerFailure(where, err);

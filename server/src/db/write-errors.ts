@@ -56,11 +56,30 @@ export function bulkWriteFailures(err: unknown): WriteFailure[] | null {
  */
 export function isDuplicateKeyOnly(err: unknown): boolean {
   const failures = bulkWriteFailures(err);
-  if (failures) return failures.every(f => f.code === DUPLICATE_KEY);
+  if (failures) return onlyDuplicateKeys(failures);
   return (err as { code?: number } | null)?.code === DUPLICATE_KEY;
 }
 
 export const DUPLICATE_KEY = 11000;
+
+/**
+ * Is ONE write's failure a duplicate key — a single write's rejection, or one entry of a bulk's `writeErrors`? The code is read
+ * through {@link writeErrorCode}, so the top-level and the `err` shapes both answer. The sibling of {@link onlyDuplicateKeys}
+ * for a failure that is not a list: a caller that spelled `writeErrorCode(err) === DUPLICATE_KEY` itself would be the second
+ * place that says what "a duplicate" is.
+ */
+export function isDuplicateKey(err: unknown): boolean {
+  return writeErrorCode(err) === DUPLICATE_KEY;
+}
+
+/**
+ * Are the per-operation failures of a bulk write ALL duplicate keys? `isDuplicateKeyOnly` for a caller that already read the list
+ * ({@link bulkWriteFailures}) and has the "no per-item detail" case to handle itself — an empty list is vacuously all of them,
+ * so a caller that can hold none checks that first.
+ */
+export function onlyDuplicateKeys(failures: readonly WriteFailure[]): boolean {
+  return failures.every(f => f.code === DUPLICATE_KEY);
+}
 
 /**
  * Server codes that refuse ONE DOCUMENT for what it is — it will be refused identically however often it is

@@ -53,7 +53,7 @@ import { declareStep } from '../util/housekeeping-signals.js';
 const CLEANUP_STEP = declareStep('Unrecorded bytes cleanup');
 
 function sayCleanupFailure(spaceId: string, key: string, err: unknown): void {
-  reportSpaceFailure(CLEANUP_STEP, spaceId, err, { unit: key, ...(storeIsNotAnswering(err) ? { kind: 'store-down' as const } : {}) });
+  reportSpaceFailure(CLEANUP_STEP, spaceId, err, { unit: key });
 }
 
 /**

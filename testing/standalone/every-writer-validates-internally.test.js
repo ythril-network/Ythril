@@ -48,6 +48,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 /**
  * The eight functions that write a brain record, by the collection they own.
@@ -65,8 +66,12 @@ const WRITERS = [
   { file: 'server/src/brain/fact.ts', fn: 'updateFact', classifier: /classifyFactUpsertAgainst\(|classifyUpdateViolations\(/ },
   { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono', classifier: /classifyChronoUpsertAgainst\(/ },
   { file: 'server/src/brain/chrono.ts', fn: 'updateChrono', classifier: /classifyChronoUpsertAgainst\(|classifyUpdateViolations\(/ },
-  // The planner resolves the ends from the read set (`resolvedEnds`), the update path from the store.
-  { file: 'server/src/brain/write-plan/plan-edge.ts', fn: 'planEdge', classifier: /classifyEdgeUpsertAgainst\(/, resolvesEnds: 'resolvedEnds' },
+  // The edge create/converge rule is `edgeRefusal` since `Q-170` (the planner asks it first, and the inline-edge doors
+  // ask it before their record is written), so it is the function the rule must live in. `derived`: the file is
+  // found by name under write-plan/ (`_write-plan-sources.mjs`), not listed. It resolves the ends from the read set
+  // (`resolvedEnds`), the update path from the store. The classification is HANDED BACK through `planEdge`'s
+  // `onValidation`, so that is where the hand-back is asserted.
+  { derived: true, fn: 'edgeRefusal', classifier: /classifyEdgeUpsertAgainst\(/, resolvesEnds: 'resolvedEnds', handsBackThrough: 'planEdge' },
   { file: 'server/src/brain/edges.ts', fn: 'updateEdgeById', classifier: /classifyEdgeUpsertAgainst\(|classifyUpdateViolations\(/, resolvesEnds: 'await resolveEdgeEndsForWrite' },
 ];
 
@@ -85,11 +90,15 @@ const DOORS = [
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
+/** The body of a writer (or planner) row: found by name under write-plan/ when `derived`, else read from its file. */
+const bodyFor = (w) => (w.derived ? writePlanFunction(w.fn).body : bodyOf(src(w.file), w.fn));
+
 describe('the sweep itself works', () => {
   it('every writer named here still exists', () => {
     // A renamed writer would silently reduce the subject to nothing — the vacuity every coverage gate in this
     // repo has had at least once.
     for (const w of WRITERS) {
+      if (w.derived) { writePlanFunction(w.fn); continue; }   // throws, naming the function, when it is declared nowhere
       assert.match(src(w.file), new RegExp(`export async function ${w.fn}\\b`), `${w.fn} is gone from ${w.file}`);
     }
   });
@@ -98,7 +107,7 @@ describe('the sweep itself works', () => {
 describe('the schema is enforced inside the writer', () => {
   for (const w of WRITERS) {
     it(`${w.fn} validates before it touches the collection`, () => {
-      const body = bodyOf(src(w.file), w.fn);
+      const body = bodyFor(w);
       assert.match(body, w.classifier,
         `${w.fn} writes without validating, so any caller that reaches it directly writes around the schema — `
         + 'which is how a supersedes edge landed in a space whose allowlist forbade the label');
@@ -114,7 +123,7 @@ describe('the schema is enforced inside the writer', () => {
        * So a writer must consult `blocked` — the classification's own verdict — rather than "are there any
        * violations", which is the rule `bulk.ts` had and the routes did not.
        */
-      const body = bodyOf(src(w.file), w.fn);
+      const body = bodyFor(w);
       assert.match(body, /\.blocked\b/,
         `${w.fn} must branch on the classification's blocked verdict, not on the presence of violations`);
     });
@@ -122,11 +131,31 @@ describe('the schema is enforced inside the writer', () => {
     it(`${w.fn} hands the classification back, so a door need not re-derive it`, () => {
       // Without this a door runs the classifier a second time purely for presentation — two lookups per write,
       // and the second copy of the rule that this whole change exists to remove.
-      const body = bodyOf(src(w.file), w.fn);
+      const body = w.handsBackThrough ? writePlanFunction(w.handsBackThrough).body : bodyFor(w);
       assert.match(body, /onValidation/,
-        `${w.fn} gives a caller no way to see the warnings a warn-mode space must report`);
+        `${w.handsBackThrough ?? w.fn} gives a caller no way to see the warnings a warn-mode space must report`);
     });
   }
+});
+
+describe('the edge planner asks the refusal before it decides or embeds anything', () => {
+  /*
+   * `planEdge` is the writer the edge doors and the bulk door share, and since `Q-170` the rule it enforces is
+   * `edgeRefusal`'s — the same function the inline-edge doors ask BEFORE their record is written. Both halves are
+   * pinned: the planner CALLS it (so the writer cannot enforce a weaker rule than the doors asked), and calls it
+   * before `noteWritten(` (after which a later batch item treats the edge as written) and before `vectorBeforeWrite(`
+   * (which starts the embedding of a record about to be refused).
+   */
+  it('planEdge calls edgeRefusal before noteWritten and before vectorBeforeWrite', () => {
+    const { body } = writePlanFunction('planEdge');
+    const askAt = body.search(/\bedgeRefusal\(/);
+    assert.notEqual(askAt, -1, 'planEdge does not call edgeRefusal — the writer enforces a rule the doors did not ask');
+    for (const later of ['noteWritten(', 'vectorBeforeWrite(']) {
+      const laterAt = body.indexOf(later);
+      assert.notEqual(laterAt, -1, `no ${later} found in planEdge — re-point this gate`);
+      assert.ok(askAt < laterAt, `planEdge asks edgeRefusal AFTER ${later}`);
+    }
+  });
 });
 
 describe('an edge writer LOOKS UP what the endpoint rules need', () => {
@@ -147,7 +176,7 @@ describe('an edge writer LOOKS UP what the endpoint rules need', () => {
   for (const w of WRITERS.filter(x => x.resolvesEnds)) {
     const resolver = w.resolvesEnds.replace(/^await /, '');
     it(`${w.fn} resolves the endpoints before it validates`, () => {
-      const body = bodyOf(src(w.file), w.fn);
+      const body = bodyFor(w);
       const at = body.indexOf(`${resolver}(`);
       assert.ok(at > 0,
         `${w.fn} validates without resolving its endpoints, so \`endpoints\` and \`functional\` are accepted `
@@ -163,7 +192,7 @@ describe('an edge writer LOOKS UP what the endpoint rules need', () => {
        * is the likelier accident of the two, because a refactor that reorders arguments leaves the call
        * compiling. The variable has to reach the classifier's argument list.
        */
-      const body = bodyOf(src(w.file), w.fn);
+      const body = bodyFor(w);
       const assigned = new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*${w.resolvesEnds.replace(/ /g, '\\s+')}\\(`).exec(body);
       assert.ok(assigned, `${w.fn} does not keep what ${resolver} returned`);
       const at = body.indexOf('classifyEdgeUpsertAgainst(');
@@ -238,12 +267,14 @@ describe('applying defaults must not manufacture properties nobody sent', () => 
     { file: 'server/src/brain/write-plan/plan-fact.ts', fn: 'planFact' },
     { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono' },
     { file: 'server/src/brain/write-plan/plan-entity.ts', fn: 'planEntity' },
-    { file: 'server/src/brain/write-plan/plan-edge.ts', fn: 'planEdge' },
+    // `Q-170`: the edge's defaults are applied inside `edgeRefusal` — the one place the triplet, the defaults, the
+    // resolved ends and the classifier meet — so that is where a coerced `properties` would be introduced.
+    { derived: true, fn: 'edgeRefusal' },
   ];
 
   for (const c of CALLS) {
     it(`${c.fn} passes the caller's properties through untouched`, () => {
-      const body = bodyOf(src(c.file), c.fn);
+      const body = bodyFor(c);
       const at = body.indexOf('applyPropertyDefaults(');
       assert.notEqual(at, -1, `${c.fn} applies no property defaults — re-point this gate to where they are applied`);
       const call = body.slice(at, body.indexOf(')', at) + 1);

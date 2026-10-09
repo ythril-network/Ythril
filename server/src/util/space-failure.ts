@@ -48,7 +48,7 @@
  * to catch one.
  */
 import { errorChain } from '../db/error-chain.js';
-import { storeConditionKind } from '../db/store-condition.js';
+import { storeConditionKind, storeIsNotAnswering } from '../db/store-condition.js';
 import { writeErrorCode } from '../db/write-errors.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { LruMap } from './lru-map.js';
@@ -233,11 +233,21 @@ export const defaultSpaceFailureReporter: SpaceFailureReporter = spaceFailureRep
 
 /**
  * Say that `step` failed for `spaceId`, once per window. **Synchronous and never throws** — for every caller, a walk or not
- * (`sweepAfterMetaWrite` reports a failure with no walk above it). It is handed the verdict (`opts.kind`) by whoever ran
- * {@link walkVerdict}; it does not derive one.
+ * (`sweepAfterMetaWrite` reports a failure with no walk above it). A walk hands it the verdict (`opts.kind`) it ran
+ * {@link walkVerdict} for; it does not derive one. A caller with no walk above it passes no kind, and a failure that says the
+ * store is not answering (`storeIsNotAnswering`, the one question for code outside a walk) is then reported as `store-down` —
+ * the stop line, not a space's failure — so no caller spells that decision itself.
  */
 export function reportSpaceFailure(step: string, spaceId: string, err: unknown, opts?: ReportOptions): void {
-  defaultSpaceFailureReporter.spaceFailure(step, spaceId, err, opts);
+  defaultSpaceFailureReporter.spaceFailure(step, spaceId, err, opts?.kind === undefined && storeNotAnswering(err) ? { ...opts, kind: 'store-down' } : opts);
+}
+
+/**
+ * {@link storeIsNotAnswering} that never throws, for a report that runs in a `catch`: an error that cannot be read (a hostile
+ * getter) is not a store that is not answering, and it must not replace the failure being reported.
+ */
+function storeNotAnswering(err: unknown): boolean {
+  try { return storeIsNotAnswering(err); } catch { return false; }
 }
 
 /** {@link SpaceFailureReporter.storeDown} on the process-wide reporter. */

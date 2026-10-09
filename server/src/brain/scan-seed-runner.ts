@@ -50,7 +50,9 @@ export function seedsInRequest(step: string, spaceId: string): SeedRunner {
       try {
         await fn(seed);
       } catch (err) {
-        reportSpaceFailure(step, spaceId, err, { unit: type, when: 'next scan' });
+        // The seed's own line even for a store that is not answering: it is rethrown below for the request to answer, and the line
+        // names the seed that was running — so the default of `reportSpaceFailure` (a store-down stop line) is declined on purpose.
+        reportSpaceFailure(step, spaceId, err, { unit: type, when: 'next scan', kind: 'space-failure' });
         if (storeIsNotAnswering(err)) throw err;
       }
     }

@@ -685,6 +685,8 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
   const memberIds = memberSpacesForRequest(req, id);
+  // Edges whose write guard names another subject than the one they are under: not violations, so not in `totalViolations`.
+  const staleGuards: Array<{ _id: string; label: string }> = [];
   const SCAN_LIMIT = 10_000;
   /*
    * Q-129: how much of each collection was actually checked. The scan reads at most SCAN_LIMIT records per collection,
@@ -711,7 +713,9 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
     // Edges need two lookups the document cannot supply — see `validateStoredEdges`, which also
     // explains why they live in a module of their own rather than here.
-    violations.push(...await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT));
+    const storedEdges = await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT);
+    violations.push(...storedEdges.violations);
+    staleGuards.push(...storedEdges.staleGuards);
     await note(mid, 'edges', SCAN_LIMIT);
 
     // Facts
@@ -744,6 +748,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     complete: Object.values(checked).every(c => c.checked >= c.total),
     totalViolations: violations.length,
     violations: page.rows,
+    staleGuards,
     ...page.fields,
   });
 });

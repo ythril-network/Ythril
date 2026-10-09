@@ -362,7 +362,14 @@ describe('every per-record flag is reachable on every surface that can set it', 
     assert.match(edge, /const edgeFlags = parseRecordFlags\(item\);/, 'the edge loop in brain/bulk.ts does not parse the record flags');
     // The planner input is the call's FIRST argument, so a forward elsewhere in the call does not count.
     const edgeCall = bulk.indexOf('planEdgeItem(', bulk.indexOf("shapeError('edge', item);"));
-    const edgePlanned = argumentsOf(bulk, edgeCall, 'bulk edge planEdgeItem call')[0];
+    let edgePlanned = argumentsOf(bulk, edgeCall, 'bulk edge planEdgeItem call')[0];
+    // Since `Q-170` the planner input is built once, as `edgeInput`, so the refusal and the planner are asked about the
+    // same edge; the flags have to be IN that input, and the planner has to be handed it.
+    if (/^edgeInput$/.test(edgePlanned.trim())) {
+      const declared = bulk.indexOf('const edgeInput', bulk.indexOf("shapeError('edge', item);"));
+      assert.notEqual(declared, -1, 'the edge loop in brain/bulk.ts hands its planner an `edgeInput` it never builds');
+      edgePlanned = bulk.slice(declared, edgeCall);
+    }
     assert.match(edgePlanned, /\.\.\.edgeFlags\.flags\b/, 'the edge loop in brain/bulk.ts drops the parsed record flags before its planner');
     const mcp = code('server/src/mcp/tools/bulk.ts');
     for (const flag of recordFlags()) {

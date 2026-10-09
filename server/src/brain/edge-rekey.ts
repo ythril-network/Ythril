@@ -48,7 +48,7 @@ import { withoutVector } from './read-projection.js';
 import type { EdgeDoc } from '../config/types.js';
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { rekeyedRow } from '../sync/local-only-fields.js';
+import { rekeyedRow, FUNCTIONAL_GUARD } from '../sync/local-only-fields.js';
 
 /**
  * The result of a re-key. `null` where the identity did not change, so a caller can fall through to its
@@ -100,6 +100,16 @@ export class EdgeIdentityTaken extends Error {
 }
 
 /**
+ * The one answer to {@link EdgeIdentityTaken}, on every door: `409 edge_identity_taken` naming the edge in the way.
+ * The REST route and the MCP dispatcher both call it, so a relabel onto a held identity is not a 409 with a code on one
+ * door and a codeless `400` on the other; `undefined` for any other error.
+ */
+export function edgeIdentityTakenAnswer(err: unknown): { status: 409; body: { error: 'edge_identity_taken'; message: string; existingId: string } } | undefined {
+  if (!(err instanceof EdgeIdentityTaken)) return undefined;
+  return { status: 409, body: { error: 'edge_identity_taken', message: err.message, existingId: err.existingId } };
+}
+
+/**
  * Move an edge onto the id `(from, to, label)` derives, when that is not the id it is already under — one move
  * through `rekeyEdges`, which is the one implementation (see its docblock for the rules).
  *
@@ -112,6 +122,10 @@ export class EdgeIdentityTaken extends Error {
  *                  `ttlDays: null`, and the pre-3.1 suppression key — and the TTL case is the one that loses
  *                  data: the owner is told with a 200 that the edge no longer expires, and the sweep removes
  *                  it on the original schedule.
+ * @param functionalGuard the write guard the moved row is stamped with — the value `guardFor` computed for its NEW subject
+ *                   (`brain/write-plan/plan-edge.ts`), which this never derives: the key and the condition for having one live in
+ *                   that one function. `undefined`: the row carries no guard (the old one is dropped whatever the caller says).
+ *                   A caller that passes one moves a single edge, by label.
  * @returns `null` when the derived id is the one already stored — the caller does its ordinary update.
  */
 export async function rekeyEdge(
@@ -121,8 +135,9 @@ export async function rekeyEdge(
   alsoSet: Record<string, unknown> = {},
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
+  functionalGuard?: string,
 ): Promise<EdgeRekey | null> {
-  const [moved] = await rekeyEdges(spaceId, [{ existing, next }], alsoSet, alsoUnset, session);
+  const [moved] = await rekeyEdges(spaceId, [{ existing, next }], alsoSet, alsoUnset, session, functionalGuard);
   return moved ?? null;
 }
 
@@ -150,6 +165,7 @@ export async function rekeyEdges(
   alsoSet: Record<string, unknown> = {},
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
+  functionalGuard?: string,
 ): Promise<Array<EdgeRekey | null>> {
   const instanceId = getConfig().instanceId;
   const planned = moves.map(({ existing, next }) => {
@@ -232,6 +248,10 @@ export async function rekeyEdges(
       // `rekeyedRow`: a row under a NEW id is a record written here, so it is stamped as nobody's delivery — the
       // upstream that delivered the OLD row has no claim on what this instance made of it (`sync/local-only-fields.ts`).
       const doc = rekeyedRow({ ...existing, ...alsoSet }, { _id: newId, from, to, label, updatedAt: now, seq: insertSeq + i }) as unknown as EdgeDoc;
+      // The write guard (`Q-439`), AFTER the drop `rekeyedRow` made: the OLD marker named the old `(from, label)` and is gone, and
+      // a move onto a label that is functional in a strict space is stamped for its NEW one. Never through `alsoSet`, which the
+      // drop would erase too. A merge passes no guard: it reports a functional breach and must never fail on the guard.
+      if (functionalGuard !== undefined) doc[FUNCTIONAL_GUARD] = functionalGuard;
       // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
       // a GET immediately contradict the 200 that created the row.
       for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];

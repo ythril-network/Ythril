@@ -60,7 +60,25 @@ const LOCAL_VALUES = {
   syncBase: { 'some-peer': 'sha-agreed' },
   // bundle-51: who delivered the stored version. RE-STAMPED by the arrival (below), not carried across it.
   deliveredBy: 'an-earlier-deliverer',
+  // Q-439: an edge's write guard. Its value is the record's own subject key, filled in per record by `localFor`: the
+  // arrival carries it only while it names the stored edge's from and label, so a made-up value is rightly dropped.
+  _functionalGuard: 'per-record',
 };
+
+/**
+ * The local-only fields to seed on one stored record. The write guard exists only on an edge and only as the key of that
+ * edge's own `(from, label)`, the one value an arrival that keeps both carries; on any other kind it is left out.
+ */
+function localFor(doc) {
+  const out = {};
+  for (const f of LOCAL_ONLY) {
+    if (f !== '_functionalGuard') { out[f] = LOCAL_VALUES[f]; continue; }
+    if (typeof doc.from === 'string' && typeof doc.label === 'string') {
+      out[f] = `${doc.from.length}:${doc.from}${doc.label.length}:${doc.label}`;
+    }
+  }
+  return out;
+}
 
 /**
  * The local-only fields an arrival WRITES rather than carries: the stamp is part of the version, so a peer's newer copy is
@@ -109,8 +127,9 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
         if (via === 'single' && !fam.single) continue;
         it(`${via} ${fam.key}: a newer copy from a peer keeps every local-only field the stored copy had`, async () => {
           const id = `${fam.key}-kept`;
-          const local = Object.fromEntries([...LOCAL_ONLY].map(f => [f, LOCAL_VALUES[f]]));
-          await door.coll(S, fam.coll).insertOne({ ...build[KIND[fam.key]](S, id, 5), ...local });
+          const stored = build[KIND[fam.key]](S, id, 5);
+          const local = localFor(stored);
+          await door.coll(S, fam.coll).insertOne({ ...stored, ...local });
           const incoming = build[KIND[fam.key]](S, id, 6);
           const r = via === 'single'
             ? await door.push(fam.single, incoming, { spaceId: S })
@@ -118,7 +137,7 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
           assert.equal(r.code, 200, JSON.stringify(r.body));
           const after = await door.coll(S, fam.coll).findOne({ _id: id });
           assert.equal(after.seq, 6, 'the newer copy did not land');
-          const lost = [...LOCAL_ONLY].filter(f => !RESTAMPED.has(f) && JSON.stringify(after[f]) !== JSON.stringify(local[f]));
+          const lost = Object.keys(local).filter(f => !RESTAMPED.has(f) && JSON.stringify(after[f]) !== JSON.stringify(local[f]));
           assert.deepEqual(lost, [],
             `${via} ${fam.key}: a peer's edit erased the receiver's own ${lost.join(', ')}. The retention stamps stop `
             + 'the record expiring here; the vector drops it out of search until it is re-embedded');

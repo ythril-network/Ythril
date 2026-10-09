@@ -59,7 +59,9 @@ function derivedFields() {
   const at = s.indexOf('LOCAL_ONLY_FIELDS');
   if (at < 0) return [];
   const body = s.slice(at, s.indexOf(']', at));
-  return [...body.matchAll(/'([A-Za-z_][A-Za-z0-9_]*)'/g)].map(m => m[1]);
+  // The write guard's name is spelled once, as `FUNCTIONAL_GUARD = '…'`, and the set names the constant.
+  const named = [...s.matchAll(/export const ([A-Z_]+) = '([A-Za-z_][A-Za-z0-9_]*)' as const;/g)].filter(m => new RegExp(`\\b${m[1]}\\b`).test(body)).map(m => m[2]);
+  return [...body.matchAll(/'([A-Za-z_][A-Za-z0-9_]*)'/g)].map(m => m[1]).concat(named);
 }
 
 describe('the two ingest paths agree about local-only fields', () => {
@@ -95,8 +97,10 @@ describe('the two ingest paths agree about local-only fields', () => {
     assert.match(src('server/src/sync/accept-page.ts'), /await writeArrivals\(/,
       'the page accept no longer stores through the arrival writer, so nothing drops what never crosses');
     const prep = bodyOf(src(ARRIVALS), 'prepared');
-    assert.match(prep, /for \(const f of DERIVED_LOCAL_FIELDS\) delete doc\[f\];/,
-      'the writer no longer drops the derived local-only fields (vector, model, matchedText) from what arrived');
+    assert.match(prep, /for \(const f of NOT_CARRIED_BY_BACKUP\) delete doc\[f\];/,
+      'the writer no longer drops the derived local-only fields (vector, model, matchedText) and the write guard from what arrived');
+    assert.match(src(FIELDS), /NOT_CARRIED_BY_BACKUP[^=]*=\s*new Set\(\[\.\.\.DERIVED_LOCAL_FIELDS,\s*\.\.\.WRITE_GUARD_FIELDS\]\)/,
+      'NOT_CARRIED_BY_BACKUP is no longer the derived fields plus the write guards, so the writer drops less than a backup leaves out');
     assert.match(prep, /for \(const f of RESTORED_LOCAL_FIELDS\) \{\s*if \(!restore\) \{ delete doc\[f\]; continue; \}/,
       'the writer keeps a peer\'s retention stamps or sync base — a peer would decide when this instance deletes '
       + 'its data, which is what `ttl-sweep.ts` acts on');

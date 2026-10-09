@@ -31,6 +31,7 @@ where the detail lives so nothing here becomes the second source of truth.
 | [04](decisions/04-a-result-row-is-whole-or-absent.md) | A search result row is **whole or absent**, and nothing is spilled unasked | a node cap or spill threshold below the byte budget that shortens a row "to keep more matches" |
 | [05](decisions/05-an-upstream-may-delete-what-it-relayed.md) | On a pub/sub network or a tree, an upstream may delete **what it delivered** to an instance, and never what that instance wrote | widening the rule to any peer, or to the instance's own records, or replacing the stored delivery stamp with an inference from authorship |
 | [06](decisions/06-what-an-instance-derives-or-audits-stays-local.md) | A soft-deleted file's row and a conversion's sidecar **stay on the instance that made them**; the deletion travels as the file tombstone | putting `deletedAt` on the wire, or letting sidecars travel, which brings back a row that outranks its own tombstone and a conversion that is not the receiver's |
+| [07](decisions/07-a-functional-label-is-held-by-a-local-marker-and-a-unique-index.md) | A functional label is held by a **local marker plus a unique partial index**; the marker is neither restored nor derived and always names its edge's subject | treating the marker as an ordinary record field, or an edge writer that copies a row whole without saying what it does with the marker, which leaves a lock that refuses every later write under its subject |
 
 ## Format
 

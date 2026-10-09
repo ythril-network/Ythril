@@ -10,11 +10,13 @@ Every link between brain records — an edge's `from`/`to`, and the records a fa
 is linked to (`linkEntities`, `linkFacts`, `linkChronos`) — names the target by its **id**,
 which is a **UUID v4**. A name is not a reference.
 
-**A reference that cannot resolve is refused.** The write returns `400` (or an MCP `isError`) naming the
-field and the offending value, and **nothing is stored**. Both halves are checked:
+**A reference that cannot resolve is refused.** A `link*` id answers `400` with `{ "error" }` on a create and an
+update alike; the far end of an inline `edges` entry answers the `schema_violation` body (`400` on a create, `422` on
+an update, a structured `schema_violation` from an MCP tool) — each naming the field and the offending value (for an
+inline `edges` entry, the entry: `edges[0].to`), and **nothing is stored**, the record included. Both halves are checked:
 
 - the value is a UUID v4, and
-- a record with that id exists in the target space.
+- a record with that id exists in the target space (for the far end of an inline `edges` entry, one of the kind its `toKind` names).
 
 Format alone was never sufficient — a syntactically perfect id pointing at nothing dangles exactly as
 silently as a name did, and the only symptom is a later traversal that quietly returns nothing.
@@ -27,7 +29,7 @@ deliberate per-space choice to accept dangling links, and it is **off by default
 linkage by saying nothing.
 
 Bulk writes (`POST /bulk`, `save_bulk`) check references for **format and existence** under strict linkage,
-exactly as the single-record writes do. A record created earlier in the same payload is referenced by its
+exactly as the single-record writes do, and an item's own `edges` the same way, before the item is written. A record created earlier in the same payload is referenced by its
 `$ref` key, which always resolves; a literal id cannot name a record the payload creates, because ids are
 minted by the server.
 
@@ -106,9 +108,11 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
 - **Every replicated family is exported, keyed by its collection name** — facts, entities, edges, chrono, links and
   file metadata. Links were missing until this release, so an export-then-import lost every link.
 - What this instance DERIVES with its own model is left out — `embedding`, `embeddingModel` and `matchedText` — so
-  exported data is model-independent; the import re-embeds.
-- The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`) and a file's
-  `syncBase`. JSON writes the stamps as ISO strings; the import turns them back into dates.
+  exported data is model-independent; the import re-embeds. So is an edge's write guard (`_functionalGuard`): this
+  instance's own lock on a functional label's subject, never a backup's to carry.
+- The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
+  `syncBase` and who delivered the record (`deliveredBy`). JSON writes the stamps as ISO strings; the import turns
+  them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
 
 ---
@@ -140,11 +144,13 @@ are **replaced, whatever their seq** — an import is a restore, so a backup res
 What the import stores of each document:
 
 - **Kept**: everything the export carried as the record's content, plus its retention stamps (as dates — they ARE
-  the record's own retention, since a per-record `ttlDays` is never stored) and a file's `syncBase`. A record that
+  the record's own retention, since a per-record `ttlDays` is never stored), a file's `syncBase` and `deliveredBy`. A record that
   carries no stamp is stamped by THIS space's retention policy (type schema over space), counted from its own
   `createdAt`. **Never the replaced copy's**: a stamp or `syncBase` the export does not carry is not taken from the
   record the import overwrites — a record restored to "never expires" no longer keeps the replaced copy's expiry.
-- **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); every file chunk and face record
+- **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); an edge's write guard
+  `_functionalGuard` (a restored edge arrives unguarded, and a second edge under a functional label is still refused
+  when one is written); every file chunk and face record
   (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
   (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
   onto what is stored, as sync merges it — except that an export is a full record, so every authored key
@@ -536,7 +542,23 @@ Content-Type: application/json
 
 `backupId` must match a directory name under `<data-root>/backups/`. Slashes and `..` are rejected.
 
-**Response `200`:** `{ "ok": true }`
+**Response `200`:**
+
+```json
+{
+  "ok": true,
+  "vectorIndexes": { "rebuilding": ["general"], "failed": [] },
+  "edgeIndexes": { "failed": [ { "id": "notes", "failures": ["guard index: <reason>"] } ] }
+}
+```
+
+The restore drops every collection and reloads it, which leaves none of the indexes that make an edge unique. Each
+space's edge indexes — the one that keeps an edge's identity unique, and the one that keeps a functional label to one
+edge per subject among concurrent writers — are rebuilt before maintenance mode ends, together with its vector
+indexes. `edgeIndexes.failed` names, per space `id`, each index that could not be rebuilt and why (`[]` when every
+build succeeded); the restore itself still succeeded, the space is tried again at the next start, and until then a
+duplicate edge or a lost race there is not refused by the store. `vectorIndexes.failed` is the spaces whose vector
+index could not be rebuilt, and `rebuilding` those whose builds started and are still warming up.
 
 | Status | Meaning |
 |--------|--------|

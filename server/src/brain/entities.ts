@@ -6,10 +6,10 @@ import { withSeq } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
-import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
+import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyEntityUpsertAgainst, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
@@ -133,7 +133,7 @@ export async function upsertEntity(
   const entity = { ...done.plan.result, seq: done.seq } as unknown as EntityDoc;
   if (actor) {
     emitWebhookEvent({ event: done.plan.op === 'insert' ? 'entity.created' : 'entity.updated', spaceId,
-      entry: { ...entity, embedding: undefined }, ...actor });
+      entry: eventEntryOf(entity), ...actor });
   }
   // Advisory only — the entity is stored either way.
   return { entity: withoutVector(entity), warning: done.warning, similar: done.similar, contradicts: done.contradicts };
@@ -205,7 +205,7 @@ export async function updateEntityById(
   const $unset: Record<string, unknown> = {};
 
   const newName = updates.name ?? existing.name;
-  const newType = updates.type ?? existing.type;
+  const newType = resultingEntityType(existing, updates);
   const newDesc = updates.description !== undefined ? updates.description : existing.description;
   let newTags = mergeTagsOrKeep(existing.tags, updates.tags);
   let newProps = mergePropertiesOrKeep(existing.properties, updates.properties) ?? {};
@@ -316,7 +316,7 @@ export async function updateEntityById(
   // `embedStoredRecord` unsets the vector when the flag is on and computes one when it is off, so this path
   // still never has to know which way the toggle went.
   await enqueueEmbedJob(spaceId, 'entity', result._id, { priority: EMBED_PRIORITY.write });
-  if (actor) emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'entity.updated', spaceId, entry: eventEntryOf(result), ...actor });
   return result;
 }
 

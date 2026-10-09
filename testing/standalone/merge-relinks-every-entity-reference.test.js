@@ -275,9 +275,34 @@ describe('executeMerge relinks every collection that can reference an entity', (
   });
 
   it('dedupes after relinking, so a record linked to BOTH does not hold the survivor twice', () => {
-    const dedupes = merge.split('new Set(').length - 1;
-    assert.ok(dedupes >= 3,
-      `only ${dedupes} dedupe(s) — a record referencing the survivor AND the absorbed entity collapses to two `
-      + 'identical ids without one');
+    /*
+     * THE RULE, not a count of `new Set(` in the file. That count was this case's body, and it was never about the
+     * dedupe: it held at three because a prototype-key list, a stored-identity set and a subject counter happened to
+     * be sets, and it went red when the subject counter moved into `functional-subject.ts` with the dedupe untouched.
+     *
+     * What a record linked to BOTH entities needs is two decisions, one per kind of record the merge re-keys, and each
+     * is a statement in the writer that this case reads by NAME:
+     *  - an EDGE whose relinked identity the survivor already holds is deleted with its tombstone and never relinked
+     *    (the unique identity index would refuse it), and every identity the loop DOES relink is recorded as held, so a
+     *    second absorbed edge onto the same identity is a duplicate too;
+     *  - a LINK whose re-keyed id the survivor already holds is not written again: the survivor's row stays as it is,
+     *    author included, and only the absorbed row goes.
+     */
+    const writer = bodyOf(merge, 'relinkAndAbsorb');
+    assert.match(writer, /if \(survivorKeys\.has\(\w+\)\) duplicates\.push\(/,
+      'an absorbed edge whose relinked identity the survivor already holds is not routed to the duplicates, so it '
+      + 'is relinked into the unique identity index and the merge fails on it, or holds the survivor twice');
+    assert.match(writer, /else\s*\{[^}]*\bedgesToRelink\.push\([^}]*\bsurvivorKeys\.add\(/,
+      'an identity this merge relinks is not recorded as held, so a second absorbed edge onto it is relinked as '
+      + 'well and the survivor holds it twice');
+    assert.match(writer, /removeWithTombstones\(spaceId, 'edges',\s*duplicates\.map\(/,
+      'the duplicate edges are not deleted with a tombstone, so the next pull from a peer brings them back');
+    assert.match(writer, /readStoredById<[^>]*>\(spaceCollection\(spaceId, 'links'\), linkMoves\.map\(m => m\.newId\)/,
+      'the links the survivor already holds are not read, so there is nothing to dedupe a re-keyed link against');
+    assert.match(writer, /const fresh = linkMoves\.filter\(m => !held\.has\(m\.newId\)\)/,
+      'a link whose re-keyed id the survivor already holds is not filtered out, so the absorbed row overwrites the '
+      + 'survivor\'s and hands its authorship to whoever wrote the absorbed one');
+    assert.match(writer, /withAllocatedSeqs\(spaceId, fresh\.length,[\s\S]*?fresh\.map\(/,
+      'the links are written from the full move list rather than from `fresh`, so the dedupe filters nothing');
   });
 });

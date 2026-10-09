@@ -373,6 +373,11 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 > MFA is unchanged. A space administrator is still a human with an authenticator, and exempting one would make
 > the role a way around an instance-wide second factor.
 
+**`POST :id/validate-schema` answers `staleGuards` beside `violations`**: `[{ _id, label }]`, the stored edges that
+hold a write guard for a subject they are not under (the guard is this instance's own lock on a functional label's
+subject, and no read returns it). They are not schema violations, so `violations` and `totalViolations` are unchanged.
+See [Validate Schema](06a-schema-api.md#validate-schema-dry-run).
+
 #### What each field in the update body requires
 
 Every field answers to the area that owns it rather than to the route. A token needs **one** of: the

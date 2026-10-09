@@ -1340,6 +1340,20 @@ for (const collection of Object.values(COLLECTION_SUFFIX)) {
   }
 }
 
+/**
+ * Functional-label writes the store refused because another writer's edge already held the subject (`Q-439`): two writers
+ * that both counted zero edges at a `(from, label)` and both inserted, the guard index refusing the second. Each one is
+ * re-planned against the winner and answered as an ordinary functional violation, so this is the rate at which concurrent
+ * writers meet on one subject, not a rate of failures.
+ */
+export const functionalRaceLostTotal = new Counter({
+  name: 'ythril_functional_race_lost_total',
+  help: 'Edge writes under a functional label that lost a race to another writer of the same subject, by space',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+functionalRaceLostTotal.labels({ space: '' }).inc(0);
+
 // ── Security posture (observability audit, lens 9) ────────────────────────────
 
 /**

@@ -14,7 +14,7 @@ import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossM
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 
 export const save_entityTool: ToolHandler = {
@@ -102,10 +102,10 @@ export const save_entityTool: ToolHandler = {
     const entContraCheck = a['checkContradictions'] === true;
     const entDupeThreshold = typeof a['dupeThreshold'] === 'number' ? a['dupeThreshold'] : undefined;
     const entTtlDays = ttlDaysFromArgs(a);
-    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
-    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
-    // leave the record stored without the links the same call asked for.
-    await assertConnections(wt.target, 'entity', a);
+    // Refused BEFORE the record is written: the connections' shape, a class this kind cannot hold, under strict
+    // linkage an id that names nothing, and every inline edge the space's schema refuses. `applyConnections` runs after
+    // the write, so a refusal there would leave the record stored without the connections the same call asked for.
+    await assertConnections(wt.target, 'entity', await connectionSubject(wt.target, 'entity', a, { id: rawId, type: eType.trim() }), a);
 
     let upserted;
     try {
@@ -300,11 +300,16 @@ export const update_entityTool: ToolHandler = {
      * duplicate is the one that drifted.
      */
 
-    // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
-    await assertConnections(wt.target, 'entity', a);
-
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    // It is also where the record is LOCATED: which member space holds it, and so whose schema judges this edit.
     const audit = await readEditAudit(wt.target, mid => getEntityById(mid, id), id, a);
+    // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
+    // changed — once the record is found (a missing one is the not-found below, as REST's `404`), by the schema of the
+    // member that holds it, and judged by the type this patch leaves the entity.
+    if (audit.prior) {
+      await assertConnections(audit.home!, 'entity',
+        await connectionSubject(audit.home!, 'entity', a, { stored: audit.prior, type: updates.type }), a);
+    }
     const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
     if (updatedEnt) { const s = audit.snapshots(updatedEnt); ctx.recordChanges?.(s.before, s.after); }
     if (!updatedEnt) throw new Error(`Entity '${id}' not found`);

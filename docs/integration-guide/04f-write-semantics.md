@@ -232,6 +232,21 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 A body carrying only a connection field is a valid patch. Change a record's links this way rather than by
 deleting and re-creating it, which costs the record its id and its history.
 
+**A connection the write cannot honour changes nothing — the other fields of the patch included.** An `edges` entry
+the space's schema refuses, or on a `strictLinkage` space whose far end names nothing (of any kind), answers `422`
+with the `schema_violation` body and `field` naming the entry (`edges[0].to`); a `link*` id that names nothing, or a
+malformed one, answers `400` with `{ "error" }`. The order is: a record that does not exist is `404`, then the
+refusal, then an `If-Match` mismatch `412`. A create answers the schema refusal `400` instead of `422`
+([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
+
+**What is not a refusal is a failure after the record was written.** The patch's fields are stored first and its
+connections after, so the store failing in between answers with that failure's status and `written` at the top level
+of the body, never retryable (`retryable: false`) and with no `Retry-After`; `written` is `{ kind, id, edges }`. The
+status follows the cause's class — `422` for a schema refusal that only showed up after the record landed, `400` for a
+reference, `409` for a conflict, `503` or `500` for the store — and a refusal cause adds `refusal`, its words. Do not send the patch again as if nothing happened: `written.edges` lists what landed, and an `edges` entry
+sent again is upserted, not duplicated. An MCP tool carries the same object in `structuredContent`, and
+`POST /api/<tool>` under `data`.
+
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
 an empty `properties: {}` is a no-op rather than a wipe. If you need a key gone, name it:
 `deleteFields: ["properties.oldKey"]`.
@@ -352,13 +367,22 @@ Losing that race a second time answers **409** on both doors (on MCP, the tool r
 It takes a record under continuous concurrent writes to see it. Resending the same request is the remedy. On a
 bulk write the same case is an item error with that reason, and the rest of the batch is written.
 
+**A functional create that loses a race is decided again, and refused.** An edge under a `functional` label in a
+`strict` space is subject to the same re-decision. Two writers that both find the subject free cannot both store an
+edge: the one that loses is decided again against what the winner wrote and refused with the ordinary `functional`
+violation, the one a write made afterwards gets, with nothing written. Only a writer that keeps losing, because
+the subject keeps changing under it, answers `409` as above. Writing the same edge twice is not a loss — both writers
+converge on the one edge.
+
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
 asks for it.** `POST /api/filter` merges a mandatory exclusion into whatever projection you send and strips an
 explicit `"embedding": 1` out of it, so the vector cannot be opted back in; every read of a record collection
 projects it out before the document leaves the database. If you have been hunting for a flag to switch it off,
-this is why you could not find one.
+this is why you could not find one. **An edge's write guard (`_functionalGuard`) is withheld the same way**: it is
+this instance's own lock on a functional label's subject, so no read, webhook or live-view event carries it, and a
+`projection` that names it is not honoured.
 
 > **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
 > `POST /api/filter` with a projection for any bulk read there.

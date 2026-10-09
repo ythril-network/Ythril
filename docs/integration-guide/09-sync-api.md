@@ -503,11 +503,11 @@ a chrono `type` outside the vocabulary is stored on pull. Until 4.0 a pull kept 
 expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then acted on — and until this
 release it validated nothing. Both directions drop the same local-only fields, and the serving side leaves them out
 of the page altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a
-peer's update of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or
-its file sync bases — they are carried across the replace, so an update whose embedded text did not change is not
+peer's update of a record no longer erases the receiver's vector (`embedding`), its model (`embeddingModel`), `matchedText`, its retention stamps (`_expireAt`, `_contentExpireAt`),
+its file sync bases (`syncBase`) or an edge's write guard (`_functionalGuard`, kept only while the edge's `from` and `label` are the stored ones) — they are carried across the replace, so an update whose embedded text did not change is not
 re-embedded and the record stays searchable meanwhile. **Unless the receiver suppresses it:** an arriving record its
-own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps and
-`syncBase` only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
+own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps,
+`syncBase` and the write guard only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
 longer embeds, and `matchedText` would keep removed text findable by lexical search. A file's derived passages lose
 their vectors with it. Every arrival is also stamped with the peer that delivered it (`deliveredBy`, local to the receiver and never sent on), which is what the [deletion rule](#tombstones) reads.
 
@@ -743,7 +743,7 @@ root a full recompute gives, by construction.
 What is excluded follows one rule, worth knowing if you are comparing roots yourself: **a field that is hashed
 must replicate, as it is.** The local-only fields are out: `embedding`, `embeddingModel` and `matchedText` are
 derived by the local model, so peers running different models legitimately differ, and the retention stamps
-(`_expireAt`, `_contentExpireAt`) the sync base and `deliveredBy` (which peer delivered the record, read by the deletion rule) are each instance's own — a peer's stamp is never adopted,
+(`_expireAt`, `_contentExpireAt`), the sync base (`syncBase`), `deliveredBy` (which peer delivered the record, read by the deletion rule) and an edge's write guard (`_functionalGuard`, this instance's lock on a functional label's subject) are each instance's own — a peer's value is never adopted,
 in either direction, because the sweep that acts on it would then be following another operator's policy.
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
 `spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field

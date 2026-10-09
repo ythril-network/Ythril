@@ -46,7 +46,10 @@ POST /api/brain/spaces/:spaceId/entities
 
 Tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
 
-**Constraints**: `name` required string; `type` required non-empty string (`400` if omitted); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
+**Constraints**: `name` required string; `type` required non-empty string (`400` if omitted); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean; `edges` optional array of labelled
+relationships from this entity to records that already exist (`{ "to", "label", … }`, see
+[A record and its relationships in ONE call](04-brain-api.md#a-record-and-its-relationships-in-one-call)). An entry the
+space refuses stores nothing, the entity included ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
 
 ---
 
@@ -299,14 +302,18 @@ The same refusals answer the same statuses on every door that merges: this route
 
 **How large a merge may be.** One merge relinks at most **2500** records — the absorbed entity's edges, links and face labels together. A merge over that is refused with `422 merge_too_large`, naming the count and the bound, **before anything is written**: the transaction a hub needs would hold every sync reader of the space for its whole length, and past a size the store cannot hold it at all. The bound is set from measurement (half of the largest merge that still committed on the test store). The `error` names both entities by name, each followed by its id in brackets, and states the absorbed entity's edges, links and face labels separately. It suggests only what a door can do: deleting at least as many of the absorbed entity's edges or links as the merge is over the bound — an edge's ends cannot be changed, so an edge cannot be moved, and no door removes a face label, so when the face labels alone exceed the bound it says that instead — and merging the other way round, only when that merge fits the bound, with what it would relink. The structured fields stay `code`, `relinks` and `bound`. **Each kind is counted only up to `bound + 1`** — past that the merge is refused whatever the true number, so a hub is not counted in full: a kind at `bound + 1` is stated as *more than* the bound, the deletion advice then names no number, and `relinks` is then a lower bound. A merge INTO a hub costs only what it relinks: the survivor's own edges are never read in full.
 
-**`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the only
-operation that can produce one: every path that CREATES an edge refuses a broken `endpoints` or `functional`
-rule, but a merge rewrites the `from`/`to` of stored edges, and merging entities of different types is the
-normal case rather than a mistake — it is how a mistyped record gets fixed.
+**`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the one operation
+that produces one in the ordinary course: every door that CREATES an edge — the edge routes, `save_edge`, a batch,
+and the inline `edges` of an entity, fact or chrono write — refuses a broken `endpoints` or `functional` rule, but a
+merge rewrites the `from`/`to` of stored edges, and merging entities of different types is the normal case rather
+than a mistake — it is how a mistyped record gets fixed. (An edge that arrives from a sync peer or an import is
+stored as it was written, and is not refused either.)
 
 Each row is `{ edgeId, label, end, field, reason }`. `end` is which end of that edge the merge moves (`from`,
 `to`, or `both` for a self-loop on the absorbed entity), `field` is `fromType`, `toType` or `functional` — the
-same names a refused write uses — and `reason` says what the label admits.
+same names a refused write uses — and `reason` says what the label admits. A `functional` row counts another edge
+as a write does: one of a different identity (`to` and both kinds) under the same `from` and `label` once the relink
+is done. The merge reports it and never refuses it, whatever else is writing.
 
 **They are REPORTED, never blocking**, on the `409` preview and on the success body alike. Only an unresolved
 property conflict makes a plan unresolved: a broken endpoint rule has no resolution to offer, and refusing
@@ -345,8 +352,8 @@ POST /api/brain/spaces/:spaceId/edges
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` for the wrong shape, or for an id that names nothing, when `strictLinkage` is on. |
-| `to` | yes | Target record id, read the same way against `toKind`. |
+| `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` `{ "error" }` for the wrong shape, and, when `strictLinkage` is on, `400` with the `schema_violation` body (`field` `from`) for an id that names nothing, of whichever kind `fromKind` names. |
+| `to` | yes | Target record id, read the same way against `toKind` (`field` `to` on a refusal). |
 | `fromKind` | no | What kind of record `from` points at: `entity`, `fact`, `chrono` or `file`. **Omit for an entity** — see below. |
 | `toKind` | no | The same for `to`. |
 | `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |
@@ -420,11 +427,17 @@ relationships, so they must be two ids.
 id for an ordinary entity-to-entity edge. If you derive ids yourself, omit the kinds for an entity-to-entity
 edge; do not send `"entity"`.
 
-The unique index is `(from, to, label, fromKind, toKind)`. An entity endpoint stores nothing — `"entity"` is
+A relationship is stored once: `(from, to, label, fromKind, toKind)` is unique within a space. An entity endpoint stores nothing — `"entity"` is
 normalised to absent. Two peers creating the same relationship therefore arrive at the same id **without talking**,
 and the sync collision is an idempotent no-op instead of a duplicate key on every cycle. `spaceId` is
 deliberately not part of the key: space aliasing lets one logical space carry a different local id on each
 peer, so including it would derive differently on the two sides.
+
+**That is identity, and it is not the `functional` rule.** Two edges that differ in `to` are two relationships, so
+identity admits both; only a label declared `functional` in the space schema limits a subject to one edge, and in a
+`strict` space that limit holds between writers that run at the same time too (see
+[Schema API](06a-schema-api.md)). It is a limit among this instance's own writers: an edge from a sync peer, a merge
+or an import can bring a second one, which `validate-schema` lists.
 
 **This is a contract about ids, not only an implementation detail, because identity can change.** Mongo's
 `_id` is immutable, so an edge whose identity changes is deleted and re-inserted under the id it now derives.
@@ -447,7 +460,8 @@ A merge resolves the collision case itself, by deleting the absorbed edge whose 
 survivor already holds.
 
 An identity that is **already taken** by another edge is refused with `409 edge_identity_taken` naming the
-edge in the way, rather than surfaced as an index violation.
+edge in the way, rather than surfaced as an index violation — however the edge is relabelled, and when two relabels
+race for the same identity.
 
 **One case does not move: an edge this instance did not author.** The re-key deletes the old id with a
 tombstone this instance issues, and a peer applies a tombstone to what its issuer wrote (the deletion rule in

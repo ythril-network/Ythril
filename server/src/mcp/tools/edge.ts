@@ -2,14 +2,14 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { shapeError } from '../../brain/write-shape.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge, EdgeSchemaViolation } from '../../brain/edges.js';
+import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
-import { assertRefsResolve, edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
+import { edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -28,7 +28,7 @@ export const save_edgeTool: ToolHandler = {
     + 'IDENTITY IS THE TRIPLET `(from, to, label)` — there is no id anywhere in the call, so EVERY repeat of the same triplet is an update of the existing edge and nothing in the arguments suggests it. Properties merge over what is stored; an absent `properties` means "leave them alone", not "clear them". Change the label and you have a second, different edge rather than a renamed one.\n\n'
     + 'DIRECTION IS PART OF THE MEANING. `from`/`to` are not interchangeable, and `depends_on` reversed is a different claim about the world. A traversal follows them separately (`direction: outbound|inbound|both`), so a reversed edge is not merely untidy — it is unreachable from the side that should have found it.\n\n'
     + 'Both endpoints must name records that exist when the space uses strict linkage — entities by default, or a fact, chrono entry or file when `fromKind`/`toKind` says so; that is a refusal, not a dangling edge. And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
-    + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. Re-writing the same triplet is never a cardinality breach — an edge is not its own duplicate — and an endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
+    + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. A subject holds at most ONE edge under a functional label, whatever its `to`; "another edge" means a different `to` or end kind. Re-writing the same edge is never a cardinality breach — an edge is not its own duplicate. Writers that run at the same time cannot both win: in a strict space the loser is refused exactly as a sequential second write is, and only one that keeps losing answers a conflict (409). An endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
     + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
   mutating: true,
   spaceRequired: true,
@@ -106,15 +106,11 @@ export const save_edgeTool: ToolHandler = {
       // this did — refuses every legitimate file endpoint with a message about entity IDs.
       if (!isWellFormedRef(fromKind, from)) throw new Error(`from must be a valid ${fromKind} reference, not a name`);
       if (!isWellFormedRef(toKind, to)) throw new Error(`to must be a valid ${toKind} reference, not a name`);
-      // Shape is not existence. A UUID v4 that names a CHRONO passes both checks above, and the edge then
-      // stores fine and is invisible to every graph query — `traverse` and `recall(traverse:1)` hydrate
-      // neighbours from the entity collection, so a non-entity endpoint yields no node and no edge. The
-      // caller gets an id back for a link that does not exist.
-      //
-      // Reported by the canary, who lost a 33-day incident timeline to it. The REST route has always
-      // called this; only the MCP surface checked the shape and stopped there.
-      await assertRefsResolve(wt.target, 'from', fromKind, [from]);
-      await assertRefsResolve(wt.target, 'to', toKind, [to]);
+      // Shape is not existence, and existence is `edgeRefusal`'s, asked inside `upsertEdge` with the schema — the one
+      // function the REST door, the batch and an inline edge ask too. A UUID v4 that names a CHRONO passes the checks
+      // above, and an edge to an entity that is not there stores fine and is invisible to every graph query —
+      // `traverse` and `recall(traverse:1)` hydrate neighbours from the entity collection, so a dangling endpoint
+      // yields no node and no edge (reported by the canary, who lost a 33-day incident timeline to it).
     }
 
     // Schema validation of the record this upsert will PRODUCE. An edge's identity is (from, to, label)
@@ -130,34 +126,22 @@ export const save_edgeTool: ToolHandler = {
      */
     const edgeTtlDays = ttlDaysFromArgs(a);
     let edgeCheck: UpdateValidation | undefined;
-    let edge;
-    try {
-      // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
-      // grammar, so a change to it reaches every create door at once rather than one at a time.
-      const supCreate = parseRecordSuppression(a);
-      if (!supCreate.ok) throw new Error(supCreate.error);
-      const susCreate = parseRecordSuperseded(a);
-      if (!susCreate.ok) throw new Error(susCreate.error);
-      edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
-        {
-          ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
-          ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
-          ...(a['fromKind'] !== undefined ? { fromKind } : {}),
-          ...(a['toKind'] !== undefined ? { toKind } : {}),
-          onValidation: c => { edgeCheck = c; },
-        });
-    } catch (err) {
-      if (!(err instanceof EdgeSchemaViolation)) throw err;
-      const c = err.check;
-      // The violations travel as structured data rather than a JSON tail glued to the sentence: a
-      // caller had to parse the message to act on them. The prose is unchanged for a client that
-      // reads only the content blocks.
-      return {
-        content: [{ type: 'text' as const, text: `Error: schema_violation: ${c.message}` }],
-        isError: true,
-        structuredContent: { error: 'schema_violation', message: c.message, introduced: c.introduced, preExisting: c.preExisting, violations: c.all },
-      };
-    }
+    // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
+    // grammar, so a change to it reaches every create door at once rather than one at a time.
+    const supCreate = parseRecordSuppression(a);
+    if (!supCreate.ok) throw new Error(supCreate.error);
+    const susCreate = parseRecordSuperseded(a);
+    if (!susCreate.ok) throw new Error(susCreate.error);
+    // A refusal (`EdgeSchemaViolation`, a `SchemaViolationError`) is answered by `callTool` — the structured 422 every
+    // refused record write gets, `violations` as data and not as a tail on the sentence.
+    const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
+      {
+        ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
+        ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
+        ...(a['fromKind'] !== undefined ? { fromKind } : {}),
+        ...(a['toKind'] !== undefined ? { toKind } : {}),
+        onValidation: c => { edgeCheck = c; },
+      });
     const edgeSchemaViolations = edgeCheck?.all ?? [];
     let edgeMsg = `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).`;
     if (edgeMeta?.validationMode === 'warn') {
@@ -180,7 +164,10 @@ export const update_edgeTool: ToolHandler = {
     + 'CHANGING THE `label` MOVES THE EDGE UNDER A DIFFERENT RULE. A space can declare what sits at each end of '
     + 'a label and whether a subject may have more than one; the ends cannot change here, but the label can, so '
     + 'the check is against the NEW label\'s rule and this update is refused when the existing ends do not fit '
-    + 'it. A violation the edge already had does not block an edit that leaves the ends and the label alone.\n\n'
+    + 'it. A violation the edge already had does not block an edit that leaves the ends and the label alone. A '
+    + 'relabel onto a functional label cannot win a race either: when a concurrent writer takes the subject first '
+    + 'it is refused as a second edge, and a relabel onto an identity another edge holds answers a conflict '
+    + '(409, identity taken), never a raw error.\n\n'
     + 'MERGE, NOT REPLACE, for `tags` and `properties`. Sending `tags: ["b"]` on an edge tagged `["a"]` leaves '
     + 'it tagged `["a","b"]`. Note that `update_fact` REPLACES tags instead — one word of difference between '
     + 'tools that otherwise take the same arguments. To remove a tag or a property here, use `deleteFields` '

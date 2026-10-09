@@ -203,9 +203,11 @@ function bootRoots() {
  *
  * The rule exists because a peer running older code writes the old shape back, and a boot migration cannot
  * see that happen. **A version floor suspends the rule** — when the handshake refuses every peer below our
- * own major, the network is homogeneous or it is not a network — and that is the only argument accepted
- * here. "It seemed fine" is not one, and neither is "it is only additive": additive protects the DATA, not
- * the migration's premise.
+ * own major, the network is homogeneous or it is not a network. **The second argument accepted is a write limited to
+ * `WRITE_GUARD_FIELDS`** (`sync/local-only-fields.ts`): a field that is local-only — never hashed, never sent, never taken
+ * from an arrival — so no peer's write carries it and none can put it back; the rule's premise (an older peer rewriting the
+ * shape) cannot happen to it. Those are the only two arguments accepted here. "It seemed fine" is not one, and neither is
+ * "it is only additive": additive protects the DATA, not the migration's premise.
  */
 const SANCTIONED = new Map([
   ['server/src/brain/links-convert-on-boot.ts:convertLinksOnBoot', {
@@ -217,6 +219,20 @@ const SANCTIONED = new Map([
       + '`MIN_PEER_VERSION` derives from our own major, so a 5.0 instance refuses every 4.x peer at the '
       + 'handshake and no peer can write the arrays back. Additive on top of that: it creates link records '
       + 'and removes no array, and a space is correct before, during and after. Removed at 6.0.',
+  }],
+  /*
+   * NOT a version-floor argument, and the gate has no way to say what this one is, so it is said here. The rule exists because a
+   * peer on older code rewrites a whole synced document and undoes the migration. This write is `$unset: { _functionalGuard }`
+   * and nothing else: a `WRITE_GUARD_FIELDS` field, local-only — never hashed, never sent, never taken from an arrival
+   * (`sync/local-only-fields.ts`) — so no peer's write carries it, none can put it back, and none sees it cleared. It is
+   * also not a migration: it runs only when building the guard index fails over duplicate markers, to make the build possible,
+   * and a space with no duplicates never reaches it. The write is named, so a second write added under the same
+   * entry is refused like any other.
+   */
+  ['server/src/bootstrap.ts:startConfiguredInstanceServices', {
+    writes: ['server/src/brain/write-plan/commit.ts:clearStaleWriteGuard'],
+    why: 'The edges\' write-guard index build clears duplicate `_functionalGuard` markers before retrying (Q-439). The field is '
+      + 'local-only (`WRITE_GUARD_FIELDS`): it replicates nowhere, so a mixed-version peer can neither revert nor observe the clear.',
   }],
 ]);
 
@@ -360,7 +376,7 @@ describe('no boot migration writes to a synced collection', () => {
       + 'replicates across networks:\n  ' + offenders.join('\n  ')
       + '\n\nRepair or derive the field ON ACCESS instead. If the write is genuinely safe, the argument goes '
       + 'in SANCTIONED against the STARTUP ENTRY that reaches it, naming THIS function among its `writes` — and '
-      + 'a version floor is the only argument accepted, because '
+      + 'a version floor, or a write limited to `WRITE_GUARD_FIELDS` (local-only, never hashed or synced), are the only arguments accepted, because '
       + '"additive" protects the data rather than the migration\'s premise.');
   });
 });
