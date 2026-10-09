@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A write that stored its record and failed on its connections answers that cause's status with `retryable: false`, no `Retry-After` and `written: { kind, id, edges }` (was a retryable `503`); a bulk row carries `written` | Send the missing edges as an update to `written.id` |
 | Each edges collection gains a unique index (background pass; a restore rebuilds it, answering `edgeIndexes.failed`) | Races refused once the pass has run |
 | A second edge to the same `to` of another kind under a `functional` label is refused; `validate-schema` adds `staleGuards`; a relabel onto a held identity answers `409 edge_identity_taken`, was `500` | Read `staleGuards`; handle `409` |
+| A webhook or live-view `entry` no longer carries instance-local fields (`_expireAt`, `_contentExpireAt`, `syncBase`, `deliveredBy`, `matchedText`) | Fetch the record if you read them |
 
 ### Changed
 
