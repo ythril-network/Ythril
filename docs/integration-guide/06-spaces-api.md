@@ -454,9 +454,10 @@ refused, too old to serve the feed, address refused, no credentials, or not reac
   instance's counter passes this row's seq.
 
 **Bounds.** One feed page times out after 10 s; the whole run after 60 s, which is below the HTTP timeouts. Peers are
-walked one at a time, at most 50 pages each. A peer that refuses, is too old, or fails stops being asked for the run and
-every row it would have answered is `cannot-tell`; nothing is retried. A peer in several networks that carry the space
-is asked through one, the first by network id that answers.
+walked one at a time, each from the start of its feed and at most 50 pages of 500 rows, so a file whose row lies further
+into a peer's feed is `cannot-tell` (not reached) on every call, whatever `after` says. A peer that refuses, is too old,
+or fails stops being asked for the run and every row it would have answered is `cannot-tell`; nothing is retried. A peer
+in several networks that carry the space is asked through one, the first by network id that answers.
 
 ---
 

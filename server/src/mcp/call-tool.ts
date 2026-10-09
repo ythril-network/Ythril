@@ -308,6 +308,22 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
     return { result, status, callSpace };
   } catch (err) {
+    const answer = answerThrown(err);
+    /*
+     * An ACT that threw after it ran is recorded with the status that is answered: the REST middleware records every response
+     * of the route, and a tool door that recorded only the answered run would leave the failed run — the one that spent the
+     * credentials and then failed — out of the trail. A refusal is not a run (`ToolRefusal` is raised before the work), and a
+     * stored record whose connections failed has recorded itself (`ConnectionsNotWritten`, below). Every other tool is
+     * unchanged: a failed write is recorded by its caller's own entry or not at all, as before.
+     */
+    if (!(err instanceof ToolRefusal) && !(err instanceof ConnectionsNotWritten) && mcpActOperation(name) !== null) {
+      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a);
+    }
+    return answer;
+  }
+
+  /** What a call that threw is answered with, whatever threw it: the one classification both doors share. */
+  function answerThrown(err: unknown): ToolCallOutcome {
     const message = err instanceof Error ? err.message : String(err);
     // A refusal a shared module made with its own status (`ToolRefusal`): answered with that status, and not logged as a
     // tool's failure, because nothing failed.

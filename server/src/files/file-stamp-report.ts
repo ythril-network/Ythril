@@ -53,7 +53,7 @@ import { fileKeyOf } from './sandbox.js';
 import { isMachineMadeSource } from './derived-fields.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
-import { pageSeqRuns } from '../sync/seq-run-pager.js';
+import { isRider, pageSeqRuns, serverCursorOf } from '../sync/seq-run-pager.js';
 import { syncBasePath } from '../sync/file-sync.js';
 import { peerIdsCarryingSpace, peersCarryingSpace, type PeerForSpace } from '../sync/peer-for-space.js';
 
@@ -297,6 +297,15 @@ interface RunClock {
 
 const expired = (c: RunClock): boolean => c.signal.aborted || c.now() - c.startedMs >= c.deadlineMs;
 
+/** The least a database read is given once the run's budget is spent: a read with no time at all would fail before it began. */
+const MIN_READ_BUDGET_MS = 1000;
+
+/**
+ * What a database read of this run may take: the time LEFT in the run, never the whole figure. Each read given the full budget
+ * would let a run of two reads outlast the budget its answer promises (`deadlineMs`, the whole run).
+ */
+const readBudgetMs = (c: RunClock): number => Math.max(MIN_READ_BUDGET_MS, c.deadlineMs - (c.now() - c.startedMs));
+
 const failureOfStatus = (status: number): StampFailure => (status === 401 || status === 403 ? 'refused' : status === 404 ? 'too-old' : 'unreachable');
 
 /** What an error from the client means for the rows: a refused address, the deadline, or an unreachable peer. */
@@ -345,8 +354,8 @@ async function walkFeed(
         if (typeof page !== 'object' || page === null) throw new FeedFailure('unreachable');
         const { items, nextCursor } = page as { items?: unknown; nextCursor?: unknown };
         return {
-          groups: [Array.isArray(items) ? items.filter(it => !(it && typeof it === 'object' && (it as { deletedAt?: unknown }).deletedAt)) : []],
-          nextCursor: typeof nextCursor === 'string' ? nextCursor : nextCursor === null ? null : undefined,
+          groups: [Array.isArray(items) ? items.filter(it => !isRider(it)) : []],
+          nextCursor: serverCursorOf(nextCursor),
         };
       },
       admit: (raw) => {
@@ -474,15 +483,15 @@ function rowOf(doc: CandidateDoc, verdict: StampVerdict, evidence: readonly Peer
 /**
  * The candidates, ascending by path: LIVE files this instance authored that record a sync base for some peer that currently
  * shares the space. `take` is the limit plus one, so a full page that ends the space is not called truncated. `syncBase` is not
- * indexed, so `take` bounds the rows returned and not the rows scanned: the read carries the run's own budget as its server
- * deadline (`maxTimeMS`).
+ * indexed, so `take` bounds the rows returned and not the rows scanned: the read carries the time LEFT in the run as its server
+ * deadline (`maxTimeMS`, `readBudgetMs`), so the reads together stay inside the run's one budget.
  *
  * **Not inside `withinHousekeepingBound`, and that is the point.** A bound scope puts a driver `timeoutMS` on a read, and a read
  * with `timeoutMS` is retried by the driver for as long as it lasts when the store fails it at once (a cleared pool, a missing
  * server): one retry straight after another for the scope's whole figure, with no I/O between them for a timer to fire in. A
  * report is a request, and a request's read has its deadline as an OPTION of the read, like every other read a door makes.
  */
-async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number): Promise<CandidateDoc[]> {
+async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number, clock: RunClock): Promise<CandidateDoc[]> {
   if (peerIds.length === 0) return [];
   const filter = {
     ...LIVE_FILE_ROW,
@@ -495,13 +504,13 @@ async function readCandidates(spaceId: string, self: string, peerIds: readonly s
     ...Object.fromEntries(peerIds.map(p => [syncBasePath(p), 1])),
   };
   return col<CandidateDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<CandidateDoc>(filter), { projection, maxTimeMS: FILE_STAMP_REPORT_DEADLINE_MS }).sort({ _id: 1 }).limit(take).toArray() as Promise<CandidateDoc[]>;
+    .find(asFilter<CandidateDoc>(filter), { projection, maxTimeMS: readBudgetMs(clock) }).sort({ _id: 1 }).limit(take).toArray() as Promise<CandidateDoc[]>;
 }
 
 /** The ids among `ids` that are still live files of this instance: a row deleted or replaced since it was read is not reported. */
-async function stillCandidates(spaceId: string, self: string, ids: readonly string[]): Promise<Set<string>> {
+async function stillCandidates(spaceId: string, self: string, ids: readonly string[], clock: RunClock): Promise<Set<string>> {
   const rows = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<{ _id: string }>({ ...LIVE_FILE_ROW, 'author.instanceId': self, _id: { $in: ids } }), { projection: { _id: 1 }, maxTimeMS: FILE_STAMP_REPORT_DEADLINE_MS }).toArray();
+    .find(asFilter<{ _id: string }>({ ...LIVE_FILE_ROW, 'author.instanceId': self, _id: { $in: ids } }), { projection: { _id: 1 }, maxTimeMS: readBudgetMs(clock) }).toArray();
   return new Set(rows.map(r => String(r._id)));
 }
 
@@ -530,7 +539,7 @@ export async function fileStampReport(
   const clock: RunClock = { startedMs, deadlineMs, now, signal: AbortSignal.timeout(deadlineMs) };
 
   const peerIds = peerIdsCarryingSpace(spaceId).filter(id => id !== self);
-  const read = await readCandidates(spaceId, self, peerIds, after, limit + 1);
+  const read = await readCandidates(spaceId, self, peerIds, after, limit + 1, clock);
   const truncated = read.length > limit;
   const page = truncated ? read.slice(0, limit) : read;
 
@@ -554,7 +563,7 @@ export async function fileStampReport(
   }
 
   // A file deleted (or replaced by another author's) between the read and the verdict is not reported.
-  const live = await stillCandidates(spaceId, self, page.map(d => String(d._id)));
+  const live = await stillCandidates(spaceId, self, page.map(d => String(d._id)), clock);
   const rows: FileStampRow[] = [];
   for (const d of page) {
     if (!live.has(String(d._id))) continue;

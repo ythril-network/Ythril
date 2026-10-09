@@ -76,8 +76,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // backfilled a space's embeddings, and two names for one act makes every query have to know both.
   space_reembed: 'space.embeddings.reembed',
   delete_space_data: 'space.wipe',
-  // Audited, as an ACT and not through this map: see `MCP_ACT_OPERATIONS`. A non-mutating tool recorded here must be
-  // classified a read (`mcp-audit-coverage`), and a report that spends this instance's credentials on every peer is not one.
+  // `null` here does NOT mean "not audited": this tool IS audited, every call, as an ACT through `MCP_ACT_OPERATIONS` (which
+  // `logReads` does not gate). It is kept out of this map because a non-mutating tool recorded here is a read (`mcp-audit-coverage`),
+  // and a report that spends this instance's credentials on every peer is not one.
   file_stamp_report: null,
   write_file: 'file.create',
   move_file: 'file.update',

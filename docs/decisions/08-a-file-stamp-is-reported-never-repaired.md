@@ -34,7 +34,7 @@ The owner's second ruling (D-26, 2026-10-09), asked with four options and a fift
 - **This software repairs no stamped file row, on any network type, on request or automatically.** The capability is a
   report: `file_stamp_report` (`POST /api/spaces/:id/file-stamp-report`, `POST /api/file_stamp_report` and the MCP
   tool), per space, instance-admin. The repair stays a manual act on the **real author's instance**: an edit there
-  arrives here as a newer version and replaces the stamp.
+  replaces the stamp here once that instance's counter has passed the stamp's seq, and not before.
 - **The report says "likely" only on a peer's evidence, and nothing stronger.** Each peer's own file feed
   (`GET /api/sync/filemeta`) must report an author that is that peer, a creation time more than a fixed two minutes
   earlier, the same `sha256`, and nothing edited here; otherwise the row says "cannot tell" with a fixed reason. No path

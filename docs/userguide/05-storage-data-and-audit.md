@@ -442,7 +442,8 @@ token, shared with deleting space data and starting an ingest, and one report pe
 - **It is a lead, not a finding.** The peer is the only witness. The peer named may itself have been stamped by the
   same old version and be repeating it. Each row shows both versions and both creation times so you can check it.
 - **What you do about a row you have checked.** Edit the file's metadata (its description, for instance) on **the
-  instance that really authored the file**. The edit arrives here as a newer version and replaces the stamp. Nothing in
+  instance that really authored the file**. The edit arrives here and replaces the stamp only once that instance's
+  counter has passed the stamp's seq (each row shows both); an edit below it is not accepted here. Nothing in
   Ythril does this for you, on purpose: any automatic repair would hand a peer ownership of a file that may be yours (see
   the [decision record](../decisions/08-a-file-stamp-is-reported-never-repaired.md)). Copies further down a chain are
   replaced only on the instances that pull from the one you edited.
@@ -451,7 +452,9 @@ token, shared with deleting space data and starting an ingest, and one report pe
   its `rules`.
 - **It reads the peers' file lists.** It calls each peer holding the space, through the networks that share it, one at a
   time, and reads that peer's file records. It sends no file path. A peer that refuses, is too old, or cannot be reached
-  gives *cannot tell* for the rows it would have answered, and is not asked again in that run.
+  gives *cannot tell* for the rows it would have answered, and is not asked again in that run. It reads each peer's
+  records from the start, at most 50 pages of 500 rows, so a file whose record lies further into a peer's list is
+  *cannot tell* (not checked) on every run, however you page through the answer.
 
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
