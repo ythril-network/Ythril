@@ -43,7 +43,7 @@ import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
@@ -55,7 +55,7 @@ import { auditChanges } from '../audit/audit-changes.js';
 
 /** What a tool hands the audit entry through `recordChanges` (Q-50) — the pair a REST route sets as `req.auditSnapshots`. */
 type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> };
-import { mcpAuditOperation, isMcpReadOperation } from './audit-map.js';
+import { mcpAuditOperation, mcpActOperation, isMcpReadOperation } from './audit-map.js';
 import { toolCallsTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
 export interface ToolCaller {
@@ -309,6 +309,11 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // A refusal a shared module made with its own status (`ToolRefusal`): answered with that status, and not logged as a
+    // tool's failure, because nothing failed.
+    if (err instanceof ToolRefusal) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: err.status, callSpace };
+    }
     /*
      * THE RECORD LANDED and its connections did not (`Q-170`) — matched before the store's classification below, which
      * looks through the wrapper to the failure it holds and would answer a stored record as a retryable `503`. The
@@ -405,9 +410,10 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
   durationMs: number, args: unknown, snapshots?: AuditSnapshots, writtenId?: string): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
-  const operation = mcpAuditOperation(toolName, args);
+  const act = mcpActOperation(toolName);
+  const operation = act ?? mcpAuditOperation(toolName, args);
   if (!operation) return;                       // deliberately not an audited operation — see audit-map.ts
-  if (isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
+  if (!act && isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
   logAuditEntry({
     requestId: currentRequestId() ?? null,
     tokenId: caller.tokenId ?? null,

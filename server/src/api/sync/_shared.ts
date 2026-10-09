@@ -18,6 +18,7 @@ import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
+import { MACHINE_MADE_SOURCES } from '../../files/derived-fields.js';
 
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
@@ -117,7 +118,7 @@ export const IncomingFileMetaDoc = z.object({
   spaceId: z.string().min(1),
   path: z.string().min(1),
   description: z.string().optional(),
-  descriptionSource: z.enum(['generated', 'extracted']).optional(),
+  descriptionSource: z.enum(MACHINE_MADE_SOURCES).optional(),
   tags: z.array(z.string()).max(MAX_TAGS).optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */

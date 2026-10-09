@@ -179,6 +179,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Local agent | `local_agent.bootstrap`, `local_agent.enable_networks` |
 | About | `about.logs.ticket` (issuing a short-lived ticket for the live server log) |
 | Audit | `audit.export` — taking a copy of the whole record. Logged even when `logReads` is off |
+| File stamps | `file.stamps.reported` — one entry for each [`file_stamp_report`](06-spaces-api.md) call that came through a door (`POST /api/spaces/:id/file-stamp-report`, `POST /api/file_stamp_report`, the MCP tool), the space named. Written as an act and not as a read, so it is recorded even when `logReads` is off: the call spends this instance's credentials on every peer holding the space. It is the report's only write |
 | Auth | `auth.failed` (invalid or expired tokens on any endpoint) — the one entry no route produces, because a rejected credential is refused before any handler |
 
 **An MCP tool logs the same operation as the REST route it mirrors**, so a filter finds the capability

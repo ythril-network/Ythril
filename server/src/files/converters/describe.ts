@@ -40,9 +40,10 @@ import { describeDocumentText } from './vlm-client.js';
 import { resolveVlmEndpoint, vlmSlotUsable } from './vlm-endpoint.js';
 import { summariseMarkdown } from './summarise.js';
 import type { Chunk } from './types.js';
+import type { MachineMadeSource } from '../derived-fields.js';
 
 /** Where a description came from. `extracted` is the document's own opening text, taken verbatim. */
-export type DescriptionSource = 'generated' | 'extracted';
+export type DescriptionSource = MachineMadeSource;
 
 export interface DocumentDescription {
   /** Absent when the document yielded nothing worth saying — better than a misleading sentence. */

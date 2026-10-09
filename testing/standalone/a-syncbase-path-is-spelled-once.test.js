@@ -52,7 +52,8 @@ const declaring = (sources) => sources.filter(({ text }) => /export\s+(?:async\s
 export function keyBuilders(sources) {
   const out = [];
   for (const { file, text } of sources) {
-    let code = blankComments(text);
+    // `bodyOf` joins its window with LF, so a CRLF checkout must be compared as LF or the body is never removed.
+    let code = blankComments(text).replace(/\r\n/g, '\n');
     if (declaring([{ file, text }]).length > 0) code = code.replace(bodyOf(code, 'syncBasePath', 'the declaration of syncBasePath'), '');
     for (const [spelling, re] of BUILDERS) if (re.test(code)) out.push({ file, spelling });
   }

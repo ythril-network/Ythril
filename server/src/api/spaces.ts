@@ -3,6 +3,7 @@ import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
+import { registerFileStampReportRoute } from './spaces-file-stamp-report.js';
 import {
   requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdminMfa, requireAdminMfaScoped,
   requireAdminOrSpaceAdminMfaScoped, denyReadOnly, requireCreateSpacesMfa,
@@ -85,6 +86,7 @@ spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaSc
 
 registerReembedRoute(spacesRouter);
 registerActivityResetRoute(spacesRouter);
+registerFileStampReportRoute(spacesRouter);
 
 // PATCH /api/spaces/:id/rename
 spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaScoped('id'), async (req, res) => {
