@@ -118,7 +118,11 @@ describe('MCP tool schemas — universal invariants', () => {
     // 72 -> 73: `network_introduction_accept` (Q-154), the door onto `acceptIntroductionAct` like
     // `POST /api/networks/:id/introductions/:instanceId/accept`: `admin: true` as the route's `requireAdmin`, an
     // audit-map entry under `network.introduction.accept`, a capability-map row, and a `16-mcp.md` row.
-    assert.equal(ALL_TOOLS.length, 73);
+    // 73 -> 74: `file_stamp_report` (Q-433), the door onto the shared file-stamp report like
+    // `POST /api/spaces/:id/file-stamp-report`: `admin: true` (it names peers and spends this instance's peer credentials, so
+    // instance-admin like the network sync tools), not mutating, `spaceRequired`, an audit-map entry under
+    // `file.stamps.reported`, a capability-map row, and `16-mcp.md` rows.
+    assert.equal(ALL_TOOLS.length, 74);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {
