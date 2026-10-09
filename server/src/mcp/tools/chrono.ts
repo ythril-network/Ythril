@@ -34,7 +34,7 @@ import { getAllowedChronoTypes, resolveMetaRefs } from '../../spaces/schema-vali
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 
 export const save_chronoTool: ToolHandler = {
@@ -152,10 +152,10 @@ export const save_chronoTool: ToolHandler = {
     const rec = parseRecurrence(a['recurrence']);
     if (!rec.ok) throw new Error(rec.error);
 
-    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
-    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
-    // leave the record stored without the links the same call asked for.
-    await assertConnections(wt.target, 'chrono', a);
+    // Refused BEFORE the record is written: the connections' shape, a class this kind cannot hold, under strict
+    // linkage an id that names nothing, and every inline edge the space's schema refuses. `applyConnections` runs after
+    // the write, so a refusal there would leave the record stored without the connections the same call asked for.
+    await assertConnections(wt.target, 'chrono', await connectionSubject(wt.target, 'chrono', a, { id: chronoSuppliedId }), a);
 
     let entry;
     try {
@@ -441,14 +441,18 @@ export const update_chronoTool: ToolHandler = {
      * duplicate is the one that drifted.
      */
 
-    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
-    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
-    // leave the record stored without the links the same call asked for.
-    await assertConnections(wt.target, 'chrono', a);
-
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    // It is also where the entry is LOCATED: which member space holds it, and so whose schema judges this edit.
     const audit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, a);
-    const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
+    // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
+    // changed — once the entry is found (a missing one is the not-found below, as REST's `404`), by the schema of the
+    // member that holds it.
+    if (audit.prior) {
+      await assertConnections(audit.home!, 'chrono', await connectionSubject(audit.home!, 'chrono', a, { stored: audit.prior }), a);
+    }
+    // Through the members, as REST's PATCH and every other update tool do: a write target may itself be a proxy, and the
+    // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
+    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a)));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics

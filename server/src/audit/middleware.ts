@@ -441,7 +441,7 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       spaceId: matched.spaceId ?? (req.authorisedSpaces?.length ? req.authorisedSpaces.join(',') : null),
       operation: matched.operation,
       status: res.statusCode,
-      entryId: matched.entryId,
+      entryId: req.auditEntryId ?? matched.entryId,
       durationMs: Math.round(durationMs),
       // Only for a request that actually succeeded: a rejected PATCH changed nothing, and recording its
       // intended values would make the log claim an edit that never happened.

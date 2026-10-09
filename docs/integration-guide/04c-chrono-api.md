@@ -121,8 +121,10 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 > body and does both.
 
 **Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `linkEntities`, `linkFacts`, `edges`, `description`, `properties`, `recurrence`, `suppressEmbeddings`, `ttlDays`), plus `deleteFields`.
-`edges` upsert and never remove. An entry the space refuses answers `422` and changes nothing; an entry that does not
-exist is `404` first, and the refusal comes before an `If-Match` `412`.
+`edges` upsert and never remove. An entry the space refuses — its schema, or on a `strictLinkage` space a far end that
+names nothing — answers `422` with the `schema_violation` body and changes nothing; a `linkEntities` or `linkFacts` id
+that names nothing answers `400` `{ "error" }`. A chrono entry that does not exist is `404` first, and the refusal
+comes before an `If-Match` `412`.
 
 > **`deleteFields` arrived in 3.1, and it is the only way to remove anything.** `properties` MERGE — patching
 > one key keeps the others — and an omitted field means *leave it alone*, so before 3.1 there was no request

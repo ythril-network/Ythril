@@ -41,9 +41,10 @@ import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
-import { SchemaViolationError } from '../brain/write-validation.js';
+import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
 import { NotFoundError } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
+import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { validatorFor } from './validate-args.js';
@@ -242,6 +243,8 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     if (adminRefusal) return refuse(403, adminRefusal);
   }
   const callSpace = rawSpace;
+  // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
+  const startedAt = Date.now();
 
   try {
     // Refused BEFORE it is counted (`Q-108`): `name` is whatever the caller sent, and as a metric label an
@@ -275,7 +278,6 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
       return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
     }
-    const startedAt = Date.now();
     let snapshots: AuditSnapshots | undefined;
     const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
     const result = await tool.handle({
@@ -307,6 +309,22 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     /*
+     * THE RECORD LANDED and its connections did not (`Q-170`) — matched before the store's classification below, which
+     * looks through the wrapper to the failure it holds and would answer a stored record as a retryable `503`. The
+     * answer is the one the REST door's error handler gives (`connectionsNotWrittenAnswer`), carried in
+     * `structuredContent`; and the call is audited as a write of the record it named, which the arguments of a create
+     * cannot (`recordToolCall` otherwise runs only on a call the handler answered).
+     */
+    if (err instanceof ConnectionsNotWritten) {
+      const connectionsNotWritten = connectionsNotWrittenAnswer(err, `tool ${name}`);
+      log.warn(`tool '${peerText(name)}' stored its ${err.written.kind} and failed its connections in space '${peerText(callSpace || 'global')}', answered ${connectionsNotWritten.status}`);
+      recordToolCall(caller, name, callSpace, connectionsNotWritten.status, Date.now() - startedAt, a, undefined, err.written.id);
+      return {
+        result: { content: [{ type: 'text' as const, text: connectionsNotWritten.body.error }], isError: true, structuredContent: { ...connectionsNotWritten.body } },
+        status: connectionsNotWritten.status, callSpace,
+      };
+    }
+    /*
      * Classified FIRST, because classifying a store failure logs the driver's text (`storeFailureAnswer`) — and this
      * line logged it as well, so every failed call wrote it twice (bundle-30 I12, verify-drive-2 finding 4). The line
      * still names the tool and the space; for the store's failure it says so instead of repeating the text. None of
@@ -321,9 +339,10 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * reads only `content`.
      */
     if (err instanceof SchemaViolationError) {
+      // A tool is an edit of what the caller named: the status is `writeRefusalAnswer`'s for an update, not spelled here.
       return {
         result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: err.toStructured() },
-        status: 422, callSpace,
+        status: writeRefusalAnswer(err, 'update')!.status, callSpace,
       };
     }
     /*
@@ -345,7 +364,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 409, callSpace };
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: writeRefusalAnswer(err, 'update')!.status, callSpace };
     }
     // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
     // transport has no status line to carry it, so `storeSideFailure: true` says it in the body. The text is the
@@ -377,7 +396,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
  * that was forgotten is an unaudited mutation.
  */
 function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
-  durationMs: number, args: unknown, snapshots?: AuditSnapshots): void {
+  durationMs: number, args: unknown, snapshots?: AuditSnapshots, writtenId?: string): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
   const operation = mcpAuditOperation(toolName, args);
@@ -395,7 +414,9 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
     spaceId: spaceId || null,
     // Q-50: the record the call acted on, as the REST entry names it from the path. A tool's `id` argument is always
     // its subject's id, so an operator filtering the log by record finds the MCP edit beside the REST one.
-    entryId: typeof (args as Record<string, unknown> | null)?.['id'] === 'string' ? (args as Record<string, string>)['id']! : null,
+    // `writtenId`: a create whose record landed and whose connections failed names the record it stored (`Q-170`) —
+    // its arguments carry no id to name it by.
+    entryId: writtenId ?? (typeof (args as Record<string, unknown> | null)?.['id'] === 'string' ? (args as Record<string, string>)['id']! : null),
     operation,
     status,
     durationMs,

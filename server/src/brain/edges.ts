@@ -94,7 +94,8 @@ export interface TraverseResult {
 // note there. Re-exported because it is part of this module's published surface and callers should not care.
 export { findEdgeByTriplet } from './edge-lookup.js';
 
-// Raised by the planner, where the check runs; re-exported for the doors that catch it.
+// Raised by the planner, where the check runs; re-exported for the callers that name it. A door that does not name it
+// still answers it: it is a `SchemaViolationError`, which `connectionRefusalAnswer` and `callTool` map.
 export { EdgeSchemaViolation } from './write-plan/plan-edge.js';
 
 export async function upsertEdge(
@@ -138,7 +139,9 @@ export async function upsertEdge(
 ): Promise<EdgeDoc> {
   /*
    * The DOOR, and nothing else. Every rule an edge write applies is in `write-plan/plan-edge.ts`, decided
-   * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
+   * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3). That
+   * includes the refusals — the schema and, under `strictLinkage`, a far end that names nothing, of any kind — which
+   * `edgeRefusal` decides for this door, the edge routes, an inline edge and a batch alike.
    */
   const input: EdgeInput = { from, to, label, weight, type, description, properties, tags, ttlDays, opts };
   const done = await planAndCommitOne(spaceId, edgeWant(spaceId, input), view => planEdge(spaceId, input, view));

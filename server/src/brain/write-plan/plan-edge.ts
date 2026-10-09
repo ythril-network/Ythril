@@ -6,6 +6,14 @@
  * what the payload does not carry — the TYPE of the entity at each end, and how many other edges share this
  * subject under a functional label — and the read set holds both, including what this batch has already planned.
  *
+ * ## The refusal is its own function (`Q-170`)
+ *
+ * `edgeRefusal` is the refusal half of the decision: the triplet, the defaults, the resolved ends, the classifier and —
+ * under `strictLinkage` — whether each end exists. It is asked twice for one edge on purpose: by a door BEFORE the
+ * record an inline edge hangs off is written, so that a refusal leaves nothing behind, and by `planEdge` before it decides
+ * anything, because the writer cannot enforce a weaker rule than the one the door asked. It records nothing and embeds
+ * nothing, so asking it is free of consequence — the property the first ask depends on.
+ *
  * The kinds a plan stores are the kinds its caller RESOLVED, always. A bulk edge whose end was a `$ref` to a fact
  * used to be existence-checked as a fact and stored as an entity endpoint (`Q-193`), because the door passed a
  * kind only when the caller had typed one; the door now always passes them, and this stores what it is given.
@@ -14,15 +22,18 @@ import { authorRef } from '../../config/author.js';
 import { edgeEmbedText } from '../embed-text.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults, type ResolvedEdgeEnds } from '../../spaces/schema-validation.js';
-import { classifyEdgeUpsertAgainst, type UpdateValidation } from '../write-validation.js';
+import { isStrictLinkage } from '../../spaces/proxy.js';
+import {
+  classifyEdgeUpsertAgainst, danglingReferenceCheck, EdgeSchemaViolation, type UpdateValidation,
+} from '../write-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../merge-fields.js';
 import { type RecordFlags } from '../record-flag.js';
 import { edgeIdFor } from '../edge-id.js';
-import { storedEdgeKind, edgeEndpointKind } from '../entity-refs.js';
+import { storedEdgeKind, edgeEndpointKind, missingRefsRefusal } from '../entity-refs.js';
 import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
 import type { EdgeDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { ReadSet, type ReadWant } from './read-set.js';
+import { ReadSet, type ReadWant, type Triplet } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { convergeResult, finishInsert, vectorBeforeWrite } from './plan-steps.js';
 
@@ -44,19 +55,9 @@ export interface EdgeInput {
   };
 }
 
-/**
- * A refused edge write, carrying the whole classification rather than a message.
- *
- * Both doors answer with `{ error: 'schema_violation', message, violations, introduced, preExisting }`, and
- * neither should have to rebuild that from prose. Carrying `UpdateValidation` means the response shape is
- * unchanged by where the check runs. Declared here, where the refusal is raised; `edges.ts` re-exports it.
- */
-export class EdgeSchemaViolation extends Error {
-  constructor(readonly check: UpdateValidation) {
-    super(check.message ?? 'schema_violation');
-    this.name = 'EdgeSchemaViolation';
-  }
-}
+// Declared in `write-validation.ts`, beside the `SchemaViolationError` it extends; re-exported because this is where the
+// refusal is raised and `edges.ts` and `bulk.ts` already import it from here.
+export { EdgeSchemaViolation };
 
 export interface EdgePlanned {
   plan: WritePlan;
@@ -64,19 +65,45 @@ export interface EdgePlanned {
   existed: boolean;
 }
 
-/** What `planEdge` will ask the read set: the entity ends' types, the triplet, a functional label's subject. */
-export function edgeWant(spaceId: string, input: EdgeInput): ReadWant {
+/**
+ * The record an inline edge hangs off, as a refusal needs to know it BEFORE that record is written.
+ *
+ * - `id` is the record's own, or — for a create — a placeholder no collection holds (`minted`), which is what an edge's
+ *   `from` is while the record does not exist yet.
+ * - `type` is the type the record WILL have, `null` when it has none (`undefined` never): an entity's `endpoints` rule
+ *   is judged by the type the write leaves, not by the stored one, and a subject that is not an entity has none.
+ * - `minted`: nothing stored can be an edge from it, so its triplets and its functional count are answered without a read.
+ *
+ * Built by one function (`connectionSubject`, `brain/write-connections.ts`), because a door building it by hand is a door
+ * that reads the stored type of a record its own patch is about to change.
+ */
+export interface EdgeSubject { id: string; type: string | null; minted: boolean }
+
+/**
+ * What `edgeRefusal` and `planEdge` will ask the read set: the entity ends' types, the existence of every other end
+ * (`strictLinkage` only — a lax space refuses nothing for a dangling end), the triplet, a functional label's subject.
+ *
+ * With a `subject`, the subject's own end is neither read nor looked up: the caller already says what it is, and for a
+ * `minted` one nothing stored can match its triplet or share its functional label.
+ */
+export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubject): ReadWant {
   const { from, to, label } = input;
   const fromKind = input.opts?.fromKind;
   const toKind = input.opts?.toKind;
-  const entityEnds = [
-    ...(edgeEndpointKind(fromKind) === 'entity' ? [from] : []),
-    ...(edgeEndpointKind(toKind) === 'entity' ? [to] : []),
-  ];
+  const ends = [{ id: from, kind: edgeEndpointKind(fromKind) }, { id: to, kind: edgeEndpointKind(toKind) }]
+    .filter(e => e.id !== subject?.id);
+  const entityEnds = ends.filter(e => e.kind === 'entity').map(e => e.id);
+  const exist: NonNullable<ReadWant['exist']> = {};
+  if (isStrictLinkage(spaceId)) {
+    for (const e of ends) if (e.kind !== 'entity') exist[e.kind] = [...(exist[e.kind] ?? []), e.id];
+  }
   return {
     records: entityEnds.length > 0 ? { entity: entityEnds } : {},
-    triplets: [{ from, to, label, fromKind, toKind }],
-    ...(isFunctionalLabel(spaceId, label) ? { functional: [{ from, label }] } : {}),
+    ...(Object.keys(exist).length > 0 ? { exist } : {}),
+    ...(subject?.minted ? {} : {
+      triplets: [{ from, to, label, fromKind, toKind }],
+      ...(isFunctionalLabel(spaceId, label) ? { functional: [{ from, label }] } : {}),
+    }),
   };
 }
 
@@ -120,9 +147,12 @@ export async function resolveEdgeEndsForWrite(
  */
 function resolvedEnds(
   view: ReadSet, input: Pick<EdgeInput, 'from' | 'to' | 'label' | 'opts'>, functional: boolean,
+  subject?: EdgeSubject, sameBody: readonly Triplet[] = [],
 ): ResolvedEdgeEnds {
   const out: ResolvedEdgeEnds = {};
+  // The subject's type is the type its record will HAVE, so it is never read back from the store (which holds the old one).
   const typeOf = (id: string): string | null | undefined => {
+    if (id === subject?.id) return subject.type;
     const doc = view.stored('entity', id);
     return doc === null ? undefined : (typeof doc['type'] === 'string' ? doc['type'] : null);
   };
@@ -134,12 +164,56 @@ function resolvedEnds(
     const t = typeOf(input.to);
     if (t !== undefined) out.toType = t;
   }
-  if (functional) out.otherEdgesFromSubject = view.otherEdgesFromSubject(input.from, input.label, input.to);
+  if (functional) out.otherEdgesFromSubject = view.otherEdgesFromSubject(input.from, input.label, input.to, sameBody);
   return out;
 }
 
-export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet): Promise<EdgePlanned> {
-  const { from, to, label, weight, type, description, properties, tags, ttlDays, opts } = input;
+/** What an edge write that was NOT refused leaves its caller: the stored edge it lands on, the properties to store, and the classification. */
+export interface EdgeAllowed {
+  existing: EdgeDoc | null;
+  /** The caller's properties with the space's defaults filled in — on an insert only, so an update cannot resurrect a deletion. */
+  withDefaults: EdgeInput['properties'];
+  check: UpdateValidation;
+}
+
+/**
+ * Refuse an edge write that the space's rules do not allow — or return what the write would be allowed to store.
+ *
+ * ## What it prevents
+ *
+ * The refusal of an edge was decided in three places: the planner (schema), the doors (an end that names nothing) and,
+ * for an edge a record write carries inline, nowhere before the record was stored. A record whose inline edge was
+ * refused AFTER it was written is a caller told "refused" holding a row they did not ask for. This is the one
+ * function that decides, and a door asks it before it writes anything.
+ *
+ * ## What it is
+ *
+ * Pure: it reads only what the read set holds and records NOTHING in it — no `noteWritten`, so a refused edge leaves no
+ * phantom behind for the next item of a batch — and starts no embedding. The caller must have `load`ed what
+ * `edgeWant` names, with the same `subject`.
+ *
+ * - **`strictLinkage` only** refuses an end that names nothing, in the collection its kind names. A lax space has
+ *   chosen to accept dangling ends. The subject's own end is not asked about: it is the record being written.
+ * - **`subject`** says what the edge hangs off when that record is not stored yet (or about to change): its type is the
+ *   type the write leaves, and a minted one has no stored edges.
+ * - **`sameBody`** is the edges of the same write that already passed. A refusal records nothing, so without it two
+ *   edges under one `functional` label in one body would each meet a count that cannot see the other.
+ *
+ * A violation the stored edge already had does not refuse an unrelated write (`classifyEdgeUpsertAgainst`); only what
+ * this write introduces does.
+ */
+export function edgeRefusal(
+  spaceId: string, input: EdgeInput, view: ReadSet, subject: EdgeSubject | undefined, sameBody: readonly EdgeInput[],
+): EdgeAllowed {
+  const { from, to, label, properties, opts } = input;
+  if (isStrictLinkage(spaceId)) {
+    for (const [id, kind, field] of [[from, edgeEndpointKind(opts?.fromKind), 'from'], [to, edgeEndpointKind(opts?.toKind), 'to']] as const) {
+      if (id === subject?.id) continue;
+      const dangling = missingRefsRefusal(spaceId, field, kind, view.missing(kind, [id]));
+      if (dangling) throw new EdgeSchemaViolation(danglingReferenceCheck(field, id, dangling.message));
+    }
+  }
+  if (subject?.minted) view.mint(subject.id);
   const existing = view.triplet({ from, to, label, fromKind: opts?.fromKind, toKind: opts?.toKind });
 
   /*
@@ -150,10 +224,19 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
   const meta = getSpaceMeta(spaceId);
   const withDefaults = existing ? properties : applyPropertyDefaults(meta?.typeSchemas?.edge?.[label], properties);
   const functional = isFunctionalLabel(spaceId, label);
-  const ends = resolvedEnds(view, input, functional);
+  const passed = sameBody.map(e => ({ from: e.from, to: e.to, label: e.label, fromKind: e.opts?.fromKind, toKind: e.opts?.toKind }));
+  const ends = resolvedEnds(view, input, functional, subject, passed);
   const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, ends);
   if (check.blocked) throw new EdgeSchemaViolation(check);
+  return { existing, withDefaults, check };
+}
+
+export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet): Promise<EdgePlanned> {
+  const { from, to, label, weight, type, description, tags, ttlDays, properties, opts } = input;
+  // The refusal first: nothing below is decided, noted or embedded for an edge the space does not allow.
+  const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, []);
   opts?.onValidation?.(check);
+  const meta = getSpaceMeta(spaceId);
 
   const now = new Date().toISOString();
   const effectiveDesc = description ?? existing?.description;

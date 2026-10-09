@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
@@ -15,20 +15,17 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
-import { resolveMemberSpaces, resolveWriteTarget, isStrictLinkage } from '../../spaces/proxy.js';
-import { validateFact } from '../../spaces/schema-validation.js';
+import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
 import {
   UUID_V4_RE,
   webhookToken,
-  getSpaceMeta,
-  applyValidation,
   ttlDaysFromBody,
   ttlDaysError,
   dupeCheckOptsFromBody,
   ifMatchFromRequest,
   preconditionFailedBody,
 } from './_shared.js';
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { MAX_FACT_LENGTH } from '../../util/request-bounds.js';
@@ -103,15 +100,12 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
    */
   const safeTags: string[] = Array.isArray(tags) ? tags : [];
 
-  // Schema validation
+  // Schema validation is the writer's (`saveFact`), against the record the write will produce — this door kept its own
+  // copy, of the payload, which refused a legitimate converge and answered a body of its own with half the keys every
+  // other record door's refusal carries. The writer hands the classification back (`onValidation`) for the warnings, and
+  // its refusal is answered below as every record door answers it.
   const safeFactType: string | undefined = typeof memoryType === 'string' ? memoryType : undefined;
-  const meta = getSpaceMeta(wt.target);
-  const violations = validateFact(meta ?? {}, { type: safeFactType, properties: safeProps });
-  const validation = applyValidation(meta, violations);
-  if (validation.blocked) {
-    res.status(400).json({ error: 'schema_violation', violations: validation.warnings });
-    return;
-  }
+  let createCheck: UpdateValidation | undefined;
 
   // Persist through the shared saveFact() so REST and MCP produce identical records: the same
   // embed-text derivation (properties folded as `key value` via propsEmbedText, entity names
@@ -126,14 +120,6 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // must not.
   const shapeErr = shapeError('fact', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
-
-  // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
-  // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
-  if (connErr) { res.status(400).json({ error: connErr }); return; }
-  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
-  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
-  await assertConnections(wt.target, 'fact', req.body);
 
   // A caller-supplied id becomes the sync identity of a record that replicates across networks, so it is held
   // to the same shape the rest of the API uses. (The entity route accepts any string here — pre-existing, and
@@ -160,27 +146,38 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   if ('error' in dupe) { res.status(400).json({ error: dupe.error }); return; }
   const writeOpts = { ...dupe.opts, ...(waitForEmbedding === true ? { waitForEmbedding: true } : {}) };
 
-  const doc = await saveFact(
-    // No link set here: the links come from the body's `link*` fields, through `applyConnections` below,
-    // which is the one path for both doors since the `entityIds` spelling went.
-    targetSpace, fact, [], safeTags, safeDesc, safeProps,
-    safeFactType, Object.keys(writeOpts).length > 0 ? writeOpts : undefined,
-    webhookToken(req), ttlDaysFromBody(req.body), safeId,
-  );
+  let doc;
+  try {
+    // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict linkage — an id
+    // that names nothing, and every inline edge the space's schema refuses. BEFORE the record is written, or a refusal
+    // leaves a row; inside this `try`, so it is answered as every record door answers it.
+    await assertConnections(targetSpace, 'fact', await connectionSubject(targetSpace, 'fact', req.body, { id: safeId }), req.body);
+    doc = await saveFact(
+      // No link set here: the links come from the body's `link*` fields, through `applyConnections` below,
+      // which is the one path for both doors since the `entityIds` spelling went.
+      targetSpace, fact, [], safeTags, safeDesc, safeProps,
+      safeFactType, { ...writeOpts, onValidation: (c: UpdateValidation) => { createCheck = c; } },
+      webhookToken(req), ttlDaysFromBody(req.body), safeId,
+    );
 
-  /*
-   * `F-27`: the relationships this write asked for, in the same call.
-   *
-   * AFTER the record exists, because a relationship needs both ends and the `from` is what was just minted.
-   * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
-   * restate them and no two doors can disagree about them.
-   */
-  await applyConnections(targetSpace, doc._id, 'fact', req.body, doc.author, webhookToken(req));
+    /*
+     * `F-27`: the relationships this write asked for, in the same call.
+     *
+     * AFTER the record exists, because a relationship needs both ends and the `from` is what was just minted.
+     * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
+     * restate them and no two doors can disagree about them.
+     */
+    await applyConnections(targetSpace, doc._id, 'fact', req.body, doc.author, webhookToken(req));
+  } catch (err) {
+    const refused = connectionRefusalAnswer(err, 'create');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
+    throw err;
+  }
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...validation.warnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
+  const warnings = [...(createCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
   if (warnings.length > 0) body['warnings'] = warnings;
   res.status(201).json(body);
 });
@@ -254,13 +251,8 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   const shapeErr = shapeError('fact', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
 
-  // `F-27`: the one-call write. Shape and well-formedness here; existence is the writer's job, in one query.
-  // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
-  if (connErr) { res.status(400).json({ error: connErr }); return; }
-  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
-  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
-  await assertConnections(wt.target, 'fact', req.body);
+  // `F-27`: the one-call write. The connections' shape and refusals are asked below, once the record is found:
+  // a record that is not there is a `404`, not its edges' refusal.
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; type?: string; tags?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
@@ -333,16 +325,14 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     let updated;
     let check: UpdateValidation | undefined;
     try {
+      // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
+      // changed — by the schema of the member that holds the record, after the `404` above and before any `412`.
+      await assertConnections(mid, 'fact', await connectionSubject(mid, 'fact', req.body, { stored: existing[0] as { _id: string; type?: string } }), req.body);
       updated = await updateFact(mid, id, updates, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq,
         c => { check = c; });
     } catch (err) {
-      if (err instanceof SchemaViolationError) {
-        res.status(422).json({
-          error: 'schema_violation', message: err.check.message, violations: err.check.all,
-          introduced: err.check.introduced, preExisting: err.check.preExisting,
-        });
-        return;
-      }
+      const refused = connectionRefusalAnswer(err, 'update');
+      if (refused) { res.status(refused.status).json(refused.body); return; }
       throw err;
     }
     if (updated) {

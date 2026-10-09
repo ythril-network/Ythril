@@ -10,9 +10,10 @@ Every link between brain records — an edge's `from`/`to`, and the records a fa
 is linked to (`linkEntities`, `linkFacts`, `linkChronos`) — names the target by its **id**,
 which is a **UUID v4**. A name is not a reference.
 
-**A reference that cannot resolve is refused.** The write is refused — `400` on a create, `422` on an update, or a
-structured `schema_violation` from an MCP tool — naming the field and the offending value (for an inline `edges`
-entry, the entry: `edges[0].to`), and **nothing is stored**, the record included. Both halves are checked:
+**A reference that cannot resolve is refused.** A `link*` id answers `400` with `{ "error" }` on a create and an
+update alike; the far end of an inline `edges` entry answers the `schema_violation` body (`400` on a create, `422` on
+an update, a structured `schema_violation` from an MCP tool) — each naming the field and the offending value (for an
+inline `edges` entry, the entry: `edges[0].to`), and **nothing is stored**, the record included. Both halves are checked:
 
 - the value is a UUID v4, and
 - a record with that id exists in the target space (for the far end of an inline `edges` entry, one of the kind its `toKind` names).

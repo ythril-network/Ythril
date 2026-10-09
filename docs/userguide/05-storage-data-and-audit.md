@@ -598,8 +598,11 @@ counts those removals (`keysRemoved`).
 >
 > **The old way of writing connections is refused, and the refusal says what to send instead.** A script
 > still sending `entityIds`, `memoryIds` or `chronoIds` gets an error naming `linkEntities`, `linkFacts` or
-> `linkChronos` — the same ids, a different field. Nothing is written half-way: the whole call is refused,
-> so a record never lands without the connections it asked for.
+> `linkChronos` — the same ids, a different field. A refused call writes nothing, the record included, so a
+> record never lands without the connections it asked for because the call was turned away. The one other way
+> to end with a record and missing connections is a failure after the record was saved (the database going
+> away in between): that answer says so and names the record, and the audit log records it as the write of
+> that record, so it is found by the record's id like any other write.
 >
 > **Files uploaded before 4.0 are the one part startup does NOT do for you.** Their descriptions reach a
 > peer only once each record has been given a position in the space's history, and giving it one is a

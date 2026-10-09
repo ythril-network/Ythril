@@ -185,28 +185,32 @@ sent to `POST …/edges` would be: its label and end types against the space's s
 end exists. The refusal names the entry — `edges[1].to` — so a body with several faults is corrected in one pass. A
 `link*` id that names nothing is refused the same way.
 
-**The status is the one the record's own schema refusal has on that verb.** A `POST` answers `400` and a `PATCH`
-answers `422`, both with the body documented under [Schema Validation](06a-schema-api.md#schema-validation); an MCP
-tool answers a structured `schema_violation` ([MCP](16-mcp.md)). On an update, a record that does not exist is `404`
-before any of this, and the refusal comes before an `If-Match` `412`. A malformed body (an id that is not a UUID, a
-retired field) is a `400` on every verb. Under `validationMode: warn` a schema rule is reported as a warning and the
+**What was refused sets the status.** An `edges` entry the space refuses — its schema, or on a `strictLinkage` space a
+far end that names nothing — is a `schema_violation`, the record's own schema refusal with the status it has on that
+verb: a `POST` answers `400` and a `PATCH` answers `422`, both with the body documented under
+[Schema Validation](06a-schema-api.md#schema-validation); an MCP tool answers the same body as a structured
+`schema_violation` ([MCP](16-mcp.md)). A `link*` id that names nothing, and a malformed body (an id that is not a
+UUID, a retired field), is a `400` with `{ "error" }` on every verb, a `PATCH` included. On an update, a record that
+does not exist is `404` before any of this, and the refusal comes before an `If-Match` `412`. Under `validationMode: warn` a schema rule is reported as a warning and the
 write proceeds, as for every other schema rule; `strictLinkage` is its own switch.
 
 **What this does not cover is the window after the record is stored.** A single-record write stores the record, then
 its edges — an edge needs both ends — and the two are not one transaction. If the store fails in between, or a far
 end is deleted between the check and the write, the record exists and some of its edges may not. That answer says so,
-with the status of the underlying failure and:
+with the status of the cause's class, the same on a `POST` and a `PATCH` — `422` for a schema refusal that only shows
+after the record landed, `400` for a reference, `409` for a write conflict, `503` or `500` for the store — and:
 
 ```json
 { "error": "…", "retryable": false,
   "written": { "kind": "entity", "id": "3f2b1c9e-…", "edges": ["b81c0e5a-…"] } }
 ```
 
-`written` names the record and the edges that DID land. It is never `retryable` and carries no `Retry-After`, **even
-when the status is a `503`**: a create sent again without an id stores a second record. Send the edges that did not
-land as an update to `written.id`; an edge you send again that had landed is upserted, not duplicated. An MCP tool
-carries the same object in `structuredContent`, and on `/bulk` and `save_bulk` it rides on the failed item's row in
-`errors` ([Bulk](04d-brain-ops-api.md)).
+`written` names the record and the edges that DID land, at the top level of the body. It is never `retryable` and
+carries no `Retry-After`, **even when the status is a `503`**: a create sent again without an id stores a second
+record. When the cause is a refusal the body adds `refusal`, its words. Send the edges that did not land as an update
+to `written.id`; an edge you send again that had landed is upserted, not duplicated. An MCP tool carries the same
+object in `structuredContent`, `POST /api/<tool>` under `data`, and on `/bulk` and `save_bulk` it rides on the failed
+item's row in `errors` ([Bulk](04d-brain-ops-api.md)).
 
 #### A batch that connects what it creates
 

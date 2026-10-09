@@ -11,12 +11,18 @@
  *
  * `after` is built from what the writer returned, so a caller cannot hand it the values it MEANT to write.
  */
-import { findFirstAcrossMembers } from '../spaces/proxy.js';
+import { locateForUpdate } from './write-validation.js';
 import { linkAuditSnapshots } from './write-connections.js';
 
 export interface EditAudit<T> {
   /** The record before the write, or null when no member space holds it. */
   prior: T | null;
+  /**
+   * The member space that holds it, `null` when none does. The one answer to "which space's schema judges this edit":
+   * a door that checks an edit's connections before it lands asks THIS space (`Q-170`), not the proxy it was addressed
+   * to and not the first member searched.
+   */
+  home: string | null;
   /** The entry's before/after, from the prior read and the record the writer returned. */
   snapshots(updated: object): { before: Record<string, unknown>; after: Record<string, unknown> };
 }
@@ -33,15 +39,15 @@ export async function readEditAudit<T extends object>(
   linkId: string,
   body: unknown,
 ): Promise<EditAudit<T>> {
-  let home: string | undefined;
-  const prior = await findFirstAcrossMembers(target, async mid => {
-    const found = await read(mid);
-    if (found) home = mid;
-    return found;
-  });
+  // `locateForUpdate`: the record AND the member that holds it, from the one read — the same walk an update door's
+  // refusal of its connections needs, so the two cannot name different members.
+  const located = await locateForUpdate(target, read);
+  const home = located?.memberId ?? null;
+  const prior = located?.record ?? null;
   const links = home ? await linkAuditSnapshots(home, linkId, body) : { before: {}, after: {} };
   return {
-    prior: prior ?? null,
+    prior,
+    home,
     snapshots: (updated) => ({
       before: { ...((prior ?? {}) as Record<string, unknown>), ...links.before },
       after: { ...(updated as Record<string, unknown>), ...links.after },

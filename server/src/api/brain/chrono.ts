@@ -12,18 +12,18 @@ import { createChrono, updateChrono, getChronoById, deleteChrono, parseRecurrenc
 import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 
 export const chronoRouter = Router();
@@ -131,14 +131,6 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   // must not.
   const shapeErr = shapeError('chrono', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
-  // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
-  if (connErr) { res.status(400).json({ error: connErr }); return; }
-  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
-  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
-  await assertConnections(wt.target, 'chrono', req.body);
-
-
   // `waitForEmbedding` (default false): the vector is normally computed by the embedding queue
   // moments after this returns. Pass true when the caller will search for, scan, or compare what it
   // just wrote — none of those can see a record that has no vector yet.
@@ -155,29 +147,28 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   const embedOpts = Object.keys(writeOpts).length > 0 ? writeOpts : undefined;
   let entry;
   try {
+    // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict linkage — an id
+    // that names nothing, and every inline edge the space's schema refuses. BEFORE the record is written, or a refusal
+    // leaves a row; inside this `try`, so it is answered as the record's own refusal is.
+    await assertConnections(wt.target, 'chrono', await connectionSubject(wt.target, 'chrono', req.body, { id: safeId }), req.body);
     entry = await createChrono(wt.target, {
       title: title.trim(), type, startsAt, endsAt, status, confidence,
       tags, description, properties: safeProps, recurrence: safeRecurrence,
       id: safeId,
     }, webhookToken(req), ttlDaysFromBody(req.body), { ...(embedOpts ?? {}), onValidation: c => { check = c; } });
+    /*
+     * `F-27`: the relationships this write asked for, in the same call.
+     *
+     * AFTER the record exists, because a relationship needs both ends and the `from` is what was just minted.
+     * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
+     * restate them and no two doors can disagree about them.
+     */
+    await applyConnections(wt.target, entry._id, 'chrono', req.body, entry.author, webhookToken(req));
   } catch (err) {
-    if (err instanceof SchemaViolationError) {
-      res.status(400).json({
-        error: 'schema_violation', message: err.check.message, violations: err.check.all,
-        introduced: err.check.introduced, preExisting: err.check.preExisting,
-      });
-      return;
-    }
+    const refused = connectionRefusalAnswer(err, 'create');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
     throw err;
   }
-  /*
-   * `F-27`: the relationships this write asked for, in the same call.
-   *
-   * AFTER the record exists, because a relationship needs both ends and the `from` is what was just minted.
-   * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
-   * restate them and no two doors can disagree about them.
-   */
-  await applyConnections(wt.target, entry._id, 'chrono', req.body, entry.author, webhookToken(req));
 
   const result: Record<string, unknown> = { ...entry };
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
@@ -301,9 +292,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     ? body['deleteFields'] as string[]
     : undefined;
 
-  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
-  await assertConnections(wt.target, 'chrono', req.body);
-
   // Snapshot for the audit change list — see the note in facts.ts. Read before the write, since
   // `updateChrono` returns only the new document.
   // The member space holding this entry, captured while looking for it: the link sets below are read per
@@ -327,19 +315,21 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   let updated;
   let updateCheck: UpdateValidation | undefined;
   try {
+    // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
+    // changed — by the schema of the member that holds the entry (`editAudit.home`), and only once it is found: a
+    // missing entry is the `404` below, not its edges' refusal, and either precedes a `412`.
+    if (prior) {
+      await assertConnections(editAudit.home!, 'chrono',
+        await connectionSubject(editAudit.home!, 'chrono', req.body, { stored: prior }), req.body);
+    }
     updated = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, {
       title, type, startsAt, endsAt, status, confidence,
       tags, description, properties: safeProps, recurrence: safeRecurrence,
       suppressEmbeddings, superseded,
     }, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq, c => { updateCheck = c; }));
   } catch (err) {
-    if (err instanceof SchemaViolationError) {
-      res.status(422).json({
-        error: 'schema_violation', message: err.check.message, violations: err.check.all,
-        introduced: err.check.introduced, preExisting: err.check.preExisting,
-      });
-      return;
-    }
+    const refused = connectionRefusalAnswer(err, 'update');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
     throw err;
   }
   if (updated) {

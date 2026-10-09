@@ -52,7 +52,12 @@ export const save_bulkTool: ToolHandler = {
     + 'rather than a second pass. An item\'s `edges` name records that ALREADY EXIST — a `$ref` there is '
     + 'refused, because an item is applied when it is written and a reference forwards could not resolve. '
     + 'For a relationship to a record this same call creates, use the top-level `edges` array, which runs '
-    + 'after every record array.\n\n'
+    + 'after every record array. An item\'s inline edge that is refused (the space schema, or on a strict-linkage '
+    + 'space a far end that does not exist, of whichever kind) refuses the ITEM, before its record is written: '
+    + 'its `errors` row names the entry (`edges[1]`) and nothing of the item is stored. The one failure that '
+    + 'leaves the record stored is one AFTER it was written, and that row carries `errors[i].written` — '
+    + '`{ kind, id, edges }`, the record and the edges that landed: do not send that item again as a create, '
+    + 'send its missing edges as an update to that id.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
@@ -63,7 +68,7 @@ export const save_bulkTool: ToolHandler = {
     + 'fails asking you to resend it.\n\n'
     + 'RESPONSE: `inserted` and `updated` (counts per collection), `connections` (the links and edges the '
     + 'ITEMS\' own fields attached, which is a different question from `inserted.edges` — that one counts the '
-    + 'top-level `edges` array), `errors` (one entry per rejected item, with its collection and index), and '
+    + 'top-level `edges` array), `errors` (one entry per rejected item, with its collection and index, and `written` on a row whose record was stored), and '
     + '`refs` (the id each `$ref` key was given, for items that were written).',
   mutating: true,
   spaceRequired: true,

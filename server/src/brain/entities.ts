@@ -9,7 +9,7 @@ import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyEntityUpsertAgainst, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
@@ -205,7 +205,7 @@ export async function updateEntityById(
   const $unset: Record<string, unknown> = {};
 
   const newName = updates.name ?? existing.name;
-  const newType = updates.type ?? existing.type;
+  const newType = resultingEntityType(existing, updates);
   const newDesc = updates.description !== undefined ? updates.description : existing.description;
   let newTags = mergeTagsOrKeep(existing.tags, updates.tags);
   let newProps = mergePropertiesOrKeep(existing.properties, updates.properties) ?? {};

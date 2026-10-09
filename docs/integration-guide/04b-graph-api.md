@@ -350,8 +350,8 @@ POST /api/brain/spaces/:spaceId/edges
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` for the wrong shape, or for an id that names nothing, when `strictLinkage` is on. |
-| `to` | yes | Target record id, read the same way against `toKind`. |
+| `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` `{ "error" }` for the wrong shape, and, when `strictLinkage` is on, `400` with the `schema_violation` body (`field` `from`) for an id that names nothing, of whichever kind `fromKind` names. |
+| `to` | yes | Target record id, read the same way against `toKind` (`field` `to` on a refusal). |
 | `fromKind` | no | What kind of record `from` points at: `entity`, `fact`, `chrono` or `file`. **Omit for an entity** — see below. |
 | `toKind` | no | The same for `to`. |
 | `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |

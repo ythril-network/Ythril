@@ -232,6 +232,21 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 A body carrying only a connection field is a valid patch. Change a record's links this way rather than by
 deleting and re-creating it, which costs the record its id and its history.
 
+**A connection the write cannot honour changes nothing — the other fields of the patch included.** An `edges` entry
+the space's schema refuses, or on a `strictLinkage` space whose far end names nothing (of any kind), answers `422`
+with the `schema_violation` body and `field` naming the entry (`edges[0].to`); a `link*` id that names nothing, or a
+malformed one, answers `400` with `{ "error" }`. The order is: a record that does not exist is `404`, then the
+refusal, then an `If-Match` mismatch `412`. A create answers the schema refusal `400` instead of `422`
+([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
+
+**What is not a refusal is a failure after the record was written.** The patch's fields are stored first and its
+connections after, so the store failing in between answers with that failure's status and `written` at the top level
+of the body, never retryable (`retryable: false`) and with no `Retry-After`; `written` is `{ kind, id, edges }`. The
+status follows the cause's class — `422` for a schema refusal that only showed up after the record landed, `400` for a
+reference, `409` for a conflict, `503` or `500` for the store — and a refusal cause adds `refusal`, its words. Do not send the patch again as if nothing happened: `written.edges` lists what landed, and an `edges` entry
+sent again is upserted, not duplicated. An MCP tool carries the same object in `structuredContent`, and
+`POST /api/<tool>` under `data`.
+
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
 an empty `properties: {}` is a no-op rather than a wipe. If you need a key gone, name it:
 `deleteFields: ["properties.oldKey"]`.

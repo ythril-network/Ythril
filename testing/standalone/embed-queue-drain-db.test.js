@@ -192,8 +192,17 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     },
     {
       name: 'edge', collection: 'edges',
-      create: (opts) => edges.upsertEdge(SPACE, 'a-9', 'b-9', 'runs-on', undefined, undefined, undefined,
-        { since: '2026' }, ['prod'], undefined, undefined, opts),
+      create: async (opts) => {
+        // The edge write refuses an end that names nothing on a strict space (`edgeRefusal`, `Q-170`), so the ends are
+        // there — inserted straight into the collection, which enqueues nothing, so the job count below is the edge's.
+        for (const id of ['a-9', 'b-9']) {
+          await mongo.col(`${SPACE}_entities`).updateOne({ _id: id },
+            { $setOnInsert: { _id: id, spaceId: SPACE, name: id, type: 'machine', tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), seq: 0 } },
+            { upsert: true });
+        }
+        return edges.upsertEdge(SPACE, 'a-9', 'b-9', 'runs-on', undefined, undefined, undefined,
+          { since: '2026' }, ['prod'], undefined, undefined, opts);
+      },
     },
     {
       name: 'chrono', collection: 'chrono',

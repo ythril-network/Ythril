@@ -19,13 +19,14 @@ import { resolveMetaRefs, getAllowedChronoTypes } from '../spaces/schema-validat
 import type { SpaceMeta } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { BatchRefs, resolveRef, refKeyDeclared, refKeyUsed, isRefUse, type ResolvedRef } from './batch-refs.js';
-import { connectionInputError, connectionsOf, edgeInputsFrom } from './write-connections.js';
+import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom } from './write-connections.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import { parseRecordFlags, type RecordFlags } from './record-flag.js';
 import type { ChronoType, ChronoStatus } from '../config/types.js';
-import { SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { SchemaViolationError, EdgeSchemaViolation, type UpdateValidation } from './write-validation.js';
+import { writtenRecord, type WrittenRecord } from './connections-not-written.js';
 import type { DesiredLinks } from './links.js';
-import { ReadSet, tripletKey, type ReadWant, type Triplet } from './write-plan/read-set.js';
+import { ReadSet, mergeWants, tripletKey, type ReadWant, type Triplet } from './write-plan/read-set.js';
 import { commitPlans } from './write-plan/commit.js';
 import { planAndCommit } from './write-plan/plan-and-commit.js';
 import type { CommitOutcome, WritePlan } from './write-plan/types.js';
@@ -33,12 +34,12 @@ import { linkTargets, refuseLinks } from './write-plan/plan-links.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planChrono, chronoWant, type ChronoInput } from './write-plan/plan-chrono.js';
-import { planEdge, edgeWant, EdgeSchemaViolation, type EdgeInput } from './write-plan/plan-edge.js';
+import { planEdge, edgeWant, edgeRefusal, type EdgeInput, type EdgeSubject } from './write-plan/plan-edge.js';
 
 /** Max items processed per collection in a single bulk call. */
 export const BULK_MAX_PER_TYPE = 500;
 
-import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef, missingRefsRefusal } from './entity-refs.js';
+import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
 import { REF_KINDS, isRefKind } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
@@ -66,6 +67,15 @@ export const BULK_BODY_KEYS = ['facts', 'entities', 'edges', 'chrono'] as const;
 
 export type BulkInput = Partial<Record<typeof BULK_BODY_KEYS[number], unknown>>;
 
+/**
+ * One item's error row.
+ *
+ * `written` is on a row for an item whose RECORD was stored and whose inline edge was not (`Q-170`): it names the record
+ * and the ids of the edges that did land, so the caller sends the rest as an update to that id rather than sending the
+ * item again — the row alone reads "failed", and a failed item is the one a caller retries. Absent on every other row.
+ */
+export interface BulkError { type: string; index: number; reason: string; written?: WrittenRecord }
+
 export interface BulkResult {
   inserted: Counts;
   updated: Counts;
@@ -81,7 +91,7 @@ export interface BulkResult {
    * updated rather than created, and this door does not tell the two apart for an item's own edges.
    */
   connections: { links: number; edges: number };
-  errors: { type: string; index: number; reason: string }[];
+  errors: BulkError[];
   /**
    * The id each `$ref` key was given, keyed by the key: `{ "e1": { id, kind } }`. A refused item's key is
    * absent. It is how a caller learns the ids a batch minted without reading them back by text.
@@ -217,6 +227,12 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * Per-item failures are collected, never fatal. `inserted` counts NEW records and `updated` the ones a write
  * converged on — including a fact or chrono entry addressed by its `id`, which used to count as inserted.
  * A key whose item was not written is absent from `refs`, and anything depending on it says why.
+ *
+ * An item's own inline `edges` are refused WITH the item (`edgeRefusal`, the one function the single-record doors ask
+ * before they write): a refused entry — the schema, or under `strictLinkage` a far end of any kind that names nothing —
+ * refuses the item before its record is planned, and the reason names the entry. A failure AFTER the record committed
+ * is the one that leaves it stored, and its row carries `written` (`BulkError`), because a failed item is the one a
+ * caller sends again.
  */
 export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
   const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
@@ -229,7 +245,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
 
   const inserted: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const updated: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
-  const errors: { type: string; index: number; reason: string }[] = [];
+  const errors: BulkError[] = [];
   const connections = { links: 0, edges: 0 };
 
   /** A refused item: its error, and — if it declared a key — the reason a dependant will be told. */
@@ -258,6 +274,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   for (const [i, item] of slice(input.edges).entries()) await run.planTopLevelEdge(i, item, strict);
   await run.flush();
   await run.replanStale();
+  run.nameWhatLanded();
 
   return { inserted, updated, connections, errors, refs: refs.toJSON() };
 }
@@ -402,13 +419,13 @@ function prepareItems(
 
   // What the items' OWN connections will ask: the link targets for the class check, and each inline edge's
   // far end and (for a record addressed by id) its triplet. An edge from a record this batch mints needs no
-  // read — nothing stored can name it.
+  // read — nothing stored can name it — so its subject says so (`minted`), and only the far end is read.
   for (const p of out) {
     const extra: ReadWant[] = [];
     if (p.desired) extra.push({ records: linkTargets(p.desired) });
-    for (const e of connectionsOf(p.item, p.addresses ?? '', p.kind).edges) extra.push(edgeWant(spaceId, e));
-    // From a record this batch mints, nothing stored can be the edge or share its subject: only the far end is read.
-    if (extra.length > 0) p.want = mergeWants([p.want, ...extra.map(w => p.addresses ? w : { records: w.records })]);
+    const subject: EdgeSubject | undefined = p.addresses ? undefined : mintedSubject('', null);
+    for (const e of connectionsOf(p.item, p.addresses ?? '', p.kind).edges) extra.push(edgeWant(spaceId, e, subject));
+    if (extra.length > 0) p.want = mergeWants([p.want, ...extra]);
   }
   return out;
 }
@@ -434,23 +451,6 @@ function topLevelEdgeWant(spaceId: string, item: Record<string, unknown>): ReadW
 }
 
 
-/** Several read wants as one — the batch's single `load`. */
-function mergeWants(wants: readonly ReadWant[]): ReadWant {
-  const records: NonNullable<ReadWant['records']> = {};
-  const triplets: NonNullable<ReadWant['triplets']>[number][] = [];
-  const functional: NonNullable<ReadWant['functional']>[number][] = [];
-  const nameTypes: NonNullable<ReadWant['nameTypes']>[number][] = [];
-  for (const w of wants) {
-    for (const [kind, ids] of Object.entries(w.records ?? {}) as Array<[keyof typeof records, readonly string[]]>) {
-      records[kind] = [...(records[kind] ?? []), ...ids];
-    }
-    triplets.push(...(w.triplets ?? []));
-    functional.push(...(w.functional ?? []));
-    nameTypes.push(...(w.nameTypes ?? []));
-  }
-  return { records, triplets, functional, nameTypes };
-}
-
 /** A plan waiting for the commit, with what the batch reports about it. */
 interface Pending {
   plan: WritePlan;
@@ -469,6 +469,24 @@ interface Pending {
   want: ReadWant;
   /** Set once committed: undefined while pending. */
   result?: { ok: true } | { ok: false; reason: string };
+  /**
+   * Shared by an item's record and each of its own inline edges (by reference, so it survives the re-plans that copy a
+   * Pending): what the edges did, for the `written` a failed one reports.
+   */
+  inline?: InlineEdges;
+}
+
+/** What one item's own inline edges did, gathered while the batch runs and read once it is done (`nameWhatLanded`). */
+interface InlineEdges {
+  kind: RefKind;
+  /** The record the edges hang off. */
+  id: string;
+  /** Whether the record's own commit landed, once it is known. */
+  recordLanded?: boolean;
+  /** The ids of the edges that landed. */
+  landed: string[];
+  /** The error rows of the edges that did not, already in the batch's errors. */
+  failed: BulkError[];
 }
 
 /** The planning and committing state of one batch — closures, so the call graph can follow them. */
@@ -481,6 +499,7 @@ function batchRun(
   out: { inserted: Counts; updated: Counts; connections: { links: number; edges: number }; errors: BulkResult['errors'] },
 ) {
   let pending: Pending[] = [];
+  const inlines: InlineEdges[] = [];
   const targets = new Set<string>();
   const stale: Pending[] = [];
 
@@ -499,6 +518,21 @@ function batchRun(
     try {
       // The item's whole link set, including classes its kind cannot hold — refused here in the shared words.
       if (p.desired) await refuseLinks(view, p.kind, p.desired);
+      /*
+       * The item's own inline edges are refused WITH the item, before anything of it is planned or its key declared
+       * (`Q-170`): the record is written first and its edges after, so an edge refused only when it came to be
+       * planned left the record stored in a batch that reported the item failed. The same `edgeRefusal` the
+       * single-record doors ask before they write, against the batch's read set.
+       */
+      const subject = await connectionSubject(spaceId, p.kind, p.item, {
+        stored: p.addresses ? view.stored(p.kind, p.addresses) as { _id: string; type?: string } | null : null,
+        type: typeof p.item['type'] === 'string' ? p.item['type'].trim() : undefined,
+      });
+      if (subject) {
+        refuseEachEdge(connectionsOf(p.item, subject.id, p.kind).edges, (edge, passed) => {
+          edgeRefusal(spaceId, edge, view, subject, passed);
+        });
+      }
       const planned = await p.plan(view);
       entry = {
         plan: planned.plan, type, index: p.index, counted, isUpdate: planned.plan.op === 'converge',
@@ -513,7 +547,12 @@ function batchRun(
     push(entry, `${p.kind}:${entry.plan.id}`);
     // The item's own edges hang off the record just planned, and are written after it — the edge writes
     // `connectionsOf` derives, the same ones `applyConnections` makes after a single-record write.
-    for (const e of connectionsOf(p.item, entry.plan.id, p.kind).edges) {
+    const inlineEdges = connectionsOf(p.item, entry.plan.id, p.kind).edges;
+    if (inlineEdges.length > 0) {
+      entry.inline = { kind: p.kind, id: entry.plan.id, landed: [], failed: [] };
+      inlines.push(entry.inline);
+    }
+    for (const e of inlineEdges) {
       await planEdgeItem(e, type, p.index, p.item, null, entry);
     }
   }
@@ -554,23 +593,7 @@ function batchRun(
     const edgeFlags = parseRecordFlags(item);
     if (!edgeFlags.ok) return refuse(edgeFlags.error);
 
-    // The records both ends name, read now if the batch's one read did not (a `$ref` to a record addressed by id).
-    await view.load(fromKind === toKind
-      ? { records: { [fromKind]: [from, to] } }
-      : { records: { [fromKind]: [from], [toKind]: [to] } });
-    /*
-     * `F-27` item 2: under `strictLinkage` both ends must EXIST — the same condition the single-record doors
-     * use. A `$ref` that resolved names a record this batch writes, which the read set holds as written.
-     */
-    if (strict) {
-      for (const [id, kind, field] of [[from, fromKind, 'from'], [to, toKind, 'to']] as const) {
-        const refusal = missingRefsRefusal(spaceId, field, kind, view.missing(kind, [id]));
-        if (refusal) return refuse(refusal.message);
-      }
-    }
-    const after = pendingFor(fromRef.id && rawFrom !== from ? `${fromKind}:${from}` : undefined)
-      ?? pendingFor(toRef.id && rawTo !== to ? `${toKind}:${to}` : undefined);
-    await planEdgeItem({
+    const edgeInput: EdgeInput = {
       from, to, label,
       weight: typeof item['weight'] === 'number' ? item['weight'] : undefined,
       type: typeof item['type'] === 'string' ? item['type'] : undefined,
@@ -579,7 +602,23 @@ function batchRun(
       // The RESOLVED kinds, always (`Q-193`): a `$ref` to a fact is stored as a fact end even when the
       // caller stated no kind. Passing them only when typed stored such an end as an entity.
       opts: { ...edgeFlags.flags, fromKind, toKind, onValidation: warn('edge', i) },
-    }, 'edge', i, item, 'edges', after);
+    };
+    /*
+     * What the edge asks of the read set, read now if the batch's one read did not (a `$ref` to a record addressed by
+     * id), and then REFUSED by the one function every door asks — the schema and, under `strictLinkage`, both ends
+     * existing (`F-27` item 2; a `$ref` that resolved names a record this batch writes, which the read set holds as
+     * written). Before the batch commits anything for it: planning an edge whose triplet is already planned would
+     * commit what is pending first (`beforeTarget`), and an edge about to be refused must not cost that.
+     */
+    await view.load(edgeWant(spaceId, edgeInput));
+    try {
+      edgeRefusal(spaceId, edgeInput, view, undefined, []);
+    } catch (err) {
+      return refuse(itemReason(err));
+    }
+    const after = pendingFor(fromRef.id && rawFrom !== from ? `${fromKind}:${from}` : undefined)
+      ?? pendingFor(toRef.id && rawTo !== to ? `${toKind}:${to}` : undefined);
+    await planEdgeItem(edgeInput, 'edge', i, item, 'edges', after);
   }
 
   async function planEdgeItem(
@@ -597,9 +636,15 @@ function batchRun(
         plan: planned.plan, type, index, counted, isUpdate: planned.existed, want,
         replan: view => planEdge(spaceId, edgeInput, view),
         ...(after ? { after } : {}),
+        ...(counted === null && after?.inline ? { inline: after.inline } : {}),
       }, target);
     } catch (err) {
-      reject(type, index, counted === null ? undefined : item, itemReason(err));
+      if (counted !== null) { reject(type, index, item, itemReason(err)); return; }
+      // An item's own edge refused after its record was planned: the record is still written, so the row is kept to
+      // say so once the record's commit is known (`nameWhatLanded`).
+      const row: BulkError = { type, index, reason: itemReason(err) };
+      out.errors.push(row);
+      after?.inline?.failed.push(row);
     }
   }
 
@@ -669,26 +714,42 @@ function batchRun(
       e.result = { ok: false, reason: o.reason };
       return;
     }
+    if (e.inline && e.counted !== null) e.inline.recordLanded = o.ok;
     if (!o.ok) {
       e.result = { ok: false, reason: o.reason };
-      out.errors.push({ type: e.type, index: e.index, reason: o.reason });
+      const row: BulkError = { type: e.type, index: e.index, reason: o.reason };
+      out.errors.push(row);
+      if (e.counted === null) e.inline?.failed.push(row);
       if (e.key) refs.fail(e.key, o.reason);
       return;
     }
     e.result = { ok: true };
-    if (e.counted === null) out.connections.edges++;
+    if (e.counted === null) { out.connections.edges++; e.inline?.landed.push(e.plan.id); }
     else if (e.isUpdate) out.updated[e.counted]++;
     else out.inserted[e.counted]++;
     out.connections.links += o.linksAdded ?? 0;
     if (e.warning) out.errors.push({ type: e.type, index: e.index, reason: e.warning });
   }
-  return { planRecord, planTopLevelEdge, flush, replanStale };
+  /**
+   * Tell every failed inline edge of an item whose RECORD landed what did land (`Q-170`). Once the batch is done, because
+   * which edges landed is known only when the last of them has been committed; an item whose record did not land has
+   * nothing written to name and keeps its plain row.
+   */
+  function nameWhatLanded(): void {
+    for (const item of inlines) {
+      if (!item.recordLanded) continue;
+      for (const row of item.failed) row.written = writtenRecord(item.kind, item.id, item.landed);
+    }
+  }
+  return { planRecord, planTopLevelEdge, flush, replanStale, nameWhatLanded };
 }
 
 /** A planning refusal as a per-item reason. A schema refusal keeps the `schema_violation:` form the batch always used. */
 function itemReason(err: unknown): string {
-  if (err instanceof SchemaViolationError || err instanceof EdgeSchemaViolation) {
-    return `schema_violation: ${err.check.all.map(v => v.reason).join('; ')}`;
+  if (err instanceof SchemaViolationError) {
+    // An inline edge refused with its item says which edge (`edges[1]`) — the item has several and the reasons alone do not.
+    const at = err instanceof EdgeSchemaViolation && err.at ? `${err.at}: ` : '';
+    return `schema_violation: ${at}${err.check.all.map(v => v.reason).join('; ')}`;
   }
   return err instanceof Error ? err.message : String(err);
 }

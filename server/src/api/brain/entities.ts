@@ -15,13 +15,13 @@ import { mergeEntities, mergeRefusal, type PropertyResolution } from '../../brai
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { getConfig } from '../../config/loader.js';
-import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../../spaces/proxy.js';
+import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { UUID_V4_RE, webhookToken, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const entitiesRouter = Router();
@@ -118,14 +118,13 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   // must not.
   const shapeErr = shapeError('entity', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
-  // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
-  if (connErr) { res.status(400).json({ error: connErr }); return; }
-  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
-  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
-  await assertConnections(wt.target, 'entity', req.body);
-
   try {
+    // `F-27`: the one-call write — links and labelled edges together. The shape of the connection fields, a class this
+    // kind cannot hold, and — under strict linkage — an id that names nothing, and every inline edge the space's schema
+    // refuses: ONE call, BEFORE the record is written, or a refusal leaves a row; inside this `try`, so it is answered
+    // as the record's own refusal is.
+    await assertConnections(wt.target, 'entity',
+      await connectionSubject(wt.target, 'entity', req.body, { id: safeId, type: type.trim() }), req.body);
     // `waitForEmbedding` (default false): the vector is normally computed by the embedding queue moments
     // after this returns. Pass true when the caller will search for, scan, or compare what it just wrote —
     // a duplicate scan cannot pair records that have no vector yet.
@@ -166,12 +165,10 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
     if (contradicts && contradicts.length > 0) result['contradicts'] = contradicts;
     res.status(201).json(result);
   } catch (err) {
-    // The refusal the writer now raises, translated to this route's existing 400 shape. Caught before the
-    // generic handler so a schema violation never reads as an internal error.
-    if (err instanceof SchemaViolationError) {
-      res.status(400).json({ error: 'schema_violation', message: err.check.message, violations: err.check.all, introduced: err.check.introduced, preExisting: err.check.preExisting });
-      return;
-    }
+    // The refusal the writer — or the check before it — raises, answered as every record door answers it. Caught
+    // before the generic handler so a schema violation never reads as an internal error.
+    const refused = connectionRefusalAnswer(err, 'create');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
     // The body stays flat and generic — `public-probes-leak-nothing.test.js` pins that, and a write route is
     // the last place to start echoing an exception back. The operator gets the cause; the caller gets a code.
     sendCaughtFailure(res, 'brain POST /spaces/:spaceId/entities', err);
@@ -373,25 +370,19 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
      */
     // Snapshot for the audit change list, from the read above — see the note in facts.ts.
     // `properties` is deliberately not allowlisted, so handing the record over cannot publish it.
-    // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
-    await assertConnections(mid, 'entity', req.body);
-
     let updated;
     let updateCheck: UpdateValidation | undefined;
     try {
+      // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
+      // changed — and only now that the record is found (a missing one is the `404` below, not the edge's refusal), by
+      // the schema of the member that HOLDS it, and judged by the type this patch leaves it.
+      await assertConnections(mid, 'entity',
+        await connectionSubject(mid, 'entity', req.body, { stored: existing, type: updates.type }), req.body);
       updated = await updateEntityById(mid, id, updates, dfPaths, webhookToken(req), ttlDaysFromBody(req.body), ifMatch.seq,
         c => { updateCheck = c; });
     } catch (err) {
-      if (err instanceof SchemaViolationError) {
-        res.status(422).json({
-          error: 'schema_violation',
-          message: err.check.message,
-          violations: err.check.all,
-          introduced: err.check.introduced,
-          preExisting: err.check.preExisting,
-        });
-        return;
-      }
+      const refused = connectionRefusalAnswer(err, 'update');
+      if (refused) { res.status(refused.status).json(refused.body); return; }
       throw err;
     }
     if (updated) {

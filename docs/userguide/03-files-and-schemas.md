@@ -228,14 +228,20 @@ one pairing, make a second label — that is what the two labels are for.
 
 **A new link that breaks the rule is refused.** Whichever way it arrives — the app, the API, an AI assistant,
 or a bulk import — the write is turned away and the message says which end is wrong and what the label does
-accept. If the space is set to *warn* rather than *strict*, it is written and reported instead.
+accept. If the space is set to *warn* rather than *strict*, it is written and reported instead. That includes an
+edge sent together with its record in one call: the record is not saved either, and the message says which edge was
+refused.
+
+**A missing end is refused too, when the space's *Strict linkage* is on.** An edge whose far end is not there — an
+entity, a fact, a chrono entry or a file — is turned away the same way, however it arrives, and nothing is saved.
+With *Strict linkage* off the edge is stored anyway (see **Strict linkage** under Space settings).
 
 **Nothing is deleted or refused retroactively.** Declaring a rule on a label you have already used does not touch
 the links you already have, and it does not lock them: you can still edit a link that breaks the rule, as long as
 your edit does not change the ends. So a rule can never make an existing record impossible to maintain. To find
 out which links break a new rule, use **Validate** on the space's Schema tab: it lists each one and which end is
 wrong. A link pointing at something that no longer exists is reported separately, as a dangling link, and not as
-a wrong type — and for the same reason it is not refused when written.
+a wrong type; whether it is refused when written is the space's *Strict linkage* setting, not this rule.
 
 **Both are set on the Schema tab**, under **Permitted ends** when an edge type is selected. Two lists — the
 types allowed at the **From** end and at the **To** end — and a checkbox for the cardinality. A list you leave

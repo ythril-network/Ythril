@@ -89,7 +89,9 @@ describe('every create door offers the connections, through the one module', () 
        * Either is correct for its surface — what is not correct is neither.
        */
       const src = code(door);
-      const refuses = /connectionInputError\(/.test(src);
+      // `assertConnections` asks `connectionInputError` itself (the shape, then the rest), so a REST door that calls it
+      // refuses a malformed connection field — and cannot drop that half by forgetting a second call.
+      const refuses = /\b(?:assertConnections|connectionInputError)\(/.test(src);
       const declares = /connectionSchemas\(/.test(src);
       assert.ok(refuses || declares,
         `${door} applies connections but neither validates them (REST) nor declares them (MCP). On MCP an `
