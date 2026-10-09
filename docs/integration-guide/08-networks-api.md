@@ -63,7 +63,9 @@ GET /api/networks
 GET /api/networks/:id
 ```
 
-Returns one network object (same shape as entries in `GET /api/networks`).
+Returns one network object (same shape as entries in `GET /api/networks`). A network body carries no credential and no
+vote rounds: an open join round holds the invite key's hash, so rounds are read on `GET /api/networks/:id/votes` (since
+5.6.10; before it, `pendingRounds` was part of the body).
 
 **Response** `200` on success, `404` when the network does not exist or you may not see it.
 
