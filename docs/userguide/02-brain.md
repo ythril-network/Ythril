@@ -173,6 +173,13 @@ three different kinds of record, from one file.
 > fact endpoint shows its fact, a chrono endpoint its title, a file endpoint its path. Pickers for the other
 > three kinds are not in this release.
 
+**An agent or the API can save a record together with its edges, and a refused edge stores nothing.** If one of the
+edges is refused — a relationship name the schema does not allow, or, in a space with the strict reference setting on,
+an end that does not exist — the record is not saved either, and the refusal says which edge. A space with the strict
+reference setting off (**Strict linkage** on the space's Schema tab) saves the edge to a missing end anyway. If a
+failure comes after the record was stored, the answer says so and names the record: do not save it again, add its
+missing relationships to it instead.
+
 **Searching:** The top search bar is **Semantic** (ranks edges by meaning), same as Facts. Plain-text matching (label / endpoint names) is the **freetext box under the Relation column**.
 
 **Creating an edge:** Click **+ Add edge**. Use the entity pickers to select the source and target, choose or type a label, and click **Save**.

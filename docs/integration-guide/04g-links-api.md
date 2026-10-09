@@ -45,11 +45,12 @@ things is one request rather than four:
 Each takes the ids you want attached. **A class you NAME is replaced wholesale and a class you omit is left
 alone** — so `linkEntities: []` detaches every entity and leaves the fact links untouched, and there is no
 add-only trap. Under `strictLinkage` every id must resolve, and the call is refused rather than storing a
-link that points at nothing.
+link that points at nothing. A refused id stores nothing — the record included — and so does a refused entry of the
+same call's `edges` ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
 
 **The 4.x spelling is REFUSED, by name.** A body carrying `entityIds`, `memoryIds` or `chronoIds` gets a
 `400` naming the field to send instead — the same sentence on both doors, and the ids do not change. The
-call is refused whole, so a record never lands without the connections it asked for. `[]` and `null` are
+call is refused whole, so a body carrying one stores nothing. `[]` and `null` are
 refused too: a present key is a write, and the call that meant "detach everything" is the one that must not
 be read as "said nothing".
 

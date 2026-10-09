@@ -31,6 +31,10 @@ anything an agent writes is retried.
 | **chrono** | **not idempotent** | same |
 | **entity** | **not idempotent** | same; reconcile by `name` if your space treats names as unique |
 
+**An answer carrying `written` is not a failed create.** It means the record was stored and a later step — its
+connections — failed, so the create must not be sent again, whatever the status; its `retryable` is `false`. See
+[A refused connection writes nothing](#a-refused-connection-writes-nothing).
+
 ### Identity is server-generated
 
 **You cannot choose a record's id.** `id` on a create names an **existing** record to update; an id that matches
@@ -120,7 +124,9 @@ space-relative paths; the other three take UUIDs.
 >
 > A connection is a record in the space's `links` collection and nothing else, so an ordinary edit of a fact
 > cannot drop a link somebody else made. **A body carrying one of the old fields is REFUSED** whole, with the
-> new field named in the message, so a record never lands without the connections it asked for.
+> new field named in the message, so a body naming one stores nothing. What else a connection can be refused for,
+> and what a failure after the record was stored answers, is in
+> [A refused connection writes nothing](#a-refused-connection-writes-nothing).
 
 ```json
 {
@@ -163,10 +169,44 @@ or the `delete_edge` tool.
 identities are minted server-side. That case is `save_bulk`, which takes `entities` and `edges` in one
 payload.
 
-**A reference that names nothing is refused**, not stored — the same rule the rest of the API applies, so a
-dangling relationship cannot be created by accident. One exception worth knowing: a UUID is a legal
-filename, so a `toKind: "file"` end holding an entity id is not a *shape* error. It is caught by the
-existence check instead, which is why that check is not optional.
+**On a space with `strictLinkage` (the default), a far end that names nothing is refused**, not stored — the same
+rule the rest of the API applies, so a dangling relationship cannot be created by accident. It holds for a far end
+of every kind (`toKind` entity, fact, chrono or file). A space with `strictLinkage: false` stores it, for staged
+imports whose targets arrive in a later pass; see [Reference integrity](12-admin-api.md#reference-integrity). One
+thing worth knowing under strict: a UUID is a legal filename, so a `toKind: "file"` end holding an entity id is not
+a *shape* error. It is caught by the existence check instead, which is why that check is not optional.
+
+#### A refused connection writes nothing
+
+**A connection that cannot be honoured is refused before the record is written, and then nothing is stored** — not
+the record, and not the entries of `edges` that came before the bad one. An `edges` entry is judged as the same edge
+sent to `POST …/edges` would be: its label and end types against the space's schema, the second target of a
+`functional` label (counting the other entries of the same body) and, on a space with `strictLinkage`, whether its far
+end exists. The refusal names the entry — `edges[1].to` — so a body with several faults is corrected in one pass. A
+`link*` id that names nothing is refused the same way.
+
+**The status is the one the record's own schema refusal has on that verb.** A `POST` answers `400` and a `PATCH`
+answers `422`, both with the body documented under [Schema Validation](06a-schema-api.md#schema-validation); an MCP
+tool answers a structured `schema_violation` ([MCP](16-mcp.md)). On an update, a record that does not exist is `404`
+before any of this, and the refusal comes before an `If-Match` `412`. A malformed body (an id that is not a UUID, a
+retired field) is a `400` on every verb. Under `validationMode: warn` a schema rule is reported as a warning and the
+write proceeds, as for every other schema rule; `strictLinkage` is its own switch.
+
+**What this does not cover is the window after the record is stored.** A single-record write stores the record, then
+its edges — an edge needs both ends — and the two are not one transaction. If the store fails in between, or a far
+end is deleted between the check and the write, the record exists and some of its edges may not. That answer says so,
+with the status of the underlying failure and:
+
+```json
+{ "error": "…", "retryable": false,
+  "written": { "kind": "entity", "id": "3f2b1c9e-…", "edges": ["b81c0e5a-…"] } }
+```
+
+`written` names the record and the edges that DID land. It is never `retryable` and carries no `Retry-After`, **even
+when the status is a `503`**: a create sent again without an id stores a second record. Send the edges that did not
+land as an update to `written.id`; an edge you send again that had landed is upserted, not duplicated. An MCP tool
+carries the same object in `structuredContent`, and on `/bulk` and `save_bulk` it rides on the failed item's row in
+`errors` ([Bulk](04d-brain-ops-api.md)).
 
 #### A batch that connects what it creates
 
@@ -240,9 +280,12 @@ refusal names the top-level `edges` array, which runs after every record array a
 anything in the call.
 
 **A connection that cannot be honoured is refused before the record is written.** An `edges` entry with no
-label, or a link class the record's kind cannot hold, is reported against that item's index and the record
-does not exist afterwards. The alternative is an error plus a row you did not ask for, which on a batch of
-five hundred is worse than either.
+label, a label or end the space's schema refuses, a far end that does not exist on a `strictLinkage` space, or a
+link class the record's kind cannot hold, is reported against that item's index, names the entry (`edges[1]`), and
+the record does not exist afterwards. The alternative is an error plus a row you did not ask for, which on a batch
+of five hundred is worse than either. The one case outside that is a failure after the record was stored: the
+item's row then carries `written` and is not to be sent again as a create
+([A refused connection writes nothing](#a-refused-connection-writes-nothing)).
 
 **What each kind may hold is the link vocabulary's answer, not this door's.** An entity holds no link
 classes — it is only ever the far end of one — and it still takes `edges`, because a labelled relationship

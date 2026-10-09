@@ -27,6 +27,11 @@ On connect, the server sends global instructions listing all available space IDs
 > fix the patch. `preExisting` means the stored record already violated the schema there and your write
 > neither caused nor fixed it.
 >
+> **A refused inline edge is this same shape.** `save_entity`, `save_fact`, `save_chrono` and their `update_*` twins
+> judge `edges` before the record is written: a refusal is a structured `schema_violation` whose `field` names the
+> entry (`edges[0].to`), and nothing is stored, the record included. On an update, a record that does not exist is
+> refused as not found first.
+>
 > **In a `strict` space, only `introduced` blocks the write.** A violation the record already had is reported and
 > does not refuse your patch: it is already stored, so refusing would not improve the data — it would only stop the
 > record being maintained. Until 3.1 both kinds blocked, which meant tightening a schema made every record that no
@@ -55,6 +60,12 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and no status, so the classification lives in `structuredContent` instead.
+>
+> **Except when the answer carries `written`.** A tool that stores a record and then its inline `edges` can fail in
+> between. The result is then `isError` with `retryable: false` and `written: { kind, id, edges }` — the record that was
+> stored and the edges that landed — whatever the cause, a store failure included. Do not retry it as a create: that
+> stores a second record. Send the missing edges as an update to `written.id`. See
+> [A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing).
 >
 > Why it matters more than a clearer message: these used to fail as a tool error ending mid-sentence at `caused by ::`,
 > so a fleet built around "continue on error" ran on with no context — **one call in six across fourteen agents,
@@ -316,8 +327,8 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 |---|---|
 | `help` | Self-documenting system guide — the knowledge model, how to choose between `query` / `recall` / filtered recall, schema authoring, and the tools available to the calling token. Read-only, no `space` needed; scoped to the token so it never lists tools the token can't call. **Pass `query` to get only the matching sections** instead of the whole guide — a tool name returns just that tool's line, not the whole list. Matching is plain keyword (**all** words must appear) and **never semantic**, deliberately: `help` is the tool that must work when the embedder does not. A query matching nothing returns the **section index** rather than an empty answer, and `structuredContent.sections` always lists the ids and titles so a caller can see what there is to ask for |
 | `list_spaces` | List accessible space IDs with purposes and entry counts (facts, entities, edges, chrono). `purpose` is the space-level directive; `description` is returned alongside as its deprecated alias, always the same text |
-| `save_fact` | Store a fact with optional tags and entity links |
-| `update_fact` | Update an existing fact's fact, tags, entity links, or delete specific fields via `deleteFields`; `suppressEmbeddings` retires it from semantic search |
+| `save_fact` | Store a fact with optional tags, links (`linkEntities`, …) and labelled `edges`; a connection the space refuses stores nothing, the fact included |
+| `update_fact` | Update an existing fact's fact, tags, links or `edges` (a refused one is a `schema_violation` and changes nothing), or delete specific fields via `deleteFields`; `suppressEmbeddings` retires it from semantic search |
 | `delete_fact` | Delete a fact by ID |
 | `recall` | Semantic search across all knowledge types (facts, entities, edges, chrono entries, files). Searches the specified `space`; omit `space` to search across all accessible spaces |
 | `query` | Structured MongoDB filter query (read-only) — supports `facts`, `entities`, `edges`, `chrono`, and `files` collections |
@@ -325,8 +336,8 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `read_spill` | Read the part of a `recall` or `similar` answer that did not fit — `remainder.spillId`, the matches past the budget, kept only with `remainderDump: true` (an older answer's `graphComplete.spillId` stays readable until it expires). `{id, skip?, maxChars?, maxBytes?, maxTokens?}`, no `space`, paged exactly like a search: whole items, `truncated`, `nextSkip`. **Only the token that ran the search can read it**, while it still holds knowledge read on every space whose records are inside; anyone else, an unknown id and an expired one get the same "not found". Lives up to one day and may be evicted earlier by the token's own newer spills. Nothing about a spill is written into any space. The REST half is `GET /api/brain/spills/:id` — see [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill) |
 | `space_stats` | Return counts of facts, entities, edges, chrono entries, and files |
 | `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, `reindexRun` ({running, remaining, failed}), and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0. `reindexRun.running` is the field to poll after `space_reindex`, which returns as soon as the run starts; recall in the space refuses while `needsReindex` is true. Counts and `actualSchema` are current as of the last committed write, and cheap to read again. A schema-library type carries its `$ref` AND the entry's definition side by side; sent back as it came, the link is kept, and an edited field beside a `$ref` is a `400` naming it. **`resolve`** (default `true`, the same on REST `GET /api/spaces/:id/meta?resolve=`): `false` returns only the stored `{ $ref }` |
-| `save_entity` | Create or update a named entity (with optional properties) |
-| `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
+| `save_entity` | Create or update a named entity (with optional properties and labelled `edges` to records that already exist; a refused edge stores nothing, the entity included) |
+| `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `edges`, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking. With `cascadeToken` (from `delete_entity_preview`) it removes the blocking edges too, a chunk at a time with each chunk's delete and tombstones in one transaction, then the entity; a fact, chrono entry or file that still names the entity refuses the cascade before anything is removed |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
 | `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts, in one transaction. An unresolved conflict plan comes back as an error result (`422` on `POST /api/graph_merge`; the REST merge route answers the same plan `409`). Refused before anything is written: `422 merge_too_large` past the merge bound — the absorbed entity's edges, links and face labels together, stated in [04b](04b-graph-api.md#merge-two-entities) — with `relinks` and `bound` in `structuredContent`, `400` when the merged survivor would break a `strict` space's schema |
@@ -336,8 +347,8 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_link` | Record that one record CONCERNS another — a fact about an entity, a file about a chrono entry. Six classes, no label and no weight: an edge says how two things relate, a link says only that one is about the other. The id is derived from the connection, so re-running it is a no-op |
 | `delete_link` | Remove one link by ID. Clears the array entry too, so nothing is left claiming the connection |
 | `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops. Chrono entries referencing a reached node come back too, marked `kind: "chrono"` (`includeChrono: false` for entity-only); `includeMemories: true` reaches facts the same way (opt-in — they are numerous and count against `limit`); `includeFiles: true` reaches files, returning **file meta only** — path, description, tags, never passage text, and one node per file rather than per chunk; `includeEdges: false` drops the edge list from the answer without changing the walk |
-| `save_chrono` | Create a chrono entry (the five built-in types, or the space's own declared chrono types, which replace them) |
-| `update_chrono` | Update an existing chrono entry, including `suppressEmbeddings`. Requires at least one field beyond `id` |
+| `save_chrono` | Create a chrono entry (the five built-in types, or the space's own declared chrono types, which replace them); takes labelled `edges` like `save_entity`, and a refused one stores nothing |
+| `update_chrono` | Update an existing chrono entry, including `edges` (upserted) and `suppressEmbeddings`. Requires at least one field beyond `id` |
 | `delete_chrono` | Delete a chrono entry by ID |
 | `save_bulk` | Batch-upsert facts, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `ingest` | Turn a conversation into records — entities, claims, dated events, edges and transcripts. Answers at once with a `runId`; see [Ingest API](04i-ingest-api.md) |
@@ -462,79 +473,10 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 
 ### Duplicate Detection on Insert
 
-The `save_fact`, `save_entity` and `save_chrono` tools run a **semantic near-duplicate check** before storing, using the same embedding the new record is stored with — so it costs a vector search, not a re-embed. When a highly similar record already exists, the tool's response flags it (id, a short summary, and the cosine score) so an agent can update or merge the existing record instead of accumulating redundant ones:
-
-```text
-Stored fact (seq 1284, ID 7f3c…).
-⚠️ Possible duplicate — 1 existing fact is highly similar: "The Vault service stores secrets and rotates auth tokens" (ID 9a1b…, 0.97). This fact was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.
-```
-
-#### It sees the batch you are writing
-
-The check reads **two** places, and the second one matters if your agent writes several related records in
-one turn. The vector index is eventually consistent — a record committed a second ago is not in it yet — so
-a check that read only the index could never warn you about a sibling from the same batch. Every duplicate
-warning named an older record, and none ever named the one you had just written, which is precisely when
-duplicates get created.
-
-So the check also scores the space's **most recently written records straight from the collection**. Two
-bounds keep that off your latency budget, both settable if your write rate needs different ones:
-
-| variable | default | what it bounds |
-|---|---|---|
-| `DUPE_FRESH_WINDOW_MS` | `180000` | how far back it reads. `0` disables this half — index only, the pre-2.5 behaviour |
-| `DUPE_FRESH_SCAN_CAP` | `200` | the most records one check scores this way, whatever the window says |
-
-The cost is proportional to how much the space is actually churning, not to how large it is: measured on
-20,000 records at 768 dimensions, **~9 ms** when nothing was written recently and **~52 ms** when the window
-is full. A space sustaining more writes than the cap covers logs a warning naming the cap, so a truncated
-scan never quietly reads as a complete one.
-
-#### Contradiction warning on insert
-
-`checkContradictions` (default **off**) asks a different question of the same neighbours: not *"is this
-redundant?"* but *"does this conflict with what we already believe?"*. When a near-neighbour sets the same
-single-valued property to a different value, the response names the property and **both** values:
-
-```text
-Stored fact (seq 1290, ID 4c2e…).
-⚠️ Contradiction — 1 existing fact disagrees with this one: "Vault runs in the eu-west cluster" (ID 9a1b…: region eu-west vs us-east). This fact was still stored. If you are correcting an outdated fact, update or supersede the record above instead of leaving both.
-```
-
-Three deliberate limits:
-
-- **It is its own flag**, not a rider on `checkDuplicates` — a caller may well want the conflict check
-  without the redundancy check. One neighbour search serves both when both are on.
-- **Deterministic only.** The entailment (NLI) judge is a model call *per pair*; on the write path that
-  would add latency to every insert and, with an external endpoint, send record text off the instance on
-  every insert. The nightly scanner runs the NLI pass over the same pairs, so nothing is lost — this is a
-  fast-path courtesy, not the safety net.
-- **It never blocks the write.** An agent correcting an outdated fact *should* be able to contradict the
-  record it supersedes; the point is to tell it, not to stop it.
-
-Available on `save_fact`, `save_entity` and `save_chrono`. **Not** on edges or files: edge writes are the
-bulk path (imports, peer sync, subgraph building) where a per-insert vector search would be felt most, and a
-file record "disagreeing" with another is not a meaningful claim.
-
-#### What counts as a claim
-
-The check compares **single-valued claims**. For facts and entities those are the entries in
-`properties`. A **chrono** entry additionally claims its **`status`** — one entry saying an event
-`completed` and a near-identical one saying it was `cancelled` is a genuine conflict, and because status is
-part of a chrono entry's embedded text, a pair similar enough to be flagged *while disagreeing about it* is
-near-certainly the same event logged twice.
-
-A chrono entry's **`startsAt`/`endsAt` are deliberately excluded.** The dates are not embedded, so two
-hand-logged occurrences of a repeating event ("Team sync", every Monday) reach ~1.0 similarity with
-different dates *every time*. Reporting those would fill the review queue with the one thing that is
-certainly not a contradiction — and a pair that similar is already reported by the duplicate scanner, so it
-would also be the same two records named twice under two different headings.
-
-- **The write always succeeds** — the check is advisory, never blocking. It also never fails an insert: if vector search is unavailable or the space needs reindexing, the check is silently skipped.
-- **Default on** for all three tools. Pass `checkDuplicates: false` to skip it, or `dupeThreshold` (0–1, default ~0.92) to tune sensitivity — lower flags looser matches.
-- For `save_entity` the check fires only on a **new insert** (no `id`, or an `id` that does not yet exist), not on updates.
-- Because `$vectorSearch` has indexing latency, a record inserted moments earlier may not yet be visible to the check — duplicates are detected against the already-indexed corpus.
-- Not applied by `save_bulk` (it would add a search per item); use single-item `save_fact`/`save_entity` when you want duplicate feedback.
+The `save_fact`, `save_entity` and `save_chrono` tools run a semantic near-duplicate check before storing, and
+`checkContradictions` adds a conflict check over the same neighbours. Both are advisory and never block the write.
+The reference — the flags, how fresh writes are seen, what counts as a claim — is
+[Duplicate Detection on Insert](14-duplicates-and-webhooks.md#duplicate-detection-on-insert).
 
 ### Example: recall
 

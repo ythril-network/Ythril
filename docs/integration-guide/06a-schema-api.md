@@ -268,7 +268,7 @@ Each space can define a schema in its `meta` block that governs what data is acc
 |------|-----------|
 | `off` | No validation. All writes accepted. This is what an **absent** `validationMode` resolves to. |
 | `warn` | Violations are returned as `warnings` in the response but writes proceed. |
-| `strict` | Violations cause a `400` with `{ "error": "schema_violation", "violations": [...] }`. |
+| `strict` | Violations refuse the write with `{ "error": "schema_violation", "violations": [...] }` — `400` on a REST create, `422` on a REST update (below). |
 
 > **A space you create is `strict`, not `off`.** New spaces are seeded with `validationMode: "strict"`
 > and `strictLinkage: true`. Only a space whose meta never had the field — one created before those
@@ -279,7 +279,7 @@ Each space can define a schema in its `meta` block that governs what data is acc
 **Every write validates the record as it will be.** A `PATCH` (and the matching `update_*` MCP tool)
 validates the **merged** result — the stored record with your patch applied — not the patch on its own.
 Validating the fragment would fail every partial update that does not restate every required property, so
-the answer would be meaningless. In `strict` mode a violating update is refused with `422`:
+the answer would be meaningless. In `strict` mode a violating update is refused with `422` (the same body on a create is a `400`):
 
 ```json
 {
@@ -290,6 +290,11 @@ the answer would be meaningless. In `strict` mode a violating update is refused 
   "preExisting": []
 }
 ```
+
+**An inline `edges` entry is judged by the same rules and refused in the same shape**, with the record's own status for
+that verb, `field` naming the entry (`edges[0].to`), and nothing stored — the record included. A record that does not
+exist is `404` before it, and it comes before an `If-Match` `412`. A write that fails after the record was stored is not
+a refusal and says so: [A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing).
 
 `introduced` and `preExisting` are the same violations, split by **whose fault they are**:
 
@@ -421,7 +426,7 @@ What the schema enforces:
 | Field | Description |
 |-------|-------------|
 | `typeSchemas` | Per-type schema definitions (see above). **The PATCH merge is exactly two levels deep, and the second one REPLACES.** A knowledge type you do not mention is preserved; a *type name* you do not mention inside one is preserved; but a type name you **do** mention has its definition object **replaced wholesale**, not merged. So `PATCH {"meta":{"typeSchemas":{"chrono":{"event":{"retention":{"days":90}}}}}}` leaves `entity` and every other chrono type untouched — and wipes `event`'s own `propertySchemas`, `namingPattern` and `tagSuggestions`. **Read the type first and send it back complete.** Deleting a type needs `PUT /:id/schema` (full replace), because under merge semantics an absent type is indistinguishable from a removed one. |
-| `strictLinkage` | When `true`, every reference — an edge's `from`/`to`, and the ids in `linkEntities`, `linkFacts` and `linkChronos` — must be a valid UUID v4 naming a record that exists, and entity deletion is blocked while inbound backlinks exist. **Default: `true`** — and an absent value also resolves to `true`. Turning it off is a deliberate per-space choice to accept dangling references (the case it exists for is bulk import, where targets are resolved in a later pass); you do not get that by saying nothing. |
+| `strictLinkage` | When `true`, every reference — an edge's `from`/`to` (the far end of an inline `edges` entry on a record write included, of whichever kind its `toKind` names), and the ids in `linkEntities`, `linkFacts` and `linkChronos` — must be a valid UUID v4 naming a record that exists, and entity deletion is blocked while inbound backlinks exist. **Default: `true`** — and an absent value also resolves to `true`. Turning it off is a deliberate per-space choice to accept dangling references (the case it exists for is bulk import, where targets are resolved in a later pass); you do not get that by saying nothing. |
 | `whenDuePasses` | **Chrono only.** What a PASSED due moment means across this space, for chrono types whose own schema is silent: `overdue` (the built-in behaviour) or `nothing`, which returns the STORED status. The OUTER tier of **schema > space** — a chrono type schema that states a value overrides it, and absent here is the built-in behaviour, so an instance that sets nothing sees no change. Set `nothing` on a space whose chrono entries mostly record events that happened — a deploy, a backup run, an alert episode — where a past date is the normal condition and does not mean late, then override per type where a real deadline lives. See [the chrono API](04c-chrono-api.md). |
 | `suppressEmbeddings` | When `true`, records in this space are **not embedded**, so they never appear in semantic recall. **Default: `false`** — suppression is opt-in. This is the LOWEST of three tiers, all three spelled the same: a per-record `suppressEmbeddings` wins, then a type's own `suppressEmbeddings`, then this. (The record tier was called `excludeFromVectorSearch` before 3.1.0; 4.0 removed that spelling and sending it is now refused.) A type schema that says nothing falls through to this value rather than overriding it with `false`. Intended for records that are **state rather than prose** — a row whose text never changes but whose numbers are patched constantly, which would otherwise re-embed identical text on every write. **Switching it off does not backfill on its own** — records written while it was on have no vector and nothing revisits them. Run [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) afterwards to queue the missing ones. |
 | `purpose` | Short description of the space (max 4000 chars). Returned by `space_meta`. |
@@ -459,10 +464,12 @@ records can ever be edge endpoints, so it cannot later be read as a type name th
 **`functional: true` means one `to` per `(from, label)`.** Not per `(from, to)` — that is already guaranteed by
 edge identity — and not per `to`, which is the inverse relation and has its own name.
 
-**Where the rules are enforced.** A write that would break either one is **refused**, on every door — the two
-edge routes, `save_edge`, `update_edge`, and per item through `/bulk`. The violation names `fromType`, `toType`
-or `functional` as its field, and the reason says which types the label admits. In a `warn` space it is reported
-in the response instead of refused, like every other schema rule.
+**Where the rules are enforced.** A write that would break either one is **refused**, on every door that creates or
+edits an edge — the two edge routes, `save_edge`, `update_edge`, per item through `/bulk`, and the inline `edges` of
+an entity, fact or chrono write (refused before the record is written, so nothing is stored). The violation names
+`fromType`, `toType` or `functional` as its field, and the reason says which types the label admits. In a `warn`
+space it is reported in the response instead of refused, like every other schema rule. An edge that arrives from a
+sync peer or an import is stored as it was written, and a merge reports instead of refusing.
 
 **A rule you declare later does not freeze the edges you already have.** Refusal is on what a write INTRODUCES:
 if a stored edge already breaks the rule, an edit that leaves the ends alone still goes through, so declaring a

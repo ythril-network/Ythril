@@ -4,7 +4,7 @@
 
 ## Duplicate Scanner & Action Rules
 
-A background scanner can sweep a space for **semantically duplicate** records and act on them according to per-space rules. It complements the interactive insert-time check ([Duplicate Detection on Insert](16-mcp.md#duplicate-detection-on-insert)) but is independent of it: the scanner finds duplicates among **all** records — including those inserted with `checkDuplicates` off — and re-evaluates a pair whenever either record changes (a **dismissed** pair re-opens only when its content materially changes, not on a bare re-embed/re-sync — see below).
+A background scanner can sweep a space for **semantically duplicate** records and act on them according to per-space rules. It complements the interactive insert-time check ([Duplicate Detection on Insert](#duplicate-detection-on-insert)) but is independent of it: the scanner finds duplicates among **all** records — including those inserted with `checkDuplicates` off — and re-evaluates a pair whenever either record changes (a **dismissed** pair re-opens only when its content materially changes, not on a bare re-embed/re-sync — see below).
 
 **Off by default.** Enable it in `config.json`:
 
@@ -302,11 +302,87 @@ settled question is expensive.
 
 **What the sweep covers.** Facts, entities and **chrono** entries. For a chrono pair the structured pass
 compares the stored `status` as well as `properties` — the dates are deliberately not compared, for the
-reason given under [Duplicate Detection on Insert](16-mcp.md#what-counts-as-a-claim). Edges are excluded until edge
+reason given under [Duplicate Detection on Insert](#what-counts-as-a-claim). Edges are excluded until edge
 labels can declare which relations are single-valued (without that, `knows` / `mentions` / `related-to` all
 read as conflicts), and file *records* are excluded permanently.
 
 > **Cost note:** the initial full scan of a large existing space is O(N) vector searches — inherently the expensive part. It is bounded per run (`maxPerRun`) and runs off-hours; steady-state runs only touch new or edited records. Keep `notify` rules and automation idempotent, since an edited record re-fires its pair's action.
+
+### Duplicate Detection on Insert
+
+The `save_fact`, `save_entity` and `save_chrono` tools run a **semantic near-duplicate check** before storing, using the same embedding the new record is stored with — so it costs a vector search, not a re-embed. When a highly similar record already exists, the tool's response flags it (id, a short summary, and the cosine score) so an agent can update or merge the existing record instead of accumulating redundant ones:
+
+```text
+Stored fact (seq 1284, ID 7f3c…).
+⚠️ Possible duplicate — 1 existing fact is highly similar: "The Vault service stores secrets and rotates auth tokens" (ID 9a1b…, 0.97). This fact was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.
+```
+
+#### It sees the batch you are writing
+
+The check reads **two** places, and the second one matters if your agent writes several related records in
+one turn. The vector index is eventually consistent — a record committed a second ago is not in it yet — so
+a check that read only the index could never warn you about a sibling from the same batch. Every duplicate
+warning named an older record, and none ever named the one you had just written, which is precisely when
+duplicates get created.
+
+So the check also scores the space's **most recently written records straight from the collection**. Two
+bounds keep that off your latency budget, both settable if your write rate needs different ones:
+
+| variable | default | what it bounds |
+|---|---|---|
+| `DUPE_FRESH_WINDOW_MS` | `180000` | how far back it reads. `0` disables this half — index only, the pre-2.5 behaviour |
+| `DUPE_FRESH_SCAN_CAP` | `200` | the most records one check scores this way, whatever the window says |
+
+The cost is proportional to how much the space is actually churning, not to how large it is: measured on
+20,000 records at 768 dimensions, **~9 ms** when nothing was written recently and **~52 ms** when the window
+is full. A space sustaining more writes than the cap covers logs a warning naming the cap, so a truncated
+scan never quietly reads as a complete one.
+
+#### Contradiction warning on insert
+
+`checkContradictions` (default **off**) asks a different question of the same neighbours: not *"is this
+redundant?"* but *"does this conflict with what we already believe?"*. When a near-neighbour sets the same
+single-valued property to a different value, the response names the property and **both** values:
+
+```text
+Stored fact (seq 1290, ID 4c2e…).
+⚠️ Contradiction — 1 existing fact disagrees with this one: "Vault runs in the eu-west cluster" (ID 9a1b…: region eu-west vs us-east). This fact was still stored. If you are correcting an outdated fact, update or supersede the record above instead of leaving both.
+```
+
+Three deliberate limits:
+
+- **It is its own flag**, not a rider on `checkDuplicates` — a caller may well want the conflict check
+  without the redundancy check. One neighbour search serves both when both are on.
+- **Deterministic only.** The entailment (NLI) judge is a model call *per pair*; on the write path that
+  would add latency to every insert and, with an external endpoint, send record text off the instance on
+  every insert. The nightly scanner runs the NLI pass over the same pairs, so nothing is lost — this is a
+  fast-path courtesy, not the safety net.
+- **It never blocks the write.** An agent correcting an outdated fact *should* be able to contradict the
+  record it supersedes; the point is to tell it, not to stop it.
+
+Available on `save_fact`, `save_entity` and `save_chrono`. **Not** on edges or files: edge writes are the
+bulk path (imports, peer sync, subgraph building) where a per-insert vector search would be felt most, and a
+file record "disagreeing" with another is not a meaningful claim.
+
+#### What counts as a claim
+
+The check compares **single-valued claims**. For facts and entities those are the entries in
+`properties`. A **chrono** entry additionally claims its **`status`** — one entry saying an event
+`completed` and a near-identical one saying it was `cancelled` is a genuine conflict, and because status is
+part of a chrono entry's embedded text, a pair similar enough to be flagged *while disagreeing about it* is
+near-certainly the same event logged twice.
+
+A chrono entry's **`startsAt`/`endsAt` are deliberately excluded.** The dates are not embedded, so two
+hand-logged occurrences of a repeating event ("Team sync", every Monday) reach ~1.0 similarity with
+different dates *every time*. Reporting those would fill the review queue with the one thing that is
+certainly not a contradiction — and a pair that similar is already reported by the duplicate scanner, so it
+would also be the same two records named twice under two different headings.
+
+- **The write always succeeds** — the check is advisory, never blocking. It also never fails an insert: if vector search is unavailable or the space needs reindexing, the check is silently skipped.
+- **Default on** for all three tools. Pass `checkDuplicates: false` to skip it, or `dupeThreshold` (0–1, default ~0.92) to tune sensitivity — lower flags looser matches.
+- For `save_entity` the check fires only on a **new insert** (no `id`, or an `id` that does not yet exist), not on updates.
+- Because `$vectorSearch` has indexing latency, a record inserted moments earlier may not yet be visible to the check — duplicates are detected against the already-indexed corpus.
+- Not applied by `save_bulk` (it would add a search per item); use single-item `save_fact`/`save_entity` when you want duplicate feedback.
 
 ---
 

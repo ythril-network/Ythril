@@ -10,11 +10,12 @@ Every link between brain records — an edge's `from`/`to`, and the records a fa
 is linked to (`linkEntities`, `linkFacts`, `linkChronos`) — names the target by its **id**,
 which is a **UUID v4**. A name is not a reference.
 
-**A reference that cannot resolve is refused.** The write returns `400` (or an MCP `isError`) naming the
-field and the offending value, and **nothing is stored**. Both halves are checked:
+**A reference that cannot resolve is refused.** The write is refused — `400` on a create, `422` on an update, or a
+structured `schema_violation` from an MCP tool — naming the field and the offending value (for an inline `edges`
+entry, the entry: `edges[0].to`), and **nothing is stored**, the record included. Both halves are checked:
 
 - the value is a UUID v4, and
-- a record with that id exists in the target space.
+- a record with that id exists in the target space (for the far end of an inline `edges` entry, one of the kind its `toKind` names).
 
 Format alone was never sufficient — a syntactically perfect id pointing at nothing dangles exactly as
 silently as a name did, and the only symptom is a later traversal that quietly returns nothing.
@@ -27,7 +28,7 @@ deliberate per-space choice to accept dangling links, and it is **off by default
 linkage by saying nothing.
 
 Bulk writes (`POST /bulk`, `save_bulk`) check references for **format and existence** under strict linkage,
-exactly as the single-record writes do. A record created earlier in the same payload is referenced by its
+exactly as the single-record writes do, and an item's own `edges` the same way, before the item is written. A record created earlier in the same payload is referenced by its
 `$ref` key, which always resolves; a literal id cannot name a record the payload creates, because ids are
 minted by the server.
 

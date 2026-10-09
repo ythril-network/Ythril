@@ -102,6 +102,10 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
 - `linkEntities` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID, and under `strictLinkage` if any names nothing. The 4.x `entityIds` is refused, and the refusal names this field
 - `linkFacts` — array of UUID v4 fact IDs (not names); same rules. The 4.x `memoryIds` is refused, and the refusal names this field
 
+`edges` is accepted too: labelled relationships from this entry to records that already exist (`{ "to", "label", … }`,
+see [A record and its relationships in ONE call](04-brain-api.md#a-record-and-its-relationships-in-one-call)). An entry
+the space refuses answers `400` and stores nothing, the chrono entry included ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
+
 **Response** `201` — the created `ChronoEntry`.
 
 ---
@@ -116,7 +120,9 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 > the brain API; it performed no property validation and wrote no audit snapshot. `PATCH` takes the same
 > body and does both.
 
-**Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `linkEntities`, `linkFacts`, `description`, `properties`, `recurrence`, `suppressEmbeddings`, `ttlDays`), plus `deleteFields`.
+**Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `linkEntities`, `linkFacts`, `edges`, `description`, `properties`, `recurrence`, `suppressEmbeddings`, `ttlDays`), plus `deleteFields`.
+`edges` upsert and never remove. An entry the space refuses answers `422` and changes nothing; an entry that does not
+exist is `404` first, and the refusal comes before an `If-Match` `412`.
 
 > **`deleteFields` arrived in 3.1, and it is the only way to remove anything.** `properties` MERGE — patching
 > one key keeps the others — and an omitted field means *leave it alone*, so before 3.1 there was no request

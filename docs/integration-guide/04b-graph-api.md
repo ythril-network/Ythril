@@ -46,7 +46,10 @@ POST /api/brain/spaces/:spaceId/entities
 
 Tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
 
-**Constraints**: `name` required string; `type` required non-empty string (`400` if omitted); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
+**Constraints**: `name` required string; `type` required non-empty string (`400` if omitted); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean; `edges` optional array of labelled
+relationships from this entity to records that already exist (`{ "to", "label", … }`, see
+[A record and its relationships in ONE call](04-brain-api.md#a-record-and-its-relationships-in-one-call)). An entry the
+space refuses stores nothing, the entity included ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
 
 ---
 
@@ -299,10 +302,12 @@ The same refusals answer the same statuses on every door that merges: this route
 
 **How large a merge may be.** One merge relinks at most **2500** records — the absorbed entity's edges, links and face labels together. A merge over that is refused with `422 merge_too_large`, naming the count and the bound, **before anything is written**: the transaction a hub needs would hold every sync reader of the space for its whole length, and past a size the store cannot hold it at all. The bound is set from measurement (half of the largest merge that still committed on the test store). The `error` names both entities by name, each followed by its id in brackets, and states the absorbed entity's edges, links and face labels separately. It suggests only what a door can do: deleting at least as many of the absorbed entity's edges or links as the merge is over the bound — an edge's ends cannot be changed, so an edge cannot be moved, and no door removes a face label, so when the face labels alone exceed the bound it says that instead — and merging the other way round, only when that merge fits the bound, with what it would relink. The structured fields stay `code`, `relinks` and `bound`. **Each kind is counted only up to `bound + 1`** — past that the merge is refused whatever the true number, so a hub is not counted in full: a kind at `bound + 1` is stated as *more than* the bound, the deletion advice then names no number, and `relinks` is then a lower bound. A merge INTO a hub costs only what it relinks: the survivor's own edges are never read in full.
 
-**`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the only
-operation that can produce one: every path that CREATES an edge refuses a broken `endpoints` or `functional`
-rule, but a merge rewrites the `from`/`to` of stored edges, and merging entities of different types is the
-normal case rather than a mistake — it is how a mistyped record gets fixed.
+**`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the one operation
+that produces one in the ordinary course: every door that CREATES an edge — the edge routes, `save_edge`, a batch,
+and the inline `edges` of an entity, fact or chrono write — refuses a broken `endpoints` or `functional` rule, but a
+merge rewrites the `from`/`to` of stored edges, and merging entities of different types is the normal case rather
+than a mistake — it is how a mistyped record gets fixed. (An edge that arrives from a sync peer or an import is
+stored as it was written, and is not refused either.)
 
 Each row is `{ edgeId, label, end, field, reason }`. `end` is which end of that edge the merge moves (`from`,
 `to`, or `both` for a self-loop on the absorbed entity), `field` is `fromType`, `toType` or `functional` — the
