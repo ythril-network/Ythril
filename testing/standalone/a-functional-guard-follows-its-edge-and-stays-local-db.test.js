@@ -18,9 +18,10 @@
  * - **a stale one is healed, counted and reported**: a phantom marker does not block the next insert for its subject,
  *   the heal is signalled through the housekeeping reporter, and `validate-schema` names stale markers under `staleGuards`
  *   without moving `totalViolations`;
- * - **its index exists** after `initSpace` and after an online restore, is partial (unmarked edges, and edges whose marker
- *   is `null`, coexist), is reported when it cannot be built over duplicate markers WITHOUT aborting `initSpace`, and a
- *   store failure during the build still propagates instead of being swallowed as "a duplicate".
+ * - **its index exists** after `initSpace` creates the collection, after the background build for an existing one (which
+ *   `initSpace` never scans), and after an online restore; it is partial (unmarked edges, and edges whose marker is `null`,
+ *   coexist), duplicate markers are thinned and reported rather than failing the build, and a store failure during the
+ *   build still propagates instead of being swallowed as "a duplicate".
  *
  * ## What is derived, and what is chosen
  *
@@ -539,23 +540,26 @@ describe('the functional guard marker follows its edge and stays on this instanc
       assert.ok(await edgesOf(STRICT).findOne({ _id: 'marked-1' }), 'the first marked edge was lost');
     });
 
-    it('over duplicate markers the build is REPORTED (a declared step counts it), initSpace still completes every later index, and no two edges share a marker afterwards', async () => {
+    it('initSpace does not build it over an EXISTING edges collection: that build reads every edge before the server listens, so it is the background pass\'s', async () => {
+      await dropGuardIndex(STRICT);
+      const value = await initSpace(STRICT, { waitForVectorReady: false }).then(() => 'completed', err => err);
+      assert.equal(value, 'completed', `initSpace threw: ${value?.message ?? value}`);
+      assert.equal(await guardIndex(STRICT), undefined, 'initSpace built the guard index over an existing collection: a boot that scans every edge of every space before listening');
+      await (await ensureEdgeGuardIndexOf())(STRICT);
+      assert.ok(await guardIndex(STRICT), 'the background build did not restore the guard index');
+    });
+
+    it('over duplicate markers the background build is REPORTED (a declared step counts it), completes, and no two edges share a marker afterwards', async () => {
       await dropGuardIndex(STRICT);
       await edgesOf(STRICT).insertMany([
         build.edge(STRICT, ID.R1, 4, { from: IDS.ALICE, to: IDS.BOB, label: LABELS.functional, [MARKER]: SEEDED }),
         build.edge(STRICT, ID.R2, 4, { from: IDS.ALICE, to: IDS.DOC, label: LABELS.functional, [MARKER]: SEEDED }),
       ]);
-      // Dropped so the rebuild is observable: the chrono and file indexes are created AFTER the edges' in initSpace.
-      await env.door.coll(STRICT, 'chrono').dropIndex({ startsAt: 1 }).catch(() => {});
-      await env.door.coll(STRICT, 'files').dropIndex({ updatedAt: -1 }).catch(() => {});
-
-      const { value, events } = await failuresDuring(() => initSpace(STRICT, { waitForVectorReady: false }).then(() => 'completed', err => err));
-      assert.equal(value, 'completed', `initSpace threw over duplicate markers: ${value?.message ?? value} - a space that cannot build one index must still initialise`);
-      assert.ok(events.length >= 1, 'the failed build was not reported: no counter moved, so a space without a guard looks like one with it');
+      const ensure = await ensureEdgeGuardIndexOf();
+      const { value, events } = await failuresDuring(() => ensure(STRICT).then(() => 'completed', err => err));
+      assert.equal(value, 'completed', `the build threw over duplicate markers: ${value?.message ?? value} - duplicates are thinned, not a failure`);
+      assert.ok(events.length >= 1, 'the thinning was not reported: no counter moved, so markers were cleared silently');
       assert.ok(events.every(e => signals.declaredSteps().includes(e.step)), `a failure was counted under an undeclared step: ${JSON.stringify(events)}`);
-      const startsAt = (await env.door.coll(STRICT, 'chrono').listIndexes().toArray()).find(ix => ix.key.startsAt === 1);
-      const updatedAt = (await env.door.coll(STRICT, 'files').listIndexes().toArray()).find(ix => ix.key.updatedAt === -1);
-      assert.ok(startsAt && updatedAt, 'initSpace stopped at the failed guard build: a later index was not created');
 
       const holders = (await edgesOf(STRICT).find({ [MARKER]: SEEDED }).toArray()).map(e => e._id);
       assert.ok(holders.length <= 1, `the duplicate markers were left in place (${JSON.stringify(holders)}): the guard index can never be built over them`);

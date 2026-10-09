@@ -37,6 +37,7 @@
  * that is the belt to this braces — but a read that never asks for the field is the fix.
  */
 import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { stripLocalOnly } from '../sync/local-only-fields.js';
 
 /**
  * The record diagnostics a LIST route withholds by default — and `seq` is deliberately not among them.
@@ -120,4 +121,23 @@ export function withoutVector<T extends object>(doc: T): T {
   const out = { ...doc } as Record<string, unknown>;
   for (const f of NEVER_RETURNED_FIELDS) delete out[f];
   return out as T;
+}
+
+/**
+ * What of a record LEAVES THIS INSTANCE on an event — the webhook payload and the live-view bus, which are one `entry`.
+ *
+ * ## What it prevents
+ *
+ * An event is a third way a record is told to the outside, beside a read and a write's answer, and it was built by spreading
+ * the stored row with only the vector blanked (`{ ...edge, embedding: undefined }`). So everything else this instance keeps
+ * about the record went out with it: the retention stamp (`_expireAt`, a policy of THIS instance), the peer that delivered
+ * it, and — since `Q-439` — the write guard, which is this instance's lock on the edge's subject.
+ *
+ * It strips every local-only field (`stripLocalOnly`, the one definition of "this instance's own") and then the never-returned
+ * ones again, so the floor of `withoutVector` holds whatever the local-only set becomes. Copies; the stored row is untouched.
+ *
+ * A caller that emits a record does not spell the strip: `emitWebhookEvent({ ..., entry: eventEntryOf(doc) })`.
+ */
+export function eventEntryOf(doc: object): Record<string, unknown> {
+  return withoutVector(stripLocalOnly(doc)) as Record<string, unknown>;
 }

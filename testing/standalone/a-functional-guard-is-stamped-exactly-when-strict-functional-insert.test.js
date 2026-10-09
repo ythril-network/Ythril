@@ -178,15 +178,24 @@ describe('"strict" is ONE predicate, `validationRefuses`', () => {
     assert.ok(calls(bodyOf(read(SCHEMA), 'applyValidation', 'applyValidation')), 'applyValidation spells the strict test itself');
   });
 
-  it('the planner\'s stamp asks it (edgeRefusal or planEdge, wherever the stamp is decided)', () => {
-    const src = read('server/src/brain/write-plan/plan-edge.ts');
+  // The stamp is decided in ONE function, `guardFor` (plan-edge.ts): a site that decides it asks `guardFor`, and `guardFor` asks the
+  // predicate — a site that spelled the strict test itself would be the second implementation this section is about.
+  const asksGuardFor = (body) => /\bguardFor\(/.test(body);
+  const PLAN_EDGE = 'server/src/brain/write-plan/plan-edge.ts';
+
+  it('`guardFor` is the one place that decides a stamp, and it asks validationRefuses', () => {
+    assert.ok(calls(bodyOf(read(PLAN_EDGE), 'guardFor', 'guardFor')), 'guardFor decides the stamp without asking validationRefuses');
+  });
+
+  it('the planner\'s stamp asks it (through guardFor, in edgeRefusal or planEdge, wherever the stamp is decided)', () => {
+    const src = read(PLAN_EDGE);
     const decided = ['edgeRefusal', 'planEdge'].map(n => bodyOf(src, n, n)).join('\n');
-    assert.ok(calls(decided), 'the planner decides which writes are stamped without asking validationRefuses');
+    assert.ok(calls(decided) || asksGuardFor(decided), 'the planner decides which writes are stamped without asking guardFor or validationRefuses');
   });
 
   it('the relabel (`updateEdgeById`) asks it, so a relabel stamps by the same rule as a create', () => {
     const body = bodyOf(read('server/src/brain/edges.ts'), 'updateEdgeById', 'updateEdgeById');
-    assert.ok(calls(body), 'updateEdgeById decides the stamp of a relabel without asking validationRefuses');
+    assert.ok(calls(body) || asksGuardFor(body), 'updateEdgeById decides the stamp of a relabel without asking guardFor or validationRefuses');
   });
 
   it('`validationMode === \'strict\'` is spelled in exactly one place, inside validationRefuses', () => {

@@ -135,6 +135,8 @@ file bytes) — and the import puts them back. What to expect from a restore:
   newer one — that is what restoring a backup means.
 - **Retention survives the round trip.** Each record keeps the expiry it had when it was exported. A record that
   had none is given this space's retention window, counted from when the record was created.
+- **A one-per-subject label's lock is not exported.** Edges come back without Ythril's internal lock for such a label.
+  That is harmless: the label's rule still refuses a second edge written after them.
 - **Search comes back on its own.** Vectors are not exported; every restored record is queued for embedding on
   this instance, so nothing has to be reindexed by hand.
 - **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
@@ -257,9 +259,17 @@ To restore a backup, click **Restore** on any backup row. The instance will:
 
 1. Enter maintenance mode automatically.
 2. Replace all data in MongoDB with the backup snapshot.
-3. Exit maintenance mode.
+3. Rebuild each space's indexes: the search indexes, and the ones that stop the same edge, or two edges under a
+   one-per-subject label, being stored twice by writers working at the same moment.
+4. Exit maintenance mode.
 
 Restore is irreversible — all data written after the backup timestamp will be lost. You will be asked to confirm before the operation begins.
+
+If an index cannot be rebuilt, the restore still finishes and its answer names the space and the reason
+(`edgeIndexes.failed` for the edge indexes, `vectorIndexes.failed` for search). The server log carries an
+`Edge indexes failed for space '<id>' …` line, and the index is tried again at the next start. Until then, in that
+space, the store itself does not stop a duplicate edge or two simultaneous writes under a one-per-subject label; a
+second edge written after the first is still refused by the label's rule.
 
 ### Database migration
 
@@ -487,6 +497,16 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   keeps its last value while any space could not be read, rather than showing a count that is too low.
 - `Link conversion failed for space '<id>': … — retried next boot` and `Link array drop failed for space '<id>' (…): …
   — retried next boot`.
+- `Edge indexes failed for space '<id>' (guard index | identity index): … — retried next index pass` (the identity
+  index after a restore: `next boot`): the index that
+  stops two writers working at the same moment from storing two edges under a one-per-subject label (or the same edge
+  twice) could not be built, when a space was set up, by the background index pass or after a restore. The space works, and the rule still refuses a second edge written
+  after the first; what is missing is protection against two at the same instant, and this line is the only sign of it.
+  When duplicate locks stopped the build the line carries `(count: N)` and ends `retried at once`: the surplus locks
+  were cleared and the build tried again.
+- `Functional guard heal failed for space '<id>' (<edge id>): … — retried at once`: a write found a leftover lock on an
+  edge that names another subject than the one it is under, cleared it and went on. Nothing was refused. When the
+  store does not answer while it looks, the line ends `retried next write`.
 - `space init failed for space '<id>': … — retried next reload`, `index confirmation` and `query indexes` at **start-up**
   and after a **configuration reload**. At start-up every space is set up in turn: one that cannot be set up is named by
   this line and the server starts anyway, with every other space set up and its search indexes confirmed; the next reload

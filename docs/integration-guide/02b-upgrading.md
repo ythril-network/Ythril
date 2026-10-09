@@ -44,6 +44,26 @@ has the index from its first write. Two things an integrator can see:
   in flight across a rollback, and nothing is lost by it — a cycle that meets the `400` stops and starts again from its
   watermark.
 - **The tombstone route has a cursor mode** that pages through any number of tombstones at one seq ([Sync API](09-sync-api.md#tombstones)).
+
+**Upgrading past 5.6.x adds one unique index to every edges collection, and a functional label then holds under concurrent
+writers.** A space created after the upgrade gets the index when it is set up. An existing edges collection gets it from
+the background index pass after start-up, as the keyset indexes do, because building it reads every edge and start-up
+must not wait on that; until the pass reaches a space, a race there behaves as it did before. A space whose build fails
+is said in the log (the `Edge indexes` step, see
+[Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and works anyway, with the build tried
+again by the next index pass. Once it
+exists, the second of two concurrent writers under a `functional` label in a `strict` space is refused like a sequential
+one. Four things an integrator can see:
+
+- **A second edge to the same `to` of another kind is now refused.** "Another edge" is one of a different identity
+  (`to` and both kinds); the check used to count distinct `to` values. It needs one id held by two kinds of record, so it
+  is rare, and a second edge already stored is not touched.
+- **`POST /api/spaces/:id/validate-schema` answers a new key, `staleGuards`**, beside `violations` and `totalViolations`,
+  which are unchanged.
+- **A relabel onto an identity another edge holds answers `409 edge_identity_taken`** on the in-place path too, where it
+  answered `500`.
+- **A restore rebuilds the edge indexes before maintenance mode ends**, and `POST /api/admin/data/restore` answers
+  `edgeIndexes.failed` for any space whose build failed.
   A puller that predates it keeps its older mode, and still stops at a run of more than `limit` tombstones at one seq until it
   upgrades.
 
@@ -190,6 +210,15 @@ the stamp is gone. Nothing is lost: the records are intact, and an upgrade done 
 the upgrade runs both again, harmlessly). The older build applies only a deletion its issuer's own peer delivered
 for a record the issuer wrote, so deletions a publisher relayed stop reaching the instance, and file tombstones are
 applied with no check of who sent them, as before.
+
+**A rollback to 5.6.x carries the write guard into builds that do not know it, and leaves its index behind.** Every
+edge a `strict` space stored under a functional label since the upgrade holds `_functionalGuard`, a field an older build
+does not know is local: it hashes it, so a `merkle: true` network with a rolled-back member logs `MERKLE_DIVERGENCE`
+for the spaces where it differs, and it serves it in sync pages (an older peer drops it from edge records). The unique
+index on it stays, and the older build neither reads nor drops it. An older build that relabels an edge copies the
+stored guard onto the new label, where it names a subject the edge is not under. Nothing is lost: the records are
+intact, and an upgrade done again finds the guards in place, clears a drifted one the first time a write meets it, and
+lists them under `staleGuards` in `validate-schema`.
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
 keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and

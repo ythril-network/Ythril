@@ -157,7 +157,8 @@ describe('the vector never leaves the database', () => {
       + 'reader, which is the sweep that was already missed once');
     // The vector, and `deliveredBy` (bundle-51): which peer delivered a record here is local state that names a peer of this
     // instance's network, so no read returns it either. Written out, not derived — a derivation would assert the list equals itself.
-    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0, deliveredBy: 0 });
+    // And the write guard (`Q-439`): this instance's lock on an edge's subject, withheld from every answer.
+    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0, deliveredBy: 0, _functionalGuard: 0 });
   });
 
   it('an EXCLUSION projection, so a new record field is never silently absent from the API', () => {

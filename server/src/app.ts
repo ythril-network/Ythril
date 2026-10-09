@@ -70,7 +70,7 @@ import {
   configReloadPending,
 } from './metrics/registry.js';
 import { spaceCollection } from './db/space-collection.js';
-import { DERIVED_LOCAL_FIELDS } from './sync/local-only-fields.js';
+import { NOT_CARRIED_BY_BACKUP } from './sync/local-only-fields.js';
 import { REPLICATED_FAMILIES } from './sync/replicated-families.js';
 
 // Server version — one reader, in `util/server-version.ts`. This file and `api/about.ts` each resolved
@@ -413,7 +413,8 @@ export function createApp() {
   // ── Admin: space export ───────────────────────────────────────────────────
   // Returns a full JSON snapshot of the space: every REPLICATED family (facts, entities, edges, chrono, links and
   // file metadata, from `REPLICATED_FAMILIES`), binary file content excluded. What this instance DERIVES with its
-  // own model is left out (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`); the record-tier local
+  // own model is left out (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`), and so is this instance's write
+  // guard on an edge (`WRITE_GUARD_FIELDS`, `Q-439`: a lock on a subject here, never a backup's to carry); the record-tier local
   // fields stay — the retention stamps and file sync bases — because a restore keeps them (`Q-205`, `Q-206`). An
   // import queues every restored record for embedding, so nothing has to be reindexed by hand afterwards.
   app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
@@ -435,7 +436,7 @@ export function createApp() {
     //
     // One JSON object, the envelope then one array per replicated family keyed by collection name — the
     // shape the import reads. (NDJSON would be cleaner but would break the import contract.)
-    const projection = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, 0]));
+    const projection = Object.fromEntries([...NOT_CARRIED_BY_BACKUP].map(f => [f, 0]));
 
     // Backpressure-aware write: pause the cursor walk when the socket buffer is full.
     const write = (chunk: string): Promise<void> =>

@@ -33,10 +33,12 @@ import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { writeTombstone, removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { rekeyedRow } from '../sync/local-only-fields.js';
+import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
+import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -299,14 +301,10 @@ async function detectEndpointRuleBreaks(
     .toArray() as EdgeDoc[];
   const afterFrom = (e: EdgeDoc) => (e.from === absorbedId ? survivor._id : e.from);
   const afterTo = (e: EdgeDoc) => (e.to === absorbedId ? survivor._id : e.to);
-  const subjectCounts = new Map<string, Set<string>>();
-  for (const e of [...survivorEdges, ...moving]) {
-    const key = `${afterFrom(e).length}:${afterFrom(e)}${e.label}`;
-    // Keyed by the DISTINCT object, because identity is the triplet: two rows that relink onto the same
-    // (from, to, label) are one edge afterwards, which is what `duplicateEdgeWarnings` is separately about.
-    if (!subjectCounts.has(key)) subjectCounts.set(key, new Set());
-    subjectCounts.get(key)!.add(afterTo(e));
-  }
+  // The edge as it will be AFTER the relink, counted by identity (`SubjectEdges`, `functional-subject.ts`): two rows that
+  // relink onto the same (from, to, label) are one edge afterwards, which is what `duplicateEdgeWarnings` is separately about.
+  const afterRelink = (e: EdgeDoc) => ({ from: afterFrom(e), to: afterTo(e), label: e.label, fromKind: e.fromKind, toKind: e.toKind });
+  const subjectEdges = new SubjectEdges([...survivorEdges, ...moving].map(afterRelink));
 
   const out: EndpointRuleWarning[] = [];
   for (const e of moving) {
@@ -324,11 +322,7 @@ async function detectEndpointRuleBreaks(
       ...(isTo ? { toType: survivor.type ?? null } : {}),
     };
     // `functional` counts the OTHER edges from the subject, so the edge being examined is excluded.
-    if (isFrom) {
-      const key = `${survivor._id.length}:${survivor._id}${e.label}`;
-      const distinct = subjectCounts.get(key)?.size ?? 1;
-      resolved.otherEdgesFromSubject = Math.max(0, distinct - 1);
-    }
+    if (isFrom) resolved.otherEdgesFromSubject = subjectEdges.others(afterRelink(e));
 
     for (const v of validateEdge(meta ?? {}, { label: e.label, properties: e.properties ?? {} }, resolved)) {
       if (v.field !== 'fromType' && v.field !== 'toType' && v.field !== 'functional') continue;
@@ -767,8 +761,8 @@ export async function executeMerge(
   // Centralised webhook emission: a merge is an update to the survivor, deletion of the absorbed entity, and
   // deletion of any duplicate edges collapsed in the process. All fire here so every door is consistent.
   if (actor) {
-    emitWebhookEvent({ event: 'entity.merged', spaceId, entry: { survivor: { ...survivor, embedding: undefined }, absorbedId: absorbed._id }, ...actor });
-    emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...survivor, embedding: undefined }, ...actor });
+    emitWebhookEvent({ event: 'entity.merged', spaceId, entry: { survivor: eventEntryOf(survivor), absorbedId: absorbed._id }, ...actor });
+    emitWebhookEvent({ event: 'entity.updated', spaceId, entry: eventEntryOf(survivor), ...actor });
     emitWebhookEvent({ event: 'entity.deleted', spaceId, entry: { _id: absorbed._id }, ...actor });
     for (const dupId of written.deletedDuplicateEdgeIds) {
       emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id: dupId }, ...actor });
@@ -871,6 +865,9 @@ async function relinkAndAbsorb(
     { updatedAt: now }, [], session);
   const inPlace = edgesToRelink.filter((_, i) => moved[i] === null);
   if (inPlace.length > 0) {
+    // A relink moves `from`, and the write guard (`_functionalGuard`, cleared by `UNSET_GUARD`) is a function of `(from, label)`: it is DROPPED, never restamped, so a merge —
+    // which reports a functional breach and never refuses one — can never fail on the guard index (`Q-439`). The re-key above
+    // drops it inside `rekeyedRow`; this is the in-place twin, whoever authored the edge.
     // A hub's count is the store's, so the write is sliced to one command each (`db/one-command.ts`), inside the one hold.
     // `ordered: true` here and at the two writes below: they run in the merge's transaction, which the server aborts at the
     // first error, so going on to the next slice would only send it into a dead transaction and bury the real failure.
@@ -878,7 +875,7 @@ async function relinkAndAbsorb(
       const updates: Record<string, unknown> = { updatedAt: now, seq: first + i };
       if (r.edge.from === absorbed._id) updates['from'] = survivor._id;
       if (r.edge.to === absorbed._id) updates['to'] = survivor._id;
-      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates } } };
+      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
     }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.edge');
   }
 

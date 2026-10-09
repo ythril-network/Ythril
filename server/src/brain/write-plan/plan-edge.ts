@@ -21,7 +21,9 @@
 import { authorRef } from '../../config/author.js';
 import { edgeEmbedText } from '../embed-text.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { getSpaceMeta, applyPropertyDefaults, type ResolvedEdgeEnds } from '../../spaces/schema-validation.js';
+import { getSpaceMeta, applyPropertyDefaults, validationRefuses, type ResolvedEdgeEnds } from '../../spaces/schema-validation.js';
+import { functionalSubjectKey } from '../functional-subject.js';
+import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import {
   classifyEdgeUpsertAgainst, danglingReferenceCheck, EdgeSchemaViolation, type UpdateValidation,
@@ -111,8 +113,23 @@ export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubjec
  * Whether the space declares this label functional — a subject carries at most one edge under it. One reading
  * for the want and the plan: if they disagreed, the plan would ask the read set for a count it never loaded.
  */
-function isFunctionalLabel(spaceId: string, label: string): boolean {
+export function isFunctionalLabel(spaceId: string, label: string): boolean {
   return getSpaceMeta(spaceId)?.typeSchemas?.edge?.[label]?.functional === true;
+}
+
+/**
+ * The write guard an edge at `(from, label)` is stored with in `spaceId` — `functionalSubjectKey(from, label)` when the label
+ * is functional AND the space refuses (`validationRefuses`), else `undefined`: the edge carries no marker.
+ *
+ * ## What it prevents
+ *
+ * Two writers decided "does this edge carry a guard" — the planner's insert and a patch that relabels — each asking
+ * `isFunctionalLabel` and `validationRefuses` and each building the key. A `warn` or `off` space lets a second edge through, and a
+ * marker there turns that into a duplicate-key error nobody can explain; a writer that left the refusal out would do exactly
+ * that. One function, so the condition and the key are never spelled apart.
+ */
+export function guardFor(spaceId: string, from: string, label: string): string | undefined {
+  return isFunctionalLabel(spaceId, label) && validationRefuses(getSpaceMeta(spaceId)) ? functionalSubjectKey(from, label) : undefined;
 }
 
 /**
@@ -164,7 +181,11 @@ function resolvedEnds(
     const t = typeOf(input.to);
     if (t !== undefined) out.toType = t;
   }
-  if (functional) out.otherEdgesFromSubject = view.otherEdgesFromSubject(input.from, input.label, input.to, sameBody);
+  if (functional) {
+    out.otherEdgesFromSubject = view.otherEdgesFromSubject(
+      { from: input.from, to: input.to, label: input.label, fromKind: input.opts?.fromKind, toKind: input.opts?.toKind }, sameBody,
+    );
+  }
   return out;
 }
 
@@ -296,6 +317,14 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
 
   const fromKind = storedEdgeKind(opts?.fromKind);
   const toKind = storedEdgeKind(opts?.toKind);
+  /*
+   * THE WRITE GUARD (`Q-439`). Two writers that both counted zero at the subject both insert; the unique partial index on
+   * `_functionalGuard` refuses the second, which the commit answers as a stale item and re-plans against the winner. Stamped
+   * on an INSERT only (a converge lands on the subject's one edge, which already holds the slot) and only where the space
+   * REFUSES — a `warn` or `off` space lets a second edge through, and a marker would turn that into a duplicate-key error
+   * nobody can explain. "Refuses" is `validationRefuses`, the predicate `applyValidation` asks, never a spelling of its own.
+   */
+  const functionalGuard = guardFor(spaceId, from, label);
   const doc: EdgeDoc = {
     _id: edgeIdFor(from, to, label, opts?.fromKind, opts?.toKind),
     spaceId, from, to,
@@ -310,6 +339,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
     ...(withDefaults !== undefined ? { properties: withDefaults } : {}),
     author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0,
+    ...(functionalGuard !== undefined ? { [FUNCTIONAL_GUARD]: functionalGuard } : {}),
     ...embeddingFields,
   };
   // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label.

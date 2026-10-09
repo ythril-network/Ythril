@@ -81,7 +81,7 @@ export const queryTool: ToolHandler = {
             },
             projection: {
               type: 'object',
-              description: 'Fields to include (1) or exclude (0). The `embedding` field is always excluded and cannot be re-included. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
+              description: 'Fields to include (1) or exclude (0). The `embedding` field is always excluded and cannot be re-included, and a field a read never sends (the write guard of an edge, `_functionalGuard`) cannot be asked for by name. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
             },
             /*
              * `minimum` and NO `maximum`, and the asymmetry is deliberate. The MCP dispatcher enforces this

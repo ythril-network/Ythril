@@ -138,7 +138,12 @@ function neverKeys(body) {
 /** The names in a `ReadonlySet<string>` constant of a source: `export const X: ReadonlySet<string> = new Set([...])`. */
 function setNamed(src, name) {
   const m = src.match(new RegExp(`${name}: ReadonlySet<string> = new Set\\(\\[([^\\]]*)\\]\\)`));
-  return [...stripComments(m?.[1] ?? '').matchAll(/'([a-zA-Z_]\w*)'/g)].map(x => x[1]);
+  const body = stripComments(m?.[1] ?? '');
+  // An entry may be a field-name CONSTANT (`export const FUNCTIONAL_GUARD = '_functionalGuard' as const;`): the name is spelled once,
+  // and the set names the constant, so the literal is read from where it is declared.
+  const constants = new Map([...src.matchAll(/export const ([A-Z_]+) = '([a-zA-Z_]\w*)' as const;/g)].map(x => [x[1], x[2]]));
+  const viaConstant = [...body.matchAll(/\b([A-Z][A-Z_]*)\b/g)].map(x => constants.get(x[1])).filter(Boolean);
+  return [...body.matchAll(/'([a-zA-Z_]\w*)'/g)].map(x => x[1]).concat(viaConstant);
 }
 
 /**

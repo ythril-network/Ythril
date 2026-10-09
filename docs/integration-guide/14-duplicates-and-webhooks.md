@@ -592,7 +592,7 @@ X-Ythril-Delivery: <unique delivery UUID>
 }
 ```
 
-- `entry` contains the full document for created/updated events (excluding embeddings), just `{ _id }` for deleted events.
+- `entry` contains the full document for created/updated events, just `{ _id }` for deleted events. It never carries a local-only field: what this instance keeps about a record for itself — its vector and the model that made it, the retention stamps, who delivered the record, an edge's write guard — is not part of the event ([the full list](../sync-protocol.md)).
 - `tokenId` + `tokenLabel` identify which token performed the write.
 
 ### Signature Verification

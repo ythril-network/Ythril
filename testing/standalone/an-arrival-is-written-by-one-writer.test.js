@@ -125,6 +125,10 @@ const EXEMPT = {
   'server/src/brain/entities.ts:unlabelFacesWhere':
     'the face-label cascade of a deleted entity (`unlabelFacesForEntities`, which a peer-applied entity tombstone now runs, '
     + 'Q-395): it clears the entity\'s claim on face rows already held and stores no arriving document',
+  'server/src/brain/write-plan/commit.ts:clearStaleWriteGuard':
+    'space creation reached from membership gossip builds the edges\' write-guard index (`ensureEdgeGuardIndex`), and a build over '
+    + 'duplicate markers clears the surplus ones first (Q-439): it `$unset`s `_functionalGuard` alone, a `WRITE_GUARD_FIELDS` field '
+    + 'that is local-only (never hashed, sent, or taken from an arrival), on edges already held, with no seq and no arriving document',
 };
 
 /**

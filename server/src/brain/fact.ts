@@ -25,7 +25,7 @@ import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
-import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
+import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
@@ -96,7 +96,7 @@ export async function saveFact(
   // `fact.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new record.
   if (actor) {
     emitWebhookEvent({ event: done.plan.op === 'insert' ? 'fact.created' : 'fact.updated', spaceId,
-      entry: { ...stored, embedding: undefined }, ...actor });
+      entry: eventEntryOf(stored), ...actor });
   }
   // Advisory only — the record is stored either way.
   return withoutVector({ ...stored, ...(done.similar ? { similar: done.similar } : {}),
@@ -254,7 +254,7 @@ export async function updateFact(
   if (updates.linkEntities !== undefined) {
     await reconcileLinks(spaceId, result._id, 'fact', { entity: updates.linkEntities }, result.author);
   }
-  if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: eventEntryOf(result), ...actor });
   return result;
 }
 

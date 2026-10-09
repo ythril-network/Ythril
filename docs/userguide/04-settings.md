@@ -121,7 +121,8 @@ member. Your own definitions are not changed. It needs the Networks right at wri
     - A type **linked to the Schema Library** has no retention of its own: a library entry cannot carry a window (it would apply to every space using it). **Unlink** first, or set the window on the space-wide default instead. Saving a type *to* the library also leaves its window behind, and says so when it does.
   - **Permitted ends** — **edge types only**: which entity types may sit at each end of a link with this
     label, and whether an entity may have more than one. Two lists (**From** and **To**) plus **At most one
-    edge with this label per source entity**. A list left untouched means any entity type — unticking the last
+    edge with this label per source entity** (whatever it points at; in a strict space two writes at the same moment
+    cannot both store one). A list left untouched means any entity type — unticking the last
     box returns that end to *any*, never to *none*. **The lists are not paired**: every From type combines with
     every To type, so the tab states how many combinations that is and lists them. **no type at all** is a
     pickable choice in both lists, for entities carrying no type. Breaking a rule is reported or refused

@@ -44,7 +44,7 @@ const COMMIT = 'server/src/brain/write-plan/commit.ts';
 const HANDLED = new Set(['stamp', 'drop', 'carry-if-unchanged']);
 const WORDS = new Set([...HANDLED, 'none-by-design']);
 /** What a handling body names: the marker itself, or the class that carries it. */
-const NAMES_THE_MARKER = /\b_?functionalGuard\b|\bWRITE_GUARD_FIELDS\b/;
+const NAMES_THE_MARKER = /\b_?functionalGuard\b|\bWRITE_GUARD_FIELDS\b|\bFUNCTIONAL_GUARD\b|\bUNSET_GUARD\b/;
 
 /**
  * Keyed `path:function`. A stale entry fails, so this cannot outlive what it describes.

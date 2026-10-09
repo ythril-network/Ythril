@@ -28,20 +28,21 @@
  * the exception that proves the rule: the update paths call it too (`reconcileLinks`), so there is one writer of
  * link rows rather than two.
  */
-import { col, asFilter, asBulk } from '../../db/mongo.js';
+import { col, asFilter, asBulk, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { withAllocatedSeqs } from '../../util/seq.js';
 import { inChunks } from '../../util/chunks.js';
 import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { log, peerText } from '../../util/log.js';
-import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
+import { bulkWriteFailures, phraseWriteFailure, onlyDuplicateKeys, DUPLICATE_KEY } from '../../db/write-errors.js';
+import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../../sync/local-only-fields.js';
 import { isWriteTimeout } from '../../db/write-timeout.js';
 import { writeFilterFor } from '../write-precondition.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
 import { writeTombstones } from '../tombstones.js';
-import type { AuthorRef, LinkDoc, TombstoneDoc } from '../../config/types.js';
+import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
 import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
@@ -106,8 +107,16 @@ async function writeStage(
         if (isWriteTimeout(err) && !somethingLanded) throw err;
         failures = bulkWriteFailures(err);
         if (!failures) ambiguous = true;
-        log.warn(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: `
-          + `${failures ? `${failures.length} item(s)` : 'no per-item detail'}`);
+        /*
+         * A duplicate key on an item is a LOST RACE, not a fault: the item is reported stale and re-planned against the
+         * winner, so a busy functional subject would otherwise fill the log with a warning per loser. It is said at debug,
+         * with the code, so that the one place a reader looks for why an item went stale still names it (`Q-439`).
+         */
+        const lostRace = failures !== null && onlyDuplicateKeys(failures);
+        const detail = failures
+          ? `${failures.length} item(s), code ${[...new Set(failures.map(f => f.code ?? 'none'))].join('/')}`
+          : 'no per-item detail';
+        (lostRace ? log.debug : log.warn)(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: ${detail}`);
       }
     }, `write.${kind}`);
   } catch (err) {
@@ -149,6 +158,27 @@ async function writeStage(
     landed.push(i);
   });
   return landed;
+}
+
+/**
+ * Take a PHANTOM write guard off the edge holding it (`Q-439`): a marker that no longer names the `(from, label)` of the edge
+ * it sits on, and so holds a subject's unique slot for an edge that is not there. The commit is the one writer of the guard —
+ * it stores the marker the planner stamped — so the one clear lives beside it, and `heal-stale-marker.ts` decides WHEN.
+ *
+ * A compare-and-swap on `{ _id, guard, from, label }`, never a blind `$unset`: if the holder was relabelled, deleted or
+ * healed since it was read, nothing matches and nothing is written. No seq: the guard is local to this instance, hashed and
+ * replicated nowhere, so clearing it changes nothing a peer or a seq-paged reader could see.
+ *
+ * @returns whether THIS call cleared it.
+ */
+export async function clearStaleWriteGuard(
+  spaceId: string, holder: { _id: string; from: string; label: string }, guard: string,
+): Promise<boolean> {
+  const res = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).updateOne(
+    asFilter<EdgeDoc>({ _id: holder._id, [FUNCTIONAL_GUARD]: guard, from: holder.from, label: holder.label }),
+    asUpdate<EdgeDoc>({ $unset: UNSET_GUARD }),
+  );
+  return res.modifiedCount === 1;
 }
 
 /** The driver operation for one plan, stamped with its seq. */

@@ -29,6 +29,8 @@
  * it before this module existed.
  */
 
+import { WRITE_GUARD_FIELDS } from '../sync/local-only-fields.js';
+
 /** Which way a projection reads, and the paths it names, pre-split on `.` so no applier re-parses. */
 export interface NormalisedProjection {
   /** `true` when the caller listed fields to KEEP; `false` when they listed fields to DROP. */
@@ -107,6 +109,31 @@ export function toMongoProjection(norm: NormalisedProjection | undefined): Recor
     out[NEVER_PROJECTABLE] = 0;
     if (!norm.keepId) out['_id'] = 0;
   }
+  return out;
+}
+
+/**
+ * A Mongo projection that also withholds this instance's write guard (`Q-439`) — what a read that hands a caller's
+ * projection to the driver applies last, because an INCLUSION projection reaches any stored field it names.
+ *
+ * ## What it prevents
+ *
+ * `_functionalGuard` is withheld from every answer (`NEVER_RETURNED_FIELDS`), but a `filter` with
+ * `projection: { _functionalGuard: 1 }` asks the store for the field by name and gets it. The vector has its own rule for
+ * that (`NEVER_PROJECTABLE`); the guard is a second field with the same promise, and it is kept apart so the vector's
+ * projection stays byte for byte what it was.
+ *
+ *  - an exclusion (or no projection) gains `field: 0`;
+ *  - an inclusion loses the field. When that leaves nothing to include the answer is the id alone — `{}` would be a
+ *    projection of NOTHING, which the store reads as "every field", the opposite of what was asked.
+ */
+export function withoutWriteGuard(projection: Record<string, 0 | 1>): Record<string, 0 | 1> {
+  const out = { ...projection };
+  const include = Object.entries(projection).some(([k, v]) => k !== '_id' && v === 1);
+  for (const f of WRITE_GUARD_FIELDS) {
+    if (include) delete out[f]; else out[f] = 0;
+  }
+  if (include && !Object.keys(out).some(k => k !== '_id')) out['_id'] = 1;
   return out;
 }
 

@@ -7,7 +7,7 @@ import { inHeldTransaction } from './held-transaction.js';
 import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
-import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
+import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { classifyEdgeUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { applyExpiryToUpdate } from './ttl.js';
@@ -27,7 +27,9 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { planEdge, edgeWant, resolveEdgeEndsForWrite, type EdgeInput } from './write-plan/plan-edge.js';
+import { planEdge, edgeWant, resolveEdgeEndsForWrite, guardFor, type EdgeInput } from './write-plan/plan-edge.js';
+import { writeRelabel } from './write-plan/guarded-relabel.js';
+import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { subgraphEdges } from './traverse-subgraph.js';
 // `syntheticEdgeId` moved to `edge-id.ts`, beside `edgeIdFor`: its own docblock says the id format is a
@@ -147,7 +149,7 @@ export async function upsertEdge(
   const done = await planAndCommitOne(spaceId, edgeWant(spaceId, input), view => planEdge(spaceId, input, view));
   const edge = { ...done.plan.result, seq: done.seq } as unknown as EdgeDoc;
   // `edge.created` on both branches, as it has always been answered.
-  if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...edge, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: eventEntryOf(edge), ...actor });
   return withoutVector(edge);
 }
 
@@ -313,7 +315,8 @@ export async function updateEdgeById(
    * prompted it named the upsert. A patch may CHANGE THE LABEL, which selects a different type schema
    * entirely, so an edge could be moved onto a label whose rules its stored properties break.
    */
-  {
+  // A closure, because a relabel the store refuses with a duplicate key asks it AGAIN against what the winner wrote (`writeRelabel`).
+  const classify = async (): Promise<void> => {
     const finalLabel = ('label' in $set ? $set['label'] : existing.label) as string;
     const finalProps = ('properties' in $unset ? {}
       : ('properties' in $set ? $set['properties'] : existing.properties)) as Record<string, string | number | boolean> | undefined;
@@ -331,7 +334,17 @@ export async function updateEdgeById(
       { label: finalLabel, properties: finalProps }, resolvedEnds);
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
-  }
+  };
+  await classify();
+
+  /*
+   * THE WRITE GUARD of a relabel (`Q-439`): the marker is a function of `(from, label)`, so a write that changes the label sets it
+   * afresh or drops it IN THE SAME WRITE — on the re-key (`rekeyEdge`) and on the in-place update a peer-authored edge falls back to
+   * alike. Stamped when the new label is functional and the space refuses (`guardFor`, the one place that asks).
+   */
+  const relabelled = updates.label !== undefined && updates.label !== existing.label;
+  const functionalGuard = relabelled ? guardFor(spaceId, existing.from, newLabel) : undefined;
+  const relabelTarget = { id: existing._id, from: existing.from, to: existing.to, label: newLabel, fromKind: existing.fromKind, toKind: existing.toKind };
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
     { collection: 'edge', existing: existing as unknown as Record<string, unknown> }); // F10
@@ -348,7 +361,7 @@ export async function updateEdgeById(
    * whose type schema its stored properties break. `deleteFields` has been applied to `$unset`, which the
    * re-key must honour too, or a field the caller asked to remove would survive the move.
    */
-  if (updates.label !== undefined && updates.label !== existing.label) {
+  if (relabelled) {
     /*
      * `If-Match` is checked HERE rather than by the filter below, because there is no `findOneAndUpdate` on
      * this branch to carry `writeFilterFor`. Skipping it would make the precondition lapse on exactly one
@@ -372,10 +385,11 @@ export async function updateEdgeById(
      */
     // Under the horizon hold, bounded, and read back inside the hold when the commit's answer is lost
     // (`brain/held-transaction.ts`): the moved edge under its new id at the seq the re-key gave it IS the commit.
-    const moved: EdgeRekey | null = await inHeldTransaction(spaceId, 'edge.relabel',
-      (session) => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session),
+    // A duplicate key on the guard (or on the identity it moves onto) is answered by `writeRelabel`, never raised raw.
+    const moved: EdgeRekey | null = await writeRelabel(spaceId, relabelTarget, functionalGuard, () => inHeldTransaction(spaceId, 'edge.relabel',
+      (session) => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session, functionalGuard),
       { landed: async (r) => r === null || (await collection.countDocuments(
-        asFilter<EdgeDoc>(atReadSeq(r.edge._id, r.edge.seq)), { limit: 1 })) === 1 });
+        asFilter<EdgeDoc>(atReadSeq(r.edge._id, r.edge.seq)), { limit: 1 })) === 1 }), classify);
     if (moved) {
       // The queue AFTER the write, and here rather than inside `rekeyEdge` — see `embedQueueWorkFor`. There
       // is no transaction on this path, so the write is already durable. The embed text is built from the
@@ -392,7 +406,7 @@ export async function updateEdgeById(
       if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
         applyDeleteFields(out as unknown as Record<string, unknown>, deleteFieldsPaths);
       }
-      if (actor) emitWebhookEvent({ event: 'edge.updated', spaceId, entry: { ...out, embedding: undefined }, ...actor });
+      if (actor) emitWebhookEvent({ event: 'edge.updated', spaceId, entry: eventEntryOf(out), ...actor });
       // `rekeyEdge` already strips, and this is still not redundant: a reader here cannot see that, and the
       // pairing of a stripped webhook with an unstripped return is exactly the shape that leaked on four
       // record kinds. The guarantee belongs where the document leaves the function.
@@ -404,8 +418,13 @@ export async function updateEdgeById(
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
+  // A relabel that stayed in place (a peer-authored edge): the guard follows the label in the same write — set for the new subject,
+  // or dropped when the label no longer carries one (`_functionalGuard` is `WRITE_GUARD_FIELDS`' field).
+  if (relabelled) {
+    if (functionalGuard !== undefined) $set[FUNCTIONAL_GUARD] = functionalGuard; else Object.assign($unset, UNSET_GUARD);
+  }
   let seq = 0;
-  const beforeWrite = await withSeq(spaceId, (s) => {
+  const writeInPlace = () => withSeq(spaceId, (s) => {
     seq = s;
     const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -414,7 +433,8 @@ export async function updateEdgeById(
       asUpdate<EdgeDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'edge.update') as EdgeDoc | null;
+  }, 'edge.update') as Promise<EdgeDoc | null>;
+  const beforeWrite = relabelled ? await writeRelabel(spaceId, relabelTarget, functionalGuard, writeInPlace, classify) : await writeInPlace();
   brainWriteSeqTotal.labels({
     collection: 'edges',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -451,7 +471,7 @@ export async function updateEdgeById(
   // STORED, and honour excludeFromVectorSearch in whichever direction it moved. See the entity update and
   // `embedStoredRecord` for why this replaced an inline embed built from a stale read.
   await enqueueEmbedJob(spaceId, 'edge', result._id, { priority: EMBED_PRIORITY.write });
-  if (actor) emitWebhookEvent({ event: 'edge.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'edge.updated', spaceId, entry: eventEntryOf(result), ...actor });
   return result;
 }
 

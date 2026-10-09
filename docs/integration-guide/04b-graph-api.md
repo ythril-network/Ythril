@@ -311,7 +311,9 @@ stored as it was written, and is not refused either.)
 
 Each row is `{ edgeId, label, end, field, reason }`. `end` is which end of that edge the merge moves (`from`,
 `to`, or `both` for a self-loop on the absorbed entity), `field` is `fromType`, `toType` or `functional` — the
-same names a refused write uses — and `reason` says what the label admits.
+same names a refused write uses — and `reason` says what the label admits. A `functional` row counts another edge
+as a write does: one of a different identity (`to` and both kinds) under the same `from` and `label` once the relink
+is done. The merge reports it and never refuses it, whatever else is writing.
 
 **They are REPORTED, never blocking**, on the `409` preview and on the success body alike. Only an unresolved
 property conflict makes a plan unresolved: a broken endpoint rule has no resolution to offer, and refusing
@@ -425,11 +427,17 @@ relationships, so they must be two ids.
 id for an ordinary entity-to-entity edge. If you derive ids yourself, omit the kinds for an entity-to-entity
 edge; do not send `"entity"`.
 
-The unique index is `(from, to, label, fromKind, toKind)`. An entity endpoint stores nothing — `"entity"` is
+A relationship is stored once: `(from, to, label, fromKind, toKind)` is unique within a space. An entity endpoint stores nothing — `"entity"` is
 normalised to absent. Two peers creating the same relationship therefore arrive at the same id **without talking**,
 and the sync collision is an idempotent no-op instead of a duplicate key on every cycle. `spaceId` is
 deliberately not part of the key: space aliasing lets one logical space carry a different local id on each
 peer, so including it would derive differently on the two sides.
+
+**That is identity, and it is not the `functional` rule.** Two edges that differ in `to` are two relationships, so
+identity admits both; only a label declared `functional` in the space schema limits a subject to one edge, and in a
+`strict` space that limit holds between writers that run at the same time too (see
+[Schema API](06a-schema-api.md)). It is a limit among this instance's own writers: an edge from a sync peer, a merge
+or an import can bring a second one, which `validate-schema` lists.
 
 **This is a contract about ids, not only an implementation detail, because identity can change.** Mongo's
 `_id` is immutable, so an edge whose identity changes is deleted and re-inserted under the id it now derives.
@@ -452,7 +460,8 @@ A merge resolves the collision case itself, by deleting the absorbed edge whose 
 survivor already holds.
 
 An identity that is **already taken** by another edge is refused with `409 edge_identity_taken` naming the
-edge in the way, rather than surfaced as an index violation.
+edge in the way, rather than surfaced as an index violation — however the edge is relabelled, and when two relabels
+race for the same identity.
 
 **One case does not move: an edge this instance did not author.** The re-key deletes the old id with a
 tombstone this instance issues, and a peer applies a tombstone to what its issuer wrote (the deletion rule in

@@ -29,7 +29,9 @@
  *    stored), and `syncBase` keeps a self-restore from turning every divergent file into a conflict copy.
  *  - **What this instance derives is dropped**: the vector, its model and `matchedText` (re-embedded here),
  *    every file chunk and face record (re-derived from the blob), and every file-metadata key that is not on
- *    the wire — a size and a hash describe bytes this instance has not got.
+ *    the wire — a size and a hash describe bytes this instance has not got. An edge's write guard (`_functionalGuard`,
+ *    `Q-439`) is dropped too: it is a lock on a subject in THIS instance's index, never a backup's to bring, so a restored
+ *    edge arrives unmarked.
  *  - **A soft-deleted file stays flagged** (`Q-257`): the export holds this instance's own audit rows, and a row with
  *    `deletedAt` is restored with it (`flagsKept` counts them) — never as a live row with no bytes, which every peer
  *    would be offered. A flag is not a wire key, so only a restore brings one.

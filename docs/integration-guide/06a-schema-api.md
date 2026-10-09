@@ -247,7 +247,8 @@ guarded at the rung it advertises rather than at "administers the whole space".
         { "field": "type", "value": "concept", "reason": "not in entityTypes allowlist: Person, Service" }
       ]
     }
-  ]
+  ],
+  "staleGuards": [ { "_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "label": "reports_to" } ]
 }
 ```
 
@@ -257,6 +258,13 @@ every document was. A clean dry-run with `complete: false` is a clean dry-run of
 space. **The violation list is paged**: `limit` (default and ceiling 500) and `skip` in the body or the query string,
 and the answer carries `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` exactly when more violations
 remain, as every paged list does. `totalViolations` stays, and equals `total`.
+
+**`staleGuards` lists the stored edges that hold a write guard for a subject they are not under**, as
+`[{ _id, label }]` (`[]` when there are none). The write guard is the instance's own lock on a functional label's
+subject: it is never returned by a read, sent to a peer or exported, and it is not part of the schema. An edge holding
+one for another subject does not break any rule, so it is **never a violation** — it is not in `violations` and not
+in `totalViolations`, which mean what they always did — and it is not paged. The first write that meets such a guard
+clears it and goes on to land, so the list is how to see them before a write does.
 
 ---
 
@@ -359,7 +367,7 @@ interface TypeSchema {
                                                   //   are entity type names, plus `UNTYPED`. Two arrays mean
                                                   //   the CROSS PRODUCT. See below.
   functional?: boolean;                           // EDGE only — at most one edge with this label per subject,
-                                                  //   i.e. one `to` per `(from, label)`. Absent = many.
+                                                  //   i.e. one edge per `(from, label)`, whatever its `to`. Absent = many.
 }
 interface PropertySchema {
   description?: string;  // what this property MEANS, in your own words. Free text, never parsed, max 2000
@@ -461,8 +469,10 @@ member may also be written `entity:<type>`; a bare name means the same thing. An
 (`fact:`, `chrono:`, `edge:`) is refused with a message saying why: the grammar is reserved for if those
 records can ever be edge endpoints, so it cannot later be read as a type name that happens to contain a colon.
 
-**`functional: true` means one `to` per `(from, label)`.** Not per `(from, to)` — that is already guaranteed by
-edge identity — and not per `to`, which is the inverse relation and has its own name.
+**`functional: true` means one edge per `(from, label)`.** "Another edge" is a different edge, not only a different
+`to`: the same `to` reached as another kind (`toKind`, or `fromKind` at the other end) is a second edge too. Not per
+`(from, to)` — that is already guaranteed by edge identity — and not per `to`, which is the inverse relation and has
+its own name.
 
 **Where the rules are enforced.** A write that would break either one is **refused**, on every door that creates or
 edits an edge — the two edge routes, `save_edge`, `update_edge`, per item through `/bulk`, and the inline `edges` of
@@ -471,10 +481,23 @@ an entity, fact or chrono write (refused before the record is written, so nothin
 space it is reported in the response instead of refused, like every other schema rule. An edge that arrives from a
 sync peer or an import is stored as it was written, and a merge reports instead of refusing.
 
+**Writers that run at the same time cannot both win.** In a `strict` space an instance's own writers — the two edge
+routes, `save_edge`, `update_edge`, a bulk item and an inline edge — leave a subject at most one edge under a
+functional label, even when two of them check at the same moment: the one that loses is decided again against the
+winner and refused with the same `functional` violation a write made afterwards gets, on either door. A writer that
+keeps losing, because the subject keeps changing under it, answers `409` and writes nothing, and a relabel onto an
+identity another edge already holds answers `409 edge_identity_taken`. What this does not cover: a `warn` or `off`
+space stores the second edge (`warn` reports it), and an edge that arrives from a sync peer, a merge or an import is
+stored and reported, never refused — so a subject can still hold two, and `validate-schema` lists them. The
+guarantee is in place from a new space's set-up, and for a space that existed before the upgrade once the background
+index pass has reached it; a space where it could not be built says so (the `Edge indexes` step in
+[Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and is tried again by the next index pass,
+and until then a race there behaves as it did before.
+
 **A rule you declare later does not freeze the edges you already have.** Refusal is on what a write INTRODUCES:
 if a stored edge already breaks the rule, an edit that leaves the ends alone still goes through, so declaring a
-schema can never make a record unmaintainable. Re-writing the same `(from, to, label)` is likewise not a
-`functional` breach — an edge is not its own duplicate.
+schema can never make a record unmaintainable. Re-writing the same edge — the same `from`, `to`, `label` and end
+kinds — is likewise not a `functional` breach: an edge is not its own duplicate.
 
 **An endpoint that resolves to nothing is not a type violation.** With `strictLinkage: false` a dangling
 reference is a deliberate documented state, and `ErModel.danglingEdges` has a row for it; a `to` that cannot be
@@ -484,7 +507,8 @@ this vocabulary.
 
 **And the stored edges are still auditable.** [`POST /api/spaces/:id/validate-schema`](06-spaces-api.md) lists
 every stored edge that breaks either rule — what the enforcement cannot reach, because it was written before the
-rule existed, arrived from a peer, or came in while the space was in `warn`.
+rule existed, arrived from a peer, was merged or imported, or came in while the space was in `warn`. The same answer
+carries `staleGuards`, which is a different list: [see below](#validate-schema-dry-run).
 
 Both fields are also accepted on a **schema-library** entry, unlike `retention`. The difference is shape versus
 policy: what may sit at the end of a `reports_to` is a fact about the relationship, and travels with an entry any

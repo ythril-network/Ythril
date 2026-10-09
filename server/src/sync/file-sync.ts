@@ -29,7 +29,6 @@ import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota
 import { withinHousekeepingBound } from '../db/write-bound.js';
 import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { storeIsNotAnswering } from '../db/store-condition.js';
 import {
   publishedFileTombstonePage, settledFileTombstones, fileTombstoneOnTheWire, decideArrivals,
   LEGACY_FILE_TOMBSTONE_LIMIT,
@@ -120,7 +119,7 @@ async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string,
  * forget a still-failing sibling's line, and it would be said again every cycle.
  */
 function sayPullFailure(step: string, spaceId: string, key: string, err: unknown): void {
-  reportSpaceFailure(step, spaceId, err, { unit: key, when: 'next cycle', ...(storeIsNotAnswering(err) ? { kind: 'store-down' as const } : {}) });
+  reportSpaceFailure(step, spaceId, err, { unit: key, when: 'next cycle' });
 }
 
 /**

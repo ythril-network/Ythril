@@ -4,6 +4,7 @@ import { validateEdge } from './schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import type { SchemaViolation } from './schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { SubjectEdges, guardNamesItsEdge } from '../brain/functional-subject.js';
 
 /** One stored edge, as much of it as validation reads. */
 interface StoredEdge {
@@ -11,7 +12,10 @@ interface StoredEdge {
   label?: string;
   from?: string;
   to?: string;
+  fromKind?: string;
+  toKind?: string;
   properties?: Record<string, unknown>;
+  _functionalGuard?: unknown;
 }
 
 /** What the dry run reports for one document. */
@@ -19,6 +23,37 @@ export interface StoredViolation {
   collection: string;
   _id: string;
   violations: SchemaViolation[];
+}
+
+/** An edge whose write guard names another subject than the one it is under: its id, and the label it is under. */
+export interface StaleGuard {
+  _id: string;
+  label: string;
+}
+
+/** What the dry run found over a page of stored edges: violations of the schema, and (apart from them) stale write guards. */
+export interface StoredEdgeFindings {
+  violations: StoredViolation[];
+  staleGuards: StaleGuard[];
+}
+
+/**
+ * What the dry run reads of a stored edge. EXPLICIT, and it names the guard: the marker is withheld from every answer
+ * (`NEVER_RETURNED_FIELDS`), so a read that wants it says so, and this is one of the two readers that do. Everything else
+ * is what `validateEdge` and the subject count read.
+ */
+const STORED_EDGE_PROJECTION = { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1, properties: 1, _functionalGuard: 1 } as const;
+
+/**
+ * Is this edge's write guard one it should not hold? A guard is `functionalSubjectKey(from, label)` or absent, so one that
+ * is a string and is anything else is a PHANTOM: it holds a subject's unique slot for an edge that is not under it. Reported
+ * as its own list and never as a schema violation — the schema did not break, an index entry outlived its edge — so
+ * `totalViolations` means what it meant before the guard existed.
+ */
+function staleGuardOf(e: StoredEdge): StaleGuard | null {
+  const guard = e._functionalGuard;
+  if (typeof guard !== 'string') return null;
+  return guardNamesItsEdge(e) ? null : { _id: String(e._id), label: typeof e.label === 'string' ? e.label : '' };
 }
 
 /**
@@ -52,11 +87,12 @@ export async function validateStoredEdges(
   spaceId: string,
   meta: SpaceMeta,
   scanLimit: number,
-): Promise<StoredViolation[]> {
+): Promise<StoredEdgeFindings> {
   const out: StoredViolation[] = [];
-  const edges = await col(spaceCollection(spaceId, 'edges')).find({}).limit(scanLimit).toArray();
+  const staleGuards: StaleGuard[] = [];
+  const edges = await col(spaceCollection(spaceId, 'edges')).find({}, { projection: STORED_EDGE_PROJECTION }).limit(scanLimit).toArray();
   const docs = edges as unknown as StoredEdge[];
-  if (docs.length === 0) return out;
+  if (docs.length === 0) return { violations: out, staleGuards };
 
   const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
   const typeOf = new Map<string, string | null>();
@@ -72,33 +108,23 @@ export async function validateStoredEdges(
    * a count reaching past the limit would make one answer depend on rows the caller was never shown, and two
    * runs with different limits would disagree about the same data.
    */
-  const subjectCounts = new Map<string, number>();
-  /*
-   * Length-prefixed, the same way `edgeIdFor` builds its key and for the same reason: a label is
-   * operator-supplied text, so any separator can appear inside a part. A plain `${from}:${label}` counts
-   * ('a:b', 'c') and ('a', 'b:c') as one subject, and would report a functional violation between two
-   * unrelated edges.
-   *
-   * A NUL separator is injective too and was the first draft — it makes git treat the file as BINARY, so
-   * `source-text-hygiene` refuses it: no diff, no blame, no review.
-   */
-  const subjectKey = (from: string, label: string) => `${from.length}:${from}${label.length}:${label}`;
-  for (const e of docs) {
-    if (!e.from || !e.label) continue;
-    const k = subjectKey(e.from, e.label);
-    subjectCounts.set(k, (subjectCounts.get(k) ?? 0) + 1);
-  }
+  // The one counting definition (`brain/functional-subject.ts`): a subject's other edges by identity, so the planner, the
+  // merge and this report agree on "another edge". A row too malformed to name an edge is not counted.
+  const subjectEdges = new SubjectEdges(docs.filter((e): e is StoredEdge & { from: string; label: string; to: string } =>
+    !!e.from && !!e.label && typeof e.to === 'string'));
 
   for (const doc of docs) {
+    const stale = staleGuardOf(doc);
+    if (stale) staleGuards.push(stale);
     const v = validateEdge(meta, doc, {
       ...(doc.from && typeOf.has(doc.from) ? { fromType: typeOf.get(doc.from) } : {}),
       ...(doc.to && typeOf.has(doc.to) ? { toType: typeOf.get(doc.to) } : {}),
-      // Minus one: an edge is not its own duplicate.
-      ...(doc.from && doc.label
-        ? { otherEdgesFromSubject: (subjectCounts.get(subjectKey(doc.from, doc.label)) ?? 1) - 1 }
+      // An edge is not its own duplicate: `others` excludes its own identity.
+      ...(doc.from && doc.label && typeof doc.to === 'string'
+        ? { otherEdgesFromSubject: subjectEdges.others({ from: doc.from, label: doc.label, to: doc.to, fromKind: doc.fromKind, toKind: doc.toKind }) }
         : {}),
     });
     if (v.length) out.push({ collection: 'edges', _id: String(doc._id), violations: v });
   }
-  return out;
+  return { violations: out, staleGuards };
 }

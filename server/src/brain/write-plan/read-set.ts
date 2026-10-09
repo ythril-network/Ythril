@@ -26,6 +26,7 @@ import { readRecordsById, type RecordsById } from '../walk-reads.js';
 import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
 import { tripletClause } from '../edge-lookup.js';
+import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
 import { missingRefs } from '../entity-refs.js';
 import { RECORD_COLLECTION, type RefKind } from '../../config/types-knowledge.js';
@@ -62,9 +63,7 @@ const CHUNK = 500;
 
 /** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
 export const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, t.fromKind, t.toKind);
-const subjectKey = (from: string, label: string) => `${from}\u0000${label}`;
 const nameTypeKey = (name: string, type: string) => `${name}\u0000${type}`;
-
 /**
  * Several wants as one — a batch's single `load`, and an inline edge set's.
  *
@@ -97,8 +96,10 @@ export class ReadSet {
   /** Per kind: whether an id names a stored record, for the ids only asked about (`ReadWant.exist`). */
   private readonly existence = new Map<RefKind, Map<string, boolean>>();
   private readonly triplets = new Map<string, EdgeDoc | null>();
-  /** Per functional subject: the edges under that label, by identity, with their `to`. */
-  private readonly subjectEdges = new Map<string, Map<string, string>>();
+  /** The edges held under functional labels, by subject and identity — the one counting definition (`functional-subject.ts`). */
+  private readonly subjectEdges = new SubjectEdges();
+  /** The functional subjects whose stored edges were read; asking about any other is a bug, not a zero. */
+  private readonly loadedSubjects = new Set<string>();
   private readonly nameTypeCounts = new Map<string, number>();
   /** Ids this batch minted — records that cannot appear in any stored edge or link. */
   private readonly mintedIds = new Set<string>();
@@ -145,14 +146,14 @@ export class ReadSet {
       for (const e of found) this.triplets.set(tripletKey(e), e);
     }
 
-    const subjectsWanted = (want.functional ?? []).filter(s => !this.subjectEdges.has(subjectKey(s.from, s.label))
+    const subjectsWanted = (want.functional ?? []).filter(s => !this.loadedSubjects.has(functionalSubjectKey(s.from, s.label))
       && !this.mintedIds.has(s.from));
     for (const chunk of inChunks(subjectsWanted, CHUNK)) {
       const found = await edges.find(asFilter<EdgeDoc>({
         $or: chunk.map(s => ({ from: s.from, label: s.label })),
       } as never), { projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } }).toArray() as EdgeDoc[];
-      for (const s of chunk) this.subjectEdges.set(subjectKey(s.from, s.label), new Map());
-      for (const e of found) this.subjectEdges.get(subjectKey(e.from, e.label))?.set(tripletKey(e), e.to);
+      for (const s of chunk) this.loadedSubjects.add(functionalSubjectKey(s.from, s.label));
+      for (const e of found) this.subjectEdges.add(e);
     }
 
     const namesWanted = (want.nameTypes ?? []).filter(n => !this.nameTypeCounts.has(nameTypeKey(n.name, n.type)));
@@ -228,28 +229,23 @@ export class ReadSet {
   }
 
   /**
-   * How many OTHER edges carry `label` from `from` — stored or planned in this batch, counted ONCE each by
+   * How many OTHER edges carry `edge.label` from `edge.from` — stored or planned in this batch, counted ONCE each by
    * identity, so an earlier item that updates a stored edge is not counted twice. The edge being written is
-   * excluded by its `to`, as `resolveEdgeEndsForWrite` excludes it: an edge is not its own duplicate.
+   * excluded by its identity, as `resolveEdgeEndsForWrite` excludes it: an edge is not its own duplicate. The count is
+   * `SubjectEdges`' (`functional-subject.ts`), the one the store's guard agrees with.
    */
-  otherEdgesFromSubject(from: string, label: string, to: string, sameBody: readonly Triplet[] = []): number {
+  otherEdgesFromSubject(edge: Triplet, sameBody: readonly Triplet[] = []): number {
     // A subject minted by this batch has no stored edges; only this batch's own can count.
-    if (!this.subjectEdges.has(subjectKey(from, label)) && this.mintedIds.has(from)) {
-      this.subjectEdges.set(subjectKey(from, label), new Map());
+    if (!this.loadedSubjects.has(functionalSubjectKey(edge.from, edge.label)) && !this.mintedIds.has(edge.from)) {
+      throw new Error(`read set: functional subject ${edge.from} -${edge.label}-> was never loaded`);
     }
-    const stored = this.subjectEdges.get(subjectKey(from, label));
-    if (!stored) throw new Error(`read set: functional subject ${from} -${label}-> was never loaded`);
     /*
      * `sameBody`: the edges of the one write that already passed, which no read set has noted — a refusal records
      * nothing, so a second edge under the label in the same body would otherwise meet a count that cannot see the
      * first. Counted by the same identity and the same arithmetic as a stored one, so an edge both stored and
      * repeated in the body is one edge, and the edge being asked about is still not its own duplicate.
      */
-    const edges = new Map(stored);
-    for (const t of sameBody) if (t.from === from && t.label === label) edges.set(tripletKey(t), t.to);
-    let n = 0;
-    for (const target of edges.values()) if (target !== to) n++;
-    return n;
+    return this.subjectEdges.others(edge, sameBody);
   }
 
   /** How many entities named `name` with `type` exist — stored, plus this batch's earlier inserts. */
@@ -270,10 +266,9 @@ export class ReadSet {
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
       this.triplets.set(tripletKey(e), e);
-      const sk = subjectKey(e.from, e.label);
-      // A subject this batch minted was never read (it has no stored edges), so its count starts here.
-      if (!this.subjectEdges.has(sk) && this.mintedIds.has(e.from)) this.subjectEdges.set(sk, new Map());
-      this.subjectEdges.get(sk)?.set(tripletKey(e), e.to);
+      // A subject this batch minted was never read (it has no stored edges), so its count starts here; one that was
+      // read counts what this batch plans from then on. A subject nobody asked about is held too, and read by nobody.
+      this.subjectEdges.add(e);
     }
     if (kind === 'entity' && inserted) {
       const k = nameTypeKey(String(doc['name']), String(doc['type']));

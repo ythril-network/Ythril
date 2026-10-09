@@ -81,7 +81,7 @@ import { col, asBulk, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import {
-  bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode, isArgumentErrorOfOneWrite,
+  bulkWriteFailures, DUPLICATE_KEY, isDuplicateKey, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode, isArgumentErrorOfOneWrite,
 } from '../db/write-errors.js';
 import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
@@ -92,7 +92,7 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields, stampOfArrival } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, carriedFields, stampOfArrival } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -290,7 +290,9 @@ export function warnArrivalsNotStored(
 /** A copy of what arrived with what never crosses removed, and a restore's stamps turned back into Dates. */
 function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   let doc: Doc = { ...raw };
-  for (const f of DERIVED_LOCAL_FIELDS) delete doc[f];
+  // The derived half and this instance's write guard: never a peer's and never a backup's (`NOT_CARRIED_BY_BACKUP`); a restored
+  // edge arrives unmarked (`Q-439`).
+  for (const f of NOT_CARRIED_BY_BACKUP) delete doc[f];
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
     // JSON turned a stamp into text; stored as text it never compares with a Date and the sweep never fires.
@@ -329,6 +331,20 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
 
 
 /**
+ * What the replace carries of a write-guard field (`Q-439`): the stored value, but only while the arriving document's `from`
+ * and `label` are the stored ones. A guard is a function of `(from, label)`, so a peer's edit that moves the edge to another
+ * subject must not leave the old marker on it — a phantom holding the old subject's slot for ever. Decided in the same write,
+ * on the stored row, because a read before it could be stale. A document with no `from` and `label` (every family but edges)
+ * has no guard to carry.
+ */
+function guardCarry(doc: Doc, field: string): unknown {
+  if (typeof doc['from'] !== 'string' || typeof doc['label'] !== 'string') return '$$REMOVE';
+  return {
+    $cond: [{ $and: [{ $eq: ['$from', { $literal: doc['from'] }] }, { $eq: ['$label', { $literal: doc['label'] }] }] }, `$${field}`, '$$REMOVE'],
+  };
+}
+
+/**
  * The replace, as an update pipeline so the carried fields cross IN THE SAME WRITE: the stored values of `carried`
  * (a missing one is simply absent), over the D-9 defaults, under what arrived — every peer value inside `$literal`.
  * Read-free, and race-free against an embed worker writing a vector between a read and this write.
@@ -336,8 +352,11 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
  * `deliveredBy` is the fourth operand, after what was carried: the stamp of THIS delivery wins over the stored one. A
  * restore passes the backup's own (`''` when it carried none): what it replaced is never what it keeps.
  */
-function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string): unknown[] {
-  const kept = Object.fromEntries([...carried].map(f => [f, `$${f}`]));
+function replacementFor(
+  doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string, guarded: ReadonlySet<string> = new Set(),
+): unknown[] {
+  // `guarded`: the carried fields that are write guards, kept only while the record's subject is unchanged.
+  const kept = Object.fromEntries([...carried].map(f => [f, guarded.has(f) ? guardCarry(doc, f) : `$${f}`]));
   return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }] } }];
 }
 
@@ -454,10 +473,11 @@ export async function writeArrivals(
   const updateOf = (d: Doc): unknown => {
     const quiet = suppressed.has(d._id);
     const stamps = defaults.get(d._id) ?? ({} as Doc);
-    return family === 'files'
-      ? fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' })
-      : replacementFor(d, stamps, carriedFields({ restore, suppressed: quiet }),
-        stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }));
+    if (family === 'files') return fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' });
+    const carried = carriedFields({ restore, suppressed: quiet });
+    // A write guard (`_functionalGuard`, an edge's) crosses only while `from` and `label` are the stored ones: carry-if-unchanged.
+    const guarded = new Set([...carried].filter(f => WRITE_GUARD_FIELDS.has(f)));
+    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }), guarded);
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
   // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.
@@ -505,7 +525,7 @@ export async function writeArrivals(
       // FIRST: code 2 is in `DOCUMENT_REFUSAL_CODES`, and a standalone mongod answers an unmeetable `w > 1` with it. Read as
       // the document's, the document is refused by id and dropped from its page for good, over a configuration fault.
       if (isUnsatisfiableWriteConcern(err)) throw stopped(err);
-      if (writeErrorCode(err) === DUPLICATE_KEY) dupes.push(d);
+      if (isDuplicateKey(err)) dupes.push(d);
       else if (isDocumentRefusal(err)) out.refused.push({ _id: d._id, reason: storeRefusal(err) });
       else throw stopped(err);
     };

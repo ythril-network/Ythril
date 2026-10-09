@@ -29,6 +29,7 @@ import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { ensureFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { createKeysetIndexesFor } from './keyset-indexes.js';
+import { ensureEdgeGuardIndex, edgeIndexFailure } from './edge-guard-index.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
@@ -39,6 +40,17 @@ import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/stor
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
+
+/**
+ * The edges' identity index: unique over `(from, to, label, fromKind, toKind)`, the guarantee `edgeIdFor` derives an id from.
+ *
+ * One function because two doors build it: `initSpace`, and the online restore, which DROPS every collection before it reloads
+ * it and so leaves the edges with no unique index at all until the next boot — two edges of one identity can be stored in that
+ * window. Idempotent. The reason each field is in the key is stated where `initSpace` calls it.
+ */
+export async function ensureEdgeIdentityIndex(spaceId: string): Promise<void> {
+  await getDb().collection(spaceCollection(spaceId, 'edges')).createIndex({ from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { unique: true });
+}
 
 export async function initSpace(
   spaceId: string,
@@ -132,7 +144,19 @@ export async function initSpace(
    * label, null, null)` — exactly what a new ordinary edge keys as. So the guarantee for the ordinary case is
    * unchanged and only the widened cases become storable.
    */
-  await edgesColl.createIndex({ from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { unique: true });
+  await ensureEdgeIdentityIndex(spaceId);
+  // The guard index of a strict functional label (`Q-439`), here only for an edges collection created just now: the build
+  // reads every edge, and this runs for every space at every boot before the server listens, so on an existing collection it
+  // is the background pass's (`ensureQueryIndexes`), like the keyset indexes above. Until it exists a race is not refused,
+  // which the planner's count still is. Its own guarded try: a space whose markers cannot be indexed is a space without a
+  // race guard, which is said (and counted), and must never be a space that does not initialise.
+  if (createdNow.has(spaceCollection(spaceId, 'edges'))) {
+    try {
+      await ensureEdgeGuardIndex(spaceId);
+    } catch (err) {
+      edgeIndexFailure(spaceId, 'guard index', err, 'next index pass');
+    }
+  }
   // The compound index above serves `from` through its prefix but leaves `to` unindexed, so any
   // "which entities does the graph touch" question scanned the whole collection on the inbound half.
   // Completeness' unlinked-entity join asks it per entity; traversal asks it per hop.

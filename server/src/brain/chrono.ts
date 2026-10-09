@@ -6,7 +6,7 @@ import { writeTombstone } from './tombstones.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
-import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
+import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { conveniencePredicate } from './list-conveniences.js';
 import { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
@@ -129,7 +129,7 @@ export async function createChrono(
   // `chrono.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new entry.
   if (actor) {
     emitWebhookEvent({ event: done.plan.op === 'insert' ? 'chrono.created' : 'chrono.updated', spaceId,
-      entry: { ...entry, embedding: undefined }, ...actor });
+      entry: eventEntryOf(entry), ...actor });
   }
   // Advisory only — the entry is stored either way.
   return withoutVector({ ...entry, ...(done.similar ? { similar: done.similar } : {}),
@@ -292,7 +292,7 @@ export async function updateChrono(
   if (Object.keys(desired).length > 0) {
     await reconcileLinks(spaceId, updatedChrono._id, 'chrono', desired, updatedChrono.author);
   }
-  if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...updatedChrono, embedding: undefined }, ...actor });
+  if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: eventEntryOf(updatedChrono), ...actor });
   return withoutVector(updatedChrono);
 }
 

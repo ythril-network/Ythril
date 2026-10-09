@@ -24,6 +24,7 @@
  * own, not bolted onto a file move.
  */
 import type { RecallResult, RecallKnowledgeType } from './recall.js';
+import { WRITE_GUARD_FIELDS } from '../sync/local-only-fields.js';
 
 /**
  * The fields a recall result carries for the SYSTEM rather than for the caller.
@@ -103,8 +104,13 @@ export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'vector
  *
  * It holds what no read returns, not only vectors: `deliveredBy` names the peer that delivered a record
  * (`sync/local-only-fields.ts`), which is local state about THIS instance's network and nobody's to read back.
+ *
+ * **The write guard joins it (`Q-439`), derived from `WRITE_GUARD_FIELDS`** so a second guard field is withheld by being named
+ * once. `_functionalGuard` is this instance's lock on an edge's subject: a caller holding it learns nothing it can use, and a
+ * copy that travelled (an export, a webhook) would name a subject under another instance's index. A reader that must see it —
+ * the holder lookup and the stored-edge dry run — names it in its own explicit projection.
  */
-export const NEVER_RETURNED_FIELDS: readonly string[] = ['embedding', 'deliveredBy'];
+export const NEVER_RETURNED_FIELDS: readonly string[] = ['embedding', 'deliveredBy', ...WRITE_GUARD_FIELDS];
 
 /**
  * The named fields that are actually present, or `{}` when the caller did not ask for them.

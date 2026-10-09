@@ -1,4 +1,12 @@
 /**
+ * The name of the write guard an edge carries on this instance (`Q-439`): spelled ONCE, so no writer, projection or filter
+ * can drift from the field the unique index is declared over by a typo that stores a second, unindexed field and guards
+ * nothing. What it holds is `functionalSubjectKey(from, label)` (`brain/functional-subject.ts`), and it is classified in
+ * {@link WRITE_GUARD_FIELDS}.
+ */
+export const FUNCTIONAL_GUARD = '_functionalGuard' as const;
+
+/**
  * The fields a record holds that belong to THIS INSTANCE and must never be taken from a peer.
  *
  * ## Why they are one list with two consumers
@@ -46,7 +54,26 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // (`sync/deletion-authority.ts`). It names a peer of THIS instance's network, so no other instance is told it, and
   // a peer's own stamp would say who delivered the record THERE, which is nothing about who delivered it here.
   'deliveredBy',
+  // The write guard (`Q-439`): `functionalSubjectKey(from, label)` on an edge a strict space inserted under a functional label,
+  // the value the unique partial index refuses a second writer on. A peer's would name a subject under THIS instance's index.
+  FUNCTIONAL_GUARD,
 ]);
+
+/**
+ * The third class of local-only field: a marker THIS instance's store collides on, which is a pure function of the record
+ * that carries it (`_functionalGuard === functionalSubjectKey(from, label)`, `brain/functional-subject.ts`).
+ *
+ * Neither half of the older split fits it, so it is named:
+ *  - **not restored.** An export or restore that carried it could bring a second marker for one subject, or one for an edge
+ *    since relabelled, and a marker that no longer names its edge holds the subject's unique slot for ever and refuses every
+ *    legitimate write under it. A restored edge arrives unmarked, which is harmless: an unmarked edge never collides and the
+ *    planner's count still refuses.
+ *  - **not derived.** `UNSET_DERIVED` clears every derived field when content changes, and an embed must never touch the guard.
+ *
+ * A writer that changes `from` or `label` — or replaces the whole document — must say what it does with it (drop, restamp,
+ * carry only while both are unchanged): `every-edge-writer-says-what-it-does-with-the-functional-guard` holds each one to it.
+ */
+export const WRITE_GUARD_FIELDS: ReadonlySet<string> = new Set([FUNCTIONAL_GUARD]);
 
 /**
  * The local-only fields that are the RECORD's own state on this instance rather than something this instance
@@ -67,15 +94,32 @@ export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', 
 
 /**
  * The rest — what THIS instance computes with its own model (`embedding`, `embeddingModel`, `matchedText`), so
- * never taken from anywhere, a restore included. Derived, so a seventh local-only field lands in one of the two
- * halves by being named once, and one that is named in neither is derived data by default.
+ * never taken from anywhere, a restore included. Derived, so a local-only field lands in the record tier or the write
+ * guard by being named once, and one that is named in neither is derived data by default.
  */
 export const DERIVED_LOCAL_FIELDS: ReadonlySet<string> =
-  new Set([...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f)));
+  new Set([...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !WRITE_GUARD_FIELDS.has(f)));
+
+/**
+ * Everything a backup never carries and a restore never takes: what this instance derives with its own model, and its write
+ * guard. The record tier ({@link RESTORED_LOCAL_FIELDS}) is the rest of {@link LOCAL_ONLY_FIELDS}.
+ *
+ * ## What it prevents
+ *
+ * The export left these out and the arrival writer's `prepared()` dropped them, each by naming `DERIVED_LOCAL_FIELDS` and
+ * `WRITE_GUARD_FIELDS` separately: a third class of local-only field would have been added to one of the two sites and not
+ * the other, so a backup would carry a lock that a restore then dropped, or the reverse.
+ */
+export const NOT_CARRIED_BY_BACKUP: ReadonlySet<string> = new Set([...DERIVED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS]);
 
 for (const f of RESTORED_LOCAL_FIELDS) {
   // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
+}
+for (const f of WRITE_GUARD_FIELDS) {
+  if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`WRITE_GUARD_FIELDS names '${f}', which is not a local-only field`);
+  // Restored, a guard would come back from a backup; derived, an embed's content change would clear it.
+  if (RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`WRITE_GUARD_FIELDS names '${f}', which is also restored: a restore would bring a stale guard back`);
 }
 
 /**
@@ -105,10 +149,14 @@ for (const f of VECTOR_FIELDS) {
 }
 
 const NOTHING: ReadonlySet<string> = new Set();
+/** What an arrival this instance suppresses keeps of the stored copy: the record tier, and the write guard (suppression is not a change of subject). */
+const KEPT_BY_SUPPRESSED: ReadonlySet<string> = new Set([...RESTORED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS]);
 
 /**
  * What crosses a write from the STORED copy, per document (`Q-230`, `Q-234`): a restore takes nothing; an arrival this
- * instance suppresses, the record tier only; any other peer arrival, every local-only field.
+ * instance suppresses, the record tier and the write guard; any other peer arrival, every local-only field. The write
+ * guard crosses only while the record's `from` and `label` are the stored ones, which the arrival writer decides
+ * (`replacementFor`): the set says what MAY cross, never that the stored marker still names its edge.
  *
  * Both of the arrival writer's write shapes read it — the replace (`sync/arrivals.ts`) and the file merge
  * (`sync/file-meta-write.ts`) — because the merge once decided for itself and kept a restored file's replaced vector
@@ -116,7 +164,7 @@ const NOTHING: ReadonlySet<string> = new Set();
  */
 export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
   if (restore) return NOTHING;
-  return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
+  return suppressed ? KEPT_BY_SUPPRESSED : LOCAL_ONLY_FIELDS;
 }
 
 /**
@@ -140,6 +188,12 @@ export function stampOfArrival(
 
 /** `$unset` of every derived field — the content changed or is gone. */
 export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
+/**
+ * `$unset` of the write guard — the edge's `(from, label)` changed and the marker would name the old subject. Beside
+ * {@link UNSET_DERIVED}, because the guard is deliberately NOT derived (an embed must never clear it): a writer that moves an
+ * edge asks for this one, never for the derived set.
+ */
+export const UNSET_GUARD: Readonly<Record<string, ''>> = Object.fromEntries([...WRITE_GUARD_FIELDS].map(f => [f, '']));
 /** `$unset` of the vector half — only the decision to embed changed. */
 export const UNSET_VECTOR: Readonly<Record<string, ''>> = Object.fromEntries([...VECTOR_FIELDS].map(f => [f, '']));
 
@@ -184,10 +238,17 @@ export function stripLocalOnly<T extends object>(doc: T): T {
  * out. The vector and the retention stamps are NOT dropped: they describe the content and this instance's policy,
  * which a re-key does not change (`edge-rekey.ts` keeps the vector on purpose).
  *
- * `patch` wins over the old row, as the spread it replaces; the stamp and `syncBase` win over `patch`.
+ * **It drops the write guard too (`Q-439`).** `_functionalGuard` is a function of `(from, label)`, and a re-key is the write that
+ * changes them: the spread would carry the OLD marker onto the new identity, a phantom that holds the old subject's unique
+ * slot for ever. The caller that moves an edge onto a functional label in a strict space stamps the new marker AFTER this
+ * drop (`rekeyEdges`), never through `patch`, which the drop would also erase.
+ *
+ * `patch` wins over the old row, as the spread it replaces; the stamp and `syncBase` win over `patch`, and the write guard is
+ * absent from the result whatever `patch` holds.
  */
 export function rekeyedRow<T extends object, P extends object>(old: T, patch: P): Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' } {
   const out = { ...old, ...patch, deliveredBy: '' } as Record<string, unknown>;
   delete out['syncBase'];
+  for (const f of WRITE_GUARD_FIELDS) delete out[f];
   return out as Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' };
 }

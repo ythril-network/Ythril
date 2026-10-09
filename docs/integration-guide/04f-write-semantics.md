@@ -367,13 +367,22 @@ Losing that race a second time answers **409** on both doors (on MCP, the tool r
 It takes a record under continuous concurrent writes to see it. Resending the same request is the remedy. On a
 bulk write the same case is an item error with that reason, and the rest of the batch is written.
 
+**A functional create that loses a race is decided again, and refused.** An edge under a `functional` label in a
+`strict` space is subject to the same re-decision. Two writers that both find the subject free cannot both store an
+edge: the one that loses is decided again against what the winner wrote and refused with the ordinary `functional`
+violation, the one a write made afterwards gets, with nothing written. Only a writer that keeps losing, because
+the subject keeps changing under it, answers `409` as above. Writing the same edge twice is not a loss — both writers
+converge on the one edge.
+
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
 asks for it.** `POST /api/filter` merges a mandatory exclusion into whatever projection you send and strips an
 explicit `"embedding": 1` out of it, so the vector cannot be opted back in; every read of a record collection
 projects it out before the document leaves the database. If you have been hunting for a flag to switch it off,
-this is why you could not find one.
+this is why you could not find one. **An edge's write guard (`_functionalGuard`) is withheld the same way**: it is
+this instance's own lock on a functional label's subject, so no read, webhook or live-view event carries it, and a
+`projection` that names it is not honoured.
 
 > **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
 > `POST /api/filter` with a projection for any bulk read there.
