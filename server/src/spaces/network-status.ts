@@ -1,5 +1,6 @@
 import type { NetworkConfig } from '../config/types.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
+import { roundIsOpen } from '../networks/round-state.js';
 
 export interface SpaceNetworkInfo {
   networks: { id: string; label: string; type: NetworkConfig['type'] }[];
@@ -41,6 +42,7 @@ export function spaceNetworkInfo(
   spaceId: string,
   isSyncing: (networkId: string) => boolean,
   myInstanceId: string,
+  now: number = Date.now(),
 ): SpaceNetworkInfo | undefined {
   const nets = networks.filter(n => n.spaces.includes(spaceId));
   if (nets.length === 0) return undefined;
@@ -50,7 +52,7 @@ export function spaceNetworkInfo(
   // space; a space-scoped round (space_deletion/meta_change) only its own space.
   const awaitingMyVote = nets.some(n =>
     n.pendingRounds.some(r =>
-      !r.concluded &&
+      roundIsOpen(r, now) &&
       // Resolved to THIS instance's name for the space (Q-133): a round names it by the network's id, or by its
       // proposer's local id, and neither is this instance's name once the two differ.
       (!r.spaceId || roundSpaceLocalId(n, r) === spaceId) &&

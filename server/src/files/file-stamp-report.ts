@@ -57,6 +57,7 @@ import { FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { isRider, pageSeqRuns, serverCursorOf } from '../sync/seq-run-pager.js';
 import { syncBasePath } from '../sync/file-sync.js';
 import { peerIdsCarryingSpace, peersCarryingSpace, type PeerForSpace } from '../sync/peer-for-space.js';
+import { limitRefusal } from '../util/strict-limit.js';
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -531,7 +532,8 @@ export async function fileStampReport(
   o: { limit: number; after?: string | undefined; deadlineMs?: number | undefined; now?: (() => number) | undefined },
 ): Promise<FileStampAnswer> {
   const { limit, after } = o;
-  if (!Number.isInteger(limit) || limit < 1 || limit > FILE_STAMP_REPORT_MAX_LIMIT) throw new RangeError(`limit must be an integer from 1 to ${FILE_STAMP_REPORT_MAX_LIMIT}`);
+  const limitError = limitRefusal(limit, FILE_STAMP_REPORT_MAX_LIMIT);
+  if (limitError) throw new RangeError(limitError);
   if (after !== undefined && (typeof after !== 'string' || after.length > FILE_STAMP_REPORT_CURSOR_MAX)) throw new RangeError(`after must be a string of at most ${FILE_STAMP_REPORT_CURSOR_MAX} characters`);
   const self = authorRef().instanceId;
   if (typeof self !== 'string' || self === '') throw new Error('file stamp report: this instance has no instance id, so no row can be called its own');

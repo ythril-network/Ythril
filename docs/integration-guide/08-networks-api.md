@@ -18,9 +18,9 @@ Since F-34 a token below instance admin acts on a network through the **`network
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
 
-Everything else on this router — members, signing keys, topology (including a reparent invite), votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
+Everything else on this router — members, signing keys, topology (including a reparent invite), votes, vote outcomes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
-**On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. `network_votes`, `network_vote` and `network_sync_history` are `GET /api/networks/:id/votes`, `POST /api/networks/:id/votes/:roundId` and `GET /api/networks/:id/sync-history`, instance-admin on both doors. `network_invite` and `network_fork` are `POST /api/networks/:id/invite` (instance admin, or administering every space) and `POST /api/networks/:id/fork` (instance admin). `network_join_remote` is `POST /api/networks/join-remote` — the same handshake, the same Networks rung checked between apply and finalize, and an inviter's refusal relayed with its own sentence. `network_member_add` and `network_member_remove` are `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`, instance-admin on both doors, with the same vote-or-direct answer per network type. `network_introduction_accept` is `POST /api/networks/:id/introductions/:instanceId/accept`, instance-admin on both doors. `network_member_admit` is `POST /api/networks/:id/join` (the inviter's half of a join by invite key), `network_member_signing_key` is `PUT /api/networks/:id/members/:instanceId/signing-key`, and `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` are the three braintree topology routes — all instance-admin on both doors. Every network route now has its tool.
+**On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. `network_votes`, `network_vote`, `network_vote_outcomes` and `network_sync_history` are `GET /api/networks/:id/votes`, `POST /api/networks/:id/votes/:roundId`, `GET /api/networks/:id/vote-outcomes` and `GET /api/networks/:id/sync-history`, instance-admin on both doors. `network_invite` and `network_fork` are `POST /api/networks/:id/invite` (instance admin, or administering every space) and `POST /api/networks/:id/fork` (instance admin). `network_join_remote` is `POST /api/networks/join-remote` — the same handshake, the same Networks rung checked between apply and finalize, and an inviter's refusal relayed with its own sentence. `network_member_add` and `network_member_remove` are `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`, instance-admin on both doors, with the same vote-or-direct answer per network type. `network_introduction_accept` is `POST /api/networks/:id/introductions/:instanceId/accept`, instance-admin on both doors. `network_member_admit` is `POST /api/networks/:id/join` (the inviter's half of a join by invite key), `network_member_signing_key` is `PUT /api/networks/:id/members/:instanceId/signing-key`, and `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` are the three braintree topology routes — all instance-admin on both doors. Every network route now has its tool.
 
 ## Networks API
 
@@ -66,6 +66,11 @@ GET /api/networks/:id
 Returns one network object (same shape as entries in `GET /api/networks`).
 
 **Response** `200` on success, `404` when the network does not exist or you may not see it.
+
+**A network body carries no vote round and no credential hash** — on `GET /api/networks`, `GET /api/networks/:id` and
+`network_get` alike. Open rounds are read on [`GET /api/networks/:id/votes`](#list-open-vote-rounds) and how rounds ended
+on [`GET /api/networks/:id/vote-outcomes`](#vote-outcomes); `pendingRounds` is no longer a field of the network, and nothing
+on it, or on a member, ends in `Hash`.
 
 **`myRole` says what THIS instance is in the network** (F-38.1), and which members that role acts on — each list
 holds instance ids into `members`:
@@ -123,6 +128,8 @@ POST /api/networks
 ```
 
 **Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only).
+
+**`votingDeadlineHours`** (optional, 1–72, default 24): how long a vote round on this network stays open. A round is open until its deadline and never after it: it is not listed as open, a cast on it is refused naming the deadline, and the round is concluded as expired (kept, with how it ended, on [Vote Outcomes](#vote-outcomes)).
 
 **`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. Since 5.6.0 every cast also signs the round's type and target (`bsig`), so a member relaying a space deletion or wipe cannot re-aim it at another space; see [Sync Protocol → Signed vote casts](../sync-protocol.md#signed-vote-casts) for the transition while older members remain.
 
@@ -301,7 +308,9 @@ with nothing but that key, use [Join a Pub/Sub by Its Published Key](#join-a-pub
 
 The invite key is consumed when the round opens (pubsub keys stay reusable). **Re-presenting the same key
 with the same `instanceId` polls the outcome**: `202` while the vote is open, `200 joined` with the member
-list once admitted, `403` if the round was vetoed or expired.
+list once admitted, `403` if the round was vetoed or expired. A round is expired from the moment after its deadline,
+whether or not anything has concluded it yet, and the poll keeps answering `403` (`denied or expired`) after the round is
+pruned, so a joiner is never told there is no invite key to present because the vote ended.
 
 ---
 
@@ -316,6 +325,20 @@ POST /api/networks/:id/votes/:roundId
 ```
 
 Accepted values: `yes`, `veto`.
+
+**A cast on a round that is no longer open is refused, never taken.** A round is open until its deadline — at the
+deadline instant itself it still is — and a round past it takes no cast, whether or not anything has concluded it yet.
+
+| status | when | body |
+|---|---|---|
+| `404` | the round does not exist on this network, or has concluded | `{ "error": "Round not found or already concluded" }` |
+| `409` | the round is past its deadline | `{ "error": "Voting on this round closed at <ISO deadline>", "code": "round_expired", "deadline": "<ISO>" }` |
+
+A cast that is taken answers `200` `{ "concluded": false, "round": { … } }`; `concluded` is `true` when this cast ended the
+round, and `round.outcome` then says how (`passed` or `vetoed`).
+
+The sentence of the `404` is the same on the peer-facing vote relay, and `network_vote` answers both with the same text.
+`deadline` is in the body so a client can show it in the viewer's own date format.
 
 A concluded `space_deletion` or `space_wipe` round acts on a member only when it **passed** with no veto — a round
 that expired is concluded but not passed, and deletes nothing — and only on the space it names as mapped to that
@@ -349,19 +372,89 @@ GET /api/networks/:id/votes
   "rounds": [
     {
       "roundId": "round-uuid",
-      "type": "join",
+      "type": "space_deletion",
       "subjectInstanceId": "peer-uuid",
+      "subjectLabel": "Peer Brain",
+      "subjectUrl": "https://peer.example.com",
+      "spaceId": "notes",
+      "networkSpaceId": "notes",
+      "localSpaceId": "my-notes",
+      "openedAt": "2026-04-11T12:00:00.000Z",
       "deadline": "2026-04-12T12:00:00.000Z",
-      "votes": []
+      "votes": [{ "instanceId": "peer-uuid", "vote": "yes", "castAt": "2026-04-11T12:00:00.000Z" }]
     }
   ]
 }
 ```
 
-Only non-concluded rounds are returned. A round about a space carries `localSpaceId` (since 5.6.0): what THIS
-instance calls the space, which after a rename is neither the network's id nor the proposer's name. It is absent for a
-space not carried here yet (a `space_addition` round), and on this route only — the peer-facing votes route serves
-rounds as they travel. MCP: `network_votes`.
+**Only a round that can still be voted on is listed.** A round is open until its deadline — at the deadline instant itself it
+still is — so a round past its deadline is never listed, whether or not anything has concluded it yet, and a cast on it is
+refused naming the deadline ([Cast a Vote](#cast-a-vote)). A concluded round is read on
+[Vote Outcomes](#vote-outcomes).
+
+A round carries the fields it travels with — `roundId`, `type`, the subject (`subjectInstanceId`, `subjectLabel`,
+`subjectUrl`), `openedAt`, `deadline`, `votes`, and by type `spaceId`, `networkSpaceId`, `wipeTypes`,
+`metaChangedFields`, `changedTypes`, `keptTypes`, `proposesLayer`, `requiredVoters` — and never a proposal's body
+(`pendingMeta`), a joining member (`pendingMember`) or an invite-key hash. A round about a space carries `localSpaceId`
+(since 5.6.0): what THIS instance calls the space, which after a rename is neither the network's id nor the proposer's name.
+It is absent for a space not carried here yet (a `space_addition` round), and on this route only — the peer-facing votes
+route serves rounds as they travel.
+
+**`summary`** (a `meta_change` round) is one plain sentence per change saying what the proposal would do to the space,
+named as this instance calls it and worded as a proposal rather than a done thing. It is English text and is text only: a
+client shows it as such. MCP: `network_votes`.
+
+---
+
+### Vote Outcomes
+
+```http
+GET /api/networks/:id/vote-outcomes?limit=20
+```
+
+How the rounds of this network ended, newest first. A round leaves the open list when it concludes and is pruned
+afterwards; this is where the answer to *"what happened to that vote?"* stays. `limit` is 1–50, default 20, the same on
+`network_vote_outcomes`; anything else is a `400` that names the bounds. `404` for an unknown network.
+
+**Response** `200`:
+
+```json
+{
+  "outcomes": [
+    {
+      "roundId": "round-uuid",
+      "type": "space_deletion",
+      "space": "my-notes",
+      "subjectLabel": "Peer Brain",
+      "openedAt": "2026-04-11T12:00:00.000Z",
+      "deadline": "2026-04-12T12:00:00.000Z",
+      "concludedAt": "2026-04-12T12:01:00.000Z",
+      "outcome": "expired",
+      "yes": 1,
+      "veto": 0,
+      "eligible": 3
+    }
+  ],
+  "total": 1
+}
+```
+
+| field | meaning |
+|---|---|
+| `type` | the round's type (`join`, `remove`, `space_deletion`, `space_wipe`, `meta_change`, `space_addition`) |
+| `space` | the space as THIS instance calls it; absent for a round that is not about a space |
+| `subjectLabel` | the member or space the vote was about, as the round named it |
+| `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes) or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |
+| `yes`, `veto`, `eligible` | the tally this instance counted, and how many members could vote |
+| `summary` | the proposed change of a `meta_change` round, as on [the open list](#list-open-vote-rounds) |
+
+**The outcome is this instance's own reading, and it stays on this instance.** It is never sent to a peer and never taken
+from one, so two members can hold different entries for one round; nothing decides by it, and a value a client does not know
+means the round did **not** pass. `total` is the whole log, so a short page is distinguishable from a short log. The newest
+50 per network are kept; older entries are dropped, and the log goes with the network when it is deleted or this
+instance is removed from it. An expiry the job concludes is also recorded as `network.round.expired` in the
+[audit log](13-audit-log-api.md), which a flood of rounds cannot evict. No entry carries a credential, a cast or a proposal
+body. MCP: `network_vote_outcomes` with `{ "id", "limit"? }`.
 
 ---
 
@@ -596,7 +689,7 @@ Creates a new independent network from your local copy of the data.
 |---|---|---|
 | `label` | Yes | Name for the new network |
 | `type` | No | `closed` (default) or `club` |
-| `votingDeadlineHours` | No | Defaults to source value, or 24 |
+| `votingDeadlineHours` | No | 1–72 hours a vote stays open; defaults to source value, or 24 |
 | `spaces` | Conditional | Required if ejected; optional if still a member |
 
 **Scenarios:**
@@ -605,7 +698,7 @@ Creates a new independent network from your local copy of the data.
 - **Ejected** — source config is deleted on `member_removed`; `spaces` must be supplied explicitly.
 - **Unknown ID** — `404`.
 
-The fork gets a fresh UUID, no members, no pending rounds. You become the root.
+The fork gets a fresh UUID, no members, no pending rounds. You become the root. The `201` answer is the new network in the same shape as `GET /api/networks/:id`: no credential, no rounds, and `myRole`.
 
 ---
 

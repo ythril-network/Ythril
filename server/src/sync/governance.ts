@@ -18,6 +18,11 @@ import { buildBraintreeAncestors } from '../util/braintree.js';
 import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
 import type { SpaceMeta } from '../config/types.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
+import { roundPastDeadline } from '../networks/round-state.js';
+import { roundElectorate, votersOf } from '../networks/round-electorate.js';
+import { recordRoundOutcome } from '../networks/round-outcomes.js';
+
+export { roundElectorate };
 
 /**
  * Recompute the braintree ancestor voter set for a round from this instance's
@@ -44,22 +49,34 @@ export function localBraintreeRequiredVoters(
   return buildBraintreeAncestors(net, getConfig().instanceId, anchor);
 }
 
+/**
+ * Decide whether `round` is over at `now`, and conclude it if so. Returns whether it just PASSED.
+ *
+ * `now` is the ONE reading of the clock the caller took for this request: the deadline is judged against it, and it is the
+ * `concludedAt` the round and its outcome entry carry, so a request cannot refuse a cast for being late and then conclude the
+ * round as if it were not. A round is open AT its deadline instant (`round-state.ts`).
+ *
+ * How it ended is recorded as the LOCAL `outcome` (`passed`, `vetoed`, `expired`) and written to the network's outcome log in
+ * the same step. A veto beats expiry: a cast's `castAt` is unsigned and a relayer can set it, so it decides no label.
+ */
 export function concludeRoundIfReady(
   net: import('../config/types.js').NetworkConfig,
   round: import('../config/types.js').VoteRound,
+  now: number = Date.now(),
 ): boolean {
-  // The subject is left out only where it is the member voted ON — a join or a removal. On every other round it is
-  // the PROPOSER, a voter like any member, whose yes is cast for it when the round opens (S-7; owner, 2026-09-25:
-  // "of course a proposer votes yes ... require the yes but set it automatically"). Dropping it there let a peer name
-  // any member as proposer and so drop that member's vote from the quorum.
-  const subjectIsVotedOn = round.type === 'join' || round.type === 'remove';
-  const voters = net.members.filter(m => !subjectIsVotedOn || m.instanceId !== round.subjectInstanceId);
+  // Who votes is `votersOf`'s (the subject is left out only where it is the member voted ON — a join or a removal; on every
+  // other round it is the PROPOSER, a voter like any member, whose yes is cast for it when the round opens, S-7; owner,
+  // 2026-09-25: "of course a proposer votes yes ... require the yes but set it automatically". Dropping it there let a peer
+  // name any member as proposer and so drop that member's vote from the quorum).
+  const { voters, localInstanceId, localIsVotedOn } = votersOf(net, round);
   const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-  const pastDeadline = new Date(round.deadline) < new Date();
 
-  if (vetoCount > 0 || pastDeadline) {
+  if (vetoCount > 0 || roundPastDeadline(round, now)) {
     round.concluded = true;
     round.passed = false;
+    round.outcome = vetoCount > 0 ? 'vetoed' : 'expired';
+    round.concludedAt = new Date(now).toISOString();
+    recordRoundOutcome(net, round, now);
     // A failed JOIN leaves the candidate's provisioned credentials (peer PAT
     // issued at invite/apply time, outbound token in secrets) with no membership
     // to justify them — revoke unless something else still references the
@@ -88,7 +105,6 @@ export function concludeRoundIfReady(
   // remove / space_deletion / meta_change through with no legitimate vote. Forged
   // casts are dropped by acceptVoteCast, so an adopted forged round holds no local
   // yes and correctly never concludes here.
-  const localInstanceId = getConfig().instanceId;
   const localVotedYes = round.votes.some(
     c => c.instanceId === localInstanceId && c.vote === 'yes',
   );
@@ -101,7 +117,6 @@ export function concludeRoundIfReady(
   // proposer decided for the other, whose own data the round then deleted or wiped. The proposer's yes is cast when
   // the round opens, so its own path is unchanged. The subject of a join or removal is not asked about itself, so
   // when this instance IS that subject its own yes is not required here either.
-  const localIsVotedOn = subjectIsVotedOn && round.subjectInstanceId === localInstanceId;
   const everyMemberVotedYes = allRemoteVotedYes && (localVotedYes || localIsVotedOn);
 
   const yesCount = round.votes.filter(v => v.vote === 'yes').length;
@@ -136,11 +151,8 @@ export function concludeRoundIfReady(
       // A majority of EVERY member, this one included unless the round is about it (`Q-77`). The count compared the
       // yeses against half the OTHER members, so on an even-sized network exactly half passed — on two members the
       // proposer's own automatic yes decided for both. Only a member's yes counts.
-      const electorate = voters.length + (localIsVotedOn ? 0 : 1);
-      const memberYes = round.votes.filter(v => v.vote === 'yes' && (
-        (v.instanceId === localInstanceId && !localIsVotedOn) || voters.some(m => m.instanceId === v.instanceId)
-      )).length;
-      passed = memberYes > electorate / 2;
+      const { eligible, yes: memberYes } = roundElectorate(net, round);
+      passed = memberYes > eligible / 2;
       break;
     }
     case 'club':
@@ -152,6 +164,10 @@ export function concludeRoundIfReady(
   if (passed) {
     round.concluded = true;
     round.passed = true;
+    round.outcome = 'passed';
+    round.concludedAt = new Date(now).toISOString();
+    // Before the passed round acts: a removal takes its subject off the roster, and the count belongs to the electorate that decided.
+    recordRoundOutcome(net, round, now);
     // On join round pass: the candidate will call join again and get a 200 with member list
     // On remove round pass: remove the member
     if (round.type === 'remove') {

@@ -120,6 +120,12 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
       + 'its own `timeoutMS` (3 s) and is never inside a scope; it writes nothing.',
   },
   {
+    methods: ['drop'], files: ['server/src/spaces/lifecycle.ts'],
+    why: 'Deleting a space a network voted to delete: reached from the vote-round expiry job only through applyRoundConclusion, which acts on '
+      + 'PASSED rounds alone, and the job hands it only rounds it concluded as expired (never passed). Dropping a collection is a one-off '
+      + 'metadata change that scales with nothing a per-operation figure could fit.',
+  },
+  {
     methods: ['command'], files: ['server/src/db/write-bound.ts'],
     why: 'The bound\'s own mechanism: after the backstop it finds the database\'s operation by its comment and kills it. It is how a bound ends, so '
       + 'it cannot be inside one.',
@@ -131,6 +137,7 @@ const NETWORK_CALL_EXEMPTIONS = [
   { key: 'server/src/brain/nli-client.ts:classify', why: 'The contradiction judge: a model call, not a database operation. Its own `AbortSignal.timeout(slot)` ends it.' },
   { key: 'server/src/brain/dupe-scanner.ts:fireNotify', why: 'The duplicate notification POST: a network call, not a database operation. Its own `AbortSignal.timeout(NOTIFY_TIMEOUT_MS)` ends it.' },
   { key: 'server/src/brain/embedding.ts:embedViaHttp', why: 'The embedding provider call: a model call, not a database operation. Its own `AbortSignal.timeout(slot)` ends it.' },
+  { key: 'server/src/sync/peer-fetch.ts:peerSafeFetch', why: 'The SSRF-safe peer client, reached from the vote-round expiry job only through sync/governance.ts sendMemberRemovedNotify, for a PASSED remove round, which that job never hands on. A network call, not a database operation; the caller passes `AbortSignal.timeout(10_000)`, which ends it.' },
   { key: 'server/src/webhooks/dispatcher.ts:attemptDelivery', why: 'A webhook delivery: a network call, not a database operation. Its own abort controller (`DELIVERY_TIMEOUT_MS`) ends it.' },
 ];
 const OWN_SIGNAL = /AbortSignal\.timeout\(|\.abort\(\)|\bsignal\b/;

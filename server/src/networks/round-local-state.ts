@@ -12,15 +12,20 @@
  *   `space_addition` skipped the guard that keeps a same-named private space out, and a `meta_change` wrote the
  *   victim's OWN definitions instead of the network's layer.
  *
+ * - `outcome` and `concludedAt`: how THIS instance's conclusion read the round, and when. An instance's own reading, unsigned, which
+ *   no decision reads back (`a-round-outcome-decides-nothing-and-is-never-markup.test.js`); taken from a peer it would let one
+ *   instance label another's round.
+ *
  * So every `pendingRounds.push` lives here, and a new site cannot forget the flag: opening a round records it, adopting
  * one strips whatever a peer sent, and serving one strips it on the way out. `a-round-proposer-is-a-local-fact.test.js`
  * refuses a push anywhere else.
  */
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
+import { roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
-export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere'] as const;
+export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt'] as const;
 type LocalField = typeof LOCAL_ROUND_FIELDS[number];
 
 /** `round` with every local field removed. */
@@ -39,6 +44,25 @@ export function openRoundHere(net: NetworkConfig, round: VoteRound): VoteRound {
   round.proposedHere = true;
   net.pendingRounds.push(round);
   return round;
+}
+
+/** Why a round a peer served is not adopted — a short phrase, counted per pass and said once as a debug line. */
+export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here';
+
+/**
+ * Should this instance adopt `peerRound`? `null` when it should; otherwise why not.
+ *
+ * Adoption used to take every round a peer served, as open, and the next pass concluded it. So a round that had ended
+ * elsewhere (the peer list also serves PASSED `space_addition` and `meta_change` rounds, for the late joiner) came back to life
+ * for one pass and ended as a failure, one this instance had already recorded ended a second time, and a round with a deadline
+ * years away stayed open here for as long as the peer chose. Refused now: past its deadline, undatable (it counts as past),
+ * further than `openedAt` + the longest a network allows, or a `roundId` this instance has an outcome for.
+ */
+export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: number): AdoptionRefusal | null {
+  if (roundPastDeadline(peerRound, now)) return 'past its deadline or undatable';
+  if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
+  if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
+  return null;
 }
 
 /**

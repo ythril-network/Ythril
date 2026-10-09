@@ -105,6 +105,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // Names a hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.
   const { startHorizonHoldWatchdog } = await import('./util/horizon-holds.js');
   startHorizonHoldWatchdog();
+  // A vote round past its deadline ends without anyone's cast, relay or sync cycle touching it (`networks/round-expiry.ts`).
+  const { startRoundExpiry } = await import('./networks/round-expiry.js');
+  startRoundExpiry();
   const { startBackupScheduler } = await import('./db/backup-scheduler.js');
   startBackupScheduler();
   const { startDupeScanner } = await import('./brain/dupe-scanner.js');

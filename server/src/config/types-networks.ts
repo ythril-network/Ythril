@@ -235,7 +235,45 @@ export interface VoteRound {
    * never taken from or served to a peer — `networks/round-local-state.ts` is the only writer.
    */
   proposedHere?: boolean;
+  /**
+   * LOCAL: how THIS instance's conclusion read the round (`passed`, `vetoed` or `expired`). Set once by
+   * `concludeRoundIfReady`; absent on an undecided round and on one concluded before it was recorded. A reading for an operator,
+   * never an input to a decision, never taken from or served to a peer.
+   */
+  outcome?: RoundOutcomeKind;
+  /** LOCAL: when this instance concluded the round (ISO8601), read from the request's own `now`. Never taken from or served to a peer. */
+  concludedAt?: string;
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
+}
+
+/** How a round ended, as this instance read it. `ended` is only ever recorded for a round concluded before the reading existed. */
+export type RoundOutcomeKind = 'passed' | 'vetoed' | 'expired';
+export type RecordedOutcomeKind = RoundOutcomeKind | 'ended';
+
+/**
+ * One concluded round, kept on THIS instance after the round itself is pruned (`NetworkConfig.roundOutcomes`). Local state, like
+ * `outcome` itself: what an instance derives from a conclusion stays local. Holds no cast, no proposal body and no member
+ * credential. `subjectInstanceId` and `inviteKeyHash` are kept for a JOIN round only, so the joiner's poll still answers
+ * "denied" after the prune; every door strips them (`outcomesFor`).
+ */
+export interface RoundOutcomeEntry {
+  roundId: string;
+  type: VoteRoundType;
+  /** The space as THIS instance names it, when the round is about one. */
+  space?: string;
+  subjectLabel: string;
+  openedAt: string;
+  deadline: string;
+  /** Absent on a round concluded before the outcome was recorded; such an entry sorts after every dated one. */
+  concludedAt?: string;
+  outcome: RecordedOutcomeKind;
+  yes: number;
+  veto: number;
+  eligible: number;
+  /** What a meta_change round proposed, in words. */
+  summary?: string;
+  subjectInstanceId?: string;
+  inviteKeyHash?: string;
 }
 
 /**
@@ -311,6 +349,11 @@ export interface NetworkConfig {
   /** Club only: members removed here, newest last and bounded, answered to peers beside the roster (`Q-135`). */
   removedMembers?: MemberRemoval[];
   pendingRounds: VoteRound[];
+  /**
+   * LOCAL: how the rounds this network has concluded ended, newest 50, kept after the round is pruned
+   * (`networks/round-outcomes.ts`). Never sent to a peer and never part of the network view. Lost with the network.
+   */
+  roundOutcomes?: RoundOutcomeEntry[];
   syncSchedule?: string;     // cron expression; omit = manual only
   inviteKeyHash?: string;    // bcrypt of current active invite key
   createdAt: string;

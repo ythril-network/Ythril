@@ -28,15 +28,16 @@ import { pullFamily, type PullResult } from './pull-family.js';
 import { pushFamily } from './push-family.js';
 import { pushTombstones } from './tombstone-transfer.js';
 import { pullSpaceTombstones } from './pull-space-tombstones.js';
-import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases, isDirectionalNetwork } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
-import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
+import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
-import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
-import { adoptPeerRound } from '../networks/round-local-state.js';
+import { concludeRoundIfReady } from './governance.js';
+import { adoptPeerRound, adoptionRefusal, type AdoptionRefusal } from '../networks/round-local-state.js';
+import { roundIsOpen } from '../networks/round-state.js';
+import { applyRoundConclusion } from '../networks/round-conclusion.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
@@ -267,10 +268,11 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   }
 
   // ── Prune expired vote rounds ───────────────────────────────────────────
-  // Concluded rounds are never removed by the governance code (concludeRoundIfReady
-  // only flips `concluded`), so pendingRounds would otherwise grow for the life of the
-  // network. Once a round is concluded AND past its deadline it can influence nothing
-  // and needs no further propagation, so drop it here, once per cycle.
+  // A round that has concluded is kept until its deadline has passed (a concluding cast
+  // may still have to reach a peer), then dropped here once per cycle, after its outcome
+  // is recorded in the network's log. The expiry job (`networks/round-expiry.ts`) does
+  // the same every minute, and concludes the rounds nobody touched, so this is the
+  // backstop for an instance whose job has not ticked yet and not the way a round ends.
   {
     const freshCfg = getConfig();
     const freshNet = freshCfg.networks.find(n => n.id === networkId);
@@ -650,19 +652,27 @@ async function propagateVotesWithPeer(
     const freshNet = fresh.networks.find(n => n.id === net.id);
     if (!freshNet) return;
 
+    // One reading of the clock for the whole pass: what is adopted, merged into and concluded is judged at the same instant.
+    const now = Date.now();
+    const refused = new Map<AdoptionRefusal, number>();
     let changed = false;
     for (const peerRound of peerRounds) {
       if (!peerRound.roundId) continue;
 
       let local = freshNet.pendingRounds.find(r => r.roundId === peerRound.roundId);
       if (!local) {
-        // Round is new to us — adopt it (GET only returns open/non-concluded rounds)
+        // Round is new to us — adopt it, if it can still be voted on here. The peer list also serves PASSED space_addition and
+        // meta_change rounds (for a late joiner) and any round its owner chose a deadline for: one that ended elsewhere is not
+        // brought back to life to end again as a failure, and one this instance already recorded is not recorded twice.
+        // Counted, never a warning per round: a mixed fleet would raise one every cycle.
+        const why = adoptionRefusal(freshNet, peerRound as VoteRound, now);
+        if (why) { refused.set(why, (refused.get(why) ?? 0) + 1); continue; }
         // Nothing local is taken from it (S-7, S-9); votes are merged below, one cast at a time.
         local = adoptPeerRound(freshNet, peerRound as VoteRound);
         changed = true;
         log.info(`Vote gossip: adopted round ${peerText(peerRound.roundId)} (${peerRound.type}) from ${peerText(member.label)}`);
       }
-      if (local.concluded) continue;
+      if (!roundIsOpen(local, now)) continue;
 
       // Merge vote casts.
       //
@@ -698,23 +708,22 @@ async function propagateVotesWithPeer(
       }
     }
 
+    if (refused.size > 0) {
+      log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);
+    }
+
     if (changed) {
-      // Re-evaluate all open rounds — new votes may push them over the threshold
+      // Re-evaluate all undecided rounds — new votes may push them over the threshold. The set of rounds handed on is what
+      // concluded NOW: the gossip pass concludes rounds nobody here voted on, so this is where a decision made elsewhere lands.
+      const concludedNow: VoteRound[] = [];
       for (const round of freshNet.pendingRounds) {
         if (!round.concluded) {
-          const justPassed = concludeRoundIfReady(freshNet, round);
-          if (justPassed && round.type === 'remove') {
-            sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
-          }
-          // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154).
-          if (justPassed && applyPassedJoin(freshNet, fresh.instanceId, round) === 'admitted') {
-            log.info(`Join round ${peerText(round.roundId)} concluded via gossip — added ${peerText(round.subjectLabel)} to network ${peerText(net.id)}`);
-          }
+          concludeRoundIfReady(freshNet, round, now);
+          if (round.concluded) concludedNow.push(round);
         }
       }
-      // Space-scoped side-effects for rounds that just concluded — deletion and wipe. The gossip pass
-      // concludes rounds nobody here voted on, so this is where a decision made elsewhere lands.
-      applyConcludedSpaceRounds(freshNet, freshNet.pendingRounds, 'gossip');
+      // Every held round is also handed to the space-scoped step, so a space_addition that did not land is tried again.
+      applyRoundConclusion(freshNet, fresh, concludedNow, 'gossip', freshNet.pendingRounds);
       saveConfig(fresh);
     }
   } catch (err) {

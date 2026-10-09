@@ -600,7 +600,7 @@ applies as the network's definition, next to yours rather than in place of it.
 
 ### Network types
 
-| Type | Who approves joins and leaves |
+| Type | Who approves joins and removals |
 |------|-------------------------------|
 | **Closed** | All members must agree unanimously |
 | **Democratic** | Majority vote, any member can veto |
@@ -615,7 +615,7 @@ The first time you open **Settings → Networks**, networking is off. Click **En
 ### Creating a network
 
 Click **Create Network**. The dialog asks for a **label**, a **type**, the **spaces** to include, and a
-**Voting deadline (hours)** — how long a vote round stays open before it lapses, 1 to 72.
+**Voting deadline (hours)** — how long a vote round stays open, 1 to 72. A vote closes at its deadline and never takes a vote after it; see [Voting](#voting).
 
 > **There is no schedule field in this dialog.** The cron box is on the network card afterwards — see
 > [Sync schedule](#sync-schedule) below.
@@ -771,10 +771,19 @@ stays where it is, but a brain still below it does not sync in the meantime.
 
 ### Voting
 
-When a vote is open (e.g. a member wants to leave), expand the network card and scroll to **Open votes**. Each open vote shows its **Deadline** and a running tally (`N yes · M veto`). Click **✓ Yes** to approve, or **✗ Veto** to block the round — a veto asks you to confirm ("A veto blocks this pending round for the whole network. This cannot be undone.") before it is cast.
+A vote opens when a brain asks to join a closed, democratic or tree network, when a member is to be removed, and when a networked space is to be deleted, emptied, added or changed. **Leaving a network is never a vote** — you leave on your own (see [Leaving a network](#leaving-a-network)). When a vote is open, expand the network card and scroll to **Open votes**. Each open vote takes two lines:
+
+- **What it is.** The kind of vote (*Join*, *Remove member*, *Delete space*, *Wipe space*, *Change space settings* or *Add space*) and what it is about, when it was **Opened**, its **Deadline**, and a running tally (`Yes: N · Veto: M`).
+- **What the change is.** A sentence saying what approving it would do — for a change to a space's definition, which settings and types it adds or changes, worded as a proposal and named by the space's name on this instance. It is shown in full and wraps rather than being cut off, so you can read all of what you are asked to approve. It is text written by the member who proposed it and is never shown as formatting.
+
+Click **✓ Yes** to approve, or **✗ Veto** to block the round — a veto names the round and asks you to confirm ("A veto blocks this pending round for the whole network. This cannot be undone.") before it is cast.
+
+**A vote closes at its deadline, and this instance ends it by itself.** At the deadline instant a vote is still open; after it, the vote leaves **Open votes** within about a minute even if nobody touches the network, no vote on it is taken, and it ends as *Expired* unless a veto was cast, which ends it as *Vetoed*. If you vote just after the deadline, the page says so ("Voting on … closed at …. Your vote was not counted.") with the deadline in your own date format, and refreshes the list. After a vote that is taken, the page says either that your vote is recorded or, when yours ended the vote, how it ended.
+
+**Recent decisions** sits on every network card, under the open votes, and is there when none is open. It lists how this instance's recent votes ended, newest first: the kind of vote, what it was about, the change it proposed, when it concluded, the tally and how many members could vote, and the outcome as a label — **Passed**, **Vetoed**, **Expired** (the deadline came without a veto and without enough yes) or **Ended (reason not recorded)** for a vote that ended before this list existed. It shows the latest few and says how many exist; the newest 50 per network are kept. It is this instance's own record: it is kept only here, it goes when the network is deleted or you are removed from it, and it is never sent to another member, so two members can differ in what they remember.
 
 **A vote to delete or empty a space acts only if it passes.** A round that reaches its deadline without enough yes
-lapses and the space is kept on every member. A member acts on such a vote only for a space its network actually
+expires and the space is kept on every member. A member acts on such a vote only for a space its network actually
 carries, and only once — a vote cannot reach a space the network does not share.
 
 **Deleting a networked space takes it out of the network; it does not delete anyone else's copy.** When that vote

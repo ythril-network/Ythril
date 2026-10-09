@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, viewChildren, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
@@ -19,17 +19,21 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
-import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
 import { NetworkMemberRowComponent } from './network-member-row.component';
+import { NetworkVoteRowComponent } from './network-vote-row.component';
+import { RecentDecisionsComponent } from './network-decisions.component';
+import { castNotice, castRefusalNotice, roundName, type CastNotice, type Translate } from './network-vote-cast';
+import { DateFormatService } from '../../core/date-format.service';
+import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
 import { NetworkEnableWizardComponent } from './network-enable-wizard.component';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -78,17 +82,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
      * correctly from its own styles while the parent carries dead rules for markup it no longer holds,
      * and the next person to touch either copy has two.
      */
-    .vote-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      background: var(--bg-elevated);
-      border-radius: var(--radius-sm);
-      margin-bottom: 8px;
-      font-size: 13px;
-    }
-
+    /* The vote row's rules live with the row, in network-vote-row.component.ts. */
     .history-row {
       display: grid;
       grid-template-columns: 140px 70px 1fr auto;
@@ -301,23 +295,12 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                 <div style="margin-top:16px;">
                   <div class="section-title">{{ 'networks.network.votes.title' | transloco }}</div>
                   @for (round of openVotes(net.id); track round.id) {
-                    <div class="vote-row">
-                      <span style="flex:1;">{{ round.type }}: {{ round.subject }}</span>
-                      <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">
-                        {{ 'networks.network.votes.deadline' | transloco }} <app-relative-time [value]="round.deadline" />
-                      </span>
-                      <span class="num" style="font-size:11px; color:var(--text-muted); white-space:nowrap;">
-                        {{ 'networks.network.votes.tally' | transloco: { yes: voteTally(round).yes, veto: voteTally(round).veto } }}
-                      </span>
-                      <button class="btn-primary btn btn-sm" [disabled]="votingRound[round.id]" (click)="castVote(net.id, round.id, 'yes')">
-                        @if (votingRound[round.id]) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-                        {{ 'networks.network.votes.yes' | transloco }}
-                      </button>
-                      <button class="btn-danger btn btn-sm" [disabled]="votingRound[round.id]" (click)="castVote(net.id, round.id, 'veto')">{{ 'networks.network.votes.veto' | transloco }}</button>
-                    </div>
+                    <app-network-vote-row [round]="round" [busy]="!!votingRound[round.id]" (cast)="castVote(net.id, round.id, $event)" />
                   }
                 </div>
               }
+              <!-- Outside the open-votes block on purpose: a round that has ended is one nobody can vote on any more. -->
+              <app-network-decisions [networkId]="net.id" />
 
               <app-network-pending-spaces [network]="net" (resolved)="replaceNetwork(net, $event)" />
               <app-network-change-notes [network]="net" />
@@ -425,13 +408,10 @@ export class NetworksComponent implements OnInit {
     ];
   });
 
-  /** Yes/veto counts for an open vote round (for the row tally). */
-  voteTally(round: VoteRound): { yes: number; veto: number } {
-    return {
-      yes: round.votes.filter(v => v.vote === 'yes').length,
-      veto: round.votes.filter(v => v.vote === 'veto').length,
-    };
-  }
+  readonly voteTally = voteTally;
+  private readonly decisions = viewChildren(RecentDecisionsComponent);
+  private readonly dates = inject(DateFormatService);
+  private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
 
   ngOnInit(): void {
     this.load();
@@ -654,10 +634,11 @@ export class NetworksComponent implements OnInit {
   async castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Promise<void> {
     // A veto is destructive — it blocks a pending join/governance round — so confirm it first. A "yes"
     // is safe and stays one click.
+    const round = this.openVotes(networkId).find(r => r.id === roundId);
     if (vote === 'veto') {
       const ok = await this.confirmDialog.confirm({
         title: this.transloco.translate('networks.confirm.vetoTitle'),
-        message: this.transloco.translate('networks.confirm.veto'),
+        message: this.transloco.translate('networks.confirm.veto', { round: roundName(round, this.t) }),
         confirmLabel: this.transloco.translate('networks.network.votes.veto'),
         danger: true,
       });
@@ -665,12 +646,17 @@ export class NetworksComponent implements OnInit {
     }
     this.votingRound[roundId] = true;
     this.networksApi.castVote(networkId, roundId, vote).subscribe({
-      next: () => { delete this.votingRound[roundId]; this.loadVotes(networkId); },
-      error: (err) => {
-        delete this.votingRound[roundId];
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.castVoteFailed'));
-      },
+      next: (res) => this.afterCast(networkId, roundId, castNotice(res, round, this.t)),
+      error: (err) => this.afterCast(networkId, roundId, castRefusalNotice(err, round, this.t, iso => this.dates.format(iso, 'datetime'))),
     });
+  }
+
+  /** Say what the cast came to, then reload the lists it may have changed — the decisions too, and focus follows the removed row. */
+  private afterCast(networkId: string, roundId: string, notice: CastNotice): void {
+    delete this.votingRound[roundId];
+    this.toast[notice.kind](notice.message);
+    this.loadVotes(networkId);
+    this.decisions().find(d => d.networkId() === networkId)?.reload(notice.reload);
   }
 
   // The role's presentation (F-38.1) lives in network-role-view.ts; the template calls it through these.

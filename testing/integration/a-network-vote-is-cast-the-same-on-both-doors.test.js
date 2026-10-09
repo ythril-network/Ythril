@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { generateKeyPairSync, publicEncrypt, randomBytes, constants } from 'node:crypto';
-import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, patchContainerNetwork } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,12 +21,13 @@ const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const FIRST = `f362-first-${RUN}`;
 const ADDED = `f362-added-${RUN}`;
+const LATE = `f362-late-${RUN}`;
 
 let admin, mcp, netId, roundId;
 
 before(async () => {
   admin = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
-  for (const id of [FIRST, ADDED]) {
+  for (const id of [FIRST, ADDED, LATE]) {
     const r = await post(INSTANCES.a, admin, '/api/spaces', { id, label: id });
     assert.equal(r.status, 201, JSON.stringify(r.body));
   }
@@ -52,7 +53,7 @@ before(async () => {
 after(async () => {
   await mcp?.close?.();
   if (netId) await del(INSTANCES.a, admin, `/api/networks/${netId}`).catch(() => {});
-  for (const id of [FIRST, ADDED]) await delWithBody(INSTANCES.a, admin, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
+  for (const id of [FIRST, ADDED, LATE]) await delWithBody(INSTANCES.a, admin, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
 });
 
 const tool = async (name, args) => {
@@ -82,6 +83,30 @@ describe('network votes through MCP and through REST', () => {
     const rest = await post(INSTANCES.a, admin, `/api/networks/${netId}/votes/${roundId}`, { vote: 'yes' });
     assert.equal(rest.status, 404, JSON.stringify(rest.body));
     assert.equal((await tool('network_vote', { id: netId, roundId, vote: 'yes' })).text, `Error (404): ${rest.body.error}`);
+  });
+
+  it('a round past its deadline is refused with the same status, code and sentence on both doors', async () => {
+    // A round whose deadline has passed and that nothing has concluded yet. The expiry job concludes such a round within a minute,
+    // after which the answer is the 404 above, so each attempt makes a fresh round, ages it on disk and casts at once; an attempt
+    // the job beat answers 404 and is made again. Every attempt that reached the round must answer alike.
+    let reached = null;
+    for (let attempt = 0; attempt < 3 && !reached; attempt++) {
+      const added = await post(INSTANCES.a, admin, `/api/networks/${netId}/spaces`, { spaceId: LATE });
+      assert.equal(added.status, 202, JSON.stringify(added.body));
+      const late = added.body.round.roundId;
+      patchContainerNetwork('ythril-a', netId, `const r=n.pendingRounds.find(x=>x.roundId==='${late}');r.deadline=new Date(Date.now()-60000).toISOString();`);
+      assert.equal((await post(INSTANCES.a, admin, '/api/admin/reload-config', {})).status, 200);
+      const rest = await post(INSTANCES.a, admin, `/api/networks/${netId}/votes/${late}`, { vote: 'yes' });
+      const viaMcp = await tool('network_vote', { id: netId, roundId: late, vote: 'yes' });
+      if (rest.status === 404) continue; // the job concluded it between the two steps: try again with a fresh round
+      reached = { rest, viaMcp };
+    }
+    assert.ok(reached, 'the expiry job concluded every aged round before it could be cast on');
+    assert.equal(reached.rest.status, 409, `REST answered ${reached.rest.status}: ${JSON.stringify(reached.rest.body)}`);
+    assert.equal(reached.rest.body.code, 'round_expired');
+    assert.ok(Date.parse(reached.rest.body.deadline) < Date.now(), 'the refusal names the deadline that passed');
+    assert.equal(reached.viaMcp.isError, true);
+    assert.equal(reached.viaMcp.text, `Error (409): ${reached.rest.body.error}`, 'MCP refused in other words, or with another status');
   });
 
   it('network_sync_history answers what GET /sync-history answers', async () => {

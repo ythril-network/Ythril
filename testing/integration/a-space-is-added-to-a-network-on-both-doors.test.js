@@ -141,8 +141,11 @@ describe('a network whose members share every space', () => {
     const rest = await post(INSTANCES.a, admin, `/api/networks/${r.body.id}/spaces`, { spaceId: ADDED });
     assert.equal(rest.status, 200, JSON.stringify(rest.body));
     assert.ok(rest.body.spaces.includes(ADDED));
-    const round = rest.body.pendingRounds.find(x => x.type === 'space_addition');
-    assert.ok(round?.passed, `the passed round must stay listed, so the members learn it: ${JSON.stringify(rest.body.pendingRounds)}`);
+    // The network body no longer carries rounds (a round holds credential hashes); the peer door is the one a member learns it from.
+    assert.equal('pendingRounds' in rest.body, false, 'the network body must not carry rounds');
+    const served = (await get(INSTANCES.a, admin, `/api/sync/networks/${r.body.id}/votes`)).body.rounds;
+    const round = served.find(x => x.type === 'space_addition');
+    assert.ok(round?.passed, `the passed round must stay listed, so the members learn it: ${JSON.stringify(served)}`);
   });
 
   it('a closed network with another member opens a vote, on both doors, and refuses a second one', async () => {

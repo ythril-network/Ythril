@@ -13,6 +13,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { OverviewTabComponent } from './overview-tab.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { elementHolding, truncationAround, declaredNearest } from '../../testing/declared-style';
 import type { Space, SpaceStats , SpaceActivity } from '../../core/api.types';
 
 const STATS: SpaceStats = { spaceId: 'general', facts: 5, entities: 12, edges: 30, chrono: 3, files: 7 };
@@ -20,11 +21,11 @@ function space(over: Partial<Space> = {}): Space {
   return { id: 'general', label: 'General', ...over } as Space;
 }
 
-function setup(opts: { stats?: SpaceStats; space?: Space; confirm?: boolean; needsReindex?: boolean } = {}) {
+function setup(opts: { stats?: SpaceStats; space?: Space; confirm?: boolean; needsReindex?: boolean; translation?: Record<string, string> } = {}) {
   const confirm = vi.fn().mockResolvedValue(opts.confirm ?? true);
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [OverviewTabComponent, getTranslocoModule()],
+    imports: [OverviewTabComponent, getTranslocoModule(opts.translation ? { translation: { en: opts.translation } } : {})],
     providers: [provideRouter([]), { provide: ConfirmDialogService, useValue: { confirm } }, { provide: BrainApi, useValue: { getErModel: () => of({ spaceId: 's', entityTypes: [], relationships: [], danglingEdges: 0, truncated: null, totals: { entities: 0, edges: 0 } }) } }],
   });
   const fixture: ComponentFixture<OverviewTabComponent> = TestBed.createComponent(OverviewTabComponent);
@@ -244,6 +245,61 @@ describe('OverviewTabComponent', () => {
     const noVotes = setup();
     noVotes.fixture.detectChanges();
     expect((noVotes.fixture.nativeElement as HTMLElement).querySelector('.vote-list')).toBeNull();
+  });
+
+  describe('Governance panel — what a voter is shown and where decisions are found', () => {
+    const OPEN = {
+      id: 'r1', networkId: 'n1', type: 'meta_change', subject: 'notes (member-b)',
+      openedAt: '2026-07-27T00:00:00Z', deadline: '2026-07-28T00:00:00Z', status: 'open',
+      votes: [{ instanceId: 'a', vote: 'yes' }],
+      summary: 'Proposed: the <b>Task</b> type gains a due date.\nTwo types stay as they are.',
+    };
+
+    it('shows the round\'s summary as wrapping plain text — a title alone does not tell a voter what they approve', () => {
+      const { fixture } = setup({ translation: { 'networks.roundType.meta_change': 'ROUNDTYPE-META' } });
+      fixture.componentRef.setInput('openVotes', [OPEN]);
+      fixture.detectChanges();
+      const li = (fixture.nativeElement as HTMLElement).querySelector('.vote-list li') as HTMLElement;
+      expect(li.textContent).toContain('Proposed: the <b>Task</b> type gains a due date.');
+      expect(li.querySelector('b'), 'a peer-authored summary was parsed as HTML').toBeNull();
+
+      const holder = elementHolding(li, '<b>Task</b>');
+      expect(holder).not.toBeNull();
+      expect(truncationAround(holder!, li), 'the summary is truncated by a box around it').toEqual([]);
+      expect(declaredNearest(holder!, 'white-space', li)).toBe('pre-line');
+    });
+
+    it('CONTROL: the stylesheet reader sees the ellipsis the title column really has', () => {
+      // If this goes red the summary test above is asserting absence about CSS it can no longer read.
+      const { fixture } = setup();
+      fixture.componentRef.setInput('openVotes', [OPEN]);
+      fixture.detectChanges();
+      const li = (fixture.nativeElement as HTMLElement).querySelector('.vote-list li') as HTMLElement;
+      const title = li.querySelector('.vs') as HTMLElement;
+      expect(title).not.toBeNull();
+      expect(truncationAround(title, li).join(' ')).toContain('text-overflow');
+    });
+
+    it('names the round type by its translated label, not the wire value', () => {
+      const { fixture } = setup({ translation: { 'networks.roundType.meta_change': 'ROUNDTYPE-META' } });
+      fixture.componentRef.setInput('openVotes', [OPEN]);
+      fixture.detectChanges();
+      const li = (fixture.nativeElement as HTMLElement).querySelector('.vote-list li') as HTMLElement;
+      expect(li.textContent).toContain('ROUNDTYPE-META');
+      expect(li.textContent).not.toContain('meta_change');
+    });
+
+    it('with no vote open the panel stays as one line pointing at Recent decisions, instead of vanishing', () => {
+      const { fixture } = setup({ space: space({ networks: [{ id: 'n1', label: 'Braintree', type: 'closed' }] }) });
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      const panel = [...el.querySelectorAll('section.panel')].find(s => (s.querySelector('h3')?.textContent ?? '').includes('brain.overview.govTitle'));
+      expect(panel, 'the Governance panel disappeared with the last open vote').toBeTruthy();
+      expect(panel!.querySelector('.vote-list'), 'an empty list was drawn').toBeNull();
+      const link = panel!.querySelector('a[href*="/settings/networks"]');
+      expect(link, 'no link to where decisions are listed').not.toBeNull();
+      expect((link!.textContent ?? '').trim(), 'the link has no text').not.toBe('');
+    });
   });
 
   it('ONE card spans the full width — the diagram — and nothing else does', () => {

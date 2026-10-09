@@ -495,6 +495,13 @@ export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
 export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
 
 /**
+ * A vote round the expiry job concluded because its deadline passed with nobody touching it (`networks/round-expiry.ts`): one
+ * entry per round, its path naming the network and the round. No request asked for it, and the network's own outcome log is
+ * bounded, so this is the record a flood of rounds cannot evict. Written directly, like the heal above.
+ */
+export const ROUND_EXPIRED_OPERATION = 'network.round.expired';
+
+/**
  * A token given admin of the space it just created (`Q-134`, `auth/creator-grant.ts`). It widens a token's rights with
  * no request to the token routes, so it is audited separately from the create that caused it: the entry names the
  * token and the space. Written directly by `createSpace`.

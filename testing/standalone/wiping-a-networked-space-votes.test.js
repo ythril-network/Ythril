@@ -126,26 +126,35 @@ describe('the round carries what was voted for', () => {
   });
 });
 
-describe('all three conclusion sites apply it, through one function', () => {
-  // One spelling now (F-38.4): the vote handlers pass the single round they just touched, the gossip pass the list
-  // it did not vote on — both through `applyConcludedSpaceRounds`, which also carries `space_deletion` and
-  // `space_addition`, so no conclusion site holds a copy of any of the three side-effects.
-  for (const [file, where, call] of [
-    ['server/src/networks/vote-acts.ts', 'an operator voting locally', /applyConcludedSpaceRounds\(net, \[round\], /],
-    ['server/src/api/sync/votes.ts', "a peer's vote arriving", /applyConcludedSpaceRounds\(net, \[round\], /],
-    ['server/src/sync/engine.ts', 'the gossip pass', /applyConcludedSpaceRounds\(/],
-  ]) {
+describe('every conclusion site applies it, through one function', () => {
+  // One function (F-38.4, then bundle-93): `applyRoundConclusion` takes the rounds a site just concluded and applies each —
+  // a passed join, a space round, the ejected member's notice — through `applyConcludedSpaceRounds`, which also carries
+  // `space_deletion` and `space_addition`. The sites are DERIVED as every file that calls it (a fourth concluder, the
+  // expiry job, joined them), so none holds a copy of any of the side-effects.
+  const SITES = [
+    ['server/src/networks/vote-acts.ts', 'an operator voting locally'],
+    ['server/src/api/sync/votes.ts', "a peer's vote arriving"],
+    ['server/src/sync/engine.ts', 'the gossip pass'],
+    ['server/src/networks/round-expiry.ts', 'the expiry job'],
+  ];
+  for (const [file, where] of SITES) {
     it(`${where} concludes the wipe`, () => {
-      assert.match(src(file), call,
+      assert.match(src(file), /\bapplyRoundConclusion\(/,
         `${file} must apply a concluded wipe — a site that misses it leaves this instance holding data every peer deleted`);
     });
   }
 
-  it('and the side-effect is not written out three times', () => {
-    // `space_deletion` IS written out three times, which is the shape this avoids: a change that reaches two
+  it('the one function carries the space side-effects', () => {
+    assert.match(src('server/src/networks/round-conclusion.ts'), /\bapplyConcludedSpaceRounds\(/,
+      'applyRoundConclusion no longer applies a concluded space round');
+  });
+
+  it('and the side-effect is not written out at any site', () => {
+    // `space_deletion` was written out three times, which is the shape this avoids: a change that reaches two
     // sites and silently misses the third.
-    for (const f of ['server/src/networks/vote-acts.ts', 'server/src/api/sync/votes.ts', 'server/src/sync/engine.ts']) {
+    for (const [f] of SITES) {
       assert.doesNotMatch(src(f), /wipeSpace\(/, `${f} must call the shared function, not wipe directly`);
+      assert.doesNotMatch(src(f), /\bapplyConcludedSpaceRounds\(/, `${f} applies a space round itself instead of through applyRoundConclusion`);
     }
   });
 

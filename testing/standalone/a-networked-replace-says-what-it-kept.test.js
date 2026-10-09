@@ -67,6 +67,49 @@ describe('the change note a network update sends down', () => {
   });
 });
 
+describe('the same note, written for a voter before the round has passed', () => {
+  const change = { fields: ['typeSchemas', 'usageNotes'], changedTypes: ['entity:Project'], keptTypes: ['entity:Profile'] };
+  const done = () => N.metaChangeNote('ythril-dev', 'ythril dev net', 'y-flows', change).split('\n');
+  const proposed = () => N.metaChangeNote('ythril-dev', 'ythril dev net', 'y-flows', change, { tense: 'proposed' }).split('\n');
+
+  it('rewrites EVERY line, not only the first (a voter reads a proposal, never "updated")', () => {
+    const was = done();
+    const now = proposed();
+    assert.equal(now.length, was.length, 'a line of the note is gone or added');
+    now.forEach((line, i) => assert.notEqual(line, was[i], `line ${i + 1} is still the past-tense sentence: ${line}`));
+    assert.match(now[0], /propos/i, 'the first line does not say it is a proposal');
+    assert.ok(!now.join('\n').includes('updated the schema'), 'a proposal says the schema was updated');
+  });
+
+  it('still says who, which space, which network, and every type and field the proposal touches', () => {
+    const text = proposed().join('\n');
+    for (const part of ['ythril-dev', "'y-flows'", "'ythril dev net'", 'entity:Project', 'usageNotes', 'entity:Profile']) assert.ok(text.includes(part), `the proposal note dropped ${part}`);
+    assert.ok(!text.includes('typeSchemas'), 'typeSchemas is the types line, not a field');
+  });
+
+  it('the default tense is unchanged (the note a passed round sends down)', () => {
+    assert.match(done()[0], /^ythril-dev updated the schema of 'y-flows' in 'ythril dev net'\.$/);
+  });
+
+  it('a malformed peer round cannot throw the whole list: a non-list input is left out, in either tense', () => {
+    const odd = [
+      { fields: 'usageNotes', changedTypes: 'entity:Project', keptTypes: { 0: 'x' } },
+      { fields: 7, changedTypes: null, keptTypes: 'abc' },
+      { fields: [3, null, 'usageNotes'], changedTypes: [{}], keptTypes: [] },
+    ];
+    for (const c of odd) {
+      for (const tense of [undefined, 'proposed']) {
+        let text;
+        assert.doesNotThrow(() => { text = N.metaChangeNote('p', 'n', 's', c, tense ? { tense } : undefined); }, `threw for ${JSON.stringify(c)} (${tense ?? 'default'})`);
+        assert.equal(typeof text, 'string');
+        assert.ok(text.split('\n').length >= 1);
+      }
+    }
+    const bare = N.metaChangeNote('p', 'n', 's', { fields: 'x', changedTypes: 'y', keptTypes: 3 });
+    assert.equal(bare.split('\n').length, 1, 'a malformed list was printed as if it were one');
+  });
+});
+
 describe('every door reports it', () => {
   const read = f => stripComments(readFileSync(f, 'utf8'));
   it('PATCH /api/spaces/:id and every schema route through voteOnSchemaEditIfNetworked', () => {
