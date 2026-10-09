@@ -17,27 +17,26 @@
  *    designed to accept.
  * 2. **Never overrides.** A caller who said something keeps what they said, including a falsy value.
  * 3. **On insert, not on update.** On an update an absent property may be one the caller has just removed, so
- *    filling it would resurrect a deliberate deletion. That is checked in the edge planner (`brain/write-plan/plan-edge.ts`) rather than here.
+ *    filling it would resurrect a deliberate deletion. That is checked in `edgeRefusal` (under `brain/write-plan/`, where the edge's defaults are applied) rather than here.
  *
  * Run: node --test testing/standalone/a-property-default-is-applied-and-stored.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, statementAround } from './_structural-window.mjs';
+import { statementAround } from './_structural-window.mjs';
+import { writePlanFunction } from './_write-plan-sources.mjs';
 
 const { applyPropertyDefaults, validateEdge } = await import('../../server/dist/spaces/schema-validation.js');
 
 /**
  * The edge write's DECISION lives in its planner since Q-99 part 3: `upsertEdge` is a door that hands `planEdge`
- * a read set, and `bulkWrite` plans its edges through the same function — so the planner is the one place both
- * doors' defaults are decided, and the place this reads.
+ * a read set, and `bulkWrite` plans its edges through the same function. Since Q-170 the DEFAULTS are applied inside
+ * `edgeRefusal` — the one function the planner and the inline-edge doors both ask, so a door refusing an inline edge
+ * validates the same defaulted document the writer will store — and the planner STORES what it hands back.
+ * Both are found by name under write-plan/ (`_write-plan-sources.mjs`) and fail loudly when absent.
  */
-function planEdgeBody() {
-  const src = stripComments(readFileSync('server/src/brain/write-plan/plan-edge.ts', 'utf8'));
-  return bodyOf(src, 'planEdge');
-}
+const edgeRefusalBody = () => writePlanFunction('edgeRefusal').body;
+const planEdgeBody = () => writePlanFunction('planEdge').body;
 
 const SCHEMA = {
   propertySchemas: {
@@ -95,8 +94,9 @@ describe('a property default is applied and stored', () => {
      * Filling defaults and then writing the untouched input would pass every assertion above and persist
      * nothing.
      */
+    assert.match(edgeRefusalBody(), /applyPropertyDefaults\(/, 'edgeRefusal does not apply defaults at all');
     const body = planEdgeBody();
-    assert.match(body, /applyPropertyDefaults\(/, 'planEdge does not apply defaults at all');
+    assert.ok(body.includes('const effectiveProps'), 'planEdge no longer builds `effectiveProps` — re-point this gate');
     const stored = body.slice(body.indexOf('const effectiveProps'));
     assert.match(
       stored.slice(0, stored.indexOf('\n')), /withDefaults/,
@@ -106,11 +106,11 @@ describe('a property default is applied and stored', () => {
   });
 
   it('defaults apply on INSERT only, so an update cannot resurrect a deletion', () => {
-    const body = planEdgeBody();
+    const body = edgeRefusalBody();
     // The whole statement, not a hand-sliced line: the call is the false branch of a three-line ternary, and
     // counting newlines backwards to find its start is exactly the fragility this suite keeps catching.
     const at = body.indexOf('applyPropertyDefaults(');
-    assert.notEqual(at, -1, 'planEdge no longer applies defaults — re-point this gate');
+    assert.notEqual(at, -1, 'edgeRefusal no longer applies defaults — re-point this gate');
     const stmt = statementAround(body, at, 'the defaults statement');
     assert.match(
       stmt, /existing/,

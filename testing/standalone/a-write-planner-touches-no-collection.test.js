@@ -43,27 +43,15 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-
-const { COLLECTION_METHOD_EFFECT } = await import('../../server/dist/db/record-write-observer.js');
+// What counts as touching a collection is `_collection-touches.mjs`, shared with `an-edge-refusal-writes-nothing-
+// and-embeds-nothing`, which asks it of a file that need not be named `plan-*.ts`.
+import { collectionTouches, COLLECTION_METHODS } from './_collection-touches.mjs';
 
 const DIR = 'server/src/brain/write-plan';
 
 /** Untracked too: a planner written in the same change is the one this gate most needs to see. */
 const FILES = readTrackedSources(DIR, { floor: 0, untracked: true });
 const PLANNERS = FILES.filter(f => /\/plan-[^/]+\.ts$/.test(f.file));
-
-/** Collection methods that cannot be mistaken for a method of an ordinary value. */
-const AMBIENT = [Array.prototype, Map.prototype, Set.prototype, String.prototype, Promise.prototype, Object.prototype];
-const COLLECTION_METHODS = Object.keys(COLLECTION_METHOD_EFFECT).filter(m => !AMBIENT.some(p => m in p));
-
-const OPENERS = [
-  { what: 'opens a collection with col(…)', re: /(^|[^\w$.])col\s*(<[^>(]*>)?\s*\(/ },
-  { what: 'opens the database with getDb()', re: /\bgetDb\s*\(/ },
-  { what: 'opens a collection with .collection(…)', re: /\.\s*collection\s*(<[^>(]*>)?\s*\(/ },
-  { what: 'names a collection with spaceCollection(…)', re: /\bspaceCollection\s*\(/ },
-  { what: 'imports a value from mongodb', re: /import\s+(?!type\b)[^;]*from\s+['"]mongodb['"]/ },
-  { what: 'imports from db/mongo', re: /import\s+(?!type\b)[^;]*from\s+['"][./]*db\/mongo(\.js)?['"]/ },
-];
 
 describe('the planners exist', () => {
   it('found at least one planner per record kind (floor)', () => {
@@ -86,11 +74,7 @@ describe('no planner touches a collection', () => {
   it('every planner reads through the read set and writes nothing', () => {
     const offenders = [];
     for (const { file, text } of PLANNERS) {
-      const src = stripComments(text);
-      for (const { what, re } of OPENERS) if (re.test(src)) offenders.push(`${file}: ${what}`);
-      for (const m of COLLECTION_METHODS) {
-        if (new RegExp(`\\.\\s*${m}\\s*(<[^>(]*>)?\\s*\\(`).test(src)) offenders.push(`${file}: calls .${m}(`);
-      }
+      for (const touch of collectionTouches(stripComments(text))) offenders.push(`${file}: ${touch}`);
     }
     assert.deepEqual(offenders, [],
       'a planner touches the store directly. Reads go through the read set (one query per kind for the batch, '
