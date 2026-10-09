@@ -47,13 +47,20 @@ const fields = () => needModule(loaded, [
   'LOCAL_ONLY_FIELDS', 'RESTORED_LOCAL_FIELDS', 'DERIVED_LOCAL_FIELDS', 'UNSET_DERIVED', 'LOCAL_ONLY_EXCLUSION', 'carriedFields', 'stripLocalOnly',
 ], 'local-only fields');
 
+/**
+ * The write-guard class (`Q-439`), tolerated as absent here so the older rows keep their own reasons to fail; the class
+ * is REQUIRED by the describe at the foot of this file.
+ */
+const writeGuard = () => loaded.mod?.WRITE_GUARD_FIELDS ?? new Set();
+
 describe('every local-only field is classified on purpose', () => {
   it('names each as record tier (restored) or as derived with a reason — nothing is derived by being left out', () => {
     const { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } = fields();
     assert.ok(LOCAL_ONLY_FIELDS.size >= 6, `only ${LOCAL_ONLY_FIELDS.size} local-only fields were read`);
-    const unclassified = [...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !DERIVED_ON_PURPOSE.has(f));
+    const guard = writeGuard();
+    const unclassified = [...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !DERIVED_ON_PURPOSE.has(f) && !guard.has(f));
     assert.deepEqual(unclassified, [],
-      `local-only field(s) ${unclassified.join(', ')} are in neither RESTORED_LOCAL_FIELDS nor DERIVED_ON_PURPOSE in this test — `
+      `local-only field(s) ${unclassified.join(', ')} are in none of RESTORED_LOCAL_FIELDS, WRITE_GUARD_FIELDS and DERIVED_ON_PURPOSE in this test — `
       + 'the module would call them derived by default, drop them on a restore and `$unset` them on every content change. '
       + 'Decide which half each belongs to, and write the reason here if it is derived.');
   });
@@ -100,5 +107,61 @@ describe('deliveredBy is a record-tier local field', () => {
     assert.ok(carriedFields({ restore: false, suppressed: true }).has('deliveredBy'));
     assert.equal(carriedFields({ restore: true, suppressed: false }).has('deliveredBy'), false,
       'a restore carries nothing from the copy it replaces; the backup\'s own record-tier half is kept through RESTORED_LOCAL_FIELDS');
+  });
+});
+
+/**
+ * The third class (`Q-439`): `WRITE_GUARD_FIELDS`. `_functionalGuard` is the marker the unique partial index on a space's
+ * edges collection collides on. It is local to this instance, so it is hashed nowhere, sent to no peer and taken from no
+ * arrival — and it is NEITHER half of the older split. Not restored: an export or restore that carried it could bring a second
+ * marker for one subject, or a marker for an edge since relabelled, and a phantom holds the subject's slot for ever. Not
+ * derived: `UNSET_DERIVED` clears every derived field when content changes, and an embed must never touch the guard.
+ * Left to the "default is derived" rule it would be dropped by exactly the writers that must keep it, so it is named.
+ *
+ * Mutation: add `_functionalGuard` to `RESTORED_LOCAL_FIELDS` (red: disjointness, restore row); leave it out of
+ * `WRITE_GUARD_FIELDS` but in `LOCAL_ONLY_FIELDS` (red: the partition row, and it is derived by default).
+ */
+describe('the write-guard class: local, never restored, never derived', () => {
+  const guardFields = () => needModule(loaded, ['WRITE_GUARD_FIELDS'], 'the write-guard class').WRITE_GUARD_FIELDS;
+
+  it('WRITE_GUARD_FIELDS is exported and names `_functionalGuard`', () => {
+    const guard = guardFields();
+    assert.ok(guard.size >= 1, 'WRITE_GUARD_FIELDS is empty');
+    assert.ok(guard.has('_functionalGuard'), 'the functional guard marker is not in WRITE_GUARD_FIELDS');
+  });
+
+  it('every write-guard field is local-only', () => {
+    const { LOCAL_ONLY_FIELDS } = fields();
+    assert.deepEqual([...guardFields()].filter(f => !LOCAL_ONLY_FIELDS.has(f)), [],
+      'a write-guard field outside LOCAL_ONLY_FIELDS is hashed and replicated: two instances would hold different markers');
+  });
+
+  it('is disjoint from the restored half, the derived half and the reasoned derived list', () => {
+    const { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } = fields();
+    const guard = guardFields();
+    assert.deepEqual([...guard].filter(f => RESTORED_LOCAL_FIELDS.has(f)), [], 'a restore would bring the marker back from a backup');
+    assert.deepEqual([...guard].filter(f => DERIVED_LOCAL_FIELDS.has(f)), [], 'the marker would be unset with the vectors');
+    assert.deepEqual([...guard].filter(f => DERIVED_ON_PURPOSE.has(f)), []);
+  });
+
+  it('restored, derived and write-guard together are exactly the local-only fields, each in one class', () => {
+    const { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } = fields();
+    const guard = guardFields();
+    const all = [...RESTORED_LOCAL_FIELDS, ...DERIVED_LOCAL_FIELDS, ...guard];
+    assert.equal(new Set(all).size, all.length, 'a field is in two classes');
+    assert.deepEqual([...new Set(all)].sort(), [...LOCAL_ONLY_FIELDS].sort());
+  });
+
+  it('is left out of what is served to a peer, stripped from a document, and never cleared by a content change', () => {
+    const { LOCAL_ONLY_EXCLUSION, stripLocalOnly, UNSET_DERIVED } = fields();
+    assert.equal(LOCAL_ONLY_EXCLUSION._functionalGuard, 0);
+    assert.deepEqual(stripLocalOnly({ _id: 'e', _functionalGuard: 'k', label: 'reports_to' }), { _id: 'e', label: 'reports_to' });
+    assert.equal('_functionalGuard' in UNSET_DERIVED, false);
+  });
+
+  it('is kept by no restore: a restore carries nothing from the replaced copy, and the backup\'s record tier excludes it', () => {
+    const { carriedFields, RESTORED_LOCAL_FIELDS } = fields();
+    assert.equal(RESTORED_LOCAL_FIELDS.has('_functionalGuard'), false);
+    assert.equal(carriedFields({ restore: true, suppressed: false }).has('_functionalGuard'), false);
   });
 });
