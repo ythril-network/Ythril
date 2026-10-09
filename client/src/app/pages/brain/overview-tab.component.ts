@@ -504,7 +504,7 @@ import { ReindexNotesComponent } from './reindex-notes.component';
           </header>
           <div class="panel-b">
             @if (openVotes().length) {
-            <ul class="vote-list">
+            <ul class="vote-list" tabindex="0" [attr.aria-label]="'brain.overview.govTitle' | transloco">
               @for (v of openVotes(); track v.id) {
                 <li>
                   <div class="vote-top"><span class="vs" [title]="v.subject">{{ v.subject }}</span><span class="vt">{{ (roundTypeKey(v.type)) | transloco }}</span></div>

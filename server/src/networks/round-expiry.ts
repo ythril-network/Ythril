@@ -50,6 +50,12 @@ const LABEL = 'Vote round expiry';
 /** A failure that is not a unit of the walk (the save, an audit write): one line per window. */
 const saidOnce = warnOnce<string>({ max: 10, every: SKIP_WARNING_WINDOW_MS });
 
+/**
+ * A save failed and none has succeeded since. The rounds it would have written are concluded and pruned in memory, so the next tick
+ * finds nothing to change and would not save on its own: this is what makes it save anyway.
+ */
+let unsaved = false;
+
 /** One audit entry for a round this job concluded. Never throws: the audit is a record, and a missing one must not undo the conclusion. */
 function auditExpired(net: NetworkConfig, round: VoteRound): void {
   try {
@@ -84,9 +90,10 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
     const rounds = Array.isArray(net.pendingRounds) ? [...net.pendingRounds] : [];
     const walkedRounds = eachNetwork(`${LABEL} (network ${net.label ?? net.id})`, rounds, (round) => {
       if (round.concluded || !roundPastDeadline(round, now)) return;
+      // Before the call, not after: a conclusion that throws once it has marked the round still changed what the save must write.
+      dirty = true;
       concludeRoundIfReady(net, round, now);
       if (round.concluded) {
-        dirty = true;
         concluded.push(round);
         // At once and per round: it IS concluded in memory, and the save keeps it, so what it decided is applied even when another
         // round of the network fails.
@@ -105,10 +112,12 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
   });
   failures += walked.failed.length;
 
-  if (dirty) {
+  if (dirty || unsaved) {
     try {
       saveConfig(cfg);
+      unsaved = false;
     } catch (err) {
+      unsaved = true;
       failures += 1;
       saidOnce('save', () => log.error(`${LABEL}: the config could not be saved after rounds concluded, so they are tried again next tick: ${peerText(err)}`));
     }

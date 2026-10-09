@@ -261,6 +261,22 @@ describe('one bad round or one bad network never stops the rest, and the failure
     fs.writeFileSync(CONFIG, JSON.stringify(loader.getConfig()), { mode: 0o600 });
     assert.ok(counted > before, 'a config save failed during the tick and nothing counted it');
   });
+
+  it('a save that failed is made by the next tick, even when that tick concludes nothing', async () => {
+    await bootInstance(dir, { instanceId: SELF, spaces: SPACES, networks: [network('closed', [round('remove', { roundId: 'retried' })])] });
+    const onDisk = fs.readFileSync(CONFIG, 'utf8');
+    fs.rmSync(CONFIG);
+    fs.mkdirSync(CONFIG);
+    fs.writeFileSync(path.join(CONFIG, 'keep'), 'x');
+    try { await tick(); } catch { /* counted, as the case above holds */ }
+    fs.rmSync(CONFIG, { recursive: true, force: true });
+    // The file as it was before the failed tick: the round still open on disk, while memory holds it concluded.
+    fs.writeFileSync(CONFIG, onDisk, { mode: 0o600 });
+    await tick();
+    const net = JSON.parse(fs.readFileSync(CONFIG, 'utf8')).networks[0];
+    assert.ok(net.roundOutcomes?.some(e => e.roundId === 'retried'),
+      'the tick after a failed save wrote nothing, so the disk still holds the round open until some other writer saves');
+  });
 });
 
 describe('eachNetwork: the per-network walk, beside the per-space one', () => {
