@@ -709,7 +709,7 @@ async function propagateVotesWithPeer(
     }
 
     if (refused.size > 0) {
-      log.debug(`Vote gossip: did not adopt ${[...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', ')} from ${peerText(member.label)}`);
+      log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);
     }
 
     if (changed) {
