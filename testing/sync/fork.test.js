@@ -135,7 +135,11 @@ describe('Off-grid / fork', () => {
         label: 'No rounds fork',
       });
       assert.equal(r.status, 201);
-      assert.deepEqual(r.body.pendingRounds, []);
+      // The network body carries no rounds at all now (they hold credential hashes); "no pending rounds" is read off the votes door.
+      assert.equal('pendingRounds' in r.body, false, 'the network body must not carry rounds');
+      const votes = await get(INSTANCES.a, tokenA, `/api/networks/${r.body.id}/votes`);
+      assert.equal(votes.status, 200, JSON.stringify(votes.body));
+      assert.deepEqual(votes.body.rounds, []);
       await del(INSTANCES.a, tokenA, `/api/networks/${r.body.id}`).catch(() => {});
     });
 

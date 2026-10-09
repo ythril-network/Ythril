@@ -75,10 +75,16 @@ describe('proposing a definition to one network', () => {
   it('the other network carrying the space sees no round and gets no layer', async () => {
     const view = await layers(INSTANCES.a, tA);
     assert.equal(layerOf(view, nets.two).gadget, undefined);
-    // The network as a whole, concluded rounds included: an organiser's own yes concludes a club round at once.
+    // The rounds the network holds, passed ones included: an organiser's own yes concludes a club round at once, and the peer door
+    // serves a passed meta_change round. The network body itself no longer carries rounds (they hold credential hashes).
     const two = (await get(INSTANCES.a, tA, `/api/networks/${nets.two}`)).body;
-    assert.ok(Array.isArray(two.pendingRounds), `no round list on the network: ${JSON.stringify(two)}`);
-    assert.ok(!JSON.stringify(two.pendingRounds).includes('gadget'), `a round reached the other network: ${JSON.stringify(two.pendingRounds)}`);
+    assert.equal('pendingRounds' in two, false, `the network body carries rounds: ${JSON.stringify(two)}`);
+    const served = await get(INSTANCES.a, tA, `/api/sync/networks/${nets.two}/votes`);
+    assert.equal(served.status, 200, JSON.stringify(served.body));
+    assert.ok(Array.isArray(served.body.rounds), `no round list for the network: ${JSON.stringify(served.body)}`);
+    assert.ok(!JSON.stringify(served.body.rounds).includes('gadget'), `a round reached the other network: ${JSON.stringify(served.body.rounds)}`);
+    const open = await get(INSTANCES.a, tA, `/api/networks/${nets.two}/votes`);
+    assert.ok(!JSON.stringify(open.body.rounds).includes('gadget'), `an open round reached the other network: ${JSON.stringify(open.body.rounds)}`);
   });
 
   it('a member of that network receives it as the network\'s layer', async () => {
