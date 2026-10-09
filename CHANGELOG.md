@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.10] — 2026-10-09
+
+A security patch: a token that may only read networks no longer receives the credential hashes of open join votes.
+
+| What changed | What to do |
+|---|---|
+| `GET /api/networks`, `GET /api/networks/:id`, MCP `network_get` and a fork's answer carry no `pendingRounds` | Read rounds on `GET /api/networks/:id/votes` |
+
+### Security
+
+- **Networks:** A network's body no longer carries its vote rounds; an open join round held the invite key's hash and the
+  joiner's token hash, readable with `networks: read`. Rounds are read on `/votes`.
+
 ## [5.6.9] — 2026-10-08
 
 A patch: a file whose name has a character outside Latin-1 downloads and previews again.

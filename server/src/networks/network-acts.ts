@@ -81,7 +81,9 @@ export const UpdateNetworkBody = z.object({
 
 /** A network as any caller may see it: no credential of any kind, and each member's version verdict. */
 export function networkView(net: NetworkConfig): Record<string, unknown> {
-  const { inviteKeyHash: _ikh, ...rest } = net;
+  // `pendingRounds` is read where it belongs (`GET /votes`): a join round carries the hash of an invite key still in use and its
+  // candidate's credential record, and a body that says it hands out no credential cannot also hand out the rounds.
+  const { inviteKeyHash: _ikh, pendingRounds: _rounds, ...rest } = net;
   // What this instance is in the network, and who that role acts on (F-38.1), by instance id into `members`.
   const role = networkRole(net);
   const myRole = {
@@ -486,5 +488,5 @@ export function forkNetworkAct(sourceId: string, input: unknown): NetworkActResu
   cfg.networks.push(forkedNet);
   saveConfig(cfg);
   log.info(`Forked network ${logSafe(sourceId)} → new network ${logSafe(forkedNet.id)} ('${logSafe(forkedNet.label)}')`);
-  return { status: 201, body: forkedNet as unknown as Record<string, unknown> };
+  return { status: 201, body: networkView(forkedNet) };
 }
