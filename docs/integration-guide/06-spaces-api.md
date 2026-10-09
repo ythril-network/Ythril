@@ -367,9 +367,9 @@ for the call — written as an act, not a read, because the call spends this ins
 [Audit Log](13-audit-log-api.md)).
 
 **Who may call it.** Instance admin only, on all three doors. A token that is read-only, an ordinary write token, or
-one that administers this space but is not instance admin is refused `403`: the report names peer instances and spends
-the instance's peer credentials, as the manual network sync routes do. The MCP tool is hidden from `tools/list` for any
-other token.
+one that administers this space but is not instance admin is refused — `403` on both REST doors, and on MCP the
+tool error every MCP refusal is: the report names peer instances and spends the instance's peer credentials, as the
+manual network sync routes do. The MCP tool is hidden from `tools/list` for any other token.
 
 **Cost.** It shares the five-a-minute heavy-call budget with `delete_space_data` and ingest starts, one count per token
 across the three doors; the sixth call in a minute is a `429` whose sentence names the report. While a report for a
