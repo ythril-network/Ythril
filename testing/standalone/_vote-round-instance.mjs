@@ -140,6 +140,7 @@ export async function startFakePeer(answer) {
       res.end(JSON.stringify(body));
     });
   });
+  // own-listener: the fake peer must bind a private LAN address, not 127.0.0.1 - the engine's peer client refuses loopback.
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, host, resolve); });
   return {
     url: `http://${host}:${server.address().port}`,
