@@ -42,6 +42,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { authorRef } from '../config/author.js';
 import { getSecrets } from '../config/loader.js';
 import { isPeerSchemeAllowed } from '../config/transport-security.js';
@@ -222,7 +223,7 @@ function judgePeer(selfId: string, ours: StampOurs, e: PeerEvidence): Judged {
   if (row.author === selfId) return out(R.PEER_SAYS_SELF, 1);
   const named = { author: row.author };
   if (row.author !== e.peerId) return out(R.RELAYED, 0, named);
-  if (!(typeof row.seq === 'number' && Number.isInteger(row.seq) && row.seq > 0)) return out(R.PEER_HOLDS_PLACEHOLDER, 0, named);
+  if ((integerOf(row.seq) ?? 0) === 0) return out(R.PEER_HOLDS_PLACEHOLDER, 0, named);
   const oursAt = instantOf(ours.createdAt);
   const theirsAt = instantOf(row.createdAt);
   if (oursAt === undefined || theirsAt === undefined) return out(R.CREATED_UNPARSABLE, 0, named);
@@ -509,9 +510,10 @@ async function readCandidates(spaceId: string, self: string, peerIds: readonly s
 
 /** The ids among `ids` that are still live files of this instance: a row deleted or replaced since it was read is not reported. */
 async function stillCandidates(spaceId: string, self: string, ids: readonly string[], clock: RunClock): Promise<Set<string>> {
-  const rows = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<{ _id: string }>({ ...LIVE_FILE_ROW, 'author.instanceId': self, _id: { $in: ids } }), { projection: { _id: 1 }, maxTimeMS: readBudgetMs(clock) }).toArray();
-  return new Set(rows.map(r => String(r._id)));
+  const rows = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), ids, {}, {
+    filter: { ...LIVE_FILE_ROW, 'author.instanceId': self }, timeLeft: () => readBudgetMs(clock),
+  });
+  return new Set(rows.keys());
 }
 
 /**
