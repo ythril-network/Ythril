@@ -115,6 +115,10 @@ export const ROUTE_RULES: RouteRule[] = [
   // change as a rebuild, and it is the action an operator takes after turning suppression off. "Who un-suppressed
   // this space and when" is answerable from the meta write; "who then backfilled it" needs this row.
   { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/reembed$/,                 operation: 'space.embeddings.reembed', spaceGroup: 1 },
+  // An ACT and not a read (no `read: true`): the report contacts every peer holding the space with this instance's
+  // credentials, so "who asked the peers about this space, and when" is a question the trail answers whether or not
+  // `logReads` is on. The tool door records the same operation (`audit-map.ts`).
+  { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/file-stamp-report$/,      operation: 'file.stamps.reported', spaceGroup: 1 },
   { method: 'PATCH',  pattern: /^\/api\/spaces\/([^/]+)$/,                         operation: 'space.update',   spaceGroup: 1 },
   // There was no PUT rule in the entire table, so every schema write was unaudited.
   { method: 'PUT',    pattern: /^\/api\/spaces\/([^/]+)\/schema$/,                 operation: 'space.schema.update', spaceGroup: 1 },

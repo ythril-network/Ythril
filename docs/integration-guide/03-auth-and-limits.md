@@ -188,6 +188,7 @@ to correct. The information is identical; only the envelope differs.
 | Sync | 2 000 / min | client (peer) | Sync API endpoints |
 | Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify` |
 | Bulk wipe | 5 / min | client | `POST /api/delete_space_data` |
+| Heavy calls | 5 / min, **one count per token** across all of them and both doors | token id (the IP when it has none) | `delete_space_data`, starting an ingest run, and [`file_stamp_report`](06-spaces-api.md) (`POST /api/spaces/:id/file-stamp-report`, `POST /api/file_stamp_report`, the MCP tool). The sixth call in a minute is a `429` whose sentence names the call |
 | Flood backstop | 3 000 / min | source IP | Everything except `/health`, `/ready`, `/metrics` |
 
 **"Keyed by client" means your budget is your own.** The limiter buckets on the credential you present —

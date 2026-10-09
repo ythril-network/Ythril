@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 
 let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
-  isMcpReadOperation;
+  isMcpReadOperation, MCP_ACT_OPERATIONS;
 let ROUTE_RULES;
 let ALL_TOOLS;
 
@@ -48,7 +48,7 @@ const ROUTER = DISPATCH_SOURCES[0];
 describe('MCP audit coverage', () => {
   before(async () => {
     ({ MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
-      isMcpReadOperation } = await import('../../server/dist/mcp/audit-map.js'));
+      isMcpReadOperation, MCP_ACT_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js'));
     ({ ROUTE_RULES } = await import('../../server/dist/audit/middleware.js'));
     ({ ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js'));
   });
@@ -67,6 +67,32 @@ describe('MCP audit coverage', () => {
       'Every MCP tool must be classified in audit-map.ts — with an operation, or with `null` and the ' +
       'reason it is not one. A tool missing from the map is silently unaudited, which is exactly how the ' +
       'entire MCP surface came to be unaudited in the first place.');
+  });
+
+  /*
+   * A `null` IN THE MAP IS "NOT AN AUDITED OPERATION" ONLY FOR A TOOL THAT IS NOT AN ACT.
+   *
+   * A non-mutating tool that spends this instance's credentials on other instances is audited on every call, as an ACT
+   * (`MCP_ACT_OPERATIONS`), and its `MCP_TOOL_OPERATIONS` entry is `null` so that it is never mistaken for a read. Nothing
+   * else held that table to the rest of the audit vocabulary, so these cases derive each act from the modules and ask the
+   * three things that keep it an act: the tool exists and does not mutate, the map does not also call it a read, and a
+   * route rule records its operation without `read: true` — so the REST door of the capability is an act as well.
+   */
+  it('every ACT is a registered non-mutating tool, mapped null, recorded by a REST rule that is not a read', () => {
+    const acts = Object.entries(MCP_ACT_OPERATIONS);
+    assert.ok(acts.length >= 1, 'no act is declared — this case is measuring nothing');
+    const byName = new Map(ALL_TOOLS.map(t => [t.name, t]));
+    const actRoutes = new Set(ROUTE_RULES.filter(r => r.operation && !r.read).map(r => r.operation));
+    for (const [tool, operation] of acts) {
+      const registered = byName.get(tool);
+      assert.ok(registered, `${tool} is declared an act and is not a registered tool`);
+      assert.ok(!registered.mutating, `${tool} is declared an act and mutates: a mutating tool is audited through MCP_TOOL_OPERATIONS`);
+      assert.equal(MCP_TOOL_OPERATIONS[tool], null,
+        `${tool} is an act and also has an operation in MCP_TOOL_OPERATIONS — one tool, two audit paths, and the first records it twice`);
+      assert.ok(actRoutes.has(operation),
+        `${tool} records "${operation}" as an act, and no route rule records that operation without \`read: true\` — `
+        + 'the two doors of one capability would be gated differently by `logReads`');
+    }
   });
 
   /*
@@ -235,6 +261,18 @@ describe('MCP audit coverage', () => {
     assert.match(src, /recordToolCall\(caller, name, callSpace, status,/,
       'the dispatch must record every call, whichever door it arrived at');
     assert.match(src, /function recordToolCall\(/, 'the recorder must exist in the dispatch');
+  });
+
+  it('an act that throws after it ran is recorded with the status answered, and a refusal is not recorded', () => {
+    // The REST middleware records every response of an act's route; the tool door would otherwise record only the run that
+    // was answered. The wiring is source-level because the recorder is private to the dispatch.
+    const src = readFileSync(ROUTER, 'utf8');
+    const at = src.indexOf('const answer = answerThrown(err);');
+    assert.ok(at > 0, 'the catch no longer answers through `answerThrown`');
+    const window = src.slice(at, src.indexOf('return answer;', at));
+    assert.match(window, /mcpActOperation\(name\) !== null/, 'only an act is recorded on a throw: every other tool keeps its behaviour');
+    assert.match(window, /!\(err instanceof ToolRefusal\)/, 'a refusal is raised before the run and is not a run');
+    assert.match(window, /recordToolCall\(caller, name, callSpace, answer\.status,/, 'the status recorded is the status answered');
   });
 
   it('a tool that fails is not recorded as a success', () => {

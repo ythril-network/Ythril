@@ -77,7 +77,8 @@ holds at most **1 000 sessions** and **20 000 turns** between them; more is a `4
 **At most four runs are in progress at once, instance-wide** — each holds model calls for minutes. A fifth start is
 a `429` that says so, until one finishes, and it costs you no rate-limit slot.
 
-Starting runs is limited per token, at the same rate as the other heavy calls (five a minute), and the REST route
+Starting runs is limited per token, at the same rate as the other heavy calls (five a minute: `delete_space_data` and
+[`file_stamp_report`](06-spaces-api.md) draw on the same count), and the REST route
 and the MCP tool share one count — a token that used its starts over REST is refused over MCP too, in the same
 words. Only a run that actually starts counts: a start refused with `400`, `404` or `409` costs nothing, and is
 still answered with that refusal while the token is limited. Reading a run back is never limited this way.

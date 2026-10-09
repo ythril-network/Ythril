@@ -94,7 +94,7 @@ export function repairReasonOf(row: HeldRow | undefined, diskSha256: string, key
  * and is the space's failure, reported by the caller's catch.
  */
 async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string, HeldRow>> {
-  const baseKey = `syncBase.${peerId}`;
+  const baseKey = syncBasePath(peerId);
   return withinHousekeepingBound(async () => {
     const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
       .find(asFilter<SyncedFileMeta>({ parentFileId: { $exists: false } }),
@@ -534,6 +534,15 @@ export async function syncFiles(
 type SyncedFileMeta = FileMetaDoc & { syncBase?: Record<string, string> };
 
 /**
+ * The Mongo path of the base recorded for `peerId` (`syncBase.<peer instance id>`): the ONE place the key is formed, read by the
+ * pull's projection, written by `recordSyncBase` and filtered on by the file-stamp report. A reader and a writer that spelled it
+ * separately would stop agreeing the day the key changes, and a row would look unsynced to one and synced to the other.
+ */
+export function syncBasePath(peerId: string): string {
+  return `syncBase.${peerId}`;
+}
+
+/**
  * Pull the peer's file tombstones, a page at a time, to the end, applying each page through the one apply
  * (`applyPeerFileTombstones`) with the page's `Delivery`: the peer pulled from is the authenticated source, and whether it is
  * this space's upstream is this instance's own knowledge (`sync/deletion-authority.ts`), never the peer's say-so.
@@ -583,6 +592,6 @@ async function pullFileTombstones(
 /** Record that this instance and `peerId` now both hold `sha256` for the file at `filePath`. */
 async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
   await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
-    .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [`syncBase.${peerId}`]: sha256 } }))
+    .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [syncBasePath(peerId)]: sha256 } }))
     .catch(err => log.warn(`recordSyncBase ${peerText(filePath)}: ${peerText(err)}`));
 }

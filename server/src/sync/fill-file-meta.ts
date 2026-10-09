@@ -38,6 +38,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { authorRef } from '../config/author.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { seqGuard } from './upsert-plan.js';
+import { MACHINE_MADE_SOURCES } from '../files/derived-fields.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 /** What a stray record did to its file row. */
@@ -51,8 +52,6 @@ export type StrayFileMetaOutcome =
   /** There is no row for it, so nothing was written. */
   | 'no-file';
 
-const MACHINE_SOURCES = ['generated', 'extracted'];
-
 type Incoming = Record<string, unknown> & { _id: string; seq?: number };
 
 /** The record carries this key: its type is the fill schema's, checked once by `admitArrivals` (see the docblock). */
@@ -65,7 +64,7 @@ function fillUpdate(incoming: Incoming): object[] | null {
   const set: Record<string, unknown> = {};
   if (carries(incoming['description'])) {
     const human = !carries(incoming['descriptionSource']);
-    const take = { $or: [missing('description'), ...(human ? [{ $in: ['$descriptionSource', MACHINE_SOURCES] }] : [])] };
+    const take = { $or: [missing('description'), ...(human ? [{ $in: ['$descriptionSource', [...MACHINE_MADE_SOURCES]] }] : [])] };
     set['description'] = { $cond: [take, { $literal: incoming['description'] }, '$description'] };
     // The label moves with the text, as `updateFileMeta` does: a human description carries none.
     set['descriptionSource'] = { $cond: [take, human ? '$$REMOVE' : { $literal: incoming['descriptionSource'] }, '$descriptionSource'] };

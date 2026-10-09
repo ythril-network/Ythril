@@ -164,7 +164,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_pending_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_join_by_key`, `network_member_add`, `network_member_remove`, `network_introduction_accept`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `space_rename`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `network_change_notes`, `space_schema_layers`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_pending_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_join_by_key`, `network_member_add`, `network_member_remove`, `network_introduction_accept`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `space_rename`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `network_change_notes`, `space_schema_layers`) work normally. `list_tokens` and `file_stamp_report` are read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
 
 ### Connecting
 
@@ -358,6 +358,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |
 | `list_tokens` | List the instance API tokens — names, prefixes, expiry, rights. **Admin only.** Never includes a secret or its hash |
+| `file_stamp_report` | Report which file rows of a space this instance **likely stamped with its own author and seq** when it pulled the file from a peer, with the evidence for each. **Admin only; report only** — it changes no file row, counter or space collection, and records one audit entry (`file.stamps.reported`). It reads the file feed of each peer holding the space (no path is sent). `limit` (1–5000, default 1000) and `after` (a path cursor, at most 1024 characters) page the answer. Shares the five-a-minute heavy-call budget per token; `409` while a report for the space is running. Same as [`POST /api/spaces/:id/file-stamp-report`](06-spaces-api.md) |
 | `retry_embed_file` | Re-queue a file whose media embedding failed or was skipped. Returns `processing` unchanged when the worker already holds it |
 | `list_embed_jobs` | List brain records whose embedding is pending, processing or **failed**, with `attempts` and `lastError` for each, plus counts. This is how you tell *"the record is missing"* from *"the record has no vector yet"*: a record with an unfinished job is stored but not yet findable by `recall`/`query`. Filter with `status`; omit it for the whole backlog. Read-only, so a `readOnly` token can still diagnose a stalled queue |
 | `update_file_meta` | Change a file record's description, tags, properties or links **without resending the file**. `write_file` can set those fields but only alongside new content. Only the fields you pass are touched; under strict linkage every id must resolve. Same as [`PATCH /api/brain/spaces/:spaceId/files`](04d-brain-ops-api.md) |
@@ -399,9 +400,10 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_set_network_precedence` | Reorder which network wins a schema clash, highest first; rebuilds the space's schema. `schema: admin`. Same as `PUT /api/spaces/:id/network-precedence` |
 | `network_sync` | Trigger immediate sync (all networks, one network via `networkId`, or one peer via `peerId`) (admin only). With `networkId`, `note` (and `spaces`) attach a change note for the members below, refused when nobody is below. The REST doors are `POST /api/networks/:id/sync` (its `{ note, spaces }` body) and `POST /api/networks/peers/:peerId/sync` |
 
-> **Instance-admin tools.** `network_sync` and `space_reindex` require
+> **Instance-admin tools.** `network_sync`, `space_reindex` and `file_stamp_report` require
 > instance-admin rights: they expose the whole peer topology or drive outbound connections to every peer, and
-> neither is scoped to one space. They are hidden from `tools/list` for other tokens and rejected if called
+> none is scoped to one space (`file_stamp_report` names peers and spends the instance's credentials on each
+> peer holding the space). They are hidden from `tools/list` for other tokens and rejected if called
 > directly.
 >
 > **`save_space` needs the `createSpaces` right** (or instance admin) — the same predicate as `POST /api/spaces`
@@ -667,6 +669,7 @@ only shape and the two are identical by construction.
 | | `space_meta` | `GET /api/spaces/:id/meta` | read `schema` |
 | | `schema_update` | `PUT /api/spaces/:id/schema` | admin `schema` |
 | | `delete_space_data` | `POST /api/delete_space_data` | space-admin |
+| | `file_stamp_report` | `POST /api/spaces/:id/file-stamp-report` | admin (MCP) · instance-level |
 | **Tokens** | | | |
 | | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
 | **Networks / sync** | | | |

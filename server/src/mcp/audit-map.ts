@@ -76,6 +76,10 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // backfilled a space's embeddings, and two names for one act makes every query have to know both.
   space_reembed: 'space.embeddings.reembed',
   delete_space_data: 'space.wipe',
+  // `null` here does NOT mean "not audited": this tool IS audited, every call, as an ACT through `MCP_ACT_OPERATIONS` (which
+  // `logReads` does not gate). It is kept out of this map because a non-mutating tool recorded here is a read (`mcp-audit-coverage`),
+  // and a report that spends this instance's credentials on every peer is not one.
+  file_stamp_report: null,
   write_file: 'file.create',
   move_file: 'file.update',
   delete_file: 'file.delete',
@@ -216,6 +220,22 @@ export const MCP_OPERATION_SUBJECTS: Record<string, (args: unknown) => string> =
       ? 'peer.sync_trigger'
       : 'network.sync_trigger',
 };
+
+/**
+ * Non-mutating tools whose call is nevertheless an ACT: recorded under the route's operation whether or not `audit.logReads`
+ * is on, because what the call does is spend this instance's credentials on other instances (`Q-433`).
+ *
+ * They are not in {@link MCP_TOOL_OPERATIONS}, whose non-mutating entries are reads by rule — a tool listed there is dropped
+ * when reads are off. The route's own rule carries no `read: true`, so both doors of one capability are acts.
+ */
+export const MCP_ACT_OPERATIONS: Readonly<Record<string, string>> = {
+  file_stamp_report: 'file.stamps.reported',
+};
+
+/** The act a non-mutating tool's call is recorded as (always, never gated by `logReads`), or `null` when it is not one. */
+export function mcpActOperation(toolName: string): string | null {
+  return MCP_ACT_OPERATIONS[toolName] ?? null;
+}
 
 /**
  * The operation for a tool call, or `null` when the tool is deliberately not an audited operation.

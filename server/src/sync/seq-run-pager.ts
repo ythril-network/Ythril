@@ -84,6 +84,13 @@ export function serverCursorOf(next: unknown): string | null | undefined {
 }
 
 /**
+ * A tombstone riding in a page of records: applied by the tombstone transfer before the records, so it is not a document to
+ * accept. One reading for every reader of a record feed (`sync/pull-family.ts`, `files/file-stamp-report.ts`), so a feed row that
+ * carries `deletedAt` is dropped the same way whoever reads it.
+ */
+export const isRider = (item: unknown): boolean => Boolean(item && typeof item === 'object' && (item as { deletedAt?: unknown }).deletedAt);
+
+/**
  * A position an element names, or `undefined` for one that names none (no string `_id`, or a seq no position may name:
  * `isPositionSeq`, the rule of the cursor codec, so an element is read by the same bound its cursor is).
  */

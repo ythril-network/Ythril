@@ -453,6 +453,24 @@ const CITED = [
     doc: 'docs/userguide/02-brain.md',
     text: (v) => new RegExp(`taken over after \\*\\*${v === 1 ? 'a minute' : counted(v, 'minute')}\\*\\*`),
   },
+  // The file-stamp report's reach, said in the two pages an integrator and an operator read: a file whose row lies beyond it is
+  // "not checked" on every call, so a changed figure is a changed answer.
+  ...['docs/integration-guide/06-spaces-api.md', 'docs/userguide/05-storage-data-and-audit.md'].flatMap(doc => [
+    {
+      what: `file-stamp report: pages walked per peer (${doc})`,
+      source: 'server/src/files/file-stamp-report.ts',
+      code: /export const MAX_FEED_PAGES_PER_PEER = ([0-9_]+);/,
+      doc,
+      text: (v) => new RegExp(`at most ${v}\\s+pages\\s+of\\s+[0-9]+\\s+rows`),
+    },
+    {
+      what: `file-stamp report: rows per feed page (${doc})`,
+      source: 'server/src/files/file-stamp-report.ts',
+      code: /const FEED_PAGE = ([0-9_]+);/,
+      doc,
+      text: (v) => new RegExp(`at most\\s+[0-9]+\\s+pages\\s+of\\s+${v}\\s+rows`),
+    },
+  ]),
 ];
 
 /**

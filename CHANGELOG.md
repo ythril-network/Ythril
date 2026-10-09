@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A second edge to the same `to` of another kind under a `functional` label is refused; `validate-schema` adds `staleGuards`; a relabel onto a held identity answers `409 edge_identity_taken`, was `500` | Read `staleGuards`; handle `409` |
 | A webhook or live-view `entry` no longer carries instance-local fields (`_expireAt`, `_contentExpireAt`, `syncBase`, `deliveredBy`, `matchedText`) | Fetch the record if you read them |
 
+### Added
+
+- **Sync:** `file_stamp_report` (admin; REST and MCP) lists the files a 4.0–5.5 version likely stamped with its own author, from each peer's file feed. It repairs nothing, writes one audit entry, and shares the five-a-minute heavy-call budget: [Spaces API](docs/integration-guide/06-spaces-api.md).
+
 ### Changed
 
 - **Errors:** The store-failure `503` carries the store's `code`, `codeName` and one retry sentence on REST (writes included), `POST /api/<tool>` and MCP; recall, similar and traverse send `Retry-After` too.
@@ -165,9 +169,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-keyed link's tombstone carries `originalSeq`, so a peer that never held it is not sent the deletion.
 - **Sync:** Records that share a sequence number are no longer skipped at a page or batch boundary, on pull, push and the duplicate and
   contradiction scans.
-- **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good against an upgraded server, and a
-  refused element's seq no longer moves it; an older server still holds it.
-- **Sync:** A tombstone `instanceId` over 256 characters is refused.
+- **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good, and a refused element's seq no longer moves it (an older server still holds it); a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since (other bytes, or a newer version by its deleter) is kept. Tombstones page past a pull's cut; a push logs refusals.
 - **Sync:** An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.

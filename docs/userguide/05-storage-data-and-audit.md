@@ -400,7 +400,7 @@ that does not reach `0` is a stopped re-read, not a slow one. No audit entry is 
 deletion the upstream no longer holds, because it had pruned it once every member counted as past it. The record that
 deletion would have removed is still here, and nothing marks it. To find such records, compare the space's record counts with
 the publisher's, or set `merkle: true` on the network (an integrator's setting, [Sync Protocol](../sync-protocol.md)): a space whose
-content differs after a sync is logged as `MERKLE_DIVERGENCE`, naming it. Delete what the publisher no longer has.
+content differs after a sync is logged as `MERKLE_DIVERGENCE`, naming it. Delete what the publisher no longer has. (A divergence on files that outlives every upgrade has a second possible cause, below: `file_stamp_report`.)
 
 **Two instances that hold the same file can disagree about when it was last changed, and that now settles itself.** A
 file record carries the moment it was last edited, and that moment is part of what instances compare — so a difference
@@ -418,6 +418,43 @@ it read, how many settled), and `ythril_sync_file_meta_rereads_owed` counts the 
 re-reads leave the content still different, a warning says so once, naming how many, and it stops asking: what is left is not a
 timestamp it can take from the writer — a file whose writer has left the network, or a real difference to look at.
 Without `merkle: true` nothing is re-read, and such a file settles at its next edit.
+
+**A divergence that stays on `files` after every member has upgraded may be a file an old version stamped as its own — and there is a report for it.**
+Between 4.0 and 5.5 an instance that pulled a file from a peer stored it under **its own name** and its own version
+number. That is closed now, but the rows it wrote are still there: this instance refuses the real author's later edits
+to such a file, and a network with `merkle: true` logs `MERKLE_DIVERGENCE` every cycle for a space where nothing else is
+wrong. Nothing repairs them automatically, because a stamped file cannot be told, from this instance alone, from one of
+your own uploads that you later sent to a peer. **`file_stamp_report`** asks the peers that share the space and lists the
+files that are *likely* stamped, with what each side holds. It is a report and **changes nothing** — no file, no setting,
+no counter; the only trace is one audit entry, `file.stamps.reported`. It has no screen in the web UI: an instance admin
+runs it from an AI assistant connected with an admin token (the tool is called `file_stamp_report`, for one space) or with
+`POST /api/spaces/<space>/file-stamp-report`
+([Spaces API](../integration-guide/06-spaces-api.md#file-stamp-report)). It is limited to five heavy calls a minute per
+token, shared with deleting space data and starting an ingest, and one report per space runs at a time.
+
+- **What "likely" means.** A peer that holds the space reports a *different* author for the same file than this
+  instance, created it more than two minutes earlier, and has the same content (the same `sha256`), and nothing in the
+  file's description or tags was edited on this instance. Anything short of that is *cannot tell*, and the row says which
+  piece is missing — the peer says the file is yours, it holds nothing or only a placeholder for it, the contents differ,
+  you edited the description here, or the peer could not be asked. The two-minute margin is fixed (it is not the
+  stamp-skew warning setting): a clock on one of the instances that is off by more than that can make a file you really
+  uploaded read as *likely*.
+- **It is a lead, not a finding.** The peer is the only witness. The peer named may itself have been stamped by the
+  same old version and be repeating it. Each row shows both versions and both creation times so you can check it.
+- **What you do about a row you have checked.** Edit the file's metadata (its description, for instance) on **the
+  instance that really authored the file**. The edit arrives here and replaces the stamp only once that instance's
+  counter has passed the stamp's seq (each row shows both); an edit below it is not accepted here. Nothing in
+  Ythril does this for you, on purpose: any automatic repair would hand a peer ownership of a file that may be yours (see
+  the [decision record](../decisions/08-a-file-stamp-is-reported-never-repaired.md)). Copies further down a chain are
+  replaced only on the instances that pull from the one you edited.
+- **Not listed.** Files a peer authored (an edit made here cannot be told from a stamp), files with no record of
+  having been exchanged with a peer, which includes every file moved here, and deleted files. The answer says so in
+  its `rules`.
+- **It reads the peers' file lists.** It calls each peer holding the space, through the networks that share it, one at a
+  time, and reads that peer's file records. It sends no file path. A peer that refuses, is too old, or cannot be reached
+  gives *cannot tell* for the rows it would have answered, and is not asked again in that run. It reads each peer's
+  records from the start, at most 50 pages of 500 rows, so a file whose record lies further into a peer's list is
+  *cannot tell* (not checked) on every run, however you page through the answer.
 
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the

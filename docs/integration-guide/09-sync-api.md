@@ -241,8 +241,12 @@ nothing about it needs a bespoke ingest.
 
 ```http
 GET /api/sync/filemeta?spaceId=&networkId=&sinceSeq=&limit=&full=true
-GET /api/sync/filemeta/:id
+GET /api/sync/filemeta/:id?spaceId=&networkId=
 ```
+
+`:id` is the file's **path** (URL-encoded: a `/` in it is `%2F`), and `spaceId` is required here as on the pages; a chunk
+or a soft-deleted file is `404`. The `full=true` pages are also what [`file_stamp_report`](06-spaces-api.md) reads to
+compare a peer's author, seq, creation time and `sha256` with this instance's rows.
 
 **File bytes cross the wire as plaintext, and each receiver stores them by its own rule.** An instance that
 encrypts files at rest ([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)) decrypts before it sends and
@@ -751,13 +755,15 @@ in neither category means two peers can never agree about identical content. Fil
 SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill, a
 conversion's sidecar — is not hashed at all, record or bytes; nor is a soft-deleted file's row (`deletedAt`, local
 audit state). A file's processing status never touches its hashed `updatedAt`. The check is advisory: a root
-mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync.
+mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync. For a file row an old receiver stamped with
+its own author, [`file_stamp_report`](06-spaces-api.md) lists the likely ones with the evidence; it repairs nothing.
 
 **Mixed versions:** a root from a version before these rules (which hashed `spaceId`, the instance-local files, a
 conversion's sidecar and a soft-deleted row) never equals one from a version after it, so a `merkle: true` network
 whose members run both reports `MERKLE_DIVERGENCE` for every space until all of them have upgraded. A file
 whose processing stamped `updatedAt` before this release keeps a differing `updatedAt` at an equal seq, and so a
-divergence, until its next authored edit.
+divergence, until its next authored edit. A divergence that persists on `files` after every member has upgraded can be
+a row a 4.0–5.5 receiver stamped with its own author: [`file_stamp_report`](06-spaces-api.md) is the command for it.
 
 ### Gossip Endpoints
 

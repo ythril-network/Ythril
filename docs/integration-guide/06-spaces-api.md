@@ -338,6 +338,129 @@ which is a different statement from *there is work left* and the one you can act
 
 ---
 
+### File stamp report
+
+```http
+POST /api/spaces/:id/file-stamp-report
+Authorization: Bearer <instance-admin token>
+```
+
+**Also `POST /api/file_stamp_report` and the `file_stamp_report` MCP tool** — the same arguments, the same answer, the
+same refusals.
+
+Between 4.0 and 5.5 an instance that pulled a peer's file bytes wrote the file row under **its own** author and a
+fresh local seq, instead of keeping the peer's — a *stamp*. The stamp is still there: the real author's later edits
+lose the seq compare, a delete the author makes is judged against the wrong author, and a network with `merkle: true`
+logs `MERKLE_DIVERGENCE` every cycle for a space where nothing else is wrong. This reports which file rows of one
+space this instance **likely** stamped, and the evidence for each. **It is a report only**: no automatic repair exists,
+because a row this instance genuinely uploaded cannot be told from a stamp by anything stored here (see
+[the decision record](../decisions/08-a-file-stamp-is-reported-never-repaired.md)). The repair is a manual act on the
+file's real author's instance.
+
+**What it does.** It reads the local file rows of the space that are *candidates* (below), then asks each peer holding
+the space — through the networks that currently carry it, one peer at a time — for its file feed
+(`GET /api/sync/filemeta?full=true`, the feed a pull reads) and compares row by row. **No path is sent to a peer**; it
+reads their feed. The feed rows it keeps are held in memory for the run and dropped at its end.
+
+**What it writes.** No file row, counter or space collection. It records **one audit entry**, `file.stamps.reported`,
+for the call — written as an act, not a read, because the call spends this instance's credentials on its peers (see
+[Audit Log](13-audit-log-api.md)).
+
+**Who may call it.** Instance admin only, on all three doors. A token that is read-only, an ordinary write token, or
+one that administers this space but is not instance admin is refused — `403` on both REST doors, and on MCP the
+tool error every MCP refusal is: the report names peer instances and spends the instance's peer credentials, as the
+manual network sync routes do. The MCP tool is hidden from `tools/list` for any other token.
+
+**Cost.** It shares the five-a-minute heavy-call budget with `delete_space_data` and ingest starts, one count per token
+across the three doors; the sixth call in a minute is a `429` whose sentence names the report. While a report for a
+space is running, another call for that space is a `409` on every door. A space that does not exist is `404`; a proxy
+space holds no rows and is `400`.
+
+**Body — all fields optional.**
+
+| Field | Description |
+|-------|-------------|
+| `limit` | Rows per answer: an integer 1–5000. Default 1000. |
+| `after` | A path: the `nextAfter` of the previous answer. A string of at most 1024 characters. A cursor only — it is never read as a file path. |
+
+An unknown field, or a value of the wrong type or outside the range, is a `400` naming the parameter, on every door.
+
+**Candidates — the rows it reports on.** A file row of this space that is live (not deleted), authored by this instance,
+and carries a `syncBase` entry for a peer (a record that this instance exchanged the bytes with that peer). Three kinds
+of row are **not** listed, and the answer states each rule in one sentence in `rules`:
+
+- a row a peer authored: one this instance may have edited cannot be told from a legitimate local edit;
+- a row with no `syncBase` entry, which includes every file moved here — a move drops it, so there is nothing to compare;
+- a deleted row.
+
+**Response** `200`:
+
+```json
+{
+  "space": "research",
+  "startedAt": "2026-10-09T08:00:00.000Z",
+  "candidates": 2,
+  "checked": 2,
+  "likely": 1,
+  "cannotTell": 1,
+  "truncated": false,
+  "rows": [
+    {
+      "path": "docs/spec.pdf",
+      "verdict": "likely-stamped-here",
+      "reason": "…",
+      "ours": { "seq": 1042, "createdAt": "2026-08-01T00:00:00.000Z", "updatedAt": "2026-08-01T00:00:00.000Z", "sha256": "…" },
+      "peer": { "instanceId": "…", "author": "…", "seq": 7, "createdAt": "2026-06-01T00:00:00.000Z", "updatedAt": "2026-06-01T00:00:00.000Z", "sha256": "…" }
+    }
+  ],
+  "rules": ["…"]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `space` | The space reported. |
+| `startedAt` | When the run started. |
+| `candidates` | Rows in this answer — each gets a verdict. |
+| `checked` | Rows the run reached a conclusion about. A row it could not reach before its total deadline says so as its reason and is not counted here. |
+| `likely` / `cannotTell` | Rows by verdict; they add up to `candidates`. |
+| `truncated` / `nextAfter` | `truncated: true` means there are more rows after this page; send `nextAfter` (the last row's path) as `after` to continue. |
+| `rows` | Ascending by path. `ours` is the local seq, times and hash as read; `peer` is the peer whose feed the verdict rests on, named by instance id only. |
+| `rules` | One sentence per exclusion rule (above). Never a count, never a path. |
+
+**The verdict is `likely-stamped-here` or `cannot-tell`, and `likely` is as far as it goes.** A row is *likely* only
+when every piece of evidence holds: a peer holding the space reports an author that is **that peer** (not this
+instance, and not a third instance), the peer's copy was created more than two minutes earlier than this one, both
+sides carry the same `sha256`, and nothing in the row's description, tags or properties was edited here (a description
+this instance made from the bytes, or the peer's own words copied in by the 5.6.3 drain, does not count as an edit).
+`reason` is a fixed sentence from one enumerated set; it never carries peer text. A *cannot-tell* row says which piece
+of evidence was missing: the peer says the author is this instance, names a third author, holds nothing or only an
+arrival placeholder for the path, the creation times are within the tolerance or unparsable, a hash is absent or
+differs, the row's description was edited here, the peers disagree, or the peer could not be asked (unreachable,
+refused, too old to serve the feed, address refused, no credentials, or not reached before the deadline).
+
+**Read a `likely` row as a lead, not a finding:**
+
+- The peer is the only witness, and could claim this instance's own file. The same bytes created independently on both
+  sides cannot be excluded from the data.
+- **The named peer may itself hold a stamp.** A relay that pulled the file from the real author and stamped it
+  reports itself as the author; it is named, wrongly. The wire carries nothing that tells the two apart.
+- **A clock off by more than two minutes can turn a genuine own file into `likely`.** The tolerance is a fixed constant
+  of the report, not the stamp-skew warning setting (`stampSkew.warnMinutes`), and no setting changes it.
+- A `likely` row can occur on any network type — a peer's seq at or above the stamp's makes this instance's push be
+  refused — but is most common where files only flow one way into this instance: a pull-only or subscriber relation, or a
+  braintree child.
+- Each row shows both seqs and both creation times. An edit on the peer replaces this instance's row only once that
+  instance's counter passes this row's seq.
+
+**Bounds.** One feed page times out after 10 s; the whole run after 60 s, which is below the HTTP timeouts. Peers are
+walked one at a time, each from the start of its feed and at most 50 pages of 500 rows, so a file whose row lies further
+into a peer's feed is `cannot-tell` (not reached) on every call, whatever `after` says. A peer that refuses, is too old,
+or fails stops being asked for the run and every row it would have answered is `cannot-tell`; nothing is retried. A peer
+in several networks that carry the space is asked through one, the first by network id that answers.
+
+---
+
 ### Update a Space
 
 ```http

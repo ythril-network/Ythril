@@ -459,6 +459,18 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
    * `DELETE` is on the same path and needs no argument: destroying a space destroys all four areas at once,
    * and it is instance-admin.
    */
+  /*
+   * THE FILE-STAMP REPORT. It reads a space's file rows, and it is still not a view of one area's data: it names peer
+   * instances and spends this instance's credentials on every peer that holds the space, so the standing it needs is the
+   * instance's, as the manual network sync's is. A `files` row would area-scope what the design says is not, and let a
+   * token holding that rung on the space reach every peer the instance trusts.
+   */
+  {
+    route: '/api/spaces/:id/file-stamp-report',
+    why: 'Reports which files a peer\'s feed says another instance created first. It names peer instances and spends this '
+       + 'instance\'s credentials on each peer holding the space (like the manual network sync): instance-admin, not an '
+       + 'area rung. The MCP tool `file_stamp_report` is instance-admin by its `admin` flag, so it has no TOOL_RIGHTS row.',
+  },
   {
     route: '/api/spaces/:id',
     why: 'The space SETTINGS route (PATCH) and its deletion. Settings are Space-admin, which is not one of '

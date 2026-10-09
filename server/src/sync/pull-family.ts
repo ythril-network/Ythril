@@ -29,7 +29,7 @@ import { peerSafeFetch } from './peer-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
 import { arrivalRefusal } from './arrivals.js';
-import { pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
+import { isRider, pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
 import { truncationWarn, type TransferOutcome } from './watermark.js';
 import { log, logSafe, peerText } from '../util/log.js';
 import type { LinkageCheck } from './linkage-check.js';
@@ -47,9 +47,6 @@ const PULL_MAX_PAGES = 50;
 export type PullResult = { count: number; converged: number; highSeq: number; maxSeq: number } & TransferOutcome;
 
 type ServedPage = { items?: unknown; nextCursor?: unknown };
-
-/** A tombstone riding in a page: applied by `pullTombstones` before the records, so it is not a document to accept. */
-const isRider = (item: unknown): boolean => Boolean(item && typeof item === 'object' && (item as { deletedAt?: unknown }).deletedAt);
 
 export async function pullFamily(o: {
   family: ReplicatedFamily;

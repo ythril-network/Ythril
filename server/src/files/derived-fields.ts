@@ -133,8 +133,18 @@ export function isLocalFileField(key: string): boolean {
 /** What a write of derived fields did. `gone` is a success: the file was deleted, so there was nothing to record. */
 export type DerivedWriteOutcome = 'written' | 'superseded' | 'gone';
 
-/** A `description` this instance made from the bytes, which `descriptionSource` is the only way to tell from a person's. */
-const MACHINE_MADE = ['generated', 'extracted'];
+/**
+ * The `descriptionSource` values that say THIS instance made the `description` from the bytes — the only way to tell one from a
+ * person's. The one list: the predicate, the Mongo `$in`s, the wire enum and the types all read it, so a third source cannot be
+ * added to some and not the others (a description read as a person's, a stamp report that calls a machine's text "edited here").
+ */
+export const MACHINE_MADE_SOURCES = Object.freeze(['generated', 'extracted'] as const);
+export type MachineMadeSource = typeof MACHINE_MADE_SOURCES[number];
+
+/** Whether `value` is a `descriptionSource` that marks a machine-made description. Anything else — absent, a person's — is not. */
+export function isMachineMadeSource(value: unknown): value is MachineMadeSource {
+  return MACHINE_MADE_SOURCES.some(s => s === value);
+}
 
 /** The fields a deleted file's row loses outright: what the bytes made, and the fingerprint of bytes that are gone. */
 const STRIPPED = ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha256', 'embeddingStatus'];
@@ -154,7 +164,7 @@ const STRIPPED = ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha2
 export function stripDerivedStages(): object[] {
   return [
     { $unset: STRIPPED },
-    { $set: { description: { $cond: [{ $in: ['$descriptionSource', MACHINE_MADE] }, '$$REMOVE', '$description'] } } },
+    { $set: { description: { $cond: [{ $in: ['$descriptionSource', [...MACHINE_MADE_SOURCES]] }, '$$REMOVE', '$description'] } } },
     { $unset: ['descriptionSource'] },
   ];
 }
@@ -181,7 +191,7 @@ export async function stripFlaggedRowsOnce(spaceId: string, limit: number): Prom
     deletedAt: { $exists: true },
     $or: [
       ...STRIPPED.map(f => ({ [f]: { $exists: true } })),
-      { descriptionSource: { $in: MACHINE_MADE } },
+      { descriptionSource: { $in: [...MACHINE_MADE_SOURCES] } },
     ],
   };
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
@@ -466,7 +476,7 @@ export async function setDerivedDescriptionIfUnset(
    * stored one, because a caller that does not say where a derived description came from must not leave the previous
    * marker standing over new text.
    */
-  descriptionSource?: 'generated' | 'extracted',
+  descriptionSource?: MachineMadeSource,
 ): Promise<boolean> {
   const _id = toDocId(filePath);
   const self = authorRef().instanceId ?? null;

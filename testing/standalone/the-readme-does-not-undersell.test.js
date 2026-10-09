@@ -68,6 +68,17 @@ describe('every count in the README is derived from the code', () => {
       + 'reports.');
   });
 
+  it('the count includes file_stamp_report (Q-433): the tool exists and the README says at least 74', () => {
+    /*
+     * The derived equality above is the rule and stays the rule; this is the pin that the change which added the 74th tool
+     * also moved the sentence. Equality passes while the tool is missing AND the README is stale in step, and neither is
+     * what a reader of the README should be told: a floor on the number, and the tool by name, so a revert of one half fails.
+     */
+    assert.ok(ALL_TOOLS.some(t => t.name === 'file_stamp_report'), 'file_stamp_report is not an MCP tool: the report this README count was raised for does not exist');
+    const claimed = Number(README.match(/\((\d+)\s+of them\)/)?.[1]);
+    assert.ok(claimed >= 74, `the README says ${claimed} MCP tools; with file_stamp_report there are at least 74 (README.md "(74 of them)")`);
+  });
+
   it('the topology table still has the five the prose describes', () => {
     const rows = [...README.matchAll(/^\|\s+\*\*(Closed|Democratic|Club|Braintree|Pub \/ Sub)\*\*/gm)].length;
     assert.equal(rows, 5,

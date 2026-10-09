@@ -1,6 +1,7 @@
 import type { TokenRights } from './rights-shape.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
+import type { MachineMadeSource } from '../files/derived-fields.js';
 export interface TokenRecord {
   id: string;
   name: string;
@@ -1830,7 +1831,7 @@ export interface FileMetaDoc {
    * It exists because "generated" is a claim about provenance: the release note said generated while the
    * value was a truncation of the first paragraph, and nothing in the record could tell the two apart.
    */
-  descriptionSource?: 'generated' | 'extracted';
+  descriptionSource?: MachineMadeSource;
   /**
    * The document's own opening prose — never invented, and an embedding input in its own right.
    *

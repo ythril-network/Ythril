@@ -111,6 +111,7 @@ export const CAPABILITIES = [
    * So the route was REST-only, and the parity gate read a covered capability because the map said so.
    */
   ['Spaces', 'space_reembed', 'POST /api/spaces/:id/reembed'],
+  ['Spaces', 'file_stamp_report', 'POST /api/spaces/:id/file-stamp-report'],
 
   ['Tokens', 'list_tokens', 'GET /api/tokens'],
   ['Tokens', 'list_tokens', 'GET /api/brain/spaces/:spaceId/token-access'],

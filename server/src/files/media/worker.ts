@@ -43,7 +43,7 @@ import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch,
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
-import { setFileProcessingState, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState } from '../derived-fields.js';
+import { setFileProcessingState, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState, type MachineMadeSource } from '../derived-fields.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
 import {
@@ -468,7 +468,7 @@ async function processJob(
     // What produced `derivedDescription`, and the document's own opening prose when there is one. Both are
     // written to the parent record: "generated" is a claim about provenance, and the extractive text is
     // what keeps a phrase remembered FROM the document able to find the parent.
-    let derivedSource: 'generated' | 'extracted' | undefined;
+    let derivedSource: MachineMadeSource | undefined;
     let derivedExcerpt: string | undefined;
     // Final file embeddingStatus for a job that completes without retrying. Text
     // conversion may embed some chunks and fail others; a partial result is recorded
