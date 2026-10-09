@@ -55,11 +55,16 @@ const LOCAL_VALUE = {
   syncBase: { somePeer: 'abc' },
   // bundle-51: who delivered the stored version — names a peer, so it never goes out.
   deliveredBy: 'some-peer',
+  // Q-439: an edge's write guard - this instance's lock on a functional subject, never sent.
+  _functionalGuard: '4:from5:label',
 };
 
 /** Store records as this instance's own writes would, so the engine's push cycle offers them. */
 async function seedLocal(family, docs) {
-  await door.mongo.col(`${S}_${family.collection}`).insertMany(docs.map(d => ({ ...d })));
+  // A write guard is unique per edge (its index refuses two edges holding one), so a run seeded with one fixture value
+  // gets it suffixed with each record's id; it is still seeded on every record, which is what the wire check needs.
+  await door.mongo.col(`${S}_${family.collection}`).insertMany(docs.map(d => (
+    typeof d._functionalGuard === 'string' ? { ...d, _functionalGuard: `${d._functionalGuard}:${d._id}` } : { ...d })));
   await door.bumpSeq(S, docs.reduce((m, d) => Math.max(m, d.seq), 0));
 }
 

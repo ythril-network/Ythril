@@ -364,9 +364,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
     }
     // A relabel onto an identity another edge holds: the REST route's 409 and body (`edgeIdentityTakenAnswer`).
-    const taken = edgeIdentityTakenAnswer(err);
-    if (taken) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...taken.body } }, status: taken.status, callSpace };
+    const identityTaken = edgeIdentityTakenAnswer(err);
+    if (identityTaken) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...identityTaken.body } }, status: identityTaken.status, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {
