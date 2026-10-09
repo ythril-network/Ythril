@@ -30,6 +30,7 @@
  */
 import { sanitizeFilter } from './query.js';
 import { andPredicates } from '../db/and-predicates.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { validateFilterExpression, buildMongoFilter, type FilterExpression } from './filter.js';
 
 /**
@@ -220,10 +221,22 @@ export type RecallFilter = FilterExpression | RawMongoFilter;
 export function recallPredicate(
   tags: string[] | undefined,
   filter: RecallFilter | undefined,
+  /**
+   * The type being searched, where the caller knows it. It decides ONE clause: a `file` recall never ranks the audit
+   * record of a deleted file (`Q-418`). It is here rather than at each channel because this function is already *"the
+   * one function that builds it, so the two channels agree on eligibility"* — a flag clause added per channel is the
+   * same rule written four times, and the channel that forgot it would be the one returning the deleted file.
+   *
+   * The ANY-TIER predicate, not `LIVE_FILE_ROW`: a file recall ranks chunk, caption and face rows, and all of them
+   * carry a `parentFileId`. It is vacuous on one of those, which is correct — a flagged file's children are removed
+   * with it.
+   */
+  knowledgeType?: string,
 ): Record<string, unknown> | undefined {
   return andPredicates(
     tags && tags.length > 0 ? { tags: { $all: tags } } : undefined,
     filter == null ? undefined : isRawFilter(filter) ? filter.__raw : buildMongoFilter(filter as FilterExpression),
+    notFlaggedIfFile(knowledgeType),
   );
 }
 

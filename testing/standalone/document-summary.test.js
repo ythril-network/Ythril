@@ -168,7 +168,9 @@ describe('the worker wires it to the parent record', () => {
       'a read-then-decide guard is back; the condition belongs in the write, not in a snapshot');
 
     // And the condition itself, at the writer, so this cannot pass against a function that ignores its own name.
-    const meta = strip(readFileSync('server/src/files/file-meta.ts', 'utf8'));
+    // In `files/derived-fields.ts` since bundle-89, with the other writers of what the bytes produced. The condition is
+    // what this case is about and it is unchanged — read from wherever the function lives, so the next move re-points one line.
+    const meta = strip(readFileSync('server/src/files/derived-fields.ts', 'utf8'));
     assert.match(meta, /export async function setDerivedDescriptionIfUnset/);
     assert.match(meta, /description: \{ \$exists: false \}/, 'absent counts as unwritten');
     // An exact substring, not a regex. Writing a regex that matches a regex literal is where this assertion went wrong

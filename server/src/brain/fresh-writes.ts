@@ -237,13 +237,19 @@ export async function addFreshWrites<T extends string, R extends { _id: string }
   results: R[],
   collectionOf: (type: T) => string,
   hydrate: (spaceId: string, hits: { type: T; id: string; score: number }[]) => Promise<R[]>,
-  /** The recall's own tag and filter predicate — see {@link matchFreshWrites}. Omitted means unfiltered. */
-  predicate?: Record<string, unknown>,
+  /**
+   * The recall's own predicate FOR ONE TYPE — see {@link matchFreshWrites}. Omitted means unfiltered.
+   *
+   * Per type rather than one for the whole scan, because the predicate is per type: a file recall's predicate carries
+   * the clause that keeps the audit record of a deleted file out of the answer, and this scan reads straight from the
+   * collection, so a shared predicate would have been the one channel that let it through.
+   */
+  predicateOf?: (type: T) => Record<string, unknown> | undefined,
 ): Promise<void> {
   const seen = new Set(results.map(r => r._id));
   const perType = await Promise.all(activeTypes.map(async type => ({
     type,
-    matches: await matchFreshWrites(`${spaceId}_${collectionOf(type)}`, queryVector, Date.now(), predicate)
+    matches: await matchFreshWrites(`${spaceId}_${collectionOf(type)}`, queryVector, Date.now(), predicateOf?.(type))
       .catch(() => []),
   })));
   const missing = perType.flatMap(({ type, matches }) =>

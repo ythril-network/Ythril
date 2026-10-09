@@ -209,7 +209,7 @@ describe('the surfaces that decline the header say so', () => {
     assert.equal(patched.status, 200, 'PATCH with a matching If-Match must still succeed');
   });
 
-  it('file metadata refuses it, because those records carry no seq', async () => {
+  it('file metadata refuses it, because a file row\'s seq advances only on an authored write', async () => {
     const r = await patch(A(), tok, '/api/brain/spaces/general/files?path=/whatever.txt',
       { description: 'x' }, ifMatch(1));
     assert.equal(r.status, 400,

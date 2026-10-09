@@ -155,6 +155,7 @@ export function docLeaf(collType: string, doc: Record<string, unknown>): string 
 // Derived from DERIVED_FIELDS itself: a hand-written copy here missed `syncBase` the day it was added (Q-66).
 const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...DERIVED_FIELDS].map(f => [f, 0]));
 
+
 /**
  * What is INCLUDED from a file's metadata — and it is an inclusion projection, unlike every other collection.
  *
@@ -170,7 +171,7 @@ const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...D
  * **The two lists must name the same fields.** That gate is what says so.
  *
  * Exported because the complement is the other half of the rule: every `FileMetaDoc` key NOT named here is local to
- * this instance, and `files/processing-state.ts` derives its local-only set from this list instead of keeping a second
+ * this instance, and `files/derived-fields.ts` derives its local-only set from this list instead of keeping a second
  * one (`Q-240`). Gates parse the declaration below from this file's source: keep its spelling, and do not write that
  * spelling anywhere above it, comments included.
  */
@@ -180,6 +181,31 @@ export const FILE_HASH_PROJECTION = {
   suppressEmbeddings: 1,
   author: 1, createdAt: 1, updatedAt: 1, seq: 1,
 } as const;
+
+/**
+ * The hash of a file row's AUTHORED content, with chosen keys blanked — what two copies of one file row have to agree
+ * on for a receiver to call them the same content.
+ *
+ * ## Why it lives here and not at its caller
+ *
+ * It is the hash's own projection, read through the hash's own canonicaliser. The equal-seq convergence (`Q-419`) has
+ * to ask *"is the authored content equal, ignoring the timestamp"*, and `docLeaf` cannot answer it: that hashes `seq`
+ * and the timestamp too, so two rows differing ONLY in the timestamp never compare equal through it — which is exactly
+ * the pair the verdict must recognise. A caller that built its own comparison would be a second definition of "the same
+ * file row", and the day the projection above gains a key the two would disagree about a divergence.
+ *
+ * `blank` names the keys to IGNORE rather than the keys to compare, so a key added to the projection is compared by
+ * default. That is the safe direction: a new authored field makes two rows differ until somebody decides it should not,
+ * where the other way round it would be silently outside every comparison.
+ */
+export function fileContentHash(doc: Record<string, unknown>, blank: readonly string[] = []): string {
+  const projected: Record<string, unknown> = {};
+  for (const key of Object.keys(FILE_HASH_PROJECTION)) {
+    if (blank.includes(key)) continue;
+    if (doc[key] !== undefined) projected[key] = doc[key];
+  }
+  return canonicalDocHash(projected);
+}
 
 /**
  * The sorted leaves of one record collection of a space, read in full.

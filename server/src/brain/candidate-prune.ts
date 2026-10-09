@@ -45,6 +45,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
@@ -122,7 +123,11 @@ async function pruneCandidateCollection(spaceId: string, suffix: (typeof CANDIDA
     const recSuffix = COLLECTION_SUFFIX[type as DupeScanType];
     if (!recSuffix) return result;   // unknown type ⇒ cannot judge ⇒ keep everything (a shape this code does not know, not a failure)
     // A lookup that fails THROWS: fail closed, and the failure is said by the walk rather than lost here.
-    const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {});
+    // The any-tier predicate, and not `LIVE_FILE_ROW`: a file finding can name a chunk row, and reading a chunk as
+    // "gone" would delete a human dismissal. A flagged top-level row read as gone is the point — the finding it leaves
+    // behind is the stranded one this module exists to remove.
+    const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {},
+      { filter: notFlaggedIfFile(recSuffix) });
     existing.set(type, new Set(found.keys()));
   }
 

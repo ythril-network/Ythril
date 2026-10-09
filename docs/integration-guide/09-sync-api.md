@@ -322,6 +322,25 @@ and a metadata row or a file tombstone for such a path is dropped; each is count
 the other instance-local paths: a conflict copy, a schema snapshot and a legacy spill. Sidecars a peer
 delivered before this release are retired, bytes and row, by the retention sweep.
 
+**A file row at an EQUAL seq can now change one field: its `updatedAt`.** Two instances could hold one file row at the
+same `seq` with different `updatedAt` values — a hashed field, so `merkle: true` reported a divergence every cycle, and
+an equal-seq arrival was skipped, so nothing ever repaired it. A receiver now adopts the arriving `updatedAt` when all of
+this holds: the DELIVERING peer is the author named on both copies, that author is not the receiver, the authored content
+is identical (the hash projection, with `updatedAt` and `author` left out), and the two instants differ. A relay's
+delivery of somebody else's row never converges — a relay serves its own stored value with the author field intact, and
+adopting it would flip the row between two values for ever. Nothing else is written: no `seq` is stamped, `deliveredBy`
+is untouched, and no embedding is re-queued.
+
+**A drifted row is delivered again by a re-read, not by the ordinary pull.** The ordinary pull asks from the receive
+watermark, and a row that drifted is behind it. With `merkle: true`, a check that finds the roots differ makes the next
+cycle ask the same peer for `GET /api/sync/filemeta?sinceSeq=0` and page to the end, through the same accept; it has its
+own cursor and never moves the receive watermark. A peer serving the file rows already serves everything this needs.
+
+**So `updatedAt` on `IncomingFileMetaDoc` is now CHECKED, and a bad one is a `400`.** It must be an ISO instant in the
+comparable fixed-width form and under 40 characters. It is the one timestamp a peer sends that can change a stored row,
+which is why it is the one that is validated; every other family's `updatedAt` arrives with a whole version and is still
+`z.string()`.
+
 **A soft-deleted file's row never syncs.** With `softDeleteFileMeta` on, a delete leaves its row flagged
 `deletedAt`: local audit state that stamps no `seq` and no `updatedAt`. `GET /api/sync/filemeta` does not page it,
 `GET /api/sync/filemeta/:id` answers `404` for it, a push never sends it, and no Merkle root hashes it. The
@@ -405,7 +424,7 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
   "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
 
-`filemeta.tombstoned` is the one counter that is **absent when it is zero** (above, a held file tombstone covered that many arrivals): read a missing one as zero.
+`filemeta.tombstoned` and `filemeta.converged` are the two counters that are **absent when they are zero**: read a missing one as zero. `tombstoned` counts arrivals a held file tombstone covered; `converged` counts file rows that took their author's `updatedAt` at an equal seq (below), which store nothing and so are neither `upserted` nor `skipped`.
 
 **A file's key is one string, whoever spelled the path.** The canonical key of a path is its Unicode NFC form with `/` separators, no leading slash, no empty or `.` segment, and a `..` that stays inside the space collapsed (`a/x/../b` is `a/b`); this instance keys every file row it writes itself by it, and keys what a peer sends (a manifest entry, a tombstone's path, an upload's `?path=`) by the path as it resolves in the space. A file-metadata document whose `_id` is not that key (`a/../b`, `./b`, `a//b`, a decomposed accented name, or a path that leaves the space) counts in `filemeta.rejected` and is not stored, and the receiver's log names the id: send the path's canonical spelling, which is the key every other door uses. A row an older release stored under another spelling keeps that id and is refused the same way by an upgraded peer; see [Upgrading](02b-upgrading.md).
 

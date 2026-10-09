@@ -56,6 +56,17 @@ export interface NetworkMember {
    *  receive watermark moved past them; re-reading what it still holds applies them. Kept per member and space like
    *  the watermarks (a rename carries it, a counter wipe re-owes it), and never shown by `GET /api/networks`. */
   tombstoneRereadAt?: Record<string, string>;
+  /** spaceId → where the re-read of this peer's FILE METADATA rows stands (`sync/file-meta-reread.ts`,
+   *  `nextFileMetaRereadState`): absent = not owed, `k:<seq>` = attempt k owed from there, `k:done` = attempt k read to
+   *  the end, `spent` = the cap's attempts are used up while the roots still differ. It exists because two instances
+   *  that both hold a file row at the same seq can hold different `updatedAt` values — the shape `Q-419` is about —
+   *  and the only way to converge is to read the author's rows again and take the author's value. Unlike
+   *  `tombstoneRereadAt` it is RE-ARMABLE: a later `MERKLE_DIVERGENCE` on the space arms it again, so `'done'` is not
+   *  absorbing here. It CANNOT share `lastSeqReceived`, which is one number across six record families: a one-family
+   *  re-read from 0 would restart every cycle and livelock a larger space. Kept per member and space like the
+   *  watermarks (a rename carries it; a counter wipe clears it, which here means not owed, so the next divergence
+   *  arms it afresh), and never shown by `GET /api/networks`. */
+  fileMetaRereadAt?: Record<string, string>;
   consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
   parentInstanceId?: string; // braintree only
   /** Set during a temporary reparent; stores the original parent so it can be restored. */
@@ -139,6 +150,7 @@ export interface MemberRemoval {
  */
 export const PER_SPACE_WATERMARKS = [
   'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
+  'fileMetaRereadAt',
 ] as const satisfies readonly (keyof NetworkMember)[];
 
 export interface VoteCast {

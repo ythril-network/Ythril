@@ -154,6 +154,13 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
      */
     family: null,
     /**
+     * `(req, res) => void` — answers `GET /api/sync/merkle` as a case scripts it (bundle-89 E3): the root the peer
+     * reports, a 404, a body with no root. Unset, the route 404s like every route the fake peer does not serve, which the
+     * receiver reads as an UNKNOWN verdict — neither a match nor a mismatch — so a case that does not script it arms and
+     * clears nothing.
+     */
+    merkle: null,
+    /**
      * `(key, items, n) => { status?: number, body?: object } | undefined` — answers a `batch-upsert` POST INSTEAD of the
      * default `{ status: 'ok' }` (`n` counts the requests since `reset`, from 1). A non-200 `status` is a refusal of the
      * whole request, and its items are NOT added to `pushedRecords`; a `body` of `{ [key]: { rejected } }` is the peer
@@ -290,6 +297,11 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
       res.json({ status: 'ok' });
     });
   }
+  // Before the family route, which would read `merkle` as a family it does not serve and 404 it.
+  app.get('/api/sync/merkle', (req, res, next) => {
+    if (!state.merkle) { next(); return; }
+    Promise.resolve(state.merkle(req, res)).catch(err => { if (!res.headersSent) res.status(500).json({ error: String(err) }); });
+  });
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
     if (state.failFamily === req.params.family) { req.socket.destroy(); return; }
@@ -442,6 +454,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     configuredKeys.clear();
     for (const k of Object.keys(initial.memberExtra)) m[k] = initial.memberExtra[k];
     delete m.tombstoneRereadAt;
+    delete m.fileMetaRereadAt;
     // The file-tombstone acknowledgement is a watermark too, and it only ever moves forward: left from a case that pushed
     // everything, it would stand in for the next case's own position and every "acknowledged up to here" row would read it.
     delete m.lastFileTombstoneAckedAt;
@@ -449,7 +462,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {
       tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null,
-      family: null, batchUpsert: null, batchRequests: [], familyRequests: [],
+      family: null, merkle: null, batchUpsert: null, batchRequests: [], familyRequests: [],
       fileTombstoneRequests: [], fileTombstonesReceived: [], fileTombstonePosts: [], fileTombstoneGet: null, fileTombstonePost: null,
       manifestRequests: [], manifest: null, fileDownloads: [], fileUploads: [], fileUpload: null,
     });

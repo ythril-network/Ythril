@@ -65,8 +65,11 @@ describe('the exclusion is a missing vector, never a read-time filter', () => {
      */
     // Re-anchored for bundle-30 `R12`: the removal is the one constant `UNSET_VECTOR` (its fields pinned by
     // `suppress-embeddings-wiring`), not a hand-spelled `$unset` of `embedding`.
+    // Re-anchored for bundle-89: the four guarded writes go through the one writer of a derived field
+    // (`files/derived-fields.ts`), so the removal is an argument rather than an inline `$unset` — the constant is still
+    // the removal, which is what this asserts.
     const store = strip(read('server/src/brain/embed-record.ts'));
-    assert.match(store, /\$unset: UNSET_VECTOR\b/,
+    assert.match(store, /unset: UNSET_VECTOR\b/,
       'setting it must REMOVE the vector, not mark the record');
   });
 });

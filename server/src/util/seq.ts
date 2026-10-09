@@ -157,6 +157,46 @@ export function withSeq<T>(spaceId: string, write: (seq: number) => Promise<T>, 
   return withAllocatedSeqs(spaceId, 1, write, holder);
 }
 
+/**
+ * Take a seq only once the condition that decides the write has been ANSWERED — for a write that routinely lands
+ * nothing.
+ *
+ * ## What it prevents
+ *
+ * The counter moves BEFORE the write: `withAllocatedSeqs` runs its `$inc` and only then calls `write`. So a guarded
+ * write whose filter matches nothing still consumes a number, and the hole it leaves is worse than the waste — the
+ * counter names a seq no record holds, and every peer pages past it. Measured on a file uploaded WITH a description:
+ * the upload took seq 1, the derived-description write landed nothing and the counter stood at 2 with no record
+ * holding it.
+ *
+ * ## How to use it, and the half that is easy to drop
+ *
+ * `stillTrue` reads what decides the write and answers before any number is taken. **The condition stays in the write's
+ * own filter as well**: the read answers "is this worth a number", the filter answers "is it still true at the instant
+ * of the write", and dropping the second turns a burned number into a lost update — which is the thing the filter was
+ * there for in the first place.
+ *
+ * ## Who CANNOT use this, which is most callers
+ *
+ * A write whose precondition must be ATOMIC with it — `findOneAndUpdate` filtered by `writeFilterFor(id, ifMatchSeq)`
+ * in `brain/fact.ts`, `entities.ts`, `edges.ts` and `chrono.ts` — cannot move its check in front of the allocation
+ * without reintroducing the lost update the filter exists to prevent. Those four decline BY DESIGN (a 412, or a
+ * concurrent delete) and keep their burn: a sanctioned decline, named here so this form is not read as covering them.
+ * Two more can lose a race to a concurrent write of the same row and burn a number that way, which is rare and is a
+ * race rather than a routine outcome.
+ *
+ * @returns what `write` returned, or `undefined` when the condition was already false — then no number was taken.
+ */
+export async function withSeqWhen<T>(
+  spaceId: string,
+  stillTrue: () => Promise<boolean>,
+  write: (seq: number) => Promise<T>,
+  holder: string,
+): Promise<T | undefined> {
+  if (!await stillTrue()) return undefined;
+  return await withAllocatedSeqs(spaceId, 1, write, holder);
+}
+
 /** The lowest seq allocated (or being allocated) and not yet settled, or undefined when none is. */
 export function lowestUncommittedSeq(spaceId: string): number | undefined {
   return seqHolds.lowest(spaceId);

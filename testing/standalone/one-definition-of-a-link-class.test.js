@@ -33,6 +33,8 @@ import { argumentsOf, statementAround, bodyOf } from './_structural-window.mjs';
 
 const { LINK_CLASSES, linkClassFor, legacyField } =
   await import('../../server/dist/brain/link-adjacency.js');
+/** The predicate a file class's scope must BE, read from the module that owns it rather than restated here. */
+const { LIVE_FILE_ROW } = await import('../../server/dist/files/live-file-row.js');
 
 const MODULE = 'server/src/brain/link-adjacency.ts';
 
@@ -95,7 +97,7 @@ describe('the declaration answers for every link class', () => {
     }
   });
 
-  it('only the file classes exclude chunks, and ALL THREE of them do', () => {
+  it('only the file classes narrow to a live file row, and ALL THREE of them do', () => {
     /*
      * The asymmetry is the whole reason this module exists, so it is asserted rather than left implicit —
      * and asserted in BOTH directions, since giving chrono a chunk predicate would silently return nothing.
@@ -104,10 +106,17 @@ describe('the declaration answers for every link class', () => {
      * a fourth file class added later would be the one without the predicate, and the symptom is a
      * forty-passage document arriving as forty nodes carrying passage text.
      */
+    /*
+     * **The expectation is READ from `live-file-row.ts`, not written out here (bundle-89).** It was the chunk
+     * exclusion alone, spelled out in this gate and in the module — the half-spelling that file warns about in as many
+     * words — and a file deleted under `softDeleteFileMeta` was therefore still a linked node. The scope is now the
+     * whole predicate, and a gate holding it to a literal would have to be edited again the next time the predicate
+     * gains a half.
+     */
     for (const c of LINK_CLASSES) {
-      const expected = c.kind === 'file' ? { parentFileId: { $exists: false } } : {};
+      const expected = c.kind === 'file' ? LIVE_FILE_ROW : {};
       assert.deepEqual(c.scope, expected,
-        c.kind === 'file' ? `${c.label} does not exclude chunks` : `a ${c.kind} has no chunks`);
+        c.kind === 'file' ? `${c.label} is not narrowed to a live file row (LIVE_FILE_ROW)` : `a ${c.kind} has neither chunks nor a deletion flag`);
     }
   });
 
@@ -118,12 +127,21 @@ describe('the declaration answers for every link class', () => {
      * as. Every helper that turns link rows into file records must therefore consult the class scope, or
      * a forty-passage document comes back as forty nodes.
      */
+    /*
+     * **The functions are DERIVED, not listed (bundle-89).** This named two, and one of them (`scopedDocs`) had no
+     * caller anywhere — so half the assertion was about dead code while a third helper added later would have been
+     * checked by nothing. Every function in the module that reads records back by id is held to it, with a floor, so
+     * an empty sweep cannot pass.
+     */
     const src = stripComments(readFileSync(MODULE, 'utf8'));
-    for (const fn of ['docsFromCollection', 'scopedDocs']) {
+    const readers = [...src.matchAll(/(?:export\s+)?(?:async\s+)?function\s+(\w+)/g)]
+      .map(m => m[1]).filter(fn => /readRowsById|readStoredById/.test(bodyOf(src, fn) ?? ''));
+    assert.ok(readers.length >= 1, 'no function in the module reads records back by id — re-anchor this case');
+    for (const fn of readers) {
       const body = bodyOf(src, fn);
       assert.match(body, /scope/,
         `${fn} reads records named by link rows without applying the class scope, so a file's chunks `
-        + 'count as links to the file');
+        + 'count as links to the file, and a deleted file counts as one too');
     }
   });
 

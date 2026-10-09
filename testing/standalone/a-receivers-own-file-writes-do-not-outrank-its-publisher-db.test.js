@@ -46,10 +46,19 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-file-arrival-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-let mongo, meta, wire, processing;
+let mongo, meta, wire, processing, log;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const stored = async () => await files().findOne({ _id: FILE });
+
+/** Every warn and error line the server logs while `fn` runs, and its result (the `_pull-door.mjs` shape). */
+async function logsDuring(fn) {
+  const lines = [];
+  const orig = { warn: log.warn, error: log.error };
+  log.warn = (...a) => { lines.push(a.join(' ')); };
+  log.error = (...a) => { lines.push(a.join(' ')); };
+  try { return { result: await fn(), lines }; } finally { Object.assign(log, orig); }
+}
 
 /**
  * A file as it lands from the publisher: its authored half, stamped with the publisher's seq — and the space counter
@@ -73,7 +82,8 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     loader.loadConfig();
     meta = await import('../../server/dist/files/file-meta.js');
     wire = await import('../../server/dist/api/sync/_shared.js');
-    processing = await import('../../server/dist/files/processing-state.js');
+    processing = await import('../../server/dist/files/derived-fields.js');
+    ({ log } = await import('../../server/dist/util/log.js'));
   });
 
   after(async () => {
@@ -91,14 +101,17 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     assert.ok(wireKeys.length > 5, `the ingest schema declares ${wireKeys.length} keys — nothing is being checked`);
     // The set is DERIVED (FileMetaDoc keys the divergence hash does not see), so the floor says it is not empty.
     const local = [...(processing.localFileFields?.() ?? [])];
-    assert.ok(local.length >= 10, `processing-state.ts derives ${local.length} local file field(s)`);
+    assert.ok(local.length >= 10, `derived-fields.ts derives ${local.length} local file field(s)`);
     for (const k of ['sizeBytes', 'sha256', 'excerpt', 'embeddingStatus']) assert.ok(local.includes(k), `${k} is not local`);
     for (const f of local) assert.ok(!wireKeys.includes(f), `${f} is on the local list and also replicates`);
   });
 
   it('the excerpt the media worker writes leaves the publisher\'s seq and updatedAt', async () => {
+    // Through `setDerivedExcerpt` since bundle-89: the excerpt is a field derived from the file's bytes, so it is
+    // written by the one writer of those, and `updateFileMeta` no longer takes one. The RULE this case is about is
+    // unchanged — a local field stamps neither seq nor `updatedAt`, so a receiver cannot outrank its publisher.
     await peerAuthoredFile();
-    await meta.updateFileMeta(SPACE, FILE, { excerpt: 'The opening prose of the guide.' });
+    await processing.setDerivedExcerpt(SPACE, FILE, 'The opening prose of the guide.');
     const d = await stored();
     assert.equal(d.excerpt, 'The opening prose of the guide.');
     assert.equal(d.seq, PEER_STAMP.seq, `the excerpt stamped seq ${d.seq}: the publisher's next edit at seq 8 would be skipped`);
@@ -167,7 +180,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
 
   it('a derived description is not written on a file the publisher authored', async () => {
     await peerAuthoredFile();
-    const wrote = await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated');
+    const wrote = await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated');
     const d = await stored();
     assert.equal(wrote, false, 'a receiver derived a description that cannot replicate, and would hash differently');
     assert.equal(d.description, undefined);
@@ -177,9 +190,79 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
   it('control: a derived description is still written on a file this instance authored', async () => {
     await meta.upsertFileMeta(SPACE, FILE, 12, { tags: ['local'] });
     const before = (await stored()).seq;
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'), true);
+    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'), true);
     const d = await stored();
     assert.equal(d.description, 'Derived here');
     assert.ok(d.seq > before, 'the author\'s derived description must page to its peers');
+  });
+
+  /*
+   * ── a row with NO author: the residual path the author clause lets through (E4 item 3, Q-280) ──────────────────
+   *
+   * The author clause admits `{ author: { $exists: false } }`, because a row written before authorship was stamped
+   * has none and is this instance's. But a row a PEER delivered before that release has none either, and on that one
+   * a derived description is the Q-143 defect: it stamps a seq that outranks the publisher's next edit, or never
+   * replicates and reports a divergence for ever.
+   *
+   * `deliveredBy` is what tells them apart, and it is the right signal rather than `syncBase`: any peer metadata
+   * arrival sets `deliveredBy`, while `syncBase` is set only by the BYTES pull (`sync/file-sync.ts`), so a row whose
+   * metadata arrived and whose bytes never did carries one and not the other.
+   */
+
+  /** A legacy row with no `author` at all, as written before authorship was stamped. */
+  async function unauthoredFile(extra = {}) {
+    await mongo.col('ythril_counters').updateOne({ _id: SPACE }, { $max: { seq: PEER_STAMP.seq } }, { upsert: true });
+    await files().insertOne({
+      _id: FILE, spaceId: SPACE, path: FILE, tags: ['legacy'],
+      createdAt: PEER_STAMP.updatedAt, ...PEER_STAMP, sizeBytes: 12, ...extra,
+    });
+  }
+
+  it('a derived description is not written on an unauthored row a peer DELIVERED, and the decline is said', async () => {
+    await unauthoredFile({ deliveredBy: PEER.instanceId });
+    const { result: wrote, lines } = await logsDuring(
+      () => processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'),
+    );
+    const d = await stored();
+    assert.equal(wrote, false, 'an unauthored row a peer delivered is not this instance\'s to describe');
+    assert.equal(d.description, undefined);
+    assert.equal(d.seq, PEER_STAMP.seq, 'and no seq was taken for it');
+    // Said, because the alternative is an old peer-delivered file staying description-less with nothing to read.
+    const said = lines.filter(l => l.includes(FILE));
+    assert.equal(said.length, 1, `the decline must be said exactly once, got: ${JSON.stringify(lines)}`);
+    assert.match(said[0], /deliveredBy|delivered/, `the line must name WHY it declined: ${said[0]}`);
+  });
+
+  it('control: an unauthored row nothing delivered is still described, and stamps a seq', async () => {
+    await unauthoredFile();
+    const before = (await stored()).seq;
+    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'), true,
+      'a row with no author and no deliverer is this instance\'s own legacy row — narrowing it would lose every pre-authorship description');
+    const d = await stored();
+    assert.equal(d.description, 'Derived here');
+    assert.ok(d.seq > before, 'it is an authored write like any other');
+  });
+
+  it('the decline is said ONCE per row, not once per attempt, and says it again for a different row', async () => {
+    // Paths no other case uses: what is said is remembered for the life of the process, which is the point, so a row an
+    // earlier case already reported would read here as "never said" and prove nothing.
+    const first = 'guide/said-once-first.md';
+    const second = 'guide/said-once-second.md';
+    for (const p of [first, second]) {
+      await files().insertOne({
+        _id: p, spaceId: SPACE, path: p, tags: ['legacy'],
+        createdAt: PEER_STAMP.updatedAt, ...PEER_STAMP, sizeBytes: 12, deliveredBy: PEER.instanceId,
+      });
+    }
+
+    const { lines } = await logsDuring(async () => {
+      await processing.setDerivedDescriptionIfUnset(SPACE, first, 'Derived here', 'generated');
+      await processing.setDerivedDescriptionIfUnset(SPACE, first, 'Derived again', 'generated');
+      await processing.setDerivedDescriptionIfUnset(SPACE, second, 'Derived here', 'generated');
+    });
+
+    // A retry of the same job must not add a line; a DIFFERENT file must. A once-only latch would mute the second.
+    assert.equal(lines.filter(l => l.includes(first)).length, 1, `the same row said other than once: ${JSON.stringify(lines)}`);
+    assert.equal(lines.filter(l => l.includes(second)).length, 1, `a second row was muted: ${JSON.stringify(lines)}`);
   });
 });

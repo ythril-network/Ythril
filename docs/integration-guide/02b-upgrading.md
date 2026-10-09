@@ -89,7 +89,7 @@ below it, everything it relayed.** Clubs, closed and democratic networks are unc
 - **A peer's byte push no longer fires `file.created`, and a peer's pushed or pulled file no longer refreshes an open Files page.** A write no user made is announced to no one, as a synced record never was. A person's upload, delete or move, an MCP tool call and an ingest's transcript still fire. An integrator that listened to `file.created` to learn that a peer delivered a file must list the files instead.
 - **A document a peer delivers is converted by this instance's own pipeline**, by push or by pull: the mode, the models and, where this instance has consented to it, an external assist model are this instance's. Until now a pulled `.html` or `.pdf` was stored and never converted, and a changed pulled version kept the previous passages. A backlog is worked off over sync cycles: a file already held whose row names other bytes than the disk's, or that never went through processing, is recorded and queued by a later cycle, at most a small fixed number per space per cycle (`ythril_sync_file_arrivals_total{outcome="repaired_…"}`), with no boot-time job. Expect conversion and, with consent, external-model traffic after the upgrade.
 - **Conversion sidecars (`_converted/`, `_extracted/`) no longer travel**; each instance converts by its own settings, so a receiver with conversion off holds no derived text. Sidecars a peer delivered before are retired, bytes and row, by the retention sweep within a cycle (at most 200 per space per pass), with no tombstone and no webhook; the log says `Retired N conversion sidecar(s) a peer delivered into space '…'`.
-- **A file's processing status no longer changes its `updatedAt`.** Rows that drifted before the upgrade keep a differing `updatedAt` at an equal seq until the file's next authored edit, so `MERKLE_DIVERGENCE` on those files does not clear by itself.
+- **A file's processing status no longer changes its `updatedAt`, and neither does a move of a file another instance wrote.** Rows that drifted before the upgrade converge on their author's `updatedAt` on a `merkle: true` network: the first `MERKLE_DIVERGENCE` arms a re-read of that peer's file rows (`ythril_sync_file_meta_rereads_owed`), with an info line when it finishes and a warning, once, if a small fixed number of re-reads (the warning names it) leave the roots differing. Without `merkle: true` a drifted row keeps its value until the file's next authored edit. Rolling back drops nothing: an older version ignores the `fileMetaRereadAt` mark in its config.
 - **A removed description, source, property, tag or suppression mark now reaches peers**, and a soft-deleted file's row stays local, with the deletion carried by the file tombstone; see the table below.
 - **A pull whose body is not the manifest's, or is longer or shorter, stores nothing**, a space over its quota is not fetched, and a pull or an upload that cannot record a NEW file removes the bytes it wrote, so nothing is listed or offered to a peer (a pull redoes the file next cycle; an upload answers `5xx` and is sent again). A file whose record still exists, or whose record failed because the database did not answer, keeps its bytes and is brought up to date by the next write or sync (`File pull record failed for space '…' …`, `File pull quota failed …`, `Unrecorded bytes cleanup failed …`).
 
@@ -153,6 +153,23 @@ collection keeps the index it has, untouched. Expect the instance's index count 
 collections — about half, on a measured production instance. An index comes back by itself with its collection's
 first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`, default `60000`). A
 rollback needs nothing: the older build recreates every index at boot.
+
+**Upgrading past 5.6.8 strips the records of files deleted under `softDeleteFileMeta` by an earlier build.** The flag
+write removes everything the bytes made in the same operation now — the vector, its model, the matched text, the
+excerpt, `sha256`, `embeddingStatus`, and a machine-made `description` with its `descriptionSource` — but that is
+forward-only, so rows flagged before the upgrade still hold all of it. The retention sweep repairs them a bounded batch
+per space per cycle, in the background, with no boot step to run and nothing to wait for. It is query-defined and keeps
+no marker: a stripped row stops matching, so once the backlog is gone the repair costs one bounded read per space per
+cycle. Every field it removes is LOCAL — never hashed, never offered to a peer — so nothing it does can make two
+instances disagree, and a rollback needs nothing: the older build simply stops repairing. What it cannot do is bring
+back what it removed, which is the point of the setting.
+
+**And a kept record is now reaped, on its own clock.** A row flagged `deletedAt` is removed once the space's FILE
+retention window has passed SINCE THE DELETION — not since the file's own `_expireAt`, which would remove the audit
+record on the sweep after the one that made it. A space with no file window reaps none, ever. The purge is its own
+sweep unit (`TTL sweep: files-flagged`), so its failures are reported under their own step and a re-upload that revives
+the path between the sweep's read and its delete WINS: the row stays live and the loss is not reported as a failure.
+After the row is gone, the file TOMBSTONE is what stops a stale copy of the deleted file arriving from a peer.
 
 ## Rolling Back
 

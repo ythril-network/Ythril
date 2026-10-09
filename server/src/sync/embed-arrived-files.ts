@@ -10,6 +10,7 @@
  * half asks nothing of the wire, so it lives where it needs no part of it, and the merge re-exports it for its callers.
  */
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
@@ -35,7 +36,10 @@ export function holdsBlob(row: { sha256?: unknown; sizeBytes?: unknown } | undef
 export async function embedArrivedFiles(spaceId: string, ids: readonly string[], { restore = false }: { restore?: boolean } = {}): Promise<void> {
   if (ids.length === 0) return;
   const rows = await readStoredById<{ sha256?: string; sizeBytes?: number; suppressEmbeddings?: boolean }>(
-    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 });
+    // A flagged row is not queued. The arrival merge keeps the flag and merges `sha256` and `sizeBytes` back in, so
+    // without this an arrival onto a deleted file's audit record reads as "the bytes are here" and queues an embed job
+    // for it — putting back the vector the flag's own write stripped.
+    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 }, { filter: NOT_A_FLAGGED_ROW });
   const meta = getSpaceMeta(spaceId);
   const quiet: string[] = [];
   const wanted: Array<{ _id: string; suppressEmbeddings?: boolean }> = [];

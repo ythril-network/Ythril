@@ -75,7 +75,10 @@ const ENTER_MS = 5000;
 // ── The derivation: every holder of a seq hold ───────────────────────────────────────────────────────────────
 // The entry points of the shared hold primitive (`util/horizon-holds.ts`'s `heldWhile`): the seq instance's three and the
 // file-tombstone position instance's one (bundle-71, Q-346). A function that calls one of them holds a horizon, and is owed a case.
-const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeq|withPositionHeld)\s*\(/g;
+// `withSeqWhen` is listed BEFORE `withSeq`, and the order is the point: alternation is tried left to right, so with
+// `withSeq` first the regex matches those seven characters and then demands a `(` that `When(` is not — and a holder
+// that takes its number only once its condition is answered (bundle-89) would be invisible to the whole rule.
+const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeqWhen|withSeq|withPositionHeld)\s*\(/g;
 /** A match that is the DEFINITION of the entry point (`function withPositionHeld(`), which holds nothing itself. */
 const isDefinition = (src, index) => /\bfunction$/.test(lineBefore(src, index, 'a holder match', { orEmpty: true }));
 function holders() {

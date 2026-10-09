@@ -162,6 +162,11 @@ There is no setting in the UI — the secret is the switch.
 - **Syncing to another instance sends the file itself**, and that instance stores it by its own setting — two
   instances in one network do not need the same secret.
 - **What stays readable on disk:** file and folder names, and roughly how large each file is.
+- **Indexing an encrypted file needs disk, briefly.** To read a picture, a recording or a document, the indexer first
+  writes itself a decrypted copy in the storage folder's own scratch area, and removes it when the job ends. So leave
+  room for one copy of your largest file for each indexing job that can run at once — that number is
+  `workerConcurrency` under Settings → Media Processing. Files stored WITHOUT a master secret need no copy at all. A
+  leftover copy from a server that was killed mid-job is cleared the next time the server starts.
 
 The server's security report (`GET /api/about/security`, and the boot log) shows the state as `atRest.files`. The
 full operator reference, including rollback and Kubernetes notes, is
@@ -387,6 +392,23 @@ deletion would have removed is still here, and nothing marks it. To find such re
 the publisher's, or set `merkle: true` on the network (an integrator's setting, [Sync Protocol](../sync-protocol.md)): a space whose
 content differs after a sync is logged as `MERKLE_DIVERGENCE`, naming it. Delete what the publisher no longer has.
 
+**Two instances that hold the same file can disagree about when it was last changed, and that now settles itself.** A
+file record carries the moment it was last edited, and that moment is part of what instances compare — so a difference
+in it alone made them report their data as different when nothing about the file was. When the instance that WROTE the
+file sends you its copy, and everything else about the two copies is identical, yours takes the writer's moment and the
+disagreement is over. Only the writer's own delivery counts: a copy passed on by somebody in between carries that
+instance's moment, and taking it would make the two of you swap values for ever. Nothing else about the record changes,
+and nothing is re-indexed.
+
+**A record that already disagreed is fetched again — when the network compares content.** An ordinary sync only asks for
+what changed since the last one, so a file that drifted before is never sent again. With `merkle: true` on the network,
+a sync that finds the content differs makes the next sync ask that peer for all of its file records once more, and
+each drifted one settles as above. It is said in one info line per peer and space when it has read them all (how many
+it read, how many settled), and `ythril_sync_file_meta_rereads_owed` counts the ones still to make. If a few full
+re-reads leave the content still different, a warning says so once, naming how many, and it stops asking: what is left is not a
+timestamp it can take from the writer — a file whose writer has left the network, or a real difference to look at.
+Without `merkle: true` nothing is re-read, and such a file settles at its next edit.
+
 **A background job that cannot finish one space says so, once, and carries on with the others.** Ythril does its
 housekeeping in the background, one space after another: the retention sweep, the chrono retention pass, the
 clean-ups of old search-result files, stray file metadata, upload leftovers and expired tombstones, the duplicate and
@@ -552,7 +574,8 @@ the file is next edited; the log of the instance that sends says so, once, namin
 **A file you deleted, with records kept, stays on your instance.** With the
 [record of deleted files](04-settings.md#keeping-a-record-of-deleted-files) switched on, the flagged record is not
 sent to other instances and not counted when instances compare their data: they get the deletion notice and each
-follows its own setting. A restore from an export brings the flag back. A restore also removes a description,
+follows its own setting. It is not a search result and not in any file count either; Brain → Query is where you read
+it, by asking the Files collection for records that carry a deletion time. A restore from an export brings the flag back. A restore also removes a description,
 tag or property the exported record did not have, as the export is a full copy, and the import summary
 counts those removals (`keysRemoved`).
 

@@ -6,6 +6,8 @@ import { allowPrivateForSlot } from '../../config/model-egress-policy.js';
 import { log } from '../../util/log.js';
 import { egressConsented } from '../../config/egress-consent.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
+import { bodyAroundImage } from './image-body.js';
+import type { ImageSource } from './image-source.js';
 import { getModelSlots } from '../../config/loader.js';
 
 /** One detected face, in exactly the shape the in-process recogniser produces. */
@@ -66,7 +68,7 @@ export function inProcessFallbackAllowed(): boolean {
  * follow a redirect into link-local metadata. Validating the URL at write time is not enough on its own —
  * DNS can change between the save and the call.
  */
-export async function detectFacesExternal(imageBytes: Buffer, expectedDims: number): Promise<ExternalFace[] | null> {
+export async function detectFacesExternal(image: ImageSource, expectedDims: number): Promise<ExternalFace[] | null> {
   if (!externalFaceReady()) return null;
   const ext = getConfig().mediaEmbedding?.faceRecognition?.externalModel;
   const baseUrl = ext?.baseUrl?.trim();
@@ -74,17 +76,24 @@ export async function detectFacesExternal(imageBytes: Buffer, expectedDims: numb
 
   const apiKey = (getSecrets() as any)?.mediaEmbedding?.faceApiKey as string | undefined;
 
+  // The same object this always sent, with the image's base64 streamed in where the marker sits — and an exact
+  // `Content-Length`, so a recogniser or a proxy that refuses an upload of unknown length still takes it (`Q-425`).
+  const request = bodyAroundImage(marker => ({
+    ...(ext?.model ? { model: ext.model } : {}),
+    image: marker,
+  }), image);
+
   try {
     const res = await ssrfSafeFetch(baseUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Content-Length': String(request.contentLength),
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
-      body: JSON.stringify({
-        ...(ext?.model ? { model: ext.model } : {}),
-        image: imageBytes.toString('base64'),
-      }),
+      // A FACTORY: `ssrfSafeFetch` re-sends the body on every redirect hop, and a one-shot stream would reach the
+      // second hop consumed.
+      body: request.stream,
       signal: AbortSignal.timeout(slotTimeoutMs('faceExternal', getModelSlots())),
     }, {
       // Matches the assist model: a self-hosted recogniser may live on a private cluster address. The

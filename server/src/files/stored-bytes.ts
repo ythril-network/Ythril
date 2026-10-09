@@ -35,7 +35,7 @@ import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import {
-  resolveMasterSecret, deriveKey, resetChunkedKeyCache, encryptChunked, decryptChunked, isChunkedEnvelope,
+  resolveMasterSecret, deriveKey, resetChunkedKeyCache, encryptChunked, isChunkedEnvelope,
   chunkedHeaderLength, chunkedPlaintextSizeFor, createChunkedEncryptor, createChunkedDecryptor, checkChunkedKey,
   ChunkedEnvelopeError, CHUNKED_MAX_HEADER_BYTES, type DerivedKey, type MasterSecret,
 } from '../config/secretbox.js';
@@ -78,6 +78,28 @@ export function resetStoredKeyCacheForTests(): void { writer = null; resetChunke
 
 /** Where temporary files are written before the rename: same filesystem as the tree, never inside it. */
 export function storedTmpDir(): string { return path.join(getDataRoot(), '.stored-tmp'); }
+
+/**
+ * A private scratch DIRECTORY under {@link storedTmpDir}, named so {@link sweepStoredTmp} removes it after a crash.
+ *
+ * ## What it prevents, measured
+ *
+ * The media embedders used to make their own scratch with `mkdtemp(os.tmpdir()/ythril-audio-…)`, removed in a
+ * `finally`. A `finally` does not run when the process is KILLED — and an out-of-memory kill is precisely this
+ * ticket's trigger (`Q-425`). Driven on 2026-10-08: an encrypted audio job was wedged, the process SIGKILLed, and the
+ * real boot sweep then ran. The decrypted copy survived, at `…/ythril-audio-SZvkBF/input.wav`, because it sat in
+ * `os.tmpdir()` where nothing sweeps. **So an out-of-memory kill left a plaintext copy of an at-rest-encrypted
+ * file on disk, indefinitely.**
+ *
+ * Here the disposer is still the normal path, and the boot sweep is what makes a kill survivable. The `.tmp` suffix
+ * is not decoration: it is the one rule the sweep applies, so a directory named this way is covered by the same
+ * sentence as a temp file and nobody has to remember a second one.
+ */
+export async function scratchDir(prefix: string): Promise<string> {
+  const dir = path.join(storedTmpDir(), `${prefix}-${crypto.randomBytes(6).toString('hex')}.tmp`);
+  await mkdirPrivate(dir);
+  return dir;
+}
 
 const pathLocks = keyedLock();
 
@@ -382,8 +404,13 @@ export async function encryptInPlace(abs: string): Promise<EncryptInPlaceResult>
 }
 
 /**
- * Remove temporary files a crash left behind. Only at boot, before anything writes: every temp file is renamed or
- * removed by the call that made it, so one that exists when no call is running is an orphan.
+ * Remove temporary files AND scratch directories a crash left behind. Only at boot, before anything writes: every
+ * temp entry is renamed or removed by the call that made it, so one that exists when no call is running is an orphan.
+ *
+ * **One rule, both shapes.** An entry whose name ends `.tmp` is an orphan, whether it is a file awaiting its rename
+ * or a {@link scratchDir} a killed media job left behind. It used to remove files only, which is why a decrypted copy
+ * of an encrypted file could outlive the process that made it — see {@link scratchDir} for the drive that showed it.
+ * `recursive` is what makes the directory case work; `force` keeps a racing cleanup from turning into a failure.
  */
 export async function sweepStoredTmp(): Promise<number> {
   let names: string[];
@@ -391,7 +418,7 @@ export async function sweepStoredTmp(): Promise<number> {
   let removed = 0;
   for (const n of names) {
     if (!n.endsWith('.tmp')) continue;
-    await fsp.rm(path.join(storedTmpDir(), n), { force: true }).then(() => { removed++; }, () => undefined);
+    await fsp.rm(path.join(storedTmpDir(), n), { force: true, recursive: true }).then(() => { removed++; }, () => undefined);
   }
   return removed;
 }
@@ -433,9 +460,35 @@ const unreadable = (abs: string, err: unknown): unknown =>
 
 /** Read a whole stored file as plaintext. Throws {@link StoredFileUnreadable} when it cannot be decoded. */
 export async function readStored(abs: string): Promise<Buffer<ArrayBuffer>> {
-  const bytes = await fsp.readFile(abs);
-  if (!isChunkedEnvelope(bytes)) return bytes;
-  try { return decryptChunked(bytes, activeSecret()); } catch (err) { throw unreadable(abs, err); }
+  const { size, encrypted } = await statStored(abs);
+  // Plaintext: the platform's own read is already one buffer of the file's size.
+  if (!encrypted) return await fsp.readFile(abs);
+  /*
+   * ONE buffer, sized before the bytes arrive (`Q-425`). This used to read the whole ciphertext, decrypt it into an
+   * array of chunks and concatenate them — three copies of the file for a function whose answer is one of them, which
+   * is 2.40x measured on a 96 MiB file. Now the decryptor streams into a buffer the size the envelope promises.
+   *
+   * `alloc`, not `allocUnsafe`: a buffer sized from a stat can only be got wrong one way, by returning it when LESS
+   * than its length was decrypted, and `allocUnsafe` would then hand the caller whatever the heap held. Zeros would
+   * be a quieter version of the same lie, so the count is checked as well and a short or over-long decrypt is
+   * `StoredFileUnreadable` — the same answer a flipped bit gets.
+   */
+  const out = Buffer.alloc(size);
+  const stream = await openStoredRead(abs);
+  let at = 0;
+  try {
+    for await (const chunk of stream) {
+      const c = chunk as Buffer;
+      if (at + c.length > size) throw new Error(`decrypted more than the ${size} byte(s) the envelope promised`);
+      c.copy(out, at);
+      at += c.length;
+    }
+  } catch (err) {
+    stream.destroy();
+    throw err instanceof StoredFileUnreadable ? err : unreadable(abs, err);
+  }
+  if (at !== size) throw unreadable(abs, new Error(`decrypted ${at} of the ${size} byte(s) the envelope promised`));
+  return out;
 }
 
 /** A plaintext stream of a stored file, whatever its size. Errors with {@link StoredFileUnreadable}. */

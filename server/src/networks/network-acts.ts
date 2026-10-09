@@ -95,8 +95,10 @@ export function networkView(net: NetworkConfig): Record<string, unknown> {
   return {
     ...rest,
     myRole,
-    // `tombstoneRereadAt` is this instance's repair bookkeeping about a peer (`sync/deletion-authority.ts`), not network state.
-    members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, tombstoneRereadAt: _tr, ...m }) => ({
+    // `tombstoneRereadAt` and `fileMetaRereadAt` are this instance's repair bookkeeping about a peer
+    // (`sync/deletion-authority.ts`), not network state. Every per-space repair mark is
+    // destructured out here: one left in leaks a cursor into the body of `GET /api/networks`.
+    members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, tombstoneRereadAt: _tr, fileMetaRereadAt: _fr, ...m }) => ({
       ...m,
       belowFloor: peerFloorRefusal(m.version, m.versionCheckedAt),
       minPeerVersion: MIN_PEER_VERSION,

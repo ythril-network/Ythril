@@ -9,70 +9,67 @@
  *      temporally, then re-embed the combined text.
  */
 
-import { spawn } from 'child_process';
+import { runFfmpeg } from './transcode.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
-import { col, asFilter, asUpdate } from '../../db/mongo.js';
+import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
-import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
-import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { updateDerivedFileRow } from '../derived-fields.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
-function ffmpegSpawn(args: string[]): Promise<{ stdout: Buffer; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const stdout: Buffer[] = [];
-    const stderrChunks: string[] = [];
-    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    proc.stdout.on('data', (d: Buffer) => stdout.push(d));
-    proc.stderr.on('data', (d: Buffer) => stderrChunks.push(d.toString()));
-    proc.on('error', reject);
-    proc.on('close', code => {
-      const stderr = stderrChunks.join('');
-      if (code !== 0) reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
-      else resolve({ stdout: Buffer.concat(stdout), stderr });
-    });
-  });
-}
-
 /** Extract audio track to a temporary WAV file. Returns the path. */
-async function extractAudioTrack(videoPath: string, outPath: string): Promise<void> {
-  await ffmpegSpawn([
+async function extractAudioTrack(videoPath: string, outPath: string, signal?: AbortSignal): Promise<void> {
+  await runFfmpeg([
     '-i', videoPath,
     '-vn',
     '-acodec', 'pcm_s16le',
     '-ar', '16000',
     '-ac', '1',
     outPath,
-  ]);
+  ], { signal });
 }
 
 /** Extract keyframe JPEG bytes at regular intervals. Returns array of { timestampS, jpegBytes }. */
+/**
+ * The most frames one keyframe pass may extract, however long the video is.
+ *
+ * A CHOSEN ceiling rather than a measured one, and a generous one: at one frame per 30 s it is more than eight hours of
+ * video, so nothing an operator uploads to be captioned hits it by accident — while the twelve-hour recording that used
+ * to ask for 1 440 frames, and caption every one of them in a single step, is bounded.
+ */
+const MAX_KEYFRAMES = 1000;
+
 async function extractKeyframes(
   videoPath: string,
   tmpDir: string,
   intervalS: number,
+  signal?: AbortSignal,
 ): Promise<Array<{ timestampS: number; jpegBytes: Buffer }>> {
   // Output pattern: frame_NNNNNN.jpg
   const pattern = path.join(tmpDir, 'frame_%06d.jpg');
   // fps=1/{intervalS} selects one frame per interval
   // select='eq(pict_type,I)' additionally prefers I-frames (ignored when fps is used)
-  await ffmpegSpawn([
+  //
+  // `-frames:v` is the BOUND, and it is ffmpeg's own: one frame per interval over the whole video is 1 440 JPEGs for a
+  // twelve-hour recording — every one of them read into one array, and every one of them a vision call in a single job
+  // step. Capping after the extraction would still have written them all to disk, so the cap is the ask.
+  await runFfmpeg([
     '-i', videoPath,
     '-vf', `fps=1/${intervalS}`,
     '-vsync', 'vfr',
+    '-frames:v', String(MAX_KEYFRAMES),
     '-q:v', '4',
     pattern,
-  ]).catch(err => {
+  ], { signal }).catch(err => {
     log.warn(`Video embedder: keyframe extraction warning: ${err instanceof Error ? err.message : String(err)}`);
     return { stdout: Buffer.alloc(0), stderr: '' };
   });
@@ -114,8 +111,15 @@ async function extractKeyframes(
 export async function embedVideo(
   spaceId: string,
   fileId: string,
-  videoBytes: Buffer,
-  mimeType: string,
+  /**
+   * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
+   *
+   * A video is the largest file this pipeline handles and ffmpeg opens it repeatedly (the audio extract, the keyframe
+   * pass). Holding it in memory as well was the worst case of the seven-times-its-size shape this ticket is about.
+   */
+  video: PlaintextFile,
+  /** Unused since the input stopped being written here — see `embedAudio`. */
+  _mimeType: string,
   vision: VisionProvider,
   stt: SttProvider,
   doKeyframes = true,
@@ -126,18 +130,25 @@ export async function embedVideo(
   // Asked ONCE for the job, at its entry, for the keyframe re-embed below; the audio stage asks for its own chunks. A
   // suppressed file's chunks are stored with their text and no vector, and the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-video-'));
-  const videoExt = mimeTypeToVideoExt(mimeType);
-  const videoPath = path.join(tmpDir, `input.${videoExt}`);
+  // Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a kill — see
+  // `scratchDir`. A video job holds the largest plaintext of any, and its `finally` does not run when it is killed.
+  // The EXTRACTED wav and the keyframes still need somewhere to go; the input does not — it is the caller's handle.
+  const tmpDir = await scratchDir('ythril-video');
+  const videoPath = video.path;
   const audioPath = path.join(tmpDir, 'audio.wav');
 
   try {
-    await fs.writeFile(videoPath, videoBytes);
-
     // Step 1: Extract audio + embed audio chunks
-    await extractAudioTrack(videoPath, audioPath);
-    const audioBytes = await fs.readFile(audioPath);
-    const audioResult = await embedAudio(spaceId, fileId, audioBytes, 'audio/wav', stt, overlapMs,
+    await extractAudioTrack(videoPath, audioPath, opts?.signal);
+    // Handed on as a PATH, with its own size: the wav was read whole here only to be written straight back to disk by
+    // the audio stage, which is two copies of a file that can be twenty minutes of PCM.
+    const audioStat = await fs.stat(audioPath);
+    const audio: PlaintextFile = {
+      path: audioPath, size: audioStat.size, copied: true,
+      // The directory this lives in is disposed by the `finally` below, so the stage must not remove it early.
+      dispose: async () => { /* the video job owns this scratch */ },
+    };
+    const audioResult = await embedAudio(spaceId, fileId, audio, 'audio/wav', stt, overlapMs,
       // The video's route, not the audio one: `embedAudio` is a STAGE of this job, and a bar that swapped
       // its segment list halfway through would redraw mid-file.
       { ...opts, steps: opts?.steps ?? VIDEO_STEPS });
@@ -163,7 +174,7 @@ export async function embedVideo(
     // Step 2: Extract keyframes
     const keyframesDir = path.join(tmpDir, 'keyframes');
     await fs.mkdir(keyframesDir, { recursive: true });
-    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS);
+    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS, opts?.signal);
 
     if (keyframes.length === 0) {
       log.debug(`Video embedder: no keyframes extracted for ${fileId}`);
@@ -188,7 +199,7 @@ export async function embedVideo(
         break;
       }
       try {
-        const caption = await vision.caption(jpegBytes, 'image/jpeg');
+        const caption = await vision.caption({ bytes: jpegBytes }, 'image/jpeg');
         if (typeof caption === 'string' && caption.trim()) {
           captionedFrames.push({ timestampS, caption: caption.trim() });
         }
@@ -223,17 +234,14 @@ export async function embedVideo(
       try {
         // A suppressed file's chunk takes the combined TEXT (the lexical channel searches it) and no vector.
         const vectorFields = await vectors.fieldsFor(combined);
-        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-          asFilter<FileMetaDoc>({ _id: chunk.chunkId }),
-          asUpdate<FileMetaDoc>({
-            $set: {
-              content: combined,
-              matchedText: combined,
-              ...vectorFields,
-              updatedAt: now,
-            },
-          }),
-        );
+        // Through the one writer of a derived row, which reads the PARENT first: this rewrite lands minutes after the
+        // transcript was stored, and a file deleted in between must not get its segments re-embedded.
+        await updateDerivedFileRow(spaceId, chunk.chunkId, fileId, {
+          content: combined,
+          matchedText: combined,
+          ...vectorFields,
+          updatedAt: now,
+        });
       } catch (err) {
         log.warn(`Video embedder: re-embed failed for chunk ${chunk.chunkId}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -245,12 +253,3 @@ export async function embedVideo(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Name the temp file ffmpeg reads. The `mp4` fallback stays — it is the best guess for an unknown
- * video — but it is now only reached for genuinely unrecognised types, not for every job whose MIME
- * arrived as a byte blob.
- */
-function mimeTypeToVideoExt(mimeType: string): string {
-  return extForMimeType(mimeType, 'mp4');
-}

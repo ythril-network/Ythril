@@ -53,8 +53,8 @@ import { applyDeleteFields } from '../brain/delete-fields.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
-import { isLocalFileField } from './processing-state.js';
-import { LIVE_FILE_ROW } from './live-file-row.js';
+import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
+import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 
 
 
@@ -206,73 +206,6 @@ export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?
   return row.seq === 0 && author !== undefined && author !== '' && author === row.deliveredBy;
 }
 
-/**
- * Partially update the metadata record for a file (tags, description,
- * entity/chrono/fact linkage, properties).  Re-embeds the record on
- * every successful update.  Returns the updated document, or null if the
- * record does not exist.
- */
-/**
- * Write a DERIVED description only if the operator has not written one — decided by the DATABASE, in one operation.
- *
- * ## Why this is not `updateFileMeta` with a read in front of it
- *
- * The media worker used to do exactly that: `findOne`, compute `operatorWrote` from the result, then write on that
- * decision. The intent was right and documented — *"Only the description itself is theirs to keep"* — but a read-modify-write
- * cannot win the race it exists to win. An operator PATCH landing between the read and the write was silently overwritten
- * by the derived text, and nothing reported it: no field is missing, no status is wrong, the description is simply somebody
- * else's.
- *
- * Same shape as the 2.5.1 embedding defect, which computed a vector from the record *as the write had read it*.
- *
- * The filter carries the condition, so MongoDB arbitrates: if the stored description became non-empty in the meantime, the
- * update matches nothing and the operator's text stands. `^\s*$` rather than `''` because the guard it replaces used
- * `.trim()`, and a whitespace-only description was treated as absent.
- *
- * Returns whether it wrote, so a caller can log the difference rather than infer it.
- */
-export async function setDerivedDescriptionIfUnset(
-  spaceId: string,
-  filePath: string,
-  description: string,
-  /**
-   * Optional, and its ABSENCE is meaningful: `updateFileMeta` unsets `descriptionSource` when a description arrives
-   * without one, so a derived description with no known provenance must not inherit the previous one's. Ported
-   * faithfully rather than defaulted — mislabelling where a description came from is a worse bug than the race being
-   * fixed here.
-   */
-  descriptionSource?: 'generated' | 'extracted',
-): Promise<boolean> {
-  const _id = toDocId(filePath);
-  const r = await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({
-      _id,
-      $and: [
-        { $or: [
-          { description: { $exists: false } },
-          { description: null },
-          // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the
-          // backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and
-          // the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
-          { description: { $regex: /^\s*$/ } },
-        ] },
-        /*
-         * Only on a file THIS instance authored (`Q-143`), or a legacy record that names no author. A description is
-         * hashed and replicates by `seq`: derived on a receiver, it either stamps a seq that outranks the publisher's
-         * next edit, or — unstamped — can never replicate and reports a divergence for ever. The publisher derives
-         * its own from the same bytes, and that one travels.
-         */
-        { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
-      ],
-    } as never),
-    asUpdate<FileMetaDoc>({
-      // `P-32`: an authored write, so it advances the space counter and pages to a peer.
-      $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
-      ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
-    }),
-  ), 'file.describe');
-  return r.modifiedCount > 0;
-}
 
 /**
  * Read one file-metadata record by path, or null.
@@ -283,9 +216,17 @@ export async function setDerivedDescriptionIfUnset(
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
+    // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
+    // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
+    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
 }
 
+/**
+ * Partially update the metadata record for a file (tags, description,
+ * entity/chrono/fact linkage, properties).  Re-embeds the record on
+ * every successful update.  Returns the updated document, or null if the
+ * record does not exist.
+ */
 export async function updateFileMeta(
   spaceId: string,
   filePath: string,
@@ -303,10 +244,6 @@ export async function updateFileMeta(
     linkChronos?: string[];
     linkFacts?: string[];
     properties?: Record<string, string | number | boolean>;
-    /** Provenance of an instance-written description. Omit when a human wrote it — see `FileMetaDoc`. */
-    descriptionSource?: 'generated' | 'extracted';
-    /** A converted document's own opening prose. Kept whatever the description says, and embedded. */
-    excerpt?: string;
   },
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
@@ -339,7 +276,11 @@ export async function updateFileMeta(
   });
 
   const normalised = toDocId(filePath);
-  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
+  // The flag is read HERE, where the edit is decided, so every write below it is governed by one read: a flagged row
+  // returns null and the doors answer 404. Editing one would write a description, tags and properties onto an audit
+  // record, re-queue the embed job the strip removed, and reconcile links off a file that is gone.
+  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ _id: normalised, ...NOT_A_FLAGGED_ROW })) as FileMetaDoc | null;
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -351,12 +292,11 @@ export async function updateFileMeta(
   // `$set` UNCONDITIONALLY while every content field below is guarded by `opts.X !== undefined`. So two
   // concurrent writes to different fields both landed and lost no field — and each wrote a whole embedding
   // describing only its own view, leaving the stored vector describing a record that existed nowhere. There
-  // was nothing to notice it with: file-meta records carry no `seq`, so there is no precondition to violate
-  // and no lost-update counter, unlike the four brain types that had the identical defect.
+  // was nothing to notice it with: a file row's `seq` advances only on an AUTHORED write, so a derived-field
+  // write leaves it where it was and no precondition on it could have been violated — unlike the four brain
+  // types, whose seq advances on every write and which had the identical defect.
   const $set: Record<string, unknown> = { updatedAt: now };
   if (opts.description !== undefined) $set['description'] = opts.description;
-  if (opts.descriptionSource !== undefined) $set['descriptionSource'] = opts.descriptionSource;
-  if (opts.excerpt !== undefined) $set['excerpt'] = opts.excerpt;
   if (opts.tags !== undefined) $set['tags'] = opts.tags;
 
   /**
@@ -379,7 +319,9 @@ export async function updateFileMeta(
   // the record claim a model wrote what an operator just typed, which is the one thing this field exists
   // to stop being ambiguous.
   const $unset: Record<string, ''> = {};
-  if (opts.description !== undefined && opts.descriptionSource === undefined) $unset['descriptionSource'] = '';
+  // A description given here is a CALLER's, never a derived one (the derived writer is `setDerivedDescriptionIfUnset`,
+  // which sets the marker itself), so the stale provenance always goes with it.
+  if (opts.description !== undefined) $unset['descriptionSource'] = '';
 
   /**
    * `deleteFields`, applied AFTER the merge — the same shape and order as the four brain writers.
@@ -394,7 +336,7 @@ export async function updateFileMeta(
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {
     const merged: Record<string, unknown> = {
       description: opts.description !== undefined ? opts.description : existing.description,
-      excerpt: opts.excerpt !== undefined ? opts.excerpt : existing.excerpt,
+      excerpt: existing.excerpt,
       tags: opts.tags ?? existing.tags,
       properties: mergedProps ?? {},
     };
@@ -544,7 +486,10 @@ export async function deleteFileMetaByPrefix(
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
   const filter = liveFileRecords(path, 'at-or-under');
   if (!filter) return [];
-  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(filter, { projection: { _id: 1 } }).toArray();
+  // `LIVE_FILE_ROW` here as well as in `liveFileRecords`: the predicate belongs to the READ, so a caller handing this
+  // function another filter cannot make it answer about a chunk or an audit row.
+  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<FileMetaDoc>({ ...filter, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray();
   return rows.map(r => String(r._id));
 }
 
@@ -575,7 +520,10 @@ export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Prom
 
 async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
   if (!filter) return false;
-  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(filter, { projection: { _id: 1 } })) !== null;
+  // The function is named for LIVE file records, so the predicate is inside it rather than in each caller's filter:
+  // every caller passes `liveFileRecords(...)`, and the one that forgets must not get a different answer.
+  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ ...filter, ...LIVE_FILE_ROW }), { projection: { _id: 1 } })) !== null;
 }
 
 /**
@@ -611,8 +559,36 @@ export async function markFileMetaDeleted(
   const normalised = toDocId(filePath);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
+    flagAndStrip() as never,
   );
+}
+
+/**
+ * The ONE write that flags a row and removes everything its bytes made — `Q-418`.
+ *
+ * ## Why it is one write and not two
+ *
+ * The flag and the strip have to land together or not at all. As two statements, a crash between them leaves a
+ * flagged row still holding its vector and its text, and nothing ever re-runs the strip: the second attempt sees a
+ * row that is already flagged and does nothing. So the window is not small, it is permanent.
+ *
+ * ## What goes, and why each
+ *
+ * The vector and its model, and `matchedText`: the row must not be rankable or findable by text. `excerpt`: a
+ * verbatim passage of a document whose bytes are deleted. `sha256`: a fingerprint of those same bytes.
+ * `embeddingStatus`: left at `complete` it makes a re-upload of identical bytes skip reprocessing, so a revived path
+ * would never be read again. A machine-made `description` goes with its marker; a person's stays, with `path`,
+ * `author`, `createdAt`, `deletedAt`, the retention stamp, `tags` and `properties` — what somebody deleted, not what
+ * the bytes produced.
+ *
+ * ## Why the removal itself is not spelled here
+ *
+ * `stripDerivedStages` (`files/derived-fields.ts`) is the one definition of what the bytes made, and the one-off repair
+ * of rows flagged by a release before this write existed uses the same stages. Two spellings would differ by exactly
+ * one field on the day somebody adds one, and the repair would be the half that still held it.
+ */
+function flagAndStrip(): object[] {
+  return [{ $set: { deletedAt: new Date().toISOString() } }, ...stripDerivedStages()];
 }
 
 /**
@@ -650,10 +626,12 @@ export async function markFileMetaDeletedByPrefix(
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // Flag the user-visible file records.
+  // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
+  // for one file, from the one place that states it. A directory delete reaches here and never through
+  // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
   await coll.updateMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }),
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString() } }),
+    flagAndStrip() as never,
   );
   // Remove derived chunk records outright.
   await coll.deleteMany(
@@ -675,20 +653,28 @@ export async function renameFileMeta(
   const normDst = toDocId(dstPath);
   if (normSrc === normDst) return;
 
+  // A flagged source is not moved: the audit record of a deleted file belongs to the path it was deleted at, and
+  // re-keying it onto the destination would make it claim a path that now holds another file's bytes.
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: normSrc }),
+    asFilter<FileMetaDoc>({ _id: normSrc, ...NOT_A_FLAGGED_ROW }),
   );
   if (!existing) return;
 
-  const now = new Date().toISOString();
   // MongoDB does not allow updating _id; delete + re-insert with new path.
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
   // `rekeyedRow`: a row under a NEW id is written here, so it is stamped as nobody's delivery and carries none of what this
   // instance agreed with its peers about the OLD path (`syncBase`) — a peer that delivered the old path cannot retire the new one.
+  //
+  // **It keeps the stored `updatedAt`** (`Q-419`). This insert stamps no `seq`: the row arrives under a new id with the
+  // seq it already had. Writing a fresh `updatedAt` beside an unchanged seq is precisely the drift this bundle exists to
+  // remove — and it is worse on a PEER-authored row, where it leaves another instance's seq and author next to this
+  // instance's clock, which no peer can order and a merkle check reports every cycle for a space where nothing is wrong.
+  // Measured before the fix: a move of a peer-authored row moved `updatedAt` by five weeks while its seq stood still.
+  // One rule for every row rather than a branch on who authored it, because the argument does not depend on the author:
+  // a write that does not stamp a version must not move the timestamp that version is read beside.
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(rekeyedRow(existing, {
     _id: normDst,
     path: normDst,
-    updatedAt: now,
   })));
 
   await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
@@ -746,22 +732,23 @@ export async function renameFileMetaByPrefix(
   // The files themselves only. Their derived records (chunks, sidecars) are re-rooted by `parentFileId` in
   // `move-cascade.ts`: renamed here by id, a chunk kept the `parentFileId` of a path that no longer existed.
   const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }))
+    // `LIVE_FILE_ROW` rather than the `parentFileId` half spelled out: the flagged audit rows under the old directory
+    // stay where they were recorded, and the half-spelling `live-file-row.ts` warns about is gone from here.
+    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }))
     .toArray() as FileMetaDoc[];
 
   if (docs.length === 0) return;
 
-  const now = new Date().toISOString();
   // Delete existing records and re-insert with updated paths.
   const oldIds = docs.map(d => d._id);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
     asFilter<FileMetaDoc>({ _id: { $in: oldIds } }),
   );
-  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery.
+  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery, and
+  // keeping its stored `updatedAt` for the reason given at the single-file rename — this insert stamps no seq.
   const updated = docs.map(d => rekeyedRow(d, {
     _id: dstPrefix + d._id.slice(srcPrefix.length),
     path: dstPrefix + d.path.slice(srcPrefix.length),
-    updatedAt: now,
   }));
   const filesColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it

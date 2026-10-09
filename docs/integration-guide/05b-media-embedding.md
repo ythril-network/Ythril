@@ -90,6 +90,13 @@ Recall queries (`recall`, `similar`) include embedded media chunks. Each media c
 
 `chunkOffsetMs` and `chunkDurationMs` identify the segment within the original audio or video file. Image results have `chunkIndex: 0` with no time offset.
 
+**A segment is at most 5 minutes long, and that bound is not configurable.** Segments are cut at the silence the
+detector found, so their lengths vary — but a span with no silence in it is divided anyway, into pieces of at most
+that size. Expect `chunkDurationMs` never to exceed `300000`, and expect an hour of unbroken speech to produce at
+least twelve chunks rather than one. The reason is the transcription call: five minutes is a request size every
+provider accepts, and a segment is held in memory twice on its way to one, so an uncapped segment would make the
+job's peak depend on how quietly the speaker talked.
+
 #### Retry Failed Embedding
 
 To re-queue a failed job:
@@ -247,6 +254,7 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 > | step | budget | vs the 5-minute stall default |
 > |---|---|---|
 > | render of one page window | `pageTimeoutMs × min(maxPages, 20)` = **20 min** | **4×** |
+> | one `ffmpeg` step — duration probe, silence pass, one segment cut, keyframe pass | 10 min, fixed | **2×** |
 > | audio transcription (Whisper) | 5 min, fixed | **1×** — equal, so indistinguishable without head-room |
 > | image caption (local / external) | 2 min / 1 min | 0.4× / 0.2× |
 > | external face recognition | 30 s | 0.1× |
@@ -284,6 +292,28 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 > item**, so the stall detector sees a working job for what it is, and both **stop when their claim is
 > withdrawn** rather than continuing alongside the run that recovered the job. Those two are what make a long
 > media file safe, not the numbers above.
+
+#### What a media job costs in memory and disk
+
+**A job holds a PATH to its file, not the file.** It used to read the whole file into memory and hand that buffer to
+the embedder, which wrote it back to disk for `ffmpeg` or built a request body out of it; a 64 MiB image measured at
+about seven times its own size in peak resident memory, and the first container with a memory limit to meet a large
+file was killed rather than throttled. Size your worker container against these instead:
+
+| what the job keeps | cost |
+|---|---|
+| the file itself | **nothing.** Not encrypted: a hard link in the job's scratch directory. Encrypted: one streamed decrypted copy on disk, never in memory |
+| a vision or face request body | **nothing.** The body streams from the path with an exact `Content-Length`, computed from the file's size — base64 is `4 × ceil(n / 3)`, so no estimate is involved |
+| an audio or video pass | one extracted segment or one keyframe at a time. A segment carries **at most 5 minutes** of audio, whatever the silence map says, so a silence-free recording of any length is still cut into pieces of that size |
+| a face detection | **the decoded image**, which is `width × height × 4` bytes and unavoidable: face detection needs the pixels. This is the one media path that is still linear in its input, and the only one for which the old sizing advice still applies |
+
+**So memory scales with the largest SEGMENT, not the largest file — except for faces.** Disk scales with one
+decrypted copy per concurrent job, and only when a master secret is set
+([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)).
+
+**A body of unknown length would be sent chunked**, and an OpenAI-compatible server, a reverse proxy in front of one,
+or `llama.cpp`'s server may refuse a chunked upload outright. That is why the length is computed rather than omitted:
+a provider stub accepts either, so this is not something a local test would catch.
 
 #### ISO 27001 / Data Egress Note
 

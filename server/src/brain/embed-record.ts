@@ -16,6 +16,9 @@
  */
 
 import { col, asFilter } from '../db/mongo.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
+import { writeDerivedFields, type FileRowTier } from '../files/derived-fields.js';
+import type { SpacePart } from '../db/space-collection.js';
 import { embed } from './embedding.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
@@ -31,7 +34,7 @@ import type {
 /** Collection suffix per record type — the same mapping recall uses. */
 /** Exported so the re-embed backfill scans the same collections this function writes. A second copy of this
  *  map is how a backfill quietly misses a record kind. */
-export const COLLECTION: Record<BrainEmbedRecordType, string> = {
+export const COLLECTION: Record<BrainEmbedRecordType, SpacePart> = {
   fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
 };
 
@@ -167,10 +170,32 @@ export async function embedStoredRecord(
   opts: EmbedStoredRecordOptions = {},
 ): Promise<EmbedOutcome> {
   const collName = `${spaceId}_${COLLECTION[recordType]}`;
-  const doc = await col(collName).findOne(asFilter({ _id: recordId })) as Record<string, unknown> | null;
+  // A flagged file row reads as 'gone': the flag strips the vector, its model and `matchedText`, and a job that ran
+  // against the row anyway would write all three back onto the audit record of a deleted file. Per kind, because the
+  // collection is the kind's, and the any-tier predicate because a chunk or caption row is a legitimate subject here.
+  const doc = await col(collName).findOne(
+    asFilter({ _id: recordId, ...notFlaggedIfFile(recordType) })) as Record<string, unknown> | null;
   if (!doc) return 'gone';
   /** The version this job read: every write below lands on it or on nothing. */
   const asRead = asFilter(atReadSeq(recordId, readSeqOf(doc)));
+
+  /**
+   * This job's write of what it derived, through the one writer of a derived field (`files/derived-fields.ts`).
+   *
+   * **A FLAG STAMPS NO SEQ, so `atReadSeq` cannot see a delete.** A file deleted while the model was running leaves the
+   * version this job read still stored — so the success write below used to put a vector, its model and the text it was
+   * made from onto the audit record of a deleted file, and the suppressed and failure paths wrote its text. The writer
+   * asks the liveness question per TIER: a file's own row answers for itself, a chunk, caption or face row answers for
+   * its PARENT (it carries no flag of its own), and a record of another kind has no flag to ask about — a delete removes
+   * it, which `atReadSeq` does see.
+   *
+   * `gone` is not a failure. The file was deleted, which is the outcome the delete decided; the job reports nothing and
+   * ends as though it had nothing to do.
+   */
+  const parentFileId = typeof doc['parentFileId'] === 'string' ? doc['parentFileId'] : undefined;
+  const tier: FileRowTier = recordType !== 'file' ? 'not-a-file' : parentFileId !== undefined ? 'derived' : 'top-level';
+  const write = (update: { set?: Record<string, unknown>; unset?: Record<string, unknown> }) =>
+    writeDerivedFields({ spaceId, collectionSuffix: COLLECTION[recordType], tier, filter: asRead as Record<string, unknown>, parentFileId, ...update });
 
   // `suppressEmbeddings` is implemented AS the absence of a vector — there is no query-time filter to honour,
   // so a stored vector IS the feature failing. This is the LAST place it can take effect, not the only one:
@@ -197,8 +222,9 @@ export async function embedStoredRecord(
   // not have. `faceEmbedding` is a different index of a different model and is not touched.
   if (text === null) {
     if (Object.keys(UNSET_DERIVED).some(f => f in doc)) {
-      const r = await col(collName).updateOne(asRead, { $unset: UNSET_DERIVED });
-      if (r.matchedCount === 0) return 'superseded';
+      const outcome = await write({ unset: UNSET_DERIVED });
+      if (outcome === 'superseded') return 'superseded';
+      if (outcome === 'gone') return 'gone';
     }
     return 'textless';
   }
@@ -211,8 +237,8 @@ export async function embedStoredRecord(
     ? await fileEmbeddingSuppressed(spaceId, doc)
     : embeddingSuppressedFor(spaceId, recordType, doc);
   if (suppressed) {
-    const r = await col(collName).updateOne(asRead, { $set: { matchedText: text }, $unset: UNSET_VECTOR });
-    return r.matchedCount === 0 ? 'superseded' : 'excluded';
+    const outcome = await write({ set: { matchedText: text }, unset: UNSET_VECTOR });
+    return outcome === 'written' ? 'excluded' : outcome === 'gone' ? 'gone' : 'superseded';
   }
 
   // Every successful update enqueues an embed job, unconditionally and for good reasons — the enqueue is also
@@ -247,16 +273,13 @@ export async function embedStoredRecord(
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
     // stale vector, the next attempt would take the vector as current and never call the model again.
     // On the version read only: a newer copy's text is not this job's to write.
-    await col(collName).updateOne(asRead, { $set: { matchedText: text }, $unset: UNSET_VECTOR });
+    await write({ set: { matchedText: text }, unset: UNSET_VECTOR });
     throw err;
   }
 
   // `seq` is deliberately NOT advanced. An embedding is a DERIVED field — `merkle.ts` excludes it from
   // replication precisely because each peer computes its own — so bumping `seq` here would broadcast a
   // no-op change to every peer in every network the space belongs to, on every embedding, forever.
-  const r = await col(collName).updateOne(
-    asRead,
-    { $set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } },
-  );
-  return r.matchedCount === 0 ? 'superseded' : 'embedded';
+  const outcome = await write({ set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } });
+  return outcome === 'written' ? 'embedded' : outcome === 'gone' ? 'gone' : 'superseded';
 }

@@ -125,18 +125,11 @@ describe('PIN: a by-id read keeps its predicate and projection (Q-211 characteri
     assert.deepEqual(byId(rows), byId(want));
   });
 
-  it('scopedDocs: a file class admits files, never chunks, in the class projection', async () => {
-    const cls = adjacency.LINK_CLASSES.find(c => c.collection === 'files');
-    assert.ok(cls, 'no link class reads the files collection');
-    const rows = await adjacency.scopedDocs(S, cls, asked(FILES));
-    const want = FILES.filter(f => !('parentFileId' in f)).map(f => pick(f, Object.keys(cls.projection)));
-    assert.deepEqual(byId(rows), byId(want));
-  });
+  /*
+   * The two `scopedDocs` cases that were here are gone with the function (bundle-89). It had no caller anywhere in the
+   * server — these cases were the only thing that reached it — so it was deleted rather than kept and given a
+   * predicate nothing would ever ask it for. What they pinned is the by-id reader under a link class's SCOPE, which
+   * the two docsFromCollection cases above hold through the path production actually uses.
+   */
 
-  it('scopedDocs: a class with no scope admits every id that exists, in its projection', async () => {
-    const cls = adjacency.LINK_CLASSES.find(c => c.collection === 'facts');
-    assert.ok(cls, 'no link class reads the facts collection');
-    const rows = await adjacency.scopedDocs(S, cls, asked(FACTS));
-    assert.deepEqual(byId(rows), byId(FACTS.map(f => pick(f, Object.keys(cls.projection)))));
-  });
 });

@@ -21,6 +21,7 @@
  * Mutates `cfg` in place and takes no `await`, so it cannot be holding a detached reference across a reload (the
  * mechanism behind #346/#348/#353/#604).
  */
+import { getConfig, saveConfig } from '../config/loader.js';
 import type { Config, NetworkMember } from '../config/types.js';
 import type { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 
@@ -33,7 +34,8 @@ export type MemberSpaceMark<K extends MemberSpaceMarkKey> = NonNullable<NetworkM
 /**
  * Fold `key` for `peerInstanceId` and `spaceId` on every member row of every network carrying the space.
  *
- * @param fold the current value (or `undefined`) to the next one, or `null` when nothing should be written
+ * @param fold the current value (or `undefined`) to the next one, `null` when nothing should be written, or `undefined`
+ *   to REMOVE the space's entry — a mark that is no longer owed is absent, never an empty or sentinel value
  * @returns whether any row changed
  */
 export function setMemberSpaceMark<K extends MemberSpaceMarkKey>(
@@ -41,7 +43,7 @@ export function setMemberSpaceMark<K extends MemberSpaceMarkKey>(
   peerInstanceId: string | undefined,
   spaceId: string,
   key: K,
-  fold: (current: MemberSpaceMark<K> | undefined) => MemberSpaceMark<K> | null,
+  fold: (current: MemberSpaceMark<K> | undefined) => MemberSpaceMark<K> | null | undefined,
 ): boolean {
   if (!peerInstanceId) return false;
   let changed = false;
@@ -52,9 +54,53 @@ export function setMemberSpaceMark<K extends MemberSpaceMarkKey>(
     const marks = m[key] as Record<string, MemberSpaceMark<K>> | undefined;
     const next = fold(marks?.[spaceId]);
     if (next === null) continue;
+    if (next === undefined) {
+      if (marks && spaceId in marks) { delete marks[spaceId]; changed = true; }
+      continue;
+    }
     const target = (marks ?? ((m as unknown as Record<string, unknown>)[key] = {})) as Record<string, MemberSpaceMark<K>>;
     target[spaceId] = next;
     changed = true;
   }
   return changed;
+}
+
+/**
+ * The value `key` holds for `peerInstanceId` and `spaceId` on `networkId`'s member row, read from the LIVE config — so a
+ * driver deciding what to do next reads what the last fold wrote, not a copy taken before an await.
+ */
+export function readMemberSpaceMark<K extends MemberSpaceMarkKey>(
+  networkId: string,
+  peerInstanceId: string,
+  spaceId: string,
+  key: K,
+): MemberSpaceMark<K> | undefined {
+  const m = getConfig().networks.find(n => n.id === networkId)?.members.find(x => x.instanceId === peerInstanceId);
+  return (m?.[key] as Record<string, MemberSpaceMark<K>> | undefined)?.[spaceId];
+}
+
+/**
+ * Move a repair's state forward on the LIVE config with a pure transition, and save once — only when a row changed, so
+ * a no-op on a hot path writes nothing. `next` returning `undefined` removes the entry.
+ *
+ * Both re-read marks went through a hand-written copy of this (read the live config, fold, save if changed); the
+ * second is what made it a module.
+ *
+ * @returns the state before and after on the first row visited, so a caller can say a transition exactly once
+ */
+export function foldRepairMark(
+  peerInstanceId: string,
+  spaceId: string,
+  key: 'tombstoneRereadAt' | 'fileMetaRereadAt',
+  next: (current: string | undefined) => string | undefined,
+): { before: string | undefined; after: string | undefined } | null {
+  const cfg = getConfig();
+  let seen: { before: string | undefined; after: string | undefined } | null = null;
+  const changed = setMemberSpaceMark(cfg, peerInstanceId, spaceId, key, (current) => {
+    const after = next(current);
+    seen ??= { before: current, after };
+    return after === current ? null : after;
+  });
+  if (changed) saveConfig(cfg);
+  return seen;
 }

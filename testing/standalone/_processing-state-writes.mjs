@@ -24,7 +24,7 @@
  *   counts as touching a processing field when the function it sits in names one anywhere outside a comment. The safe
  *   direction for a gate is a finding a person reads; a write the parser cannot read is a write nothing checks.
  * - **The processing fields are NOT listed here as a second copy of the answer** — they are the fields
- *   `files/processing-state.ts` types (`setFileProcessingState`), read from that module's own source once it exists,
+ *   `files/derived-fields.ts` types (`setFileProcessingState`), read from that module's own source once it exists,
  *   and the documented set until then. Both are asserted to be real `FileMetaDoc` fields that the divergence hash does
  *   NOT see (`FILE_HASH_PROJECTION` in `brain/merkle.ts`), so a field renamed or promoted into the hash fails here
  *   rather than being quietly dropped from the rule.
@@ -47,10 +47,10 @@ import { stripComments } from './_strip-comments.mjs';
 
 const MERKLE = 'server/src/brain/merkle.ts';
 const TYPES = 'server/src/config/types.ts';
-const PROCESSING_STATE = 'server/src/files/processing-state.ts';
+const PROCESSING_STATE = 'server/src/files/derived-fields.ts';
 
 /**
- * The local processing state of a file row, until `processing-state.ts` states it itself.
+ * The local processing state of a file row, until `derived-fields.ts` states it itself.
  *
  * What the nine writers of `Q-240` write (plus the pointer the conversion records), and the fields the hash must never
  * see move with them. Once the module exists, `processingFields()` reads its typed argument instead and this is only
@@ -213,13 +213,18 @@ export function updateKeys(argsText, body) {
  * @returns {Array<{ key: string, file: string, fn: string, op: string, ordinal: number, name: string, collection: string,
  *   keys: Set<string>, unresolved: string[], hasUpdateOperator: boolean, args: string, bodyMentions: string[] }>}
  */
-export function fileRowWrites(index, records, { floor = 30 } = {}) {
+export function fileRowWrites(index, records, { floor = 30, includeComputed = false } = {}) {
   const processing = processingFields();
   const out = [];
+  // `includeComputed`: a space collection whose name is built at run time (`${spaceId}_${COLLECTION[recordType]}`, which
+  // `brain/embed-record.ts` writes through for every record kind, the file among them) MAY be the files collection, so a
+  // gate that asks about the files collection holds it to the rule rather than guessing it away (the rule `_record-writes.mjs`
+  // already applies to record collections). Off by default: the processing-state gate predates it and reads exactly what it did.
+  const isFilesSite = (s) => s.kind === 'space' && (s.collection === 'files' || (includeComputed && s.collection == null));
   for (const [key, entry] of index.bodies) {
     if (entry.alias) continue;
     const sites = (records.writers.byKey.get(key) ?? []).filter(s => MUTATORS.includes(s.op));
-    if (!sites.some(s => s.kind === 'space' && s.collection === 'files')) continue;
+    if (!sites.some(isFilesSite)) continue;
     const body = entry.body;
     const matches = [...body.matchAll(MUTATOR_CALL)];
     assert.ok(matches.length >= sites.length,
@@ -229,7 +234,7 @@ export function fileRowWrites(index, records, { floor = 30 } = {}) {
       if (!site) return;
       assert.equal(site.op, m[1],
         `${key}: mutator #${i + 1} of the body is '${m[1]}' and the index says '${site.op}' — the pairing is broken`);
-      if (site.kind !== 'space' || site.collection !== 'files') return;
+      if (!isFilesSite(site)) return;
       const at = m.index + m[0].length - 1;
       const args = argumentsOf(body, at, `${key} ${m[1]}`);
       const argsText = args.join(', ');

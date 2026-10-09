@@ -33,7 +33,8 @@
 import path from 'path';
 import { authorRef } from '../../config/author.js';
 import sharp from 'sharp';
-import { col, asDoc, asFilter } from '../../db/mongo.js';
+import { col, asFilter } from '../../db/mongo.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 import { getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
 import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
@@ -46,6 +47,8 @@ import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
 import type { Config as HumanConfig, Result } from '@vladmandic/human';
 import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from './face-external.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
+import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
 
@@ -270,12 +273,12 @@ export async function gallerySearch(
  *
  * @param spaceId  Space that owns the file
  * @param fileId   File _id (normalised path) — the parent FileMetaDoc
- * @param imageBytes  Raw image bytes (JPEG / PNG / WebP / etc.)
+ * @param image  The file's plaintext, as a path and a size (`files/plaintext-file.ts`)
  */
 export async function embedFaces(
   spaceId: string,
   fileId: string,
-  imageBytes: Buffer,
+  image: PlaintextFile,
 ): Promise<void> {
   const faceCfg = getFaceRecognitionConfig();
 
@@ -293,7 +296,10 @@ export async function embedFaces(
   let width: number;
   let height: number;
   try {
-    const result = await sharp(imageBytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    // `sharp` opens the PATH: the decode is unavoidable here (face detection needs the pixels, and this is the one
+    // step of the media pipeline that is not sublinear in its file — `05b-media-embedding.md` says so), but the
+    // ENCODED bytes no longer sit in memory beside it waiting to be decoded.
+    const result = await sharp(image.path).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     pixelData = result.data;
     width = result.info.width;
     height = result.info.height;
@@ -314,7 +320,7 @@ export async function embedFaces(
   const expectedDims = await faceDescriptorDimsFor(spaceId);
 
   let faces: Array<{ embedding?: number[]; boxRaw?: number[] }> | undefined =
-    (await detectFacesExternal(imageBytes, expectedDims)) ?? undefined;
+    (await detectFacesExternal({ path: image.path, size: image.size }, expectedDims)) ?? undefined;
   // An answer ends an outage: the next failure is news, not a continuation of one already said.
   if (faces) noteExternalFaceProviderAnswered();
 
@@ -421,18 +427,18 @@ export async function embedFaces(
       ...(boxRaw !== undefined ? { faceBbox: boxRaw as [number, number, number, number] } : {}),
     };
 
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-      asFilter<FileMetaDoc>({ _id: chunkId }),
-      asDoc<FileMetaDoc>(chunkDoc as FileMetaDoc),
-      { upsert: true },
-    );
+    // Through the one writer of a derived row, which reads the PARENT first: a face row written after the picture was
+    // deleted is a face recall still finds, for a file nobody can open.
+    await upsertDerivedFileRow(spaceId, chunkDoc as FileMetaDoc);
   }
 
   // ── 5. Auto-label parent file ───────────────────────────────────────────
   if (autoLabelEntityId) {
     try {
       const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-        asFilter<FileMetaDoc>({ _id: fileId }),
+        // The parent read decides the auto-label, so it asks whether the parent is still here: labelling links an
+        // entity to a file, and a deleted file takes no label.
+        asFilter<FileMetaDoc>({ _id: fileId, ...NOT_A_FLAGGED_ROW }),
         { projection: { _id: 1 } },
       ) as FileMetaDoc | null;
 

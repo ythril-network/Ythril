@@ -4,6 +4,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { RECORD_SUPPRESS_FIELD, parseRecordFlag } from './record-flag.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 
 /**
  * Should this record be embedded at all?
@@ -221,7 +222,9 @@ async function ancestorSuppressed(spaceId: string, file: Record<string, unknown>
   let parentId = file['parentFileId'];
   for (let depth = 0; depth < MAX_ANCESTRY && typeof parentId === 'string'; depth++) {
     const parent = await col(spaceCollection(spaceId, 'files')).findOne(
-      asFilter({ _id: parentId }),
+      // A flagged ancestor reads as missing, which this function already treats as suppressed: the fail-closed
+      // answer, and the right one — nothing derived from a deleted file should be handed to an embedder.
+      asFilter({ _id: parentId, ...NOT_A_FLAGGED_ROW }),
       { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
     ) as Record<string, unknown> | null;
     if (!parent) return true;
@@ -265,7 +268,9 @@ export async function fileEmbeddingSuppressed(spaceId: string, file: Record<stri
  */
 export async function storedFileEmbeddingSuppressed(spaceId: string, fileId: string): Promise<boolean> {
   const row = await col(spaceCollection(spaceId, 'files')).findOne(
-    asFilter({ _id: fileId }),
+    // As above: a flagged row reads as missing and so as suppressed, so a job holding only the file's id writes no
+    // vectors for a deleted file and is not a failure for it.
+    asFilter({ _id: fileId, ...NOT_A_FLAGGED_ROW }),
     { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
   ) as Record<string, unknown> | null;
   return row === null || await fileEmbeddingSuppressed(spaceId, row);

@@ -6,14 +6,14 @@
  * on the {spaceId}_files collection with `derivedText` = caption.
  */
 
-import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { authorRef } from '../../config/author.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import { getMediaEmbeddingConfig, getFaceRecognitionConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 
 
 /**
@@ -43,7 +43,14 @@ export function facesAreWithheldFor(arrival: boolean): boolean {
 export async function embedImage(
   spaceId: string,
   fileId: string,
-  imageBytes: Buffer,
+  /**
+   * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
+   *
+   * The caption call is the only thing here that needs the image at all, and it streams it: from a `Buffer` the body
+   * cost the file four times over (in memory, as base64, as JSON, and again at the fetch encode) before the provider
+   * saw a byte. The face step reads the same path.
+   */
+  image: PlaintextFile,
   mimeType: string,
   vision: VisionProvider,
   opts: { arrival?: boolean } = {},
@@ -51,7 +58,7 @@ export async function embedImage(
   // Asked ONCE for the job, at its entry. A suppressed file (or an image extracted from a suppressed document) keeps its
   // caption as text and holds no vector; the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  const caption = await vision.caption(imageBytes, mimeType);
+  const caption = await vision.caption({ path: image.path, size: image.size }, mimeType);
 
   // Hard guard: embedding input MUST be a string — never a raw vector
   if (typeof caption !== 'string' || caption.trim().length === 0) {
@@ -79,19 +86,17 @@ export async function embedImage(
     ...vectorFields,
   };
 
-  // Upsert: a retry may re-run this after a partial failure
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-    asFilter<FileMetaDoc>({ _id: chunkId }),
-    asDoc<FileMetaDoc>(chunkDoc),
-    { upsert: true },
-  );
+  // Upsert: a retry may re-run this after a partial failure. Through the one writer of a derived row, which reads the
+  // PARENT first: a caption written after the file was deleted is an orphan row nothing removes, and the upsert is why
+  // the check cannot be a predicate in the filter — a non-matching filter on an upsert inserts.
+  await upsertDerivedFileRow(spaceId, chunkDoc);
 
   // Face recognition — run after the caption chunk is stored so the job can
   // still complete if face detection fails. Non-fatal.
   const mediaCfg = getMediaEmbeddingConfig();
   if (mediaCfg.faceRecognition?.enabled && !facesAreWithheldFor(opts.arrival === true)) {
     const { embedFaces, GalleryIncompleteError } = await import('./face-embedder.js');
-    await embedFaces(spaceId, fileId, imageBytes).catch((err: unknown) => {
+    await embedFaces(spaceId, fileId, image).catch((err: unknown) => {
       // The one failure that must NOT be absorbed: the gallery could not answer, and absorbing it writes the
       // face unlabelled for good. Rethrown, the job retries like any other transient failure; the caption chunk
       // above is an upsert, so the retry rewrites it rather than duplicating it.

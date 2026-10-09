@@ -39,6 +39,7 @@ import { CONVERTED_ROOT, EXTRACTED_ROOT } from '../files/moved-paths.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
 import { removeOneStoredFileHere } from '../files/remove-file-here.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { deliveredByAPeer } from './delivered-by.js';
 import { escapeRegex } from '../util/redos.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -59,7 +60,7 @@ async function retireInSpace(spaceId: string): Promise<number> {
     _id: { $regex: `^(?:${escapeRegex(CONVERTED_ROOT)}|${escapeRegex(EXTRACTED_ROOT)})` },
     ...LIVE_FILE_ROW,
     // A peer's: it delivered the bytes, or it wrote the row. A row this instance authored with nobody delivering is its own.
-    $or: [{ deliveredBy: { $exists: true, $nin: ['', self] } }, { 'author.instanceId': { $exists: true, $ne: self } }],
+    $or: [deliveredByAPeer(self), { 'author.instanceId': { $exists: true, $ne: self } }],
   }), { projection: { _id: 1 } }).limit(RETIRE_PER_SPACE_PER_CYCLE).toArray();
   if (found.length === 0) return 0;
 

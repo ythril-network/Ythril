@@ -15,7 +15,7 @@
  * `tombstoneRereadAt[space]` on the upstream's member row (`config/types-networks.ts`, in `PER_SPACE_WATERMARKS`, so a rename
  * carries it and a counter wipe re-owes it — harmless, the re-read is idempotent): absent = owed from the start, a decimal seq
  * = owed from there, `'done'` = finished and never asked again. `nextRereadState` (`sync/deletion-authority.ts`) is the pure
- * fold, and `setMemberSpaceMark` the one writer of a per-space mark.
+ * fold, and `foldRepairMark` (`sync/member-space-mark.ts`) moves it on the live config.
  *
  *  - **A second full read.** A member whose FIRST ordinary pull already read from the start to the end has seen everything the
  *    upstream holds and is marked done without a second read.
@@ -34,13 +34,12 @@
  * already pruned is gone for good (release notes say so). Upgrading root-first matters on a tree: a middle node that repairs
  * after its children have passed the relayed seq leaves them holding the record (the ordering limit owned by Q-238).
  */
-import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkMember } from '../config/types.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { log, peerText } from '../util/log.js';
 import { parseSeqText } from '../util/seq-keyset.js';
 import { deliveryOfMember, nextRereadState } from './deletion-authority.js';
-import { setMemberSpaceMark } from './member-space-mark.js';
+import { foldRepairMark, readMemberSpaceMark } from './member-space-mark.js';
 import { pullTombstones } from './tombstone-transfer.js';
 import type { TransferOutcome } from './watermark.js';
 
@@ -56,18 +55,12 @@ function startOf(state: string | undefined): number {
 
 /** The state this member row holds for the space, read from the LIVE config. */
 function stateOf(networkId: string, memberId: string, spaceId: string): string | undefined {
-  const net = getConfig().networks.find(n => n.id === networkId);
-  return net?.members.find(m => m.instanceId === memberId)?.tombstoneRereadAt?.[spaceId];
+  return readMemberSpaceMark(networkId, memberId, spaceId, 'tombstoneRereadAt');
 }
 
 /** Fold one outcome into every row that holds the mark, and save once when anything changed. */
 function record(memberId: string, spaceId: string, outcome: { complete: boolean; cursor?: string; stopped?: boolean }): void {
-  const cfg = getConfig();
-  const changed = setMemberSpaceMark(cfg, memberId, spaceId, 'tombstoneRereadAt', (current) => {
-    const next = nextRereadState(current, outcome);
-    return next === undefined || next === current ? null : next;
-  });
-  if (changed) saveConfig(cfg);
+  foldRepairMark(memberId, spaceId, 'tombstoneRereadAt', (current) => nextRereadState(current, outcome));
 }
 
 /**

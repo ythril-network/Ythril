@@ -408,7 +408,9 @@ const SITES = [
   { file: 'server/src/brain/edge-rekey.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'edge rows, 1000 at a time; an edge document is nowhere near 16 KiB' },
   { file: 'server/src/brain/tombstones.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'tombstones, 1000 at a time; a tombstone is an id and four fields' },
   { file: 'server/src/brain/embed-queue.ts', sites: 1, kind: 'chunked', cap: 'SWEEP_BATCH', reason: 'job rows, 500 records at a time; a job is an id and a few fields' },
-  { file: 'server/src/files/converters/pipeline.ts', sites: 1, kind: 'session', reason: 'inside a transaction: the session is the bound, in 200-row chunks' },
+  // The conversion's commit moved into the one writer of a file's derived rows (bundle-89, Q-418), which reads the
+  // parent before it writes; the bound did not change — it is still the caller's session, in chunks of the caller's cap.
+  { file: 'server/src/files/derived-fields.ts', sites: 1, kind: 'session', reason: 'inside the caller\'s transaction: the session is the bound, in chunks of the caller\'s cap' },
   { file: 'server/src/db/restore.ts', sites: 2, kind: 'own-client', reason: 'an operator restore on its own MongoClient, in 500-row batches, outside every hold' },
   { file: 'server/src/brain/write-plan/commit.ts', sites: 2, kind: 'request-capped', reason: 'one write plan: the items of one request (BULK_MAX_PER_TYPE per array, a 10 MiB body)' },
   { file: 'server/src/brain/read-spill-store.ts', sites: 1, kind: 'request-capped', reason: 'the pages of one spilled answer, which is cut at a stated size before it is stored' },

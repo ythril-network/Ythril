@@ -11,46 +11,28 @@
  *   5. Store one FileMetaDoc chunk record per segment.
  */
 
-import { spawn } from 'child_process';
+import { runFfmpeg } from './transcode.js';
+import type { PlaintextFile } from '../plaintext-file.js';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
-import { col, asDoc, asFilter } from '../../db/mongo.js';
+import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
-import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
-import { spaceCollection } from '../../db/space-collection.js';
+import { upsertDerivedFileRow } from '../derived-fields.js';
 
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
 /**
- * Run ffmpeg with the given args and return { stdout, stderr }.
- * Rejects if ffmpeg exits non-zero.
+ * The longest audio a single segment may carry, in seconds — the number the chunk loop's own comment has promised all
+ * along. A CHOSEN bound, not a measured one: five minutes of speech is a transcription call of a size every provider
+ * takes, and a segment is read into memory twice on its way to one.
  */
-function ffmpeg(args: string[]): Promise<{ stdout: Buffer; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const stdout: Buffer[] = [];
-    const stderrChunks: string[] = [];
-
-    const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    proc.stdout.on('data', (d: Buffer) => stdout.push(d));
-    proc.stderr.on('data', (d: Buffer) => stderrChunks.push(d.toString()));
-    proc.on('error', reject);
-    proc.on('close', code => {
-      const stderr = stderrChunks.join('');
-      if (code !== 0) {
-        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
-      } else {
-        resolve({ stdout: Buffer.concat(stdout), stderr });
-      }
-    });
-  });
-}
+const MAX_SEGMENT_S = 300;
 
 interface SilenceBoundary {
   start: number;  // seconds
@@ -108,7 +90,28 @@ function silencesToChunks(
   if (chunks.length === 0) {
     chunks.push({ startS: 0, endS: totalDurationS });
   }
-  return chunks;
+  return chunks.flatMap(c => splitToCap(c));
+}
+
+/**
+ * Cut one span into pieces no longer than {@link MAX_SEGMENT_S}, covering all of it.
+ *
+ * A silence is what the segmenter looks for, and a recording can simply not have one: a lecture, a meeting, music, a
+ * phone call. Those became ONE segment of the whole recording, which is then extracted to a wav, read whole into a
+ * buffer and copied again into a request body — the memory this bundle is about, on the commonest input rather than a
+ * corner case. The 300 s the comment above the loop promised was never in the code.
+ *
+ * Covering all of it is the half to be careful about: a cap that drops audio is not a cap, it is a loss. The last piece
+ * ends where the span ended, whatever that leaves it shorter by.
+ */
+function splitToCap(c: { startS: number; endS: number }): Array<{ startS: number; endS: number }> {
+  const span = c.endS - c.startS;
+  if (span <= MAX_SEGMENT_S) return [c];
+  const out: Array<{ startS: number; endS: number }> = [];
+  for (let at = c.startS; at < c.endS; at += MAX_SEGMENT_S) {
+    out.push({ startS: at, endS: Math.min(at + MAX_SEGMENT_S, c.endS) });
+  }
+  return out;
 }
 
 /**
@@ -130,11 +133,11 @@ function applyOverlap(
 }
 
 /** Get duration of an audio/video file in seconds using ffprobe. */
-async function getDurationSeconds(filePath: string): Promise<number> {
-  const result = await ffmpeg([
+async function getDurationSeconds(filePath: string, signal?: AbortSignal): Promise<number> {
+  const result = await runFfmpeg([
     '-i', filePath,
     '-f', 'null', '-',
-  ]).catch(err => {
+  ], { signal }).catch(err => {
     // ffmpeg exits 1 for probe (no output) but stderr has duration
     return { stdout: Buffer.alloc(0), stderr: String(err) };
   });
@@ -155,9 +158,10 @@ async function extractSegment(
   startS: number,
   endS: number,
   outPath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const duration = endS - startS;
-  await ffmpeg([
+  await runFfmpeg([
     '-ss', String(startS),
     '-t', String(duration),
     '-i', inputPath,
@@ -165,7 +169,7 @@ async function extractSegment(
     '-ar', '16000',
     '-ac', '1',
     outPath,
-  ]);
+  ], { signal });
 }
 
 // ── Main export ───────────────────────────────────────────────────────────
@@ -202,8 +206,19 @@ export interface AudioEmbedResult {
 export async function embedAudio(
   spaceId: string,
   fileId: string,
-  audioBytes: Buffer,
-  mimeType: string,
+  /**
+   * The file's PLAINTEXT, as a path and a size (`files/plaintext-file.ts`) — never its bytes (`Q-425`).
+   *
+   * ffmpeg opens it several times over (the duration probe, the silence pass, one extract per segment), so a path is
+   * what it wanted all along: this used to be handed the whole file in memory and write it straight back to disk.
+   */
+  audio: PlaintextFile,
+  /**
+   * Unused since the input stopped being written here: ffmpeg guesses its demuxer from the handle's own extension,
+   * which the worker set when it opened it. Kept in the signature because it is what the JOB says the file is, and a
+   * caller that stops passing it is a caller that has stopped knowing.
+   */
+  _mimeType: string,
   stt: SttProvider,
   overlapMs = 5000,
   opts?: MediaProgressOpts,
@@ -211,28 +226,33 @@ export async function embedAudio(
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ythril-audio-'));
-  const inputPath = path.join(tmpDir, `input.${mimeTypeToExt(mimeType)}`);
+  // The SEGMENTS still need somewhere to go; the input does not — it is the caller's handle, already a plaintext path
+  // under the swept scratch directory (or a hard link to the stored file, which is the snapshot ffmpeg needs across its
+  // several passes). Under the data root's temp directory, not `os.tmpdir()`, so the boot sweep can remove it after a
+  // kill: a `finally` does not run when the process is killed, and an out-of-memory kill is this path's own failure mode.
+  const tmpDir = await scratchDir('ythril-audio');
+  const inputPath = audio.path;
 
   try {
-    await fs.writeFile(inputPath, audioBytes);
-
     // Step 1: total duration
-    const totalDurationS = await getDurationSeconds(inputPath);
+    const totalDurationS = await getDurationSeconds(inputPath, opts?.signal);
     if (totalDurationS <= 0) {
       log.warn(`Audio embedder: could not determine duration for ${fileId}, treating as single chunk`);
     }
 
     // Step 2: silence detection
-    const { stderr } = await ffmpeg([
+    const { stderr } = await runFfmpeg([
       '-i', inputPath,
       '-af', 'silencedetect=n=-30dB:d=0.5',
       '-f', 'null', '-',
-    ]).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
+    ], { signal: opts?.signal }).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
 
-    const silences = parseSilenceDetect(stderr, totalDurationS || (audioBytes.length / 32000));
-    const rawChunks = silencesToChunks(silences, totalDurationS || (audioBytes.length / 32000));
-    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS || (audioBytes.length / 32000));
+    // The fallback duration is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), and the size now
+    // comes from the handle's stat rather than from the length of a buffer nobody holds any more.
+    const guessedS = audio.size / 32000;
+    const silences = parseSilenceDetect(stderr, totalDurationS || guessedS);
+    const rawChunks = silencesToChunks(silences, totalDurationS || guessedS);
+    const chunks = applyOverlap(rawChunks, overlapMs, totalDurationS || guessedS);
 
     // Step 3: for each chunk, extract audio → transcribe → embed → store
     const results: AudioChunkRecord[] = [];
@@ -261,7 +281,7 @@ export async function embedAudio(
       const segPath = path.join(tmpDir, `seg${i}.wav`);
 
       try {
-        await extractSegment(inputPath, startS, endS, segPath);
+        await extractSegment(inputPath, startS, endS, segPath, opts?.signal);
         const segBytes = await fs.readFile(segPath);
 
         const sttResult = await stt.transcribe(segBytes, 'audio/wav');
@@ -298,11 +318,9 @@ export async function embedAudio(
           chunkDurationMs: endMs - startMs,
         };
 
-        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-          asFilter<FileMetaDoc>({ _id: chunkId }),
-          asDoc<FileMetaDoc>(chunkDoc),
-          { upsert: true },
-        );
+        // Through the one writer of a derived row, which reads the PARENT first: a transcript segment written after
+        // the file was deleted is an orphan row nothing removes.
+        await upsertDerivedFileRow(spaceId, chunkDoc);
 
         results.push({ chunkId, startMs, endMs, transcript });
       } catch (err) {
@@ -349,13 +367,4 @@ export async function embedAudio(
 function buildTranscript(segments: SttSegment[], fallbackText: string): string {
   if (segments.length === 0) return fallbackText.trim();
   return segments.map(s => s.text.trim()).filter(Boolean).join(' ');
-}
-
-/**
- * Name the temp file ffmpeg reads. ffmpeg does probe content, so a wrong name is usually survivable —
- * but it picks the demuxer from the extension first, and `input.bin` (what an untyped job used to
- * produce) gives it nothing to go on.
- */
-function mimeTypeToExt(mimeType: string): string {
-  return extForMimeType(mimeType, 'bin');
 }

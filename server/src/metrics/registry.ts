@@ -997,6 +997,31 @@ export const syncTombstoneRereadsOwed = new Gauge({
 syncTombstoneRereadsOwed.set(0);
 
 /**
+ * File-row re-reads still owed (per peer and space): a merkle check found the roots differ, and this instance has not yet
+ * read that peer's file rows again to converge the ones whose timestamp drifted (`sync/file-meta-reread.ts`, `Q-419`).
+ *
+ * The same provider shape as the tombstone count above, for the same reason. The re-read module registers its own
+ * provider when it loads, so no composition root can leave this reading 0 while repairs are owed.
+ */
+let fileMetaRereadsOwedProvider: (() => number) | null = null;
+export function setFileMetaRereadsOwedProvider(fn: () => number): void {
+  fileMetaRereadsOwedProvider = fn;
+}
+export const syncFileMetaRereadsOwed = new Gauge({
+  name: 'ythril_sync_file_meta_rereads_owed',
+  help: 'File-row re-reads (per peer and space) armed by a merkle divergence and not yet read to the end — the repair that converges a file row whose timestamp drifted from its author\'s',
+  registers: [register],
+  collect() {
+    try {
+      this.set(fileMetaRereadsOwedProvider?.() ?? 0);
+    } catch {
+      this.set(0);   // A metrics scrape must never be the thing that fails.
+    }
+  },
+});
+syncFileMetaRereadsOwed.set(0);
+
+/**
  * The doors a peer's file arrives through, as `ythril_sync_file_arrivals_total` counts them: `push` (the peer wrote bytes to this
  * instance's upload door, single or chunked), `pull` (this instance fetched bytes by the manifest), `metadata` (a file's row
  * arrived by push or pull of the metadata) and `tombstone` (a file tombstone arrived). The last two only ever count an offer

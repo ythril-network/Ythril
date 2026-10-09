@@ -93,7 +93,10 @@ const EXEMPT = {
   'server/src/brain/edge-rekey.ts:rekeyEdges': 're-key: moves an edge to a new identity, delete + insert',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'retention: stamps a computed expiry on stored entries',
-  'server/src/brain/embed-record.ts:embedStoredRecord': 'the embed worker stores a vector on a record already written',
+  // The embed worker's four writes moved into the one writer of a derived field (bundle-89, Q-418), which is what asks
+  // whether the file a row belongs to is still live — a flag stamps no seq, so the job's own precondition cannot see a
+  // delete. It writes what the bytes made onto a record somebody else already created; it creates nothing.
+  'server/src/files/derived-fields.ts:writeDerivedFields': 'stores what this instance derived from a record already written — a vector, the text it was made from, a processing mark — never a record',
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'suppression: removes vectors from stored records',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'sync: a peer\'s tombstones delete their records',
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': 'prunes candidate rows; the collection name is computed',

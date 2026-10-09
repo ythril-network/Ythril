@@ -170,7 +170,7 @@ export async function verifyTarget(target: z.infer<typeof VerifySchema>['target'
 
     if (target === 'vision') {
       if (!media.vision?.model) return done('unconfigured', { detail: 'no vision model is configured' });
-      const r = await withBudget(providers.vision.caption(ONE_PIXEL_PNG, 'image/png'));
+      const r = await withBudget(providers.vision.caption({ bytes: ONE_PIXEL_PNG }, 'image/png'));
       if (r.timedOut) return done('still-loading');
       const caption = (r.value ?? '').trim();
       return caption.length > 0

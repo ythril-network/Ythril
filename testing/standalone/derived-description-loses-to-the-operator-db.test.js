@@ -40,7 +40,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-derived-desc-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-let mongo, meta;
+let mongo, meta, derived;
 
 const files = () => mongo.col(`${SPACE}_files`);
 const stored = async () => await files().findOne({ _id: FILE });
@@ -54,6 +54,9 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     meta = await import('../../server/dist/files/file-meta.js');
+    // `setDerivedDescriptionIfUnset` moved to `files/derived-fields.ts` in bundle-89, with the other writers of what a
+    // file's bytes produced. The behaviour every case here pins is unchanged — the conditions are still in the filter.
+    derived = await import('../../server/dist/files/derived-fields.js');
   });
 
   after(async () => {
@@ -72,7 +75,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
     // dropped every option without complaint. Both mistakes were mine, in sequence, and each produced a test that
     // failed for a reason unrelated to the code under test.
     await meta.upsertFileMeta(SPACE, FILE, 64, { tags: ['rma'] });
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'generated'), true);
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'generated'), true);
     const d = await stored();
     assert.equal(d.description, 'Derived summary');
     assert.equal(d.descriptionSource, 'generated');
@@ -80,7 +83,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
 
   it('DECLINES when the operator already wrote one — the defect', async () => {
     await meta.upsertFileMeta(SPACE, FILE, 64, { description: 'MINE' });
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'generated'), false,
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'generated'), false,
       'the derived write must report that it did nothing');
     assert.equal((await stored()).description, 'MINE',
       'an operator description was overwritten by derived text — the exact loss this exists to prevent');
@@ -94,7 +97,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
 
     await meta.updateFileMeta(SPACE, FILE, { description: 'MINE, written in the window' });
 
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, intent.description, intent.source), false);
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, FILE, intent.description, intent.source), false);
     assert.equal((await stored()).description, 'MINE, written in the window');
   });
 
@@ -102,7 +105,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
     // The old check was `!!parentMeta?.description?.trim()`, so "   " counted as unwritten. Preserved deliberately: a
     // fix that quietly changed which values count as "described" would be a second behaviour change smuggled in.
     await meta.upsertFileMeta(SPACE, FILE, 64, { description: '   ' });
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'extracted'), true);
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived summary', 'extracted'), true);
     assert.equal((await stored()).description, 'Derived summary');
   });
 
@@ -113,7 +116,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
     await files().updateOne({ _id: FILE }, { $set: { descriptionSource: 'generated' } });
     await files().updateOne({ _id: FILE }, { $set: { description: '' } });
 
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived, source unknown'), true);
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived, source unknown'), true);
     const d = await stored();
     assert.equal(d.description, 'Derived, source unknown');
     assert.ok(!('descriptionSource' in d), `descriptionSource must be unset, got ${JSON.stringify(d.descriptionSource)}`);
@@ -122,7 +125,7 @@ describe('a derived description never beats the operator (real MongoDB)', { skip
   it('does not create a record for a file that has no meta at all', async () => {
     // The filter matches on `_id`, so a missing record means no match. Creating one here would invent a file-meta record
     // for a path the operator may have deleted mid-conversion.
-    assert.equal(await meta.setDerivedDescriptionIfUnset(SPACE, 'docs/never-existed.md', 'Derived', 'generated'), false);
+    assert.equal(await derived.setDerivedDescriptionIfUnset(SPACE, 'docs/never-existed.md', 'Derived', 'generated'), false);
     assert.equal(await files().countDocuments({}), 0);
   });
 });

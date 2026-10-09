@@ -204,6 +204,26 @@ Deleting a file removes its bytes and, by default, its record too. The **`softDe
 
 **The kept record belongs to this instance alone.** It is not shown in the file list or counted in a space's file totals, and it is never sent to a peer or counted when instances compare their data, so keeping records never makes two synced instances look different. A restore from an export brings the flag back with the record. Writing the same path again, here or through a file a peer delivers, makes it a live file again and clears the flag.
 
+**A deleted file does not come back as an answer.** The kept record is not a search result — not by meaning and not by
+word — nothing you draw a connection from or to can point at it, and it cannot be edited: asking for it by path gets
+the same "not found" a path that never existed gets. **Where you CAN read it is Brain → Query**, the panel where you
+write a condition instead of a search: ask the Files collection for records with a `deletedAt`, and you get what was
+deleted and when. That is deliberate — it is the one place the record is readable, and keeping it readable nowhere
+would make an audit trail you cannot audit.
+
+**The kept record is removed once your Files window has passed since the DELETION.** It is kept on the file's own
+clock while it is a file, and on the deletion's clock afterwards: the retention sweep removes a kept record when
+**Files** days have passed since you deleted it, not since the file expired. That distinction is what keeps the record
+worth having — a file deleted *because* its window ran out would otherwise have its record removed by the very next
+sweep, minutes later. **With no Files window set, a kept record is never removed**: there is nothing to count from, and
+you asked for a record of deleted files.
+
+**What the kept record holds, and what it does not.** It keeps the path, who wrote it, when it was created, when it was
+deleted, your tags and properties, and a description a person wrote. Everything the file's own bytes produced is
+removed with them: the search entry, the text a search matched, the document's opening prose, the content fingerprint
+and the processing state, and a description the instance generated rather than a person. Records kept by an older
+version are brought in line once, in the background, the first few times the sweep runs after the upgrade.
+
 **Each instance follows its own setting.** A peer learns of a deletion from the removal notice, and applies it by *its* `softDeleteFileMeta`, whatever yours is: an instance with the setting on keeps a flagged record of a file a peer deleted, one with it off removes the record. The audit trail therefore exists exactly on the instances that switched it on.
 
 ---

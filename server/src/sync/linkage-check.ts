@@ -35,6 +35,7 @@
 import { derivedV4Id } from '../util/derived-id.js';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { outsideWriteBound, withinWriteBound } from '../db/write-bound.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brain/entity-refs.js';
@@ -171,7 +172,10 @@ async function missingTargets(
     if (ofKind) ofKind.push(t); else byKind.set(t.kind, [t]);
   }
   for (const [kind, ofKind] of byKind) {
-    const present = await readStoredById(spaceCollection(spaceId, collectionForRefKind(kind)), ofKind.map(t => t.id), {});
+    // Per kind, because the collection is the kind's: only a FILE target can be a flagged row. A deleted file counted
+    // as present is an edge or a link resolving onto an audit record, which strict linkage then never reports.
+    const present = await readStoredById(spaceCollection(spaceId, collectionForRefKind(kind)), ofKind.map(t => t.id), {},
+      { filter: notFlaggedIfFile(kind) });
     for (const t of ofKind) {
       if (!present.has(t.id)) missing.push({ ...t, reason: `${t.field} references non-existent ${kind} '${t.id}'` });
     }

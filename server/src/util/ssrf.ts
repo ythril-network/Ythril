@@ -32,6 +32,7 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
+import type { Readable } from 'node:stream';
 import { fetch as undiciFetch, Agent } from 'undici';
 import { log, peerText } from './log.js';
 
@@ -495,6 +496,16 @@ async function serialiseMultipart(form: FormData): Promise<{ body: Buffer; conte
   return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
+/**
+ * What {@link ssrfSafeFetch} takes: a `RequestInit`, except that `body` may be a FUNCTION returning a fresh body.
+ *
+ * The function form is how a streamed body survives a redirect — see the note on `ssrfSafeFetch`.
+ */
+export type SsrfRequestInit = Omit<RequestInit, 'body'>
+  // A Node `Readable` is what a streamed body is at this layer, and it is not in the DOM's `BodyInit`; undici takes
+  // one at run time. Named rather than cast at every call site, so the one place that knows this is this type.
+  & { body?: RequestInit['body'] | (() => BodyInit | Readable) };
+
 /** Replace a cross-realm FormData body with bytes plus an explicit Content-Type. Other bodies pass through. */
 async function normaliseBody(init: RequestInit): Promise<RequestInit> {
   if (!isFormDataLike(init.body)) return init;
@@ -522,6 +533,17 @@ async function normaliseBody(init: RequestInit): Promise<RequestInit> {
  *
  * Uses `redirect: 'manual'` internally regardless of any `init.redirect`.
  *
+ * ## A body that is a STREAM is handed in as a FACTORY, not as a stream
+ *
+ * Every hop re-sends the body: a 307 or a 308 repeats the method AND the body, by definition, and so does the
+ * `Authorization` header, to the re-validated address. That is free for a string, a `Buffer` or a serialised form,
+ * which can be read as often as they are asked — and impossible for a stream, which the first hop consumes. A caller
+ * that streams therefore passes `body` as a FUNCTION returning a fresh body, and each hop calls it.
+ *
+ * It is a factory rather than "we buffer it for you" because the callers that stream are the ones whose body is a file:
+ * buffering here would put back the copy they streamed to avoid. `duplex: 'half'` is set for them — undici demands it
+ * of a stream body, and a caller that forgot would get a runtime error on a path that only redirects sometimes.
+ *
  * ## The body is buffered unless the caller says it will stream it
  *
  * Every response is read whole before it is returned (the connection is closed with it, and the common caller reads a status
@@ -532,25 +554,32 @@ async function normaliseBody(init: RequestInit): Promise<RequestInit> {
  */
 export async function ssrfSafeFetch(
   rawUrl: string,
-  init: RequestInit = {},
+  init: SsrfRequestInit = {},
   opts: { maxRedirects?: number; lookup?: DnsLookup; fetchImpl?: typeof fetch; allowPrivate?: boolean; streamBody?: boolean } = {},
 ): Promise<Response> {
   const maxRedirects = opts.maxRedirects ?? 3;
   const injected = opts.fetchImpl;
   let current = rawUrl;
-  // Once, before the redirect loop: a body may only be read a single time, and every hop resends it.
-  const safeInit = await normaliseBody(init);
+  /** A streaming caller's body, asked for fresh per hop — see the note above. */
+  const bodyFactory = typeof init.body === 'function' ? init.body as () => BodyInit : undefined;
+  // Once, before the redirect loop: a body that is not a factory may only be read a single time, and every hop resends it.
+  const safeInit = await normaliseBody(bodyFactory ? { ...init, body: undefined } as RequestInit : init as RequestInit);
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const { addresses } = await assertUrlSafeResolved(current, { lookup: opts.lookup, allowPrivate: opts.allowPrivate });
 
+    // A fresh body for THIS hop, and the duplex undici asks of a stream — set here so no caller has to remember it.
+    const hopInit: RequestInit = bodyFactory
+      ? { ...safeInit, body: bodyFactory(), duplex: 'half' } as RequestInit
+      : safeInit;
+
     let resp: Response;
     let agent: Agent | undefined;
     if (injected) {
-      resp = await injected(current, { ...safeInit, redirect: 'manual' });
+      resp = await injected(current, { ...hopInit, redirect: 'manual' });
     } else {
       agent = pinnedAgent(addresses[0]!);
-      resp = await (undiciFetch as any)(current, { ...safeInit, redirect: 'manual', dispatcher: agent }) as Response;
+      resp = await (undiciFetch as any)(current, { ...hopInit, redirect: 'manual', dispatcher: agent }) as Response;
     }
 
     const location = resp.status >= 300 && resp.status < 400 ? resp.headers.get('location') : null;

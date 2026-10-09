@@ -247,7 +247,7 @@ describe('the entry points all go through the shared resolver', () => {
   it('external vision never emits a generic data URI', () => {
     const src = strip(readFileSync('server/src/files/media/providers.ts', 'utf8'));
     assert.match(src, /isInformativeMimeType\(mimeType\)/);
-    assert.match(src, /sniffImageMimeType\(imageBytes\)/);
+    assert.match(src, /sniffImageMimeType\(await readHeader\(image\)\)/);
   });
 
   it('Whisper names its upload from the table, not by splitting the MIME', () => {

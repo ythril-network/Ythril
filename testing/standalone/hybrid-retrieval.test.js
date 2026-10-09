@@ -148,8 +148,16 @@ describe('the source keeps its contracts', () => {
       'eligibility must be merged into the $text query itself, not applied afterwards');
     // THE predicate the vector path applies, from the one function that builds it — not a second copy of the tag
     // and filter clauses here, which is how a filter naming `tags` came to replace the caller's tags (Q-102).
-    assert.ok(/const match = recallPredicate\(tags, filter\)/.test(rec),
-      'the lexical eligibility must be recallPredicate, the same predicate the vector path builds');
+    /*
+     * PER TYPE since bundle-89: the predicate carries one clause that depends on what is being searched (a file recall
+     * excludes the audit record of a deleted file), so the type is an argument to the builder and the channel asks it
+     * once per active type. What this case holds is unchanged — the eligibility is the BUILDER's, never a second
+     * assembly of the tag and filter clauses here.
+     */
+    assert.ok(/lexicalSearch\(spaceId, t, query, limit, recallPredicate\(tags, filter, t\)/.test(rec),
+      'the lexical eligibility must be recallPredicate for that type, the same predicate the vector path builds');
+    assert.ok(!/\{ tags: \{ \$all: tags \} \}/.test(rec),
+      'recall.ts assembles a tag clause of its own: the lexical channel and the vector path must read eligibility from the one builder');
     assert.ok(/\{ tags: \{ \$all: tags \} \}/.test(pred), 'tags must be an $all match');
     assert.ok(pred.includes('buildMongoFilter(filter'), 'the filter must go through the shared builder');
   });

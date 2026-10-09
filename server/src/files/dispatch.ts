@@ -21,13 +21,14 @@ import type { FileMetaDoc } from '../config/types.js';
 import { getMediaEmbeddingConfig, DEFAULT_MEDIA_MAX_FILE_SIZE_BYTES } from '../config/loader.js';
 import { resolveInputFormat, deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
 import { enqueueMediaJob, enqueueTextJob } from './media/job-queue.js';
-import { setFileProcessingState } from './processing-state.js';
+import { setFileProcessingState } from './derived-fields.js';
 import { documentsAreOff } from './converters/extraction-level.js';
 import { mediaIsOff } from './converters/media-level.js';
 import { mimeTypeForPath } from './mime.js';
 import { toDocId } from '../util/paths.js';
 import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
 
 /** Embedding-pipeline state surfaced to the HTTP/MCP response after a write. */
 /**
@@ -58,7 +59,10 @@ export interface PriorProcessing {
  */
 async function readPriorProcessing(spaceId: string, filePath: string): Promise<PriorProcessing | null> {
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: { sha256: 1, embeddingStatus: 1 } },
+    // NOT a flagged row: a file flagged by a release before the strip can still hold `sha256` and `complete`, and
+    // "the same bytes are already processed" is then answered from the audit record of a DELETED file. No row means
+    // "unknown, so process", which is the direction this read already fails in.
+    asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: { sha256: 1, embeddingStatus: 1 } },
   ) as PriorProcessing | null;
 }
 
@@ -154,7 +158,7 @@ export async function dispatchFileProcessing(
     // Media (image/audio/video): enqueue an async embedding job, or record why we didn't.
     // `mediaType` is the guard-narrowed format so it satisfies FileMetaDoc's media subset.
     const mediaType = resolvedFormat;
-    // Through the one writer of a file's processing state (`files/processing-state.ts`): it stamps no `updatedAt` and no `seq`.
+    // Through the one writer of a file's processing state (`files/derived-fields.ts`): it stamps no `updatedAt` and no `seq`.
     const setMediaStatus = (status: Exclude<FileEmbeddingStatus, 'complete'>): Promise<unknown> =>
       setFileProcessingState(spaceId, normId, { mediaType, embeddingStatus: status });
     // Identical bytes that already completed, or whose job is under way: nothing to do, and this is the most expensive thing

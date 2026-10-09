@@ -55,9 +55,15 @@ describe the file as uploaded, so two peers compare equal whether either one enc
   MongoDB each file's metadata and plaintext SHA-256 (which sync compares). The per-file key binds each chunk to its
   place in its own file, not to the file's path, so a file swapped for another encrypted file from the same instance
   decrypts — it cannot be altered, but it can be exchanged by someone who can already write the volume.
-- **Temporary plaintext.** Audio and video indexing hands the media to `ffmpeg`, which needs a real file: a decrypted
-  copy lives in the OS temp directory for the duration of that job and is removed after it. Put the temp directory
-  on an encrypted or memory-backed volume if that window matters.
+- **Temporary plaintext, and only for an encrypted file.** Indexing a media file or a document hands a worker a PATH
+  it can open, because `ffmpeg`, `sharp` and the converters all want a real file. For a file stored in the clear that
+  costs nothing — a hard link, no copy — so this applies only with a master secret set. For an encrypted one a
+  decrypted copy is streamed into `<data-root>/.stored-tmp/plaintext-*.tmp/`, mode `0600`, and removed when the job
+  ends however it ends. **Budget disk for it: one copy of the largest file a job may take, per worker running at
+  once.** The boot sweep of `.stored-tmp/` is what covers the case the disposer cannot — a killed process never runs
+  its own cleanup, and an out-of-memory kill is exactly when one of these exists. Put the data root on an encrypted
+  or memory-backed volume if the window matters; it is no longer the OS temp directory, so a `TMPDIR` on tmpfs does
+  not cover it.
 - **The data root must be one filesystem.** Writes land in `<data-root>/.stored-tmp/` and are renamed into place, and a
   rename cannot cross filesystems. Mounting `files/` from a different volume makes every write fail; the boot log
   says so in one line.

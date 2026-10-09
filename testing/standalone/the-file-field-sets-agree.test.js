@@ -7,7 +7,7 @@
  * Three questions about a file row's keys are each answered by a list written where its subject lives, and a field added to
  * one list and not the next is wrong silently on one side of the wire:
  *
- * 1. **What never travels.** `localFileFields()` (`files/processing-state.ts`) derives it from the HASH side: every
+ * 1. **What never travels.** `localFileFields()` (`files/derived-fields.ts`) derives it from the HASH side: every
  *    `FileMetaDoc` key the divergence hash does not see, less identity. `FILE_META_SENDER_KEYS` (`api/sync/_shared.ts`)
  *    spells it from the WIRE side: every `FileMetaDoc` key the strict incoming schema does not declare. They are the same
  *    set. A key in the first and not the second is a local field a sender would serve (a vector, a status mark, on a
@@ -28,7 +28,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { localFileFields, isLocalFileField } = await import('../../server/dist/files/processing-state.js');
+const { localFileFields, isLocalFileField } = await import('../../server/dist/files/derived-fields.js');
 const { FILE_META_SENDER_KEYS, FILE_META_AUTHORED_KEYS } = await import('../../server/dist/api/sync/_shared.js');
 const { DELETABLE_FILE_META_FIELDS } = await import('../../server/dist/files/file-meta.js');
 const { RETAGGED_FIELDS } = await import('../../server/dist/sync/retagged-fields.js');
@@ -48,7 +48,7 @@ describe('the file-row field sets agree', () => {
     const byHash = sorted(localFileFields());
     const byWire = sorted(Object.keys(FILE_META_SENDER_KEYS));
     assert.deepEqual(byHash, byWire,
-      'the hash side (`localFileFields`, files/processing-state.ts) and the wire side (`FILE_META_SENDER_KEYS`, api/sync/_shared.ts) '
+      'the hash side (`localFileFields`, files/derived-fields.ts) and the wire side (`FILE_META_SENDER_KEYS`, api/sync/_shared.ts) '
       + 'disagree about which file-row keys stay on this instance: a field added to one list and not the other is served, or hashed, wrongly');
   });
 

@@ -86,7 +86,9 @@ describe('suppression removes a stale vector', () => {
     const end = branch.indexOf("'excluded'");
     assert.ok(end > 0, "the suppressed branch no longer ends in 'excluded' — re-anchor");
     const unset = branch.slice(0, end);
-    assert.match(unset, /\$unset:\s*UNSET_VECTOR\b/);
+    // `unset:` rather than `$unset:` since bundle-89: the write is handed to the one writer of a derived field, which
+    // builds the operator. The constant is the removal either way, and its fields are pinned below.
+    assert.match(unset, /unset:\s*UNSET_VECTOR\b/);
     const { UNSET_VECTOR } = await import('../../server/dist/sync/local-only-fields.js');
     assert.deepEqual(Object.keys(UNSET_VECTOR).sort(), ['embedding', 'embeddingModel']);
   });
@@ -95,7 +97,12 @@ describe('suppression removes a stale vector', () => {
     // `'embedded'` here would make a suppressed record indistinguishable from an embedded one in every caller
     // and every metric. (The write is guarded by the seq it read since bundle-30, so a copy written meanwhile
     // answers `superseded` instead — still never `embedded`.)
-    assert.match(CODE, /return [^;\n]*'excluded';/);
+    // Since bundle-89 the branch also has to tell a write that found the file DELETED from one that landed, so the
+    // return is a choice between outcomes rather than one literal: what this asserts is still that `'excluded'` is
+    // among them and is reached by a return, never that it is the only one.
+    assert.match(CODE, /return [^;\n]*'excluded'/);
+    assert.ok(!/return [^;\n]*'embedded'[^;\n]*suppressed/.test(CODE),
+      'a suppressed record must never answer `embedded`: every caller and every metric would read it as one');
   });
 });
 

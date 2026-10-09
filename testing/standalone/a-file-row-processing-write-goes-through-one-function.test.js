@@ -1,6 +1,6 @@
 /**
  * Every write that records what THIS instance did with a file's bytes goes through ONE function,
- * `setFileProcessingState` in `server/src/files/processing-state.ts` (`Q-240`, bundle-48 D7).
+ * `setFileProcessingState` in `server/src/files/derived-fields.ts` (`Q-240`, bundle-48 D7).
  *
  * ## The rule
  *
@@ -22,7 +22,7 @@
  *   mutator call it came from and its `$set` / `$unset` keys read (`_processing-state-writes.mjs`). A list of the nine
  *   would be the corrected list the next writer is missing from; the tree is the list.
  * - **The fields**: FileMetaDoc's own, minus `FILE_HASH_PROJECTION`'s (an inclusion list in `merkle.ts`), restricted to
- *   the processing set `processing-state.ts` types. The rule is therefore stated over "a field the hash does not see AND
+ *   the processing set `derived-fields.ts` types. The rule is therefore stated over "a field the hash does not see AND
  *   a pipeline writes", and a field promoted into the hash fails the derivation rather than falling out of the rule.
  * - **Not "all-local-only"**: the old nine each ALSO set `updatedAt`, which is hashed, so a rule "no write whose keys are
  *   all local-only" would have excused every one of them. The rule is "no write TOUCHES a processing field outside the
@@ -40,7 +40,7 @@
  *
  * ## Seen red
  *
- * On 2693450b `processing-state.ts` does not exist and ten updates outside it touch a processing field:
+ * On 2693450b `derived-fields.ts` does not exist and ten updates outside it touch a processing field:
  * `job-queue.ts` enqueueTextJob / completeJob / failJob / retryJob / retryFailedJobs, `worker.ts` processJob (three:
  * the "processing" mark, the conversion pointer and count, the permanent-failure mark) and `dispatch.ts`
  * dispatchFileProcessing (two). The plan counted nine and lists `worker.ts:444` and `:662`; the third, the
@@ -63,7 +63,7 @@ import {
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 
-const MODULE = 'server/src/files/processing-state.ts';
+const MODULE = 'server/src/files/derived-fields.ts';
 
 /**
  * Writes that touch a processing field and are NOT a processing mark, with the reason: `_processing-state-writes.mjs`,
@@ -137,7 +137,7 @@ describe('the derivation finds the writes at all, so the rule cannot pass by fin
 });
 
 describe('a file row\'s processing state is written by one function', () => {
-  it('every write that touches a processing field is in files/processing-state.ts, or a named exemption', () => {
+  it('every write that touches a processing field is in files/derived-fields.ts, or a named exemption', () => {
     const outside = touching
       .filter(x => !inModule(x))
       .filter(({ w }) => !(w.name in EXEMPT))
@@ -159,23 +159,38 @@ describe('a file row\'s processing state is written by one function', () => {
 });
 
 describe('the one function exists and cannot stamp what it must not', () => {
-  it('files/processing-state.ts exists and is a writer of the files collection', () => {
+  it('files/derived-fields.ts exists and is a writer of the files collection', () => {
     assert.ok(existsSync(join(REPO_ROOT, MODULE)), `${MODULE} does not exist — every processing mark is still written where it is made`);
     // An update, by location: the module builds its `$set` from a typed argument, so its keys need not be spelled in it.
     assert.ok(WRITES.some(w => w.file === MODULE && ['updateOne', 'updateMany', 'findOneAndUpdate'].includes(w.op)),
       `${MODULE} updates no file row — it is not the writer`);
   });
 
-  it('no write inside it sets a field the hash sees, or bumps a seq', () => {
+  /**
+   * The ONE write in the module that may set a hashed field, named here rather than left to the loop below.
+   *
+   * A description derived from a file's bytes IS the file's description: it is hashed, it replicates, and it stamps a
+   * seq like any authored write — which is why it is restricted to a file this instance authored. It lives in this
+   * module because what it writes is derived from bytes, and because it was one of the writers that landed a
+   * description on a file somebody had deleted. Everything else here is local state and must stay that way.
+   */
+  const AUTHORED = { setDerivedDescriptionIfUnset: 'the derived description: hashed, replicated, and stamped like any authored write — restricted to a file this instance authored (`Q-143`)' };
+
+  it('no write inside it sets a field the hash sees, or bumps a seq — except the one authored write, which says so', () => {
     const inside = WRITES.filter(w => w.file === MODULE);
     // Not a vacuous pass while the module is missing: with nothing inside, "no write inside sets X" says nothing.
     assert.ok(inside.length >= 1, `${MODULE} holds no write to the files collection, so nothing here could be checked`);
     const hashed = new Set(hashedFileFields());
     const offenders = [];
     for (const w of inside) {
+      if (w.fn in AUTHORED) continue;
       for (const k of w.keys) if (hashed.has(k)) offenders.push(`${w.name} sets '${k}'`);
       if (/\bupdatedAt\b|\bnextSeq\b|\bbumpSeq\b|\bseq\b/.test(w.args)) offenders.push(`${w.name} names updatedAt or seq in its arguments`);
     }
     assert.deepEqual(offenders, [], 'a processing mark must not set a hashed field: that is the defect this module exists to remove');
+    // And the exception is spent: a function named here that no longer writes hashed fields is a row to delete, and a
+    // SECOND authored write would have to be argued for here rather than simply landing.
+    const spent = Object.keys(AUTHORED).filter(fn => !inside.some(w => w.fn === fn && [...w.keys].some(k => hashed.has(k))));
+    assert.deepEqual(spent, [], 'these are excused from the rule and no longer set a hashed field — delete the row');
   });
 });
