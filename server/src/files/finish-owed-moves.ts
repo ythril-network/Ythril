@@ -49,7 +49,7 @@ import { FILE_MOVE_FINISH_OPERATION } from '../audit/middleware.js';
 import { fileMovesFinishedByHousekeepingTotal } from '../metrics/registry.js';
 import { moveFileCascade } from './move-cascade.js';
 import {
-  MOVE_MARKER_KEEP_MS, fileTombstoneStaleBefore, moveIsOwed, movesBegunBefore, recordMoveAttempt, type MoveMarker,
+  MOVE_MARKER_KEEP_MS, createMoveMarkerPager, fileTombstoneStaleBefore, moveIsOwed, recordMoveAttempt, type MoveMarker,
 } from './tombstones.js';
 import { publishOwedMoves } from './owed-moves-seen.js';
 
@@ -87,8 +87,8 @@ export interface FinishOutcome {
   stranded: number;
 }
 
-/** Where each space's pass resumes: strictly after this move. Absent for a space whose last pass reached the end. */
-const resume = new Map<string, { from: string; to: string }>();
+/** Where each space's pass resumes (`createMoveMarkerPager`): strictly after the last move it looked at. */
+const pageOfMoves = createMoveMarkerPager();
 /** What the pass in progress has found so far, per space: published when the pass reaches the end of the markers. */
 const inProgress = new Map<string, { owed: number; stranded: number; oldestMarkedAt?: string }>();
 
@@ -107,14 +107,7 @@ export async function finishOwedMoves(
 ): Promise<FinishOutcome> {
   const lim: FinishLimits = { ...DEFAULT_LIMITS, ...limits };
   const outcome: FinishOutcome = { examined: 0, owed: 0, finished: 0, waiting: 0, stranded: 0 };
-  const markers: Array<MoveMarker & { markedAt: string }> = [];
-  let reachedTheEnd = true;
-  for await (const marker of movesBegunBefore(spaceId, fileTombstoneStaleBefore(now), resume.get(spaceId))) {
-    if (markers.length >= lim.examinedPerTick) { reachedTheEnd = false; break; }
-    markers.push(marker);
-    resume.set(spaceId, { from: marker.from, to: marker.to });
-  }
-  if (reachedTheEnd) resume.delete(spaceId);
+  const { markers, reachedTheEnd } = await pageOfMoves(spaceId, fileTombstoneStaleBefore(now), lim.examinedPerTick);
   outcome.examined = markers.length;
 
   // Which of them are owed: a marker whose move finished, or was never begun past its bytes, is the settle's to clear.
