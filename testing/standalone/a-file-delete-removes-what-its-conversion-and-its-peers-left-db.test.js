@@ -49,21 +49,16 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { fileWithEverything, ARRIVER } from './_file-with-everything.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'sidecardel';
 const T0 = '2026-09-01T00:00:00.000Z';
-const sha = (s) => createHash('sha256').update(s).digest('hex');
-/** The peer whose bytes landed first: the author and deliverer of an arrived sidecar's row. */
-const ARRIVER = { instanceId: 'arriving-peer', instanceLabel: 'Arriving peer' };
 
 let acts, door, ttl, loader;
 
@@ -72,57 +67,9 @@ const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id });
 const live = async (id) => { const r = await rowOf(id); return r !== null && r.deletedAt === undefined; };
 const jobOf = (id) => door.coll(S, 'media_jobs').findOne({ _id: id });
 
-/** Bytes on this instance's disk, as a conversion or an arrival left them. */
-function put(rel, content = `bytes of ${rel}`) {
-  const abs = path.join(acts.root(), rel);
-  fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, content);
-}
+// The fixture every suite that asks "what does an act on a file take with it" shares (`_file-with-everything.mjs`).
+const { put, fileRow, derived, arrived, seedFileWithEverything, seedNeighbour } = fileWithEverything(S, () => acts);
 const onDisk = (rel) => acts.onDisk(rel);
-
-/** A file's own row, as an upload left it: a version, a content hash. */
-const fileRow = (id, content, extra = {}) => build.filemeta(S, id, 3, { sizeBytes: content.length, sha256: sha(content), ...extra });
-/** A row a conversion wrote: derived, pointing at its parent. */
-const derived = (id, parentFileId, extra = {}) => build.filemeta(S, id, 4, { parentFileId, ...extra });
-/** The row an ARRIVED sidecar made: top-level (no `parentFileId`), seq 0, authored and delivered by the peer whose bytes landed. */
-const arrived = (id, extra = {}) => build.filemeta(S, id, 0, { author: ARRIVER, deliveredBy: ARRIVER.instanceId, sizeBytes: 9, ...extra });
-
-/**
- * File `f` as the instance that converted it holds it: its chunk, its converted Markdown, two extracted images and the caption
- * and face rows under the first — every sidecar row DERIVED, as this instance's own pipeline writes them. With
- * `arrivedSidecars` the converted Markdown and the second image are instead the TOP-LEVEL rows a peer's bytes made before
- * sidecars became instance-local (data held from an older release). Returns every id the file owns, by kind, so a failure names
- * what was left.
- */
-async function seedFileWithEverything(f, { expired = false, arrivedSidecars = false } = {}) {
-  const bytes = `content of ${f}`;
-  put(f, bytes);
-  const converted = `_converted/${f}.md`;
-  const img = `_extracted/${f}/x.jpg`;
-  const secondImg = `_extracted/${f}/second.png`;
-  put(converted); put(img); put(secondImg);
-  const ids = {
-    file: f,
-    chunk: `${f}#chunk-0`,                 // one level down: the delete already took these
-    converted,                              // derived (parentFileId = f), or an ARRIVED top-level row
-    image: img,                             // derived: parentFileId = f
-    secondImage: secondImg,                 // derived, or an ARRIVED top-level row
-    caption: `${img}#media-chunk0`,         // two levels down: parentFileId = the image
-    face: `${img}#face-chunk0`,             // two levels down
-  };
-  const sidecarRow = (id) => (arrivedSidecars ? arrived(id) : derived(id, f));
-  await door.coll(S, 'files').insertMany([
-    fileRow(f, bytes, expired ? { _expireAt: new Date('2026-01-01T00:00:00Z') } : {}),
-    derived(ids.chunk, f),
-    sidecarRow(converted),
-    derived(img, f),
-    sidecarRow(secondImg),
-    derived(ids.caption, img, { content: 'a caption' }),
-    derived(ids.face, img, { faceEmbedding: [0.1, 0.2] }),
-  ]);
-  await door.coll(S, 'media_jobs').insertOne({ _id: img, spaceId: S, status: 'pending' });
-  return ids;
-}
 
 /** Everything of the file that is still here, by name. */
 async function leftOf(ids, f) {
@@ -134,18 +81,6 @@ async function leftOf(ids, f) {
   return left;
 }
 
-/** A neighbour whose name merely starts with the file's: its sidecars, chunks and job must survive the delete. Its sidecars are its own conversion's: derived rows. */
-async function seedNeighbour(n) {
-  put(n, `content of ${n}`);
-  put(`_converted/${n}.md`); put(`_extracted/${n}/y.jpg`);
-  const img = `_extracted/${n}/y.jpg`;
-  const ids = [n, `${n}#chunk-0`, `_converted/${n}.md`, img, `${img}#media-chunk0`];
-  await door.coll(S, 'files').insertMany([
-    fileRow(n, `content of ${n}`), derived(ids[1], n), derived(ids[2], n), derived(img, n), derived(ids[4], img),
-  ]);
-  await door.coll(S, 'media_jobs').insertOne({ _id: img, spaceId: S, status: 'pending' });
-  return { ids, disk: [n, `_converted/${n}.md`, img], job: img };
-}
 async function lostOfNeighbour(nb) {
   const lost = [];
   for (const id of nb.ids) if (!(await live(id))) lost.push(`row:${id}`);
