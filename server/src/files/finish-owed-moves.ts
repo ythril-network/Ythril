@@ -14,15 +14,19 @@
  * ## What it does
  *
  * Per space, from the markers past the settle threshold (`fileTombstoneStaleBefore`: the request that wrote one has had its time):
- * each move is asked {@link moveIsOwed}; an owed one is finished by `moveFileCascade(from, to, <the marker's actor>)` — the one
- * code path that finishes a move, which is also what a retry of the request runs, and which tells subscribers of the move once,
- * from whichever runner finishes it. A move is not trusted to have finished because the cascade returned: it is asked again.
+ * each move is asked {@link moveIsOwed}; an owed one is finished by `finishOwedMove(from, to, <the marker's actor>)` — the finishing
+ * half of the cascade a retry of the request runs, which tells subscribers of the move once, from whichever runner finishes it. It
+ * takes the move's turn first and asks again inside it: a move a request finished while this pass waited is done, not a failed
+ * attempt. A move is not trusted to have finished because the finish returned: it is asked again.
  *
  * ## What bounds it, and what it says
  *
  * - **A budget per space per pass** ({@link MOVES_FINISHED_PER_TICK} moves finished, {@link MOVES_EXAMINED_PER_TICK} markers looked
  *   at); the markers are walked move by move in a stable order and a pass resumes where the last stopped, so a space with a lot to
  *   do is neither stalled behind its first move nor held for one tick.
+ * - **A budget of time for the step** ({@link MOVES_STEP_BUDGET_MS}): a count says nothing of what a move costs. Once it is spent no
+ *   new move is started and no attempt is counted for the ones left, which wait for the next pass; a move already running is not
+ *   interrupted. The TTL sweep passes one deadline for every space of the step, so the spaces share the time.
  * - **Attempts counted on the marker, with doubling backoff.** Counted BEFORE the try (a try a restart ended is spent), and a move
  *   is not tried again before its `nextAttemptAt`: {@link MOVE_FINISH_BACKOFF_BASE_MS} doubling per failed attempt up to the
  *   window a marker is kept ({@link MOVE_MARKER_KEEP_MS}).
@@ -39,7 +43,7 @@
  * ## What it does not do
  *
  * It does not repair a move the pre-completion sweep already forgot (its marker is gone, so nothing says it is owed), and it does
- * not take the move's single-flight lock itself: `moveFileCascade` does, so a request's retry and this pass cannot interleave.
+ * not take the move's single-flight lock itself: `finishOwedMove` does, so a request's retry and this pass cannot interleave.
  */
 import { eachUnit } from '../util/housekeeping-walk.js';
 import { backoffDelayMs } from '../util/backoff.js';
@@ -47,7 +51,7 @@ import { log, peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { FILE_MOVE_FINISH_OPERATION } from '../audit/middleware.js';
 import { fileMovesFinishedByHousekeepingTotal } from '../metrics/registry.js';
-import { moveFileCascade } from './move-cascade.js';
+import { finishOwedMove } from './move-cascade.js';
 import {
   MOVE_MARKER_KEEP_MS, createMoveMarkerPager, fileTombstoneStaleBefore, moveIsOwed, recordMoveAttempt, type MoveMarker,
 } from './tombstones.js';
@@ -62,12 +66,24 @@ export const MOVES_FINISHED_PER_TICK = 5;
 /** The most markers (distinct moves) one space looks at in one pass; the next pass resumes after the last. */
 export const MOVES_EXAMINED_PER_TICK = 100;
 
+/**
+ * How long the step may go on STARTING moves, ms. A move's cost is the size of the file or tree it carries, which the count above says
+ * nothing about, and the TTL tick has the rest of the housekeeping to do: past this the step starts no more moves and leaves them for the
+ * next pass. A move already running is never interrupted.
+ */
+const MOVES_STEP_BUDGET_MS = 60_000;
+
+/** The instant after which the step starts no new move, for a step beginning at `from` (default now). */
+export const moveFinishDeadline = (from: number = Date.now()): number => from + MOVES_STEP_BUDGET_MS;
+
 /** The limits of a pass. The defaults are the real ones; a test narrows them. */
 export interface FinishLimits {
   attempts: number;
   backoffBaseMs: number;
   finishedPerTick: number;
   examinedPerTick: number;
+  /** Epoch ms after which no new move is started. Absent, the pass's own start plus {@link MOVES_STEP_BUDGET_MS}. */
+  deadlineAt?: number;
 }
 const DEFAULT_LIMITS: FinishLimits = {
   attempts: MOVE_FINISH_ATTEMPTS, backoffBaseMs: MOVE_FINISH_BACKOFF_BASE_MS,
@@ -106,6 +122,8 @@ export async function finishOwedMoves(
   spaceId: string, now: Date = new Date(), limits: Partial<FinishLimits> = {},
 ): Promise<FinishOutcome> {
   const lim: FinishLimits = { ...DEFAULT_LIMITS, ...limits };
+  // Inside the function, so a caller that passes nothing is still bounded; the TTL sweep passes one deadline for the whole step.
+  const deadlineAt = lim.deadlineAt ?? moveFinishDeadline();
   const outcome: FinishOutcome = { examined: 0, owed: 0, finished: 0, waiting: 0, stranded: 0 };
   const { markers, reachedTheEnd } = await pageOfMoves(spaceId, fileTombstoneStaleBefore(now), lim.examinedPerTick);
   outcome.examined = markers.length;
@@ -128,12 +146,17 @@ export async function finishOwedMoves(
 
   const finished = new Set<MoveMarker>();
   await eachUnit(trying, async (m) => {
+    // The pass's time is spent: no new move is started (one already running is never interrupted), no attempt is counted for it, and
+    // it is waiting for the next pass.
+    if (Date.now() >= deadlineAt) { outcome.waiting++; return; }
     const attempts = (m.attempts ?? 0) + 1;
     // Counted before the try: a try a restart ended is a try spent.
     await recordMoveAttempt(spaceId, m.from, m.to, attempts, new Date(now.getTime() + backoffMs(attempts, lim)).toISOString());
     const startedAt = Date.now();
-    await moveFileCascade(spaceId, m.from, m.to, m.actor);
-    // The cascade returning is not the move being finished: it survives some failures of its own steps.
+    // The turn is taken and the move asked about AGAIN inside it: a request that retried the move first has finished it, and a move that
+    // is done is not a failed attempt.
+    if (!(await finishOwedMove(spaceId, m.from, m.to, m.actor))) { finished.add(m); return; }
+    // The finish returning is not the move being finished: it survives some failures of its own steps.
     if (await moveIsOwed(spaceId, m.from, m.to)) throw new Error(`the move ran (attempt ${attempts} of ${lim.attempts}) and is still owed`);
     finished.add(m);
     outcome.finished++;

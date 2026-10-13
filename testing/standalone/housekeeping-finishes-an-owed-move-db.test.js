@@ -36,7 +36,7 @@ const DAY = 24 * 3_600_000;
 /** Past the settle threshold and every wait: `n` days on. */
 const LATER = (n = 1) => new Date(Date.now() + n * DAY);
 
-let acts, tombstones, finish, walk, registry, seen, sweep, F, faults;
+let acts, tombstones, finish, walk, flight, registry, seen, sweep, F, faults;
 
 const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
 const liveRow = async (p) => { const r = await row(p); return r && !r.deletedAt ? r : null; };
@@ -77,6 +77,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     tombstones = await import('../../server/dist/files/tombstones.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
+    flight = await import('../../server/dist/files/move-flight.js');
     registry = await import('../../server/dist/metrics/registry.js');
     seen = await import('../../server/dist/files/owed-moves-seen.js');
     sweep = await import('../../server/dist/brain/ttl-sweep.js');
@@ -153,6 +154,54 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     const stopped = await pass(LATER(1));
     assert.equal(stopped.storeDown, true,
       'a store that failed mid-cascade was read as one space failing: the walk went on to every space behind it, one bound each');
+  });
+
+  it('a move a request finished while housekeeping waited for its turn is done, not a failed attempt', async () => {
+    await moveStoppedAfterItsBytes('rq/from.txt', 'rq/to.txt');
+    // The request holds the move's turn (the lock). Housekeeping has already found the move owed and asks for the turn behind it.
+    let release;
+    const held = new Promise(r => { release = r; });
+    const holder = flight.runMoveOnce(S, 'rq/from.txt', 'rq/to.txt', () => held);
+    const waiting = pass(LATER(1));
+    // The attempt is counted before the turn is asked for, so the marker says housekeeping is in line.
+    await waitFor(async () => (await tombstones.moveMarkerOf(S, 'rq/from.txt', 'rq/to.txt'))?.attempts === 1, 5000, 20,
+      async () => 'housekeeping never reached the move it found owed');
+    // The request finishes the move: what a retry that ran first leaves behind (the record at the destination, the marker forgotten).
+    const records = acts.door.coll(S, 'files');
+    const r = await records.findOne({ _id: 'rq/from.txt' });
+    await records.deleteOne({ _id: 'rq/from.txt' });
+    await records.insertOne({ ...r, _id: 'rq/to.txt', path: 'rq/to.txt' });
+    await tombstones.forgetFinishedMove(S, 'rq/from.txt', 'rq/to.txt');
+    release();
+    await holder;
+    const { outcome, failed } = await waiting;
+    assert.deepEqual(failed, [], 'a move that was finished by the time housekeeping had its turn was reported as a failure');
+    assert.equal(outcome.finished, 0, 'housekeeping claimed a move a request finished');
+    assert.ok(await liveRow('rq/to.txt'), 'the finished move is not where the request left it');
+  });
+
+  it('stops starting moves once the pass has spent its time, and the rest wait for the next pass without an attempt spent', async () => {
+    await moveStoppedAfterItsBytes('bt/a-from.txt', 'bt/a-to.txt');
+    await moveStoppedAfterItsBytes('bt/b-from.txt', 'bt/b-to.txt');
+    // The first move's turn is held for longer than the budget: by the time housekeeping has it, the time is gone.
+    let release;
+    const held = new Promise(r => { release = r; });
+    const holder = flight.runMoveOnce(S, 'bt/a-from.txt', 'bt/a-to.txt', () => held);
+    const spent = pass(LATER(1), { deadlineAt: Date.now() + 200 });
+    await new Promise(r => setTimeout(r, 400));
+    release();
+    await holder;
+    const { outcome } = await spent;
+    // Whichever move the pass began first ran to its end (a move already running is not interrupted); the other was not started.
+    assert.equal(outcome.finished + outcome.waiting, 2);
+    assert.equal(outcome.finished, 1, `the pass finished ${outcome.finished} moves with its time spent after the first`);
+    assert.equal(outcome.waiting, 1, 'the move behind the first was started past the pass\'s time, or was not left waiting');
+    const markers = await Promise.all(['a', 'b'].map(n => tombstones.moveMarkerOf(S, `bt/${n}-from.txt`, `bt/${n}-to.txt`)));
+    assert.equal(markers.filter(m => m !== undefined && (m.attempts ?? 0) > 0).length, 0, 'a move not started was counted an attempt');
+    assert.equal(markers.filter(m => m !== undefined).length, 1, 'exactly one move should still be owed');
+    // The next pass, with its time, finishes the one left.
+    const next = await pass(LATER(1));
+    assert.equal(next.outcome.finished, 1, 'the move left waiting was not finished by the next pass');
   });
 
   it('finishes at most its budget per pass, and the moves behind the first are not starved', async () => {
