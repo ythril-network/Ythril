@@ -18,7 +18,7 @@
  * - **A relayed tombstone suppresses an own one.** The rule compares with the newest published POSITION for the path, and a
  *   relayed tombstone's position is its receive time: a peer's tombstone for a path suppresses this instance's own delete
  *   of it, which is then never told to anybody.
- * - **A move's marker goes with a row that is dropped or pruned.** `moveWasBegun` is the only thing that tells a retried
+ * - **A move's marker goes with a row that is dropped or pruned.** `moveMarkerOf` is the only thing that tells a retried
  *   move it is owed; removed as "another pending tombstone" or pruned as delivered, a move the store stopped is not
  *   completed, and the unfinished one is taken for an orphan beside an unrelated destination.
  * - **The prune takes a published tombstone out from under a late leftover.** The leftover is then published (a path the
@@ -194,13 +194,13 @@ describe('a path ends with one own published tombstone, however its publishers i
   it('(d) a move\'s marker survives the row that carried it being superseded', async () => {
     const move = { from: 'mv/from.txt', to: 'mv/to.txt' };
     await tombstones.writePendingFileTombstones(S, ['mv/from.txt'], move);
-    assert.equal(await tombstones.moveWasBegun(S, move.from, move.to), true, 'the move\'s marker was not written — the case is not reached');
+    assert.equal((await tombstones.moveMarkerOf(S, move.from, move.to)) !== undefined, true, 'the move\'s marker was not written — the case is not reached');
     await sleep(5);
     // Another act on the source path (no marker of its own) publishes: the move's row is "another pending tombstone" of the path.
     const covering = await tombstones.writePendingFileTombstones(S, ['mv/from.txt']);
     await tombstones.confirmFileTombstones(covering);
     assert.equal((await publishedFor('mv/from.txt')).length, 1, 'the covering act did not publish — the case is not reached');
-    assert.equal(await tombstones.moveWasBegun(S, move.from, move.to), true,
+    assert.equal((await tombstones.moveMarkerOf(S, move.from, move.to)) !== undefined, true,
       'the move row was removed with its marker: a retry cannot tell the move it began from an orphan beside an unrelated destination');
   });
 
@@ -215,7 +215,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     fs.mkdirSync(path.dirname(path.join(acts.root(), owed.to)), { recursive: true });
     fs.renameSync(path.join(acts.root(), owed.from), path.join(acts.root(), owed.to));
     await tombstones.confirmFileTombstones(await tombstones.writePendingFileTombstones(S, [owed.from], owed));
-    assert.equal(await tombstones.moveWasBegun(S, owed.from, owed.to), true, 'the owed move\'s marker was not written — the case is not reached');
+    assert.equal((await tombstones.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move\'s marker was not written — the case is not reached');
     const longAgo = new Date(Date.now() - 3 * DAY).toISOString();
     // The age of a row, whichever of its stamps the code reads it by.
     await acts.door.coll(S, 'file_tombstones').updateMany({ path: { $in: [old.from, owed.from] } },
@@ -227,7 +227,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     assert.deepEqual(await publishedFor(old.from), [], 'a marker older than a day, whose move is not owed, kept its row for ever: no row is unprunable');
     assert.equal((await publishedFor(owed.from)).length, 1,
       'the prune took the marker of a move that is still OWED because it was a day old: the retry is taken for an orphan, and the record at the source is stranded');
-    assert.equal(await tombstones.moveWasBegun(S, owed.from, owed.to), true, 'the owed move is no longer known to have begun');
+    assert.equal((await tombstones.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move is no longer known to have begun');
 
     // The owed move is finished by its retry; nothing is owed then, so its row is prunable like any other.
     const retry = await acts.move('REST', owed.from, owed.to);

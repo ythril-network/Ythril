@@ -77,7 +77,7 @@ async function moveStoppedAfterItsBytes(from, to, via = 'REST') {
   assert.equal(status(a), 503, `the move was not stopped by the store: ${body(a)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');
   assert.ok(await row(from), 'the record is not at the source — the case is not the one a stopped move leaves');
-  assert.equal(await tombstones.moveWasBegun(S, from, to), true, 'the move left no marker — the case is not reached');
+  assert.equal((await tombstones.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
 }
 
 describe('a stopped move is finished, not forgotten, and an act that cannot be recorded does not begin', { skip }, () => {
@@ -113,7 +113,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     it(`${via}: the TTL settle keeps the marker of a move that is still owed — the record is at the source`, async () => {
       await moveStoppedAfterItsBytes('from.txt', 'to.txt', via);
       await tombstones.settleStalePendingFileTombstones(S, PAST());
-      assert.equal(await tombstones.moveWasBegun(S, 'from.txt', 'to.txt'), true,
+      assert.equal((await tombstones.moveMarkerOf(S, 'from.txt', 'to.txt')) !== undefined, true,
         'the settle forgot the marker of a move whose record is still at the source: the retry is taken for an orphan and answers 404, and the record is stranded');
     });
 
@@ -136,7 +136,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     await files.deleteOne({ _id: 'done-from.txt' });
     await files.insertOne({ ...r, _id: 'done-to.txt', path: 'done-to.txt' });
     await tombstones.settleStalePendingFileTombstones(S, PAST());
-    assert.equal(await tombstones.moveWasBegun(S, 'done-from.txt', 'done-to.txt'), false,
+    assert.equal((await tombstones.moveMarkerOf(S, 'done-from.txt', 'done-to.txt')) !== undefined, false,
       'a finished move\'s marker was kept: a later orphan at the source would be taken for this move');
   });
 
@@ -169,7 +169,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     assert.ok(await liveRow('pics/from.png'),
       'the worker reconciled "a deleted source" and removed the record of a file that was MOVED: the move can no longer be completed');
     assert.ok(await jobOf('pics/from.png'), 'the worker removed the job of an owed move');
-    assert.equal(await tombstones.moveWasBegun(S, 'pics/from.png', 'pics/to.png'), true, 'the move was forgotten');
+    assert.equal((await tombstones.moveMarkerOf(S, 'pics/from.png', 'pics/to.png')) !== undefined, true, 'the move was forgotten');
 
     const retry = await acts.move('REST', 'pics/from.png', 'pics/to.png');
     assert.ok(!acts.failed(retry), `the retried move was refused (${status(retry)}): ${body(retry)}`);

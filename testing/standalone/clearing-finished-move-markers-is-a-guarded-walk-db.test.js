@@ -32,7 +32,7 @@ let acts, tombstones, walk;
 
 const markers = () => acts.door.coll(S, 'file_tombstones');
 const marker = (id, from, to) => ({ _id: id, spaceId: S, path: from, deletedAt: OLD, move: { from, to } });
-const begun = (from, to) => tombstones.moveWasBegun(S, from, to);
+const begun = (from, to) => tombstones.moveMarkerOf(S, from, to).then(m => m !== undefined);
 
 describe('clearing the markers of finished moves is a guarded walk', { skip }, () => {
   before(async () => {

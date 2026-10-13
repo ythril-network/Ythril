@@ -36,6 +36,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { inChunks } from '../util/chunks.js';
+import { inOneCommandChunks } from '../db/one-command.js';
 import { escapeRegex } from '../util/redos.js';
 import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
 import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
@@ -44,7 +45,7 @@ import { rekeyedRow } from '../sync/local-only-fields.js';
 import { DestinationTakenByOther } from './act-answers.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
-import { movedId, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
+import { idAfterMove, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
 
 /** One row a move carries. */
 export interface PlannedRow {
@@ -82,9 +83,6 @@ export interface MovePlan {
   jobIds: string[];
 }
 
-/** The id a row of the carried set has at `dst` — an id the move does not map keeps its own. */
-const newIdOf = (id: string, src: string, dst: string): string => movedId(id, src, dst) ?? id;
-
 /**
  * A row as it is stored at its new id: a plain re-key of the stored row (`rekeyedRow`: a record written HERE, nobody's delivery, none
  * of the old path's sync agreement), its `path` the new id, its parent and its converted-Markdown pointer re-rooted by the SAME rule
@@ -93,8 +91,8 @@ const newIdOf = (id: string, src: string, dst: string): string => movedId(id, sr
  * move the timestamp read beside the version.
  */
 export function rebuiltFileRow(row: FileMetaDoc, to: string, src: string, dst: string): FileMetaDoc {
-  const parent = row.parentFileId === undefined ? undefined : newIdOf(row.parentFileId, src, dst);
-  const converted = row.convertedFileId === undefined ? undefined : newIdOf(row.convertedFileId, src, dst);
+  const parent = row.parentFileId === undefined ? undefined : idAfterMove(row.parentFileId, src, dst);
+  const converted = row.convertedFileId === undefined ? undefined : idAfterMove(row.convertedFileId, src, dst);
   const patch: Pick<FileMetaDoc, '_id' | 'path'> & Partial<Pick<FileMetaDoc, 'parentFileId' | 'convertedFileId'>> = { _id: to, path: to };
   if (parent !== undefined) patch['parentFileId'] = parent;
   if (converted !== undefined) patch['convertedFileId'] = converted;
@@ -179,7 +177,7 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
     return at;
   };
   const rows: PlannedRow[] = facts.map(r => ({
-    from: r._id, to: newIdOf(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
+    from: r._id, to: idAfterMove(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
 
   const { flagged, replaced } = await holdsAtDestination(spaceId, rows, from, to, kind);
@@ -200,25 +198,14 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
 export function batchesOf(plan: MovePlan, budget: number): MoveBatch[] {
   const groups = new Map<string, PlannedRow[]>();
   for (const r of plan.rows) { const g = groups.get(r.group); if (g) g.push(r); else groups.set(r.group, [r]); }
-  const slices: PlannedRow[][] = [];
-  let open: PlannedRow[] = [];
-  let openBytes = 0;
-  const seal = (): void => { if (open.length > 0) slices.push(open); open = []; openBytes = 0; };
-  for (const group of groups.values()) {
-    const total = group.reduce((n, r) => n + r.bytes, 0);
-    if (total <= budget) {
-      if (openBytes + total > budget) seal();
-      open.push(...group); openBytes += total;
-      continue;
-    }
-    seal();
-    for (const r of group) {
-      if (openBytes + r.bytes > budget) seal();
-      open.push(r); openBytes += r.bytes;
-    }
-    seal();
-  }
-  seal();
+  // The greedy packing is `inOneCommandChunks`'s, over the groups and then, for a group that is over the budget by itself (it is alone
+  // in its chunk, by that function's rule), over its rows: what stays here is that a group is kept whole when it fits.
+  const total = (group: readonly PlannedRow[]): number => group.reduce((n, r) => n + r.bytes, 0);
+  const pack = { maxItems: Number.MAX_SAFE_INTEGER, maxBytes: budget };
+  const slices = inOneCommandChunks([...groups.values()], { ...pack, bytesOf: total }).flatMap(chunk =>
+    chunk.length === 1 && total(chunk[0]!) > budget
+      ? inOneCommandChunks(chunk[0]!, { ...pack, bytesOf: r => r.bytes })
+      : [chunk.flat()]);
   const batches: MoveBatch[] = slices.map(rows => ({ rows, linkFiles: [], jobIds: [], flagged: [], replaced: [] }));
   if (batches.length === 0) batches.push({ rows: [], linkFiles: [], jobIds: [], flagged: [], replaced: [] });
   const batchOfFile = new Map<string, MoveBatch>();

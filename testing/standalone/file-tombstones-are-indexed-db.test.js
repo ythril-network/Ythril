@@ -7,7 +7,7 @@
  * `<space>_file_tombstones` had no index but `_id`, while I15 began asking it two questions as routine work:
  *
  *     settleStalePendingFileTombstones  { pending: true, deletedAt <= t }  sort { deletedAt: 1 }   per space, every TTL cycle
- *     moveWasBegun / forgetFinishedMove { 'move.from': a, 'move.to': b }                          per move
+ *     moveMarkerOf / forgetFinishedMove { 'move.from': a, 'move.to': b }                          per move
  *
  * and I17 a third, every time a tombstone is published (verify-drive-5 F1):
  *

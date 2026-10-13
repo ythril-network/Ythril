@@ -77,19 +77,22 @@ function requireMaxItems(maxItems: number, caller: string): void {
  * @param items the operations, in the order they are to be written
  * @param opts.maxItems the most operations in a slice (a positive integer)
  * @param opts.bytesOf the BSON size of one operation as the command carries it
- * @returns consecutive slices of `items`, none of more than `maxItems` operations or `ONE_COMMAND_BYTES` — except one
+ * @param opts.maxBytes the most bytes in a slice; default `ONE_COMMAND_BYTES`. Another budget (a move's transaction, `files/move-plan.ts`) is a
+ *   figure the caller names, not a second slicer: the greedy rule is this one's. A positive finite number.
+ * @returns consecutive slices of `items`, none of more than `maxItems` operations or `maxBytes` — except one
  *   operation that is over the limit by itself, which is a slice of its own
  */
 export function inOneCommandChunks<T>(
-  items: readonly T[], { maxItems, bytesOf }: { maxItems: number; bytesOf: (item: T) => number },
+  items: readonly T[], { maxItems, bytesOf, maxBytes = ONE_COMMAND_BYTES }: { maxItems: number; bytesOf: (item: T) => number; maxBytes?: number },
 ): T[][] {
   requireMaxItems(maxItems, 'inOneCommandChunks');
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) throw new Error(`inOneCommandChunks: maxBytes must be a positive number, got ${maxBytes}`);
   const out: T[][] = [];
   let current: T[] = [];
   let bytes = 0;
   for (const item of items) {
     const size = bytesOf(item);
-    if (current.length > 0 && (current.length >= maxItems || bytes + size > ONE_COMMAND_BYTES)) {
+    if (current.length > 0 && (current.length >= maxItems || bytes + size > maxBytes)) {
       out.push(current);
       current = [];
       bytes = 0;

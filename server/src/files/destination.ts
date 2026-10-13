@@ -29,6 +29,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { FileSystemFault, PathBlockedByFile, fileActAnswer } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { isAtOrUnder } from './moved-paths.js';
 import { isMissingPath } from './stored-bytes.js';
 import { toDocId } from '../util/paths.js';
 
@@ -80,7 +81,7 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
   const from = fileKeyOf(spaceId, src).key;
   const to = fileKeyOf(spaceId, dst).key;
   if (from === to) throw new PathBlockedByFile(to, `'${from}' cannot be moved onto itself.`);
-  if (to.startsWith(`${from}/`)) throw new PathBlockedByFile(from, `'${from}' cannot be moved into itself: '${to}' lies under it.`);
+  if (isAtOrUnder(to, from)) throw new PathBlockedByFile(from, `'${from}' cannot be moved into itself: '${to}' lies under it.`);
 }
 
 /**

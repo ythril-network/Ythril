@@ -46,9 +46,9 @@
  */
 import { moveFile, listFilesRecursive } from './files.js';
 import { holdJobsForMove, releaseMoveHold, extendMoveHold, markSpaceMayHaveWork, rekeyJobsForMove } from './media/job-queue.js';
-import { movedId, movedSidecars, type PathKind } from './moved-paths.js';
+import { kindAt, movedId, movedPairs, movedSidecars } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresentAt, isStoredDirectory } from './stored-bytes.js';
+import { bytesPresentAt } from './stored-bytes.js';
 import {
   abandonMove, actUnderPendingTombstones, bytesIdentityAt, forgetFinishedMove, moveIsOwed, pendingAmong, settleBegunMove, writePendingFileTombstones,
 } from './tombstones.js';
@@ -95,11 +95,6 @@ async function pathsLeaving(spaceId: string, src: string, dst: string): Promise<
   return { moved: children.length > 0 ? children : [src], sidecars };
 }
 
-/** What the path at `relPath` is on disk — a directory or, whatever else, a file: the kind its sidecars are asked by. */
-async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
-  return await isStoredDirectory(await resolveSafePathChecked(spaceId, relPath)) ? 'directory' : 'file';
-}
-
 /**
  * Re-key one batch: converge the batch's links onto their new ids, then ONE transaction for the file rows, the rows derived from
  * them and the jobs (with the flagged audit rows at the destination removed and a live occupant's rows replaced), then — only once
@@ -108,10 +103,7 @@ async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
  */
 async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, held: readonly string[]): Promise<void> {
   const { src, dst, kind } = plan;
-  const links: LinkMove[] = batch.linkFiles.flatMap(from => {
-    const to = movedId(from, src, dst);
-    return to !== null && to !== from ? [{ from, to }] : [];
-  });
+  const links: LinkMove[] = movedPairs(batch.linkFiles, src, dst);
   await convergeLinks(spaceId, links);
 
   const moves = batch.rows.map(r => ({ from: r.from, to: r.to }));

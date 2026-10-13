@@ -17,13 +17,13 @@
  * {@link moveIsRunningAt} and answers "not now" instead.
  */
 import { keyedLock } from '../util/keyed-lock.js';
-import { parentOfSidecar, movedRoot } from './moved-paths.js';
+import { isAtOrUnder, moveKey, movedRoot, parentOfSidecar } from './moved-paths.js';
 
 const locks = keyedLock();
 /** The moves running now, by lock key: what {@link moveIsRunningAt} reads. */
 const running = new Map<string, { spaceId: string; src: string }>();
 
-const keyOf = (spaceId: string, src: string, dst: string): string => `${spaceId}\u0000${src}\u0000${dst}`;
+const keyOf = (spaceId: string, src: string, dst: string): string => moveKey({ from: src, to: dst }, spaceId);
 
 /** Run `fn` as the move `src` → `dst` of `spaceId`, after any earlier run of the same move has ended; the lock is released in a `finally`. */
 export function runMoveOnce<T>(spaceId: string, src: string, dst: string, fn: () => Promise<T>): Promise<T> {
@@ -43,7 +43,7 @@ export function moveIsRunningAt(spaceId: string, path: string): boolean {
   const owner = parentOfSidecar(at)?.parent;
   for (const m of running.values()) {
     if (m.spaceId !== spaceId || m.src === '') continue;
-    for (const p of owner ? [at, owner] : [at]) if (p === m.src || p.startsWith(`${m.src}/`)) return true;
+    for (const p of owner ? [at, owner] : [at]) if (isAtOrUnder(p, m.src)) return true;
   }
   return false;
 }
