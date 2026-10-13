@@ -28,7 +28,8 @@
  * back off, when the marker that would have finished the move is finally cleared.
  */
 import { reconcileLinkRows } from '../brain/write-plan/commit.js';
-import { linksStartingFrom, type LinkEnd } from '../brain/link-adjacency.js';
+import { linkClassesFrom, linksStartingFrom, type LinkEnd } from '../brain/link-adjacency.js';
+import { removeLinksFromMany } from '../brain/links.js';
 import { missingRefs } from '../brain/entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
@@ -41,21 +42,21 @@ import type { AuthorRef } from '../config/types.js';
 /** A file whose links move: its id now and the id it is to have. */
 export interface LinkMove { from: string; to: string }
 
-/** The classes a file's links name. */
-const CLASSES = ['entity', 'fact', 'chrono'] as const;
-type Targets = Record<(typeof CLASSES)[number], string[]>;
+/** The classes a file's links name: what the link table says a file can hold (`linkClassesFrom`), never a list of ours. */
+const CLASSES: readonly RefKind[] = linkClassesFrom('file').map(c => c.toKind);
+type Targets = Partial<Record<RefKind, string[]>>;
 
-const emptyTargets = (): Targets => ({ entity: [], fact: [], chrono: [] });
+const emptyTargets = (): Targets => Object.fromEntries(CLASSES.map(cls => [cls, [] as string[]]));
 
 /** The link rows starting from `ids`, by file: the targets of each, by class. Chunked. */
 async function targetsOf(spaceId: string, ids: readonly string[]): Promise<Map<string, Targets>> {
   const out = new Map<string, Targets>();
   for (const part of inChunks([...ids], READ_CHUNK)) {
     for (const row of await linksStartingFrom(spaceId, part) as LinkEnd[]) {
-      if (row.fromKind !== 'file' || !(CLASSES as readonly string[]).includes(row.toKind)) continue;
+      if (row.fromKind !== 'file' || !CLASSES.includes(row.toKind)) continue;
       let t = out.get(row.from);
       if (!t) { t = emptyTargets(); out.set(row.from, t); }
-      t[row.toKind as keyof Targets].push(row.to);
+      (t[row.toKind] ??= []).push(row.to);
     }
   }
   return out;
@@ -68,10 +69,10 @@ export async function convergeLinks(spaceId: string, moves: readonly LinkMove[])
     // Where the space insists every target exists, a target that has gone is not carried: one read per class for the whole set.
     if (isStrictLinkage(spaceId)) {
       for (const cls of CLASSES) {
-        const all = [...new Set([...have.values()].flatMap(t => t[cls]))];
+        const all = [...new Set([...have.values()].flatMap(t => t[cls] ?? []))];
         if (all.length === 0) continue;
-        const gone = new Set(await missingRefs(spaceId, cls as RefKind, all));
-        if (gone.size > 0) for (const t of have.values()) t[cls] = t[cls].filter(id => !gone.has(id));
+        const gone = new Set(await missingRefs(spaceId, cls, all));
+        if (gone.size > 0) for (const t of have.values()) t[cls] = (t[cls] ?? []).filter(id => !gone.has(id));
       }
     }
     const authors = await readStoredById<{ author?: AuthorRef }>(spaceCollection(spaceId, 'files'), part.map(m => m.from), { author: 1 });
@@ -84,9 +85,7 @@ export async function convergeLinks(spaceId: string, moves: readonly LinkMove[])
 
 /** Remove every link the files had at their OLD ids, with the tombstones that tell peers. After the rows have moved (step 3). */
 export async function retireLinks(spaceId: string, froms: readonly string[]): Promise<void> {
-  for (const part of inChunks([...froms], READ_CHUNK)) {
-    await reconcileLinkRows(spaceId, part.map(from => ({ from, fromKind: 'file' as RefKind, desired: emptyTargets(), author: authorRef(), minted: false })));
-  }
+  await removeLinksFromMany(spaceId, froms, 'file');
 }
 
 /**
@@ -102,7 +101,7 @@ export async function removeConvergedLinks(spaceId: string, moves: readonly Link
       const holds = now.get(m.to);
       if (!were || !holds) return [];
       const keep = emptyTargets();
-      for (const cls of CLASSES) keep[cls] = holds[cls].filter(id => !were[cls].includes(id));
+      for (const cls of CLASSES) keep[cls] = (holds[cls] ?? []).filter(id => !(were[cls] ?? []).includes(id));
       return [{ from: m.to, fromKind: 'file' as RefKind, desired: keep, author: authorRef(), minted: false }];
     });
     if (changes.length > 0) await reconcileLinkRows(spaceId, changes);
