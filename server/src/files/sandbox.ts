@@ -98,7 +98,8 @@ export async function assertNoSymlinkEscape(spaceId: string, absPath: string): P
       const suffix = path.relative(probe, absPath); // '' when probe === absPath
       const realFull = suffix ? path.resolve(realProbe, suffix) : realProbe;
       if (!isWithin(realRoot, realFull)) {
-        throw new RangeError(`Path escapes the space root via a symlink: '${absPath}'`);
+        // Named relative to the space: the refusal reaches the caller, and the server's own directory layout is not theirs to learn.
+        throw new RangeError(`Path escapes the space root via a symlink: '${toDocId(path.relative(rootDir, absPath))}'`);
       }
       return;
     } catch (err) {
