@@ -23,7 +23,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { isMissingPath, openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
@@ -40,7 +39,6 @@ import type { FileMetaDoc } from '../config/types.js';
 import { NotFoundError } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
 import { deleteDirectoryCascade, deleteFileCascade, isUnfinishedDirectoryDelete } from '../files/delete-cascade.js';
-import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { contentDispositionOf } from '../util/content-disposition.js';
@@ -48,7 +46,7 @@ import { hideDerivedTrees } from '../files/derived-trees.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { registerUploadRoute } from './files-upload.js';
 import { registerMkdirRoute } from './files-mkdir.js';
-import { webhookToken, requireQueryPath } from './files-request.js';
+import { webhookToken, requireKnownSpace, requireWritePath, requireWriteTarget } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
 import { sendCaughtFailure } from './send-failure.js';
@@ -230,12 +228,8 @@ async function enrichEntries(memberIds: string[], dirPath: string, entries: File
 // ── GET /api/files/:spaceId ───────────────────────────────────────────────────
 // Stat the path: directory → JSON list, file → stream bytes.
 fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  const spaceId = requireKnownSpace(req, res);
+  if (spaceId === null) return;
 
   const filePath = req.query['path'];
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
@@ -348,12 +342,8 @@ registerMkdirRoute(fileStoreRouter);
 // ── GET /api/files/:spaceId/upload-status ─────────────────────────────────────
 // Returns bytes received for an in-progress chunked upload.
 fileStoreRouter.get('/:spaceId/upload-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  const spaceId = requireKnownSpace(req, res);
+  if (spaceId === null) return;
   const filePath = req.query['path'];
   const total = parseInt(req.query['total'] as string, 10);
   if (typeof filePath !== 'string' || !filePath.trim() || isNaN(total) || total <= 0) {
@@ -375,16 +365,9 @@ fileStoreRouter.post(
   requireSpaceAuth,
   denyReadOnly,
   async (req, res) => {
-    const spaceId = req.params['spaceId'] as string;
-    const cfg = getConfig();
-    if (!cfg.spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
-
-    const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-    if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-    const targetSpace = wt.target;
+    const target = requireWriteTarget(req, res);
+    if (target === null) return;
+    const { targetSpace } = target;
 
     const filePath = req.query['path'];
     if (typeof filePath !== 'string' || !filePath.trim()) {
@@ -429,19 +412,9 @@ fileStoreRouter.post(
 // ── DELETE /api/files/:spaceId ────────────────────────────────────────────────
 // Deletes a file. Deleting a directory requires { confirm: true } in the JSON body.
 fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const targetSpace = wt.target;
-
-  const filePath = requireQueryPath(req, res);
-  if (filePath === null) return;
+  const request = requireWritePath(req, res);
+  if (request === null) return;
+  const { targetSpace, path: filePath } = request;
 
   let absPath: string;
   try {
@@ -523,19 +496,9 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
 // ── PATCH /api/files/:spaceId ─────────────────────────────────────────────────
 // Move/rename a file or directory. Body: { destination: string }
 fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  const targetSpace = wt.target;
-
-  const srcPath = requireQueryPath(req, res);
-  if (srcPath === null) return;
+  const request = requireWritePath(req, res);
+  if (request === null) return;
+  const { targetSpace, path: srcPath } = request;
 
   const destination = req.body?.destination;
   if (typeof destination !== 'string' || !destination.trim()) {
