@@ -54,6 +54,7 @@ import { log, peerText } from '../util/log.js';
 import { boundedErrorText } from '../util/bounded-read.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import type { MemberIntroduction, MemberRemoval } from '../config/types-networks.js';
+import { nominalBackoffMs } from '../util/backoff.js';
 
 /** The longest an opener waits before trying a pairing that failed again. The sync cycle is the clock. */
 export const PAIR_RETRY_MS = 5 * 60_000;
@@ -68,7 +69,7 @@ export const PAIR_FIRST_RETRY_MS = 30_000;
  */
 export function pairRetryDue(intro: Pick<MemberIntroduction, 'attempts' | 'lastAttemptAt'>, now: number): boolean {
   if (!intro.lastAttemptAt) return true;
-  const wait = Math.min(PAIR_RETRY_MS, PAIR_FIRST_RETRY_MS * 2 ** Math.max(0, (intro.attempts ?? 1) - 1));
+  const wait = nominalBackoffMs((intro.attempts ?? 1) - 1, PAIR_FIRST_RETRY_MS, PAIR_RETRY_MS);
   return now - time(intro.lastAttemptAt) >= wait;
 }
 /** How long a token minted for a pairing lives before the pairing completes and lifts the expiry. */

@@ -16,6 +16,7 @@
  * on its own terms (400, 413, 422) says nothing about whether it is up, and cooling down on it would switch off a
  * working endpoint for a caller's mistake.
  */
+import { nominalBackoffMs } from './backoff.js';
 import { log } from './log.js';
 
 export interface EndpointCooldown {
@@ -34,15 +35,6 @@ export function endpointUnavailable(status: number | undefined): boolean {
   return status === undefined || status === 429 || status === 529 || status === 402 || status >= 500;
 }
 
-/**
- * The wait after `failures` failures in a row: `baseMs`, doubled per failure, never past `maxMs`. The one spelling of a doubling
- * backoff, so an endpoint's cooldown and a stopped move's retry (`files/finish-owed-moves.ts`) cannot disagree about what "doubles"
- * means (the first wait is `baseMs`, after ZERO earlier failures).
- */
-export function doublingDelayMs(baseMs: number, failures: number, maxMs: number): number {
-  return Math.min(baseMs * 2 ** Math.max(0, failures), maxMs);
-}
-
 export function endpointCooldown(name: string, opts: { baseMs: number; maxMs: number }): EndpointCooldown {
   let downUntil: number | undefined;
   let streak = 0;
@@ -50,7 +42,8 @@ export function endpointCooldown(name: string, opts: { baseMs: number; maxMs: nu
     coolingDown: (now = Date.now()) => downUntil !== undefined && now < downUntil,
     until: () => downUntil,
     failed(now = Date.now()) {
-      const ms = doublingDelayMs(opts.baseMs, streak, opts.maxMs);
+      // Not jittered: the window is a figure the line names and a caller reads back (`until`), and what it passes over is one endpoint.
+      const ms = nominalBackoffMs(streak, opts.baseMs, opts.maxMs);
       streak++;
       downUntil = now + ms;
       log.warn(`${name}: unavailable — passed over for ${Math.round(ms / 1000)} s`);
