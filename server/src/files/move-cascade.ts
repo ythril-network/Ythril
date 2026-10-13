@@ -30,7 +30,8 @@
  * `MoveStillOwed` — never swallowed, never a success. The bytes are at the destination and some records are not, and the move is
  * finished by the retry of the request or, if nobody retries, by housekeeping (`files/finish-owed-moves.ts`); nothing that runs by
  * itself forgets the marker or removes the records while it is owed (`moveIsOwed`). A sidecar whose bytes cannot be moved keeps the
- * move owed: its rows do not move away from their bytes.
+ * move owed: its rows do not move away from their bytes. The destination's own sidecars are the replaced file's, so the moved file's
+ * take their place (`replaceSidecar`); a move onto a converted file therefore finishes.
  *
  * ## One run at a time
  *
@@ -46,7 +47,8 @@
  */
 import { moveFile, listFilesRecursive } from './files.js';
 import { holdJobsForMove, releaseMoveHold, extendMoveHold, markSpaceMayHaveWork, rekeyJobsForMove } from './media/job-queue.js';
-import { kindAt, movedId, movedPairs, movedSidecars } from './moved-paths.js';
+import { isAtOrUnder, kindAt, movedId, movedPairs, movedSidecars, sidecarsOwnedBy } from './moved-paths.js';
+import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import {
@@ -169,6 +171,23 @@ async function cameBackAtSource(spaceId: string, plan: MovePlan): Promise<Set<st
 }
 
 /**
+ * Move one sidecar's bytes to where the destination's go, REPLACING what the destination's own sidecar left there.
+ *
+ * A rename of a directory onto a non-empty directory fails, and a converted destination has an extracted tree: left to the rename, a
+ * move onto a converted file could never finish (every retry met the same failure and the move was stranded). The destination's
+ * sidecars belong to the file the move replaces, so the moved file's take their place — removed first, then renamed, in this one
+ * function so no caller can do the second without the first. Only a sidecar the DESTINATION owns is removed (`destinationOwns`, from
+ * `sidecarsOwnedBy`): `_converted/g.md/` is the converted tree of a directory `g.md`, not of a file `g`, and stays. A target that overlaps
+ * the sidecar being moved is not removed either: removing it would remove the bytes about to move.
+ */
+async function replaceSidecar(spaceId: string, sidecar: { from: string; to: string }, destinationOwns: ReadonlySet<string>): Promise<void> {
+  if (destinationOwns.has(sidecar.to) && !isAtOrUnder(sidecar.to, sidecar.from) && !isAtOrUnder(sidecar.from, sidecar.to)) {
+    await removeTree(await resolveSafePathChecked(spaceId, sidecar.to));
+  }
+  await moveFile(spaceId, sidecar.from, sidecar.to);
+}
+
+/**
  * Everything that follows the bytes, in the order a retry can finish: the sidecars' bytes, the settle of the tombstones the move
  * left pending, then the records in batches. A failure of any of it is {@link MoveStillOwed} — the marker stays, the jobs stay held —
  * and nothing in here swallows one. The marker is forgotten only when the move is no longer owed.
@@ -178,9 +197,11 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
     // The bytes have moved, so what the path IS is read where they went.
     const kind = await kindAt(spaceId, dst);
     let sidecarFailed = false;
+    // What stands where a sidecar goes is read BEFORE any of them moves: the destination's own, never another path's.
+    const destinationOwns = new Set((await sidecarsOwnedBy(spaceId, dst, kind)).map(s => s.path));
     for (const sidecar of await movedSidecars(spaceId, src, dst, kind)) {
       if (!(await bytesPresentAt(spaceId, sidecar.from))) continue;
-      await moveFile(spaceId, sidecar.from, sidecar.to).catch((err: unknown) => {
+      await replaceSidecar(spaceId, sidecar, destinationOwns).catch((err: unknown) => {
         sidecarFailed = true;
         log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`);
       });
