@@ -183,11 +183,18 @@ describe('a delete of a file record already gone answers 404 on every door', { s
     await seed('dir/one.txt');
     const first = await restDelete('dir/one.txt');
     assert.ok(succeeded(first), `${first.status}`);
-    assert.ok((await record('dir/one.txt'))?.deletedAt);
+    // Q-379: the audit record keeps the moment its OWN delete flagged it. "Has a deletedAt" cannot tell that from a second flag
+    // written over the first: a directory delete that matched the flagged row again (the filter's `deletedAt` half gone) stamps a
+    // new one, every truthiness check reads green, and the record claims the file was deleted later than it was.
+    const stampedBy = (await record('dir/one.txt'))?.deletedAt;
+    assert.equal(typeof stampedBy, 'string', 'the first delete did not flag the record');
+    await new Promise(r => setTimeout(r, 25));    // a later stamp must differ from the first, whatever the clock's resolution
     const tombstonesBefore = await tombstones();
     const dir = await restDelete('dir', { confirm: true });
     assert.ok(succeeded(dir), `the directory is still on disk and its delete is allowed: ${dir.status} ${JSON.stringify(dir.detail)}`);
     assert.ok((await record('dir/one.txt'))?.deletedAt, 'a directory delete after a soft delete left the flagged record live');
+    assert.equal((await record('dir/one.txt'))?.deletedAt, stampedBy,
+      'the directory delete re-flagged a record that was already flagged: its deletedAt is the directory delete\'s, not the file delete\'s');
     assert.deepEqual(await tombstones(), tombstonesBefore, 'the directory delete wrote a tombstone for a file that was already gone');
   });
 });

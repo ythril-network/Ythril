@@ -56,10 +56,11 @@ export const NOTHING = Object.freeze({ served: [], pushed: [] });
 
 /**
  * Open a door on one space, `S`, under the harness database named `suite`. Close it with `close()`.
+ * `monitorCommands` opens the door with command monitoring, for `door.commandsDuring` (`openPushDoor`).
  * Skip a suite with `mongoSkipReason()` and `privateAddressSkipReason()` before calling this.
  */
-export async function openFileActDoors({ suite, space: S }) {
-  const door = await openPushDoor({ suite, spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
+export async function openFileActDoors({ suite, space: S, monitorCommands = false }) {
+  const door = await openPushDoor({ suite, monitorCommands, spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
   const files = await import('../../server/dist/files/files.js');
   const { syncFiles } = await import('../../server/dist/sync/file-sync.js');
   const { callTool } = await import('../../server/dist/mcp/call-tool.js');
