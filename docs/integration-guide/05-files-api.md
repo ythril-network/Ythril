@@ -432,6 +432,10 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and
   the cause is the server's, so a retry that fails the same way is a fault to report, not a request to change. It
   holds back the record TTL sweep's file deletes the same way. A store failure there is still `503`.
+- **A file act the server's own storage refuses answers `500` with `code: "file_system_fault"`, on every door.** The
+  words name no path and carry the errno code only; the cause is in the server log. Nothing about it is the caller's
+  path (a path a file blocks is `409`), so it carries no `path` and no `Retry-After`: a retry that fails the same way
+  is a fault to report.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one
