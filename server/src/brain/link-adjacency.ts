@@ -40,6 +40,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
+import { distinctStringsOf } from '../db/distinct-strings.js';
 import { getConfig } from '../config/loader.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
@@ -363,8 +364,8 @@ export async function aFileUnderHoldsALink(spaceId: string, root: string): Promi
  */
 export async function fileLinkSourcesUnder(spaceId: string, root: string): Promise<string[]> {
   if (!root) throw new RangeError('fileLinkSourcesUnder: an empty root would ask about every file in the space');
-  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .distinct('from', asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } })) as string[];
+  return await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
+    asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } }));
 }
 
 /**

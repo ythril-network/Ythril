@@ -39,6 +39,7 @@
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { distinctStringsOf } from '../db/distinct-strings.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
@@ -56,8 +57,7 @@ async function stampCollection(spaceId: string, part: (typeof BRAIN_COLLECTIONS)
   const cfg = getConfig();
   const selfId = cfg.instanceId;
   let stamped = 0;
-  const authors = (await coll.distinct('author.instanceId', asFilter<{ _id: string }>({ ...UNSTAMPED })) as unknown[])
-    .filter((a): a is string => typeof a === 'string' && a !== '');
+  const authors = (await distinctStringsOf(coll, 'author.instanceId', asFilter<{ _id: string }>({ ...UNSTAMPED }))).filter(a => a !== '');
   for (const author of authors) {
     const stamp = backfillStamp(cfg, spaceId, { author: { instanceId: author } }, selfId);
     if (stamp === '') continue;

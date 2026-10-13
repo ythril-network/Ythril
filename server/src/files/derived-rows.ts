@@ -20,6 +20,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
+import { distinctStringsOf } from '../db/distinct-strings.js';
 import { inChunks } from '../util/chunks.js';
 import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
 import { escapeRegex } from '../util/redos.js';
@@ -99,6 +100,6 @@ export async function rootsOfDirectory(spaceId: string, dir: string): Promise<st
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const prefix = `^${escapeRegex(`${root}/`)}`;
   const live = (await files.find(asFilter<FileMetaDoc>({ _id: { $regex: prefix }, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray()).map(r => String(r._id));
-  const parents = await files.distinct('parentFileId', asFilter<FileMetaDoc>({ parentFileId: { $regex: prefix } })) as string[];
+  const parents = await distinctStringsOf(files, 'parentFileId', asFilter<FileMetaDoc>({ parentFileId: { $regex: prefix } }));
   return [...new Set([...live, ...parents])];
 }
