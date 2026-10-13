@@ -26,6 +26,15 @@ describe('refusalText', () => {
     expect(refusalText(transloco, { error: { error: 'Plain refusal.' } }, 'join.error.generic')).toBe('Plain refusal.');
   });
 
+  it('reads a code in the key family it is given, and offers the answer\'s path to the sentence', () => {
+    const words: Record<string, string> = { 'files.refusal.path_blocked': 'Blocked: {{path}}' };
+    const t = { translate: (key: string, p?: { path?: string }) => (words[key] ?? key).replace('{{path}}', p?.path ?? '') } as Parameters<typeof refusalText>[0];
+    const err = { error: { code: 'path_blocked', path: 'a.txt/x', error: 'server sentence' } };
+    expect(refusalText(t, err, 'join.error.generic', 'files.refusal')).toBe('Blocked: a.txt/x');
+    // The same code in the default (network) family has no words, so the server's sentence is said.
+    expect(refusalText(t, err, 'join.error.generic')).toBe('server sentence');
+  });
+
   it('uses the fallback key only when the answer carried neither', () => {
     expect(refusalText(transloco, { error: null }, 'join.error.generic')).toBe('Joining failed.');
     expect(refusalText(transloco, undefined, 'join.error.generic')).toBe('Joining failed.');

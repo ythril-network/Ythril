@@ -1,8 +1,44 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { FilesApi } from '../../core/files-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import type { FileEntry } from '../../core/api.types';
+import type { refusalText } from '../../core/refusal-text';
+
+/** A failed request as the client receives it: the answer's body under `error`. The shape `refusalText` words. */
+type RefusedAnswer = Parameters<typeof refusalText>[1];
+
+/**
+ * The family of translation keys a file act's answer code names: `files.refusal.<code>`. A prefix, not a key — the
+ * code arrives with the answer, so the key cannot be written out here.
+ */
+export const FILE_REFUSAL_PREFIX = 'files.refusal';
+
+/** The code of a move whose bytes moved and whose records the server is still finishing — not a failure. */
+const MOVE_STILL_OWED = 'move_still_owed';
+
+/** How long to wait before looking again when the answer names no `Retry-After`, and the bounds on one that does. */
+const OWED_DEFAULT_SECONDS = 5;
+const OWED_MAX_SECONDS = 60;
+
+/** The seconds an answer asks the caller to wait: its `Retry-After`, bounded, or the default when it names none. */
+function retryAfterSeconds(err: unknown): number {
+  const raw = (err as { headers?: { get(name: string): string | null } } | null)?.headers?.get('Retry-After');
+  const seconds = raw === null || raw === undefined ? NaN : Number(raw);
+  if (!Number.isFinite(seconds) || seconds < 0) return OWED_DEFAULT_SECONDS;
+  return Math.min(seconds, OWED_MAX_SECONDS);
+}
+
+/** A write that failed: which one, and the answer exactly as the client received it (the page words it). */
+export interface ListingMutationFailure {
+  kind: ListingMutationKind;
+  error: RefusedAnswer;
+}
+
+/** A move the server is finishing: the destination it named, when it named one. */
+export interface ListingMoveOwed {
+  path?: string;
+}
 
 /** What a mutation did, for whoever cares beyond the reload this store already performs. */
 export type ListingMutation = 'created' | 'moved' | 'removed';
@@ -106,8 +142,22 @@ export class FileListingStore {
   /** A write succeeded and the directory has been reloaded. */
   readonly mutated = new Subject<ListingMutation>();
 
-  /** A write failed. No message — the page owns the wording. */
-  readonly mutationFailed = new Subject<ListingMutationKind>();
+  /** A write failed. The answer travels with it; the page owns the wording. */
+  readonly mutationFailed = new Subject<ListingMutationFailure>();
+
+  /**
+   * A write was ACCEPTED and is being finished by the server (`move_still_owed`). Not a failure: the bytes moved.
+   * The listing is reloaded once, after the seconds the server asked for, so no stale row outlives the move.
+   */
+  readonly moveOwed = new Subject<ListingMoveOwed>();
+
+  /** The listing the page last asked for, so a delayed reload never drags the operator back to a folder they left. */
+  private requested: { spaceId: string; path: string } | null = null;
+  private owedReload: ReturnType<typeof setTimeout> | undefined;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.owedReload));
+  }
 
   /**
    * The path `entries()` currently describes, or null before the first successful listing.
@@ -129,6 +179,7 @@ export class FileListingStore {
      * stopped existing in the same commit. Kept as a note rather than as code, because a condition that
      * cannot change an outcome is a condition no test can protect.
      */
+    this.requested = { spaceId, path };
     const isRefresh = this.loadedPath === path && this.entries().length > 0;
     if (isRefresh) this.refreshing.set(true);
     else { this.loading.set(true); this.loadError.set(null); }
@@ -189,22 +240,45 @@ export class FileListingStore {
   createDir(spaceId: string, path: string, reloadPath: string): void {
     this.filesApi.createDir(spaceId, path).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('created'); },
-      error: () => this.mutationFailed.next('create'),
+      error: (err) => this.writeFailed('create', err, spaceId, reloadPath),
     });
   }
 
   move(spaceId: string, from: string, to: string, reloadPath: string): void {
     this.filesApi.moveFile(spaceId, from, to).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('moved'); },
-      error: () => this.mutationFailed.next('move'),
+      error: (err) => this.writeFailed('move', err, spaceId, reloadPath),
     });
   }
 
   remove(spaceId: string, path: string, reloadPath: string): void {
     this.filesApi.deleteFile(spaceId, path).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('removed'); },
-      error: () => this.mutationFailed.next('remove'),
+      error: (err) => this.writeFailed('remove', err, spaceId, reloadPath),
     });
+  }
+
+  /**
+   * What an answer to a write that did not succeed means — decided in ONE place for the three writes.
+   *
+   * `move_still_owed` is the one answer that is not a failure: the server has moved the bytes and finishes the
+   * records itself, so saying the write failed would be false. It is published as `moveOwed`, and the listing is
+   * reloaded ONCE after the `Retry-After` the server named (a default when it named none) rather than polled —
+   * the server finishes the move on its own, so one look after the wait is enough, and a reload that finds the
+   * move still owed would only repeat the same wait. Every other answer is a failure, and travels with its body.
+   */
+  private writeFailed(kind: ListingMutationKind, err: unknown, spaceId: string, reloadPath: string): void {
+    const body = (err as { error?: { code?: string; path?: string } | null } | null)?.error;
+    if (body?.code !== MOVE_STILL_OWED) {
+      this.mutationFailed.next({ kind, error: err as RefusedAnswer });
+      return;
+    }
+    this.moveOwed.next({ path: body.path });
+    clearTimeout(this.owedReload);
+    this.owedReload = setTimeout(() => {
+      // Only if that folder is still the one being shown: an operator who moved on is not pulled back.
+      if (this.requested?.spaceId === spaceId && this.requested.path === reloadPath) this.load(spaceId, reloadPath);
+    }, retryAfterSeconds(err) * 1000);
   }
 
   /** The file GET URL. No token in it — auth goes in the fetch header, never the URL (#134). */

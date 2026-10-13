@@ -12,7 +12,7 @@ import { FileTreeComponent, type TreeNode } from './file-tree.component';
 import { FileToolbarComponent, type BreadcrumbSegment } from './file-toolbar.component';
 import { FileDetailPaneComponent, type DetailMode } from './file-detail-pane.component';
 import { FileTreeStore } from './file-tree.store';
-import { FileListingStore, LISTING_FAILURE_KEYS } from './file-listing.store';
+import { FileListingStore, FILE_REFUSAL_PREFIX, LISTING_FAILURE_KEYS } from './file-listing.store';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -26,6 +26,7 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { refusalText } from '../../core/refusal-text';
 // The docked detail pane reuses the Brain's file-metadata edit fields. These are dumb, shared
 // ref-field widgets; they resolve chip labels via EntityRefPicker, which the Brain provides — so the
 // "File meta" edit mode is available only when embedded in the Brain (embeddedSpaceId set).
@@ -325,8 +326,16 @@ export class FileManagerComponent implements OnInit, OnDestroy {
       if (kind === 'moved') this.renamingEntry.set('');
       if (kind === 'removed') this.filesChanged.emit();
     });
-    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(kind => {
-      this.toast.error(this.transloco.translate(LISTING_FAILURE_KEYS[kind]));
+    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(({ kind, error }) => {
+      // The server's answer says WHY (`path_blocked`, `destination_taken_by_other`, ...): its code has words, and
+      // an answer without one still says the server's own sentence before the generic line.
+      this.toast.error(refusalText(this.transloco, error, LISTING_FAILURE_KEYS[kind], FILE_REFUSAL_PREFIX));
+    });
+    // A move the server is finishing is not a failure: the bytes moved, so the row leaves edit mode and the page
+    // says what is happening. The store reloads the listing once the server's wait is over.
+    this.listing.moveOwed.pipe(takeUntilDestroyed()).subscribe(({ path }) => {
+      this.renamingEntry.set('');
+      this.toast.info(this.transloco.translate('files.refusal.move_still_owed', { path: path ?? '' }));
     });
 
     /*
