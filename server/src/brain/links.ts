@@ -42,7 +42,9 @@ import { col, asFilter } from '../db/mongo.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
-import { linksStartingFrom } from './link-adjacency.js';
+import { LINK_CLASSES, linkClassesFrom, linksStartingFrom } from './link-adjacency.js';
+import { READ_CHUNK } from '../db/read-by-id.js';
+import { inChunks } from '../util/chunks.js';
 import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -203,7 +205,23 @@ export async function reconcileLinks(
  * refuses to create, and removing them here would silently delete another record's data.
  */
 export async function removeLinksFrom(spaceId: string, from: string, fromKind: RefKind): Promise<number> {
-  return (await reconcileLinks(spaceId, from, fromKind, allClassesEmpty(fromKind), NO_AUTHOR)).removed;
+  return removeLinksFromMany(spaceId, [from], fromKind);
+}
+
+/**
+ * {@link removeLinksFrom} for many records of one kind: the batched form, and the only one — the single call is this with one id, so
+ * a file's links retired by a move (`files/move-links.ts`) and a deleted fact's cannot be removed by two implementations. Chunked
+ * (`READ_CHUNK`): each chunk is one reconcile of the link rows. Returns how many rows were removed.
+ */
+export async function removeLinksFromMany(spaceId: string, froms: readonly string[], fromKind: RefKind): Promise<number> {
+  const desired = allClassesEmpty(fromKind);
+  if (Object.keys(desired).length === 0) return 0;   // a kind nothing is linked FROM (an entity) has no links to remove
+  let removed = 0;
+  for (const part of inChunks([...froms], READ_CHUNK)) {
+    const counts = await reconcileLinkRows(spaceId, part.map(from => ({ from, fromKind, desired, author: NO_AUTHOR, minted: false })));
+    for (const c of counts) removed += c.removed;
+  }
+  return removed;
 }
 
 /** Every class a record of this kind can hold, each set to empty — "remove all of this record's links". */
@@ -214,16 +232,13 @@ function allClassesEmpty(fromKind: RefKind): DesiredLinks {
 }
 
 /**
- * Which classes each record kind can hold — the six, keyed by the FROM side.
- *
- * Written out because it is a product fact rather than a derivable one: a fact names entities and nothing
- * else, a chrono entry names entities and facts, a file names all three. An entity is only ever a `to`.
+ * Which classes each record kind can hold — the six, keyed by the FROM side. Read out of `LINK_CLASSES`
+ * (`brain/link-adjacency.ts`), where the product fact is written once: a fact names entities and nothing else, a chrono entry
+ * names entities and facts, a file names all three. An entity is only ever a `to`.
  */
-const CLASSES_BY_FROM: Partial<Record<RefKind, readonly RefKind[]>> = {
-  fact: ['entity'],
-  chrono: ['entity', 'fact'],
-  file: ['entity', 'fact', 'chrono'],
-};
+const CLASSES_BY_FROM: Partial<Record<RefKind, readonly RefKind[]>> = Object.fromEntries(
+  [...new Set(LINK_CLASSES.map(c => c.kind))].map(kind => [kind, linkClassesFrom(kind).map(c => c.toKind)]),
+);
 
 /** A removal has no author to attribute; the tombstone carries the instance id instead. */
 const NO_AUTHOR: AuthorRef = { instanceId: '', instanceLabel: '' };
