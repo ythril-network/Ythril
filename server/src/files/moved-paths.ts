@@ -136,11 +136,57 @@ export function movedId(id: string, src: string, dst: string): string | null {
   if (!from || !to) return null;   // an empty root would claim the whole space
   const root = SIDECAR_ROOTS.find(r => id.startsWith(r)) ?? '';
   const tail = id.slice(root.length);
-  if (tail === from) return root + to;
-  if (tail.startsWith(`${from}/`) || tail.startsWith(`${from}#`)) return root + to + tail.slice(from.length);
+  if (isAtOrUnder(tail, from) || tail.startsWith(`${from}#`)) return root + to + tail.slice(from.length);
   if (root === CONVERTED_ROOT && tail === `${from}.md`) return `${root}${to}.md`;
   return null;
 }
+
+/**
+ * Whether `p` is `root` itself or lies under `root/` — on whole path segments, so `a` does not take `ab`. The one spelling of "at or
+ * under", for the id rule above and for the question of whether a running move is carrying a path (`files/move-flight.ts`).
+ */
+export const isAtOrUnder = (p: string, root: string): boolean => p === root || p.startsWith(`${root}/`);
+
+/** The id `id` has after `src` moves to `dst`, or `id` itself when it does not belong to `src` ({@link movedId}). */
+export const idAfterMove = (id: string, src: string, dst: string): string => movedId(id, src, dst) ?? id;
+
+/**
+ * The ids among `ids` that change when `src` moves to `dst`, each with the id it takes — the one spelling of "which of these ids does
+ * the move re-key, and to what". An id that does not belong to `src` is not in the answer, and neither is one that would keep its own
+ * id (a move onto itself). Asked by the cascade's links, the settle's take-back of an abandoned move's links, and the job re-key.
+ */
+export function movedPairs(ids: Iterable<string>, src: string, dst: string): Array<{ from: string; to: string }> {
+  const out: Array<{ from: string; to: string }> = [];
+  for (const from of ids) {
+    const to = movedId(from, src, dst);
+    if (to !== null && to !== from) out.push({ from, to });
+  }
+  return out;
+}
+
+/**
+ * What the path at `relPath` is on disk — a directory or, whatever else, a file: the kind its sidecars and jobs are asked by.
+ * Read from the disk and never inferred from whether it has children: an empty directory has none and is still a directory, whose
+ * trees are not a file's converted Markdown. A path the sandbox refuses is its `RangeError`; a failure to look is thrown.
+ */
+export async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
+  return await isStoredDirectory(await resolveSafePathChecked(spaceId, relPath)) ? 'directory' : 'file';
+}
+
+/**
+ * The `_id` clauses (for an `$or`) that select the jobs belonging to `p` as a `kind`: its own path and every sidecar it owns
+ * ({@link jobPathsOf}, {@link idsUnder}). The one selection of "the jobs of this path", asked by the delete that cancels them, the
+ * move that holds and re-keys them, and the probe that asks whether a move is still owed — which is why it is here, in a leaf both
+ * the job queue and the tombstones import.
+ */
+export const jobIdClausesOf = (p: string, kind: PathKind): ReturnType<typeof idsUnder> => idsUnder(jobPathsOf(p, kind));
+
+/**
+ * One key for "a move", `from` to `to`: the spelling every set and map of moves uses. With `spaceId`, the key of a move in that space
+ * (for a map that holds the moves of more than one).
+ */
+export const moveKey = (m: { from: string; to: string }, spaceId?: string): string =>
+  `${spaceId === undefined ? '' : `${spaceId}\u0000`}${m.from}\u0000${m.to}`;
 
 /**
  * The paths whose JOBS belong to `p`, as a `kind`: the path itself — a FILE's own id, a DIRECTORY's subtree — and every sidecar

@@ -270,13 +270,7 @@ export async function pipeToStored(
  * the tree to this one.
  */
 export async function bytesPresent(abs: string): Promise<boolean> {
-  try {
-    await fsp.lstat(abs);
-    return true;
-  } catch (err) {
-    if (isMissingPath(err)) return false;
-    throw err;
-  }
+  return (await lstatIfPresent(abs)) !== null;
 }
 
 /**

@@ -33,8 +33,8 @@
 import type { ClientSession } from 'mongodb';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { writeInOneCommands } from '../db/one-command.js';
-import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
-import { inChunks } from '../util/chunks.js';
+import { readStoredById } from '../db/read-by-id.js';
+import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 
 /** One row to move: its id now, and the id it is to have. */
 export interface RowMove { from: string; to: string }
@@ -96,18 +96,18 @@ export async function rekeyRows<T extends { _id: string }>(
   if (rows.length === 0) return 0;
 
   let deleted = 0;
-  for (const part of inChunks(rows.map(m => m.from), READ_CHUNK)) {
+  for (const part of inChunks(rows.map(m => m.from), ROWS_PER_BULK_COMMAND)) {
     deleted += (await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: part } }), { session })).deletedCount ?? 0;
   }
   if (deleted !== rows.length) throw new StaleRekeyPlan(`${rows.length} rows were read to be re-keyed and ${deleted} were deleted`);
 
   const flagged = plan.replacements?.flagged ?? [];
   let flaggedDeleted = 0;
-  for (const part of inChunks([...flagged], READ_CHUNK)) {
+  for (const part of inChunks([...flagged], ROWS_PER_BULK_COMMAND)) {
     flaggedDeleted += (await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: part }, deletedAt: { $exists: true } }), { session })).deletedCount ?? 0;
   }
   if (flaggedDeleted !== flagged.length) throw new StaleRekeyPlan(`${flagged.length} audit rows were to be replaced and ${flaggedDeleted} were still flagged`);
-  for (const part of inChunks([...(plan.replacements?.replaced ?? [])], READ_CHUNK)) {
+  for (const part of inChunks([...(plan.replacements?.replaced ?? [])], ROWS_PER_BULK_COMMAND)) {
     await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: part } }), { session });
   }
 

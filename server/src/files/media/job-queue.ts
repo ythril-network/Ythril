@@ -20,7 +20,7 @@ import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
+import { idsUnder, jobIdClausesOf, jobPathsOf, movedPairs, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
 import { setFileProcessingState } from '../derived-fields.js';
 import { rekeyRows } from '../rekey-rows.js';
 import { moveTiming } from '../move-timing.js';
@@ -746,7 +746,7 @@ export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKi
  * the old path.
  */
 export async function holdJobsForMove(spaceId: string, src: string, kind: PathKind): Promise<string[]> {
-  const owned = idsUnder(jobPathsOf(src, kind));
+  const owned = jobIdClausesOf(src, kind);
   if (owned.length === 0) return [];
   const open = asFilter<MediaJobDoc>({
     $or: owned,
@@ -773,7 +773,7 @@ export async function holdJobsForMove(spaceId: string, src: string, kind: PathKi
  * batch is too many when almost every batch finds the hold nowhere near its end, so the filter, not a read, decides.
  */
 export async function extendMoveHold(spaceId: string, src: string, kind: PathKind): Promise<void> {
-  const owned = idsUnder(jobPathsOf(src, kind));
+  const owned = jobIdClausesOf(src, kind);
   if (owned.length === 0) return;
   const { holdMs, holdMarginMs } = moveTiming();
   const now = Date.now();
@@ -785,7 +785,7 @@ export async function extendMoveHold(spaceId: string, src: string, kind: PathKin
 
 /** The ids of every job belonging to `src` as a `kind` — the set a move holds and re-keys (`jobPathsOf`), whatever its state. */
 export async function jobIdsOwnedBy(spaceId: string, src: string, kind: PathKind): Promise<string[]> {
-  const owned = idsUnder(jobPathsOf(src, kind));
+  const owned = jobIdClausesOf(src, kind);
   if (owned.length === 0) return [];
   return (await jobCollection(spaceId).find(asFilter<MediaJobDoc>({ $or: owned }), { projection: { _id: 1 } }).toArray()).map(j => String(j._id));
 }
@@ -820,7 +820,7 @@ export async function rekeyJobsForMove(
   const ids = within?.jobIds ?? await jobIdsOwnedBy(spaceId, src, kind);
   const held = new Set(heldIds);
   const now = new Date().toISOString();
-  const moves = ids.flatMap(id => { const to = movedId(id, src, dst); return to ? [{ from: id, to }] : []; });
+  const moves = movedPairs(ids, src, dst);
   if (moves.length === 0) return 0;
   const moving = new Set(moves.map(m => m.from));
   const run = (session: ClientSession) => rekeyRows<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'), session, {

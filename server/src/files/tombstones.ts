@@ -120,14 +120,14 @@ import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, isStoredDirectory, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt, lstatIfPresent } from './stored-bytes.js';
 import { removeConvergedLinks } from './move-links.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
 import { linksStartingFrom, aFileUnderHoldsALink, fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { ActNotRecorded } from './act-answers.js';
-import { idsUnder, jobPathsOf, movedId, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
+import { jobIdClausesOf, kindAt, moveKey, movedPairs, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
 import {
   heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
@@ -209,7 +209,7 @@ export const FILE_TOMBSTONE_INDEXES = [
   // is not the clock the one-per-path rule reads). Partial, so it holds only the pending few. It replaces `{ pending, deletedAt }`,
   // which `ensureFileTombstoneIndexes` drops ({@link REPLACED_FILE_TOMBSTONE_INDEXES}).
   { keys: { pending: 1, settleAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } } },
-  // A move's marker: `moveWasBegun`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
+  // A move's marker: `moveMarkerOf`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
   // move's tombstones carry it, and only until the move is finished.
   { keys: { 'move.from': 1, 'move.to': 1 }, options: { sparse: true } },
   // The delete of a path a move carried a file TO (`movesBegunInto`): asked by the destination alone, which the index above cannot
@@ -992,17 +992,12 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
  */
 export async function abandonMove(spaceId: string, from: string, to: string): Promise<void> {
   const marker = await moveMarkerOf(spaceId, from, to);
-  if (!marker || !(await bytesPresentAt(spaceId, marker.to)) || await bytesPresentAt(spaceId, marker.from)) return;
+  if (!marker || !(await movedBytesOf(spaceId, marker))) return;
   if (await moveIsOwed(spaceId, from, to)) return;
-  const kind: PathKind = await isStoredDirectory(await resolveSafePathChecked(spaceId, marker.to)) ? 'directory' : 'file';
+  const kind = await kindAt(spaceId, marker.to);
   const froms = kind === 'file' ? [toDocId(from)] : await fileLinkSourcesUnder(spaceId, toDocId(from));
-  await removeConvergedLinks(spaceId, froms.flatMap(f => { const t = movedId(f, from, to); return t !== null && t !== f ? [{ from: f, to: t }] : []; }));
+  await removeConvergedLinks(spaceId, movedPairs(froms, from, to));
   await forgetFinishedMove(spaceId, from, to);
-}
-
-/** Whether a move from `from` to `to` was begun here — its tombstones written — and not yet finished. */
-export async function moveWasBegun(spaceId: string, from: string, to: string): Promise<boolean> {
-  return (await tombstonesOf(spaceId).findOne(asFilter<StoredFileTombstone>(moveMarker(from, to)), { projection: { _id: 1 } })) !== null;
 }
 
 /**
@@ -1046,6 +1041,16 @@ async function lstatAt(spaceId: string, rel: string): Promise<Stats | null> {
 }
 
 /**
+ * What is at a begun move's destination when its bytes HAVE moved — bytes at `to` and none at `from` — or `null` when they have not.
+ * The one spelling of "the bytes have moved", asked by {@link moveIsOwed} (which then judges whether they are the moved ones) and by
+ * {@link abandonMove}. A path that cannot be looked at is thrown, as {@link bytesPresentAt} throws it.
+ */
+async function movedBytesOf(spaceId: string, marker: Pick<MoveMarker, 'from' | 'to'>): Promise<Stats | null> {
+  const atTo = await lstatAt(spaceId, marker.to);
+  return atTo !== null && !(await bytesPresentAt(spaceId, marker.from)) ? atTo : null;
+}
+
+/**
  * Whether the move from `from` to `to` is OWED: begun here (its marker), its bytes at `to` and none at `from`, those bytes are
  * the ones it moved, and something of the file is still at `from` — a live record, a link row or a job. THE one answer to "is
  * this move still unfinished", asked by the retry of a move, by the housekeeping that finishes it, by the media worker before it
@@ -1069,9 +1074,8 @@ async function lstatAt(spaceId: string, rel: string): Promise<Stats | null> {
 export async function moveIsOwed(spaceId: string, from: string, to: string): Promise<boolean> {
   const marker = await moveMarkerOf(spaceId, from, to);
   if (!marker) return false;
-  const atTo = await lstatAt(spaceId, marker.to);
+  const atTo = await movedBytesOf(spaceId, marker);
   if (!atTo) return false;
-  if (await bytesPresentAt(spaceId, marker.from)) return false;
   if (marker.size !== undefined && marker.mtimeMs !== undefined && (atTo.isDirectory() || atTo.size !== marker.size || atTo.mtimeMs !== marker.mtimeMs)) return false;
   return somethingOfTheFileIsAt(spaceId, marker.from, atTo.isDirectory() ? 'directory' : 'file');
 }
@@ -1085,11 +1089,8 @@ async function somethingOfTheFileIsAt(spaceId: string, at: string, kind: PathKin
     ? (await linksStartingFrom(spaceId, [root], 1)).length > 0
     : await aFileUnderHoldsALink(spaceId, root);
   if (linked) return true;
-  return (await col(spaceCollection(spaceId, 'mediaJobs')).findOne(asFilter({ $or: idsUnder(jobPathsOf(root, kind)) }), { projection: { _id: 1 } })) !== null;
+  return (await col(spaceCollection(spaceId, 'mediaJobs')).findOne(asFilter({ $or: jobIdClausesOf(root, kind) }), { projection: { _id: 1 } })) !== null;
 }
-
-/** A move as a set holds it: its two paths. */
-const moveKey = (m: { from: string; to: string }): string => `${m.from}\u0000${m.to}`;
 
 /**
  * Which of the moves the `rows` name are STILL OWED ({@link moveIsOwed}), by key — for a REMOVER, so it fails the other way: a move

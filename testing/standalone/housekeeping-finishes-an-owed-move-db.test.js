@@ -49,7 +49,7 @@ async function moveStoppedAfterItsBytes(from, to) {
   const a = await acts.move('REST', from, to);
   assert.equal(status(a), 503, `the move was not stopped by the store: ${JSON.stringify(a.body ?? a.text)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');
-  assert.equal(await tombstones.moveWasBegun(S, from, to), true, 'the move left no marker — the case is not reached');
+  assert.equal((await tombstones.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
 }
 
 /**
@@ -91,12 +91,12 @@ describe('housekeeping finishes an owed move', { skip }, () => {
 
     await sweep.sweepExpired(new Date());
     assert.ok(await liveRow('hk/from.txt'), 'the sweep finished a move whose request may still be running');
-    assert.equal(await tombstones.moveWasBegun(S, 'hk/from.txt', 'hk/to.txt'), true, 'the marker of a move still inside its window was cleared');
+    assert.equal((await tombstones.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, true, 'the marker of a move still inside its window was cleared');
 
     await sweep.sweepExpired(LATER());
     assert.ok(await liveRow('hk/to.txt'), 'the record did not follow the file to its destination: nothing finished the move');
     assert.equal(await row('hk/from.txt'), null, 'the record is still at the source');
-    assert.equal(await tombstones.moveWasBegun(S, 'hk/from.txt', 'hk/to.txt'), false, 'a finished move kept its marker');
+    assert.equal((await tombstones.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, false, 'a finished move kept its marker');
     assert.deepEqual((await acts.raw()).filter(t => !t.pending).map(t => t.path).sort(), ['hk/from.txt'], 'the path the move left is not tombstoned, once');
     assert.equal(await finishedCount(), before + 1, 'the finished move was not counted');
     const audit = await acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.move.finish' }).toArray();
