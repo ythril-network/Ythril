@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import { blockAfter } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
 
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
 // The cascade is two modules since bundle-51: the order and the tombstones are `delete-cascade.ts`'s, and what a file leaves
@@ -210,14 +211,10 @@ describe('move_file explains the tombstone and the directory case', () => {
     assert.ok(DESTINATION, 'server/src/files/destination.ts does not exist: nothing refuses a destination blocked by a file, so the description\'s sentence would be false');
     assert.match(DESTINATION, /export\s+(?:async\s+)?function\s+assertDestinationReachable\b/, 'the destination module no longer exports its check');
     assert.match(DESTINATION, /path_blocked/, 'the refusal no longer carries the code the doors answer with');
-    const at = MOVE_CASCADE.indexOf('export async function moveFileCascade');
-    const body = MOVE_CASCADE.slice(at, MOVE_CASCADE.indexOf('\nexport ', at + 10));
-    assert.match(body, /assertDestinationReachable\(/, 'moveFileCascade does not ask the destination module, so the move is not refused');
-    for (const step of ['holdJobsForMove(', 'writePendingFileTombstones(', 'moveFile(']) {
-      const stepAt = body.indexOf(step);
-      assert.ok(stepAt < 0 || body.indexOf('assertDestinationReachable(') < stepAt,
-        `the destination is checked after ${step} — a refused move would already have changed something`);
-    }
+    // The order is read by following the calls (`_cascade-order.mjs`): the steps live in what the cascade calls, not in its body, and a
+    // step nothing reaches fails. The other gate that holds this order asks the same function.
+    const order = moveCascadeAsksDestinationFirst(readFileSync('server/src/files/move-cascade.ts', 'utf8'));
+    assert.ok(order.guards, `the move does not ask the destination module first: ${order.why} — a refused move would already have changed something`);
   });
 
   it('and a taken name really is replaced — no part of the move cascade refuses an existing destination file', () => {
