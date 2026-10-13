@@ -7,6 +7,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { openStoredRead, writeStored, statStored, moveStored } from './stored-bytes.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { fsRefusalOf } from './destination.js';
 
 export interface FileEntry {
   name: string;
@@ -132,7 +133,8 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
 /** Create a directory (including parents) */
 export async function createDir(spaceId: string, dirPath: string): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, dirPath);
-  await mkdirPrivate(abs);
+  // The filesystem's refusal is the caller's path or the server's fault, said once (`fsRefusalOf`), never the raw errno text.
+  await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
 }
 
 /** Move/rename a file or directory */
@@ -143,8 +145,9 @@ export async function moveFile(
 ): Promise<void> {
   const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
   const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
-  await mkdirPrivate(path.dirname(dstAbs));
-  await moveStored(srcAbs, dstAbs);   // under both paths' locks (F-43)
+  await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [srcPath, dstPath]); });
+  // Under both paths' locks (F-43).
+  await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [srcPath, dstPath]); });
   // A rename carries the source's mode with it, so moving a file that predates this hardening would silently
   // reintroduce an 0644 file into a tightened tree.
   //
