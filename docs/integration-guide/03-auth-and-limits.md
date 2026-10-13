@@ -177,6 +177,8 @@ to correct. The information is identical; only the envelope differs.
 | 503 | **The store could not answer. Not your request — retry it.** See below. Also a file move whose bytes moved and whose records follow on their own: `code: "move_still_owed"`, with `Retry-After`; see [Files](05-files-api.md) |
 | 507 | Storage quota hard limit exceeded |
 
+**A client that meets a `code`, or an audit `operation`, it does not know acts on the HTTP status** (and `Retry-After`, where the answer carries one): new codes are added within a status and never change what that status asks of the caller, so an unrecognised one is handled as its status is.
+
 ---
 
 ## Rate Limits

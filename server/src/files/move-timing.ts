@@ -10,11 +10,11 @@
  * ## The byte budget
  *
  * A move's rows commit in transactions bounded by BYTES, not by row count: a derived row carries a vector and its text, so a
- * count that is safe for chunks of a short note is not safe for a book. Measured on the test stack with real chunk rows (about 24 KB
- * each) and the files collection's own indexes: tens of megabytes committed reliably, and a transaction several times that failed on
- * the files text index. The budget sits well under the reliable figure, so a batch is a fraction of what the store has been seen to
- * commit; the measurement and its procedure are in the bundle-44 plan (probe P5), not copied here, because a figure written into a
- * docblock outlives the stack it was taken on.
+ * count that is safe for chunks of a short note is not safe for a book. The budget was set from a measurement of real chunk rows
+ * committed against the files collection's own indexes, whose text index is what a transaction too large for the store fails on first.
+ * It sits well under what committed reliably, so a batch is a fraction of what the store has been seen to commit. The measured
+ * figures are not written here: a figure in a docblock outlives the stack it was taken on, and the constant below is the one place
+ * the budget is stated.
  *
  * ## Why it MERGES and refuses
  *
