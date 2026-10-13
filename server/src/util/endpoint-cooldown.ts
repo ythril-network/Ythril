@@ -34,6 +34,15 @@ export function endpointUnavailable(status: number | undefined): boolean {
   return status === undefined || status === 429 || status === 529 || status === 402 || status >= 500;
 }
 
+/**
+ * The wait after `failures` failures in a row: `baseMs`, doubled per failure, never past `maxMs`. The one spelling of a doubling
+ * backoff, so an endpoint's cooldown and a stopped move's retry (`files/finish-owed-moves.ts`) cannot disagree about what "doubles"
+ * means (the first wait is `baseMs`, after ZERO earlier failures).
+ */
+export function doublingDelayMs(baseMs: number, failures: number, maxMs: number): number {
+  return Math.min(baseMs * 2 ** Math.max(0, failures), maxMs);
+}
+
 export function endpointCooldown(name: string, opts: { baseMs: number; maxMs: number }): EndpointCooldown {
   let downUntil: number | undefined;
   let streak = 0;
@@ -41,7 +50,7 @@ export function endpointCooldown(name: string, opts: { baseMs: number; maxMs: nu
     coolingDown: (now = Date.now()) => downUntil !== undefined && now < downUntil,
     until: () => downUntil,
     failed(now = Date.now()) {
-      const ms = Math.min(opts.baseMs * 2 ** streak, opts.maxMs);
+      const ms = doublingDelayMs(opts.baseMs, streak, opts.maxMs);
       streak++;
       downUntil = now + ms;
       log.warn(`${name}: unavailable — passed over for ${Math.round(ms / 1000)} s`);
