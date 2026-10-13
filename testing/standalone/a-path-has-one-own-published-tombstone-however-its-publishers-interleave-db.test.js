@@ -34,7 +34,8 @@
  * - (b) a published tombstone beside a late pending leftover: the prune keeps the published one while the leftover is pending.
  * - (c) a leftover the settle could not look at stays below the tombstone that covers its path: one published, never two.
  * - (d) a move's marker survives the row that carried it being superseded; a published row that carries one is not pruned
- *   while younger than a day, and one older is.
+ *   while younger than a day, and one older is — unless its move is still owed (bytes at `to`, the record at `from`), whose
+ *   marker is the only record that a retry finishes it and not an orphan (bundle-44, Q-345).
  * - (e) a relayed tombstone of another issuer, with and without a `rowSeq`, never stops an own pending one publishing.
  * - (f) two publishers on one path (the act's confirm and the settle) publish ONE tombstone.
  * - (g) a path whose candidates are more than one slice of the publish still publishes one.
@@ -203,19 +204,36 @@ describe('a path ends with one own published tombstone, however its publishers i
       'the move row was removed with its marker: a retry cannot tell the move it began from an orphan beside an unrelated destination');
   });
 
-  it('(d) a published row that carries a move marker is not pruned while it is younger than a day; one older is, and so is one whose move finished', async () => {
+  it('(d) a published row that carries a move marker is not pruned while it is younger than a day; one older is unless its move is still OWED, and so is one whose move finished', async () => {
     const young = { from: 'mk/young.txt', to: 'mk/young-to.txt' };
     const old = { from: 'mk/old.txt', to: 'mk/old-to.txt' };
+    const owed = { from: 'mk/owed.txt', to: 'mk/owed-to.txt' };
     for (const m of [young, old]) await tombstones.confirmFileTombstones(await tombstones.writePendingFileTombstones(S, [m.from], m));
+    // An OWED move: its bytes are at `to`, its record is still at `from` (a failure stopped it after the bytes). Its marker is the only
+    // thing that lets a retry finish it — and the `old` one is not owed at all: nothing is at either end.
+    await acts.seed(owed.from);
+    fs.mkdirSync(path.dirname(path.join(acts.root(), owed.to)), { recursive: true });
+    fs.renameSync(path.join(acts.root(), owed.from), path.join(acts.root(), owed.to));
+    await tombstones.confirmFileTombstones(await tombstones.writePendingFileTombstones(S, [owed.from], owed));
+    assert.equal(await tombstones.moveWasBegun(S, owed.from, owed.to), true, 'the owed move\'s marker was not written — the case is not reached');
     const longAgo = new Date(Date.now() - 3 * DAY).toISOString();
     // The age of a row, whichever of its stamps the code reads it by.
-    await acts.door.coll(S, 'file_tombstones').updateMany({ path: old.from },
+    await acts.door.coll(S, 'file_tombstones').updateMany({ path: { $in: [old.from, owed.from] } },
       { $set: { deletedAt: longAgo, positionAt: longAgo, writtenAt: longAgo, settleAt: longAgo } });
     await sleep(5);
 
     await tombstones.pruneFileTombstonesUpTo(S, FAR);
     assert.equal((await publishedFor(young.from)).length, 1, 'the prune took the tombstone of a move begun moments ago: its marker is the only record that the move is owed');
-    assert.deepEqual(await publishedFor(old.from), [], 'a marker older than a day kept its row for ever: no row is unprunable');
+    assert.deepEqual(await publishedFor(old.from), [], 'a marker older than a day, whose move is not owed, kept its row for ever: no row is unprunable');
+    assert.equal((await publishedFor(owed.from)).length, 1,
+      'the prune took the marker of a move that is still OWED because it was a day old: the retry is taken for an orphan, and the record at the source is stranded');
+    assert.equal(await tombstones.moveWasBegun(S, owed.from, owed.to), true, 'the owed move is no longer known to have begun');
+
+    // The owed move is finished by its retry; nothing is owed then, so its row is prunable like any other.
+    const retry = await acts.move('REST', owed.from, owed.to);
+    assert.ok(!acts.failed(retry), `the retry of the owed move: ${JSON.stringify(retry.body ?? retry.text)}`);
+    await tombstones.pruneFileTombstonesUpTo(S, FAR);
+    assert.deepEqual(await publishedFor(owed.from), [], 'a finished move\'s row is still kept after its day');
 
     await tombstones.forgetFinishedMove(S, young.from, young.to);
     await tombstones.pruneFileTombstonesUpTo(S, FAR);
