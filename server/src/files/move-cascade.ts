@@ -241,9 +241,48 @@ async function finishOrRefuse(spaceId: string, src: string, dst: string): Promis
     await abandonMove(spaceId, src, dst);
     throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
   }
-  // Its tombstones were written before those bytes moved; `completeMove` settles any its first attempt left pending, once the
-  // sidecars have had their turn. The bytes are at `dst`, so what the path IS is read there.
+  await finishBegunMove(spaceId, src, dst);
+}
+
+/**
+ * Finish a move whose bytes are at `dst` and whose records are not all there — one that {@link moveIsOwed} says is owed.
+ *
+ * Its tombstones were written before those bytes moved; `completeMove` settles any its first attempt left pending, once the sidecars
+ * have had their turn. The bytes are at `dst`, so what the path IS is read there.
+ */
+async function finishBegunMove(spaceId: string, src: string, dst: string): Promise<void> {
   await completeMove(spaceId, src, dst, await holdJobsForMove(spaceId, src, await kindAt(spaceId, dst)));
+}
+
+/**
+ * The brain family's one rule (`if (actor) emitWebhookEvent`), as in `deleteFileCascade`: no actor, no webhook and no live-view event
+ * (bundle-48, Q-259). Said by whichever run finishes the move, once.
+ */
+function announceMove(spaceId: string, src: string, dst: string, actor: WebhookActor | undefined): void {
+  if (actor) emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...actor });
+}
+
+/**
+ * Housekeeping's finish of a move it found owed: take the move's turn, ask AGAIN, and finish it only if it is still owed.
+ *
+ * ## What it prevents
+ *
+ * Housekeeping asked {@link moveIsOwed} before the move's lock and then ran the cascade, whose finishing branch refuses a move that is
+ * not owed with a `NotFoundError`. A request that retried the move, holding the lock first, had finished it by the time housekeeping
+ * got its turn — so a move that was DONE was counted as a failed attempt and reported as a failure. Here a move that is no longer owed
+ * when its turn comes is done, and `false` says so; nothing is thrown, abandoned or announced.
+ *
+ * @returns `true` when this run finished the move, `false` when it was no longer owed.
+ */
+export async function finishOwedMove(spaceId: string, src: string, dst: string, actor?: WebhookActor): Promise<boolean> {
+  await resolveSafePathChecked(spaceId, src);
+  await resolveSafePathChecked(spaceId, dst);
+  return await runMoveOnce(spaceId, src, dst, async () => {
+    if (!(await moveIsOwed(spaceId, src, dst))) return false;
+    await finishBegunMove(spaceId, src, dst);
+    announceMove(spaceId, src, dst, actor);
+    return true;
+  });
 }
 
 /**
@@ -290,8 +329,6 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
       await assertDestinationReachable(spaceId, dst);
       await completeMove(spaceId, src, dst, await beginMove(spaceId, src, dst, actor));
     }
-    // The brain family's one rule (`if (actor) emitWebhookEvent`), as in `deleteFileCascade`: no actor, no webhook and no
-    // live-view event (bundle-48, Q-259).
-    if (actor) emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...actor });
+    announceMove(spaceId, src, dst, actor);
   });
 }
