@@ -10,7 +10,6 @@
 
 import path from 'path';
 import { toDocId } from '../../util/paths.js';
-import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
 import { removeTree } from '../remove-tree.js';
 import { bytesPresentAt } from '../stored-bytes.js';
@@ -35,7 +34,7 @@ import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
 import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
-import { rowsOfFiles } from '../derived-rows.js';
+import { rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
 import { embedConcurrency } from './embed-concurrency.js';
@@ -658,13 +657,9 @@ export async function deleteConversionArtifactsByPrefix(
   const dir = movedRoot(dirPath);
   if (!dir) return; // guard: empty path would match everything
 
-  // The roots: the file rows under the folder (with its slash, so `d` is not `d2`). What derives from them — chunks, the rows of
-  // their sidecars, the caption and face rows of an extracted image — is found by the walk the single file's remover shares.
-  const roots = (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escapeRegex(dir + '/')}` }, parentFileId: { $exists: false } }),
-    { projection: { _id: 1 } },
-  ).toArray()).map(r => r._id);
-  await removeWhatSidecarsLeft(spaceId, roots, sidecarsOf(dir, 'directory'));
+  // The roots are the move's too (`rootsOfDirectory`). What derives from them — chunks, the rows of their sidecars, the caption and
+  // face rows of an extracted image — is found by the walk the single file's remover shares.
+  await removeWhatSidecarsLeft(spaceId, await rootsOfDirectory(spaceId, dir), sidecarsOf(dir, 'directory'));
 
   log.info(`Deleted conversion artifacts under ${spaceId}/${dir}/`);
 }

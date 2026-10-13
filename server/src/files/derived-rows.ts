@@ -22,7 +22,9 @@ import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
-import { idsUnder, type Sidecar } from './moved-paths.js';
+import { escapeRegex } from '../util/redos.js';
+import { idsUnder, movedRoot, type Sidecar } from './moved-paths.js';
+import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 /** `roots` and the ids of every file row derived from them, however deep (to `MAX_ANCESTRY`). */
@@ -75,4 +77,28 @@ export async function rowsOfFiles(spaceId: string, roots: readonly string[], own
     { projection: { _id: 1, parentFileId: 1 } },
   ).toArray() as Array<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
   return { atSidecars, ids: await rowsDerivedFrom(spaceId, [...roots, ...atSidecars.map(r => r._id)]) };
+}
+
+/**
+ * THE one answer to "the roots of everything a directory holds": the live file rows under `dir/` and every parent a derived row under
+ * `dir/` names — so a derived row whose own parent has no row (an orphan: the file it came from is gone) still has a root, and the
+ * walk down from the roots ({@link rowsOfFiles}) reaches it.
+ *
+ * ## What it prevents
+ *
+ * The move took its roots this way and the delete took only the top-level rows by id prefix, so an orphan derived row a move carried
+ * (re-rooted under the destination) was never reached by a later delete of that directory: the delete's walk began at rows, and the
+ * orphan's parent was not one. Two selections of "what a directory holds", the weaker one winning silently (bundle-44, S2).
+ *
+ * `dir` is a path as the stores key it (`movedRoot`), without its slash: the slash is added here, so `d` never takes `d2`. Reads only.
+ * An empty `dir` is refused: it would name every row in the space.
+ */
+export async function rootsOfDirectory(spaceId: string, dir: string): Promise<string[]> {
+  const root = movedRoot(dir);
+  if (!root) throw new RangeError('A directory\'s roots are asked of a path, and this one is empty');
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const prefix = `^${escapeRegex(`${root}/`)}`;
+  const live = (await files.find(asFilter<FileMetaDoc>({ _id: { $regex: prefix }, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray()).map(r => String(r._id));
+  const parents = await files.distinct('parentFileId', asFilter<FileMetaDoc>({ parentFileId: { $regex: prefix } })) as string[];
+  return [...new Set([...live, ...parents])];
 }

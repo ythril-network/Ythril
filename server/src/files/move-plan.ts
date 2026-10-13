@@ -42,8 +42,7 @@ import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { DestinationTakenByOther } from './act-answers.js';
-import { rowsOfFiles } from './derived-rows.js';
-import { LIVE_FILE_ROW } from './live-file-row.js';
+import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
 import { movedId, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
 
@@ -163,17 +162,9 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
   const from = movedRoot(src);
   const to = movedRoot(dst);
   if (!from || !to) throw new RangeError('A move needs two paths below the space root');
-  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
 
-  // The roots: a file's own id; a directory's live file rows and every parent a derived row under it names (an orphan's).
-  let roots: string[];
-  if (kind === 'file') roots = [from];
-  else {
-    const prefix = `^${escapeRegex(`${from}/`)}`;
-    const live = (await files.find(asFilter<FileMetaDoc>({ _id: { $regex: prefix }, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray()).map(r => String(r._id));
-    const parents = await files.distinct('parentFileId', asFilter<FileMetaDoc>({ parentFileId: { $regex: prefix } })) as string[];
-    roots = [...new Set([...live, ...parents])];
-  }
+  // The roots: a file's own id; a directory's are the delete's too (`rootsOfDirectory`).
+  const roots = kind === 'file' ? [from] : await rootsOfDirectory(spaceId, from);
   const { ids } = await rowsOfFiles(spaceId, roots, await sidecarsOwnedBy(spaceId, from, kind));
 
   const facts = (await rowFacts(spaceId, [...ids])).filter(r => r.deletedAt === undefined);
