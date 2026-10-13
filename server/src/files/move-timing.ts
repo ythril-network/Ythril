@@ -22,6 +22,8 @@
  * cannot set nothing and let a test pass for the wrong reason.
  */
 
+import { narrowedFigures } from '../util/figure-narrowing.js';
+
 export interface MoveTiming {
   /** How long a move keeps the jobs it holds unclaimable before they run on their own, ms. */
   holdMs: number;
@@ -47,15 +49,5 @@ export const moveTiming = (): Readonly<MoveTiming> => current;
 
 /** Narrow some of the figures for a test, or `null` to restore the real ones. Merges; refuses what it cannot use. */
 export function setMoveTimingForTest(given: Partial<MoveTiming> | null): void {
-  if (given === null) { current = { ...DEFAULTS }; return; }
-  const known = Object.keys(DEFAULTS);
-  const entries = Object.entries(given);
-  if (entries.length === 0) throw new Error(`setMoveTimingForTest: no figure given (${known.join(', ')})`);
-  for (const [name, value] of entries) {
-    if (!known.includes(name)) throw new Error(`setMoveTimingForTest: "${name}" is not a figure of a move (${known.join(', ')})`);
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw new Error(`setMoveTimingForTest: ${name} must be a finite positive number, got ${String(value)}`);
-    }
-  }
-  current = { ...current, ...given };
+  current = given === null ? { ...DEFAULTS } : narrowedFigures('setMoveTimingForTest', 'a move', current, given);
 }
