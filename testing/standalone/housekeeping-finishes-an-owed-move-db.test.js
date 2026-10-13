@@ -62,7 +62,7 @@ async function pass(now, limits) {
   let outcome;
   const runner = walk.createHousekeepingWalk({ storeAnswers: async () => true });
   const result = await runner.eachSpace('TTL sweep: finishing interrupted file moves', [{ id: S }], async () => { outcome = await finish.finishOwedMoves(S, now, limits); });
-  return { outcome, failed: result.failed };
+  return { outcome, failed: result.failed, storeDown: result.storeDown === true };
 }
 
 const finishedCount = async () => {
@@ -143,6 +143,16 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     const retry = await acts.move('REST', 'st/from.txt', 'st/to.txt');
     assert.ok(!acts.failed(retry), `the retry of a stranded move was refused (${status(retry)}): ${JSON.stringify(retry.body ?? retry.text)}`);
     assert.ok(await liveRow('st/to.txt'), 'the retry did not finish the stranded move');
+  });
+
+  it('a store that fails INSIDE the cascade ends the pass as the store not answering, not as one space failing', async () => {
+    await moveStoppedAfterItsBytes('sd/from.txt', 'sd/to.txt');
+    // The cascade wraps every failure after its bytes as `MoveStillOwed`; the walk reads the chain under it for the store's condition.
+    // The runner here answers the ping "yes", so only the cause can say it: a verdict from the wrapper alone is a space's failure.
+    fail('deleteMany', FILES, F.storeGone.single, { times: 100 });
+    const stopped = await pass(LATER(1));
+    assert.equal(stopped.storeDown, true,
+      'a store that failed mid-cascade was read as one space failing: the walk went on to every space behind it, one bound each');
   });
 
   it('finishes at most its budget per pass, and the moves behind the first are not starved', async () => {

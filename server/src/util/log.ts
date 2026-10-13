@@ -4,6 +4,7 @@
 // Stamps every line emitted during a request with that request's id — see `runWithRequestId`.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { errorChain } from '../db/error-chain.js';
 
 const REDACTED = 'Bearer [redacted]';
 const REDACTED_TOKEN = '[redacted]';
@@ -332,9 +333,15 @@ export function peerList(values: Iterable<unknown>, sep = ', ', { count, each }:
  * are this server's own code, and `reportServerFailure` exists to leave them behind — while its message goes through
  * the same rule as any outside value (a driver's message can carry a peer's `_id`), bounded to half the budget so the
  * frames keep the rest. The whole is then bounded once more by its caller.
+ *
+ * **What the error wraps is said too**, between the header and the frames, one `caused by:` per wrapped error (`errorChain`, the one
+ * walk: `cause`, `underlying`, a driver wrapper's thrown error, an aggregate's members). A server failure answered with a sentence
+ * that says "the reason is in the server log" has its reason in the error UNDER the wrapper, and a line that printed only the wrapper
+ * sent the operator to a log that did not hold it. It is here, in the one place a 5xx is rendered, so no door has to remember it.
  */
 function errorWithStack(err: Error): string {
   const header = errorHeader(err);
+  const causes = causesOf(err);
   let frames = '';
   try {
     const stack = typeof err.stack === 'string' ? err.stack : '';
@@ -344,7 +351,22 @@ function errorWithStack(err: Error): string {
     const at = stack.indexOf('\n    at ', from);
     frames = at === -1 ? '' : stack.slice(at);
   } catch { /* no frames, then */ }
-  return `${render(header, LOG_VALUE_MAX / 2)}${frames}`;
+  return `${render(header, LOG_VALUE_MAX / 2)}${causes}${frames}`;
+}
+
+/** The most wrapped errors one line names; the rest are a count. A line that grows with its chain pushes the frames out of its budget. */
+const CAUSES_MAX = 4;
+
+/** What `err` wraps, as `\ncaused by: <header>` lines (empty when it wraps nothing); never throws. */
+function causesOf(err: Error): string {
+  try {
+    const wrapped = errorChain(err).slice(1);
+    const lines = wrapped.slice(0, CAUSES_MAX).map(e => `\ncaused by: ${render(e instanceof Error ? errorHeader(e) : textOf(e), LOG_VALUE_MAX / 4)}`);
+    const more = wrapped.length - CAUSES_MAX;
+    return lines.join('') + (more > 0 ? `\ncaused by: …(+${more} more)` : '');
+  } catch {
+    return '';
+  }
 }
 
 function redact(msg: string): string {

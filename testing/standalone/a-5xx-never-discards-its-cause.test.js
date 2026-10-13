@@ -161,6 +161,40 @@ describe('a 5xx never discards the exception that caused it', () => {
     assert.match(line, /\\n {4}at /, 'reportServerFailure must include the stack (its frames, escaped onto the line)');
   });
 
+  it('the helper reports what the failure WRAPS: a file-system fault says its syscall and cause in the log, whichever door met it', async () => {
+    // `FileSystemFault` answers "the reason is in the server log" and keeps the errno error as its `cause`. A line that printed only the
+    // wrapper held no reason, on any door. The cause is printed where a 5xx is rendered, so no door has to remember it.
+    const { reportServerFailure } = await import('../../server/dist/util/report-failure.js');
+    const { FileSystemFault, MoveStillOwed } = await import('../../server/dist/files/act-answers.js');
+    const errno = Object.assign(new Error('EACCES: permission denied, rename \'a.txt\' -> \'b.txt\''), { code: 'EACCES', syscall: 'rename' });
+    const store = Object.assign(new Error('the store went away mid-cascade'), { name: 'MongoServerSelectionError' });
+    for (const [what, err, expected] of [
+      ['a FileSystemFault', new FileSystemFault(errno), [/caused by: .*EACCES: permission denied, rename/]],
+      ['a MoveStillOwed', new MoveStillOwed('a.txt', 'b.txt', store), [/caused by: MongoServerSelectionError: the store went away mid-cascade/]],
+      ['a wrapper two deep', new Error('outer', { cause: new Error('middle', { cause: new Error('innermost reason') }) }),
+        [/caused by: middle/, /caused by: innermost reason/]],
+    ]) {
+      const { emitted } = await logLinesDuring(() => reportServerFailure('move file', err));
+      assert.equal(emitted.length, 1, `${what}: one line`);
+      for (const re of expected) assert.match(emitted[0], re, `${what}: the line does not name what it wraps: ${emitted[0]}`);
+    }
+  });
+
+  it('a cyclic or hostile cause chain still reports, once, and says no more than it holds', async () => {
+    const { reportServerFailure } = await import('../../server/dist/util/report-failure.js');
+    const a = new Error('first');
+    const b = new Error('second', { cause: a });
+    a.cause = b;   // a cycle: a walk that follows it for ever never returns from inside a `catch`
+    const hostile = new Error('hostile');
+    Object.defineProperty(hostile, 'cause', { get() { throw new Error('getter'); } });
+    for (const err of [a, hostile]) {
+      const { emitted } = await logLinesDuring(() => reportServerFailure('move file', err));
+      assert.equal(emitted.length, 1, 'a chain that loops or throws must still produce the one line');
+    }
+    const { emitted } = await logLinesDuring(() => reportServerFailure('move file', a));
+    assert.equal((emitted[0].match(/caused by:/g) ?? []).length, 1, 'a cycle was followed past the error it returns to');
+  });
+
   it('the revoke route reports its unreachable branch', () => {
     /*
      * The specific site the canary hit, pinned by name rather than left to the sweep.

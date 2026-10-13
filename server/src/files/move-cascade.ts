@@ -205,7 +205,7 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
     }
   } catch (err) {
     log.warn(`The move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} stopped after its bytes moved and is owed: ${peerText(why(err))}`);
-    throw new MoveStillOwed(src, dst);
+    throw new MoveStillOwed(src, dst, err);
   }
   // Finished: nothing is owed, so its marker must not make a later orphan at `src` look like this move. A move that is still owed
   // (something of it was not carried: a file whose bytes came back) keeps its marker.

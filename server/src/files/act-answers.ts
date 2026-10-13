@@ -48,11 +48,16 @@ export class DestinationTakenByOther extends Error {
   }
 }
 
-/** A move's bytes moved and some of its records did not follow yet; the move is owed and will be finished. */
+/**
+ * A move's bytes moved and some of its records did not follow yet; the move is owed and will be finished.
+ *
+ * `cause` is the failure that stopped it, and it is not optional in spirit: a walk (housekeeping finishing the move) and the log read
+ * the chain under this wrapper, and a wrapper that hides a store failure makes the store being down look like one space failing.
+ */
 export class MoveStillOwed extends Error {
   override readonly name = 'MoveStillOwed';
-  constructor(readonly from: string, readonly to: string) {
-    super(`The move of '${from}' to '${to}' is not finished yet; it will be completed. Retry, or wait.`);
+  constructor(readonly from: string, readonly to: string, cause?: unknown) {
+    super(`The move of '${from}' to '${to}' is not finished yet; it will be completed. Retry, or wait.`, cause === undefined ? undefined : { cause });
   }
 }
 
