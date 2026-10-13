@@ -115,6 +115,7 @@ import { randomUUID } from 'node:crypto';
 import { envInt } from '../config/env-num.js';
 import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { log, peerText } from '../util/log.js';
+import { narrowedFigures } from '../util/figure-narrowing.js';
 import { StoreTimeout, isWriteTimeout } from './write-timeout.js';
 import { parseSpaceCollection } from './space-collection.js';
 import { uriQueryOptions } from './client-options.js';
@@ -193,17 +194,7 @@ export function warnIfSocketTimeoutBelowWriteBound(uri: string): boolean {
  * changes nothing.
  */
 export function setWriteBoundForTest(given: Partial<Bounds> | null): void {
-  if (given === null) { bounds = fromEnv(); return; }
-  const known = Object.keys(bounds);
-  const entries = Object.entries(given);
-  if (entries.length === 0) throw new Error(`setWriteBoundForTest: no figure given (${known.join(', ')})`);
-  for (const [name, value] of entries) {
-    if (!known.includes(name)) throw new Error(`setWriteBoundForTest: "${name}" is not a figure of the bound (${known.join(', ')})`);
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw new Error(`setWriteBoundForTest: ${name} must be a finite positive number, got ${String(value)}`);
-    }
-  }
-  bounds = { ...bounds, ...given };
+  bounds = given === null ? fromEnv() : narrowedFigures('setWriteBoundForTest', 'the bound', bounds, given);
 }
 
 /**
