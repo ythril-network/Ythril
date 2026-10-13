@@ -76,7 +76,7 @@
  *
  * A READ keeps the driver's `timeoutMS`: it lands nothing, so the order does not matter, and its cursor needs the
  * driver's deadline across batches. An operation that is a transaction's (a SESSION) is bounded by the session
- * (`brain/held-transaction.ts`): the driver refuses a per-operation timeout inside a timed transaction, and an
+ * (`db/bounded-transaction.ts`): the driver refuses a per-operation timeout inside a timed transaction, and an
  * aborted transaction applies nothing.
  *
  *  - **Per operation**: the bound is `min(writeTimeoutMs(), deadline − now)`. A write that already carries
@@ -271,7 +271,7 @@ export async function withinHousekeepingBound<T>(fn: () => Promise<T>, { opMs }:
 
 /**
  * Run `fn` outside every bound scope — for work that must not inherit a hold's deadline: one that is detached from
- * it, or a read-back that is given a fresh bound of its own (`brain/held-transaction.ts`).
+ * it, or a read-back that is given a fresh bound of its own (`db/bounded-transaction.ts`).
  */
 export function outsideWriteBound<T>(fn: () => T): T {
   return scopes.exit(fn);
@@ -281,10 +281,9 @@ export function outsideWriteBound<T>(fn: () => T): T {
  * Milliseconds left before the active scope's DEADLINE, or `undefined` when there is none to be left before: outside any
  * scope, and inside a housekeeping scope that has no deadline. Never below 0, never `Infinity`.
  *
- * The one caller (`brain/held-transaction.ts`) hands the answer to the driver as a session's `defaultTimeoutMS`, where an
- * `Infinity` is a transaction with no bound at all; it always runs under a hold today (`withSeqHorizonHeld`), so it never sees a
- * deadline-less scope — and `undefined` is what makes a future caller that does fall back to the finite figure it
- * already has beside it (`?? writeTimeoutMs()`), rather than begin an unbounded transaction.
+ * The transaction module (`db/bounded-transaction.ts`) hands the answer to the driver as a session's `defaultTimeoutMS`,
+ * where an `Infinity` would be a transaction with no bound at all — so `undefined` is what tells it there is no deadline
+ * to inherit, and it opens a write bound of its own rather than begin an unbounded transaction.
  */
 export function boundTimeLeft(): number | undefined {
   const s = activeScope();
@@ -329,7 +328,7 @@ export const BOUNDED_DB_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
 const IN_TRANSACTION_BATCH = 1_000_000;
 
 /**
- * A cursor opened inside a TIMED transaction (`brain/held-transaction.ts`: a session with `defaultTimeoutMS`) is
+ * A cursor opened inside a TIMED transaction (`db/bounded-transaction.ts`: a session with `defaultTimeoutMS`) is
  * asked for all of its rows in its FIRST batch.
  *
  * The driver (7.1) sends `maxTimeMS` on such a cursor's `getMore`, which the server refuses for a non-awaitData
