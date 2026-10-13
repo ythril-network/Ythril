@@ -718,6 +718,8 @@ const moveMarker = (from: string, to: string) => ({ 'move.from': toDocId(from), 
 
 /** A marker as it is stored: its paths as the stores key them, and no field the caller left undefined (a stored `null` is a value). */
 const markerDocOf = (m: MoveMarker): MoveMarker => ({
+  // `fromEntries` types its result as a bare record, so the cast restores the marker's type; the fields are NOT listed here instead, because
+  // a listed marker silently drops the next field it gains.
   ...(Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined)) as unknown as MoveMarker),
   from: toDocId(m.from), to: toDocId(m.to),
 });
@@ -1238,7 +1240,7 @@ export async function moveCarriesRecordsAt(spaceId: string, path: string): Promi
  */
 export async function recordMoveAttempt(spaceId: string, from: string, to: string, attempts: number, nextAttemptAt: string): Promise<void> {
   await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(moveMarker(from, to)),
-    asUpdate<StoredFileTombstone>({ $set: { 'move.attempts': attempts, 'move.nextAttemptAt': nextAttemptAt } } as never));
+    asUpdate<StoredFileTombstone>({ $set: { 'move.attempts': attempts, 'move.nextAttemptAt': nextAttemptAt } }));
 }
 
 /**

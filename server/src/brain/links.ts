@@ -232,7 +232,7 @@ function allClassesEmpty(fromKind: RefKind): DesiredLinks {
 }
 
 /**
- * Which classes each record kind can hold — the six, keyed by the FROM side. Read out of `LINK_CLASSES`
+ * Which classes each record kind can hold, keyed by the FROM side. Read out of `LINK_CLASSES`
  * (`brain/link-adjacency.ts`), where the product fact is written once: a fact names entities and nothing else, a chrono entry
  * names entities and facts, a file names all three. An entity is only ever a `to`.
  */
