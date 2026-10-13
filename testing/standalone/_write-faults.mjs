@@ -539,13 +539,16 @@ export async function driverWriteFailures(dbName) {
 export function failWrites(proto, methods) {
   const originals = {};
   let armed = new Map();
+  let firedCounts = new Map();
   for (const m of methods) {
     const orig = proto[m];
     originals[m] = orig;
     proto[m] = async function failing(...args) {
-      const f = armed.get(`${m} ${this.collectionName}`);
+      const key = `${m} ${this.collectionName}`;
+      const f = armed.get(key);
       if (!f || f.times <= 0) return orig.apply(this, args);
       f.times -= 1;
+      firedCounts.set(key, (firedCounts.get(key) ?? 0) + 1);
       if (f.land) await orig.apply(this, args);
       if (f.lateMs !== undefined) setTimeout(() => { void orig.apply(this, args).catch(() => {}); }, f.lateMs);
       throw f.err;
@@ -557,11 +560,23 @@ export function failWrites(proto, methods) {
       assert.ok(methods.includes(method), `failWrites: ${method} is not wrapped (only ${methods.join(', ')}) — the fault would fail nothing`);
       assert.ok(err instanceof Error, `failWrites: the fault for ${method} is not an error: ${err}`);
       armed.set(`${method} ${collectionName}`, { err, times, land, lateMs });
+      firedCounts.delete(`${method} ${collectionName}`);
     },
-    /** Disarm every fault; the wrappers stay. */
-    clear() { armed = new Map(); },
+    /**
+     * How many times the fault armed for `method` on `collectionName` FIRED since it was armed (0 when it never was).
+     *
+     * ## What it prevents
+     *
+     * **A fault that was armed and never reached.** `fail` checks the method is wrapped, not that the code under test ever
+     * calls it on that collection: a test of "a failure after the bytes moved leaves nothing half-done" over a fault the move
+     * no longer goes through (a different method, another collection) passes having injected nothing. Assert it before `clear()`.
+     */
+    fired(method, collectionName) { return firedCounts.get(`${method} ${collectionName}`) ?? 0; },
+    /** Disarm every fault and forget what fired; the wrappers stay. */
+    clear() { armed = new Map(); firedCounts = new Map(); },
     restore() {
       armed = new Map();
+      firedCounts = new Map();
       for (const [m, f] of Object.entries(originals)) proto[m] = f;
     },
   };
