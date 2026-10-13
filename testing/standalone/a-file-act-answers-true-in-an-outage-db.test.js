@@ -38,6 +38,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -286,6 +287,15 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
         await assertMovedWhole();
       });
     }
+
+    it(`${via}: a move still owed leaves the failure that stopped it in the log, whichever door met it`, async () => {
+      await seedEverything('from.txt');
+      for (const m of INSERTS) fail(m, 'files', F.storeGone.single);
+      const { emitted, result: a } = await logLinesDuring(() => move('from.txt', 'to.txt'));
+      assertStoreAnswer(`${via} move`, a);
+      assert.ok(emitted.some(l => /\[ERROR\].*failed with a 5xx.*caused by: MongoServerSelectionError/.test(l)),
+        `the answer says the move will be completed and the log holds nothing of what stopped it:\n${emitted.join('\n')}`);
+    });
 
     it(`${via}: control, no fault: the same move arrives whole (what the retries above must reach)`, async () => {
       await seedEverything('from.txt');

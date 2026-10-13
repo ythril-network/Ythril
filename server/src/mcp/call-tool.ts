@@ -34,6 +34,7 @@
  */
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
+import { reportServerFailure } from '../util/report-failure.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
@@ -399,6 +400,8 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      */
     const fileAct = fileActAnswer(err);
     if (fileAct) {
+      // As the REST door does (`sendFileActAnswer`): an answer that is the server's own leaves the cause in the log, whose chain the shared reporter prints.
+      if (fileAct.status >= 500) reportServerFailure(`tool ${name}`, err);
       return {
         result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...fileAct.body } },
         status: fileAct.status, callSpace, ...(fileAct.retryAfterSeconds !== undefined ? { retryAfterSeconds: fileAct.retryAfterSeconds } : {}),
