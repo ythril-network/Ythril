@@ -122,25 +122,44 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
     log.info(`Deleted directory ${peerText(dirPath)} (space: ${peerText(spaceId)})`);
   }, pendingAmong(pending, tree));
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
-  const at = `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
+  await removeWhatADirectoryLeftBesideItsRows(spaceId, dirPath);
+  // That removal survives its own failure, so the sidecars' tombstones are settled from the disk: published where the
+  // bytes went, dropped where they are still here.
+  await settlePendingFileTombstones(pendingAmong(pending, sidecars));
+  // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
+  // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
+  await retireRowsUnderDirectory(spaceId, dirPath);
+  for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
+}
+
+const directoryAt = (spaceId: string, dirPath: string): string => `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
+
+/**
+ * What the files under a directory left BESIDE their rows, taken by prefix: their queued jobs, their conversion sidecars and the
+ * cached hash of each. One command per kind of leaving whatever the number of files, which is why a directory's removal goes
+ * through this and never through {@link removeFileHere} once per file. A store failure is thrown, so the act fails and its retry
+ * completes it; any other failure is logged and survived (`unlessTheStoreFailed`). The rows are not here: they are the caller's,
+ * LAST ({@link retireRowsUnderDirectory}), because they are what tells a retry the act is still owed.
+ */
+async function removeWhatADirectoryLeftBesideItsRows(spaceId: string, dirPath: string): Promise<void> {
+  const at = directoryAt(spaceId, dirPath);
   // Queued jobs under the folder would outlive their sources and retry forever against paths that no longer exist.
   await unlessTheStoreFailed(`cancelJobsOwnedBy error ${at}`, () => cancelJobsOwnedBy(spaceId, dirPath, 'directory'));
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
   // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.
   await unlessTheStoreFailed(`forgetFileHashesByPrefix error ${at}`, () => forgetFileHashesByPrefix(spaceId, dirPath));
-  // That removal survives its own failure, so the sidecars' tombstones are settled from the disk: published where the
-  // bytes went, dropped where they are still here.
-  await settlePendingFileTombstones(pendingAmong(pending, sidecars));
-  // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
-  // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
-  await unlessTheStoreFailed(`retireFileMetaUnder error ${at}`, () => retireFileMetaUnder(spaceId, dirPath));
-  for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
+}
+
+/** The records under a directory, as the configured retention says (`retireFileMetaUnder`), failing with the store's failure. */
+async function retireRowsUnderDirectory(spaceId: string, dirPath: string): Promise<void> {
+  await unlessTheStoreFailed(`retireFileMetaUnder error ${directoryAt(spaceId, dirPath)}`, () => retireFileMetaUnder(spaceId, dirPath));
 }
 
 /**
  * A path deleted where a move carried a file TO it, while the move is still owed: whatever the move had not yet carried away from
- * its source goes with it, the records of `from` by the one list of what a file leaves ({@link removeFileHere}). Returns the moves,
+ * its source goes with it, the records of `from` by the one list of what a file leaves ({@link removeFileHere}) — for a directory, by
+ * the directory delete's own removal by prefix, not file by file. Returns the moves,
  * so the caller clears their markers once the bytes at `to` are gone (before that the move still reads as owed: a link row
  * the delete does not remove keeps it so).
  *
@@ -158,8 +177,12 @@ async function removeWhatAMovedFileLeftAtItsSource(spaceId: string, to: string, 
   const carried: MoveMarker[] = [];
   for (const move of await movesBegunInto(spaceId, to)) {
     if (!(await moveIsOwed(spaceId, move.from, move.to))) continue;
-    const leaving = kind === 'directory' ? await fileRecordPaths(spaceId, move.from) : [move.from];
-    for (const rel of leaving) await removeFileHere(spaceId, rel, { failure: 'throw' });
+    if (kind === 'directory') {
+      await removeWhatADirectoryLeftBesideItsRows(spaceId, move.from);
+      await retireRowsUnderDirectory(spaceId, move.from);
+    } else {
+      await removeFileHere(spaceId, move.from, { failure: 'throw' });
+    }
     carried.push(move);
   }
   return carried;
