@@ -219,6 +219,25 @@ export async function eachUnit<U>(
   return { failed };
 }
 
+/**
+ * {@link eachUnit} for code a walk reaches in production and a caller can also reach on its own — the units of one space, isolated
+ * and reported the same way whichever it is. Inside a walk of THIS space it is `eachUnit` (the walk's step, reporter and failures);
+ * outside one it runs the units in a frame of its own, under `step`, reporting through the process-wide reporter.
+ *
+ * It exists so that a step which must keep working when called directly (the file-tombstone settle, run by the TTL sweep's walk and by
+ * a request-free caller alike) does not fall back to a bare `catch` for want of a walk above it: `eachUnit` itself still throws
+ * outside a walk, because a forgotten walk is a defect everywhere else.
+ */
+export async function eachUnitOfSpace<U>(
+  spaceId: string, step: string, units: readonly U[], fn: (unit: U, index: number) => Promise<unknown>, label: UnitLabel<U> = unitLabel,
+): Promise<{ failed: { unit: string; reason: string }[] }> {
+  if (frames.getStore()?.spaceId === spaceId) return eachUnit(units, fn, label);
+  const frame: Frame = {
+    ctx: new Context(spaceId, step), spaceId, when: 'next cycle', storeAnswers: defaultStoreAnswers, reporter: defaultSpaceFailureReporter, unitFailures: [],
+  };
+  return frames.run(frame, () => eachUnit(units, fn, label));
+}
+
 export interface WalkDeps {
   /** The clock, for a test. */
   now?: () => number;

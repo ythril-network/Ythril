@@ -118,6 +118,7 @@ import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { bytesPresentAt, isStoredDirectory, lstatIfPresent } from './stored-bytes.js';
 import { removeConvergedLinks } from './move-links.js';
@@ -956,6 +957,9 @@ export async function settleStalePendingFileTombstones(
   return total;
 }
 
+/** Where the clearing pass of each space resumes (`createMoveMarkerPager`); the finishing pass (`files/finish-owed-moves.ts`) keeps its own. */
+const pageOfMoves = createMoveMarkerPager();
+
 /**
  * Forget the marker of a move whose act is over — its bytes are at `to` and none at `from`, and nothing of the file is still at
  * `from` ({@link forgetFinishedMove} asks {@link moveIsOwed}, so a move that is still OWED is never forgotten here) — on any row
@@ -964,24 +968,16 @@ export async function settleStalePendingFileTombstones(
  * path it cannot look at is left alone: a marker kept is only ever a delay.
  *
  * Walks the MOVES, not the rows ({@link movesBegunBefore}): a directory move writes a marker on every file under it, and a window
- * of rows read from the head was one move's rows for ever.
+ * of rows read from the head was one move's rows for ever. **A pass resumes after the last move it looked at** (`pageOfMoves`), so a
+ * move it cannot clear does not hold the head of the window, and **each move is a unit of the space** (`eachUnitOfSpace`): a move
+ * whose path cannot be looked at is reported through the shared reporter, once per window, with its paths, and the moves after it
+ * still run; a store that is not answering ends the pass and is the walk's to say.
  */
 async function clearFinishedMoveMarkers(spaceId: string, before: string): Promise<void> {
-  try {
-    let looked = 0;
-    for await (const move of movesBegunBefore(spaceId, before)) {
-      if (++looked > FILE_TOMBSTONE_SETTLE_BATCH) break;
-      try {
-        // A finished or abandoned move: forgotten through the one place that also takes back the links a batch converged onto the
-        // destination of a move that was abandoned (an owed move is refused there, and kept).
-        await abandonMove(spaceId, move.from, move.to);
-      } catch { /* cannot look: the marker stays, and the next sweep asks again */ }
-    }
-  } catch (err) {
-    // The marker read is the sweep's own housekeeping: its store failure is the settle's to say, and the next sweep repeats it.
-    throwIfStoreSide(err);
-    log.warn(`File tombstone move markers of ${peerText(spaceId)} not cleared: ${peerText(err)}`);
-  }
+  const { markers } = await pageOfMoves(spaceId, before, FILE_TOMBSTONE_SETTLE_BATCH);
+  // A finished or abandoned move: forgotten through the one place that also takes back the links a batch converged onto the
+  // destination of a move that was abandoned (an owed move is refused there, and kept).
+  await eachUnitOfSpace(spaceId, 'file tombstone move markers', markers, m => abandonMove(spaceId, m.from, m.to), m => `${m.from} → ${m.to}`);
 }
 
 // ── The move's marker ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1155,6 +1151,33 @@ export async function* movesBegunBefore(spaceId: string, before: string, after?:
     at = { from: row.move.from, to: row.move.to };
     yield { ...row.move, markedAt: row.deletedAt };
   }
+}
+
+/**
+ * A cursor over each space's begun moves for a REPEATING pass: `next(spaceId, before, limit)` returns at most `limit` moves
+ * ({@link movesBegunBefore}) beginning after the last move the previous call returned for that space, and `reachedTheEnd` says the
+ * pass has seen them all — the cursor is then cleared and the next call starts at the head.
+ *
+ * ## What it prevents
+ *
+ * A pass that capped its batch and began at the head every time looked at the same first moves for ever once they could not be
+ * cleared or finished (a stranded one, a path it cannot look at), and the moves behind them never got a look. Each pass over the
+ * markers (the settle's clearing of the finished ones, housekeeping's finishing of the owed ones) keeps its OWN pager, so one
+ * pass's cursor never moves another's. State is per pager and in memory: a restart begins at the head, which is only a delay.
+ */
+export function createMoveMarkerPager(): (spaceId: string, before: string, limit: number) => Promise<{ markers: Array<MoveMarker & { markedAt: string }>; reachedTheEnd: boolean }> {
+  const resume = new Map<string, { from: string; to: string }>();
+  return async (spaceId, before, limit) => {
+    const markers: Array<MoveMarker & { markedAt: string }> = [];
+    let reachedTheEnd = true;
+    for await (const marker of movesBegunBefore(spaceId, before, resume.get(spaceId))) {
+      if (markers.length >= limit) { reachedTheEnd = false; break; }
+      markers.push(marker);
+      resume.set(spaceId, { from: marker.from, to: marker.to });
+    }
+    if (reachedTheEnd) resume.delete(spaceId);
+    return { markers, reachedTheEnd };
+  };
 }
 
 /** The moves whose marker names any of `paths` as the SOURCE: the begun moves that were carrying a file from one of them. */
