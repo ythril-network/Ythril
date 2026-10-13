@@ -262,6 +262,10 @@ A move carries what belongs to the path: the metadata, the derived records, the 
 and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing
 beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never touched by the file's move.
 
+**A directory move or delete has no size limit: it carries (or removes) every record under the directory, however many files
+it holds, and takes time in proportion to what it holds,** and one that is interrupted is finished later
+([stated under Delete a File](#delete-a-file)).
+
 #### A file is identified by its PATH, and that is the one record type where it is
 
 Entities, facts, edges and chrono entries all carry a UUID. **A file's metadata record does not**: its

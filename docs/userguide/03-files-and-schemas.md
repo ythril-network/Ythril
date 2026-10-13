@@ -46,7 +46,9 @@ succeeded, delete it and upload it again.
 **A file has one name, however it was spelled.** An accented name typed or sent in its decomposed form (as some
 macOS apps do), a doubled slash (`docs//a.txt`) or a `./` is stored, listed and synced under one canonical name, so
 two spellings never become two files. A name in any script — `日本.txt`, an emoji — downloads and previews under its
-real name. Moving or renaming a document carries everything made from it, including work still queued for it.
+real name. Moving or renaming a document carries everything made from it, including work still queued for it. Moving or deleting
+a folder has no size limit: it covers every file under it, however many, and takes time in proportion to what the folder holds,
+and one that is interrupted is finished later (*An interrupted rename finishes on its own*, below).
 
 **A rename or delete that fails says so — it never reports success, and this page shows the same short message
 for every failure:** *Failed to rename file.*, *Failed to delete file.* or *Failed to create folder.*, which says
