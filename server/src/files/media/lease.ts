@@ -35,7 +35,8 @@
  * first and the run writes nothing, or lands after and finds the run's records already there to act on.
  */
 import type { ClientSession } from 'mongodb';
-import { col, asFilter, getMongo } from '../../db/mongo.js';
+import { col, asFilter } from '../../db/mongo.js';
+import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
@@ -104,25 +105,22 @@ function heldBy(claim: JobClaim): Record<string, unknown> {
  * filter matching nothing; one that lands second waits for the commit, and then finds the results in place.
  *
  * A write refused by a conflict is retried by `withTransaction` from the top, so `writes` must be safe to run twice:
- * delete what it is about to insert rather than rely on the insert being the first.
+ * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by the write
+ * bound (`db/bounded-transaction.ts`) — a job row locked elsewhere is a `StoreTimeout`, not a two-minute wait — and it
+ * holds no seq horizon of its own: the fence is a counter on a job row, which no seq-paged reader waits for.
  */
 export async function writeUnderClaim<T>(
   spaceId: string,
   claim: JobClaim,
   writes: (session: ClientSession) => Promise<T>,
 ): Promise<T> {
-  const session = getMongo().startSession();
-  try {
-    return await session.withTransaction(async () => {
-      const fenced = await col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs')).updateOne(
-        asFilter<MediaJobDoc>(heldBy(claim)), { $inc: { fencedWrites: 1 } }, { session },
-      );
-      if (fenced.matchedCount === 0) throw new JobLeaseLostError(spaceId, claim.jobId);
-      return await writes(session);
-    });
-  } finally {
-    await session.endSession();
-  }
+  return inBoundedTransaction(async (session) => {
+    const fenced = await col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs')).updateOne(
+      asFilter<MediaJobDoc>(heldBy(claim)), { $inc: { fencedWrites: 1 } }, { session },
+    );
+    if (fenced.matchedCount === 0) throw new JobLeaseLostError(spaceId, claim.jobId);
+    return await writes(session);
+  });
 }
 
 /**
