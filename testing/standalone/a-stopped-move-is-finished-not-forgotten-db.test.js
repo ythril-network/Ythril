@@ -68,11 +68,11 @@ const fail = (method, collection, err, opts) => faults.fail(method, collection, 
 
 /**
  * A move a store failure stopped after its bytes: the file is at `to`, its record still at `from`, its marker kept. The failure is
- * in the RECORD step (the metadata rename), the one the outage test uses, so every step before it ran.
+ * in the RECORD step (the records' re-key transaction), the one the outage test uses, so every step before it ran.
  */
 async function moveStoppedAfterItsBytes(from, to, via = 'REST') {
   await acts.seed(from);
-  fail('deleteOne', FILES, F.storeGone.single);
+  fail('deleteMany', FILES, F.storeGone.single);
   const a = await acts.move(via, from, to);
   assert.equal(status(a), 503, `the move was not stopped by the store: ${body(a)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');

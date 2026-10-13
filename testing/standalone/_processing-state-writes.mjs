@@ -121,9 +121,9 @@ const UPDATE_OPS = new Set(['updateOne', 'updateMany', 'findOneAndUpdate']);
  * what it excuses.
  */
 export const NOT_A_PROCESSING_MARK = Object.freeze({
-  'files/move-cascade.ts:relocateDerivedFileMeta updateMany #3':
-    'a move rewrites the `convertedFileId` POINTER on a parent to its sibling\'s new path, so the path stays true; '
-    + 'it records nothing the pipeline did, stamps nothing, and is a rename of a reference rather than a status mark',
+  // Empty on purpose. Its one row excused the move's `updateMany` on a parent's `convertedFileId` (a scan per derived row, on a field with
+  // no index). The pointer is now set by the row builder of the move (`rebuiltFileRow`, `files/move-plan.ts`) when the row is re-keyed, so
+  // no update touches it any more. A row added here needs the write it excuses to exist, and the gate fails a row that does not.
 });
 
 const MUTATOR_CALL = new RegExp(`\\.\\s*(${MUTATORS.join('|')})\\s*(?:<[^>(]*>)?\\s*\\(`, 'g');

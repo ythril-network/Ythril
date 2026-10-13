@@ -158,12 +158,6 @@ export function jobPathsOf(p: string, kind: PathKind): Array<Pick<Sidecar, 'path
   return [{ path: root, shape: kind === 'directory' ? 'tree' : 'file' }, ...sidecarsOf(root, kind)];
 }
 
-/** The regex that selects, by `parentFileId`, every DERIVED record of a file at or under `src`. */
-export function parentIdsUnder(src: string): RegExp | null {
-  const from = escapeRegex(movedRoot(src));
-  return from ? new RegExp(`^${from}(/|$)`) : null;
-}
-
 /**
  * The sidecar paths that belong to `src` — a directory's two trees, or a file's converted Markdown and its extracted tree, by
  * `kind` (what `src` IS, read from the disk by the caller: `isStoredDirectory`) — with where each goes when `src` moves to

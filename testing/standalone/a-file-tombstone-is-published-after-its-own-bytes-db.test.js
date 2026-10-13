@@ -96,7 +96,10 @@ describe('a file tombstone is published after its own path\'s bytes', { skip }, 
       fs.mkdirSync(path.join(acts.root(), '_converted', 'b.txt.md', 'inside'), { recursive: true });
       fs.writeFileSync(path.join(acts.root(), '_converted', 'b.txt.md', 'inside', 'x'), 'x');
       const m = await acts.move(via, 'a.txt', 'b.txt');
-      assert.ok(!acts.failed(m), `the move: ${JSON.stringify(m.body ?? m.text)}`);
+      // A sidecar whose bytes cannot move keeps the move OWED (bundle-44): its records do not move away from its bytes, so the door
+      // answers the move that is not finished, and housekeeping or the retry finishes it. It used to log, carry on and answer 200.
+      assert.equal(acts.statusOf(m), 503, `the move: ${JSON.stringify(m.body ?? m.text)}`);
+      assert.equal((m.body ?? m.sc).code, 'move_still_owed', JSON.stringify(m.body ?? m.sc));
       assert.ok(acts.onDisk('_converted/a.txt.md'), 'the sidecar moved after all — the case is not reached');
       await settled();
       assert.deepEqual(await acts.published(), { served: ['a.txt'], pushed: ['a.txt'] },

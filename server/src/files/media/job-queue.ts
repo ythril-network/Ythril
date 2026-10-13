@@ -6,7 +6,8 @@
  */
 
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
-import { writeInOneCommands } from '../../db/one-command.js';
+import type { ClientSession } from 'mongodb';
+import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { readStoredById } from '../../db/read-by-id.js';
 import { toDocId } from '../../util/paths.js';
 import type { StepProgress } from '../converters/types.js';
@@ -21,6 +22,10 @@ import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idsUnder, jobPathsOf, movedId, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
 import { setFileProcessingState } from '../derived-fields.js';
+import { rekeyRows } from '../rekey-rows.js';
+import { moveTiming } from '../move-timing.js';
+import { moveIsRunningAt } from '../move-flight.js';
+import { moveCarriesRecordsAt } from '../tombstones.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -725,14 +730,10 @@ export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKi
 // ── Move (a file or directory changes path) ────────────────────────────────
 
 /**
- * How long a move may hold its jobs before they become claimable again on their own. Only reached if the process
- * dies mid-move; then the job runs at the old path, finds the file wherever the move left it, and reconciles.
- */
-const MOVE_HOLD_MS = 10 * 60_000;
-
-/**
  * Take the claim on every unfinished job belonging to `src` and keep them unclaimable — step one of a move, BEFORE the
- * bytes leave. Returns the ids held, for `rekeyJobsForMove` or `releaseMoveHold`.
+ * bytes leave. Returns the ids held, for `rekeyJobsForMove` or `releaseMoveHold`. How long they stay held is
+ * `moveTiming().holdMs` (`files/move-timing.ts`): only a process that dies mid-move reaches the end of it, and then the job runs
+ * at the old path, finds the file wherever the move left it, and — asking whether a move of that path is owed — reconciles nothing.
  *
  * Before the bytes, because both late writers a move can meet act on what they observe on disk. A run whose
  * conversion commits after this finds its claim gone and writes nothing (`writeUnderClaim`); a run that finds the file
@@ -759,10 +760,34 @@ export async function holdJobsForMove(spaceId: string, src: string, kind: PathKi
     // Handed back rather than failed: nothing went wrong, so `attempts` is not charged — the same terms as a release.
     asUpdate<MediaJobDoc>({ $set: {
       status: 'pending', claimedAt: null, claimToken: null, updatedAt: now,
-      claimableAfter: new Date(Date.now() + MOVE_HOLD_MS).toISOString(),
+      claimableAfter: new Date(Date.now() + moveTiming().holdMs).toISOString(),
     } }),
   );
   return ids;
+}
+
+/**
+ * Keep the hold of a move that is still going: push the release of the jobs still at `src` out again — but only the ones whose hold
+ * has less than `holdMarginMs` left, and by the path prefix a move holds by (`jobPathsOf`), not by a list of ids. A move of many
+ * batches would otherwise outlive its hold and let the worker claim a job at the old path in the middle of it; one write per
+ * batch is too many when almost every batch finds the hold nowhere near its end, so the filter, not a read, decides.
+ */
+export async function extendMoveHold(spaceId: string, src: string, kind: PathKind): Promise<void> {
+  const owned = idsUnder(jobPathsOf(src, kind));
+  if (owned.length === 0) return;
+  const { holdMs, holdMarginMs } = moveTiming();
+  const now = Date.now();
+  await jobCollection(spaceId).updateMany(
+    asFilter<MediaJobDoc>({ $or: owned, status: 'pending', claimableAfter: { $ne: null, $lt: new Date(now + holdMarginMs).toISOString() } }),
+    asUpdate<MediaJobDoc>({ $set: { claimableAfter: new Date(now + holdMs).toISOString() } }),
+  );
+}
+
+/** The ids of every job belonging to `src` as a `kind` — the set a move holds and re-keys (`jobPathsOf`), whatever its state. */
+export async function jobIdsOwnedBy(spaceId: string, src: string, kind: PathKind): Promise<string[]> {
+  const owned = idsUnder(jobPathsOf(src, kind));
+  if (owned.length === 0) return [];
+  return (await jobCollection(spaceId).find(asFilter<MediaJobDoc>({ $or: owned }), { projection: { _id: 1 } }).toArray()).map(j => String(j._id));
 }
 
 /** Undo `holdJobsForMove` where they stand — the move failed, so the jobs belong to the old path after all. */
@@ -777,34 +802,37 @@ export async function releaseMoveHold(spaceId: string, heldIds: string[]): Promi
 
 /**
  * Re-key every job belonging to `src` onto its path under `dst`, releasing the ones `holdJobsForMove` held so they
- * run again where the file now is. A job's `_id` IS its path, so this is a delete and a re-insert — the same shape as
- * the metadata it follows. A finished job keeps its state: it describes bytes that moved unchanged. The jobs are the ones
- * `holdJobsForMove` holds, by the same `kind`.
+ * run again where the file now is. A job's `_id` IS its path, so this is a re-key (`files/rekey-rows.ts`): the same one the
+ * metadata it follows goes through, and a job is local state, so the row is a plain spread. A finished job keeps its state: it
+ * describes bytes that moved unchanged. The jobs are the ones `holdJobsForMove` holds, by the same `kind`.
+ *
+ * Anything already queued at a destination id is replaced: a move onto an existing path replaces that file.
+ *
+ * With `within` — the cascade's batch transaction and the ids of the jobs that belong to the batch — the re-key is part of THAT
+ * transaction, and waking the worker is the caller's, once the transaction has committed: a wake before the commit finds no row at
+ * the new id, reports the job gone, and has it deleted. Without it the call is its own transaction and wakes the worker itself.
+ * Returns how many jobs moved.
  */
-export async function rekeyJobsForMove(spaceId: string, src: string, dst: string, heldIds: string[], kind: PathKind): Promise<void> {
-  const owned = idsUnder(jobPathsOf(src, kind));
-  if (owned.length === 0) return;
-  const jobs = await jobCollection(spaceId).find(
-    asFilter<MediaJobDoc>({ $or: owned }),
-  ).toArray() as MediaJobDoc[];
+export async function rekeyJobsForMove(
+  spaceId: string, src: string, dst: string, heldIds: readonly string[], kind: PathKind,
+  within?: { session: ClientSession; jobIds: readonly string[] },
+): Promise<number> {
+  const ids = within?.jobIds ?? await jobIdsOwnedBy(spaceId, src, kind);
   const held = new Set(heldIds);
   const now = new Date().toISOString();
-  const moved = jobs.flatMap(j => {
-    const to = movedId(j._id, src, dst);
-    return to ? [{ ...j, _id: to, filePath: to, updatedAt: now, ...(held.has(j._id) ? { claimableAfter: null } : {}) }] : [];
+  const moves = ids.flatMap(id => { const to = movedId(id, src, dst); return to ? [{ from: id, to }] : []; });
+  if (moves.length === 0) return 0;
+  const moving = new Set(moves.map(m => m.from));
+  const run = (session: ClientSession) => rekeyRows<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'), session, {
+    moves,
+    rebuild: (j, to) => ({ ...j, _id: to, filePath: to, updatedAt: now, ...(held.has(j._id) ? { claimableAfter: null } : {}) }),
+    refuse: (to) => new Error(`two jobs would take the id '${to}'`),
+    replacements: { replaced: moves.map(m => m.to).filter(to => !moving.has(to)) },
   });
-  if (moved.length === 0) return;
-  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: jobs.map(j => j._id) } }));
-  // Replacing anything already queued at the destination: a move onto an existing path replaces that file.
-  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: moved.map(j => j._id) } }));
-  const jobsColl = jobCollection(spaceId);
-  // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
-  // before the write was sliced. The moved path's jobs are deleted BEFORE this insert, so a set larger than that — several commands — can
-  // fail between two of them and leave the later rows deleted and not re-inserted: the limit of delete-then-insert, stated
-  // here rather than hidden. Making it insert-first changes what the move does with a destination that is taken, and is owed
-  // its own tests against the store.
-  await writeInOneCommands(moved.map(j => asDoc<MediaJobDoc>(j)), (slice, { ordered }) => jobsColl.insertMany(slice, { ordered }), { ordered: true });
-  markSpaceMayHaveWork(spaceId);
+  if (within) return await run(within.session);
+  const moved = await inBoundedTransaction(run);
+  if (moved > 0) markSpaceMayHaveWork(spaceId);
+  return moved;
 }
 
 // ── retry_embedding helper ─────────────────────────────────────────────────
@@ -823,6 +851,8 @@ export async function retryJob(
 
   if (!existing) return 'not_found';
   if (existing.status === 'processing') return 'processing';
+  // A move of this path is running or owed: its hold is what keeps the job off the old path, and the reset below would end it.
+  if (moveIsRunningAt(spaceId, fileId) || await moveCarriesRecordsAt(spaceId, fileId)) return 'processing';
 
   const now = new Date().toISOString();
   await jobCollection(spaceId).updateOne(

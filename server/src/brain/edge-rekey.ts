@@ -27,9 +27,10 @@
  * any tombstone, so an edge later re-keyed BACK onto a previous id is re-created rather than suppressed by the
  * tombstone the first re-key left behind.
  *
- * **`renameFileMeta` is not the model, despite being named as one.** It deletes and re-inserts with no
- * tombstone and no new seq, on the stated grounds that file meta is best-effort and disk is the source of
- * truth. Copying it would leave every peer holding the edge under its old id for ever, beside the new one.
+ * **The file move is not the model for the seq and the tombstones.** It re-keys with no tombstone and no new seq (its rows
+ * keep the seq they had, and a path's deletion is told to peers by a FILE tombstone). Copying that here would leave every peer
+ * holding the edge under its old id for ever, beside the new one. What the two share is the destination guard
+ * (`assertNewIdsFree`, `files/rekey-rows.ts`) and nothing else.
  *
  * ## Its own module rather than a function in `edges.ts`
  *
@@ -41,7 +42,7 @@ import { col, asDoc } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
 import { withAllocatedSeqs } from '../util/seq.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
-import { readStoredById } from '../db/read-by-id.js';
+import { assertNewIdsFree } from '../files/rekey-rows.js';
 import { getConfig } from '../config/loader.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
@@ -220,13 +221,13 @@ export async function rekeyEdges(
   const collName = spaceCollection(spaceId, 'edges');
   const coll = col<EdgeDoc>(collName);
   // BEFORE anything is written. After the delete, a refused move would have destroyed the edge it declined to
-  // relocate. Two moves onto ONE id are the same refusal: the second insert would hit the unique index.
-  const taken = await readStoredById<{ _id: string }>(collName, moving.map(m => m.newId), { _id: 1 }, session ? { session } : {});
-  const claimed = new Set<string>();
-  for (const m of moving) {
-    if (taken.has(m.newId) || claimed.has(m.newId)) throw new EdgeIdentityTaken(m.newId, m.from, m.to, m.label);
-    claimed.add(m.newId);
-  }
+  // relocate. The guard is the one a file move asks (`files/rekey-rows.ts`): any row at a new id that is not itself moving is a
+  // refusal, read in the caller's session, and two moves onto ONE id are the same refusal.
+  const byNewId = new Map(moving.map(m => [m.newId, m]));
+  await assertNewIdsFree(collName, moving.map(m => ({ from: m.existing._id, to: m.newId })), (to) => {
+    const m = byNewId.get(to)!;
+    return new EdgeIdentityTaken(to, m.from, m.to, m.label);
+  }, session ? { session } : {});
 
   const now = new Date().toISOString();
   const n = moving.length;

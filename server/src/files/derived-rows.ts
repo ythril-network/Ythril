@@ -22,6 +22,8 @@ import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
+import { idsUnder, type Sidecar } from './moved-paths.js';
+import type { FileMetaDoc } from '../config/types.js';
 
 /** `roots` and the ids of every file row derived from them, however deep (to `MAX_ANCESTRY`). */
 export async function rowsDerivedFrom(spaceId: string, roots: readonly string[]): Promise<Set<string>> {
@@ -38,4 +40,39 @@ export async function rowsDerivedFrom(spaceId: string, roots: readonly string[])
     frontier = next;
   }
   return reached;
+}
+
+/** What a file (or a directory's files) leaves, as rows: see {@link rowsOfFiles}. */
+export interface FileRowSet {
+  /** The rows standing at the sidecars' own paths: derived rows (with their parent) and ARRIVED top-level rows (no parent). */
+  atSidecars: ReadonlyArray<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
+  /** The roots, the rows at the sidecars' paths and every row derived from either, at every level. Ids only: a root with no row is in it. */
+  ids: ReadonlySet<string>;
+}
+
+/**
+ * THE one answer to "what rows does a file leave" — the selection a delete removes and a move carries.
+ *
+ * ## What it prevents
+ *
+ * The delete selected these rows one way (`removeWhatSidecarsLeft`) and the move another (a regex over `parentFileId` plus an
+ * id-prefix walk), so the move missed what only the first reached: the caption and face rows of an extracted image, and a child of
+ * an arrived converted sidecar. A moved file's delete then found nothing to remove and left them, searchable, belonging to nothing
+ * (bundle-44, Q-314). One selection serves both, so the weaker one cannot win again.
+ *
+ * ## The rule
+ *
+ * `roots` are file ids (whether or not they have a row); `owned` are the sidecars those files own (`sidecarsOwnedBy`, or
+ * `sidecarsOf` for a directory's two trees). The rows standing at a sidecar's own path are read (a converted file by id, a tree by
+ * its prefix with the slash, so `d` is not `d2`), and everything that derives from a root or from one of those rows is
+ * {@link rowsDerivedFrom}. Reads only: what the caller does with the set (remove it, re-key it) is the caller's.
+ */
+export async function rowsOfFiles(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<FileRowSet> {
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  // The rows at the sidecars' own paths: a converted file by id, a tree by prefix (with its slash, so `d` is not `d2`).
+  const atSidecars = owned.length === 0 ? [] : await files.find(
+    asFilter<FileMetaDoc>({ $or: idsUnder(owned) }),
+    { projection: { _id: 1, parentFileId: 1 } },
+  ).toArray() as Array<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
+  return { atSidecars, ids: await rowsDerivedFrom(spaceId, [...roots, ...atSidecars.map(r => r._id)]) };
 }

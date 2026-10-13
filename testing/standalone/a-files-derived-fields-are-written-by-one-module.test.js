@@ -113,9 +113,6 @@ const EXEMPT = {
   'server/src/files/media/face-embedder.ts:propagateFaceLabel':
     'a manual entity label copied to the face rows of a file that already hold a face vector (`faceEmbedding: { $exists: true }`): a label '
     + 'on rows already held, never creates a row',
-  'server/src/files/move-cascade.ts:relocateDerivedFileMeta':
-    'a MOVE re-keys the rows already derived from a file under the new path, content and vectors carried as they were (`rekeyedRow`), and '
-    + 'rewrites the `convertedFileId` pointer so the path stays true: it records nothing the pipeline did and computes nothing new',
 };
 
 const INDEX = moduleIndex('server/src');

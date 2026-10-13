@@ -333,9 +333,13 @@ describe('the insert half is the same relationship, not a new one', () => {
      */
     const b = body();
     // Read through the one by-id reader since the re-key took a batch (bundle-30): every target id, before any write.
-    assert.match(b, /readStoredById\b[^;]*newId/,
+    // Since bundle-44 it is the destination guard a file move asks too (`assertNewIdsFree`, `files/rekey-rows.ts`): ONE rule about a taken id.
+    assert.match(b, /assertNewIdsFree\([^;]*newId/,
       'the target id must be checked before the insert, or the driver reports it as an index violation');
-    assert.match(b, /throw new EdgeIdentityTaken\(/,
+    const guard = bodyOf(src('server/src/files/rekey-rows.ts'), 'assertNewIdsFree');
+    assert.match(guard, /readStoredById\b[^;]*wanted/, 'the shared guard must read the rows at the new ids through the one by-id reader');
+    assert.ok(b.indexOf('assertNewIdsFree') < b.indexOf('insertMany'), 'the guard must run before the insert');
+    assert.match(b, /new EdgeIdentityTaken\(/,
       'the refusal must be a named error carrying which edge is in the way');
     /*
      * And it has to be CAUGHT, or a named error is only a nicer stack trace. An uncaught throw leaves REST

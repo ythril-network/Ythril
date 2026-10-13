@@ -229,8 +229,8 @@ describe('an arrival stores who delivered it', { skip }, () => {
    * a file's metadata has no single route), the byte doors (a peer's upload, one request or chunked — `UPLOAD_DOORS`, which
    * rev 2 of the plan omitted although they are the doors that CREATE a row from bytes), and the admin import. Three writers
    * outside it DO stamp, and a pin that read "no door stamps" would be believed about them too:
-   *   - `renameFileMeta` / `renameFileMetaByPrefix` (`files/file-meta.ts`): a move keeps the old seq and author under a new
-   *     `updatedAt` — held by `a-move-of-a-peers-file-keeps-its-updatedat-db`, and fixed by E3's forward half;
+   *   - the move's file-row re-key (`rebuiltFileRow`, `files/move-plan.ts`, formerly `renameFileMeta` and `renameFileMetaByPrefix`): a move keeps the old seq, author and
+   *     `updatedAt` under the new id — held by `a-move-of-a-peers-file-keeps-its-updatedat-db`;
    *   - `upsertFileMeta`'s existing-row branch (`files/file-meta.ts`): a LOCAL re-upload of a peer-authored row stamps a local seq
    *     — not pinned here, because pinning it would pin the behaviour Q-280 reports;
    *   - `stampFileMetaSeqs` (`brain/links-conversion.ts`): operator-invoked, stamps this instance's seq on any seq-less row.

@@ -356,6 +356,18 @@ export async function aFileUnderHoldsALink(spaceId: string, root: string): Promi
 }
 
 /**
+ * The files under the directory `root` that are the `from` of a link row, each once — the file ids a directory move has links
+ * to carry. {@link aFileUnderHoldsALink}'s question asked for the whole set instead of one hit, so what a move carries is what its
+ * owed check looks for: a file's delete leaves its link rows behind, so a path can hold links and no record, and a move that carried
+ * only the links of records it found would stay owed for ever. Same prefix, same refusal of an empty root.
+ */
+export async function fileLinkSourcesUnder(spaceId: string, root: string): Promise<string[]> {
+  if (!root) throw new RangeError('fileLinkSourcesUnder: an empty root would ask about every file in the space');
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .distinct('from', asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } })) as string[];
+}
+
+/**
  * The ids of records of one class that link to ANY of `ids` — the single-class form, for a caller with one
  * class in hand.
  *

@@ -34,8 +34,8 @@ import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/typ
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
-import { convertedFileOf, extractedTreeOf, idsUnder, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
-import { rowsDerivedFrom } from '../derived-rows.js';
+import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
+import { rowsOfFiles } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
 import { embedConcurrency } from './embed-concurrency.js';
@@ -617,7 +617,7 @@ export async function deleteConversionArtifacts(
  * THE one step both removers share, for a file and for a directory's whole tree: take the rows and the bytes that `owned`
  * sidecars and `roots` (the file rows they belong to) left behind.
  *
- *  1. **Every row derived from the roots or from a sidecar row, at every level** (`rowsDerivedFrom`): rows whose parent is one of
+ *  1. **Every row derived from the roots or from a sidecar row, at every level** (`rowsOfFiles`): rows whose parent is one of
  *     them, found by `parentFileId $in` — chunks, converted and extracted rows, and the caption and face rows beneath an image,
  *     whose parent is the image and not the file.
  *  2. **A derived row at a sidecar path whose parent is gone** (an orphan the walk cannot reach from a root), by id.
@@ -630,13 +630,9 @@ export async function deleteConversionArtifacts(
  */
 async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // The rows at the sidecars' own paths: a converted file by id, a tree by prefix (with its slash, so `d` is not `d2`).
-  const atSidecars = owned.length === 0 ? [] : await files.find(
-    asFilter<FileMetaDoc>({ $or: idsUnder(owned) }),
-    { projection: { _id: 1, parentFileId: 1 } },
-  ).toArray() as Array<Pick<FileMetaDoc, '_id' | 'parentFileId'>>;
-
-  const parents = [...await rowsDerivedFrom(spaceId, [...roots, ...atSidecars.map(r => r._id)])];
+  // The selection a move carries as well (`rowsOfFiles`): what the roots and the sidecars' rows leave, at every level.
+  const { atSidecars, ids } = await rowsOfFiles(spaceId, roots, owned);
+  const parents = [...ids];
   for (const part of inChunks(parents, READ_CHUNK)) {
     await files.deleteMany(asFilter<FileMetaDoc>({ parentFileId: { $in: part } }));
   }

@@ -91,6 +91,7 @@ const EXEMPT = {
   // into the one batched implementation `rekeyEdge` now calls.
   'server/src/brain/merge.ts:relinkAndAbsorb': 'merge: rewrites a survivor and retires the merged records',
   'server/src/brain/edge-rekey.ts:rekeyEdges': 're-key: moves an edge to a new identity, delete + insert',
+  'server/src/files/rekey-rows.ts:rekeyRows': 're-key of the rows of a file move (file rows, derived rows, jobs): delete + insert in the caller transaction, never a create or a converge',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'retention: stamps a computed expiry on stored entries',
   // The embed worker's four writes moved into the one writer of a derived field (bundle-89, Q-418), which is what asks
