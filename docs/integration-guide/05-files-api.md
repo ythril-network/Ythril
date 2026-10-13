@@ -417,7 +417,10 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   `PATCH` or `move_file` completes it too. A retry finds the file at `destination`, the records at the old path and the
   mark the first attempt left with its tombstones, and finishes them; without that mark — an old path whose file went
   missing for another reason, or a file at `destination` that is not the one the move carried — it is `404`, and
-  nothing at `destination` is touched. **So a `404` on a retried move can mean it was finished**, by the sweep or by an
+  nothing at `destination` is touched. That identity check is for a **file** (the mark records its size and modification
+  time); a **directory** carries none, so a retried directory move is judged on the mark, the bytes at `destination` and
+  something of it still at the old path, and what protects what stands at `destination` is the refusal per record
+  (`destination_taken_by_other`, below). **So a `404` on a retried move can mean it was finished**, by the sweep or by an
   earlier attempt whose answer you never saw: look at `destination` before moving again. A move the sweep gave up on
   is *stranded*: its records stay at the old path and its mark is kept, so a retry can still finish it
   (`ythril_file_moves_stranded`). A move finished by the sweep fires `file.updated` once, with `previousPath`
@@ -426,7 +429,9 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   whatever fails, and the file's links are at one path or the other and never at neither. A file moved onto a file
   it replaces takes that file's place: its records, derived records and jobs stand at the destination, and its links
   **replace** the previous occupant's, so a file never inherits the people, facts or chrono entries linked to the one it
-  replaced. A move that would take over records that belong to **another** file is refused `409` with `code:
+  replaced. A move onto an existing file replaces its record, chunks, jobs and links where the moved file has a counterpart
+  (and its converted Markdown and extracted images on disk by the moved file's); rows of the replaced file beyond those
+  stay. A move that would take over records that belong to **another** file is refused `409` with `code:
   "destination_taken_by_other"` and the relative `path`, before anything changes.
 - **A delete or a move whose deletion cannot be recorded answers `500` with `code: "act_not_recorded"`.** The tombstone
   is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and

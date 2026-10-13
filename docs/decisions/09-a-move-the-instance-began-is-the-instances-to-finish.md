@@ -38,8 +38,12 @@ receiver's **tree**, which can change.
   is, after a bounded number of attempts, **stranded**: the marker is kept, the reporter says so once per window and a
   gauge counts it. Nothing is deleted and nothing loops. A move housekeeping finishes is audited, counted and announced
   to webhook subscribers once, as the request's own completion would have been.
-- **Identity fails closed.** If the bytes at the destination cannot be shown to be the moved bytes, the move is not owed:
-  the marker is kept as the operator's signal and nothing at the destination is overwritten.
+- **Identity fails closed, for a file.** If the bytes at the destination cannot be shown to be the moved bytes (the size and
+  modification time the marker recorded), the move is not owed: the marker is kept as the operator's signal and nothing at
+  the destination is overwritten. **A directory carries no identity**, so a directory move is judged on the other facts
+  (the marker, bytes at the destination and none at the source, something of it still at the source), and what protects what
+  stands at its destination is the refusal per record: a record of another file at an id the move would take is `409`
+  `destination_taken_by_other`, and a record of a file the move replaces is replaced.
 - **An act that removes bytes records its tombstone first or does not begin.** A move and both delete doors (and the
   retention sweep's delete, which goes through the same cascade) refuse before any byte goes when the tombstone cannot be
   written: a store failure is `503`, anything else is `500` with `code: "act_not_recorded"`.
