@@ -11,8 +11,8 @@
  *  1. **Refuse what cannot be done, before anything is written**: a source that is not there and owes nothing (404, checked first so
  *     the order of refusals is the caller's), a move onto itself or into its own subtree, a destination a regular file blocks
  *     (`files/destination.ts`), and a destination whose ids another file's rows hold (`DestinationTakenByOther`, `files/move-plan.ts`).
- *  2. **Hold the jobs** (`holdJobsForMove`), before a byte moves. A conversion started by the upload can still be running; it used to
- *     finish afterwards and insert its chunk rows under the OLD path, which nothing would ever delete. A run that has not yet
+ *  2. **Hold the jobs** (`holdJobsForMove`), before a byte moves. A conversion started by the upload can still be running; left
+ *     alone it would finish afterwards and insert its chunk rows under the OLD path, which nothing would ever delete. A run that has not yet
  *     committed finds its claim gone and writes nothing; a run that did leaves rows where the batches below find them; a run that
  *     finds the file missing asks whether a move of that path is owed before it reconciles "a deleted source".
  *  3. **Write the tombstones PENDING, with the move's marker**, then move the bytes under them: each is published once ITS bytes
@@ -207,7 +207,7 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
       });
     }
     // Every byte this move will carry has moved, or failed to: the tombstones it left pending are settled from the disk. A sidecar that
-    // could not move is still here, so its tombstone is dropped rather than published (preship-4 P4-3).
+    // could not move is still here, so its tombstone is dropped rather than published.
     await settleBegunMove(spaceId, src, dst);
     if (sidecarFailed) throw new Error('a sidecar of the moved path could not be moved, so its records stay with its bytes');
 
@@ -235,8 +235,8 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
 
 /** A source with no bytes: a move this instance began and a failure stopped is finished; anything else is an orphan beside whatever is at the destination. */
 async function finishOrRefuse(spaceId: string, src: string, dst: string): Promise<void> {
-  // Without the marker this is an orphan `src` beside an unrelated `dst`, which this used to "complete" by overwriting that file's jobs,
-  // chunks and sidecars (preship-3 P3-2). A path that cannot be looked at is thrown, never read as "not owed".
+  // Without the marker this is an orphan `src` beside an unrelated `dst`; "completing" it would overwrite that file's jobs, chunks and
+  // sidecars, so it is refused. A path that cannot be looked at is thrown, never read as "not owed".
   if (!(await moveIsOwed(spaceId, src, dst))) {
     await abandonMove(spaceId, src, dst);
     throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
@@ -256,7 +256,7 @@ async function finishBegunMove(spaceId: string, src: string, dst: string): Promi
 
 /**
  * The brain family's one rule (`if (actor) emitWebhookEvent`), as in `deleteFileCascade`: no actor, no webhook and no live-view event
- * (bundle-48, Q-259). Said by whichever run finishes the move, once.
+ * (Q-259). Said by whichever run finishes the move, once.
  */
 function announceMove(spaceId: string, src: string, dst: string, actor: WebhookActor | undefined): void {
   if (actor) emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...actor });
@@ -267,10 +267,9 @@ function announceMove(spaceId: string, src: string, dst: string, actor: WebhookA
  *
  * ## What it prevents
  *
- * Housekeeping asked {@link moveIsOwed} before the move's lock and then ran the cascade, whose finishing branch refuses a move that is
- * not owed with a `NotFoundError`. A request that retried the move, holding the lock first, had finished it by the time housekeeping
- * got its turn — so a move that was DONE was counted as a failed attempt and reported as a failure. Here a move that is no longer owed
- * when its turn comes is done, and `false` says so; nothing is thrown, abandoned or announced.
+ * The cascade's finishing branch refuses a move that is not owed with a `NotFoundError`, so asking {@link moveIsOwed} only BEFORE the
+ * move's lock would count a move a retrying request finished meanwhile as a failed attempt and report it as a failure. Here a move
+ * that is no longer owed when its turn comes is done, and `false` says so; nothing is thrown, abandoned or announced.
  *
  * @returns `true` when this run finished the move, `false` when it was no longer owed.
  */
@@ -289,11 +288,10 @@ export async function finishOwedMove(spaceId: string, src: string, dst: string, 
  * Begin a move that has a source: refuse a destination other files' rows hold, write the tombstones pending with the marker, hold the
  * jobs and move the bytes under them. Returns the jobs it holds.
  *
- * The tombstones go BEFORE the bytes move, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here leaves the source
- * where it was, so the retry repeats the move — written after, the retry found no source and the paths left behind were never
- * tombstoned. Each is published once ITS bytes have moved — the file's with the rename, a sidecar's only after its own move
- * (bundle-30 I16, preship-4 P4-3) — and dropped if they did not, since nobody asked for those paths to go. Pending, no peer is told of
- * them meanwhile.
+ * The tombstones go BEFORE the bytes move, pending (`files/tombstones.ts`): a store failure here leaves the source where it was, so
+ * the retry repeats the move — written after, the retry would find no source and the paths left behind would never be tombstoned.
+ * Each is published once ITS bytes have moved — the file's with the rename, a sidecar's only after its own move — and dropped if they
+ * did not, since nobody asked for those paths to go. Pending, no peer is told of them meanwhile.
  */
 async function beginMove(spaceId: string, src: string, dst: string, actor: WebhookActor | undefined): Promise<string[]> {
   const kind = await kindAt(spaceId, src);

@@ -8,7 +8,7 @@
  * left the file at one path and its records at the other. The request that began it answered `503`; whether anything then
  * finished it depended on the caller retrying. A caller that does not retry — a sync peer's rename, a client that gave up, a script
  * that read the failure and went on — left the file listed where it no longer is and, once the media worker found no bytes at the old
- * path, deleted by the "deleted source" reconcile (`files/media/worker.ts`; it now asks {@link moveIsOwed} first). The marker the
+ * path, deleted by the "deleted source" reconcile — which asks {@link moveIsOwed} first (`files/media/worker.ts`). The marker the
  * move wrote with its tombstones (`files/tombstones.ts`) is the record that it is owed, and this reads it.
  *
  * ## What it does

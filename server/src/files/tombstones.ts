@@ -745,9 +745,9 @@ const generationOfHandle = (pending: PendingFileTombstones): number => pending.g
  *
  * **The write is REQUIRED: an act that cannot record its own removal does not begin.** A STORE failure is thrown, after a drop
  * of whatever may have landed: the door answers it as every door answers one, and since nothing irreversible has happened the
- * retry repeats the act. Any other failure is {@link ActNotRecorded} (`500` on both doors), after the same drop. It used to be
- * logged with the act going on — the bytes went, no peer was told, and a peer's manifest brought the file back; a persistent
- * fault here now blocks deletes, retention included, rather than let them go unrecorded. `named` is the path the refusal says
+ * retry repeats the act. Any other failure is {@link ActNotRecorded} (`500` on both doors), after the same drop. It is never merely
+ * logged with the act going on — the bytes would go, no peer would be told, and a peer's manifest would bring the file back; a
+ * persistent fault here blocks deletes, retention included, rather than let them go unrecorded. `named` is the path the refusal says
  * (a directory delete names the directory, not the first file under it); by default the move's source, else the first path.
  */
 export async function writePendingFileTombstones(
@@ -987,7 +987,7 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
 /**
  * Forget a move that is not owed, and take back the links it converged onto its destination. Called by the retry (a source with no
  * bytes and a move not owed) and by the settle sweep, so neither can forget a marker and leave the links a batch put at `to` behind
- * (privacy vet S8: a file arriving at that path later would inherit them). An owed move is left alone: `forgetFinishedMove` refuses it.
+ * (a file arriving at that path later would inherit them). An owed move is left alone: `forgetFinishedMove` refuses it.
  * A move whose bytes are not at `to`, or are still at `from`, is not touched — it was not abandoned, it did not happen.
  *
  * Here and not in the cascade because the settle cannot import the cascade (the cascade imports this module).
@@ -1060,16 +1060,16 @@ async function movedBytesOf(spaceId: string, marker: Pick<MoveMarker, 'from' | '
  *
  * ## What it prevents
  *
- * Every remover of a marker decided for itself whether the marker was clutter, and none asked whether the record was still at the
- * source: the settle forgot it ten minutes on, the prune took its row a day on, a supersede or a drop removed the row that carried
- * it, and the worker, finding no bytes at the old path, removed the record itself. Each looked right where it stood, and the move
- * stranded its records for ever (`no-remover-drops-an-owed-move-marker` derives the sites).
+ * A remover of a marker that decided for itself whether the marker was clutter, without asking whether the record is still at the
+ * source, would strand the move's records for ever: the settle forgetting it ten minutes on, the prune taking its row a day on, a
+ * supersede or a drop removing the row that carries it, the worker — finding no bytes at the old path — removing the record itself.
+ * Each looks right where it stands (`no-remover-drops-an-owed-move-marker` derives the sites).
  *
  * ## The two ways it fails, and they run opposite ways
  *
  * - **The bytes at `to` are not shown to be the moved ones** (a size or mtime that differs from the marker's) is NOT owed: the
- *   move would be finished over an unrelated file, replacing its derived records, which is what the marker exists to prevent
- *   (preship-3 P3-2). A marker written before the identity was recorded carries neither and is judged on the other facts.
+ *   move would be finished over an unrelated file, replacing its derived records, which is what the marker exists to prevent.
+ *   A marker written before the identity was recorded carries neither and is judged on the other facts.
  * - **A path that cannot be looked at throws.** A caller that is about to REMOVE something reads that as "keep"
  *   ({@link movesStillOwed}); the one that is about to complete the move reads it as "not now".
  */

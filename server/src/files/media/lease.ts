@@ -129,9 +129,8 @@ export async function writeUnderClaim<T>(
  * so the operator's setting moves it and a lock held elsewhere still ends it in a bound of the same kind.
  *
  * Not the write bound itself, because a conversion's write is its WHOLE set of derived rows in one transaction, so its size is the
- * file's and not a record's. Before the write bound existed the server ended it at its own transaction lifetime, a minute by default;
- * at the default write bound this is that, so a conversion whose commit landed then lands now. The write bound's own figure would
- * refuse it and the job would be retried at the same size for ever. A hold that encloses the write still ends it sooner.
+ * file's and not a record's. The server's own transaction lifetime ends it, which is what a conversion's commit needs; the write bound's
+ * own figure would refuse it and the job would be retried at the same size for ever. A hold that encloses the write still ends it sooner.
  */
 const LEASED_WRITE_BOUND_FACTOR = 2;
 const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
