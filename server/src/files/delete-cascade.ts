@@ -12,8 +12,10 @@
  *
  * The path is resolved first (a path outside the space is the caller's `RangeError`, before anything is written),
  * then the tombstone is written PENDING, then the bytes go, then the tombstone is CONFIRMED — see
- * `files/tombstones.ts` for why it is written before and published only after. A store failure on the write throws
- * with the file untouched, so the retry repeats the whole cascade. **An unlink that fails for any other reason** (a
+ * `files/tombstones.ts` for why it is written before and published only after. A failure of the write throws with the
+ * file untouched, so the retry repeats the whole cascade: the store's as it is (`503`), any other as `ActNotRecorded` (`500`) —
+ * a delete that cannot be recorded does not happen, since the bytes gone with no tombstone are brought back by a peer's
+ * manifest. The TTL sweep deletes through this cascade, so it refuses alike. **An unlink that fails for any other reason** (a
  * directory, a permission) settles the pending tombstone from the disk and throws: the file is still here, so it is
  * dropped and no peer is told otherwise — it used to keep the tombstone, and the TTL sweep wrote another every cycle
  * (preship-3 P3-3). A directory's tree removal that stops part way publishes the files it did remove (preship-4 P4-2),
@@ -44,10 +46,13 @@ import { forgetFileHashesByPrefix } from './manifest.js';
 import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere } from './remove-file-here.js';
-import { sidecarsOf } from './moved-paths.js';
+import { sidecarsOf, type PathKind } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
+import {
+  actUnderPendingTombstones, forgetFinishedMove, moveIsOwed, movesBegunInto, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones,
+  type MoveMarker,
+} from './tombstones.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -61,15 +66,20 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
     throw new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
   }
   // BEFORE the bytes go, pending; published once they have: a peer's manifest re-pushes a file it has no tombstone
-  // for, and a peer told of a file still here deletes it and tells us back.
+  // for, and a peer told of a file still here deletes it and tells us back. REQUIRED: a tombstone that cannot be written
+  // refuses the delete (`ActNotRecorded`) before a byte goes.
   const pending = await writePendingFileTombstones(spaceId, [filePath]);
+  let movedHere: MoveMarker[] = [];
   // A concurrent delete that got there first has done this half; anything else is the caller's failure.
   await actUnderPendingTombstones(pending, async () => {
-    if (present) await deleteStoredIfPresent(abs);
+    if (!present) return;
+    movedHere = await removeWhatAMovedFileLeftAtItsSource(spaceId, filePath, 'file');
+    await deleteStoredIfPresent(abs);
   });
   // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
   // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
   await removeFileHere(spaceId, filePath, { failure: 'throw' });
+  for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
   // The brain family's one rule (`if (actor) emitWebhookEvent`): a delete no user made — the TTL sweep passes its own
   // actor, so it still reports; a caller with none is silent on the webhook AND the live view (bundle-48, Q-259).
   if (actor) emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path: filePath }, ...actor });
@@ -103,9 +113,11 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   // place and the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
   // The tree's are published once the tree has gone, the sidecars' once THEY have — a later step, below (I16, P4-3) —
   // and a removal that stops part way publishes the files it did remove (P4-2): see `actUnderPendingTombstones`.
-  const pending = await writePendingFileTombstones(spaceId, [...tree, ...sidecars]);
+  const pending = await writePendingFileTombstones(spaceId, [...tree, ...sidecars], undefined, dirPath);
+  let movedHere: MoveMarker[] = [];
   await actUnderPendingTombstones(pending, async () => {
     if (!present) return;
+    movedHere = await removeWhatAMovedFileLeftAtItsSource(spaceId, dirPath, 'directory');
     await removeTree(abs, { mustExist: true });   // a converter may still be writing under it
     log.info(`Deleted directory ${peerText(dirPath)} (space: ${peerText(spaceId)})`);
   }, pendingAmong(pending, tree));
@@ -123,4 +135,32 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
   await unlessTheStoreFailed(`retireFileMetaUnder error ${at}`, () => retireFileMetaUnder(spaceId, dirPath));
+  for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
+}
+
+/**
+ * A path deleted where a move carried a file TO it, while the move is still owed: whatever the move had not yet carried away from
+ * its source goes with it, the records of `from` by the one list of what a file leaves ({@link removeFileHere}). Returns the moves,
+ * so the caller clears their markers once the bytes at `to` are gone (before that the move still reads as owed: a link row
+ * the delete does not remove keeps it so).
+ *
+ * ## What it prevents
+ *
+ * The file is deleted at the destination and the records stay at the source: a record listing a file that has no bytes anywhere,
+ * which no delete reaches (the path it names has nothing to delete) and housekeeping finishes as a move whose bytes were deleted.
+ *
+ * Only a move that is OWED by `moveIsOwed` — the bytes at `to` are the moved ones — is acted on: an unrelated file that now stands
+ * at `to` is deleted like any other and the source's records are left, since they are not what this delete was asked about.
+ * Run BEFORE the bytes are removed, inside the act's pending tombstone: a failure here leaves the bytes where they are and
+ * the delete still deletable.
+ */
+async function removeWhatAMovedFileLeftAtItsSource(spaceId: string, to: string, kind: PathKind): Promise<MoveMarker[]> {
+  const carried: MoveMarker[] = [];
+  for (const move of await movesBegunInto(spaceId, to)) {
+    if (!(await moveIsOwed(spaceId, move.from, move.to))) continue;
+    const leaving = kind === 'directory' ? await fileRecordPaths(spaceId, move.from) : [move.from];
+    for (const rel of leaving) await removeFileHere(spaceId, rel, { failure: 'throw' });
+    carried.push(move);
+  }
+  return carried;
 }

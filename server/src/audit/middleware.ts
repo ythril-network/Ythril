@@ -522,6 +522,13 @@ export const STRAY_FILEMETA_DRAIN_OPERATION = 'file.stray_filemeta.drain';
  */
 export const PEER_SIDECAR_RETIREMENT_OPERATION = 'file.peer_sidecar.retire';
 
+/**
+ * A file move whose bytes had moved and whose records had not, finished by the instance's own housekeeping rather than by a
+ * retry of the request (`files/finish-owed-moves.ts`): one entry per move finished, with no token. The records of a file changed
+ * path though no request was running, so it is audited as the other work no request named.
+ */
+export const FILE_MOVE_FINISH_OPERATION = 'file.move.finish';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

@@ -39,7 +39,8 @@ import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { removeFileHere } from '../remove-file-here.js';
-import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob } from './job-queue.js';
+import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove } from './job-queue.js';
+import { moveCarriesRecordsAt } from '../tombstones.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
@@ -452,8 +453,11 @@ async function processJob(
         // never succeed, so this is TERMINAL, not a failure: reconcile to disk truth by
         // dropping the job and any orphaned metadata/artifacts, and stop (no retry, no
         // "exhausted retries" churn — that infinite loop is exactly what this avoids).
-        await reconcileDeletedSource(spaceId, claim);
-        log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — removed job and orphaned metadata (no retry)`);
+        if (await reconcileDeletedSource(spaceId, claim)) {
+          log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — removed job and orphaned metadata (no retry)`);
+        } else {
+          log.info(`Media worker: source file ${spaceId}/${fileId} is not at its old path — a move owes its records; nothing removed, job held`);
+        }
         return;
       }
       throw new Error(`Could not read file for embedding: ${err instanceof Error ? err.message : String(err)}`);
@@ -602,8 +606,11 @@ async function processJob(
     // reconciles, or it comes after and the delete's own metadata cleanup follows it. Asked of `bytesPresent`, which
     // throws a failure to look: read as "deleted", a permission refused here removed what this job wrote (preship-4 P4-5).
     if (!(await bytesPresent(absolutePath))) {
-      await reconcileDeletedSource(spaceId, claim);
-      log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
+      if (await reconcileDeletedSource(spaceId, claim)) {
+        log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
+      } else {
+        log.info(`Media worker: source file ${spaceId}/${fileId} left its path during its job — a move owes its records; nothing removed, job held`);
+      }
       return;
     }
 
@@ -703,18 +710,28 @@ async function processJob(
  * orphaned file-meta record, and any conversion artifacts (chunks / converted /
  * extracted). Disk is the source of truth for the file store, so a job pointing at
  * a file that no longer exists is stale and must be cleaned up, not retried.
- * Best-effort throughout — each step swallows its own error.
+ * Best-effort throughout — each step swallows its own error. Returns whether it removed anything: it does not when a move that
+ * began here still owes the records at this path (they are the move's to carry, and the job is held for it).
  *
  * Only while this run still holds its claim, and otherwise it throws `JobLeaseLostError` and touches nothing. A file
  * gone from its path is not always a deleted file: a MOVE takes the claim first and then carries the file, its
  * job and its derived records to the new path. Reconciling "the deleted source" in that window deleted the very job
  * and records the move was about to carry — the moved file arrived with no job and nothing ever processed it.
  */
-async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise<void> {
+async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise<boolean> {
   if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
+  // A path with no bytes is not always a deleted file: the move that took the bytes away may still have to carry the records.
+  // The hold the move put on this job ends on its own; past it the job is claimed here, finds nothing at the old path, and "the
+  // deleted source" removed the very record the move owes its destination. Asked of the move's marker: while one is OWED (or cannot be
+  // told), nothing is removed and the job is handed back held, for the move's completion to re-key.
+  if (await moveCarriesRecordsAt(spaceId, claim.jobId)) {
+    await holdJobsForMove(spaceId, claim.jobId, 'file');
+    return false;
+  }
   // The job, the artefacts, the cached hash and the record — honouring softDeleteFileMeta (flag the orphan for audit, or
   // remove it) — by the one list of what a file leaves; each step swallows its own failure, there being nothing to retry with.
   await removeFileHere(spaceId, claim.jobId, { failure: 'swallow' });
+  return true;
 }
 
 

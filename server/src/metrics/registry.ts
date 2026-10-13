@@ -27,6 +27,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
+import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
@@ -694,6 +695,41 @@ export const fileTombstoneOldestHoldSeconds = perSpaceGauge({
   help: 'Age in seconds of the oldest open file-tombstone position hold per space (0 when none); a growing value means deletions of the space are not reaching peers',
   read: oldestPositionHoldAgeSeconds,
 });
+
+/**
+ * File moves whose bytes moved and whose records did not follow, per space (`files/finish-owed-moves.ts`): what the last complete
+ * pass of housekeeping's completion found owed. A move that is owed is finished by its request's retry or by housekeeping, so a value
+ * that does not return to 0 is a move that is not finishing — and a file whose record is at one path while its bytes are at another.
+ * Read from what the pass published (`owed-moves-seen.ts`), not asked of the store at scrape time.
+ */
+export const fileMovesOwed = perSpaceGauge({
+  name: 'ythril_file_moves_owed',
+  help: 'File moves per space whose bytes moved and whose records are still at the old path, as the last pass of housekeeping found them (0 when none); a value that does not return to 0 is a move that is not finishing',
+  read: owedMoveCount,
+});
+
+/** How long the oldest owed move of each space has been owed ({@link fileMovesOwed}): its marker's age, 0 when none is owed. */
+export const fileMoveOldestOwedSeconds = perSpaceGauge({
+  name: 'ythril_file_move_oldest_owed_seconds',
+  help: 'Age in seconds of the oldest owed file move per space (0 when none), counted from when its tombstone marker was written; a growing value means housekeeping is not finishing it',
+  read: (spaceId) => oldestOwedMoveAgeSeconds(spaceId),
+});
+
+/** The owed moves housekeeping has stopped trying: their attempts are spent and their marker is kept, so a retry of the move may still finish them. */
+export const fileMovesStranded = perSpaceGauge({
+  name: 'ythril_file_moves_stranded',
+  help: 'Owed file moves per space that housekeeping gave up finishing after its attempts (0 when none); their records stay at the old path and the marker is kept, so a retry of the move may still finish them',
+  read: strandedMoveCount,
+});
+
+/** Moves finished by housekeeping rather than by the retry of the request that began them, by space. */
+export const fileMovesFinishedByHousekeepingTotal = new Counter({
+  name: 'ythril_file_moves_finished_by_housekeeping_total',
+  help: 'File moves whose records housekeeping carried to the destination after the request that began the move could not, by space',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+fileMovesFinishedByHousekeepingTotal.labels({ space: '' }).inc(0);
 
 export const embedWaitSeconds = new Histogram({
   name: 'ythril_embed_wait_seconds',
