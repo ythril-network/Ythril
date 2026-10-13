@@ -46,27 +46,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'destblocked';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let acts, chunks, mkdirHandler, uploadHandler, ADMIN;
-
-const handlerOf = (router, method, route) => {
-  const layer = router.stack.find(l => l.route?.path === route && l.route.methods[method]);
-  assert.ok(layer, `no ${method.toUpperCase()} ${route} on the router — re-anchor this test`);
-  return layer.route.stack.at(-1).handle;
-};
-
-/** One request through a route's own handler (past rate limit and auth), as `_file-act-doors.mjs` does for PATCH and DELETE. */
-async function call(handler, { params = {}, query = {}, body = {}, headers = {} } = {}) {
-  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
-  const req = { method: 'POST', params, query, body, headers: lower, ip: '127.0.0.1',
-    authToken: { id: 't', name: 'test', rights: ADMIN },
-    get: (h) => lower[String(h).toLowerCase()],
-    is: (type) => (lower['content-type'] ?? '').includes(type.split('/')[1]) };
-  const res = { code: 200, body: undefined, headers: {}, headersSent: false,
-    status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
-  await handler(req, res);
-  return res;
-}
+let acts, chunks;
 
 /** A door's answer, whichever door it is: the status, the `code` and `path` it carries, and every byte of text it said. */
 function normalised(answer, { via }) {
@@ -83,12 +63,12 @@ const DOORS = () => [
   { name: 'REST PATCH /api/files (move)', move: true, run: async (src, dst) => normalised(await acts.rest('PATCH', { path: src }, { destination: dst }), { via: 'rest' }) },
   { name: 'POST /api/move_file', move: true, run: async (src, dst) => normalised(await acts.tool('move_file', { src, dst }), { via: 'tool' }) },
   { name: 'MCP move_file', move: true, run: async (src, dst) => normalised(await acts.mcp('move_file', { src, dst }), { via: 'mcp' }) },
-  { name: 'REST mkdir', dir: true, run: async (p) => normalised(await call(mkdirHandler, { params: { spaceId: S }, query: { path: p } }), { via: 'rest' }) },
+  { name: 'REST mkdir', dir: true, run: async (p) => normalised(await acts.post('mkdir', { query: { path: p } }), { via: 'rest' }) },
   { name: 'MCP create_dir', dir: true, run: async (p) => normalised(await acts.mcp('create_dir', { path: p }), { via: 'mcp' }) },
-  { name: 'REST upload', run: async (p) => normalised(await call(uploadHandler, { params: { spaceId: S }, query: { path: p },
+  { name: 'REST upload', run: async (p) => normalised(await acts.post('upload', { query: { path: p },
     body: { content: 'hello' }, headers: { 'content-type': 'application/json' } }), { via: 'rest' }) },
   { name: 'MCP write_file', run: async (p) => normalised(await acts.mcp('write_file', { path: p, content: 'hello' }), { via: 'mcp' }) },
-  { name: 'REST chunked upload, first range', chunked: true, run: async (p) => normalised(await call(uploadHandler, { params: { spaceId: S }, query: { path: p },
+  { name: 'REST chunked upload, first range', chunked: true, run: async (p) => normalised(await acts.post('upload', { query: { path: p },
     body: Buffer.from('abcd'), headers: { 'content-type': 'application/octet-stream', 'content-range': 'bytes 0-3/8' } }), { via: 'rest' }) },
 ];
 
@@ -136,11 +116,6 @@ describe('a destination blocked by a file is refused, alike, before anything is 
   before(async () => {
     acts = await openFileActDoors({ suite: 'destblocked', space: S });
     chunks = await import('../../server/dist/files/chunks.js');
-    const { fileStoreRouter } = await import('../../server/dist/api/files.js');
-    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
-    ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
-    mkdirHandler = handlerOf(fileStoreRouter, 'post', '/:spaceId/mkdir');
-    uploadHandler = handlerOf(fileStoreRouter, 'post', '/:spaceId');
   });
   after(async () => { await acts?.close(); });
   beforeEach(async () => {
@@ -167,7 +142,7 @@ describe('a destination blocked by a file is refused, alike, before anything is 
     }
 
     it('a chunked upload whose blocker appears between two ranges is refused at the later one, and the staged ranges are discarded', async () => {
-      const send = (range, bytes) => call(uploadHandler, { params: { spaceId: S }, query: { path: 'n/f' }, body: Buffer.from(bytes),
+      const send = (range, bytes) => acts.post('upload', { query: { path: 'n/f' }, body: Buffer.from(bytes),
         headers: { 'content-type': 'application/octet-stream', 'content-range': range } });
       const first = await send('bytes 0-3/8', 'abcd');
       assert.equal(first.code, 202, `the first range, with nothing in the way: ${JSON.stringify(first.body)}`);

@@ -100,12 +100,13 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
   const ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
   const { fileStoreRouter } = await import('../../server/dist/api/files.js');
-  const handlerOf = (m) => {
-    const layer = fileStoreRouter.stack.find(l => l.route?.path === '/:spaceId' && l.route.methods[m]);
-    assert.ok(layer, `no ${m.toUpperCase()} /:spaceId on the file router — re-anchor _file-act-doors.mjs`);
+  const handlerOf = (m, route = '/:spaceId') => {
+    const layer = fileStoreRouter.stack.find(l => l.route?.path === route && l.route.methods[m]);
+    assert.ok(layer, `no ${m.toUpperCase()} ${route} on the file router — re-anchor _file-act-doors.mjs`);
     return layer.route.stack.at(-1).handle;
   };
   const handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
+  const postHandlers = { upload: handlerOf('post'), mkdir: handlerOf('post', '/:spaceId/mkdir') };
   const { tool, answerOf } = await toolDoor(S);
 
   // A peer that records the tombstones a sync cycle pushes it, and holds no files of its own.
@@ -145,6 +146,22 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     await handlers[method](req, res);
     return res;
   }
+  /**
+   * One `POST` through the file router's own handler, past rate limit and auth, as an admin token: `upload` (`POST /:spaceId`, a
+   * whole file or one range) or `mkdir`. Answers as `rest` does (`code`, `body`, `headers`).
+   */
+  async function post(which, { query = {}, body = {}, headers = {} } = {}) {
+    const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+    const req = { method: 'POST', params: { spaceId: S }, query, body, headers: lower, ip: '127.0.0.1',
+      authToken: { id: 't', name: 'test', rights: ADMIN },
+      get: (h) => lower[String(h).toLowerCase()],
+      is: (type) => (lower['content-type'] ?? '').includes(type.split('/')[1]) };
+    const res = { code: 200, body: undefined, headers: {}, headersSent: false,
+      status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
+      json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
+    await postHandlers[which](req, res);
+    return res;
+  }
   async function mcp(tool, args) {
     const out = await callTool({ name: tool, args: { space: S, ...args },
       caller: { rights: ADMIN, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' } });
@@ -169,7 +186,7 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
       fs.rmSync(root(), { recursive: true, force: true });
       fs.mkdirSync(root(), { recursive: true });
     },
-    rest, mcp, tool, answerOf, served, pushed,
+    rest, post, mcp, tool, answerOf, served, pushed,
     /** Both ways a peer learns of a tombstone, by path. */
     async published() {
       const paths = (list) => list.map(t => t.path).sort();
