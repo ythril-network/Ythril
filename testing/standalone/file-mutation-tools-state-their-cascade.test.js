@@ -175,20 +175,60 @@ describe('move_file explains the tombstone and the directory case', () => {
       'a caller moving a tree needs to know its tags survive');
   });
 
-  it('warns that nothing checks the destination', () => {
-    assert.match(MOVE, /NOTHING CHECKS THE DESTINATION FIRST/,
-      'a move onto an existing path is a filesystem rename, and there is no refusal to catch it');
+  // The two guarantees a caller picks a destination by. Stated as GUARANTEES, never as a mechanism ("nothing checks", "a bare
+  // rename"): the sentence that named the mechanism went stale the day a destination check was added, and nobody reports a
+  // refusal they were told did not exist. Read by SENTENCE, so the two halves cannot be satisfied by two unrelated sentences.
+  const SENTENCES = MOVE.replace(/'\s*\r?\n\s*\+\s*'/g, '').split(/(?<=[.!?])\s+|\\n/);
+  const sentenceAbout = (...parts) => SENTENCES.find(s => parts.every(p => p.test(s)));
+
+  it('states, as a guarantee, that a name blocked by a file is refused', () => {
+    assert.ok(sentenceAbout(/blocked by a file/i, /refus/i),
+      'no sentence says that a destination blocked by a file (`a.txt/x` where `a.txt` is a file, or a directory moved into itself) is REFUSED — '
+      + 'the one thing a caller cannot find out from list_dir, and now a refusal rather than the filesystem\'s own failure');
   });
 
-  it('and that really is the case — moveFile renames with no existence check', () => {
+  it('states, as a guarantee, that a taken name is replaced', () => {
+    assert.ok(sentenceAbout(/\btaken\b/i, /\breplace[sd]?\b/i),
+      'no sentence says that a destination name that is TAKEN by a file is replaced: a caller who reads "refused" for one case and says nothing about this one will assume it is refused too');
+  });
+
+  it('no longer says nothing checks the destination — in the description or in the dst parameter\'s', () => {
+    const tool = FILE_TOOLS.slice(FILE_TOOLS.indexOf('name: \'move_file\''), FILE_TOOLS.indexOf('name: \'retry_embed_file\''));
+    assert.ok(tool.length > 500, 'could not isolate the move_file tool — the scanner is wrong, not the code');
+    assert.doesNotMatch(stripComments(tool), /NOTHING CHECKS/i,
+      'a sentence claiming no check exists survives next to the check that does: a stale guarantee is worse than none');
+  });
+
+  // "A destination check appeared" is judged over the WHOLE move cascade. It used to read only `files.ts` and `stored-bytes.ts`, the
+  // two files the rename lives in, while a check added in the cascade (or in the module the cascade asks) was outside it: the
+  // description could be wrong and this still green. The cascade is `move-cascade.ts`; the check is `destination.ts`.
+  const readIfThere = (p) => { try { return stripComments(readFileSync(p, 'utf8')); } catch { return null; } };
+  const MOVE_CASCADE = readIfThere('server/src/files/move-cascade.ts');
+  const DESTINATION = readIfThere('server/src/files/destination.ts');
+
+  it('and the refusal really is in the cascade: the destination module answers it and the move asks before its first step', () => {
+    assert.ok(DESTINATION, 'server/src/files/destination.ts does not exist: nothing refuses a destination blocked by a file, so the description\'s sentence would be false');
+    assert.match(DESTINATION, /export\s+(?:async\s+)?function\s+assertDestinationReachable\b/, 'the destination module no longer exports its check');
+    assert.match(DESTINATION, /path_blocked/, 'the refusal no longer carries the code the doors answer with');
+    const at = MOVE_CASCADE.indexOf('export async function moveFileCascade');
+    const body = MOVE_CASCADE.slice(at, MOVE_CASCADE.indexOf('\nexport ', at + 10));
+    assert.match(body, /assertDestinationReachable\(/, 'moveFileCascade does not ask the destination module, so the move is not refused');
+    for (const step of ['holdJobsForMove(', 'writePendingFileTombstones(', 'moveFile(']) {
+      const stepAt = body.indexOf(step);
+      assert.ok(stepAt < 0 || body.indexOf('assertDestinationReachable(') < stepAt,
+        `the destination is checked after ${step} — a refused move would already have changed something`);
+    }
+  });
+
+  it('and a taken name really is replaced — no part of the move cascade refuses an existing destination file', () => {
     const at = FILES.indexOf('export async function moveFile');
     const body = FILES.slice(at, FILES.indexOf('\nexport ', at + 10));
     assert.match(body, /moveStored\(srcAbs, dstAbs\)/, 'moveFile no longer moves through the file door');
     const door = doorFn('moveStored');
     assert.match(door, /fsp\.rename\(srcAbs, dstAbs\)/, 'the door\'s move is no longer a bare rename');
-    for (const b of [body, door]) {
+    for (const [name, b] of Object.entries({ 'files.ts moveFile': body, 'stored-bytes.ts moveStored': door, 'move-cascade.ts': MOVE_CASCADE ?? '', 'destination.ts': DESTINATION ?? '' })) {
       assert.doesNotMatch(b, /fileExists|already exists|\.stat\(dstAbs/,
-        'a destination check appeared — delete the warning rather than leaving it wrong');
+        `${name}: a check on an existing destination file appeared — the description's "a taken name is replaced" is now wrong; change the guarantee, not just this assertion`);
     }
   });
 
