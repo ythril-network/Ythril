@@ -55,6 +55,39 @@ export async function wireKeys() {
 export const NOTHING = Object.freeze({ served: [], pushed: [] });
 
 /**
+ * `POST /api/<tool>` — the third door a file act reaches, beside the file router and MCP — and the one reading of any door's answer.
+ *
+ * Standalone, so a suite that opens its own store (`openPushDoor`) drives the same door the same way and not through a copy of it.
+ * `tool(name, args)` is the tools router's own handler, past rate limit and auth, answering as REST answers (`code`, `body`, `headers`).
+ * `answerOf(a)` is `{ status, code, path, retryable, retryAfter }` of a REST, tool or MCP answer: a REST answer is its body, a tool's
+ * structured answer is `data`, MCP's is `structuredContent` and has no header (`retryAfter` is undefined; its wait is `retryable`).
+ */
+export async function toolDoor(space) {
+  const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
+  const { toolsRouter } = await import('../../server/dist/api/tools.js');
+  const ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
+  const layer = toolsRouter.stack.find(l => l.route?.path === '/:tool' && l.route.methods['post']);
+  assert.ok(layer, 'no POST /:tool on the tools router — re-anchor _file-act-doors.mjs');
+  const handler = layer.route.stack.at(-1).handle;
+  return {
+    async tool(name, args) {
+      const req = { method: 'POST', params: { tool: name }, query: {}, body: { space, ...args }, headers: {}, ip: '127.0.0.1',
+        authToken: { id: 't', name: 'test', rights: ADMIN }, get: () => undefined };
+      const res = { code: 200, body: undefined, headers: {}, headersSent: false,
+        status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
+        json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
+      await handler(req, res);
+      return res;
+    },
+    answerOf(a) {
+      const detail = 'code' in a ? (a.body?.data ?? a.body ?? {}) : (a.sc ?? {});
+      return { status: 'code' in a ? a.code : a.status, code: detail.code, path: detail.path, retryable: detail.retryable,
+        retryAfter: 'code' in a ? a.headers['retry-after'] : undefined };
+    },
+  };
+}
+
+/**
  * Open a door on one space, `S`, under the harness database named `suite`. Close it with `close()`.
  * `monitorCommands` opens the door with command monitoring, for `door.commandsDuring` (`openPushDoor`).
  * Skip a suite with `mongoSkipReason()` and `privateAddressSkipReason()` before calling this.
@@ -73,6 +106,7 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     return layer.route.stack.at(-1).handle;
   };
   const handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
+  const { tool, answerOf } = await toolDoor(S);
 
   // A peer that records the tombstones a sync cycle pushes it, and holds no files of its own.
   const received = [];
@@ -135,14 +169,17 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
       fs.rmSync(root(), { recursive: true, force: true });
       fs.mkdirSync(root(), { recursive: true });
     },
-    rest, mcp, served, pushed,
+    rest, mcp, tool, answerOf, served, pushed,
     /** Both ways a peer learns of a tombstone, by path. */
     async published() {
       const paths = (list) => list.map(t => t.path).sort();
       return { served: paths(await served()), pushed: paths(await pushed()) };
     },
-    move: (via, src, dst) => (via === 'REST' ? rest('PATCH', { path: src }, { destination: dst }) : mcp('move_file', { src, dst })),
-    del: (via, p) => (via === 'REST' ? rest('DELETE', { path: p }) : mcp('delete_file', { path: p })),
+    /** `via` is `REST` (the file router), `TOOL` (`POST /api/<tool>`) or anything else for MCP. */
+    move: (via, src, dst) => (via === 'REST' ? rest('PATCH', { path: src }, { destination: dst })
+      : via === 'TOOL' ? tool('move_file', { src, dst }) : mcp('move_file', { src, dst })),
+    del: (via, p) => (via === 'REST' ? rest('DELETE', { path: p })
+      : via === 'TOOL' ? tool('delete_file', { path: p }) : mcp('delete_file', { path: p })),
     /** Whether a door's answer (REST or MCP) is a failure. */
     failed: (a) => ('code' in a ? a.code >= 400 : a.isError),
     /** A door's answer as one status number. */

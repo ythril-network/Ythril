@@ -180,12 +180,22 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
 
   const notTheStore = () => new Error('the tombstone could not be built');
 
-  for (const via of ['REST', 'MCP']) {
+  /** The answer every door gives an act it could not record: 500, `act_not_recorded`, and the path the act was asked about. */
+  const assertNotRecorded = (via, a, path) => {
+    const answer = acts.answerOf(a);
+    assert.equal(answer.status, 500, `${via}: the act was not refused as a failure of the server: ${answer.status} ${body(a)}`);
+    assert.equal(answer.code, 'act_not_recorded', `${via}: the answer carries code ${JSON.stringify(answer.code)}: ${body(a)}`);
+    assert.equal(answer.path, path, `${via}: the answer names path ${JSON.stringify(answer.path)}, not the one the act was asked about: ${body(a)}`);
+    assert.equal(answer.retryAfter, undefined, `${via}: an act nothing did carries a Retry-After`);
+  };
+
+  // `TOOL` is `POST /api/<tool>`: the third door that reaches the same answer, carrying it as `data`.
+  for (const via of ['REST', 'TOOL', 'MCP']) {
     it(`${via}: a move whose tombstone write fails for a reason that is not the store's is refused before a byte moves`, async () => {
       await acts.seed('keep.txt');
       fail('insertMany', TOMBSTONES, notTheStore());
       const a = await acts.move(via, 'keep.txt', 'moved.txt');
-      assert.equal(status(a), 500, `the move was not refused as a failure of the server: ${status(a)} ${body(a)}`);
+      assertNotRecorded(via, a, 'keep.txt');
       assert.ok(acts.onDisk('keep.txt') && !acts.onDisk('moved.txt'), 'the bytes moved although nothing could record the move: no peer is told, and the manifest brings the old path back');
       assert.ok(await liveRow('keep.txt') && !await row('moved.txt'), 'the record moved with a move that was not recorded');
       assert.deepEqual(await everyTombstonePath(), [], 'a tombstone was left behind for an act that did not begin');
@@ -195,7 +205,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
       await acts.seed('stay.txt');
       fail('insertMany', TOMBSTONES, notTheStore());
       const a = await acts.del(via, 'stay.txt');
-      assert.equal(status(a), 500, `the delete was not refused as a failure of the server: ${status(a)} ${body(a)}`);
+      assertNotRecorded(via, a, 'stay.txt');
       assert.ok(acts.onDisk('stay.txt'), 'the bytes went although the deletion could not be recorded: a peer pushes the file back');
       assert.ok(await liveRow('stay.txt'), 'the record went with a delete that was not recorded');
     });
@@ -206,7 +216,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     await acts.seed('tree/two.txt');
     fail('insertMany', TOMBSTONES, notTheStore());
     const a = await acts.rest('DELETE', { path: 'tree' }, { confirm: true });
-    assert.equal(status(a), 500, `the delete was not refused as a failure of the server: ${status(a)} ${body(a)}`);
+    assertNotRecorded('REST', a, 'tree');
     assert.ok(acts.onDisk('tree/one.txt') && acts.onDisk('tree/two.txt'), 'the tree went although the deletion could not be recorded');
     assert.ok(await liveRow('tree/one.txt') && await liveRow('tree/two.txt'), 'the records went with a delete that was not recorded');
   });

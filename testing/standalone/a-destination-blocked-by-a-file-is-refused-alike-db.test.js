@@ -46,7 +46,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'destblocked';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let acts, chunks, mkdirHandler, uploadHandler, toolHandler, ADMIN;
+let acts, chunks, mkdirHandler, uploadHandler, ADMIN;
 
 const handlerOf = (router, method, route) => {
   const layer = router.stack.find(l => l.route?.path === route && l.route.methods[method]);
@@ -81,7 +81,7 @@ function normalised(answer, { via }) {
 /** The doors that can be asked to place bytes or a directory under `a.txt/`. `run` returns the normalised answer. */
 const DOORS = () => [
   { name: 'REST PATCH /api/files (move)', move: true, run: async (src, dst) => normalised(await acts.rest('PATCH', { path: src }, { destination: dst }), { via: 'rest' }) },
-  { name: 'POST /api/move_file', move: true, run: async (src, dst) => normalised(await call(toolHandler, { params: { tool: 'move_file' }, body: { space: S, src, dst } }), { via: 'tool' }) },
+  { name: 'POST /api/move_file', move: true, run: async (src, dst) => normalised(await acts.tool('move_file', { src, dst }), { via: 'tool' }) },
   { name: 'MCP move_file', move: true, run: async (src, dst) => normalised(await acts.mcp('move_file', { src, dst }), { via: 'mcp' }) },
   { name: 'REST mkdir', dir: true, run: async (p) => normalised(await call(mkdirHandler, { params: { spaceId: S }, query: { path: p } }), { via: 'rest' }) },
   { name: 'MCP create_dir', dir: true, run: async (p) => normalised(await acts.mcp('create_dir', { path: p }), { via: 'mcp' }) },
@@ -137,12 +137,10 @@ describe('a destination blocked by a file is refused, alike, before anything is 
     acts = await openFileActDoors({ suite: 'destblocked', space: S });
     chunks = await import('../../server/dist/files/chunks.js');
     const { fileStoreRouter } = await import('../../server/dist/api/files.js');
-    const { toolsRouter } = await import('../../server/dist/api/tools.js');
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     mkdirHandler = handlerOf(fileStoreRouter, 'post', '/:spaceId/mkdir');
     uploadHandler = handlerOf(fileStoreRouter, 'post', '/:spaceId');
-    toolHandler = handlerOf(toolsRouter, 'post', '/:tool');
   });
   after(async () => { await acts?.close(); });
   beforeEach(async () => {

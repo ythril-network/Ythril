@@ -39,6 +39,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
+import { toolDoor } from './_file-act-doors.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -46,7 +47,7 @@ process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const S = 'fileoutage';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let door, files, tombstones, F, handlers, callTool, ADMIN, faults;
+let door, files, tombstones, F, handlers, callTool, ADMIN, faults, tool, answerOf;
 
 const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
 const onDisk = (p) => fs.existsSync(path.join(root(), p));
@@ -91,6 +92,26 @@ function assertStoreAnswer(door, a) {
   assert.ok(!raw.includes(F.address), `${door} answered with the driver's text: ${raw}`);
 }
 
+/**
+ * A move whose bytes moved and whose records did not follow answers, on every door, 503 `move_still_owed` for the destination, says
+ * it is retryable, and none of the driver's text. A REST door says WHEN in `Retry-After` (a positive whole number of seconds, the one
+ * writer of it); MCP has no header and says `retryable` in the body.
+ */
+function assertMoveStillOwed(via, a, destination) {
+  const answer = answerOf(a);
+  const raw = JSON.stringify(a.body ?? a.sc ?? null) + (a.text ?? '');
+  assert.equal(answer.status, 503, `${via} answered ${answer.status}: ${raw}`);
+  assert.equal(answer.code, 'move_still_owed', `${via} answered code ${JSON.stringify(answer.code)}: ${raw}`);
+  assert.equal(answer.path, destination, `${via} named path ${JSON.stringify(answer.path)}: ${raw}`);
+  assert.equal(answer.retryable, true, `${via} did not say the move is retryable: ${raw}`);
+  assert.ok(!raw.includes(F.address), `${via} answered with the driver's text: ${raw}`);
+  if (via === 'MCP') {
+    assert.equal(answer.retryAfter, undefined, 'MCP has no header to carry a Retry-After');
+  } else {
+    assert.match(String(answer.retryAfter), /^[1-9]\d*$/, `${via} answered 503 without a usable Retry-After (${JSON.stringify(answer.retryAfter)}): the caller is not told when to come back`);
+  }
+}
+
 describe('a file act answers true in an outage, and its retry repairs it', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'fileoutage', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
@@ -107,6 +128,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       return layer.route.stack.at(-1).handle;
     };
     handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
+    ({ tool, answerOf } = await toolDoor(S));
     faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertOne', 'insertMany', 'deleteOne', 'deleteMany', 'bulkWrite']);
   });
   after(async () => {
@@ -260,8 +282,9 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     { name: 'the jobs\' delete LANDS and is reported failed', methods: DELETES, part: 'media_jobs', err: () => F.storeGone.single, opts: { land: true } },
   ];
 
-  for (const via of ['REST', 'MCP']) {
-    const move = (s, d) => (via === 'REST' ? restMove(s, d) : mcp('move_file', { src: s, dst: d }));
+  // `TOOL` is `POST /api/<tool>`, the third door a move reaches (`_file-act-doors.mjs`).
+  for (const via of ['REST', 'TOOL', 'MCP']) {
+    const move = (s, d) => (via === 'REST' ? restMove(s, d) : via === 'TOOL' ? tool('move_file', { src: s, dst: d }) : mcp('move_file', { src: s, dst: d }));
     for (const f of FAULTS) {
       it(`${via}: ${f.name}, after the bytes moved: 503, everything still at the source, and the retry completes the move`, async () => {
         await seedEverything('from.txt');
@@ -269,7 +292,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
 
         const a = await move('from.txt', 'to.txt');
 
-        assertStoreAnswer(`${via} move`, a);
+        assertMoveStillOwed(via, a, 'to.txt');
         const fired = f.methods.reduce((n, m) => n + faults.fired(m, `${S}_${f.part}`), 0);
         assert.ok(fired > 0, `the fault armed on ${f.methods} of ${S}_${f.part} never fired — the move does not go through them, so this case injected nothing`);
         assert.ok(onDisk('to.txt') && !onDisk('from.txt'), 'fixture: the bytes did not move, so this is not a failure AFTER the bytes moved');
@@ -292,7 +315,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       await seedEverything('from.txt');
       for (const m of INSERTS) fail(m, 'files', F.storeGone.single);
       const { emitted, result: a } = await logLinesDuring(() => move('from.txt', 'to.txt'));
-      assertStoreAnswer(`${via} move`, a);
+      assertMoveStillOwed(via, a, 'to.txt');
       assert.ok(emitted.some(l => /\[ERROR\].*failed with a 5xx.*caused by: MongoServerSelectionError/.test(l)),
         `the answer says the move will be completed and the log holds nothing of what stopped it:\n${emitted.join('\n')}`);
     });
