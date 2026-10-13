@@ -160,6 +160,47 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
     }
   }
 
+  describe('an orphan derived row under a directory: the roots of what a directory holds are one answer', () => {
+    /**
+     * A derived row whose parent has no row (the file it came from is gone) and whose id is under neither the directory nor its
+     * sidecar trees — only its `parentFileId` names the directory, so only a root taken from the parents reaches it.
+     */
+    const orphanOf = (dir) => ({ id: `orphans-of/${dir}/gone.txt#chunk-0`, parent: `${dir}/gone.txt` });
+    const seedWithOrphan = async (dir) => {
+      const set = [await seedFileWithEverything(`${dir}/f.txt`), await seedFileWithEverything(`${dir}/sub/k.txt`)];
+      const o = orphanOf(dir);
+      await door.coll(S, 'files').insertOne(derived(o.id, o.parent));
+      return { set, orphan: o };
+    };
+
+    it('a directory delete removes an orphan derived row, as the move carried it', async () => {
+      const src = 'docs/d-orphan';
+      const dst = 'docs/d-orphan-moved';
+      const { set, orphan } = await seedWithOrphan(src);
+
+      const mv = await acts.move('REST', src, dst);
+      assert.ok(!acts.failed(mv), `move: ${JSON.stringify(mv.body ?? mv.text)}`);
+      const carried = await rowOf(orphan.id);
+      assert.ok(carried, 'the move did not carry the orphan derived row: it stands at its old id');
+      assert.equal(carried.parentFileId, `${dst}/gone.txt`, 'the carried orphan names the moved directory\'s path as its parent');
+
+      const del = await acts.rest('DELETE', { path: dst }, { confirm: true });
+      assert.ok(!acts.failed(del), `delete: ${JSON.stringify(del.body)}`);
+      const left = [];
+      for (const s of labelled(set)) if (await rowOf(movedTo(s.id, src, dst))) left.push(s.label);
+      assert.deepEqual(left, [], 'the delete left rows of the moved files');
+      assert.equal(await rowOf(orphan.id), null, 'the directory delete did not remove an orphan derived row the move had carried');
+    });
+
+    it('a directory delete without a move removes the same orphan', async () => {
+      const dir = 'docs/d-orphan-direct';
+      const { orphan } = await seedWithOrphan(dir);
+      const del = await acts.rest('DELETE', { path: dir }, { confirm: true });
+      assert.ok(!acts.failed(del), `delete: ${JSON.stringify(del.body)}`);
+      assert.equal(await rowOf(orphan.id), null, 'the directory delete left an orphan derived row that names the directory');
+    });
+  });
+
   describe('the cost of a move does not grow with the rows it carries', () => {
     /** A converted file with `n` further chunk rows, its parent pointing at its converted Markdown. */
     async function seedWithChunks(f, n) {
