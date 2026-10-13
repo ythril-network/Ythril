@@ -40,7 +40,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { findMojibake, mojibakeOf } from './_mojibake.mjs';
+import { findMojibake, isValidUtf8, mojibakeOf } from './_mojibake.mjs';
 import { trackedSources } from './_sources.mjs';
 
 /**
@@ -110,6 +110,24 @@ describe('no source file carries mis-decoded UTF-8', () => {
     const offenders = tracked('"server/src/mcp/**/*.ts"')
       .filter(f => MOJIBAKE.test(readFileSync(f, 'utf8')));
     assert.deepEqual(offenders, []);
+  });
+
+  it('every tracked text source is valid UTF-8 — a single stray byte is not a run, so the run rule cannot see it', () => {
+    // A cp1252 em dash saved raw (0x97) decodes to ONE replacement character, and the detectors above only look
+    // at runs of two or more. The bytes are the evidence, so this reads bytes and not a decoded string.
+    // The listing is derived from git with a floor inside `trackedSources`; nothing here names a file.
+    const files = trackedSources(['server/src', 'client/src', 'testing', 'docs', 'sidecars', 'scripts'], {
+      ext: ['.ts', '.js', '.mjs', '.cjs', '.md', '.json', '.html', '.scss', '.css', '.yml', '.yaml', '.sh'],
+      floor: 500,
+    });
+    const offenders = files.filter(f => !isValidUtf8(readFileSync(f)));
+    assert.deepEqual(offenders, [], 'these hold bytes that are not UTF-8 (a cp1252 character saved raw):\n  '
+      + offenders.join('\n  ') + '\nRewrite the character as UTF-8 with an editor that writes UTF-8, or as ASCII.');
+  });
+
+  it('isValidUtf8 refuses the lone cp1252 byte and accepts the character it stood for', () => {
+    assert.equal(isValidUtf8(Uint8Array.from([0x61, 0x97, 0x62])), false, 'a raw 0x97 is not UTF-8');
+    assert.equal(isValidUtf8(new TextEncoder().encode('a — b × c')), true, 'the same characters as UTF-8 are');
   });
 
   it('the detector actually detects', () => {

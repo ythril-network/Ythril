@@ -106,6 +106,23 @@ export function mojibakeOf(s) {
   return out;
 }
 
+/**
+ * Whether `bytes` are valid UTF-8 — the question `findMojibake` cannot ask.
+ *
+ * `findMojibake` reads a decoded string, and a decoder given one stray cp1252 byte (an em dash saved as 0x97)
+ * does not fail: it substitutes U+FFFD, a single non-ASCII character, which the two-or-more run rule never
+ * looks at. The file still compiles, and the line shows a replacement character wherever it is read as UTF-8.
+ * Asking the bytes themselves leaves nothing to substitute.
+ */
+export function isValidUtf8(bytes) {
+  try {
+    decoder.decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Every mis-decoded run in `src`, as `{ found, shouldBe }`. Empty when the text is clean. */
 export function findMojibake(src) {
   const hits = [];

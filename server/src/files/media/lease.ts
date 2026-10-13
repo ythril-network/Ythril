@@ -106,7 +106,7 @@ function heldBy(claim: JobClaim): Record<string, unknown> {
  *
  * A write refused by a conflict is retried by `withTransaction` from the top, so `writes` must be safe to run twice:
  * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by the write
- * bound (`db/bounded-transaction.ts`) — a job row locked elsewhere is a `StoreTimeout`, not a two-minute wait — and it
+ * bound (`db/bounded-transaction.ts`) â€” a job row locked elsewhere is a `StoreTimeout`, not a two-minute wait â€” and it
  * holds no seq horizon of its own: the fence is a counter on a job row, which no seq-paged reader waits for.
  */
 export async function writeUnderClaim<T>(
