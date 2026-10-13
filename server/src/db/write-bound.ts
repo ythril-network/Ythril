@@ -249,7 +249,7 @@ export async function withinWriteBound<T>(fn: () => Promise<T>): Promise<T> {
  * can only LENGTHEN what the default would have given when nothing encloses it.
  *
  * Its one caller is a conversion's leased write (`files/media/lease.ts`), a single transaction that carries every row a conversion
- * made and which the server itself bounded at its transaction lifetime before the write bound existed.
+ * made and which the server itself bounds at its transaction lifetime, a figure the write bound alone would undercut.
  */
 export async function withinWriteBoundOf<T>(ms: number, fn: () => Promise<T>): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) throw new Error(`withinWriteBoundOf: ms must be a finite positive number, got ${String(ms)}`);

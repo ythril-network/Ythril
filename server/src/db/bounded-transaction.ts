@@ -1,6 +1,5 @@
 /**
- * A TRANSACTION that the write bound ends — the one way a multi-document write is run inside a MongoDB session
- * (bundle-44 plan rev 3, D2).
+ * A TRANSACTION that the write bound ends — the one way a multi-document write is run inside a MongoDB session.
  *
  * ## The question it answers
  *
@@ -48,8 +47,8 @@ export interface BoundedTransactionOptions<T> {
   /**
    * The bound of this transaction's PURPOSE, ms, when it is not the write bound's: the deadline across the transaction and the cap on
    * its commit. For a transaction whose size is the data's (a conversion's whole set of derived rows) and which the server itself
-   * ended at its own lifetime before this module existed — a tighter figure would refuse what used to land. An enclosing scope's
-   * lower deadline still wins. Absent: the write bound.
+   * ends at its own transaction lifetime — a figure tighter than that would refuse what the data's size makes legitimate. An
+   * enclosing scope's lower deadline still wins. Absent: the write bound.
    */
   boundMs?: number;
 }

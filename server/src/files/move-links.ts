@@ -5,10 +5,10 @@
  *
  * *"A file's links hang off its path, and a link has no rename: how do they follow a move so that, whatever fails, the file is
  * linked at the old path or the new one (never at neither) and the new path is never linked to what its previous occupant was?"*
- * A link's id is derived from its `from`, so a move is a delete and a create. Done in the old order (remove at the old path, then
- * add at the new one, after the record had moved) a failure between the two lost the links and nothing ever retried it.
+ * A link's id is derived from its `from`, so a move is a delete and a create. Done as remove-at-the-old-path then add-at-the-new-one,
+ * after the record had moved, a failure between the two would lose the links with nothing to retry them.
  *
- * ## The order, and why each step is where it is (bundle-44 plan rev 3, D3 b, D8)
+ * ## The order, and why each step is where it is
  *
  *  1. **{@link convergeLinks} BEFORE the rows move**: the new path's link set is made EQUAL to the old path's — non-additive, so a
  *     previous occupant's links go (a file never inherits the people, facts and chrono its predecessor at that path was linked to,

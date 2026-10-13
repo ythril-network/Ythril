@@ -1,14 +1,14 @@
 /**
  * Moving keyed rows onto new ids, all or nothing — one implementation for the edges a merge re-keys and the file rows a move
- * carries (bundle-44, Q-342; plan rev 3 D1).
+ * carries (Q-342).
  *
  * ## The question it answers
  *
  * *"Move these rows to these new ids so that, whatever fails, each is wholly at its old id or wholly at its new one, and no row of
  * anything else is touched."* A document's `_id` is immutable, so a re-key is a delete and an insert. Written by hand that is four
- * private copies (the file row, a directory's rows, the derived rows, the jobs), and each lost the rows when the insert failed after
- * the delete: a destination that was already taken made the insert fail `E11000` after the source row was gone, and the moved
- * file's record was nowhere (pinned as a "known limit" until this bundle).
+ * private copies (the file row, a directory's rows, the derived rows, the jobs), and each would lose the rows when the insert failed
+ * after the delete: a destination that was already taken makes the insert fail `E11000` after the source row is gone, and the moved
+ * file's record is nowhere.
  *
  * ## What it guarantees, and what a hand-written copy drops
  *

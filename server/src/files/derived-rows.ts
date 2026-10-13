@@ -58,10 +58,9 @@ export interface FileRowSet {
  *
  * ## What it prevents
  *
- * The delete selected these rows one way (`removeWhatSidecarsLeft`) and the move another (a regex over `parentFileId` plus an
- * id-prefix walk), so the move missed what only the first reached: the caption and face rows of an extracted image, and a child of
- * an arrived converted sidecar. A moved file's delete then found nothing to remove and left them, searchable, belonging to nothing
- * (bundle-44, Q-314). One selection serves both, so the weaker one cannot win again.
+ * A delete and a move that each select these rows their own way miss what only the other reaches: the caption and face rows of an
+ * extracted image, and a child of an arrived converted sidecar. A moved file's delete would then find nothing to remove and leave
+ * them, searchable, belonging to nothing (Q-314). One selection serves both, so the weaker one cannot win.
  *
  * ## The rule
  *
@@ -87,9 +86,9 @@ export async function rowsOfFiles(spaceId: string, roots: readonly string[], own
  *
  * ## What it prevents
  *
- * The move took its roots this way and the delete took only the top-level rows by id prefix, so an orphan derived row a move carried
- * (re-rooted under the destination) was never reached by a later delete of that directory: the delete's walk began at rows, and the
- * orphan's parent was not one. Two selections of "what a directory holds", the weaker one winning silently (bundle-44, S2).
+ * Taking only the top-level rows by id prefix would never reach an orphan derived row a move carried (re-rooted under the
+ * destination): the walk would begin at rows, and the orphan's parent is not one. So a directory's roots are selected the way a move
+ * takes them, and one selection of "what a directory holds" serves the move and the delete, never a weaker one beside it.
  *
  * `dir` is a path as the stores key it (`movedRoot`), without its slash: the slash is added here, so `d` never takes `d2`. Reads only.
  * An empty `dir` is refused: it would name every row in the space.

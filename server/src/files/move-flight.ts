@@ -12,8 +12,8 @@
  *
  * ## What it prevents
  *
- * A manual `retry_embedding` of a file whose move is running cleared the move's hold on the file's job (`retryJob` sets
- * `claimableAfter` to null), so the worker claimed the job at the OLD path in the middle of the move. The job queue asks
+ * A manual `retry_embedding` of a file whose move is running would clear the move's hold on the file's job (`retryJob` sets
+ * `claimableAfter` to null), and the worker would claim the job at the OLD path in the middle of the move. The job queue asks
  * {@link moveIsRunningAt} and answers "not now" instead.
  */
 import { keyedLock } from '../util/keyed-lock.js';
