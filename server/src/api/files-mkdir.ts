@@ -13,11 +13,9 @@
 import type { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { getConfig } from '../config/loader.js';
 import { createDir } from '../files/files.js';
 import { assertDestinationReachable } from '../files/destination.js';
-import { resolveWriteTarget } from '../spaces/proxy.js';
-import { requireQueryPath } from './files-request.js';
+import { requireWritePath } from './files-request.js';
 import { sendCaughtFailure } from './send-failure.js';
 
 /** Attach `POST /:spaceId/mkdir` to the file-store router. */
@@ -28,19 +26,9 @@ export function registerMkdirRoute(mkdirRouter: Router): void {
     requireSpaceAuth,
     denyReadOnly,
     async (req, res) => {
-      const spaceId = req.params['spaceId'] as string;
-      const cfg = getConfig();
-      if (!cfg.spaces.some(s => s.id === spaceId)) {
-        res.status(404).json({ error: `Space '${spaceId}' not found` });
-        return;
-      }
-
-      const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-      if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-      const targetSpace = wt.target;
-
-      const dirPath = requireQueryPath(req, res);
-      if (dirPath === null) return;
+      const request = requireWritePath(req, res);
+      if (request === null) return;
+      const { targetSpace, path: dirPath } = request;
 
       try {
         await assertDestinationReachable(targetSpace, dirPath);

@@ -112,6 +112,8 @@ const queryKeysFrom = body =>
  */
 function requestReadingHelpers(sources) {
   const names = new Set();
+  /** Each helper's own body, for the hop that is itself a hand-off (below). */
+  const bodies = new Map();
   for (const src of sources) {
     for (const m of src.matchAll(/(?:export )?(?:async )?function (\w+)\s*\(/g)) {
       /*
@@ -125,6 +127,18 @@ function requestReadingHelpers(sources) {
       const open = src.indexOf('{', src.indexOf(')', m.index));
       const fnBody = open === -1 ? '' : (literalAt(src, open) ?? '');
       if (/req\.(body|query)/.test(fnBody)) names.add(m[1]);
+      else bodies.set(m[1], fnBody);
+    }
+  }
+  /*
+   * A helper that hands `req` on to one that reads parameters is itself one that does: `requireWritePath(req, res)` reads nothing,
+   * and asks `requireWriteTarget` and `requireQueryPath`, which do. Closed to a fixed point, so a route that reaches a read through
+   * two hops is as unresolved as one that reaches it through one, and the depth of the hand-off is not a place to hide a parameter.
+   */
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, fnBody] of bodies) {
+      if (handsOffTheRequest(fnBody, names) !== null) { names.add(name); bodies.delete(name); grew = true; }
     }
   }
   return names;

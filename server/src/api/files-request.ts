@@ -14,6 +14,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config/loader.js';
+import { resolveWriteTarget } from '../spaces/proxy.js';
 
 /** Extract token identification from the request for webhook payloads. */
 export function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
@@ -37,7 +38,7 @@ export function parseTtlDaysQuery(req: Request): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-/** Validate and return the `path` query param; 404 if missing. */
+/** Validate and return the `path` query param; `400` if missing. */
 export function requireQueryPath(req: Request, res: Response): string | null {
   const p = req.query['path'];
   if (typeof p !== 'string' || !p.trim()) {
@@ -45,6 +46,48 @@ export function requireQueryPath(req: Request, res: Response): string | null {
     return null;
   }
   return p;
+}
+
+/**
+ * The space a file route names, or `null` after answering `404` — the one place that answer is built, so a route cannot name a
+ * space the instance does not have and reach the filesystem with it.
+ */
+export function requireKnownSpace(req: Request, res: Response): string | null {
+  const spaceId = req.params['spaceId'] as string;
+  if (!getConfig().spaces.some(s => s.id === spaceId)) {
+    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    return null;
+  }
+  return spaceId;
+}
+
+/** The space a write route names, and the space it writes to. */
+export interface WriteTarget { spaceId: string; targetSpace: string }
+/** A {@link WriteTarget} and the path the route acts on. */
+export interface WritePath extends WriteTarget { path: string }
+
+/**
+ * The space a file WRITE route names and the space it writes to (`?targetSpace=`, which a proxy space narrows), or `null` after
+ * answering: `404` for an unknown space, `400` for a target the space may not write to. `requireKnownSpace` then `resolveWriteTarget`,
+ * asked together so no write route can ask the second without the first.
+ */
+export function requireWriteTarget(req: Request, res: Response): WriteTarget | null {
+  const spaceId = requireKnownSpace(req, res);
+  if (spaceId === null) return null;
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  if (!wt.ok) { res.status(400).json({ error: wt.error }); return null; }
+  return { spaceId, targetSpace: wt.target };
+}
+
+/**
+ * {@link requireWriteTarget} and the `path` the route acts on ({@link requireQueryPath}): the prologue every file route that writes
+ * at a caller's path begins with (the upload, the directory create, the delete, the move), answered in this order, once.
+ */
+export function requireWritePath(req: Request, res: Response): WritePath | null {
+  const target = requireWriteTarget(req, res);
+  if (target === null) return null;
+  const p = requireQueryPath(req, res);
+  return p === null ? null : { ...target, path: p };
 }
 
 /**

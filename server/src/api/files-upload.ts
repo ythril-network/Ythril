@@ -30,9 +30,8 @@ import { assertDestinationReachable, isPathBlocked } from '../files/destination.
 import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
-import { resolveWriteTarget } from '../spaces/proxy.js';
 import { primitivePropertyError } from '../brain/property-values.js';
-import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
+import { webhookToken, parseTtlDaysQuery, requireWritePath, enforceSizeLimit } from './files-request.js';
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
@@ -96,19 +95,10 @@ export function registerUploadRoute(router: Router): void {
       express.raw({ type: '*/*', limit: uploadBodyLimit() })(req, res, next);
     },
     async (req, res) => {
-      const spaceId = req.params['spaceId'] as string;
+      const request = requireWritePath(req, res);
+      if (request === null) return;
+      const { targetSpace, path: filePath } = request;
       const cfg = getConfig();
-      if (!cfg.spaces.some(s => s.id === spaceId)) {
-        res.status(404).json({ error: `Space '${spaceId}' not found` });
-        return;
-      }
-
-      const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-      if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-      const targetSpace = wt.target;
-
-      const filePath = requireQueryPath(req, res);
-      if (filePath === null) return;
       // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
       const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
