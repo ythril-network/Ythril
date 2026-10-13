@@ -1119,8 +1119,25 @@ async function movesStillOwed(spaceId: string, rows: ReadonlyArray<{ move?: Move
  *
  * Not "keep every row of an owed move": a move writes the marker on every file it takes (and every sidecar), and the rows of a
  * sidecar that stayed behind are dropped by the move itself while it is still owed, with the file's own row carrying the marker on.
+ *
+ * ## One remover at a time per space, and the lock is here so no caller can leave it out
+ *
+ * "Does another row of the move survive?" and the delete are two steps, and two removers (the prune after an acknowledgement, a
+ * supersede, a drop of pending rows) running together could each read the OTHER's row as the survivor and each delete its own: the
+ * move lost its marker with its records still at the source. A remover takes its space's turn (`markerRemovalLock`) from its read of
+ * the survivor to its delete, so a second one reads what the first left. The lock is in-process, like every hold in this module: one
+ * server process owns a data root.
  */
-async function removeUnlessOwed(
+function removeUnlessOwed(
+  spaceId: string, rows: ReadonlyArray<{ _id: string; move?: MoveMarker | undefined }>, where: Record<string, unknown>,
+): Promise<number> {
+  return markerRemovalLock.run(spaceId, () => removeUnlessOwedUnlocked(spaceId, rows, where));
+}
+
+/** One remover of marker rows per space at a time ({@link removeUnlessOwed}). */
+const markerRemovalLock = keyedLock();
+
+async function removeUnlessOwedUnlocked(
   spaceId: string, rows: ReadonlyArray<{ _id: string; move?: MoveMarker | undefined }>, where: Record<string, unknown>,
 ): Promise<number> {
   const owed = await movesStillOwed(spaceId, rows);
