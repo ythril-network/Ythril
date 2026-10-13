@@ -447,7 +447,9 @@ export const FROZEN = {
   // `api/brain/spills.ts`, where the rest of it lives. Removed with `path` at the next major.
   // 458 -> 422 (bundle-30 I14): the directory delete's cascade — tombstones, tree, jobs, sidecars, metadata — moved
   // to `files/delete-cascade.ts` beside the one-file cascade whose order it shares, and with it eight imports.
-  'server/src/api/files.ts': 422,
+  // 422 -> 394 (bundle-44, Q-351): the mkdir route moved to `api/files-mkdir.ts` (registered like the upload route), so
+  // the destination guard it gained did not grow this file; a file act's refusals are answered once in send-failure.ts.
+  'server/src/api/files.ts': 394,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs
