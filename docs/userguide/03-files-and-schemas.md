@@ -50,11 +50,20 @@ real name. Moving or renaming a document carries everything made from it, includ
 a folder has no size limit: it covers every file under it, however many, and takes time in proportion to what the folder holds,
 and one that is interrupted is finished later (*An interrupted rename finishes on its own*, below).
 
-**A rename or delete that fails says so — it never reports success, and this page shows the same short message
-for every failure:** *Failed to rename file.*, *Failed to delete file.* or *Failed to create folder.*, which says
-that it failed and not why. A rename the server refuses (a name a file blocks, such as one inside a file) changes
-nothing, and neither does a delete the server could not record; the file is still there under its old name and trying
-again is safe. A rename onto a name another file holds **replaces** that file, with no warning.
+**A rename, delete or new folder that fails says so, and says why when the server says why — it never reports success.**
+A name a file blocks (one inside a file) says *'<path>' can't be used here: a file is in the way, or the destination is
+the item itself or inside it*; a name another file's records hold says *'<path>' is already taken by another file's records,
+so nothing was moved*; a rename onto a name that already holds something says *Something already exists at '<path>', so nothing was moved*; a rename or delete the server could not record says *Nothing was changed: the server could not
+record this action*; and a failure of the server's own file storage says so and points the administrator to the server
+log. All of these change nothing: the file is still there under its old name and trying again is safe. An answer the page
+has no words for shows the server's own sentence, and one with none shows *Failed to rename file.*, *Failed to delete
+file.* or *Failed to create folder.*
+
+**A move the server is finishing is not a failure.** When the file has moved and the server is completing the rest of the
+rename itself, the page says *The file was moved and the server is finishing the move. This list reloads once it has.*
+in an information message, leaves the rename box, and reloads the list once, after the few seconds the server asks for
+(a few when it names none), so the row appears under its new name without you refreshing. Nothing needs doing; the
+details are in *An interrupted rename finishes on its own*, below.
 
 **An interrupted rename finishes on its own.** When a database outage or a restart stops a rename after the file itself
 moved, the list may briefly show the file under its new name without its status and tags while its metadata is not
