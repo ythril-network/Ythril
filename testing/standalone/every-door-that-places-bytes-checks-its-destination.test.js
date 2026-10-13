@@ -105,9 +105,8 @@ function handlerAt(blanked, at) {
 /** Every call of `local` in `blanked`: where it is, and whether the handler around it asked the guard first. */
 function sitesOf(blanked, local) {
   const sites = [];
-  for (const m of blanked.matchAll(new RegExp(`(?<![.\\w$])${local}\\s*\\(`, 'g'))) {
-    // an import statement or a declaration of the same name is not a call
-    if (/function\s+$/.test(blanked.slice(Math.max(0, m.index - 12), m.index))) continue;
+  // a declaration of the same name (`function storeFile(`) is not a call: refused by the pattern itself, not by a window behind it
+  for (const m of blanked.matchAll(new RegExp(`(?<![.\\w$])(?<!\\bfunction\\s+)${local}\\s*\\(`, 'g'))) {
     const h = handlerAt(blanked, m.index);
     // A guard EARLIER in the handler whose own block still contains the site: one inside an `if` or a `try` that closed before the
     // site (the chunked branch of an upload handler, say) says nothing about a write the single-request branch makes after it.

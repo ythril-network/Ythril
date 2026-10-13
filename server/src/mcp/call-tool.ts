@@ -394,8 +394,8 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...identityTaken.body } }, status: identityTaken.status, callSpace };
     }
     /*
-     * A file act's refusal (a destination a file blocks, a destination another file's records hold, a move still owed, a deletion that
-     * could not be recorded): the status and body every REST door answers (`fileActAnswer`), the body carried as `structuredContent`.
+     * A file act's refusal or failure (the kinds `files/act-answers.ts` defines): the status and body every REST door answers
+     * (`fileActAnswer`), the body carried as `structuredContent`.
      * Not a `ToolRefusal`: that is raised before the work and is neither logged nor audited, and these come from an act that ran.
      * A filesystem failure that is the server's (`FileSystemFault`) answers `500` in words that name no path.
      */
