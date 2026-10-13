@@ -37,8 +37,10 @@ const files = () => mongo.col(`${S}_files`);
 const links = () => mongo.col(`${S}_links`);
 const big = (prefix, i) => `${prefix}/${String(i).padStart(6, '0')}${PAD}`;
 
+/** Insert `docs` in batches the driver takes comfortably, by the server's own chunker. */
 async function insertInBatches(coll, docs) {
-  for (let i = 0; i < docs.length; i += 500) await coll.insertMany(docs.slice(i, i + 500));
+  const { inChunks } = await import('../../server/dist/util/chunks.js');
+  for (const batch of inChunks(docs, 500)) await coll.insertMany(batch);
 }
 
 describe('what a directory holds is read past the one-reply cap (real MongoDB)', { skip }, () => {

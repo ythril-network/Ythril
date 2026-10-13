@@ -22,7 +22,7 @@
  *  - a function (or an inline route handler, `_routes.mjs`) is a reader of the files collection when it NAMES that collection
  *    — `spaceCollection(x, 'files')`, a `${id}_files` template, or a name computed at run time (`spaceCollection(x, kind)`,
  *    `${id}_${suffix}`), which MAY be the files collection and is held to the rule rather than guessed away — and READS
- *    (`find`, `findOne`, `aggregate`, `countDocuments`, `distinct`, or a by-id read helper), or hands the collection out;
+ *    (`find`, `findOne`, `aggregate`, `countDocuments`, `distinct`, or a read helper: by id, or `distinctStringsOf`), or hands the collection out;
  *  - it CARRIES a predicate when its body names one of the predicates `live-file-row.ts` exports (the exports are read from
  *    the module, so a predicate added there joins the rule and a renamed one cannot hide behind a stale name).
  *
@@ -131,10 +131,10 @@ const NAMES = [
   ['computed key', /spaceCollection\s*\(\s*[^,()]+,\s*[^'"\s)][^)]*\)/],
   ['computed suffix', /`[^`]*\$\{[^}]*\}_\$\{[^}]*\}`/],
 ];
-/** A read of a collection: a driver call, or a by-id read helper. A global regex is built fresh per use. */
+/** A read of a collection: a driver call, or a read helper (by id, or the distinct values of a field). A global regex is built fresh per use. */
 const readCalls = (body) => [...body.matchAll(new RegExp(
   '\\.\\s*(?:find|findOne|aggregate|countDocuments|distinct)\\s*(?:<[^>(]*>)?\\s*\\('
-  + '|\\b(?:readStoredById|readRowsById|readRecordsById)\\s*(?:<[^>(]*>)?\\s*\\(', 'g'))]
+  + '|\\b(?:readStoredById|readRowsById|readRecordsById|distinctStringsOf)\\s*(?:<[^>(]*>)?\\s*\\(', 'g'))]
   // `.find(` of an ARRAY takes a callback: `x => …` or `(x) => …`. A cursor's takes a filter.
   .filter(m => !(m[0].includes('find') && /^\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(body.slice(m.index + m[0].length))));
 /** Hands the collection out for a caller to read. */
