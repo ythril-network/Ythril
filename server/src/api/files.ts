@@ -28,7 +28,6 @@ import { log } from '../util/log.js';
 import { isMissingPath, openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
   listDir,
-  createDir,
   type FileEntry,
 } from '../files/files.js';
 import { fetchJobProgress } from '../files/media/job-queue.js';
@@ -48,6 +47,7 @@ import { contentDispositionOf } from '../util/content-disposition.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { registerUploadRoute } from './files-upload.js';
+import { registerMkdirRoute } from './files-mkdir.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
@@ -342,39 +342,8 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   }
 });
 
-// ── POST /api/files/:spaceId/mkdir ────────────────────────────────────────────
-fileStoreRouter.post(
-  '/:spaceId/mkdir',
-  globalRateLimit,
-  requireSpaceAuth,
-  denyReadOnly,
-  async (req, res) => {
-    const spaceId = req.params['spaceId'] as string;
-    const cfg = getConfig();
-    if (!cfg.spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
-
-    const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-    if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-    const targetSpace = wt.target;
-
-    const dirPath = requireQueryPath(req, res);
-    if (dirPath === null) return;
-
-    try {
-      await createDir(targetSpace, dirPath);
-      res.status(201).json({ created: dirPath });
-    } catch (err) {
-      if (err instanceof RangeError) {
-        res.status(400).json({ error: err.message });
-        return;
-      }
-      sendCaughtFailure(res, `createDir for space ${targetSpace}, path ${dirPath}`, err, { error: 'Failed to create directory' });
-    }
-  },
-);
+// The mkdir route lives in `files-mkdir.ts`: the destination check made it the concern this frozen file moved out.
+registerMkdirRoute(fileStoreRouter);
 
 // ── GET /api/files/:spaceId/upload-status ─────────────────────────────────────
 // Returns bytes received for an in-progress chunked upload.

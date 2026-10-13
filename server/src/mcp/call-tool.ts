@@ -43,6 +43,8 @@ import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
+import { fileActAnswer } from '../files/act-answers.js';
+import { FileSystemFault } from '../files/destination.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
@@ -88,6 +90,8 @@ export interface ToolCallOutcome {
    * door that delegates here until bundle-30 I12. MCP carries the same answer in `structuredContent`.
    */
   storeFailure?: StoreFailureAnswer;
+  /** Headers the REST door puts on the answer (`Retry-After` for a move still owed): MCP has no place for them and says it in `structuredContent`. */
+  headers?: Record<string, string>;
 }
 
 /** A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. */
@@ -388,6 +392,22 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     const identityTaken = edgeIdentityTakenAnswer(err);
     if (identityTaken) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...identityTaken.body } }, status: identityTaken.status, callSpace };
+    }
+    /*
+     * A file act's refusal (a destination a file blocks, a destination another file's records hold, a move still owed, a deletion that
+     * could not be recorded): the status and body every REST door answers (`fileActAnswer`), the body carried as `structuredContent`.
+     * Not a `ToolRefusal`: that is raised before the work and is neither logged nor audited, and these come from an act that ran.
+     * A filesystem failure that is the server's (`FileSystemFault`) answers `500` in words that name no path.
+     */
+    const fileAct = fileActAnswer(err);
+    if (fileAct) {
+      return {
+        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...fileAct.body } },
+        status: fileAct.status, callSpace, ...(fileAct.headers ? { headers: fileAct.headers } : {}),
+      };
+    }
+    if (err instanceof FileSystemFault) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 500, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {

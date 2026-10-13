@@ -97,8 +97,9 @@ describe('the refusal keeps its classification', () => {
       classified += 1;
       // `connectionsNotWritten`: the third classification (Q-170) — a record that landed with its connections not, whose
       // answer carries `written`; it too is attached only by the branch that classified it. `identityTaken`: the fourth
-      // (Q-439), a relabel onto a held identity, answered by `edgeIdentityTakenAnswer` as REST answers it.
-      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken/,
+      // (Q-439), a relabel onto a held identity, answered by `edgeIdentityTakenAnswer` as REST answers it. `fileAct`: the fifth
+      // (bundle-44), a file act's refusal, answered by `fileActAnswer` as every REST file door answers it.
+      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken|fileAct/,
         `a return carries structuredContent without a classification, so every unclassified error grows an `
         + `empty field: ${r.slice(0, 120)}`);
     }

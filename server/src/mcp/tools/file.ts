@@ -4,6 +4,7 @@ import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { createDir, listDir, readFileWindow } from '../../files/files.js';
+import { assertDestinationReachable } from '../../files/destination.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
@@ -94,7 +95,7 @@ export const write_fileTool: ToolHandler = {
     + 'default and is what you want for notes, markdown and code; an image, a PDF or anything else that is '
     + 'not text has to say `base64` or it is stored as mojibake. The two doors take the same two encodings '
     + 'and mean the same thing by them.\n\n'
-    + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking.\n\n'
+    + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking. A path that runs THROUGH a file (`a.txt/x` where `a.txt` is a file) is REFUSED with `409`, and nothing is written.\n\n'
     + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeFileContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
     + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
   mutating: true,
@@ -104,7 +105,7 @@ export const write_fileTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
             path: filePathSchema('An existing file at this path is OVERWRITTEN without a warning, and '
-              + 'missing parent directories are created for you.'),
+              + 'missing parent directories are created for you. A path that runs through a file is REFUSED with `409`.'),
             content: {
               type: 'string',
               description: 'The ENTIRE new contents. There is no append and no patch — whatever you send '
@@ -179,6 +180,7 @@ export const write_fileTool: ToolHandler = {
     // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
     // (`files/store-file.ts`). MCP has no Content-Type; the dispatcher derives it from the extension.
     const ifFmt = typeof a['inputFormat'] === 'string' ? a['inputFormat'] as InputFormat : 'auto';
+    await assertDestinationReachable(wt.target, filePath);
     const { sha256, sizeBytes, quota: wfQuota } = await storeFile(wt.target, filePath, bytes,
       { meta, inputFormat: ifFmt, ...(ctx.actor ? { actor: ctx.actor as Record<string, unknown> } : {}) });
     const wfText = `Written (sha256: ${sha256}).`
@@ -318,7 +320,7 @@ export const create_dirTool: ToolHandler = {
   name: 'create_dir',
   description: 'Create a directory in the space file store, including any parent directories that do not yet '
     + 'exist — the equivalent of `mkdir -p`, so `a/b/c` in one call is fine. Creating a directory that is '
-    + 'already there SUCCEEDS rather than erroring, so this is safe to call without checking first.\n\n'
+    + 'already there SUCCEEDS rather than erroring, so this is safe to call without checking first. A name that is a FILE, or a path that runs through one, is REFUSED with `409`, and nothing is created.\n\n'
     + 'YOU RARELY NEED THIS BEFORE A WRITE. `write_file` and `move_file` both create the parent directories of '
     + 'their destination on their own, so calling this first is a no-op step in most flows. It is for the case '
     + 'where the EMPTY directory is the point: laying out a structure a human or another agent will fill.\n\n'
@@ -347,6 +349,7 @@ export const create_dirTool: ToolHandler = {
     if (!dirPath.trim()) throw new Error('path must not be empty');
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
+    await assertDestinationReachable(wt.target, dirPath);
     await createDir(wt.target, dirPath);
     return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }],
       structuredContent: { path: dirPath, created: true } };
@@ -370,17 +373,21 @@ export const move_fileTool: ToolHandler = {
     + 'For a directory move every child path is tombstoned, not just '
     + 'the directory. Who the tombstones reach is who a delete reaches: ' + DELETION_REACH + ' So a file ANOTHER '
     + 'instance wrote keeps its old path on a mesh peer, which then holds both paths.\n\n'
-    + 'NOTHING CHECKS THE DESTINATION FIRST. There is no "already exists" refusal here — the move is a '
-    + 'filesystem rename, and a rename onto an existing file replaces it. Read `list_dir` first if that would '
-    + 'lose something. Missing parent directories of `dst` ARE created for you.\n\n'
+    + 'THE DESTINATION IS CHECKED BEFORE ANYTHING MOVES. A name blocked by a file is REFUSED with `409` and '
+    + 'nothing is changed: that is `a.txt/x` where `a.txt` is a file, and a directory '
+    + 'moved into itself or onto itself. A name that is TAKEN by a file is REPLACED: the moved file overwrites it '
+    + 'without asking, so read `list_dir` first if that would lose something. Missing parent directories of `dst` '
+    + 'ARE created for you.\n\n'
     + 'THE FILE IS NOT RE-READ. Moving does not re-extract text, re-run media analysis or re-embed: the '
     + 'content did not change, only where it lives. A file that failed extraction at the old path is still '
     + 'failed at the new one — use `retry_embed_file` for that, which is a different question from where the '
     + 'file sits.\n\n'
-    + 'A FAILED MOVE IS SAFE TO RETRY with the same `src` and `dst`. A store failure is a retryable error, never a '
-    + 'success. Before the bytes move nothing changes, and no peer is told of the tombstones it wrote (they are '
-    + 'published only once the bytes each one names have moved — a conversion sidecar\'s after the sidecar\'s own move); after they move, the metadata is still at `src`, and the retry '
-    + 'finds the file at `dst` and completes the move. Only a move begun with that same `src` and `dst` is '
+    + 'A MOVE THAT COULD NOT FINISH IS FINISHED ON ITS OWN, and a failed move is SAFE TO RETRY with the same `src` and '
+    + '`dst`. A store failure is a retryable error, never a success. Before the bytes move nothing changes, and no peer is '
+    + 'told of the tombstones it wrote (they are published only once the bytes each one names have moved — a conversion '
+    + 'sidecar\'s after the sidecar\'s own move). Once they have moved, a move whose records could not all follow answers '
+    + '`503` with `Retry-After`: it is not lost, the server completes it without being asked '
+    + 'again, and repeating the call completes it too. Only a move begun with that same `src` and `dst` is '
     + 'completed: a `src` whose bytes are gone for any other reason is not found, and `dst` is left alone. '
     + 'However many attempts it took, peers are sent ONE tombstone per path the move left: the successful '
     + 'attempt\'s replaces any a failed one left behind.\n\n'
@@ -401,9 +408,10 @@ export const move_fileTool: ToolHandler = {
             space: s.requiredSpace,
             src: filePathSchema('The existing file OR directory to move. Moving a directory carries '
               + 'everything under it, including each file\'s metadata record.'),
-            dst: filePathSchema('Where it should end up. NOTHING CHECKS THIS FIRST — the move is a '
-              + 'rename, so an existing file here is REPLACED with no refusal and no warning. Missing parent '
-              + 'directories are created. The file is not re-read, so a failed extraction stays failed.'),
+            dst: filePathSchema('Where it should end up. A name blocked by a file (`a.txt/x` where `a.txt` is a '
+              + 'file, or a path inside the directory being moved) is REFUSED with `409` before anything changes; a name '
+              + 'that is TAKEN by a file is REPLACED, with no warning. Missing parent directories are created. The file '
+              + 'is not re-read, so a failed extraction stays failed.'),
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['space', 'src', 'dst'],

@@ -26,6 +26,7 @@ import { countFileArrival } from '../files/bytes-arrived.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
 import { StreamVerificationError } from '../util/sha256-tap.js';
+import { assertDestinationReachable, isPathBlocked } from '../files/destination.js';
 import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
 import { storeFile, recordStoredFile, peerBytesShadowed, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
@@ -194,6 +195,9 @@ export function registerUploadRoute(router: Router): void {
         }
 
         try {
+          // A destination a file blocks is refused at the FIRST range, before a byte is staged, and again before the assembly
+          // (below): the blocker may appear between the two.
+          if (firstChunk) await assertDestinationReachable(targetSpace, filePath);
           const { received, complete } = await storeChunk(
             targetSpace, filePath, req.body, range.start, range.total,
           );
@@ -202,6 +206,7 @@ export function registerUploadRoute(router: Router): void {
             // Assemble final file (symlink-checked before writing the target).
             const absTarget = resolveSafePath(targetSpace, filePath);
             await assertNoSymlinkEscape(targetSpace, absTarget);
+            await assertDestinationReachable(targetSpace, filePath);
             // A peer's bytes that a tombstone erased are not kept (Q-229, Q-348), and are DECIDED BEFORE the target is written: the
             // staged chunks are hashed in one streaming pass (only when a tombstone for the path carries a hash to compare), and
             // on a shadow they are discarded and the answer is the one the single upload gives (`peerBytesShadowed`). Assembled
@@ -235,6 +240,8 @@ export function registerUploadRoute(router: Router): void {
             res.status(202).json({ path: filePath, received, maxBodyBytes: uploadBodyLimit() });
           }
         } catch (err) {
+          // The answer is `sendCaughtFailure`'s (409); what this door owes is that the ranges the refused upload staged do not stay.
+          if (isPathBlocked(err)) await discardStagedChunks(targetSpace, filePath, range.total).catch(() => undefined);
           if (err instanceof RangeError) {
             res.status(400).json({ error: (err as Error).message });
             return;
@@ -306,6 +313,8 @@ export function registerUploadRoute(router: Router): void {
         }
         const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
 
+        // A destination a regular file blocks is refused before quota or bytes (`409`, the answer every door gives).
+        await assertDestinationReachable(targetSpace, filePath);
         // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
         // (files/store-file.ts). A metadata write that fails is no longer swallowed into a 2xx.
         let stored;
