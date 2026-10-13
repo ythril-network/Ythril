@@ -244,6 +244,19 @@ export async function withinWriteBound<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * {@link withinWriteBound} for work whose purpose has a longer bound of its own: the deadline across the scope AND each operation's
+ * figure are `ms`. The enclosing active scope still wins where it is lower (a hold's deadline is never raised from inside it), so this
+ * can only LENGTHEN what the default would have given when nothing encloses it.
+ *
+ * Its one caller is a conversion's leased write (`files/media/lease.ts`), a single transaction that carries every row a conversion
+ * made and which the server itself bounded at its transaction lifetime before the write bound existed.
+ */
+export async function withinWriteBoundOf<T>(ms: number, fn: () => Promise<T>): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) throw new Error(`withinWriteBoundOf: ms must be a finite positive number, got ${String(ms)}`);
+  return withinScope(Date.now() + ms, ms, fn);
+}
+
+/**
  * Run `fn` — one housekeeping unit — with every database operation it issues ended at a figure of its own: `opMs`, or
  * `housekeepingOpMs()`. The same scope as `withinWriteBound` and the same door: a plain write is ended by the SERVER at the
  * figure with the client backstop `SERVER_FIRST_MARGIN_MS` later, so a housekeeping write the bound ended can no more land
@@ -279,6 +292,14 @@ export function outsideWriteBound<T>(fn: () => T): T {
 export function boundTimeLeft(): number | undefined {
   const s = activeScope();
   return s && Number.isFinite(s.deadline) ? Math.max(0, s.deadline - Date.now()) : undefined;
+}
+
+/**
+ * The longest ONE operation may take inside the active scope, ms, or `undefined` outside any. A transaction's commit is one operation,
+ * so a caller that sets its own figure for it takes the lower of the two and never raises what the scope bounded.
+ */
+export function boundOperationMs(): number | undefined {
+  return activeScope()?.perOpMs;
 }
 
 /**

@@ -37,6 +37,7 @@
 import type { ClientSession } from 'mongodb';
 import { col, asFilter } from '../../db/mongo.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
+import { writeTimeoutMs } from '../../db/write-bound.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
@@ -105,9 +106,9 @@ function heldBy(claim: JobClaim): Record<string, unknown> {
  * filter matching nothing; one that lands second waits for the commit, and then finds the results in place.
  *
  * A write refused by a conflict is retried by `withTransaction` from the top, so `writes` must be safe to run twice:
- * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by the write
- * bound (`db/bounded-transaction.ts`) — a job row locked elsewhere is a `StoreTimeout`, not a two-minute wait — and it
- * holds no seq horizon of its own: the fence is a counter on a job row, which no seq-paged reader waits for.
+ * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by a bound
+ * (`db/bounded-transaction.ts`, at {@link leasedWriteBoundMs}) — a job row locked elsewhere is a `StoreTimeout`, not a two-minute
+ * wait — and it holds no seq horizon of its own: the fence is a counter on a job row, which no seq-paged reader waits for.
  */
 export async function writeUnderClaim<T>(
   spaceId: string,
@@ -120,8 +121,20 @@ export async function writeUnderClaim<T>(
     );
     if (fenced.matchedCount === 0) throw new JobLeaseLostError(spaceId, claim.jobId);
     return await writes(session);
-  });
+  }, { boundMs: leasedWriteBoundMs() });
 }
+
+/**
+ * How long a leased write may take, ms: the deadline across its transaction and the cap on its commit — a multiple of the write bound,
+ * so the operator's setting moves it and a lock held elsewhere still ends it in a bound of the same kind.
+ *
+ * Not the write bound itself, because a conversion's write is its WHOLE set of derived rows in one transaction, so its size is the
+ * file's and not a record's. Before the write bound existed the server ended it at its own transaction lifetime, a minute by default;
+ * at the default write bound this is that, so a conversion whose commit landed then lands now. The write bound's own figure would
+ * refuse it and the job would be retried at the same size for ever. A hold that encloses the write still ends it sooner.
+ */
+const LEASED_WRITE_BOUND_FACTOR = 2;
+const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
 
 /**
  * Whether `claim` still holds its job — for a decision that follows from something the run OBSERVED, not a write.
