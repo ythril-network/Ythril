@@ -54,6 +54,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { holdDocumentLock, settleWithin, setWriteBoundForTest, loseNextCommitReply } from './_write-faults.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -144,8 +145,8 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
         entered = true;
         await facts().updateOne({ _id: 'f-00001' }, { $set: { stalledEdit: true } }, { session });
       }));
-      const reached = Date.now() + 5000;
-      while (!entered && Date.now() < reached) await new Promise(r => setTimeout(r, 10));
+      // the callback has started (it will stall on the lock); the assertion after the finally reports it if it never did
+      await waitFor(() => entered, 5000, 10).catch(() => {});
       horizonWhileStalled = seq.lowestUncommittedSeq(S);
       res = await settleWithin(op, CAP_MS);
     } finally {

@@ -297,7 +297,7 @@ describe('the caller-facing contract of a re-key', () => {
     // ends the session are read THERE, in the one module every transaction goes through (every-transaction-is-bounded).
     assert.match(b.slice(0, at), /inHeldTransaction\(/,
       'the delete and the insert are not in a transaction, so a failure between them loses the edge');
-    const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const strip = stripComments;
     const held = strip(readFileSync(new URL('../../server/src/brain/held-transaction.ts', import.meta.url), 'utf8'));
     assert.match(held, /inBoundedTransaction\(/, 'inHeldTransaction no longer runs a bounded transaction');
     const bounded = strip(readFileSync(new URL('../../server/src/db/bounded-transaction.ts', import.meta.url), 'utf8'));

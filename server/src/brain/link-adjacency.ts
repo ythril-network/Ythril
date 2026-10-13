@@ -45,6 +45,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { escapeRegex } from '../util/redos.js';
 
 /** One class of link: a record kind that names another record kind through one array field. */
 export interface LinkClass {
@@ -339,6 +340,19 @@ export async function linksStartingFrom(
           { projection: { from: 1, fromKind: 1, to: 1, toKind: 1 } });
   if (limit !== undefined) cursor.limit(limit);
   return await cursor.toArray() as LinkEnd[];
+}
+
+/**
+ * Whether any FILE under the directory `root` (a space-relative path, no trailing slash) is the `from` of a link row.
+ * Asked by the move marker's owed check (`files/tombstones.ts`): a directory move whose records left but whose links have
+ * not is still owed. One indexed prefix probe on `from`, escaped and anchored, limit 1; an empty root is refused rather
+ * than read as "every file in the space".
+ */
+export async function aFileUnderHoldsALink(spaceId: string, root: string): Promise<boolean> {
+  if (!root) throw new RangeError('aFileUnderHoldsALink: an empty root would ask about every file in the space');
+  const hit = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .findOne(asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } }), { projection: { _id: 1 } });
+  return hit !== null;
 }
 
 /**

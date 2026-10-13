@@ -111,7 +111,6 @@ import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
-import { escapeRegex } from '../util/redos.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { dropIndexesIfPresent } from '../db/index-names.js';
@@ -124,7 +123,7 @@ import { withinWriteBound } from '../db/write-bound.js';
 import { bytesPresentAt, isMissingPath } from './stored-bytes.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
-import { linksStartingFrom } from '../brain/link-adjacency.js';
+import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { ActNotRecorded } from './act-answers.js';
 import { idsUnder, jobPathsOf, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
@@ -689,9 +688,9 @@ async function publishSlice(
 async function dropPendingById(spaceId: string, ids: readonly string[]): Promise<void> {
   for (const chunk of inChunks([...ids], READ_CHUNK)) {
     await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, pending: true, 'move.from': { $exists: false } }));
-    const marked = await tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, pending: true, 'move.from': { $exists: true } }),
-      { projection: { move: 1 } }).toArray();
-    await removeUnlessOwed(spaceId, marked, { pending: true });
+    const marked = await readStoredById<StoredFileTombstone>(spaceCollection(spaceId, 'fileTombstones'), chunk, { move: 1 },
+      { filter: { pending: true, 'move.from': { $exists: true } } });
+    await removeUnlessOwed(spaceId, [...marked.values()], { pending: true });
   }
 }
 
@@ -1070,7 +1069,7 @@ async function somethingOfTheFileIsAt(spaceId: string, at: string, kind: PathKin
   if (await hasLiveFileRecordAt(spaceId, root)) return true;
   const linked = kind === 'file'
     ? (await linksStartingFrom(spaceId, [root], 1)).length > 0
-    : (await col(spaceCollection(spaceId, 'links')).findOne(asFilter({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } }), { projection: { _id: 1 } })) !== null;
+    : await aFileUnderHoldsALink(spaceId, root);
   if (linked) return true;
   return (await col(spaceCollection(spaceId, 'mediaJobs')).findOne(asFilter({ $or: idsUnder(jobPathsOf(root, kind)) }), { projection: { _id: 1 } })) !== null;
 }
