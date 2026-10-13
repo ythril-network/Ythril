@@ -24,6 +24,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'markerrace';
@@ -70,7 +71,7 @@ describe('two removers of marker rows never drop the last row of an owed move', 
     realDeleteMany = proto.deleteMany;
     const real = realDeleteMany;
     proto.deleteMany = async function held(...args) {
-      if (String(this.collectionName).endsWith('_file_tombstones')) await new Promise(r => setTimeout(r, DELETE_HELD_MS));
+      if (String(this.collectionName).endsWith('_file_tombstones')) await sleep(DELETE_HELD_MS);
       return real.apply(this, args);
     };
   }

@@ -28,6 +28,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'owedhk';
@@ -188,7 +189,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     const held = new Promise(r => { release = r; });
     const holder = flight.runMoveOnce(S, 'bt/a-from.txt', 'bt/a-to.txt', () => held);
     const spent = pass(LATER(1), { deadlineAt: Date.now() + 200 });
-    await new Promise(r => setTimeout(r, 400));
+    await sleep(400);
     release();
     await holder;
     const { outcome } = await spent;
