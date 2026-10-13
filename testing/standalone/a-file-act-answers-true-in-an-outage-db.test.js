@@ -20,8 +20,12 @@
  * - One that is reported failed AND landed publishes no tombstone, whether it landed before the act's clean-up or
  *   after that clean-up was itself refused — and the TTL sweep's settle removes what is left.
  * - "Published" is what `GET /api/sync/file-tombstones` serves a peer.
- * - A store step that fails AFTER the bytes went (delete) or moved (move) answers `503`, and the same request,
- *   retried, completes the act: bytes, metadata and tombstone each where a finished act leaves them.
+ * - A store step that fails AFTER the bytes went (delete) answers `503`, and the same request, retried, completes the act:
+ *   bytes, metadata and tombstone each where a finished act leaves them.
+ * - A MOVE whose record step fails after the bytes moved — the store's failure or not, a write that did not happen or one that
+ *   landed and was reported failed — leaves the file's row, its derived rows, its jobs and its links ALL at the source, answers
+ *   `503` (never `200` over half a move), and a retry completes it (bundle-44, Q-342, Q-345). The case asserts the armed fault
+ *   fired (`failWrites(...).fired`).
  *
  * Every injected error is one the installed driver produced against the real store (`driverWriteFailures`).
  *
@@ -102,7 +106,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       return layer.route.stack.at(-1).handle;
     };
     handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
-    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
+    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertOne', 'insertMany', 'deleteOne', 'deleteMany', 'bulkWrite']);
   });
   after(async () => {
     faults?.restore();
@@ -110,7 +114,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
   });
   beforeEach(async () => {
     faults.clear();
-    for (const part of ['files', 'file_tombstones']) await door.mongo.col(`${S}_${part}`).deleteMany({});
+    for (const part of ['files', 'file_tombstones', 'media_jobs', 'links', 'entities']) await door.mongo.col(`${S}_${part}`).deleteMany({});
     fs.rmSync(root(), { recursive: true, force: true });
   });
   afterEach(() => { faults.clear(); });
@@ -118,6 +122,20 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
   it('the injected errors are the driver\'s: the bulk wrapper the drive saw, and a failed selection', () => {
     assert.equal(F.storeGone.bulk.name, 'MongoBulkWriteError');
     assert.equal(F.storeGone.single.name, 'MongoServerSelectionError');
+  });
+
+  it('failWrites reports whether an armed fault FIRED: once per throw, nothing for a write it was not armed on, and nothing after clear()', async () => {
+    const probe = door.mongo.col(`${S}_fault_probe`);
+    fail('insertOne', 'fault_probe', F.storeGone.single);
+    assert.equal(faults.fired('insertOne', `${S}_fault_probe`), 0, 'a fault that was only armed reports it fired');
+    await assert.rejects(() => probe.insertOne({ _id: 'x' }), (err) => err === F.storeGone.single);
+    assert.equal(faults.fired('insertOne', `${S}_fault_probe`), 1);
+    await probe.insertOne({ _id: 'y' });
+    assert.equal(faults.fired('insertOne', `${S}_fault_probe`), 1, 'a write after the fault was spent counted as fired');
+    assert.equal(faults.fired('insertMany', `${S}_fault_probe`), 0, 'a method the fault was not armed on reports fired');
+    faults.clear();
+    assert.equal(faults.fired('insertOne', `${S}_fault_probe`), 0);
+    await probe.deleteMany({});
   });
 
   for (const via of ['REST', 'MCP']) {
@@ -161,18 +179,119 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       await tombstones.whenPendingFileTombstoneDropsSettle();
       assert.deepEqual(await tombstoned(), [], 'a failed move left a tombstone for a file that did not move (D2)');
     });
+  }
 
-    it(`${via}: a move whose metadata rename fails after the bytes moved answers 503, and the retry completes it`, async () => {
-      await seed('from.txt');
-      fail('deleteOne', 'files', F.storeGone.single);
-      const a = via === 'REST' ? await restMove('from.txt', 'to.txt') : await mcp('move_file', { src: 'from.txt', dst: 'to.txt' });
-      assertStoreAnswer(`${via} move`, a);
-      const retry = via === 'REST' ? await restMove('from.txt', 'to.txt') : await mcp('move_file', { src: 'from.txt', dst: 'to.txt' });
-      assert.equal(retry.code ?? retry.status, 200, `the retried move: ${JSON.stringify(retry.body ?? retry.text)}`);
-      assert.ok(onDisk('to.txt') && !onDisk('from.txt'), 'the retried move did not leave the file at its destination');
-      assert.ok(await meta('to.txt'), 'the retried move did not carry the metadata to the destination');
-      assert.equal(await meta('from.txt'), null, 'the metadata is still at the source');
-      assert.deepEqual(await tombstoned(), ['from.txt'], 'the path the move left is not tombstoned');
+  // ── A move whose record step fails after the bytes moved ─────────────────────────────────────────────────────────
+  //
+  // THE outage test of the move (bundle-44, Q-342, Q-345; plan rev 3 D1, D3, D7). The rule is about WHERE EVERYTHING IS, not
+  // about which write failed: whatever fails in the record step once the bytes have moved — the store, or anything else, a
+  // write that never happened or one that landed and was reported failed — the file's row, the rows derived from it, its jobs
+  // and its links are all still at the source (none lost, none at neither id), the door answers `503` it can be retried
+  // from (never `200` over a half-done move), and the retry completes the move. It used to arm ONE fault, a `deleteOne` of the
+  // file row that never ran, which left the source row in place by construction: the only half-move it could see was the
+  // one that cannot lose a row. A fault AFTER the delete — the insert, or a delete that landed — is the one that does.
+  //
+  // Each fault names the writes a record step can make (`INSERTS`, `DELETES`) rather than the one the code makes today, and the
+  // case asserts the armed fault FIRED: a move that no longer goes through a method must not turn this into a test of nothing.
+  const E1 = '11111111-1111-4111-8111-111111111111';
+  const E2 = '22222222-2222-4222-8222-222222222222';
+  const INSERTS = ['insertOne', 'insertMany', 'bulkWrite'];
+  const DELETES = ['deleteOne', 'deleteMany', 'bulkWrite'];
+  /** Every row a file owns here: its own, a chunk, the converted Markdown and an extracted image (each derived from it). */
+  const rowsOf = (p) => [p, `${p}#chunk-0`, `_converted/${p}.md`, `_extracted/${p}/x.jpg`].sort();
+  /** The queued job of the extracted image: a job's id is its path. */
+  const jobOf = (p) => `_extracted/${p}/x.jpg`;
+  const LINKS = [`entity:${E1}`, `entity:${E2}`];
+
+  /** A file with everything a move carries: bytes and sidecar bytes, a rich record, three derived rows, a queued job, two links. */
+  async function seedEverything(p) {
+    await files.writeFile(S, p, `content of ${p}`);
+    await files.writeFile(S, `_converted/${p}.md`, 'converted markdown');
+    await files.writeFile(S, `_extracted/${p}/x.jpg`, 'image bytes');
+    const derived = (id, extra = {}) => ({ _id: id, spaceId: S, path: id, parentFileId: p, tags: [], createdAt: T0, updatedAt: T0, sizeBytes: 5, ...extra });
+    await door.mongo.col(`${S}_files`).insertMany([
+      { _id: p, spaceId: S, path: p, sizeBytes: 10, tags: ['kept-tag'], description: 'the moved description', properties: { kept: true }, createdAt: T0, updatedAt: T0 },
+      derived(`${p}#chunk-0`, { chunkIndex: 0, content: 'a chunk' }), derived(`_converted/${p}.md`), derived(`_extracted/${p}/x.jpg`),
+    ]);
+    await door.mongo.col(`${S}_media_jobs`).insertOne({ _id: jobOf(p), spaceId: S, status: 'pending' });
+    const entity = (_id, seq) => ({ _id, spaceId: S, name: `Entity ${seq}`, type: 'thing', tags: [], createdAt: T0, seq, author: { instanceId: 'outage', instanceLabel: 'Outage' } });
+    await door.mongo.col(`${S}_entities`).insertMany([entity(E1, 1), entity(E2, 2)]);
+    const { updateFileMeta } = await import('../../server/dist/files/file-meta.js');
+    await updateFileMeta(S, p, { linkEntities: [E1, E2] });
+    const adjacency = await import('../../server/dist/brain/link-adjacency.js');
+    assert.deepEqual((await adjacency.linksStartingFrom(S, [p])).map(r => `${r.toKind}:${r.to}`).sort(), LINKS, 'fixture: the file is not linked');
+  }
+
+  /** Which of a file's rows, its job and its links are held under the path `p`, by identity. */
+  async function heldAt(p) {
+    const adjacency = await import('../../server/dist/brain/link-adjacency.js');
+    const rows = await door.mongo.col(`${S}_files`).find({ _id: { $in: rowsOf(p) } }, { projection: { _id: 1 } }).toArray();
+    return {
+      rows: rows.map(r => r._id).sort(),
+      job: (await door.mongo.col(`${S}_media_jobs`).findOne({ _id: jobOf(p) }))?._id ?? null,
+      links: (await adjacency.linksStartingFrom(S, [p])).map(r => `${r.toKind}:${r.to}`).sort(),
+    };
+  }
+
+  /** Everything of `from.txt` is at `to.txt` and nothing of it is left: rows, job, links, the record's own fields, bytes, the tombstone. */
+  async function assertMovedWhole() {
+    const done = await heldAt('to.txt');
+    assert.deepEqual(done.rows, rowsOf('to.txt'), 'the move did not carry every row to the destination');
+    assert.equal(done.job, jobOf('to.txt'), 'the move did not carry the job');
+    assert.deepEqual(done.links, LINKS, 'the move did not carry the links');
+    assert.deepEqual(await heldAt('from.txt'), { rows: [], job: null, links: [] }, 'something of the file is still at the source');
+    const record = await meta('to.txt');
+    assert.equal(record.description, 'the moved description');
+    assert.deepEqual(record.tags, ['kept-tag']);
+    assert.deepEqual(record.properties, { kept: true });
+    assert.ok(onDisk('_converted/to.txt.md') && onDisk('_extracted/to.txt/x.jpg') && !onDisk('from.txt'), 'the move did not leave the file and its sidecars at the destination');
+    const gone = await tombstoned();
+    assert.ok(gone.includes('from.txt'), `the path the move left is not tombstoned: ${JSON.stringify(gone)}`);
+    assert.ok(!gone.includes('to.txt'), 'the destination is tombstoned');
+  }
+
+  const NOT_THE_STORE = new Error('injected: a failure that is not the store\'s');
+  const FAULTS = [
+    { name: 'the records\' re-insert fails as the store fails it', methods: INSERTS, part: 'files', err: () => F.storeGone.single },
+    { name: 'the records\' re-insert fails with an error that is not the store\'s', methods: INSERTS, part: 'files', err: () => NOT_THE_STORE },
+    { name: 'the records\' delete LANDS and is reported failed', methods: DELETES, part: 'files', err: () => F.storeGone.single, opts: { land: true } },
+    { name: 'the jobs\' re-insert fails with an error that is not the store\'s', methods: INSERTS, part: 'media_jobs', err: () => NOT_THE_STORE },
+    { name: 'the jobs\' delete LANDS and is reported failed', methods: DELETES, part: 'media_jobs', err: () => F.storeGone.single, opts: { land: true } },
+  ];
+
+  for (const via of ['REST', 'MCP']) {
+    const move = (s, d) => (via === 'REST' ? restMove(s, d) : mcp('move_file', { src: s, dst: d }));
+    for (const f of FAULTS) {
+      it(`${via}: ${f.name}, after the bytes moved: 503, everything still at the source, and the retry completes the move`, async () => {
+        await seedEverything('from.txt');
+        for (const m of f.methods) fail(m, f.part, f.err(), f.opts);
+
+        const a = await move('from.txt', 'to.txt');
+
+        assertStoreAnswer(`${via} move`, a);
+        const fired = f.methods.reduce((n, m) => n + faults.fired(m, `${S}_${f.part}`), 0);
+        assert.ok(fired > 0, `the fault armed on ${f.methods} of ${S}_${f.part} never fired — the move does not go through them, so this case injected nothing`);
+        assert.ok(onDisk('to.txt') && !onDisk('from.txt'), 'fixture: the bytes did not move, so this is not a failure AFTER the bytes moved');
+        const atSource = await heldAt('from.txt');
+        assert.deepEqual(atSource.rows, rowsOf('from.txt'), 'a row of the file is not at the source: a record step that fails after the bytes moved must leave every row where it was');
+        assert.equal(atSource.job, jobOf('from.txt'), 'the queued job is not at the source');
+        assert.deepEqual(atSource.links, LINKS, 'the file\'s links are not at the source');
+        const atDestination = await heldAt('to.txt');
+        assert.deepEqual(atDestination.rows, [], 'a row of the file is at the destination although the move failed: half a move');
+        assert.equal(atDestination.job, null, 'the job is at the destination although the move failed');
+
+        faults.clear();
+        const retry = await move('from.txt', 'to.txt');
+        assert.equal(retry.code ?? retry.status, 200, `the retried move: ${JSON.stringify(retry.body ?? retry.text)}`);
+        await assertMovedWhole();
+      });
+    }
+
+    it(`${via}: control, no fault: the same move arrives whole (what the retries above must reach)`, async () => {
+      await seedEverything('from.txt');
+      const a = await move('from.txt', 'to.txt');
+      assert.equal(a.code ?? a.status, 200, `the move: ${JSON.stringify(a.body ?? a.text)}`);
+      await assertMovedWhole();
     });
   }
 
