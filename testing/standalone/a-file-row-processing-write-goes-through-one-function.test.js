@@ -131,8 +131,14 @@ describe('the derivation finds the writes at all, so the rule cannot pass by fin
     assert.ok(fields.includes('embeddingStatus'), 'embeddingStatus is the anchor of the rule and is not in the set');
   });
 
-  it('some write anywhere touches a processing field (otherwise the rule below is vacuous)', () => {
-    assert.ok(touching.length >= 1, 'no write in the tree touches a file\'s processing state — the derivation is broken');
+  it('the derivation sees the writer of processing state (otherwise the rule below is vacuous)', () => {
+    // It used to be satisfied by the one write OUTSIDE the module that touched a processing field (the move's pointer rewrite, exempted
+    // in `_processing-state-writes.mjs`); that write is gone, so the derivation is asked for what it must see: the module's own writer, in
+    // the writes it found, with its keys unreadable (built from a typed argument) and so NOT read as clean — and any write that does touch.
+    const writer = WRITES.find(w => w.file === MODULE && /:setFileProcessingState\b/.test(w.name));
+    assert.ok(writer, `the derivation does not see ${MODULE}'s setFileProcessingState among the ${WRITES.length} file-collection writes it found`);
+    assert.equal(processingTouched(writer).readable, false, 'the writer builds its update from a typed argument: an unreadable write must not be read as clean');
+    assert.ok(touching.every(({ w }) => inModule({ w }) || w.name in EXEMPT || isChildRow(w)), 'a write outside the module touches a processing field (the next case names it)');
   });
 });
 

@@ -19,7 +19,7 @@
  * ## What each case is really asserting
  *
  * **The move carries the WHOLE document**, which is a stronger claim than "carries the three fields".
- * `renameFileMeta` re-inserts by spread, so a field added next year rides across without anybody
+ * `rebuiltFileRow` (`files/move-plan.ts`) re-keys the stored row by spread, so a field added next year rides across without anybody
  * remembering — and the day somebody replaces the spread with a field list, that stops being true for
  * whatever they leave out. The assertion is therefore on the SPREAD, not on the field names.
  *
@@ -36,7 +36,7 @@
  *
  * ## Seen red
  *
- * By mutation: replacing the spread in `renameFileMeta` with a field list, and dropping the `!== undefined`
+ * By mutation: replacing the spread in `rebuiltFileRow` with a field list, adding an `updatedAt` to its patch, and dropping the `!== undefined`
  * guard on `properties` in `upsertFileMeta`.
  *
  * Run: node --test testing/standalone/a-file-keeps-its-metadata-across-a-move.test.js
@@ -50,16 +50,25 @@ import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
 const SRC = stripComments(readFileSync(join(REPO_ROOT, 'server/src/files/file-meta.ts'), 'utf8'));
+/** The file-row builder of a move (`files/move-plan.ts`) and the cascade that hands rows to it. */
+const PLAN = stripComments(readFileSync(join(REPO_ROOT, 'server/src/files/move-plan.ts'), 'utf8'));
+const CASCADE = stripComments(readFileSync(join(REPO_ROOT, 'server/src/files/move-cascade.ts'), 'utf8'));
 
 /** The fields an integrator authors, as opposed to the ones the server computes. */
 const AUTHORED = ['description', 'tags', 'properties'];
 
 describe('the gate is reading the functions it names', () => {
-  it('both are in file-meta.ts', () => {
-    for (const name of ['renameFileMeta', 'upsertFileMeta']) {
-      const body = bodyOf(SRC, name);
+  it('the row builder of a move is in move-plan.ts, the rewrite in file-meta.ts, and the cascade hands every file row to the builder', () => {
+    for (const [src, name] of [[PLAN, 'rebuiltFileRow'], [SRC, 'upsertFileMeta']]) {
+      const body = bodyOf(src, name);
       assert.ok(body.length > 200, `${name} is not where this gate thinks it is — re-anchor before trusting it`);
     }
+    assert.match(CASCADE, /rebuild:\s*\(row,\s*to\)\s*=>\s*rebuiltFileRow\(\s*row\s*,\s*to\s*,/,
+      'the cascade no longer builds the moved file rows with `rebuiltFileRow`: a second builder is a second rule for what a move keeps');
+  });
+
+  it('the old private re-keys are gone: nothing deletes a file row and inserts it again outside the one re-key', () => {
+    assert.doesNotMatch(SRC, /renameFileMeta|carryFileLinks/, 'file-meta.ts still holds a private re-key of the file rows');
   });
 });
 
@@ -68,8 +77,8 @@ describe('a move carries the record whole', () => {
     // Re-anchored (bundle-51): the spread moved into `rekeyedRow(old, patch)` (`sync/local-only-fields.ts`), the one place a row
     // written under a NEW id is built, which spreads `old` and resets only the two LOCAL fields that described the old identity
     // (`deliveredBy`, stamped as nobody's delivery, and `syncBase`) — neither is authored data, and the helper's own gate holds it.
-    const body = bodyOf(SRC, 'renameFileMeta');
-    assert.match(body, /insertOne\([\s\S]*rekeyedRow\(\s*existing\s*,/,
+    const body = bodyOf(PLAN, 'rebuiltFileRow');
+    assert.match(body, /rekeyedRow\(\s*row\s*,\s*patch\s*\)/,
       'the renamed record must be built from the one it replaces. A field list carries what '
       + 'somebody remembered on the day, and a file added a field to later arrives at its new path '
       + 'without it — with no error, because an insert of a partial document is a valid insert.');
@@ -89,11 +98,17 @@ describe('a move carries the record whole', () => {
      * for a space where nothing is wrong. The path is an authored field, so the write that changes it belongs
      * to the authored path that stamps both, not to a re-key that stamps one of the two.
      */
-    const body = bodyOf(SRC, 'renameFileMeta');
-    const insert = /rekeyedRow\(\s*existing\s*,\s*\{([\s\S]*?)\}\)/.exec(body);
-    assert.ok(insert, 'could not read the re-insert — re-anchor this case');
-    const assigned = [...insert[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)].map(m => m[1]);
-    assert.deepEqual(assigned.sort(), ['_id', 'path'],
+    const body = bodyOf(PLAN, 'rebuiltFileRow');
+    const start = /const patch[^=]*=\s*\{([^}]*)\}/.exec(body);
+    assert.ok(start, 'could not read the patch the row is re-keyed with — re-anchor this case');
+    // The keys the patch starts with, and the ones assigned onto it after: `patch['key'] = …`.
+    const assigned = [
+      ...[...start[1].matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map(m => m[1]),
+      ...[...body.matchAll(/patch\[['"]([\w$]+)['"]\]\s*=/g)].map(m => m[1]),
+    ];
+    // What a move adds to the identity (`_id`, `path`) is the two pointers that name another row by id: the parent a derived row hangs
+    // under and the converted Markdown a parent names. Each is re-rooted by the rule that re-roots the id, so none is written by a scan.
+    assert.deepEqual(assigned.sort(), ['_id', 'convertedFileId', 'parentFileId', 'path'],
       `the re-insert assigns ${assigned.join(', ')} on top of the existing document. Anything beyond the new id and `
       + 'the new path is a field a move silently rewrites — `updatedAt` included, which is what this case was '
       + 'changed to refuse.');

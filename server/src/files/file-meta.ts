@@ -16,16 +16,14 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { writeInOneCommands } from '../db/one-command.js';
 import { readRowsById } from '../db/read-by-id.js';
-import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
-import { linksStartingFrom } from '../brain/link-adjacency.js';
+import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
-import { rekeyedRow, stampOfArrival } from '../sync/local-only-fields.js';
+import { stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { peerFileKey } from './sandbox.js';
 import { getConfig } from '../config/loader.js';
@@ -637,128 +635,4 @@ export async function markFileMetaDeletedByPrefix(
   await coll.deleteMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: true } }),
   );
-}
-
-/**
- * Move/rename the metadata record to a new path.
- * If no record exists for `srcPath` the call is a no-op (e.g. plain
- * directory moves where individual file records don't need renaming).
- */
-export async function renameFileMeta(
-  spaceId: string,
-  srcPath: string,
-  dstPath: string,
-): Promise<void> {
-  const normSrc = toDocId(srcPath);
-  const normDst = toDocId(dstPath);
-  if (normSrc === normDst) return;
-
-  // A flagged source is not moved: the audit record of a deleted file belongs to the path it was deleted at, and
-  // re-keying it onto the destination would make it claim a path that now holds another file's bytes.
-  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: normSrc, ...NOT_A_FLAGGED_ROW }),
-  );
-  if (!existing) return;
-
-  // MongoDB does not allow updating _id; delete + re-insert with new path.
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(asFilter<FileMetaDoc>({ _id: normSrc }));
-  // `rekeyedRow`: a row under a NEW id is written here, so it is stamped as nobody's delivery and carries none of what this
-  // instance agreed with its peers about the OLD path (`syncBase`) — a peer that delivered the old path cannot retire the new one.
-  //
-  // **It keeps the stored `updatedAt`** (`Q-419`). This insert stamps no `seq`: the row arrives under a new id with the
-  // seq it already had. Writing a fresh `updatedAt` beside an unchanged seq is precisely the drift this bundle exists to
-  // remove — and it is worse on a PEER-authored row, where it leaves another instance's seq and author next to this
-  // instance's clock, which no peer can order and a merkle check reports every cycle for a space where nothing is wrong.
-  // Measured before the fix: a move of a peer-authored row moved `updatedAt` by five weeks while its seq stood still.
-  // One rule for every row rather than a branch on who authored it, because the argument does not depend on the author:
-  // a write that does not stamp a version must not move the timestamp that version is read beside.
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(rekeyedRow(existing, {
-    _id: normDst,
-    path: normDst,
-  })));
-
-  await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
-}
-
-/**
- * Move every link a file holds from its old path to its new one — for a single rename and for each file of a
- * directory move alike (`Q-164`).
- *
- * A file's `_id` IS its path, so a move changes the identity every `file.*` link hangs off, and without this the
- * links would still name the OLD path: a `from` pointing at a record that no longer exists. The single-file rename
- * carried them inline; the directory move re-rooted the records and did not, so every file in a moved directory
- * lost its links in silence. One function now, so the next move path cannot forget the step.
- *
- * READ THE LINK ROWS FIRST: since 5.0 they are the only record of what the file linked to. Removed from the old id
- * and created under the new one, because a link's id is derived from its `from` — there is no rename of a link,
- * only a delete and a create — and the tombstone the removal writes is what stops a peer restoring the links under
- * the old path on the next pull.
- */
-async function carryFileLinks(spaceId: string, fromId: string, toId: string, author: AuthorRef): Promise<void> {
-  const carried = await linksStartingFrom(spaceId, [fromId]);
-  if (carried.length === 0) return;
-  const byKind = { entity: [] as string[], fact: [] as string[], chrono: [] as string[] };
-  for (const row of carried) {
-    const bucket = byKind[row.toKind as keyof typeof byKind];
-    if (bucket) bucket.push(row.to);
-  }
-  await removeLinksFrom(spaceId, fromId, 'file');
-  await reconcileLinks(spaceId, toId, 'file', byKind, author);
-}
-
-/**
- * Bulk-rename all metadata records whose path starts with `srcDir/`.
- * Used when an entire directory is moved/renamed so that all child records
- * are re-rooted under the new path.
- *
- * Note: MongoDB does not support updating `_id` in-place, so this uses a
- * delete-then-insert pattern per document.  A concurrent read between the
- * two steps will see missing metadata — acceptable given this is a
- * best-effort metadata store (disk is the source of truth).
- */
-export async function renameFileMetaByPrefix(
-  spaceId: string,
-  srcDir: string,
-  dstDir: string,
-): Promise<void> {
-  const normSrc = toDocId(srcDir).replace(/\/?$/, '');
-  const normDst = toDocId(dstDir).replace(/\/?$/, '');
-  if (!normSrc || !normDst) return; // guard: empty path would match everything
-  const srcPrefix = normSrc + '/';
-  const dstPrefix = normDst + '/';
-  if (srcPrefix === dstPrefix) return;
-
-  const escaped = escapeRegex(srcPrefix);
-  // The files themselves only. Their derived records (chunks, sidecars) are re-rooted by `parentFileId` in
-  // `move-cascade.ts`: renamed here by id, a chunk kept the `parentFileId` of a path that no longer existed.
-  const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    // `LIVE_FILE_ROW` rather than the `parentFileId` half spelled out: the flagged audit rows under the old directory
-    // stay where they were recorded, and the half-spelling `live-file-row.ts` warns about is gone from here.
-    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }))
-    .toArray() as FileMetaDoc[];
-
-  if (docs.length === 0) return;
-
-  // Delete existing records and re-insert with updated paths.
-  const oldIds = docs.map(d => d._id);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
-    asFilter<FileMetaDoc>({ _id: { $in: oldIds } }),
-  );
-  // `rekeyedRow` for each, as a single rename does: written here under a new id, stamped as nobody's delivery, and
-  // keeping its stored `updatedAt` for the reason given at the single-file rename — this insert stamps no seq.
-  const updated = docs.map(d => rekeyedRow(d, {
-    _id: dstPrefix + d._id.slice(srcPrefix.length),
-    path: dstPrefix + d.path.slice(srcPrefix.length),
-  }));
-  const filesColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // ONE insert command for anything within the driver's one-command limits, 99 999 rows and 16 MiB (`db/one-command.ts`), as the driver sent it
-  // before the write was sliced. The moved directory's metadata is deleted BEFORE this insert, so a set larger than that — several commands — can
-  // fail between two of them and leave the later rows deleted and not re-inserted: the limit of delete-then-insert, stated
-  // here rather than hidden. Making it insert-first changes what the move does with a destination that is taken, and is owed
-  // its own tests against the store.
-  await writeInOneCommands(updated.map(d => asDoc<FileMetaDoc>(d)), (slice, { ordered }) => filesColl.insertMany(slice, { ordered }), { ordered: true });
-  // Each file's links follow it, exactly as a single rename carries them (Q-164).
-  for (let i = 0; i < docs.length; i++) {
-    await carryFileLinks(spaceId, docs[i]!._id, updated[i]!._id, docs[i]!.author ?? authorRef());
-  }
 }

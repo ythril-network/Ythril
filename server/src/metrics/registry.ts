@@ -731,6 +731,24 @@ export const fileMovesFinishedByHousekeepingTotal = new Counter({
 });
 fileMovesFinishedByHousekeepingTotal.labels({ space: '' }).inc(0);
 
+/** Moves that replaced a live file's records at the ids they took: the record of the file a rename onto an existing path replaced. */
+export const fileMovesOntoTakenDestinationTotal = new Counter({
+  name: 'ythril_file_moves_onto_taken_destination_total',
+  help: 'File moves whose destination held a live file whose records at the moved ids were replaced (a rename onto an existing file replaces it), by space',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+fileMovesOntoTakenDestinationTotal.labels({ space: '' }).inc(0);
+
+/** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
+export const fileMoveBatchReplansTotal = new Counter({
+  name: 'ythril_file_move_batch_replans_total',
+  help: 'Batches of a file move planned again because what stood at the destination changed between the plan and the transaction, by space',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+fileMoveBatchReplansTotal.labels({ space: '' }).inc(0);
+
 export const embedWaitSeconds = new Histogram({
   name: 'ythril_embed_wait_seconds',
   help: 'Time a local embedding request waited in the queue before it was sent to the embedding process',

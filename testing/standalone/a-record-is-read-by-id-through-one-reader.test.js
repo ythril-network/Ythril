@@ -67,6 +67,9 @@ const ALLOWED = new Map([
   ['server/src/brain/recall.ts:introduceLexicalOnly',
     'the ids are ANDed with the caller\'s eligibility predicate inside a scoring pipeline (`andPredicates`, so a '
     + 'caller\'s own `_id` clause narrows it); it reads candidates for ranking, not stored copies.'],
+  ['server/src/files/move-plan.ts:rowFacts',
+    'an aggregation that projects each row\'s stored SIZE (`$bsonSize`) beside its parent and flag, never the stored copy: the sizes decide '
+    + 'which rows of a move share a transaction, and reading the documents to measure them would move the very bytes the budget exists to bound.'],
   ['server/src/brain/entity-name-scope.ts:attachedToEntityNamed',
     'a filter BUILDER: it returns a predicate the filter tool ANDs into a caller\'s query, never reads by id itself.'],
 ]);

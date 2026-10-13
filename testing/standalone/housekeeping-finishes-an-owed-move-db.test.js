@@ -45,7 +45,7 @@ const fail = (method, collection, err, opts) => faults.fail(method, collection, 
 /** A move a store failure stopped after its bytes: the file at `to`, its record still at `from`, its marker kept. */
 async function moveStoppedAfterItsBytes(from, to) {
   await acts.seed(from);
-  fail('deleteOne', FILES, F.storeGone.single);
+  fail('deleteMany', FILES, F.storeGone.single);
   const a = await acts.move('REST', from, to);
   assert.equal(status(a), 503, `the move was not stopped by the store: ${JSON.stringify(a.body ?? a.text)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');
@@ -108,7 +108,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     await moveStoppedAfterItsBytes('st/from.txt', 'st/to.txt');
     const limits = { attempts: 2, backoffBaseMs: 60 * 60_000 };
     // A failure that is not the store's: the cascade survives it, so what says the move did not finish is the pass asking again.
-    fail('deleteOne', FILES, new Error('the record step failed'), { times: 100 });
+    fail('deleteMany', FILES, new Error('the record step failed'), { times: 100 });
 
     const first = await pass(LATER(1), limits);
     assert.equal(first.outcome.finished, 0, 'the move finished with the store failing');

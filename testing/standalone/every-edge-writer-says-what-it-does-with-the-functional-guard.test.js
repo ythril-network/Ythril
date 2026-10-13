@@ -61,6 +61,7 @@ const WRITERS = {
 
   'server/src/files/derived-fields.ts:writeDerivedFields': { marker: 'none-by-design', why: 'the embed job\'s write of derived fields onto a record already written; it refuses any hashed key, so from and label are never touched, and the marker is not derived so it is never unset' },
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': { marker: 'none-by-design', why: 'removes vectors only' },
+  'server/src/files/rekey-rows.ts:rekeyRows': { marker: 'none-by-design', why: 'the rows of a file move and the jobs that follow it: the collection name is a parameter and is never edges (an edge re-key keeps its own writer and shares only the destination guard)' },
   'server/src/brain/tombstones.ts:removeWithTombstones': { marker: 'none-by-design', why: 'a delete frees the marker with the row' },
   'server/src/spaces/lifecycle.ts:wipeSpace': { marker: 'none-by-design', why: 'the space wipe deletes every row, markers included' },
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': { marker: 'none-by-design', why: 'a peer\'s tombstone is a delete' },
