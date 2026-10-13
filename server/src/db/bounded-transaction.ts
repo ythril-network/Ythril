@@ -21,7 +21,8 @@
  *
  *  1. **Opens a bound scope when none is active** (`withinWriteBound`). Without a scope `db/write-bound.ts` bounds
  *     nothing and a timed transaction's cursor reads are not asked for all of their rows in one batch — so a caller
- *     outside a hold gets the same bound as one inside it, and an enclosing scope's deadline is never raised.
+ *     outside a hold gets the same bound as one inside it, and an enclosing scope's deadline is never raised. A transaction
+ *     whose purpose has a bound of its own (`boundMs`) opens its scope at that figure instead, and its commit is capped there.
  *  2. **Bounds the session**: `defaultTimeoutMS` = what is left of the scope's deadline, so `withTransaction`'s retry
  *     loop ends at the deadline, and the commit carries `maxCommitTimeMS`. Operations issued without the session are
  *     bounded by the scope.
@@ -35,7 +36,7 @@
  */
 import type { ClientSession } from 'mongodb';
 import { getMongo } from './mongo.js';
-import { boundTimeLeft, writeTimeoutMs, withinWriteBound, outsideWriteBound } from './write-bound.js';
+import { boundOperationMs, boundTimeLeft, writeTimeoutMs, withinWriteBound, withinWriteBoundOf, outsideWriteBound } from './write-bound.js';
 import { StoreTimeout } from './write-timeout.js';
 
 export interface BoundedTransactionOptions<T> {
@@ -44,6 +45,13 @@ export interface BoundedTransactionOptions<T> {
    * transaction's value is returned as if the commit had answered. Without it, a failed commit is thrown as it came.
    */
   landed?: (result: T) => Promise<boolean>;
+  /**
+   * The bound of this transaction's PURPOSE, ms, when it is not the write bound's: the deadline across the transaction and the cap on
+   * its commit. For a transaction whose size is the data's (a conversion's whole set of derived rows) and which the server itself
+   * ended at its own lifetime before this module existed — a tighter figure would refuse what used to land. An enclosing scope's
+   * lower deadline still wins. Absent: the write bound.
+   */
+  boundMs?: number;
 }
 
 /** Run `fn` as one transaction under the write bound — see the module docblock. The callback's value is the value. */
@@ -51,8 +59,12 @@ export async function inBoundedTransaction<T>(
   fn: (session: ClientSession) => Promise<T>, opts: BoundedTransactionOptions<T> = {},
 ): Promise<T> {
   // No active scope with a deadline: open one. An enclosing one is kept as it is (a scope never raises what an outer bounded).
-  if (boundTimeLeft() === undefined) return withinWriteBound(() => inBoundedTransaction(fn, opts));
-  const left = boundTimeLeft() ?? writeTimeoutMs();
+  const left = boundTimeLeft();
+  if (left === undefined) {
+    return opts.boundMs === undefined
+      ? withinWriteBound(() => inBoundedTransaction(fn, opts))
+      : withinWriteBoundOf(opts.boundMs, () => inBoundedTransaction(fn, opts));
+  }
   if (left <= 0) throw new StoreTimeout('the transaction');
   const session = getMongo().startSession({ defaultTimeoutMS: left });
   let ran = false;
@@ -63,7 +75,7 @@ export async function inBoundedTransaction<T>(
       result = await fn(session);
       ran = true;
       return result;
-    }, { maxCommitTimeMS: Math.min(left, writeTimeoutMs()) });
+    }, { maxCommitTimeMS: Math.min(left, opts.boundMs ?? writeTimeoutMs(), boundOperationMs() ?? Infinity) });
   } catch (err) {
     // `ran`: the callback finished, so what failed is the commit — the one failure that may have landed.
     if (!ran || !opts.landed) throw err;
