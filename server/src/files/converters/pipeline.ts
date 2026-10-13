@@ -661,5 +661,5 @@ export async function deleteConversionArtifactsByPrefix(
   // face rows of an extracted image — is found by the walk the single file's remover shares.
   await removeWhatSidecarsLeft(spaceId, await rootsOfDirectory(spaceId, dir), sidecarsOf(dir, 'directory'));
 
-  log.info(`Deleted conversion artifacts under ${spaceId}/${dir}/`);
+  log.info(`Deleted conversion artifacts under ${peerText(spaceId)}/${peerText(dir)}/`);
 }
