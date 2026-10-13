@@ -38,7 +38,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { bodyOf, enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
+import { enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
+import { MOVE_CASCADE_STEPS, moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
 
 const SRC = 'server/src';
 const GUARD = 'assertDestinationReachable';
@@ -121,17 +122,12 @@ function sitesOf(blanked, local) {
   return sites;
 }
 
-/** Whether `moveFileCascade` asks the guard before its first irreversible step, read from its own body. */
-function cascadeGuardsItself(cascadeSource) {
-  const body = bodyOf(code(cascadeSource), 'moveFileCascade', 'moveFileCascade');
-  const guard = body.search(new RegExp(`\\b${GUARD}\\s*\\(`));
-  if (guard < 0) return { guards: false, why: `moveFileCascade never calls ${GUARD}` };
-  for (const step of ['holdJobsForMove', 'writePendingFileTombstones', 'actUnderPendingTombstones', 'moveFile']) {
-    const at = body.search(new RegExp(`\\b${step}\\s*\\(`));
-    if (at >= 0 && at < guard) return { guards: false, why: `${GUARD} comes after ${step}, which already changed something` };
-  }
-  return { guards: true, why: '' };
-}
+/**
+ * Whether `moveFileCascade` asks the guard before the call that reaches its first irreversible step. The steps are followed into the
+ * functions the cascade calls (`_cascade-order.mjs`, which the other gate that holds this order asks too): they are not in its own
+ * body, and a step no call reaches is a failure.
+ */
+const cascadeGuardsItself = moveCascadeAsksDestinationFirst;
 
 const all = readTrackedSources(SRC, { floor: 300 });
 const nonFiles = all.filter(f => !f.file.startsWith(`${SRC}/files/`));
@@ -252,12 +248,36 @@ describe('every door that places bytes or a directory checks its destination fir
       const src = `export const t = {\n  name: 'x',\n  async handle(ctx) {\n    await ${GUARD}(a, b);\n    await put(a, b, c);\n  },\n};\n`;
       assert.deepEqual(verdict(src), [true]);
     });
-    it('the cascade check reads order: the guard after the first step fails', () => {
-      const after = 'export async function moveFileCascade(a, b, c) {\n  await holdJobsForMove(a);\n  await ' + GUARD + '(a, b);\n  await moveFile(a, b, c);\n}\n';
-      const before = 'export async function moveFileCascade(a, b, c) {\n  await ' + GUARD + '(a, b);\n  await holdJobsForMove(a);\n  await moveFile(a, b, c);\n}\n';
-      assert.equal(cascadeGuardsItself(after).guards, false);
-      assert.equal(cascadeGuardsItself(before).guards, true);
-      assert.equal(cascadeGuardsItself('export async function moveFileCascade(a) {\n  await moveFile(a);\n}\n').guards, false);
+    // The cascade as it is shaped: the steps are in a function it calls, and a branch that finishes a begun move reaches them unguarded.
+    const STEPS = 'holdJobsForMove(a);\n  await writePendingFileTombstones(a);\n  await actUnderPendingTombstones(a, async () => { await moveFile(a, b, c); });';
+    const cascade = (inside, helperBody = STEPS) => 'async function beginMove(a, b, c) {\n  await ' + helperBody + '\n}\n'
+      + 'async function finishBegun(a) {\n  await holdJobsForMove(a);\n}\n'
+      + 'export async function moveFileCascade(a, b, c) {\n  if (!present) {\n    await finishBegun(a);\n  } else {\n' + inside + '\n  }\n}\n';
+    const guard = '    await ' + GUARD + '(a, b);\n';
+    const begin = '    await beginMove(a, b, c);';
+
+    it('the cascade check follows the call: the guard before the call that holds the steps passes, and the sibling finishing branch is another path', () => {
+      const r = cascadeGuardsItself(cascade(guard + begin));
+      assert.equal(r.guards, true, r.why);
+      assert.deepEqual([...r.reached].sort(), [...MOVE_CASCADE_STEPS].sort(), 'it did not follow beginMove to the steps it holds');
+    });
+    it('the cascade check reads order: the guard AFTER the call that holds the steps fails, naming the call', () => {
+      const r = cascadeGuardsItself(cascade(begin + '\n' + guard));
+      assert.equal(r.guards, false);
+      assert.match(r.why, /comes after beginMove/);
+    });
+    it('the cascade check reads order for a step called directly, as before', () => {
+      const r = cascadeGuardsItself(cascade('    await moveFile(a, b, c);\n' + guard + begin));
+      assert.equal(r.guards, false);
+      assert.match(r.why, /comes after moveFile/);
+    });
+    it('a step that nothing after the guard reaches is a failure, not a pass', () => {
+      const r = cascadeGuardsItself(cascade(guard + begin, 'moveFile(a, b, c);'));
+      assert.equal(r.guards, false, 'a cascade whose callee no longer holds the tombstone steps was read as ordered');
+      assert.match(r.why, /reaches .*writePendingFileTombstones/);
+    });
+    it('a cascade that never asks the guard fails', () => {
+      assert.equal(cascadeGuardsItself(cascade(begin)).guards, false);
     });
   });
 });
