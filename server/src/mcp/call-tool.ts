@@ -44,7 +44,6 @@ import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-fail
 import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { fileActAnswer } from '../files/act-answers.js';
-import { FileSystemFault } from '../files/destination.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
@@ -90,8 +89,8 @@ export interface ToolCallOutcome {
    * door that delegates here until bundle-30 I12. MCP carries the same answer in `structuredContent`.
    */
   storeFailure?: StoreFailureAnswer;
-  /** Headers the REST door puts on the answer (`Retry-After` for a move still owed): MCP has no place for them and says it in `structuredContent`. */
-  headers?: Record<string, string>;
+  /** The `Retry-After` a REST door puts on the answer (for a move still owed): MCP has no place for it and says `retryable` in `structuredContent`. */
+  retryAfterSeconds?: number;
 }
 
 /** A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. */
@@ -397,17 +396,13 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * A file act's refusal or failure (the kinds `files/act-answers.ts` defines): the status and body every REST door answers
      * (`fileActAnswer`), the body carried as `structuredContent`.
      * Not a `ToolRefusal`: that is raised before the work and is neither logged nor audited, and these come from an act that ran.
-     * A filesystem failure that is the server's (`FileSystemFault`) answers `500` in words that name no path.
      */
     const fileAct = fileActAnswer(err);
     if (fileAct) {
       return {
         result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...fileAct.body } },
-        status: fileAct.status, callSpace, ...(fileAct.headers ? { headers: fileAct.headers } : {}),
+        status: fileAct.status, callSpace, ...(fileAct.retryAfterSeconds !== undefined ? { retryAfterSeconds: fileAct.retryAfterSeconds } : {}),
       };
-    }
-    if (err instanceof FileSystemFault) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 500, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {

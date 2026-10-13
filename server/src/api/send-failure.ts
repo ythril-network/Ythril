@@ -34,8 +34,16 @@ import { fileActAnswer, type FileActAnswer } from '../files/act-answers.js';
  * is `storeFailureAnswer`'s; this decides only that no door can drop the header or the status.
  */
 export function sendStoreFailure(res: express.Response, answer: StoreFailureAnswer, envelope?: Record<string, unknown>): void {
-  if (answer.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(answer.retryAfterSeconds));
+  sendRetryAfter(res, answer.retryAfterSeconds);
   res.status(answer.status).json(envelope ?? answer.body);
+}
+
+/**
+ * The one writer of `Retry-After`: every answer that says when to retry carries its wait as `retryAfterSeconds` (the store's, a file
+ * act's, a tool outcome's), and this is the only place it becomes a header — so the header's spelling and unit cannot differ by door.
+ */
+function sendRetryAfter(res: express.Response, retryAfterSeconds: number | undefined): void {
+  if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
 }
 
 /**
@@ -53,13 +61,13 @@ export function sendConnectionsNotWritten(res: express.Response, err: Connection
 }
 
 /**
- * Put a file act's refusal on the wire (`fileActAnswer`): its status, its headers (`Retry-After` for a move still owed) and its body, the
+ * Put a file act's refusal on the wire (`fileActAnswer`): its status, its `Retry-After` (a move still owed) and its body, the
  * same object MCP carries as `structuredContent`. A refusal that is the server's own (`500`, `503`) is reported to the operator as
  * any other server failure is; one that is the caller's (`409`) is not a failure of ours and is not logged.
  */
 function sendFileActAnswer(res: express.Response, answer: FileActAnswer, where: string, err: unknown): void {
   if (answer.status >= 500) reportServerFailure(where, err);
-  for (const [name, value] of Object.entries(answer.headers ?? {})) res.setHeader(name, value);
+  sendRetryAfter(res, answer.retryAfterSeconds);
   res.status(answer.status).json(answer.body);
 }
 
@@ -99,8 +107,8 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
  * for a store failure, through {@link sendStoreFailure}, so the header the tool's transport cannot carry is put on
  * the HTTP one.
  */
-export function sendToolAnswer(res: express.Response, outcome: Pick<ToolCallOutcome, 'status' | 'storeFailure' | 'headers'>, body: Record<string, unknown>): void {
+export function sendToolAnswer(res: express.Response, outcome: Pick<ToolCallOutcome, 'status' | 'storeFailure' | 'retryAfterSeconds'>, body: Record<string, unknown>): void {
   if (outcome.storeFailure) { sendStoreFailure(res, outcome.storeFailure, body); return; }
-  for (const [name, value] of Object.entries(outcome.headers ?? {})) res.setHeader(name, value);
+  sendRetryAfter(res, outcome.retryAfterSeconds);
   res.status(outcome.status).json(body);
 }
