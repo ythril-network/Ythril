@@ -118,6 +118,7 @@ export const HELP_DOCS = [
       'decisions/06-what-an-instance-derives-or-audits-stays-local.md',
       'decisions/07-a-functional-label-is-held-by-a-local-marker-and-a-unique-index.md',
       'decisions/08-a-file-stamp-is-reported-never-repaired.md',
+      'decisions/09-a-move-the-instance-began-is-the-instances-to-finish.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

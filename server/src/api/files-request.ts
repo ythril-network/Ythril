@@ -81,7 +81,7 @@ export function requireWriteTarget(req: Request, res: Response): WriteTarget | n
 
 /**
  * {@link requireWriteTarget} and the `path` the route acts on ({@link requireQueryPath}): the prologue every file route that writes
- * at a caller's path begins with (the upload, the directory create, the delete, the move), answered in this order, once.
+ * at a caller's path begins with, answered in this order, once.
  */
 export function requireWritePath(req: Request, res: Response): WritePath | null {
   const target = requireWriteTarget(req, res);
