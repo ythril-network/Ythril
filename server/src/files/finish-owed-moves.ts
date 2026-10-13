@@ -42,7 +42,7 @@
  * not take the move's single-flight lock itself: `moveFileCascade` does, so a request's retry and this pass cannot interleave.
  */
 import { eachUnit } from '../util/housekeeping-walk.js';
-import { doublingDelayMs } from '../util/endpoint-cooldown.js';
+import { backoffDelayMs } from '../util/backoff.js';
 import { log, peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { FILE_MOVE_FINISH_OPERATION } from '../audit/middleware.js';
@@ -92,9 +92,9 @@ const pageOfMoves = createMoveMarkerPager();
 /** What the pass in progress has found so far, per space: published when the pass reaches the end of the markers. */
 const inProgress = new Map<string, { owed: number; stranded: number; oldestMarkedAt?: string }>();
 
-/** The wait before the move's next attempt, after `attempts` of them have failed. */
+/** The wait before the move's next attempt, after `attempts` of them have failed: jittered, so moves that failed together do not retry together. */
 const backoffMs = (attempts: number, limits: FinishLimits): number =>
-  doublingDelayMs(limits.backoffBaseMs, attempts - 1, MOVE_MARKER_KEEP_MS);
+  backoffDelayMs(attempts - 1, limits.backoffBaseMs, MOVE_MARKER_KEEP_MS);
 
 const label = (m: Pick<MoveMarker, 'from' | 'to'>): string => `${m.from} → ${m.to}`;
 

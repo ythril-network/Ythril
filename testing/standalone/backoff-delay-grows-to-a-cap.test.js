@@ -25,8 +25,8 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let backoffDelayMs;
-before(async () => { ({ backoffDelayMs } = await import('../../server/dist/util/backoff.js')); });
+let backoffDelayMs, nominalBackoffMs;
+before(async () => { ({ backoffDelayMs, nominalBackoffMs } = await import('../../server/dist/util/backoff.js')); });
 
 /** A small seeded PRNG (mulberry32) so two sequences can be compared draw for draw. */
 function seeded(seed) {
@@ -110,6 +110,30 @@ describe('backoffDelayMs — the rule', () => {
     assert.equal(backoffDelayMs(2, 0, 4_000, () => 0.5), 0);
     assert.equal(backoffDelayMs(2, -5, 4_000, () => 0.5), 0);
     assert.ok(Number.isFinite(backoffDelayMs(2, 250, NaN, () => 0.5)), 'a NaN cap must not poison the delay');
+  });
+});
+
+describe('nominalBackoffMs — the schedule before its jitter, for the callers that must not scatter', () => {
+  it('is the figure backoffDelayMs jitters: the same schedule, so no second spelling of a doubling can drift from it', () => {
+    for (const [base, cap] of [[250, 4_000], [5_000, 300_000], [30_000, 300_000]]) {
+      for (const attempt of [0, 1, 2, 3, 6, 40, 1_100, Infinity]) {
+        assert.equal(backoffDelayMs(attempt, base, cap, () => 1), nominalBackoffMs(attempt, base, cap), `${base}/${cap} attempt ${attempt}`);
+      }
+    }
+  });
+
+  it('the first wait is the base after ZERO earlier failures, then doubles to the cap', () => {
+    assert.deepEqual(Array.from({ length: 7 }, (_, n) => nominalBackoffMs(n, 30_000, 300_000)),
+      [30_000, 60_000, 120_000, 240_000, 300_000, 300_000, 300_000]);
+  });
+
+  it('is the same on every call (no draw), and NaN, negative or non-positive input never yields NaN or a negative wait', () => {
+    assert.equal(nominalBackoffMs(3, 1_000, 60_000), nominalBackoffMs(3, 1_000, 60_000));
+    assert.equal(nominalBackoffMs(NaN, 250, 4_000), 250);
+    assert.equal(nominalBackoffMs(-3, 250, 4_000), 250);
+    assert.equal(nominalBackoffMs(2, NaN, 4_000), 0);
+    assert.equal(nominalBackoffMs(2, -5, 4_000), 0);
+    assert.ok(Number.isFinite(nominalBackoffMs(2, 250, NaN)), 'a NaN cap must not poison the delay');
   });
 });
 

@@ -54,9 +54,22 @@ export function withJitter(delayMs: number, random: () => number = Math.random):
 export function backoffDelayMs(
   attempt: number, baseMs: number, capMs: number, random: () => number = Math.random,
 ): number {
+  return withJitter(nominalBackoffMs(attempt, baseMs, capMs), random);
+}
+
+/**
+ * The same schedule as {@link backoffDelayMs} before its jitter: `baseMs` doubling per attempt (0-based) up to `capMs`, with the
+ * exponent clamped and a NaN, negative or non-positive input never yielding NaN or a negative wait.
+ *
+ * For the caller that must NOT scatter: one that asks "is this wait over" of a stored attempt count (`pairRetryDue`, which would
+ * otherwise answer differently each time it is asked) and one that wants the figure itself (`endpointCooldown`, which names the
+ * window it passes over an endpoint for). A caller that SLEEPS or SCHEDULES a retry wants {@link backoffDelayMs}: failures that
+ * happen together must not retry together.
+ */
+export function nominalBackoffMs(attempt: number, baseMs: number, capMs: number): number {
   if (!Number.isFinite(baseMs) || baseMs <= 0) return 0;
   // 2 ** 50 times any base a caller would pass is past every cap, and stays a finite number.
   const exponent = Number.isFinite(attempt) && attempt > 0 ? Math.min(attempt, 50) : (attempt === Infinity ? 50 : 0);
   const nominal = baseMs * 2 ** exponent;
-  return withJitter(Number.isFinite(capMs) && capMs > 0 ? Math.min(nominal, capMs) : nominal, random);
+  return Number.isFinite(capMs) && capMs > 0 ? Math.min(nominal, capMs) : nominal;
 }
