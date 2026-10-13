@@ -762,6 +762,11 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   }
 
   confirmRename(entry: FileEntry): void {
+    // An unchanged name is a cancel: a move onto itself is refused by the server, and nothing was asked for.
+    if (this.renameValue.trim() === entry.name) {
+      this.renamingEntry.set('');
+      return;
+    }
     const from = this.join(this.currentPath(), entry.name);
     const parentDir = this.currentPath();
     const to = this.join(parentDir, this.renameValue.trim());
