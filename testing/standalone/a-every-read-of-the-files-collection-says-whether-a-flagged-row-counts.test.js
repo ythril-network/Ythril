@@ -101,7 +101,6 @@ const EXEMPT = {
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'applies a peer\'s record tombstones; reads the stored rows it is about to remove',
   'server/src/files/file-meta.ts:upsertFileMeta': 'a re-upload of a path whose row is flagged REVIVES it, so the upload door has to read the flagged row to write over it',
   // ── it removes or moves rows, which includes the flagged ones
-  'server/src/files/converters/pipeline.ts:deleteConversionArtifactsByPrefix': 'selects the converted rows under a deleted directory, to remove them',
   'server/src/files/legacy-spill-sweep.ts:sweepSpace': 'removes the legacy spill rows by path prefix',
   'server/src/files/derived-rows.ts:rowsOfFiles': 'by sidecar path: selects the rows a file leaves at its sidecars paths, flagged ones included, because the delete retires an arrived row as the files own and the move skips a flagged one by its own flag',
   'server/src/files/move-plan.ts:rowFacts': 'by id: reads the parent, the flag and the stored size of the rows a move carries, because it decides ON the flag: a flagged audit row stays where it was recorded',
