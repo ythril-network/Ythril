@@ -10,7 +10,7 @@
  * words: REST a bare `500`, MCP a `400` carrying the raw message, which names the server's absolute data path. A directory moved
  * into itself failed the same way by another errno, after the move had published pending tombstones and held the queued jobs.
  * A refusal about the CALLER'S path is answered as one, before anything is written, with a name relative to the space
- * (`PathBlockedByFile`, `files/act-answers.ts`).
+ * (`PathBlocked`, `files/act-answers.ts`).
  *
  * ## What it answers
  *
@@ -27,7 +27,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FileSystemFault, PathBlockedByFile, fileActAnswer } from './act-answers.js';
+import { FileSystemFault, PathBlocked, fileActAnswer } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { isAtOrUnder } from './moved-paths.js';
 import { isMissingPath } from './stored-bytes.js';
@@ -44,7 +44,7 @@ import { toDocId } from '../util/paths.js';
  * The name in the refusal is the blocker's, relative to the space and always a prefix of the requested path, so what a caller
  * learns is about the path it asked for and never about another part of the tree.
  *
- * @throws PathBlockedByFile when an ancestor is not a directory.
+ * @throws PathBlocked when an ancestor is not a directory.
  * @throws RangeError when the path leaves the space.
  */
 export async function assertDestinationReachable(spaceId: string, relPath: string): Promise<void> {
@@ -64,7 +64,7 @@ export async function assertDestinationReachable(spaceId: string, relPath: strin
     }
     if (!found.isDirectory()) {
       const blocker = toDocId(path.relative(root, probe));
-      throw new PathBlockedByFile(blocker, `'${toDocId(path.relative(root, abs))}' cannot be created: '${blocker}' is a file, and a directory is needed there.`);
+      throw new PathBlocked(blocker, `'${toDocId(path.relative(root, abs))}' cannot be created: '${blocker}' is a file, and a directory is needed there.`);
     }
   }
 }
@@ -74,14 +74,14 @@ export async function assertDestinationReachable(spaceId: string, relPath: strin
  * Compared as keys of whole path segments (the key of a path is what its records are filed under), so `a` to `ab` is not
  * "under" and is allowed. Both are resolved lexically, without the disk.
  *
- * @throws PathBlockedByFile naming `src` (the directory that would have to hold itself) or, for an identical pair, the path.
+ * @throws PathBlocked naming `src` (the directory that would have to hold itself) or, for an identical pair, the path.
  * @throws RangeError when either path leaves the space or names the space itself.
  */
 export function assertNotMovedIntoItself(spaceId: string, src: string, dst: string): void {
   const from = fileKeyOf(spaceId, src).key;
   const to = fileKeyOf(spaceId, dst).key;
-  if (from === to) throw new PathBlockedByFile(to, `'${from}' cannot be moved onto itself.`);
-  if (isAtOrUnder(to, from)) throw new PathBlockedByFile(from, `'${from}' cannot be moved into itself: '${to}' lies under it.`);
+  if (from === to) throw new PathBlocked(to, `'${from}' cannot be moved onto itself.`);
+  if (isAtOrUnder(to, from)) throw new PathBlocked(from, `'${from}' cannot be moved into itself: '${to}' lies under it.`);
 }
 
 /**
@@ -89,7 +89,7 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
  * class, so a caller that must act on a refusal (an upload discarding what it staged) and the door that reports it cannot disagree
  * about which errors those are.
  */
-export function isPathBlocked(err: unknown): err is PathBlockedByFile {
+export function isPathBlocked(err: unknown): err is PathBlocked {
   return fileActAnswer(err)?.body.code === 'path_blocked';
 }
 
@@ -108,14 +108,14 @@ const REFUSED_BY_THE_TREE: Readonly<Record<string, string>> = Object.freeze({
  * What a failed filesystem call (`mkdir`, `rename`, a write) means for the caller. `relPaths` are the space-relative paths the
  * act was given, the DESTINATION last.
  *
- * A code in the table is a {@link PathBlockedByFile} naming the destination, built from `relPaths`. Every other failure,
+ * A code in the table is a {@link PathBlocked} naming the destination, built from `relPaths`. Every other failure,
  * whatever it is, becomes a {@link FileSystemFault} holding the original as its `cause` for the log: `err.message` of the
  * filesystem carries the server's absolute data path, and is never what a caller is told.
  */
-export function fsRefusalOf(err: unknown, relPaths: readonly string[]): PathBlockedByFile | FileSystemFault {
+export function fsRefusalOf(err: unknown, relPaths: readonly string[]): PathBlocked | FileSystemFault {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   const meaning = typeof code === 'string' && Object.hasOwn(REFUSED_BY_THE_TREE, code) ? REFUSED_BY_THE_TREE[code] : undefined;
   if (meaning === undefined) return new FileSystemFault(err);
   const destination = toDocId(relPaths.at(-1) ?? '');
-  return new PathBlockedByFile(destination, `'${destination}' cannot be created: ${meaning}.`);
+  return new PathBlocked(destination, `'${destination}' cannot be created: ${meaning}.`);
 }

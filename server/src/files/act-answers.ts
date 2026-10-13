@@ -31,9 +31,9 @@
  */
 import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
 
-/** A destination cannot be created because a regular file stands where a directory must be (or it is the source's own subtree). */
-export class PathBlockedByFile extends Error {
-  override readonly name = 'PathBlockedByFile';
+/** The caller's path cannot be used: a regular file stands where a directory must be, it is the source itself or inside it, or the file system refuses it. Answered `path_blocked`. */
+export class PathBlocked extends Error {
+  override readonly name = 'PathBlocked';
   /** `path` is space-relative: the blocker, or the requested path when the blocker is outside it. */
   constructor(readonly path: string, message: string) {
     super(message);
@@ -93,7 +93,7 @@ export interface FileActAnswer {
 
 /** The one answer to a file act's refusal or failure, or `undefined` when `err` is not one of them. */
 export function fileActAnswer(err: unknown): FileActAnswer | undefined {
-  if (err instanceof PathBlockedByFile) {
+  if (err instanceof PathBlocked) {
     return { status: 409, body: { error: err.message, code: 'path_blocked', path: err.path } };
   }
   if (err instanceof DestinationTakenByOther) {

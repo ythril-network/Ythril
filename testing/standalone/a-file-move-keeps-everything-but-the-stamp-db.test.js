@@ -162,7 +162,7 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
 
     it('a move onto itself, onto its own subtree, from a path with no bytes or from an empty path is refused and changes nothing', async () => {
       const before = await put('docs/same.md');
-      await assert.rejects(() => move('docs/same.md', 'docs/same.md'), (e) => e.name === 'PathBlockedByFile');
+      await assert.rejects(() => move('docs/same.md', 'docs/same.md'), (e) => e.name === 'PathBlocked');
       assert.deepEqual(await files().findOne({ _id: 'docs/same.md' }), before);
 
       await assert.rejects(() => move('docs/none.md', 'docs/elsewhere.md'), (e) => e.name === 'NotFoundError');
@@ -283,8 +283,8 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       await put('dir/a.md');
       await put('keep.md');
       const before = await rowsOf();
-      await assert.rejects(() => move('dir', 'dir/'), (e) => e.name === 'PathBlockedByFile');
-      await assert.rejects(() => move('dir', 'dir/inside'), (e) => e.name === 'PathBlockedByFile');
+      await assert.rejects(() => move('dir', 'dir/'), (e) => e.name === 'PathBlocked');
+      await assert.rejects(() => move('dir', 'dir/inside'), (e) => e.name === 'PathBlocked');
       await assert.rejects(() => move('', 'moved'));
       await assert.rejects(() => move('/', 'moved'));
       await assert.rejects(() => move('dir', ''));
