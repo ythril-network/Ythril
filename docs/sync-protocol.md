@@ -261,8 +261,10 @@ File tombstones carry no `seq` and their pull is unfiltered, so there is no serv
   page, every push page and the prune stop below the oldest open one. So an acknowledgement can never cover a tombstone
   whose write landed late, and the prune cannot take it before it is sent. The hold is in-process, like the seq horizon,
   and bounded by `YTHRIL_HOLD_DEADLINE_MS`; a write the bound ended that still lands is the same stated residual as for
-  seq. The prune also keeps a published tombstone while its path holds a pending one, and a move's tombstone while the
-  move is younger than 24 hours.
+  seq. The prune also keeps a published tombstone while its path holds a pending one, and a move's tombstone for as
+  long as the move is **owed** — its bytes at the destination and its records still at the old path — however old it
+  is: the tombstone carries the only record that the records are still to follow the bytes, so age alone never removes
+  it. It goes when the move is finished or is no longer a move, and is kept when that cannot be told.
 - **Only a 200 counts.** A 403 (direction-blocked peer) or a timeout leaves the position unknown, which blocks pruning.
 - **`applied` is not a count of what CHANGED, and a `200` is not a promise that the file was deleted.** The receiver answers `{ applied, refused?, declined? }`: `applied` counts the elements that passed the shape check (an already-held tombstone still counts), `refused` the ones it threw away for their shape (a bad path, a malformed date), and `declined` — which is part of `applied`, not in addition to it — the ones it judged it may not apply under the [deletion authority](#tombstone-deletion-authorisation). A declined tombstone (a file row somebody authored — never the placeholder that arriving bytes created) would be declined again, so the sender may prune it; a refused one cannot succeed on a re-send either. Both counts are omitted when zero, so a body from an older receiver, which answers `{ applied }` only, reads the same way.
 - **Timestamps are compared only in the fixed-width `…Z` form**, which sorts lexically. An offset form (`+02:00`) sorts later while being earlier in real time, so anything else is treated as unknown rather than compared; a `deletedAt` that is not in that form is refused as malformed.

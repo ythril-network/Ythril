@@ -711,7 +711,10 @@ answer is lost is read back while the hold is still held. On the serving instanc
   **`x-expected-sha256`**, the SHA-256 (64 hex digits) of the whole file, on any range: the door binds it to the assembly
   and refuses a different one before the rename with `422`, storing nothing and dropping the staged ranges (a malformed
   value is `400`, never read as absent). The sync engine sends it on every range, and remembers a refusal of the bytes
-  (`400`/`422`) per peer, path and hash, so the same bytes are not sent whole every cycle.
+  (`400`/`422`) per peer, path and hash, so the same bytes are not sent whole every cycle. **A path that runs through a
+  regular file on the receiver answers `409` (`code: "path_blocked"`), not `400`:** that refusal is about the receiver's
+  tree, which can change, not about the bytes, so the sender is meant to keep sending them each cycle and not to remember
+  a refusal ([Files](05-files-api.md#move--rename)).
 - **A pull streams.** The sync engine reads a body through one hash tap into a staged temp file, stopped at the size the
   manifest declared and verified in the stream's last step; the staged file is renamed into place only after the deletion
   re-check and, under the path lock, a re-check that the disk still holds what the pull decided on (otherwise the bytes

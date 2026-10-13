@@ -47,6 +47,9 @@ its job is still under way): the analysis it already has, or is doing, is kept r
 except those. A file with an extension the pipeline does not recognise is stored as it is; the answer carries no
 `embeddingStatus` for it, and its record says `skipped`.
 
+**An upload to a path that runs through a regular file (`a.txt/x`) answers `409` with `code: "path_blocked"`**, a
+chunked upload at its first range, and nothing is stored or left staged ([the reasons](#move--rename)).
+
 **An upload whose record cannot be written answers `5xx` and leaves nothing behind for a new path:** the bytes it
 stored are removed, so nothing is listed or offered to a peer; send it again. For a path that already has a record, the
 bytes are kept and the next upload rewrites the record. When the database itself did not answer (`503`, retryable), the
@@ -223,6 +226,9 @@ POST /api/files/:spaceId/mkdir?path=reports/charts
 { "created": "reports/charts" }
 ```
 
+Creating a directory that already exists succeeds. A name that is a file, or a path that runs through one, answers `409`
+with `code: "path_blocked"` and creates nothing ([the reasons](#move--rename)).
+
 ---
 
 ### Move / Rename
@@ -239,6 +245,18 @@ Content-Type: application/json
 ```json
 { "from": "reports/draft.docx", "to": "reports/final.docx" }
 ```
+
+**A destination that cannot exist is refused before anything changes: `409`.** A directory cannot be created, and a
+file cannot be moved, uploaded or written, at a path whose ancestor is a regular file (`a.txt/x` where `a.txt` is a file).
+A directory moved into itself, or a path moved onto itself, is refused the same way. The body is
+`{ "error", "code": "path_blocked", "path" }`, with `path` relative to the space (on `POST /api/<tool>` that object is the
+answer's `data`), and it is the same on `PATCH`, `POST /api/move_file` and MCP `move_file`, on `POST …/mkdir` and MCP
+`create_dir`, and on an upload, a chunked upload (refused
+at its first range, with nothing left staged) and MCP `write_file`. Nothing is moved, created or written, and no
+tombstone is published. **It is `409`, not `400`, because the refusal is about the receiver's tree, which can change:** a
+sync sender reads `400` and `422` as a refusal about the bytes and stops re-sending them, and it must keep trying. It is
+not `404` either: a `404` on a move says the **source** names nothing, and that includes a source path that runs
+through a file. A name taken by a *file* is not refused: the moved file replaces it.
 
 A move carries what belongs to the path: the metadata, the derived records, the conversion sidecars (`_converted/<id>.md`
 and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing
@@ -262,7 +280,7 @@ them from outside and built a workaround they did not need.
 | | |
 |---|---|
 | **A move carries the whole record** | `description`, `tags`, `properties`, `sha256`, the embedding state and the link arrays all arrive at the new path. The record is re-inserted under the new key with every field intact. |
-| **What the file owns moves with it** | Its chunk records (`path#chunkN`), a converted document's Markdown (`_converted/…`) and extracted images (`_extracted/…`) are re-keyed to the new path, on disk and in the metadata, and each still names the moved file as its parent. A conversion still running when the move lands writes nothing under the old path: it is re-run where the file now is. Nothing is left under the old path to find with `filter`, and a later delete of the moved file removes all of it. The file's **links** (to entities, facts and chrono entries) follow it too, for a folder move as for a single rename. Asserted by `a-moved-file-leaves-nothing-at-its-old-path-db.test.js`. |
+| **What the file owns moves with it** | Its chunk records (`path#chunkN`), a converted document's Markdown (`_converted/…`) and extracted images (`_extracted/…`, with their captions and faces) are re-keyed to the new path, on disk and in the metadata, and each still names the moved file as its parent. A conversion still running when the move lands writes nothing under the old path: it is re-run where the file now is. Nothing is left under the old path to find with `filter`, and a later delete of the moved file removes all of it. The file's **links** (to entities, facts and chrono entries) follow it too, for a folder move as for a single rename. Asserted by `a-moved-file-leaves-nothing-at-its-old-path-db.test.js`. |
 | **A content rewrite touches only what you send** | `POST` with a body carrying no `description`, `tags` or `properties` changes the bytes, the size and the hash, and leaves those three exactly as they were. Sending one replaces that one. |
 
 **To hold a stable handle onto a file, mint your own id into `properties` and resolve it with a query**
@@ -335,7 +353,8 @@ structured query door**: `POST /api/filter` and `POST /api/query` over `collecti
 after all of the above nothing else would, and the record exists to be read. Filter on `deletedAt` to tell the two
 apart — `{"deletedAt": {"$exists": false}}` for the files the space has, `{"deletedAt": {"$exists": true}}` for what
 was deleted and when. Bytes written to the same path again (an upload, or a file a peer
-delivers) clear the flag. **The deletion reaches peers as the file tombstone, and each peer applies it by its
+delivers) clear the flag, and so does a file **moved onto** the path: the flagged record is removed and the moved file's own
+record stands there. **The deletion reaches peers as the file tombstone, and each peer applies it by its
 own `softDeleteFileMeta`**, whatever this instance's setting: one keeps its flagged row, another removes it.
 A restore from an admin export keeps the flag its backup row carried (the import summary counts them in
 `flagsKept`). Derived records (conversion chunks / `_converted` / `_extracted`) are always hard-removed
@@ -350,7 +369,8 @@ rather than `404` when it finds one and writes the sync tombstone the file never
 push it back. MCP `delete_file` and the record TTL sweep complete an orphan the same way. A path with
 neither bytes nor a record is `404` on both doors (an error result in MCP, which used to carry the
 filesystem's `ENOENT` and the absolute data path); a move whose source is not there is `404` too, unless
-it is a move to finish (below).
+it is a move to finish (below). A **source** path that runs through a regular file (`a.txt/x`) names nothing, so it
+is `404` as well; it is the **destination** a file blocks that is `409` (see Move / Rename).
 
 **A delete or a move that fails is safe to retry, and a store failure never answers success.** A store
 failure anywhere in the act answers `503` (retryable) on REST, and an error result with `retryable: true`
@@ -386,12 +406,32 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   tombstone for the path dropped. A person's upload to a sidecar path is never asked. A deleted file that is written
   again at the same path is a new file, whose conversion writes its sidecars afresh.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
-  and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
-  the file at `destination`, the record at the old path and the mark its first attempt left with its
-  tombstones, and finishes the record, its derived records and its jobs; without that mark — an old path
-  whose file went missing for another reason — it is `404`, and nothing at `destination` is touched. A
-  directory delete sent with `{ "confirm": true }` finds records under a folder whose tree is gone,
-  tombstones their paths and removes them.
+  and the same request retried completes the act. A delete completes as an orphan, as above. A directory delete
+  sent with `{ "confirm": true }` finds records under a folder whose tree is gone, tombstones their paths and
+  removes them.
+- **A move the instance began is the instance's to finish.** A move whose bytes moved and whose records could not
+  all follow answers **`503` with `Retry-After`**, `retryable: true` and `code: "move_still_owed"` (`path` is the
+  destination). It is not the store's "nothing was written": the file is at `destination` already. The move is not
+  lost and needs no retry to survive: the record TTL sweep finishes it (the step `TTL sweep: finishing interrupted file
+  moves`, see [Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)), and a retry of the same
+  `PATCH` or `move_file` completes it too. A retry finds the file at `destination`, the records at the old path and the
+  mark the first attempt left with its tombstones, and finishes them; without that mark — an old path whose file went
+  missing for another reason, or a file at `destination` that is not the one the move carried — it is `404`, and
+  nothing at `destination` is touched. **So a `404` on a retried move can mean it was finished**, by the sweep or by an
+  earlier attempt whose answer you never saw: look at `destination` before moving again. A move the sweep gave up on
+  is *stranded*: its records stay at the old path and its mark is kept, so a retry can still finish it
+  (`ythril_file_moves_stranded`). A move finished by the sweep fires `file.updated` once, with `previousPath`
+  ([webhooks](14-duplicates-and-webhooks.md#webhooks-api)).
+- **What a move leaves is whole.** Each record of a moved file is wholly at its old path or wholly at its new one,
+  whatever fails, and the file's links are at one path or the other and never at neither. A file moved onto a file
+  it replaces takes that file's place: its records, derived records and jobs stand at the destination, and its links
+  **replace** the previous occupant's, so a file never inherits the people, facts or chrono entries linked to the one it
+  replaced. A move that would take over records that belong to **another** file is refused `409` with `code:
+  "destination_taken_by_other"` and the relative `path`, before anything changes.
+- **A delete or a move whose deletion cannot be recorded answers `500` with `code: "act_not_recorded"`.** The tombstone
+  is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and
+  the cause is the server's, so a retry that fails the same way is a fault to report, not a request to change. It
+  holds back the record TTL sweep's file deletes the same way. A store failure there is still `503`.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one
