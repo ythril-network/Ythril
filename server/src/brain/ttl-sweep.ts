@@ -45,6 +45,7 @@ import { deleteEdge } from './edges.js';
 import { deleteChrono } from './chrono.js';
 import { deleteFileCascade } from '../files/delete-cascade.js';
 import { settleStalePendingFileTombstones } from '../files/tombstones.js';
+import { finishOwedMoves } from '../files/finish-owed-moves.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
@@ -66,6 +67,7 @@ type TtlCollection = (typeof TTL_COLLECTIONS)[number];
 
 const STEP = declareStep('TTL sweep');
 const SETTLE_STEP = declareStep('TTL sweep: settling file tombstones');
+const FINISH_MOVES_STEP = declareStep('TTL sweep: finishing interrupted file moves');
 const INDEX_STEP = declareStep('TTL sweep: indexes');
 const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
 /** The step a collection's READ failure is said under. */
@@ -317,6 +319,11 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // was reported failed, or a restart came between. Settled from the disk (bundle-30 I15, `files/tombstones.ts`):
   // never served while pending, so nothing waits on this but the record of a removal that did happen.
   await eachSpace(SETTLE_STEP, concreteSpaces(), space => settleStalePendingFileTombstones(space.id, now));
+
+  // Moves whose bytes moved and whose records did not, finished by the instance (`files/finish-owed-moves.ts`). After the settle,
+  // never inside it: the settle clears the markers of moves that are over, so what is left to look at is what is owed — and a move's
+  // completion is a cascade of its own, which one failing move must not turn into a failure of the settle behind it.
+  await eachSpace(FINISH_MOVES_STEP, concreteSpaces(), space => finishOwedMoves(space.id, now));
 
   // Per-chrono-type retention rides the same cycle: its backfill and content-redaction passes are the same
   // shape of work on the same clock, and running them here means one timer rather than two doing housekeeping
