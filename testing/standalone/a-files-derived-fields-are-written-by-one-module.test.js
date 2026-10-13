@@ -251,6 +251,29 @@ describe('a file row\'s derived fields are written by one module', () => {
     assert.deepEqual(orphans, [], 'writes that no function owns, so the rule above never saw them');
   });
 
+  /*
+   * `rekeyRows` (files/rekey-rows.ts) writes whatever collection its caller hands it, so the call graph above cannot attribute its
+   * writes to the files collection: a write of file rows through it is invisible to the rule. The calls that re-key FILE rows are
+   * found here by their row type instead, and each must be one this file names with the reason it computes nothing from the bytes.
+   */
+  const REKEY_OF_FILE_ROWS = {
+    'server/src/files/move-cascade.ts':
+      'the move re-keys the stored rows it read INSIDE its transaction, rebuilt by `rebuiltFileRow` (files/move-plan.ts), whose assigned '
+      + 'keys a-file-keeps-its-metadata-across-a-move holds to the identity and parent pointers: it carries derived fields across, never sets one',
+  };
+  it('a re-key of file rows through rekey-rows, whose collection is a parameter, is seen and named too', () => {
+    const calls = [];
+    for (const f of trackedSources('server/src')) {
+      const src = blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
+      for (const m of src.matchAll(/\brekeyRows\s*<\s*FileMetaDoc\s*>\s*\(/g)) calls.push(f);
+    }
+    assert.ok(calls.length >= 1, 'no re-key of file rows found at all — the move stopped re-keying through rekey-rows, or this scan went blind');
+    const unnamed = [...new Set(calls)].filter(f => !(f in REKEY_OF_FILE_ROWS));
+    assert.deepEqual(unnamed, [], 'these re-key file rows through rekey-rows without a reason here: a re-key that SETS a derived field is a derived write outside the module');
+    const stale = Object.keys(REKEY_OF_FILE_ROWS).filter(f => !calls.includes(f));
+    assert.deepEqual(stale, [], 'named here but no longer re-keying file rows — delete the entry');
+  });
+
   it('every exemption still names a function that writes the files collection', () => {
     const live = new Set(WRITES.map(fnKeyOf));
     const stale = Object.keys(EXEMPT).filter(k => !live.has(k));

@@ -50,16 +50,15 @@ import { movedId, movedSidecars, type PathKind } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt, isStoredDirectory } from './stored-bytes.js';
 import {
-  actUnderPendingTombstones, bytesIdentityAt, forgetFinishedMove, moveIsOwed, moveMarkerOf, pendingAmong, settleBegunMove, writePendingFileTombstones,
+  abandonMove, actUnderPendingTombstones, bytesIdentityAt, forgetFinishedMove, moveIsOwed, pendingAmong, settleBegunMove, writePendingFileTombstones,
 } from './tombstones.js';
 import { MoveStillOwed } from './act-answers.js';
 import { assertDestinationReachable, assertNotMovedIntoItself } from './destination.js';
 import { batchesOf, holdsAtDestination, planMove, rebuiltFileRow, type MoveBatch, type MovePlan } from './move-plan.js';
-import { convergeLinks, removeConvergedLinks, retireLinks, type LinkMove } from './move-links.js';
+import { convergeLinks, retireLinks, type LinkMove } from './move-links.js';
 import { moveTiming } from './move-timing.js';
 import { runMoveOnce } from './move-flight.js';
 import { StaleRekeyPlan, rekeyRows } from './rekey-rows.js';
-import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inBoundedTransaction } from '../db/bounded-transaction.js';
 import { isDuplicateKey } from '../db/write-errors.js';
@@ -218,20 +217,6 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
   }
   // Finished: nothing is owed, so its marker must not make a later orphan at `src` look like this move. A move that is still owed
   // (something of it was not carried: a file whose bytes came back) keeps its marker.
-  await forgetFinishedMove(spaceId, src, dst);
-}
-
-/**
- * Take back the links an abandoned move converged onto its destination, and forget its marker. A move is abandoned when its marker
- * says the bytes moved, the bytes are at the destination and none at the source, and yet it is not owed: what is at the destination
- * is not what moved (an unrelated file replaced it), or nothing of the file is left at the source. Nothing is carried or overwritten.
- */
-async function abandonMove(spaceId: string, src: string, dst: string): Promise<void> {
-  const marker = await moveMarkerOf(spaceId, src, dst);
-  if (!marker || !(await bytesPresentAt(spaceId, marker.to)) || await bytesPresentAt(spaceId, marker.from)) return;
-  const kind = await kindAt(spaceId, marker.to);
-  const froms = kind === 'file' ? [toDocId(src)] : await fileLinkSourcesUnder(spaceId, toDocId(src));
-  await removeConvergedLinks(spaceId, froms.flatMap(from => { const to = movedId(from, src, dst); return to !== null && to !== from ? [{ from, to }] : []; }));
   await forgetFinishedMove(spaceId, src, dst);
 }
 

@@ -119,13 +119,14 @@ import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_REA
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt, isStoredDirectory, lstatIfPresent } from './stored-bytes.js';
+import { removeConvergedLinks } from './move-links.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
-import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency.js';
+import { linksStartingFrom, aFileUnderHoldsALink, fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { ActNotRecorded } from './act-answers.js';
-import { idsUnder, jobPathsOf, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
+import { idsUnder, jobPathsOf, movedId, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
 import {
   heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
@@ -971,9 +972,9 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
     for await (const move of movesBegunBefore(spaceId, before)) {
       if (++looked > FILE_TOMBSTONE_SETTLE_BATCH) break;
       try {
-        if (await bytesPresentAt(spaceId, move.to) && !await bytesPresentAt(spaceId, move.from)) {
-          await forgetFinishedMove(spaceId, move.from, move.to);
-        }
+        // A finished or abandoned move: forgotten through the one place that also takes back the links a batch converged onto the
+        // destination of a move that was abandoned (an owed move is refused there, and kept).
+        await abandonMove(spaceId, move.from, move.to);
       } catch { /* cannot look: the marker stays, and the next sweep asks again */ }
     }
   } catch (err) {
@@ -984,6 +985,24 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
 }
 
 // ── The move's marker ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Forget a move that is not owed, and take back the links it converged onto its destination. Called by the retry (a source with no
+ * bytes and a move not owed) and by the settle sweep, so neither can forget a marker and leave the links a batch put at `to` behind
+ * (privacy vet S8: a file arriving at that path later would inherit them). An owed move is left alone: `forgetFinishedMove` refuses it.
+ * A move whose bytes are not at `to`, or are still at `from`, is not touched — it was not abandoned, it did not happen.
+ *
+ * Here and not in the cascade because the settle cannot import the cascade (the cascade imports this module).
+ */
+export async function abandonMove(spaceId: string, from: string, to: string): Promise<void> {
+  const marker = await moveMarkerOf(spaceId, from, to);
+  if (!marker || !(await bytesPresentAt(spaceId, marker.to)) || await bytesPresentAt(spaceId, marker.from)) return;
+  if (await moveIsOwed(spaceId, from, to)) return;
+  const kind: PathKind = await isStoredDirectory(await resolveSafePathChecked(spaceId, marker.to)) ? 'directory' : 'file';
+  const froms = kind === 'file' ? [toDocId(from)] : await fileLinkSourcesUnder(spaceId, toDocId(from));
+  await removeConvergedLinks(spaceId, froms.flatMap(f => { const t = movedId(f, from, to); return t !== null && t !== f ? [{ from: f, to: t }] : []; }));
+  await forgetFinishedMove(spaceId, from, to);
+}
 
 /** Whether a move from `from` to `to` was begun here — its tombstones written — and not yet finished. */
 export async function moveWasBegun(spaceId: string, from: string, to: string): Promise<boolean> {
