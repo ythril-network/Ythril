@@ -101,7 +101,6 @@
  * who asked, how often housekeeping has tried), all of it inside `move` and off the wire.
  */
 
-import fsp from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
@@ -120,7 +119,7 @@ import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_REA
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, isMissingPath } from './stored-bytes.js';
+import { bytesPresentAt, lstatIfPresent } from './stored-bytes.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
 import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency.js';
@@ -1028,7 +1027,7 @@ export async function bytesIdentityAt(spaceId: string, rel: string): Promise<{ s
 
 /** What is at `rel` on the disk, or `null` when the path does not exist — the one failure read as an answer; any other is thrown, as {@link bytesPresentAt} throws it. */
 async function lstatAt(spaceId: string, rel: string): Promise<Stats | null> {
-  return fsp.lstat(await resolveSafePathChecked(spaceId, rel)).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+  return lstatIfPresent(await resolveSafePathChecked(spaceId, rel));
 }
 
 /**

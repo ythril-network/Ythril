@@ -314,8 +314,17 @@ export const isMissingPath = (err: unknown): boolean => {
  * path could be either and must not act on a tree as if it were one file.
  */
 export async function isStoredDirectory(abs: string): Promise<boolean> {
-  const stat = await fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+  const stat = await lstatIfPresent(abs);
   return stat !== null && stat.isDirectory();
+}
+
+/**
+ * What is at `abs` on the disk (`lstat`: nothing is followed, read or decrypted), or `null` when the path does not exist — the one failure
+ * read as an answer ({@link isMissingPath}); any other is thrown, on the terms of {@link bytesPresent}. For a caller that needs more than
+ * whether something is there: its kind (`isStoredDirectory`) or its size and mtime (a move's marker).
+ */
+export async function lstatIfPresent(abs: string): Promise<fs.Stats | null> {
+  return fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
 }
 
 /** Delete a stored file under its path lock. */
