@@ -674,6 +674,22 @@ describe('FileManagerComponent — what a write MEANS beyond the write (characte
     expect(c.renamingEntry()).toBe('');
   });
 
+  it('a rename saved with the name UNCHANGED (or only padded) is a cancel: nothing is sent, the row leaves edit mode', () => {
+    /*
+     * bundle-44 (Q-351, D8): a move onto itself is refused 409 on every door. The row's Save with the same name used to send
+     * that move — answered with a bogus tombstone, later with "Failed to rename file." for a rename the user never made.
+     */
+    let sent = 0;
+    const { c } = createWith({ moveFile: () => { sent++; return of({}); } });
+    for (const typed of ['a.txt', '  a.txt  ']) {
+      c.renamingEntry.set('a.txt');
+      c.renameValue = typed;
+      c.confirmRename(file('a.txt'));
+      expect(c.renamingEntry()).toBe('');
+    }
+    expect(sent).toBe(0);
+  });
+
   it('a delete tells the host the file set changed; a create does not', () => {
     /*
      * The host uses this to refresh its record counts, and the two cases differ on purpose: a folder is
