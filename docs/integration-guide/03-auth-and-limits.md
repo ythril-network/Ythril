@@ -173,7 +173,7 @@ to correct. The information is identical; only the envelope differs.
 | 409 | Conflict (duplicate ID). On a file act, a destination the tree refuses: `code: "path_blocked"` (a regular file where a directory must be, or a directory moved into itself) or `code: "destination_taken_by_other"`. It is about the receiver's tree and can change, so a sync sender keeps retrying; see [Files](05-files-api.md#move--rename) |
 | 413 | Payload too large (Express body limit: 10 MB for JSON) |
 | 429 | Rate limited — check `Retry-After` header |
-| 500 | A server fault, in words that name no path. A file delete or move whose deletion cannot be recorded is `code: "act_not_recorded"`: nothing was moved or deleted |
+| 500 | A server fault, in words that name no path. A file delete or move whose deletion cannot be recorded is `code: "act_not_recorded"`: nothing was moved or deleted. A file act the server's storage refuses is `code: "file_system_fault"` |
 | 503 | **The store could not answer. Not your request — retry it.** See below. Also a file move whose bytes moved and whose records follow on their own: `code: "move_still_owed"`, with `Retry-After`; see [Files](05-files-api.md) |
 | 507 | Storage quota hard limit exceeded |
 
