@@ -27,7 +27,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { PathBlockedByFile, fileActAnswer } from './act-answers.js';
+import { FileSystemFault, PathBlockedByFile, fileActAnswer } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { isMissingPath } from './stored-bytes.js';
 import { toDocId } from '../util/paths.js';
@@ -102,14 +102,6 @@ const REFUSED_BY_THE_TREE: Readonly<Record<string, string>> = Object.freeze({
   ENAMETOOLONG: 'the name is too long',
   ELOOP: 'the path loops through symbolic links',
 });
-
-/** A filesystem failure that is the SERVER's, in words that name no path: the operator reads the cause in the log, the caller reads this. */
-export class FileSystemFault extends Error {
-  override readonly name = 'FileSystemFault';
-  constructor(cause: unknown) {
-    super('The file operation failed on the server: its storage location refused it.', { cause });
-  }
-}
 
 /**
  * What a failed filesystem call (`mkdir`, `rename`, a write) means for the caller. `relPaths` are the space-relative paths the

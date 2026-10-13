@@ -69,6 +69,7 @@ import { MongoError, MongoServerError } from 'mongodb';
 import { errorChain, wrapsAThrownError } from '../db/error-chain.js';
 import { isStoreCondition, unsatisfiableWriteConcern } from '../db/store-condition.js';
 import { isWriteTimeout, STORE_RETRY_SENTENCE } from '../db/write-timeout.js';
+import { fileSystemRefusalMessage, isFileSystemError } from '../util/fs-failure-words.js';
 import { log, logSafe } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 
@@ -335,16 +336,6 @@ export function refusalText(err: unknown): string {
     return fileSystemRefusalMessage(fsError.code);
   }
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Node's file-system error: an `Error` with a string `syscall` and `code` (`ENOENT`, `EACCES`, …). */
-function isFileSystemError(e: unknown): e is Error & { code: string; syscall: string } {
-  return e instanceof Error && typeof (e as { syscall?: unknown }).syscall === 'string' && typeof (e as { code?: unknown }).code === 'string';
-}
-
-/** Our sentence for a file-system refusal: its code (it names no path), and where the detail is. */
-function fileSystemRefusalMessage(code: string): string {
-  return `The file system refused this step (${/^[A-Z0-9_]{1,32}$/.test(code) ? code : 'unknown'}); the reason is in the server log.`;
 }
 
 /**

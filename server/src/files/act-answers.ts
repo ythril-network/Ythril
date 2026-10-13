@@ -26,7 +26,10 @@
  * - `503` + `Retry-After` for a move whose bytes moved and whose records did not all follow yet: the move is owed, a
  *   retry (or housekeeping) finishes it. It is not the store's "not answering" — the store may be fine.
  * - `500` for an act that could not record its own deletion: nothing was moved or deleted, and the reason is ours.
+ * - `500` for a file-system failure that is not about the caller's path ({@link FileSystemFault}): the reason is the server's
+ *   storage, said in words that name no path.
  */
+import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
 
 /** A destination cannot be created because a regular file stands where a directory must be (or it is the source's own subtree). */
 export class PathBlockedByFile extends Error {
@@ -61,14 +64,26 @@ export class ActNotRecorded extends Error {
   }
 }
 
+/**
+ * A file-system failure that is the SERVER's, in words that name no path: the operator reads the cause in the log, the caller reads the
+ * sentence (`fileSystemRefusalMessage`, the one place that sentence is built). The original is the `cause`.
+ */
+export class FileSystemFault extends Error {
+  override readonly name = 'FileSystemFault';
+  constructor(cause: unknown) {
+    super(fileSystemRefusalMessage((cause as NodeJS.ErrnoException | null)?.code), { cause });
+  }
+}
+
 /** How long a caller is told to wait before retrying an owed move, in seconds. */
 const OWED_MOVE_RETRY_AFTER_S = 5;
 
 export interface FileActAnswer {
   status: 409 | 503 | 500;
   /** The REST body, and the MCP `structuredContent` — the same object on both doors. */
-  body: { error: string; code: 'path_blocked' | 'destination_taken_by_other' | 'move_still_owed' | 'act_not_recorded'; path?: string; retryable?: true };
-  headers?: Record<string, string>;
+  body: { error: string; code: 'path_blocked' | 'destination_taken_by_other' | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault'; path?: string; retryable?: true };
+  /** Seconds a REST door puts in `Retry-After` (`sendRetryAfter`, the one writer of it); MCP has no place for it and says `retryable` in the body. */
+  retryAfterSeconds?: number;
 }
 
 /** The one answer to a file act's refusal or failure, or `undefined` when `err` is not one of them. */
@@ -82,11 +97,15 @@ export function fileActAnswer(err: unknown): FileActAnswer | undefined {
   if (err instanceof MoveStillOwed) {
     return {
       status: 503, body: { error: err.message, code: 'move_still_owed', path: err.to, retryable: true },
-      headers: { 'Retry-After': String(OWED_MOVE_RETRY_AFTER_S) },
+      retryAfterSeconds: OWED_MOVE_RETRY_AFTER_S,
     };
   }
   if (err instanceof ActNotRecorded) {
     return { status: 500, body: { error: err.message, code: 'act_not_recorded', path: err.path } };
+  }
+  if (err instanceof FileSystemFault) {
+    // No `path` and no `Retry-After`: it is not about a path the caller gave, and nobody knows a retry will help.
+    return { status: 500, body: { error: err.message, code: 'file_system_fault' } };
   }
   return undefined;
 }
