@@ -204,7 +204,7 @@ In the **Danger** tab, click **Wipe all data**. A confirmation dialog shows how 
 
 Deleting a file removes its bytes and, by default, its record too. The **`softDeleteFileMeta`** setting keeps the record instead, flagged as deleted, as an audit trail. It is a top-level key of `config.json` (default `false`); there is no control for it in the app, and the file's own bytes and everything made from them (its text, thumbnails, search entries) are removed either way.
 
-**The kept record belongs to this instance alone.** It is not shown in the file list or counted in a space's file totals, and it is never sent to a peer or counted when instances compare their data, so keeping records never makes two synced instances look different. A restore from an export brings the flag back with the record. Writing the same path again, here or through a file a peer delivers, makes it a live file again and clears the flag.
+**The kept record belongs to this instance alone.** It is not shown in the file list or counted in a space's file totals, and it is never sent to a peer or counted when instances compare their data, so keeping records never makes two synced instances look different. A restore from an export brings the flag back with the record. Writing the same path again, here or through a file a peer delivers, makes it a live file again and clears the flag. Moving or renaming another file onto that path ends the kept record too: it is removed, and the moved file's own record stands in its place.
 
 **A deleted file does not come back as an answer.** The kept record is not a search result — not by meaning and not by
 word — nothing you draw a connection from or to can point at it, and it cannot be edited: asking for it by path gets

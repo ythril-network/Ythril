@@ -413,7 +413,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `chrono.updated` | A chrono entry is updated |
 | `chrono.deleted` | A chrono entry is deleted |
 | `file.created` | A file is written (new or overwrite) by a person or a token on this instance. **A file a peer delivers — its bytes pushed to this instance's upload door, or pulled by the sync engine — fires nothing** (it used to fire for a push, with the peer's token as the actor) |
-| `file.updated` | A file is moved/renamed |
+| `file.updated` | A file is moved/renamed. A move whose records did not all follow its bytes is finished by a retry or by housekeeping (`TTL sweep: finishing interrupted file moves`), and the event fires when it is finished, once, with `previousPath` — from whichever of the two finishes it, to the token that asked for the move |
 | `file.deleted` | A file is deleted |
 | `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |

@@ -507,8 +507,18 @@ being asked again until the cycle ends, so one stubborn record no longer holds b
 line carries the count and the first few ids — `TTL sweep: facts delete failed for space 'notes' (facts): … (count: 3)
 — retried next cycle` — and when a collection keeps failing so many records that the cycle gives up on it, it says so:
 `… records keep failing; the rest wait for the next cycle`. A collection that cannot even be read is named without
-`delete` (`TTL sweep: facts failed for space …`), and a failed settle of file tombstones and a failed index check are
-named `TTL sweep: settling file tombstones` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+`delete` (`TTL sweep: facts failed for space …`), and a failed settle of file tombstones, a failed finish of an
+interrupted file move and a failed index check are named `TTL sweep: settling file tombstones`,
+`TTL sweep: finishing interrupted file moves` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+
+**The same sweep finishes a file move that was interrupted.** A rename or move carries the file first and its records
+after, and a database outage or restart between the two leaves the records at the old path until something finishes
+the job. The sweep does, for every space, after it has settled the file tombstones (`TTL sweep: finishing interrupted
+file moves`); a repeat of the rename finishes it as well. A move it finishes is logged, audited as `file.move.finish` (an
+entry with no token) and announced to webhook subscribers once. A move it cannot finish after repeated attempts is
+named in the log (`… failed for space '<id>' (<from> → <to>): the move is stranded …`) and counted in
+`ythril_file_moves_stranded`; its records stay where they are and nothing is deleted. `ythril_file_moves_owed` counts
+the moves still waiting.
 
 Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
 

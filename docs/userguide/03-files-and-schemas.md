@@ -48,13 +48,22 @@ macOS apps do), a doubled slash (`docs//a.txt`) or a `./` is stored, listed and 
 two spellings never become two files. A name in any script — `日本.txt`, an emoji — downloads and previews under its
 real name. Moving or renaming a document carries everything made from it, including work still queued for it.
 
-**A delete or a rename that fails on a database outage says so — it never reports success.** When the failure
-comes before the file is touched, nothing changed: the file is still there under its old name, and trying again
-is safe. When it comes after the file itself was removed or moved, the list already shows that (the row is gone,
-or is under its new name without its status and tags) while the file's metadata is not finished; repeat the same
-delete or rename through the API (`DELETE` or `PATCH /api/files/:spaceId?path=…`) or the MCP `delete_file` /
-`move_file` tool once the database is back, and it completes. This page cannot repeat it for you, because it no
-longer has a row for the old path.
+**A rename or delete that fails says so — it never reports success, and this page shows the same short message
+for every failure:** *Failed to rename file.*, *Failed to delete file.* or *Failed to create folder.*, which says
+that it failed and not why. A rename the server refuses (a name a file blocks, such as one inside a file) changes
+nothing, and neither does a delete the server could not record; the file is still there under its old name and trying
+again is safe. A rename onto a name another file holds **replaces** that file, with no warning.
+
+**An interrupted rename finishes on its own.** When a database outage or a restart stops a rename after the file itself
+moved, the list may briefly show the file under its new name without its status and tags while its metadata is not
+finished. Nothing needs doing: Ythril finishes the rename in the background, with the retention sweep, and the status
+and tags appear under the new name; repeating the rename finishes it too, and a repeat that says the file is not found
+can mean it was already finished. A move the sweep keeps failing to finish is counted in `ythril_file_moves_stranded`
+and named in the server log (see [Storage, data and audit](05-storage-data-and-audit.md#settings--audit-log)), and is
+for the administrator, who can repeat it through the API (`PATCH /api/files/:spaceId?path=…`) or the MCP `move_file`
+tool. This page cannot repeat it for you, because it no longer has a row for the old path. A delete that stopped after
+the file itself was removed is completed the same way: repeat it through the API (`DELETE /api/files/:spaceId?path=…`)
+or the MCP `delete_file` tool.
 
 **A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
 from disk — although the **Files** count still includes it. Delete it through the API
@@ -76,7 +85,8 @@ first one did complete; check the file list before deleting again.
 
 **A file a peer delivers is processed by your own settings, and the pieces are yours.** When a synced peer sends you a file — pushed to you, or fetched by your own sync — Ythril converts, chunks and analyses it the way it would an upload to this instance: the document mode, the models and, where you have confirmed an external one, the external assist model are your own, and a new version of the file replaces the passages of the old one. The converted text and extracted images are **not** sent to or from peers: a space with document conversion switched off holds no converted text of a file it was given, however the sender's instance is set up. After an upgrade, files a peer delivered earlier and your instance never converted are picked up by later sync cycles, a few at a time, so expect some conversion work (and external-model use, if you have confirmed one) for a while. A file that arrives from a peer is listed after the page is refreshed; the Files page does not move on its own for a change you did not make here.
 
-**New folder:** Click **New folder** in the toolbar.
+**New folder:** Click **New folder** in the toolbar. A name that is already a file, or a path that runs through a file,
+creates nothing and shows *Failed to create folder.*; a folder that already exists is not an error.
 
 **Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view.
 
