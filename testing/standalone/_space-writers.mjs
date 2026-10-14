@@ -42,7 +42,7 @@
  * it. `spaceWriters` returns them, and a gate asserts there are none on a space.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { argumentsOf } from './_structural-window.mjs';
 import { callSitesIn } from './_call-graph.mjs';
@@ -172,7 +172,8 @@ function lineOf(file, src, at) {
   for (let i = 0; i < at && i < src.length; i++) if (src[i] === '\n') { n++; lineStart = i + 1; }
   const end = src.indexOf('\n', lineStart);
   const text = src.slice(lineStart, end < 0 ? src.length : end).trim();
-  if (!RAW.has(file)) RAW.set(file, readFileSync(join(REPO_ROOT, file), 'utf8').split(/\r?\n/));
+  // A source held only in memory (`indexSources` over a synthetic file, to see a gate red) has no file: its line is the stripped one.
+  if (!RAW.has(file)) RAW.set(file, existsSync(join(REPO_ROOT, file)) ? readFileSync(join(REPO_ROOT, file), 'utf8').split(/\r?\n/) : []);
   const raw = RAW.get(file);
   // Stripping only removes lines, so the raw line is at or after the stripped one.
   for (let i = n - 1; text && i < raw.length; i++) if (raw[i].includes(text)) return i + 1;

@@ -49,6 +49,14 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 import { writePlanFunction } from './_write-plan-sources.mjs';
+import { validationEntryPoints, callsOf } from './_validation-entry-points.mjs';
+
+/**
+ * The validators and the classifiers, DERIVED from the modules that export them. This file named the kinds in a regular
+ * expression (`classify(?:Entity|Memory|Chrono|Edge)Upsert`) and kept the old name `Memory` after the knowledge type became
+ * `fact`, so a `classifyFactUpsertAgainst(` placed in a door matched nothing and the fact doors went unswept (Q-93, R6-16).
+ */
+const ENTRY_POINTS = await validationEntryPoints();
 
 /**
  * The eight functions that write a brain record, by the collection they own.
@@ -229,13 +237,35 @@ describe('and no door keeps its own copy of the rule', () => {
        * a `deleteFields` the writer applies, and one of them validated the wrong `type` on a re-type for
        * months while the entity route next door did it correctly.
        */
-      for (const m of s.matchAll(/classify(?:Entity|Memory|Chrono|Edge)Upsert\w*\(|classifyUpdateViolations\(/g)) {
-        offenders.push(`${d}: ${m[0]}`);
-      }
+      for (const m of callsOf(ENTRY_POINTS.classifiers, s)) offenders.push(`${d}: ${m}`);
     }
     assert.deepEqual(offenders, [],
       'these re-derive a rule the writer now enforces — a second copy, reachable only if remembered, and the '
       + 'one that drifts:\n  ' + offenders.join('\n  '));
+  });
+
+  it('and no door runs a validator itself, for any kind', () => {
+    /*
+     * The same rule one level down, and the half the classifier sweep above could not see: a door that calls
+     * `validateFact(` directly validates the INCOMING payload instead of the merged record, which is the defect the
+     * classifiers were written to end. Derived from the validator module's exports (`_validation-entry-points.mjs`), so the
+     * kind that was once spelled `Memory` here is found under the name it has now.
+     */
+    const offenders = [];
+    for (const d of DOORS) {
+      for (const m of callsOf(ENTRY_POINTS.validators, src(d))) offenders.push(`${d}: ${m}`);
+    }
+    assert.deepEqual(offenders, [],
+      'these run a validator on a payload at the door, around the writer that validates the record as it will be:\n  '
+      + offenders.join('\n  '));
+  });
+
+  it('the sweep derives its names from the exports and reads every door', () => {
+    // A floor on each side: no names, or no door source, is a sweep over nothing that passes.
+    assert.ok(ENTRY_POINTS.validators.includes('validateFact'), `validateFact is not among the derived validators: ${ENTRY_POINTS.validators}`);
+    assert.ok(ENTRY_POINTS.classifiers.includes('classifyFactUpsertAgainst'),
+      `classifyFactUpsertAgainst is not among the derived classifiers: ${ENTRY_POINTS.classifiers}`);
+    for (const d of DOORS) assert.ok(src(d).length > 500, `${d} read as empty — the sweep covers nothing`);
   });
 
   it('a door still reports warnings, rather than losing them with the copy it dropped', () => {
