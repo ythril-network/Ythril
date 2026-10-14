@@ -25,7 +25,7 @@ import {
   ifMatchFromRequest,
   preconditionFailedBody,
 } from './_shared.js';
-import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -181,7 +181,7 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
   const warnings = [...(createCheck?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
-  if (warnings.length > 0) body['warnings'] = warnings;
+  Object.assign(body, writeWarningFields(warnings));
   res.status(201).json(body);
 });
 
@@ -363,7 +363,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
        */
       const connected = await applyConnections(updated.spaceId, updated._id, 'fact', req.body, updated.author, webhookToken(req));
       const warnings = [...(check?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
-      res.json(warnings.length > 0 ? { ...updated, warnings } : updated);
+      res.json(warnings.length > 0 ? { ...updated, ...writeWarningFields(warnings) } : updated);
       return;
     }
     // See the note in entities.ts: with a precondition in play, a write that matched nothing is a 412

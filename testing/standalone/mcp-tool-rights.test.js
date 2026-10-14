@@ -203,7 +203,8 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
     // claim is that the refusal is RETURNED from inside it. Neither cap could tell "inside the branch" from
     // "160 characters after it" — and "computed and dropped" versus "computed and returned" is exactly that
     // distinction. It is also the defect the test's own comment names as this repo's signature.
-    assert.match(src, /if \(rightsRefusal\) return refuse\(403, rightsRefusal\);/,
+    // `refuseAudited` is `refuse` plus the audit row REST records for the same refusal (R6-13: every refusal status of an audited write tool).
+    assert.match(src, /if \(rightsRefusal\) return refuse(?:Audited)?\(403, rightsRefusal(?:, sid)?\);/,
       'the refusal must be RETURNED, carrying its own text and a 403 for the door that has a status');
   });
 });

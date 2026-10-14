@@ -206,7 +206,9 @@ function inlineWriter(d) {
         if (!row) return [`no errors row for item 0 of ${d.kind}: ${answer.text.slice(0, 300)}`];
         // The loser's record was written before its edge lost, so its row also says what was written: every key the
         // sequential refusal's row has must be there, and `written` may be the one more.
-        for (const k of Object.keys(ours ?? {})) if (!(k in row)) problems.push(`the errors row lacks \`${k}\`, which the sequential refusal's carries`);
+        // Not `violation` (R5-3, Q-315): that is the SCHEMA's refusal body beside a schema refusal's row, and a writer that lost the race lost a write conflict,
+        // which the plan never saw as a violation — its row says so in its reason and has no structured refusal to carry.
+        for (const k of Object.keys(ours ?? {})) if (k !== 'violation' && !(k in row)) problems.push(`the errors row lacks \`${k}\`, which the sequential refusal's carries`);
         return problems;
       }
       // A single-record door: the record is written by the time the edge loses, so the answer is `ConnectionsNotWritten`

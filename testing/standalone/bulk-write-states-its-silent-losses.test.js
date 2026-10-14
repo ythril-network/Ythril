@@ -86,7 +86,8 @@ describe('partial success is stated as the trap it is', () => {
     assert.match(DESC, /INDEX/, 'an error without a position is not actionable on a 500-item batch');
     // Every refusal goes through `reject(type, index, …)`, which is what puts the position on it.
     assert.match(CORE, /reject\('fact', i, item/, 'and they really are');
-    assert.match(CORE, /errors\.push\(\{ type, index, reason \}\)/, 'and the one place errors are recorded carries the index');
+    // `violation` rides beside the reason on a schema refusal's row (R5-3, Q-315): the position is still the first thing the row carries.
+    assert.match(CORE, /errors\.push\(\{ type, index, reason(?:, \.\.\.\(violation \? \{ violation \} : \{\}\))? \}\)/, 'and the one place errors are recorded carries the index');
   });
 });
 

@@ -18,7 +18,7 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
@@ -176,7 +176,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
   const warnings = [...(check?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, CHRONO_CREATE_BODY_KEYS)];
-  if (warnings.length > 0) result['warnings'] = warnings;
+  Object.assign(result, writeWarningFields(warnings));
   res.status(201).json(result);
 });
 
@@ -354,7 +354,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
      */
     const connected = await applyConnections(updated.spaceId, updated._id, 'chrono', req.body, updated.author, webhookToken(req));
     const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
-    res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
+    res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
     return;
   }
   // `prior` proves the entry was there when this handler read it, so a write that matched nothing was

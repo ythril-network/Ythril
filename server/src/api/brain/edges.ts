@@ -22,7 +22,7 @@ import {
   findFirstAcrossMembers,
 } from '../../spaces/proxy.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { sendReadFailure } from './_read-failure.js';
@@ -175,7 +175,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
   const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_CREATE_BODY_KEYS)];
-  if (warnings.length > 0) result['warnings'] = warnings;
+  Object.assign(result, writeWarningFields(warnings));
   res.status(201).json(result);
 });
 
@@ -343,7 +343,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
       // The `warnings` array an update response did not have — see the facts route, where the
       // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
       const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_UPDATE_BODY_KEYS)];
-      res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
+      res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
       return;
     }
     // See the note in entities.ts: with a precondition in play, a write that matched nothing is a 412
