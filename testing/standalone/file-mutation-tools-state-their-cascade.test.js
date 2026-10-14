@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { blockAfter } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
-import { moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
+import { moveCascadeAsksDestinationFirst, guardPrecedesIrreversibleSteps, MOVE_CASCADE_STEPS } from './_cascade-order.mjs';
 
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
 // The cascade is two modules since bundle-51: the order and the tombstones are `delete-cascade.ts`'s, and what a file leaves
@@ -45,7 +45,6 @@ const CASCADE = stripComments(readFileSync('server/src/files/delete-cascade.ts',
 const FILES = stripComments(readFileSync('server/src/files/files.ts', 'utf8'));
 // The file door (F-43): the rename and the parent-creation that `files.ts` used to do inline now happen here.
 const DOOR = stripComments(readFileSync('server/src/files/stored-bytes.ts', 'utf8'));
-const doorFn = (name) => { const at = DOOR.indexOf(`export async function ${name}`); return DOOR.slice(at, DOOR.indexOf('\nexport ', at + 10)); };
 const FS_MODES = stripComments(readFileSync('server/src/util/fs-modes.ts', 'utf8'));
 
 const description = (name) => {
@@ -61,6 +60,24 @@ const description = (name) => {
 const DELETE = description('delete_file');
 const MOVE = description('move_file');
 const MKDIR = description('create_dir');
+
+/** A description's sentences: its source-string joins closed, split after a full stop or at a `\n`. Read by SENTENCE so two halves of a guarantee cannot be met by two unrelated sentences. */
+const sentencesOf = (text) => text.replace(/'\s*\r?\n\s*\+\s*'/g, '').split(/(?<=[.!?])\s+|\\n/);
+/** The source text of one tool: from its `name:` to the next tool's, comments stripped. */
+const toolSource = (name) => {
+  const s = stripComments(FILE_TOOLS);
+  const at = s.indexOf(`name: '${name}'`);
+  assert.ok(at > 0, `${name} not found — the scanner is wrong, not the code`);
+  const next = s.indexOf('\nexport const ', at);
+  return s.slice(at, next === -1 ? undefined : next);
+};
+/** What a tool's handler does: its source from `async handle` on. */
+const handlerOf = (name) => {
+  const src = toolSource(name);
+  const at = src.indexOf('async handle');
+  assert.ok(at > 0, `${name} has no handler — the scanner is wrong, not the code`);
+  return src.slice(at);
+};
 
 describe('delete_file describes the cascade it really performs', () => {
   it('names the derived things that go with the blob', () => {
@@ -96,21 +113,67 @@ describe('delete_file describes the cascade it really performs', () => {
   });
 
   it('and that is still true — the cascade refuses only what has neither bytes nor a live file record, after the tombstone order', () => {
-    // The handler hands the path straight to the cascade, which decides; no second not-found check of its own.
-    const handler = FILE_TOOLS.slice(FILE_TOOLS.indexOf("name: 'delete_file'"));
-    const end = handler.indexOf('\nexport const ');
-    assert.match(stripComments(end === -1 ? handler : handler.slice(0, end)), /await deleteFileCascade\([^)]*\);\s*return \{/,
-      'delete_file decides something itself before the cascade — the description describes the cascade');
-    const notFound = CASCADE.indexOf('throw new NotFoundError(');
-    const tombstone = CASCADE.indexOf('writePendingFileTombstones(');
+    // The handler hands the path and `confirm` straight to `deletePath`, which decides file, directory or refusal; no decision of
+    // its own, so the doors cannot differ in what a path is (Q-438). Nothing in it names a cascade, a stat or the root.
+    const handler = handlerOf('delete_file');
+    assert.match(handler, /await deletePath\(\s*wt\.target\s*,\s*filePath\s*,\s*\{\s*confirm:\s*a\['confirm'\]\s*,\s*actor:\s*ctx\.actor\s*\}\s*\)/,
+      'delete_file does not hand the path, `confirm` and the actor to deletePath as REST does — the doors would decide differently');
+    assert.doesNotMatch(handler, /deleteFileCascade|deleteDirectoryCascade|NotFoundError|\.stat\(|spaceRoot|confirm\s*(?:===|!==|\?)|\bif\s*\(\s*!?confirm/,
+      'delete_file decides something itself before or after deletePath — the description describes the one decision');
+    // The cascade: read from the body of `deleteFileCascade`, where the order lives.
+    const at = CASCADE.indexOf('export async function deleteFileCascade');
+    assert.ok(at > -1, 'deleteFileCascade is no longer in delete-cascade.ts — re-anchor this gate');
+    const cascade = CASCADE.slice(at, CASCADE.indexOf('\nexport ', at + 10));
+    const notFound = cascade.indexOf('throw new NotFoundError(');
+    const tombstone = cascade.indexOf('writePendingFileTombstones(');
     // The unlink is `deleteStoredIfPresent` (bundle-51 round 4): the one deleter that reads a missing path as done and nothing
     // else as done, where the cascade used to spell that tolerance by hand around `deleteStored`.
-    const unlink = CASCADE.indexOf('deleteStoredIfPresent(');
+    const unlink = cascade.indexOf('deleteStoredIfPresent(');
     assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
     assert.ok(notFound < tombstone && tombstone < unlink,
       'the cascade must refuse a path that is not there, then write the tombstone, then remove the bytes — in that order');
-    assert.match(CASCADE.slice(CASCADE.lastIndexOf('if', notFound), notFound), /!\(await hasLiveFileRecordExactlyAt\(/,
+    assert.match(cascade.slice(cascade.lastIndexOf('if', notFound), notFound), /!\(await hasLiveFileRecordExactlyAt\(/,
       'the not-found refusal is no longer conditional on a LIVE file record at the path being absent too — an orphan would be refused, or a flagged one completed');
+  });
+
+  // The guarantees a caller picks the tool by, as sentences (never a mechanism): which path it removes and what stops it. Q-438: the
+  // tool said "not the tool for removing a directory tree" while the REST route of the same capability removed one.
+  it('states that it deletes one file or, with confirm: true, a whole directory tree, and what refuses', () => {
+    const says = (...parts) => sentencesOf(DELETE).find(s => parts.every(p => p.test(s)));
+    assert.ok(says(/directory/i, /`confirm`/, /`true`/), 'no sentence says a directory is deleted with `confirm: true`');
+    assert.ok(says(/without `confirm`/i, /directory/i, /`422`/, /nothing is deleted/i), 'no sentence says a directory without `confirm` is refused with 422 and nothing deleted');
+    assert.ok(says(/space root/i, /never deleted/i, /`400`/), 'no sentence says the space root is never deleted (400)');
+    assert.ok(says(/directory delete/i, /every file under it/i, /tombstone/i), 'no sentence says what a directory delete removes and tells peers');
+    assert.ok(says(/repeating the call with `confirm: true`/i), 'no sentence says an interrupted directory delete is completed by repeating the call with `confirm: true`');
+    assert.doesNotMatch(DELETE, /not the tool for removing a directory/i, 'the old refusal of directories is back in the description');
+    assert.doesNotMatch(DELETE, /One FILE:/, 'the parameter list still says the path is one file');
+  });
+
+  it('scopes the file.deleted webhook to a single file, because a directory delete emits none (Q-469)', () => {
+    const about = sentencesOf(DELETE).filter(s => /file\.deleted/.test(s));
+    assert.ok(about.length > 0, 'the description no longer says anything about the file.deleted webhook');
+    for (const s of about) assert.match(s, /single file|one file/i, `a sentence promises the webhook without saying it is for one file: ${s}`);
+  });
+
+  it('declares `confirm` as a described boolean parameter of the tool', () => {
+    const schema = toolSource('delete_file');
+    const at = schema.indexOf('confirm: {');
+    assert.ok(at > -1, 'delete_file has no `confirm` parameter — a caller cannot delete a directory, and the REST twin can');
+    const decl = schema.slice(at, schema.indexOf('}', at));
+    assert.match(decl, /type:\s*'boolean'/, '`confirm` is not a boolean');
+    assert.match(decl, /description:[^}]*(?:directory)/i, '`confirm` says nothing about what it is for');
+    assert.match(decl, /Ignored for a file/i, '`confirm` does not say a file is unaffected by it');
+  });
+
+  it('and the one decision exists: deletePath is what REST, MCP and the tools door call', () => {
+    const rest = stripComments(readFileSync('server/src/api/files.ts', 'utf8'));
+    const at = rest.indexOf("fileStoreRouter.delete('/:spaceId'");
+    assert.ok(at > -1, 'the REST DELETE route moved — re-anchor this gate');
+    const route = rest.slice(at, rest.indexOf('\nfileStoreRouter.', at + 10));
+    assert.match(route, /await deletePath\(/, 'REST DELETE does not call deletePath');
+    assert.doesNotMatch(route, /deleteFileCascade|deleteDirectoryCascade|isUnfinishedDirectoryDelete|spaceRoot\(/,
+      'REST DELETE decides file, directory or root itself: the second implementation of the rule deletePath holds');
+    assert.match(CASCADE, /export async function deletePath\b/, 'delete-cascade.ts no longer exports deletePath');
   });
 
   it('and says a flagged or derived record is not found too (Q-343)', () => {
@@ -188,9 +251,27 @@ describe('move_file explains the tombstone and the directory case', () => {
       + 'the one thing a caller cannot find out from list_dir, and now a refusal rather than the filesystem\'s own failure');
   });
 
-  it('states, as a guarantee, that a taken name is replaced', () => {
-    assert.ok(sentenceAbout(/\btaken\b/i, /\breplace[sd]?\b/i),
-      'no sentence says that a destination name that is TAKEN by a file is replaced: a caller who reads "refused" for one case and says nothing about this one will assume it is refused too');
+  // Q-437 (D-29): a move never replaces anything. The guarantee is stated with its code and its remedy, because a caller who is
+  // refused needs both, and with what is NOT a taken name, because a caller who reads "refused" for every audit record would
+  // never reuse a deleted file's name.
+  it('states, as a guarantee, that a move never replaces anything: a file, a folder or a file\'s record at the destination is refused 409 destination_exists', () => {
+    assert.ok(sentenceAbout(/never replaces/i), 'no sentence says a move never replaces anything');
+    assert.ok(sentenceAbout(/\bfile\b/i, /\bfolder\b|\bdirectory\b/i, /record/i, /`409`/, /destination_exists/, /nothing changes/i),
+      'no sentence says that a file, a folder or a file\'s record standing at `dst` is refused with 409 and destination_exists and that nothing changes');
+    assert.ok(sentenceAbout(/delete the destination first/i, /delete_file/, /every instance/i),
+      'no sentence names the remedy: delete the destination first with delete_file, which deletes it on every instance it is replicated to');
+    assert.ok(sentenceAbout(/deleted file/i, /audit record/i, /\bfree\b/i), 'no sentence says a name only a deleted file\'s audit record holds is free');
+    assert.doesNotMatch(MOVE, /\bis REPLACED\b|overwrites it\s+without asking|so read `list_dir` first if that would lose/i,
+      'the old promise that a taken name is replaced is still in the description');
+  });
+
+  it('says the same in the dst parameter, which is what a caller reads while building the call', () => {
+    const tool = stripComments(FILE_TOOLS.slice(FILE_TOOLS.indexOf('name: \'move_file\''), FILE_TOOLS.indexOf('name: \'retry_embed_file\'')));
+    const at = tool.indexOf('dst: filePathSchema(');
+    assert.ok(at > -1, 'move_file has no `dst` parameter built by filePathSchema — re-anchor this gate');
+    const dst = tool.slice(at, tool.indexOf('targetSpace', at));
+    assert.match(dst, /destination_exists/, 'the dst parameter does not name the refusal a taken destination answers');
+    assert.doesNotMatch(dst, /\bREPLACED\b|with no warning/i, 'the dst parameter still says a taken name is replaced');
   });
 
   it('no longer says nothing checks the destination — in the description or in the dst parameter\'s', () => {
@@ -204,7 +285,6 @@ describe('move_file explains the tombstone and the directory case', () => {
   // two files the rename lives in, while a check added in the cascade (or in the module the cascade asks) was outside it: the
   // description could be wrong and this still green. The cascade is `move-cascade.ts`; the check is `destination.ts`.
   const readIfThere = (p) => { try { return stripComments(readFileSync(p, 'utf8')); } catch { return null; } };
-  const MOVE_CASCADE = readIfThere('server/src/files/move-cascade.ts');
   const DESTINATION = readIfThere('server/src/files/destination.ts');
 
   it('and the refusal really is in the cascade: the destination module answers it and the move asks before its first step', () => {
@@ -217,16 +297,12 @@ describe('move_file explains the tombstone and the directory case', () => {
     assert.ok(order.guards, `the move does not ask the destination module first: ${order.why} — a refused move would already have changed something`);
   });
 
-  it('and a taken name really is replaced — no part of the move cascade refuses an existing destination file', () => {
-    const at = FILES.indexOf('export async function moveFile');
-    const body = FILES.slice(at, FILES.indexOf('\nexport ', at + 10));
-    assert.match(body, /moveStored\(srcAbs, dstAbs\)/, 'moveFile no longer moves through the file door');
-    const door = doorFn('moveStored');
-    assert.match(door, /fsp\.rename\(srcAbs, dstAbs\)/, 'the door\'s move is no longer a bare rename');
-    for (const [name, b] of Object.entries({ 'files.ts moveFile': body, 'stored-bytes.ts moveStored': door, 'move-cascade.ts': MOVE_CASCADE ?? '', 'destination.ts': DESTINATION ?? '' })) {
-      assert.doesNotMatch(b, /fileExists|already exists|\.stat\(dstAbs/,
-        `${name}: a check on an existing destination file appeared — the description's "a taken name is replaced" is now wrong; change the guarantee, not just this assertion`);
-    }
+  it('and a taken name really is refused — the cascade asks assertDestinationFree before the call that reaches its first irreversible step', () => {
+    assert.match(DESTINATION ?? '', /export\s+(?:async\s+)?function\s+assertDestinationFree\b/,
+      'the destination module does not export assertDestinationFree: nothing refuses a taken destination, so the description\'s guarantee would be false');
+    const order = guardPrecedesIrreversibleSteps(readFileSync('server/src/files/move-cascade.ts', 'utf8'),
+      { entry: 'moveFileCascade', guard: 'assertDestinationFree', steps: MOVE_CASCADE_STEPS });
+    assert.ok(order.guards, `the move does not ask whether the destination is free first: ${order.why} — a refused move would already have changed something`);
   });
 
   it('says the content is not re-read, so a failed extraction stays failed', () => {
