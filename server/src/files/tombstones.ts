@@ -120,14 +120,14 @@ import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, classifyDestination, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt, classifyDestination, destinationStateAt, lstatIfPresent } from './stored-bytes.js';
 import { removeConvergedLinks } from './move-links.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
 import { linksStartingFrom, aFileUnderHoldsALink, fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { ActNotRecorded } from './act-answers.js';
-import { jobIdClausesOf, kindAt, moveKey, movedPairs, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
+import { jobIdClausesOf, kindAt, moveKey, movedId, movedPairs, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
 import {
   heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
@@ -877,8 +877,28 @@ interface Settled {
 const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1 } as const;
 
 /**
+ * Whether a move's pending tombstone is for an id that is no longer THIS file's although bytes still answer at its spelling: the move
+ * was a case-only rename (in any path component) on a case-insensitive file system, so the old id and the new one are one directory
+ * entry under two spellings (`classifyDestination`: `alias`).
+ *
+ * ## What it prevents
+ *
+ * A record id is case-SENSITIVE and a peer may run on a case-sensitive host. "Do bytes answer at the old spelling" dropped the tombstone
+ * of every sidecar of a case-only rename, so a peer kept `_converted/a.txt.md` and received `_converted/A.txt.md`: two files for ever.
+ * The settle's question for a move is "is the old ID still this file's", which the alias answers no to. Anything that is not a move's
+ * own tombstone, or whose new id has no bytes (the move did not happen), keeps the disk's answer.
+ */
+async function isRenamedOntoItself(spaceId: string, t: Pick<ToPublish, 'path' | 'move'>): Promise<boolean> {
+  if (!t.move) return false;
+  const to = movedId(t.path, t.move.from, t.move.to);
+  if (to === null || to === t.path) return false;
+  return await destinationStateAt(await resolveSafePathChecked(spaceId, t.path), await resolveSafePathChecked(spaceId, to), { begun: true }) === 'alias';
+}
+
+/**
  * THE settle rule, one copy for every caller: the disk decides each pending tombstone. Its path still has bytes, so
- * the act did not remove it: dropped. It has none, so the act did: published ({@link publishOnePerPath} — one per
+ * the act did not remove it: dropped (unless it is a move's old id that is the same entry as its new one, {@link isRenamedOntoItself}).
+ * It has none, so the act did: published ({@link publishOnePerPath} — one per
  * path, stamped now, never a caller's clock). A path that cannot be looked at is neither — it stays pending, served
  * to nobody, and is returned as `unresolved` for the caller to decide when to ask again. Only tombstones still
  * pending are dropped, and one an act published meanwhile is left as it is. A store failure is thrown.
@@ -889,7 +909,7 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], ge
   const unresolved: string[] = [];
   for (const t of rows) {
     try {
-      if (await bytesPresentAt(spaceId, t.path)) here.push(t._id); else gone.push(t);
+      if (!(await bytesPresentAt(spaceId, t.path)) || await isRenamedOntoItself(spaceId, t)) gone.push(t); else here.push(t._id);
     } catch (err) {
       unresolved.push(t._id);
       log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
