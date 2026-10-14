@@ -289,8 +289,8 @@ Entities, facts, edges and chrono entries all carry a UUID. **A file's metadata 
 path. `sha256` changes on every save and `seq` is a sync counter, so neither is a handle either.
 
 **It is deliberate, and the reason is deletion.** A delete writes a sync tombstone per removed path so
-peers remove their copies; the link records a file takes part in hang off that same id, and a rename
-re-keys them. A second identity would be a second thing each of those has to reconcile, and the one that
+peers remove their copies; the link records a file takes part in hang off that same id, a rename
+re-keys them, and a delete removes the ones this instance wrote. A second identity would be a second thing each of those has to reconcile, and the one that
 disagreed would be found by an operator rather than by a test.
 
 **So a rename changes a file's identity, and two guarantees make that survivable.** Both are asserted by
@@ -342,20 +342,29 @@ repeating it with `confirm: true`, which finds what the first one left.
 
 **The MCP `delete_file` tool takes the same `confirm` parameter, and an MCP token with `files: write` can now delete a
 directory tree, with `confirm: true`, exactly as on REST.** It answers `Deleted '<path>'.`; without `confirm` a directory
-is refused `422` and nothing is deleted. `POST /api/delete_file` is the same tool. A directory delete fires no
-`file.deleted` webhook (a single file's does) and is audited with `kind: "directory"`
+is refused `422` and nothing is deleted. `POST /api/delete_file` is the same tool. A directory delete fires one
+`file.deleted` webhook for each file it removed, as a single file's does (the live Files page hears each one too): never one for a
+conversion sidecar, a derived record or a file an earlier delete had already flagged, and none when the delete was made by no
+user (a retention sweep reports under its own actor). Each file is announced at most once, a delete repeated after a failure
+announces what the failed attempt had not, and an announcement lost to a crash between the removal and the event is not made
+again. A directory of many files is a burst of events: see [Webhooks → delivery guarantees](14-duplicates-and-webhooks.md#delivery-guarantees).
+It is audited with `kind: "directory"`
 ([the audit log](13-audit-log-api.md#what-changed-changes)); a single file's delete records no change.
 
-Deleting a file cascades: its metadata record, any queued embedding job, and all conversion
+Deleting a file cascades: its metadata record, any queued embedding job, the links this instance wrote from the file and from
+its derived records (each with a link tombstone, so a peer does not restore it), and all conversion
 artifacts — chunk records plus the on-disk `_converted/<id>.md` and `_extracted/<id>/` sidecars —
-are removed from the file store. **Everything derived from the file goes with it, however deep:** the records of an
+are removed from the file store. **A link another instance wrote stays with it**: the delete does not carry it, and a file
+uploaded at the path later is linked to what that instance linked, until that instance removes the link
+([Links API](04g-links-api.md)). A link a fact or a chrono entry holds *to* the file is the record's own and is not touched. **Everything derived from the file goes with it, however deep:** the records of an
 extracted image's caption and faces hang from the image, not from the file, and are removed too; so are the metadata rows
 a sidecar left on this instance (one an older peer delivered before sidecars became instance-local included),
 flagged or removed as the file's own record is (`softDeleteFileMeta`), and the queued jobs of the extracted images.
 A directory `<id>.md/` standing beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never
-touched by the file's delete. Deleting a **directory** does the same for every file beneath it,
+touched by the file's delete. Deleting a **directory** does the same for every file beneath it (their links included),
 including the `_converted/<path>` and `_extracted/<path>` subtrees, and writes a sync **tombstone**
-per removed file so peers delete their copies too (otherwise the next sync would push them back).
+per removed file so peers delete their copies too (otherwise the next sync would push them back). The links go once the tree
+has: those of a file a failure left standing stay with it, and a repeat of the delete removes the rest.
 
 **A delete takes what derives from the file even work running at that moment.** A media job that is processing the file
 when it is deleted, moved or wiped with its space cannot write a derived record afterwards: every write it makes about

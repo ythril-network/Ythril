@@ -77,7 +77,7 @@ every subscriber.
 ## Where the detail lives
 
 - `server/src/sync/deletion-authority.ts` — the one question (`authorises`, `deleteBound`, the delivery) for both doors.
-- `server/src/sync/tombstone-apply.ts` and `server/src/files/tombstones.ts` — the record and file applies.
+- `server/src/sync/tombstone-apply.ts` and `server/src/files/peer-tombstone-apply.ts` — the record and file applies.
 - `server/src/sync/local-only-fields.ts` — the stamp's category: local, unhashed, kept by a restore.
 - `docs/sync-protocol.md` — *Tombstone deletion authorisation*, the stamp, the back-fill and the one-time re-read.
 - `docs/integration-guide/09-sync-api.md` and `docs/integration-guide/02b-upgrading.md` — the contract for integrators
