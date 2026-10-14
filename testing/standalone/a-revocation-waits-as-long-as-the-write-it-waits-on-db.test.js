@@ -129,13 +129,16 @@ describe('a revocation waits as long as the write it waits on (real MongoDB)', {
   it('the bound a revoker\'s write carries is never below the one the holder\'s transaction was given, even inside a request\'s own scope', async () => {
     const claim = await seedClaim(S, 'pic.png');
     // What the driver is handed for the revoker's write: read where it is issued, from the scope the call runs in.
+    // Both delete verbs: the cancel is one `$in` delete over its ids (`cancelMediaJobs`), and a revoker may issue either.
     const proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    const original = proto.deleteOne;
+    const original = { deleteOne: proto.deleteOne, deleteMany: proto.deleteMany };
     let carried;
-    proto.deleteOne = function spy(...args) {
-      if (this.collectionName === `${S}_media_jobs`) carried = bound.boundOperationMs();
-      return original.apply(this, args);
-    };
+    for (const verb of ['deleteOne', 'deleteMany']) {
+      proto[verb] = function spy(...args) {
+        if (this.collectionName === `${S}_media_jobs`) carried = bound.boundOperationMs();
+        return original[verb].apply(this, args);
+      };
+    }
     try {
       await lease.writeUnderClaim(S, claim, async () => 'written');
       const holderBound = Math.max(...sessionTimeouts);
@@ -143,6 +146,6 @@ describe('a revocation waits as long as the write it waits on (real MongoDB)', {
       assert.ok(carried !== undefined, 'fixture: the revoker\'s write carried no bound at all');
       assert.ok(carried >= holderBound,
         `the revoker's write is bounded at ${carried} ms inside a request, below the ${holderBound} ms the holder's transaction was given: it can give up before the run must`);
-    } finally { proto.deleteOne = original; }
+    } finally { Object.assign(proto, original); }
   });
 });
