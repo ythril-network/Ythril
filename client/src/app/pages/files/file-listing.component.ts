@@ -62,9 +62,9 @@ export interface FileRow {
   template: `
     <div class="table-wrapper" hscrollTop>
       <table>
-        <!-- The caption names the table for a screen reader, and is where the focus lands after the last row is deleted:
-             there is no next row to give it to, and the page would otherwise leave it on a button that no longer exists. -->
-        <caption #caption tabindex="-1" class="sr-only">{{ 'files.table.caption' | transloco }}</caption>
+        <!-- The caption names the table for a screen reader. It is NOT a place to put the focus: nothing of it is on screen, so a
+             focus there is invisible to everyone but a screen reader (the empty-state heading below takes it instead). -->
+        <caption class="sr-only">{{ 'files.table.caption' | transloco }}</caption>
         <thead>
           <tr>
             <th style="width:24px"><span class="sr-only">{{ 'files.table.icon' | transloco }}</span></th>
@@ -167,7 +167,7 @@ export interface FileRow {
               } @else {
               <div class="empty-state" style="padding:32px">
                 <div class="empty-state-icon"><ph-icon name="folder-open" [size]="48"/></div>
-                <h3>{{ 'files.emptyFolder.title' | transloco }}</h3>
+                <h3 #emptyTitle tabindex="-1">{{ 'files.emptyFolder.title' | transloco }}</h3>
                 <p>{{ 'files.emptyFolder.body' | transloco }}</p>
               </div>
               }
@@ -202,17 +202,20 @@ export class FileListingComponent {
   protected readonly formatSize = formatSize;
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly caption = viewChild<ElementRef<HTMLElement>>('caption');
+  private readonly emptyTitle = viewChild<ElementRef<HTMLElement>>('emptyTitle');
 
   /**
-   * Put the focus on the name of the row called `name`, or on the table's caption when there is no such row (`null`, or a row that
-   * is not drawn: the last one was just deleted).
+   * Put the focus on the name of the row called `name`, or, when there is no such row (`null`, or a row that is not drawn: the last
+   * one was just deleted), on the heading of the empty folder, which says what the list now holds. Failing that (a load error is
+   * shown instead of the heading) on the first column header's sort button: also visible, and a real control.
    *
    * It is here and not on the page because only this component knows what a row IS in the DOM: the page hands over a name and
-   * never reaches into the table's markup. The caption is always there to land on, so the focus is never left on the body.
+   * never reaches into the table's markup. The target is always something on screen: the table's caption is read by a screen reader
+   * only, and a focus there is invisible to everyone else.
    */
   focusRow(name: string | null): void {
     const names = Array.from(this.host.nativeElement.querySelectorAll<HTMLElement>('tbody .file-name-btn'));
-    (names.find(button => (button.textContent ?? '').trim() === name) ?? this.caption()?.nativeElement)?.focus();
+    const fallback = this.emptyTitle()?.nativeElement ?? this.host.nativeElement.querySelector<HTMLElement>('thead button');
+    (names.find(button => (button.textContent ?? '').trim() === name) ?? fallback)?.focus();
   }
 }

@@ -9,7 +9,7 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { provideRouter } from '@angular/router';
 import { FilesApi } from '../../core/files-api.service';
@@ -52,7 +52,7 @@ function mount(opts: {
 }) {
   const lang = opts.lang ?? 'en';
   const toasts: Toast[] = [];
-  const confirms: { title?: string; message?: string }[] = [];
+  const confirms: { title?: string; message?: string; confirmLabel?: string; danger?: boolean }[] = [];
   const calls: Calls = { resolve: [], bulk: [] };
   const list = Array.from({ length: opts.conflicts ?? 2 }, (_, i) => conflict(i + 1));
   TestBed.resetTestingModule();
@@ -75,7 +75,7 @@ function mount(opts: {
         info: (message: string, duration?: number) => { toasts.push({ kind: 'info', message, duration }); return 0; },
         show: (message: string, kind: Toast['kind'] = 'info', duration?: number) => { toasts.push({ kind, message, duration }); return 0; },
       } },
-      { provide: ConfirmDialogService, useValue: { confirm: (o: { title?: string; message?: string }) => { confirms.push(o); return Promise.resolve(opts.confirmAnswer ?? true); } } },
+      { provide: ConfirmDialogService, useValue: { confirm: (o: { title?: string; message?: string; confirmLabel?: string; danger?: boolean }) => { confirms.push(o); return Promise.resolve(opts.confirmAnswer ?? true); } } },
     ],
   });
   const fixture = TestBed.createComponent(ConflictsComponent);
@@ -301,4 +301,162 @@ describe('every conflicts.refusal.* sentence is one the server can answer, in ev
     expect(sentence, 'en has the sentence').toBeDefined();
     expect(sentence).toMatch(/nothing was moved/i);
   });
+});
+
+/** The polite status the page keeps in the DOM: what a screen reader hears of an outcome that has no element of its own. */
+const statusText = (el: HTMLElement): string => (el.querySelector('[role="status"]')?.textContent ?? '').trim();
+const rowsOf = (el: HTMLElement): HTMLElement[] => [...el.querySelectorAll('tbody tr')] as HTMLElement[];
+
+describe('the bulk confirmation for keep-incoming says it cannot be undone and is a danger confirm (U1)', () => {
+  const irreversible: Record<string, RegExp> = { en: /cannot be undone/i, de: /nicht rückgängig/i, pl: /nie można cofnąć/i };
+  for (const lang of LANGS) {
+    it(`${lang}: keep-incoming is asked as a danger confirm with irreversible wording; keep-local and keep-both are not`, async () => {
+      const words = locale(lang);
+      const incoming = mount({ lang });
+      incoming.c.selectedIds.set([UUID(1), UUID(2)]);
+      incoming.c.bulkAction = 'keep-incoming';
+      await incoming.c.bulkResolve();
+      expect(incoming.confirms.length).toBe(1);
+      expect(incoming.confirms[0]!.danger, `${lang} a replacement nothing brings back is a danger confirm`).toBe(true);
+      expect(incoming.confirms[0]!.message, lang).toMatch(irreversible[lang]!);
+      expect(incoming.confirms[0]!.message, `${lang} it still names the action by its label`).toContain(words['conflicts.action.keepIncoming']!);
+      expect(incoming.confirms[0]!.confirmLabel, lang).toBe(words['conflicts.action.keepIncoming']);
+
+      for (const action of ['keep-local', 'keep-both'] as const) {
+        const other = mount({ lang });
+        other.c.selectedIds.set([UUID(1), UUID(2)]);
+        other.c.bulkAction = action;
+        await other.c.bulkResolve();
+        expect(other.confirms[0]!.danger, `${lang} ${action}`).not.toBe(true);
+        expect(other.confirms[0]!.message, `${lang} ${action} is not irreversible wording`).not.toMatch(irreversible[lang]!);
+      }
+    });
+  }
+});
+
+describe('the destination hint fits keep-both as well as the move (U6)', () => {
+  // The page can offer keep-both a rename-less placement and the move a target space: the hint says what to do about what stands
+  // there and to resolve again, and names another space only as the move's own way out.
+  const remedy: Record<string, [RegExp, RegExp]> = {
+    en: [/remove what stands there/i, /resolve again/i],
+    de: [/entfernen Sie, was dort liegt/i, /erneut/i],
+    pl: [/usuń to, co tam jest/i, /ponownie/i],
+  };
+  for (const lang of LANGS) {
+    it(`${lang}: destination_exists says what to remove and to resolve again`, () => {
+      const sentence = locale(lang)['conflicts.refusal.destination_exists']!;
+      expect(sentence).toMatch(remedy[lang]![0]);
+      expect(sentence).toMatch(remedy[lang]![1]);
+    });
+  }
+});
+
+describe('after a resolve the focus moves on, and the outcome is announced (A3)', () => {
+  it('a single resolve focuses the first control of the row that took its place', async () => {
+    const m = mount({ conflicts: 3 });
+    (rowsOf(m.el)[0]!.querySelector('button') as HTMLButtonElement).focus();
+    await m.c.resolve(m.list[0]);
+    await m.settle();
+    const rows = rowsOf(m.el);
+    expect(rows.length).toBe(2);
+    expect(document.activeElement, 'not left on the page body').not.toBe(document.body);
+    expect(document.activeElement).toBe(rows[0]!.querySelector('input[type="checkbox"]'));
+    expect(rows[0]!.textContent).toContain('docs/report-2.txt');
+  });
+
+  it('resolving the last row of several focuses the row now last', async () => {
+    const m = mount({ conflicts: 2 });
+    await m.c.resolve(m.list[1]);
+    await m.settle();
+    const rows = rowsOf(m.el);
+    expect(rows.length).toBe(1);
+    expect(document.activeElement).toBe(rows[0]!.querySelector('input[type="checkbox"]'));
+  });
+
+  it('resolving the only conflict focuses the empty-state heading, which is on screen', async () => {
+    const m = mount({ conflicts: 1 });
+    await m.c.resolve(m.list[0]);
+    await m.settle();
+    const heading = m.el.querySelector('.empty-state h3') as HTMLElement | null;
+    expect(heading, 'the empty state is shown').toBeTruthy();
+    expect(document.activeElement).toBe(heading);
+  });
+
+  it('a bulk resolve focuses the first remaining row', async () => {
+    const m = mount({ conflicts: 3 });
+    m.c.selectedIds.set([UUID(1)]);
+    await m.c.bulkResolve();
+    await m.settle();
+    expect(document.activeElement).toBe(rowsOf(m.el)[0]!.querySelector('input[type="checkbox"]'));
+  });
+
+  for (const lang of LANGS) {
+    it(`${lang}: keep-local, keep-incoming and keep-both each say what happened, by path, in a polite status`, async () => {
+      const words = locale(lang);
+      for (const [action, key] of [['keep-local', 'keepLocal'], ['keep-incoming', 'keepIncoming'], ['keep-both', 'keepBoth']] as const) {
+        const m = mount({ lang, conflicts: 1 });
+        const region = m.el.querySelector('[role="status"][aria-live="polite"]');
+        expect(region, `${lang} ${action}: a polite status is on the page before the outcome`).toBeTruthy();
+        m.c.conflictActions[UUID(1)] = action;
+        await m.c.resolve(m.list[0]);
+        await vi.waitFor(() => {
+          m.fixture.detectChanges();
+          expect(statusText(m.el), `${lang} ${action}`).toContain(fixedWords(words[`conflicts.status.${key}`]!));
+        }, { timeout: 1500 });
+        expect(statusText(m.el)).toContain('docs/report-1.txt');
+        expect(statusText(m.el), 'an operator reads the words, not the code').not.toContain(action);
+      }
+    });
+
+    it(`${lang}: a bulk resolve says how many it resolved`, async () => {
+      const words = locale(lang);
+      const m = mount({ lang });
+      m.c.selectedIds.set([UUID(1), UUID(2)]);
+      await m.c.bulkResolve();
+      await vi.waitFor(() => {
+        m.fixture.detectChanges();
+        expect(statusText(m.el), lang).toContain(fixedWords(words['conflicts.status.bulkResolved']!));
+      }, { timeout: 1500 });
+      expect(statusText(m.el)).toContain('2');
+    });
+  }
+});
+
+describe('a file-act code with no conflicts sentence never shows the server\'s English (A6)', () => {
+  const english = locale('en');
+  const unworded = serverActCodes().filter(code => !(`conflicts.refusal.${code}` in english));
+
+  for (const lang of LANGS) {
+    it(`${lang}: the generic sentence exists and is a translation`, () => {
+      const generic = locale(lang)['conflicts.error.resolveUnfinished'];
+      expect(generic, `${lang} conflicts.error.resolveUnfinished`).toBeTruthy();
+      if (lang !== 'en') expect(generic).not.toBe(english['conflicts.error.resolveUnfinished']);
+    });
+
+    it(`${lang}: each such code, single and bulk, shows the generic sentence`, async () => {
+      const generic = fixedWords(locale(lang)['conflicts.error.resolveUnfinished']!);
+      for (const code of unworded) {
+        const single = mount({
+          lang, conflicts: 1,
+          resolveConflict: () => throwError(() => refused(500, { error: 'English server words', code, path: 'docs/report-1.txt' })),
+        });
+        single.c.resolve(single.list[0]);
+        await single.settle();
+        const said = single.toasts.filter(t => t.kind === 'error').map(t => t.message).join('|');
+        expect(said, `${lang} ${code} single`).toContain(generic);
+        expect(said, `${lang} ${code} single: not the server's sentence`).not.toContain('English server words');
+
+        const bulk = mount({
+          lang,
+          bulkResolveConflicts: () => of({ resolved: 0, failed: [{ id: UUID(1), error: 'English server words', code, status: 500, path: 'docs/report-1.txt' }] }),
+        });
+        bulk.c.selectedIds.set([UUID(1)]);
+        await bulk.c.bulkResolve();
+        await bulk.settle();
+        const listed = bulk.toasts.filter(t => t.kind === 'error').map(t => t.message).join('|');
+        expect(listed, `${lang} ${code} bulk`).toContain(generic);
+        expect(listed, `${lang} ${code} bulk: not the server's sentence`).not.toContain('English server words');
+      }
+    });
+  }
 });
