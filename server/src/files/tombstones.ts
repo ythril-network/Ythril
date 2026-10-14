@@ -101,7 +101,7 @@
  * who asked, how often housekeeping has tried), all of it inside `move` and off the wire.
  */
 
-import type { Stats } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
 import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
@@ -120,7 +120,7 @@ import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt, classifyDestination, lstatIfPresent } from './stored-bytes.js';
 import { removeConvergedLinks } from './move-links.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
@@ -1038,18 +1038,31 @@ export async function bytesIdentityAt(spaceId: string, rel: string): Promise<{ s
 }
 
 /** What is at `rel` on the disk, or `null` when the path does not exist — the one failure read as an answer; any other is thrown, as {@link bytesPresentAt} throws it. */
-async function lstatAt(spaceId: string, rel: string): Promise<Stats | null> {
-  return lstatIfPresent(await resolveSafePathChecked(spaceId, rel));
+async function lstatAt(spaceId: string, rel: string): Promise<Stats | null>;
+async function lstatAt(spaceId: string, rel: string, opts: { bigint: true }): Promise<BigIntStats | null>;
+async function lstatAt(spaceId: string, rel: string, opts?: { bigint: true }): Promise<Stats | BigIntStats | null> {
+  const abs = await resolveSafePathChecked(spaceId, rel);
+  return opts ? lstatIfPresent(abs, opts) : lstatIfPresent(abs);
 }
 
 /**
- * What is at a begun move's destination when its bytes HAVE moved — bytes at `to` and none at `from` — or `null` when they have not.
- * The one spelling of "the bytes have moved", asked by {@link moveIsOwed} (which then judges whether they are the moved ones) and by
- * {@link abandonMove}. A path that cannot be looked at is thrown, as {@link bytesPresentAt} throws it.
+ * What is at a begun move's destination when its bytes HAVE moved — bytes at `to` and none at `from`, or at both only as a move's own
+ * HALF-MADE LINK (the same inode, two names, and this marker: `classifyDestination`, `files/stored-bytes.ts`, the one decision the
+ * step that placed them asks) — or `null` when they have not. The one spelling of "the bytes have moved", asked by {@link moveIsOwed}
+ * (which then judges whether they are the moved ones) and by {@link abandonMove}. A path that cannot be looked at is thrown, as
+ * {@link bytesPresentAt} throws it.
+ *
+ * **A marked half-link counts as moved**, so every remover of a marker ({@link movesStillOwed}) keeps the marker of a move whose last
+ * step was an unlink that did not happen, and housekeeping can finish it. A case-only move is never read as owed by this: its two names
+ * are one entry (`nlink` 1, an `alias`), so there are bytes at `from` and no half-link.
  */
 async function movedBytesOf(spaceId: string, marker: Pick<MoveMarker, 'from' | 'to'>): Promise<Stats | null> {
   const atTo = await lstatAt(spaceId, marker.to);
-  return atTo !== null && !(await bytesPresentAt(spaceId, marker.from)) ? atTo : null;
+  if (atTo === null) return null;
+  const atFrom = await lstatAt(spaceId, marker.from, { bigint: true });
+  if (atFrom === null) return atTo;
+  const exactTo = await lstatAt(spaceId, marker.to, { bigint: true });
+  return exactTo !== null && classifyDestination(atFrom, exactTo, { begun: true }) === 'half-linked' ? atTo : null;
 }
 
 /**
