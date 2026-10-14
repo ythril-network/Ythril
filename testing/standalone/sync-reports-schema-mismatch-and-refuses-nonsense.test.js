@@ -32,6 +32,8 @@ import { bodyOf, statementAround } from './_structural-window.mjs';
 
 const DOCS = 'server/src/api/sync/docs.ts';
 const SHARED = 'server/src/api/sync/_shared.ts';
+const RECORDER = 'server/src/sync/arrival-recording.ts';
+const ACCEPT = 'server/src/sync/accept-page.ts';
 const docs = stripComments(readFileSync(DOCS, 'utf8'));
 const shared = stripComments(readFileSync(SHARED, 'utf8'));
 
@@ -40,24 +42,29 @@ const TYPES = ['fact', 'entity', 'edge', 'chrono'];
 describe('sync reports a schema mismatch and refuses nonsense', () => {
   it('one helper answers for every record type', () => {
     // A per-type copy is how the old single check drifted into being the only one. The helper must cover all
-    // four, or the next type added quietly gets nothing.
-    assert.match(shared, /export function violationsAgainstLocalSchema/, 'no shared validation helper');
+    // four, or the next type added quietly gets nothing. Re-pointed for R6-9: the check is the arrival recorder's
+    // (`sync/arrival-recording.ts`), one module the page accept and the import both ask, and no longer a helper in `_shared.ts`
+    // that six sites called.
+    const recorder = stripComments(readFileSync(RECORDER, 'utf8'));
+    assert.match(recorder, /export async function watchArrivals/, 'no shared recorder');
+    assert.match(recorder, /export function recordedOf/, 'no shared recorder');
     for (const t of TYPES) {
       assert.match(
-        shared, new RegExp(`case '${t}'`),
-        `the helper does not handle '${t}', so that type ingests unchecked`,
+        recorder, new RegExp(`case '${t}'`),
+        `the recorder does not handle '${t}', so that type ingests unchecked`,
       );
     }
+    assert.doesNotMatch(shared, /violationsAgainstLocalSchema/, 'the six-site helper is back: the recorder is the one place a stored arrival is judged');
   });
 
   it('every batch loop checks what it is about to store', () => {
-    for (const t of TYPES) {
-      assert.match(
-        docs, new RegExp(`violationsAgainstLocalSchema\\(spaceId, '${t}'`),
-        `batch-upsert stores '${t}' records without checking them. This is the path a real peer uses — a sync `
-        + 'cycle ships records in batches — so a check that skips it protects almost nothing.',
-      );
-    }
+    // The page accept is what every door stores through, so the recording is made THERE, for every family, and the batch route answers
+    // its count from it: a route that judged for itself is the six-sites defect again.
+    const accept = stripComments(readFileSync(ACCEPT, 'utf8'));
+    assert.match(accept, /watchArrivals\(spaceId, collection,/, 'the page accept does not look at what it is about to store');
+    assert.match(accept, /recordedOf\(/, 'the page accept does not record what landed');
+    assert.match(docs, /out\[key\]\.recorded/, 'the batch route does not answer its violation count from the page accept\'s recording');
+    assert.doesNotMatch(docs, /violationsAgainstLocalSchema/, 'a route judges a document itself again');
   });
 
   it('every per-type stat that CAN carry a violation count does', () => {

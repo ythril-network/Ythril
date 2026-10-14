@@ -98,7 +98,7 @@ export interface WriteDelta { changedPath(field: string): boolean }
 const NOTHING_CHANGED: WriteDelta = { changedPath: () => false };
 
 /** The delta between the record as stored (`null`: nothing, an insert) and as the write leaves it. */
-function deltaBetween(before: RecordView | null, after: RecordView): WriteDelta {
+export function deltaBetween(before: RecordView | null, after: RecordView): WriteDelta {
   if (!before) return { changedPath: () => true };
   return {
     changedPath(field) {

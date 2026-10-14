@@ -28,6 +28,7 @@
 import { peerSafeFetch } from './peer-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
+import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
 import { arrivalRefusal } from './arrivals.js';
 import { isRider, pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
 import { truncationWarn, type TransferOutcome } from './watermark.js';
@@ -43,8 +44,11 @@ const PULL_MAX_PAGE = 500;
 /** Requests one transfer makes per cycle before it stops as capped; the next cycle resumes from where this one is complete. */
 const PULL_MAX_PAGES = 50;
 
-/** `converged`: file rows whose drifted timestamp took the author's (`Q-419`) — counted apart, since nothing was stored. */
-export type PullResult = { count: number; converged: number; highSeq: number; maxSeq: number } & TransferOutcome;
+/**
+ * `converged`: file rows whose drifted timestamp took the author's (`Q-419`) — counted apart, since nothing was stored.
+ * `recorded`: what the transfer stored that the local schema does not accept and the copy it replaced lacked, in names and counts (R6-9).
+ */
+export type PullResult = { count: number; converged: number; highSeq: number; maxSeq: number; recorded: RecordedSummary } & TransferOutcome;
 
 type ServedPage = { items?: unknown; nextCursor?: unknown };
 
@@ -64,6 +68,7 @@ export async function pullFamily(o: {
   const peerLabel = member.label ?? member.instanceId;
   const outcome: TransferOutcome = { deliveredThrough: sinceSeq, truncated: false };
   let count = 0, converged = 0, highSeq = sinceSeq, maxSeq = 0;
+  let recorded: RecordedSummary = NOTHING_RECORDED;
 
   await pageSeqRuns({
     outcome,
@@ -103,10 +108,12 @@ export async function pullFamily(o: {
         if (doc.seq > maxSeq) maxSeq = doc.seq;
         if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
       }
+      // What the page stored against the local schema's rules, by names and counts — the cycle's history row keeps it.
+      recorded = mergeSummaries(recorded, written.summary);
       return null;
     },
     // A transfer that stopped has more to give, so it caps the watermark AND keeps making progress next cycle.
     stopped: (why, heldAt) => log.warn(peerText(truncationWarn(`Pull ${key} from`, member.label ?? '', spaceId, why, heldAt))),
   });
-  return { count, converged, highSeq, maxSeq, ...outcome };
+  return { count, converged, highSeq, maxSeq, recorded, ...outcome };
 }

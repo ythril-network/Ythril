@@ -1252,6 +1252,31 @@ export const syncFileArrivalsTotal = new Counter({
 // Declared at 0, so a scrape before the first arrival reports 0 rather than nothing (`recallDegradedTotal`).
 for (const door of FILE_ARRIVAL_DOORS) for (const outcome of FILE_ARRIVAL_OUTCOMES) syncFileArrivalsTotal.labels({ door, outcome }).inc(0);
 
+/**
+ * The doors a record arrives through that are recorded against this instance's schema (`sync/arrival-recording.ts`, R6-9), the values of
+ * the `source` label: `push` (a peer's POST), `pull` (this instance fetched a page) and `import` (an admin restore). Listed here so the
+ * series can be declared at 0.
+ */
+export const SCHEMA_RECORDING_SOURCES = ['push', 'pull', 'import'] as const;
+
+export const schemaViolationsRecordedTotal = new Counter({
+  name: 'ythril_schema_violations_recorded_total',
+  help: 'Documents a peer sent or an import restored that were STORED carrying a violation of this instance\'s schema that the copy they replaced did not (recorded, never refused), by source (push, pull, import)',
+  labelNames: ['source'] as const,
+  registers: [register],
+});
+export const schemaRecorderFailuresTotal = new Counter({
+  name: 'ythril_schema_recorder_failures_total',
+  help: 'Times the recording of what an arrival broke in this instance\'s schema failed; the arrival itself was stored (a recorder never stops a write), by source (push, pull, import)',
+  labelNames: ['source'] as const,
+  registers: [register],
+});
+// Declared at 0, so a scrape before the first arrival reports 0 rather than nothing: "absent" and "0" mean opposite things on a graph.
+for (const source of SCHEMA_RECORDING_SOURCES) {
+  schemaViolationsRecordedTotal.labels({ source }).inc(0);
+  schemaRecorderFailuresTotal.labels({ source }).inc(0);
+}
+
 // ── Media embedding ──────────────────────────────────────────────────────────
 // Pipeline that converts image / audio / video into text → embedding vector.
 // Counters are pre-initialised with `.inc(0)` so HELP/TYPE lines appear from

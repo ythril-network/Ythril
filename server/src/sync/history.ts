@@ -15,6 +15,17 @@ export interface SyncCounts {
   links: number;
 }
 
+/**
+ * What a cycle's pulled pages stored that the receiving space's schema does not accept and the copy they replaced lacked, for ONE space
+ * (`sync/arrival-recording.ts`, R6-9): how many documents, and the field names most of them carried with how many each. Names and counts only —
+ * never a value, and never a document's id.
+ */
+export interface SyncSchemaRecording {
+  spaceId: string;
+  records: number;
+  top: Array<{ name: string; count: number }>;
+}
+
 export interface SyncHistoryRecord {
   _id: string;
   networkId: string;
@@ -24,6 +35,11 @@ export interface SyncHistoryRecord {
   pulled: SyncCounts;
   pushed: SyncCounts;
   errors?: string[];
+  /**
+   * Per space, what this cycle's pulls stored against the local schema's rules (`SyncSchemaRecording`). Absent when nothing was — a
+   * cycle that recorded nothing writes the row it always wrote. A push is not in it: a pushing peer is answered per document.
+   */
+  schemaViolations?: SyncSchemaRecording[];
 }
 
 const COLLECTION = '_sync_history';

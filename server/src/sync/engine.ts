@@ -21,7 +21,8 @@ import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
 import { refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
-import { recordSyncResult, type SyncCounts } from './history.js';
+import { recordSyncResult, type SyncCounts, type SyncSchemaRecording } from './history.js';
+import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
 import { log, peerText } from '../util/log.js';
 import { resolveWatermark, type TransferOutcome } from './watermark.js';
 import { pullFamily, type PullResult } from './pull-family.js';
@@ -147,6 +148,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const errorMessages: string[] = [];
+  // What the cycle's pulls stored against the local schemas' rules, per space across every member (`sync/arrival-recording.ts`, R6-9).
+  const recordedBySpace = new Map<string, RecordedSummary>();
 
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
   let synced = 0; let errors = 0; let refusals = 0;
@@ -157,6 +160,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       const counts = await runSyncForMember(net, member);
       // Every family, links included: a hand-written list of five here never summed links into the cycle (Q-59).
       for (const k of Object.keys(pulled) as (keyof SyncCounts)[]) { pulled[k] += counts.pulled[k]; pushed[k] += counts.pushed[k]; }
+      for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
       // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
       // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
       // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
@@ -231,6 +235,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
+    // Per space, in names and counts: what the pulled pages stored that the local schema does not accept (R6-9). Absent when nothing was.
+    ...(recordedBySpace.size > 0 ? { schemaViolations: [...recordedBySpace].map(([spaceId, r]): SyncSchemaRecording => ({ spaceId, records: r.records, top: r.top })) } : {}),
   }).catch(err => log.error(`Failed to record sync history: ${peerText(err)}`));
 
   // ── Orphan detection (braintree only) ──────────────────────────────────
@@ -328,17 +334,19 @@ export async function runSyncForPeer(
 async function runSyncForMember(
   net: NetworkConfig,
   member: NetworkMember,
-): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[]; refused: string[] }> {
+): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[]; refused: string[]; recorded: SyncSchemaRecording[] }> {
   const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   // What did not complete this cycle, one entry per space and direction. Non-empty makes the member's sync a
   // failure in the cycle's accounting (`Q-48`) — the watermarks were held correctly; what was missing was saying so.
   const incomplete: string[] = []; const refused: string[] = [];
+  // What this member's pulled pages stored against the local schema's rules, per space (`sync/arrival-recording.ts`, R6-9).
+  const recorded: SyncSchemaRecording[] = [];
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${peerText(member.label)} (${peerText(member.instanceId)}) — skipping sync`);
-    return { pulled, pushed, incomplete: ['no peer token for this member'], refused };
+    return { pulled, pushed, incomplete: ['no peer token for this member'], refused, recorded };
   }
 
   const headers: Record<string, string> = {
@@ -443,6 +451,7 @@ async function runSyncForMember(
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts); // F-39.1: only from upstream, never throws
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
       pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono; pulled.links += pc.links;
+      if (pc.recorded.records > 0) recorded.push({ spaceId, ...pc.recorded });
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
       // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
       await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts });
@@ -475,7 +484,7 @@ async function runSyncForMember(
   // Hot-path bookkeeping: a cosmetic timestamp written every member every cycle.
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfigSoon(freshCfg); }
 
-  return { pulled, pushed, incomplete, refused };
+  return { pulled, pushed, incomplete, refused, recorded };
 }
 
 // ── Gossip: member list exchange ────────────────────────────────────────────
@@ -774,7 +783,7 @@ async function pullFromPeer(
   networkId: string,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; recorded: RecordedSummary }> {
   let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0, pulledChrono = 0, pulledLinks = 0;
   const sinceSeq = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqReceived') ?? 0;
 
@@ -861,6 +870,8 @@ async function pullFromPeer(
   return {
     facts: pulledMemories, entities: pulledEntities, edges: pulledEdges, chrono: pulledChrono,
     links: pulledLinks, stoppedEarly,
+    // What every family of this space's pull stored against the local schema's rules, by names and counts.
+    recorded: REPLICATED_FAMILIES.reduce((sum, f) => mergeSummaries(sum, pulled[f.payloadKey]?.recorded), NOTHING_RECORDED),
   };
 }
 

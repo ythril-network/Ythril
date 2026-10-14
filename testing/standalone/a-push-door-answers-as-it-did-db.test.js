@@ -35,9 +35,14 @@ import { openPushDoor, build } from './_push-door.mjs';
 const skip = await mongoSkipReason();
 
 const S = 'pushpin';
-/** A space with a schema, so `schemaViolations` has something to report. */
+/**
+ * A space with a schema, so `schemaViolations` has something to report. In `warn`: an arrival is recorded against the schema only by a space
+ * that judges (`validationMode` `warn` or `strict`) — a space that never said is `off`, and an `off` space records nothing (R6-9; it answered the
+ * rows whatever its mode before, because the validator ignored the mode for a declared value).
+ */
 const SCHEMAED = 'pushpin-schema';
 const META = {
+  validationMode: 'warn',
   typeSchemas: {
     fact: { note: { propertySchemas: { source: { type: 'string', required: true } } } },
     entity: { person: { propertySchemas: { age: { type: 'number', required: true } } } },

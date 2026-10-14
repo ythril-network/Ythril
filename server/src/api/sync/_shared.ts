@@ -12,7 +12,6 @@ import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletio
 import { networksHolding } from '../../spaces/wipe-vote.js';
 import { isDirectionalNetwork } from '../../networks/network-spaces.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
-import type { KnowledgeType } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-keyset.js';
@@ -44,9 +43,7 @@ export { MAX_FORK_DEPTH } from '../../sync/upsert-plan.js';
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
-  from '../../spaces/schema-validation.js';
-import { recordViewOf } from '../../brain/record-view.js';
+import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { MAX_FACT_LENGTH, MAX_TAGS } from '../../util/request-bounds.js';
 
 export const AuthorRefSchema = z.object({
@@ -495,33 +492,9 @@ export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<str
 // MEMORIES
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Validate an incoming record against the LOCAL space's schema, and never refuse it.
- *
- * Sync checks, lets everything in, and reports what broke the rules: a peer validated these records against
- * ITS schema, so a refusal would discard data the sender believes it delivered. Violations go back to the
- * caller (batch stats, or beside the stored document via `withSchemaViolations`), not to a log line.
- */
-export function violationsAgainstLocalSchema(
-  spaceId: string,
-  kind: KnowledgeType,
-  doc: Record<string, unknown>,
-): SchemaViolation[] {
-  const meta = getSpaceMeta(spaceId);
-  if (!meta) return [];
-  // The view of the record as it arrived (`brain/record-view.ts`): a validator reads a title, a description and tags, and a literal
-  // of the two fields this site used to need would have made a rule about any other silently not apply to what a peer sends.
-  switch (kind) {
-    case 'entity':
-      return validateEntity(meta, recordViewOf('entity', doc));
-    case 'edge':
-      return validateEdge(meta, recordViewOf('edge', doc));
-    case 'chrono':
-      return validateChrono(meta, recordViewOf('chrono', doc));
-    case 'fact':
-      return validateFact(meta, recordViewOf('fact', doc));
-  }
-}
+// What an incoming record breaks in the LOCAL space's schema is judged, classified against the copy it replaced and recorded — never
+// refused — by `sync/arrival-recording.ts`, once, from the page accept (`Q-93`, R6-9). It was `violationsAgainstLocalSchema` here, called
+// from six sites that each decided for themselves which documents and which rules.
 
 // Moved to `db/write-errors.ts`, which every reader of a write failure now shares; re-exported for the routes.
 export { isDuplicateKeyOnly } from '../../db/write-errors.js';
