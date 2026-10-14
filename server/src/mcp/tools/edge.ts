@@ -6,6 +6,7 @@ import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } fr
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
@@ -142,14 +143,12 @@ export const save_edgeTool: ToolHandler = {
         ...(a['toKind'] !== undefined ? { toKind } : {}),
         onValidation: c => { edgeCheck = c; },
       });
-    const edgeSchemaViolations = edgeCheck?.all ?? [];
+    const schemaWarnings = schemaWarningAnswer(edgeMeta, edgeCheck as UpdateValidation | undefined);
     let edgeMsg = `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).`;
-    if (edgeMeta?.validationMode === 'warn') {
-      for (const v of edgeSchemaViolations) edgeMsg += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
+    for (const line of schemaWarnings.lines) edgeMsg += `\n${line}`;
     return {
       content: [{ type: 'text' as const, text: edgeMsg }],
-      structuredContent: { ...edge, ...(edgeSchemaViolations.length > 0 ? { violations: edgeSchemaViolations } : {}) },
+      structuredContent: { ...edge, ...schemaWarnings.structured },
     };
   },
 };

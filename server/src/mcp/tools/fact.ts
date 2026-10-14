@@ -18,6 +18,7 @@ import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.j
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer } from '../schema-warnings.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, DELETION_REACH } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -177,15 +178,14 @@ export const save_factTool: ToolHandler = {
     // (An unresolved or ambiguous reference is now a hard error above, not a warning on a write
     // that already happened.)
     // Schema warnings (reuse violations from pre-write check)
-    if (remMeta?.validationMode === 'warn') {
-      for (const v of (remCheck as UpdateValidation | undefined)?.all ?? []) warnings.push(`⚠️ Schema: ${v.field} — ${v.reason}`);
-    }
+    const schemaWarnings = schemaWarningAnswer(remMeta, remCheck as UpdateValidation | undefined);
+    warnings.push(...schemaWarnings.lines);
     const remText = `Stored fact (seq ${mem.seq}, ID ${mem._id}).`
       + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '')
       + (warnings.length > 0 ? `\n${warnings.join('\n')}` : '');
     return {
       content: [{ type: 'text' as const, text: remText }],
-      structuredContent: { ...mem },
+      structuredContent: { ...mem, ...schemaWarnings.structured },
     };
   },
 };

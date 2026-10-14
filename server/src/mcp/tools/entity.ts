@@ -8,6 +8,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer } from '../schema-warnings.js';
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
@@ -153,12 +154,11 @@ export const save_entityTool: ToolHandler = {
     }
     // Schema warnings, taken from the classification the writer handed back rather than re-derived — which
     // would be a second lookup per write and the second copy of the rule this change exists to remove.
-    if (entMeta?.validationMode === 'warn') {
-      for (const v of (entCheck as UpdateValidation | undefined)?.all ?? []) msg += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
+    const schemaWarnings = schemaWarningAnswer(entMeta, entCheck as UpdateValidation | undefined);
+    for (const line of schemaWarnings.lines) msg += `\n${line}`;
     return {
       content: [{ type: 'text' as const, text: msg }],
-      structuredContent: { ...entity, ...(warning ? { warning } : {}) },
+      structuredContent: { ...entity, ...(warning ? { warning } : {}), ...schemaWarnings.structured },
     };
   },
 };

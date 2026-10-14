@@ -6,6 +6,7 @@ import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrenc
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer } from '../schema-warnings.js';
 
 /**
  * What a passed due moment means — ONE sentence, quoted everywhere that used to state it.
@@ -215,12 +216,11 @@ export const save_chronoTool: ToolHandler = {
         `"${c.summary}" (ID ${c.id}: ${c.fields.map(f => `${f.key} ${f.aValue} vs ${f.bValue}`).join(', ')})`).join('; ');
       text += `\n⚠️ Contradiction — ${entry.contradicts.length} existing entr${entry.contradicts.length === 1 ? 'y disagrees' : 'ies disagree'} with this one: ${detail}. This entry was still stored. If you are correcting an outdated entry, update or supersede the record above instead of leaving both.`;
     }
-    if (chronoMeta?.validationMode === 'warn') {
-      // From the classification the writer handed back, not re-derived — a second call would be a second
-      // lookup per write and the second copy of the rule.
-      for (const v of (chronoCheck as UpdateValidation | undefined)?.all ?? []) text += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
-    return { content: [{ type: 'text' as const, text }] };
+    // From the classification the writer handed back, not re-derived — a second call would be a second
+    // lookup per write and the second copy of the rule.
+    const schemaWarnings = schemaWarningAnswer(chronoMeta, chronoCheck as UpdateValidation | undefined);
+    for (const line of schemaWarnings.lines) text += `\n${line}`;
+    return { content: [{ type: 'text' as const, text }], structuredContent: { ...entry, ...schemaWarnings.structured } };
   },
 };
 
