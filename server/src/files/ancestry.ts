@@ -25,7 +25,7 @@
  *    each ancestor, and the first one that carries it is the answer — so it pays no read for the levels above).
  *
  * The caller chooses the fields it reads of each ancestor (`fields`) and may stop early; one `$in` read serves each LEVEL for the whole
- * set of rows being walked, so a page of five hundred rows costs {@link MAX_ANCESTRY} reads, not five hundred times that.
+ * set of rows being walked, so a page of rows costs {@link MAX_ANCESTRY} reads, not that many times as many.
  *
  * ## Why the loop is here and nowhere else
  *

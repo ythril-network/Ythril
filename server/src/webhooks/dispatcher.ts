@@ -5,7 +5,8 @@
  * - At-least-once delivery with exponential backoff retries
  * - MongoDB-backed retry queue — retries survive process restarts
  * - First deliveries bounded per subscription: a burst or a hung sink cannot open unbounded connections (see
- *   {@link FIRST_DELIVERY_BOUND}); what does not fit is persisted to the retry queue, never dropped
+ *   {@link FIRST_DELIVERY_BOUND}); what does not fit is persisted to the retry queue, and a write of it that fails is counted
+ *   (`ythril_webhook_first_deliveries_lost_total`) and said
  * - Delivery logging for debugging
  * - Fire-and-forget from the caller's perspective (non-blocking)
  */
@@ -14,7 +15,7 @@ import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Filter, Sort } from 'mongodb';
 import { getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess, markWebhookFailure, acceptsDeliveries } from './store.js';
-import { col } from '../db/mongo.js';
+import { asDoc, col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log, peerText } from '../util/log.js';
@@ -33,6 +34,15 @@ const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
 export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
 const DELIVERY_TIMEOUT_MS = 10_000;
 const RETRY_COLLECTION = '_webhook_retry_queue';
+
+/**
+ * Ensure the retry queue's index on `scheduledAt`, once at startup (`bootstrap.ts`, beside the store's own indexes). The poll reads the queue
+ * `{ scheduledAt: { $lte: now } }` sorted by it, every ten seconds; the queue is small until a burst overflows into it (a directory delete
+ * to a sink that is down), and then each poll would scan and sort all of it.
+ */
+export async function initRetryQueueIndexes(): Promise<void> {
+  await col<RetryJob>(RETRY_COLLECTION).createIndex({ scheduledAt: 1 });
+}
 const RETRY_POLL_INTERVAL_MS = 10_000;
 
 // ── Retry queue document ────────────────────────────────────────────────────
@@ -137,11 +147,11 @@ async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
     await deps.removeJob(job._id);
 
     const sub = await deps.getWebhook(job.webhookId);
-    if (!sub) return; // webhook deleted while retry was queued
+    if (!sub) { dropRetry('deleted', job.webhookId); return; } // webhook deleted while retry was queued
     // Switched off, disabled or failing: the retry is dropped (its row is already gone), with no delivery and no verdict about the
     // subscription. A burst to a sink that went down leaves a row per event; once the subscription is marked failing, delivering the rest
-    // is an attempt at a sink the dispatcher has stopped sending to.
-    if (!acceptsDeliveries(sub)) return;
+    // is an attempt at a sink the dispatcher has stopped sending to. Counted and said, because the row was the event's only copy.
+    if (!acceptsDeliveries(sub)) { dropRetry(sub.status === 'failing' ? 'failing' : 'disabled', job.webhookId); return; }
 
     const result = await deps.deliver(sub, job);
 
@@ -157,6 +167,24 @@ async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
   } catch (err) {
     sayDeliveryFailureOnce('retry-error', job.webhookId, () => { log.warn(`Webhook retry queue error for ${peerText(job.webhookId)}: ${peerText(err)}`); });
   }
+}
+
+/** Why a queued retry was removed and not delivered; the labels of `ythril_webhook_retries_dropped_total`. */
+const RETRY_DROP_REASONS = ['deleted', 'disabled', 'failing'] as const;
+type RetryDropReason = typeof RETRY_DROP_REASONS[number];
+
+/** The tally behind `ythril_webhook_retries_dropped_total`, every reason present at 0 so every series is on the scrape from the start. */
+const retriesDropped: Record<RetryDropReason, number> = { deleted: 0, disabled: 0, failing: 0 };
+export function webhookRetriesDroppedCounts(): Readonly<Record<RetryDropReason, number>> {
+  return { ...retriesDropped };
+}
+
+/** A retry removed from the queue and not delivered: counted every time, said once per window per subscription and reason. */
+function dropRetry(reason: RetryDropReason, webhookId: string): void {
+  retriesDropped[reason]++;
+  sayDeliveryFailureOnce(`retry-dropped-${reason}`, webhookId, () => {
+    log.warn(`Webhook retries for ${peerText(webhookId)} are being dropped without a delivery attempt (${reason}); every one is counted in ythril_webhook_retries_dropped_total`);
+  });
 }
 
 /** One retry-queue document for a delivery's attempt number `attempt` (2 is the first retry). The ONE shape, written by every writer. */
@@ -193,7 +221,7 @@ async function enqueueRetry(
   deliveryId: string,
   attempt: number,
 ): Promise<void> {
-  await col<RetryJob>(RETRY_COLLECTION).insertOne(retryJobFor(webhookId, body, event, spaceId, deliveryId, attempt) as any);
+  await col<RetryJob>(RETRY_COLLECTION).insertOne(asDoc<RetryJob>(retryJobFor(webhookId, body, event, spaceId, deliveryId, attempt)));
 }
 
 // ── Delivery failure lines ──────────────────────────────────────────────────
@@ -346,9 +374,9 @@ export function setFirstDeliveryDepsForTest(deps: FirstDeliveryDeps | null): voi
   firstDeliveryOverride = deps;
 }
 
-/** The tally behind `ythril_webhook_first_deliveries_queued_total` and `_overflowed_total`; the registry reads it at scrape time. */
-const firstDeliveryTally = { queued: 0, overflowed: 0 };
-export function webhookFirstDeliveryCounts(): { queued: number; overflowed: number } {
+/** The tally behind `ythril_webhook_first_deliveries_queued_total`, `_overflowed_total` and `_lost_total`; the registry reads it at scrape time. */
+const firstDeliveryTally = { queued: 0, overflowed: 0, lost: 0 };
+export function webhookFirstDeliveryCounts(): { queued: number; overflowed: number; lost: number } {
   return { ...firstDeliveryTally };
 }
 
@@ -364,7 +392,7 @@ function offerFirstDelivery(d: FirstDelivery): void {
   switch (firstDeliveries.submit(d.sub.id, d)) {
     case 'started': return;
     case 'queued': firstDeliveryTally.queued++; return;
-    case 'refused': persistForRetry(d, !firstDeliveries.closed); return;
+    case 'refused': persistForRetry(d, { overflow: !firstDeliveries.closed }); return;
   }
 }
 
@@ -376,10 +404,13 @@ const pendingRetryRows = drainedQueue<{ job: RetryJob; overflow: boolean }>(
   async (batch) => {
     try {
       // Sliced by bytes and count so each write is ONE wire command (`db/one-command.ts`): a retry body is a whole event payload.
-      await writeInOneCommands(batch.map(b => b.job), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice as any, { ordered }), { ordered: false });
+      await writeInOneCommands(batch.map(b => asDoc<RetryJob>(b.job)), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice, { ordered }), { ordered: false });
       firstDeliveryTally.overflowed += batch.filter(b => b.overflow).length;
     } catch (err) {
-      sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted: ${peerText(err)}`); });
+      // Counted as lost: `writeInOneCommands` may have landed some slices before one failed, so this is an upper bound, which is the
+      // honest side for a counter of events a subscriber may never be sent.
+      firstDeliveryTally.lost += batch.length;
+      sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted and are lost (counted in ythril_webhook_first_deliveries_lost_total): ${peerText(err)}`); });
     }
   },
   {
@@ -388,21 +419,37 @@ const pendingRetryRows = drainedQueue<{ job: RetryJob; overflow: boolean }>(
   },
 );
 
-function persistForRetry(d: FirstDelivery, overflow: boolean): void {
+/** `overflow`: the delivery was refused by its subscription's bound, and is counted as overflowed once its row is written (a shutdown's are not). */
+function persistForRetry(d: FirstDelivery, { overflow }: { overflow: boolean }): void {
   pendingRetryRows.push({ job: retryJobFor(d.sub.id, d.body, d.event, d.spaceId, d.deliveryId, 2), overflow });
 }
 
 /**
  * Shutdown: the first deliveries that were queued and never attempted are written to the retry queue (so a restart delivers them), and
- * every first delivery offered afterwards goes there as well. Resolves when the rows are written. Called before the HTTP drain, while the
- * database is still open. Returns how many queued deliveries were persisted.
+ * every first delivery offered afterwards goes there as well. Resolves when the rows are written, or after `withinMs` — the shutdown's own
+ * drain budget, so a database that stopped answering costs the budget and not the orchestrator's kill. Returns how many queued deliveries
+ * this call persisted.
+ *
+ * **Called twice by the shutdown, and safe to.** First before the HTTP drain, while the database is open; then once more after the drain,
+ * before the connection closes: an event emitted by a request that finished while the server was draining went to the closed limiter and
+ * on to the rows, and nobody awaited those. The second call closes nothing (the limiter is already closed) and waits for what is left.
  */
-export async function drainFirstDeliveries(): Promise<number> {
+export async function drainFirstDeliveries({ withinMs }: { withinMs: number }): Promise<number> {
+  const lostBefore = firstDeliveryTally.lost;
   const queued = firstDeliveries.close();
-  for (const d of queued) persistForRetry(d, false);
+  for (const d of queued) persistForRetry(d, { overflow: false });
   // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
-  await emitQueue.settled();
-  await pendingRetryRows.settled();
+  const written = (async () => { await emitQueue.settled(); await pendingRetryRows.settled(); })();
+  let timer: NodeJS.Timeout | undefined;
+  const budget = new Promise<'late'>(resolve => { timer = setTimeout(() => resolve('late'), withinMs); timer.unref(); });
+  const outcome = await Promise.race([written.then(() => 'written' as const), budget]);
+  clearTimeout(timer);
+  if (outcome === 'late') {
+    log.warn(`Shutdown: the webhook retry queue did not finish writing within ${withinMs}ms (${emitQueue.size} events unresolved, ${pendingRetryRows.size} rows unwritten); those deliveries are lost`);
+  }
+  if (firstDeliveryTally.lost > lostBefore) {
+    log.warn(`Shutdown: ${firstDeliveryTally.lost - lostBefore} queued webhook deliveries could not be persisted for retry`);
+  }
   return queued.length;
 }
 
@@ -419,8 +466,9 @@ async function deliverFirst(d: FirstDelivery): Promise<void> {
   if (result.success) {
     await markWebhookSuccess(sub.id);
   } else {
-    // Enqueue first retry (attempt 2)
-    await enqueueRetry(sub.id, body, event, spaceId, deliveryId, 2);
+    // Enqueue first retry (attempt 2). A write that fails leaves the event with no copy anywhere: counted before the failure goes to the
+    // limiter's reporter, which names it.
+    try { await enqueueRetry(sub.id, body, event, spaceId, deliveryId, 2); } catch (err) { firstDeliveryTally.lost++; throw err; }
     sayDeliveryFailureOnce('first', sub.id, () => { log.warn(`Webhook first delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)} — queued for retry`); });
   }
 }

@@ -14,6 +14,7 @@ import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
+import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
@@ -245,7 +246,7 @@ export const space_renameTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const r = await renameSpaceAct(callSpace, { newId: a['newId'] });
     if (r.status === 200) ctx.recordChanges?.({ id: callSpace }, { id: r.space.id });
-    return toResult(r.status === 200 ? { status: 200, body: { space: r.space } } : r, `Space '${callSpace}' renamed.`);
+    return toResult(r.status === 200 ? { status: 200, body: { space: spaceForWire(r.space) } } : r, `Space '${callSpace}' renamed.`);
   },
 };
 

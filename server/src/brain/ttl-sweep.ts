@@ -311,8 +311,22 @@ export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number;
   return { deleted, walk };
 }
 
-/** Delete all records past their `_expireAt`, across every space. Returns the number deleted. */
+/**
+ * Delete all records past their `_expireAt`, across every space. Returns the number deleted.
+ *
+ * The leaked-rows gauge (`ythril_leaked_rows_repair_pending_spaces`) is written however the pass ends, in a `finally`: a step that threw
+ * before the repair's own used to leave it at the last value a pass that did reach it wrote (or at 0, which says "no scan owed", before
+ * the first). It is also written when the sweep starts (`startTtlSweep`), from the config.
+ */
 export async function sweepExpired(now: Date = new Date()): Promise<number> {
+  try {
+    return await sweepExpiredSteps(now);
+  } finally {
+    publishLeakedRowScansOwed(now);
+  }
+}
+
+async function sweepExpiredSteps(now: Date): Promise<number> {
   let strippedRows = 0;
   const { deleted: total } = await sweepExpiredRecords(now);
   if (total > 0) log.info(`TTL sweep deleted ${total} expired record(s)`);
@@ -360,7 +374,6 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // end. After the strip, so what is repaired here is what the strip left; the spaces share the budget, and a space that fails is passed over.
   const repairUntil = leakedRowsDeadline();
   await eachSpace(REPAIR_STEP, concreteSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
-  publishLeakedRowScansOwed(now);
 
   return total;
 }
@@ -382,6 +395,8 @@ const sweepJob = intervalJob('TTL sweep', SWEEP_INTERVAL_MS, () => sweepExpired(
 /** Start the background TTL sweep. Call once during startup. */
 export function startTtlSweep(): void {
   if (sweepJob.armed) return;
+  // From the config now, so the gauge never reads a false 0 ("no scan owed") during the first interval, before any pass has run.
+  publishLeakedRowScansOwed(new Date());
   void ensureSweepIndexes().catch(err => log.warn(`TTL sweep: ensuring the sweep indexes: ${peerText(err)}`));
   sweepJob.start();
   log.debug('TTL sweep worker started');

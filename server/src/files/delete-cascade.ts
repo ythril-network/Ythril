@@ -28,7 +28,7 @@
  * nothing a peer restores. Links another instance wrote stay with it (ADR 05, owner decision D-31). The step is called directly and its
  * failure fails the delete, the row still there to find it owed on every door (REST, `POST /api/delete_file`, MCP, the TTL sweep); a second
  * pass after the row removes a link written while the row was still live, bounded to links written by the instant the row went. A file's
- * own tombstone is published after its links are gone, so a delete whose link step failed has told no peer yet and its retry tells them once.
+ * own tombstone is published after its links are gone and settled from the disk (bytes back at the path: dropped, never published over them), so a delete whose link step failed has told no peer yet and its retry tells them once.
  * A directory runs the same steps over its tree: its links are those of the files gone from disk (never of one a failure left standing).
  *
  * **After the bytes, a store failure still fails the delete** (bundle-30 I14, verify-drive-4 D1). The job, the
@@ -61,7 +61,7 @@ import { removeFileHere, removeLinksOfDeletedFiles } from './remove-file-here.js
 import { sidecarsOf, type PathKind } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import { actUnderPendingTombstones, confirmFileTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
+import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
 import { forgetFinishedMove, moveIsOwed, movesBegunInto, type MoveMarker } from './move-markers.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
@@ -69,6 +69,17 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 
 /** The refusal of a path with nothing to delete, in one sentence for every way a delete reaches it (`404` on REST, an error result in MCP). */
 const fileNotFound = (spaceId: string, filePath: string): NotFoundError => new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
+
+/** The seams a test narrows: the two intervals a re-upload can land in. Production passes none. */
+interface DeleteSteps {
+  /** Runs after the links of the delete were removed and before the file's tombstone is settled (one file's delete). */
+  afterLinks: (at: { spaceId: string; path: string }) => void | Promise<void>;
+  /** Runs once the row (the rows, for a directory) was removed and before the second link pass reads its stamp's links. */
+  afterRow: (at: { spaceId: string; path: string }) => void | Promise<void>;
+}
+let steps: Partial<DeleteSteps> | null = null;
+/** A test seam only: `null` puts the real behaviour back. */
+export function setDeleteStepsForTest(next: Partial<DeleteSteps> | null): void { steps = next; }
 
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
@@ -90,13 +101,18 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
   // The links this instance wrote from the file and from its derived ids, with the tombstones that tell peers: after the bytes and
   // before the row, so a failure leaves the delete owed (the row finds it), called directly so it IS thrown (`removeLinksOfDeletedFiles`).
   await removeLinksOfDeletedFiles(spaceId, filePath, 'file');
-  await confirmFileTombstones(pending);
+  await steps?.afterLinks?.({ spaceId, path: filePath });
+  // Settled from the DISK, never confirmed on the strength of the unlink above: a file uploaded at the path while the link step ran has
+  // bytes again, and a tombstone published over them would tell every peer to delete a live file. No bytes: published; bytes: dropped.
+  await settlePendingFileTombstones(pending);
   // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
   // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
+  const rowGoneBy = new Date().toISOString();   // BEFORE the removal: a re-upload's link can only be written after the row went, so it is later than this
   await removeFileHere(spaceId, filePath, { failure: 'throw' });
+  await steps?.afterRow?.({ spaceId, path: filePath });
   // A link written while the row was still live (a `save_link` between the pass above and the row's removal): the same removal, bounded to
   // links written by the instant the row went, so a file uploaded at this path since keeps the links it is given.
-  await removeLinksOfDeletedFiles(spaceId, filePath, 'file', { createdUntil: new Date().toISOString() });
+  await removeLinksOfDeletedFiles(spaceId, filePath, 'file', { createdUntil: rowGoneBy });
   for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
   // The brain family's one rule (`if (actor) emitWebhookEvent`): a delete no user made — the TTL sweep passes its own
   // actor, so it still reports; a caller with none is silent on the webhook AND the live view (bundle-48, Q-259).
@@ -225,9 +241,11 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string, a
   await removeLinksOfDeletedFiles(spaceId, dirPath, 'directory', { surviving });
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
+  const rowsGoneBy = new Date().toISOString();   // BEFORE the removal, as for one file: a re-upload's link is written after the rows went
   await retireRowsUnderDirectory(spaceId, dirPath, announcedBy(spaceId, actor));
+  await steps?.afterRow?.({ spaceId, path: dirPath });
   // A link written while the rows were still live: the pass above again, bounded to links written by the instant the rows went.
-  await removeLinksOfDeletedFiles(spaceId, dirPath, 'directory', { surviving: await filesStillUnder(spaceId, dirPath), createdUntil: new Date().toISOString() });
+  await removeLinksOfDeletedFiles(spaceId, dirPath, 'directory', { surviving: await filesStillUnder(spaceId, dirPath), createdUntil: rowsGoneBy });
   for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
 }
 

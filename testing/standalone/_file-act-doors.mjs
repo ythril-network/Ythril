@@ -246,15 +246,16 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     /**
      * One link row FROM `from` (a file id, or a derived id such as `a.txt#chunk-0`) to the entity `to`, authored by `who`: `self` (this
      * instance), `peer` (another instance) or `none` (a row with no author). Raw: it is the row a write once left, so a case can hold
-     * a link another instance wrote, which no local door can make. Returns the row's id.
+     * a link another instance wrote, which no local door can make. `createdAt` is the row's write time (default a fixed old instant): a
+     * case about a link written DURING a delete passes the current time. Returns the row's id.
      */
-    async put(from, to, who = 'self') {
+    async put(from, to, who = 'self', createdAt = T0) {
       const { linkIdFor } = await import('../../server/dist/brain/link-id.js');
       const { authorRef } = await import('../../server/dist/config/author.js');
       const author = who === 'self' ? authorRef() : who === 'peer' ? OTHER_INSTANCE : undefined;
       const _id = linkIdFor(from, 'file', to, 'entity');
       await door.coll(S, 'links').insertOne({ _id, spaceId: S, from, fromKind: 'file', to, toKind: 'entity', ...(author ? { author } : {}),
-        createdAt: T0, updatedAt: T0, seq: 1_000 + (++linkSeq) });
+        createdAt, updatedAt: createdAt, seq: 1_000 + (++linkSeq) });
       return _id;
     },
     /** {@link links.put} for many sources at once (one insert): `from` is each of `froms`, `to` the same entity. Returns the ids. */

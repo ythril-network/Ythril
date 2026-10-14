@@ -280,7 +280,7 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    * Where the leaked-rows repair has got to in this space (`files/leaked-rows-repair.ts`, Q-465): its cursor while a scan is running and
    * the time the last scan finished, which a scan waits a day from. Local bookkeeping about THIS disk like `deliveredByBackfilled` — never
    * governed, synced, exported or restored, and it lives on the space's config entry and not on its meta (the meta replicates; this is
-   * not a fact the network should agree on). A restore and an import clear it before they answer (`restartLeakedRowScan`), because the
+   * not a fact the network should agree on). A restore and an import clear it before they answer (`restartLeakedRowScans`), because the
    * rows they bring were never read. Absent means no scan has started. An older build ignores the key, which is what makes a rollback
    * harmless. `phase` is what a running scan reads (derived rows by `_id`, the default, then the links of deleted files by `from`),
    * `after` the last id (or `from`) it finished with, `completedAt` the ISO time the last scan reached its end, which a scan does not

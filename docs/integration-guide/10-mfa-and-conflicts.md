@@ -194,7 +194,13 @@ When there is nothing to place, the answer says so and still closes the record:
 
 That is: the conflict copy is already gone (an earlier resolution placed it and failed to close the record), `save-to-space`
 into the conflict's own space at the same path, or a `keep-both` `rename` equal to the conflict path. Nothing was placed or
-replaced, and a client must not report that something was.
+replaced, and a client must not report that something was. `resolved` is a word this answer may gain values for, so a client
+must **treat any other `resolved` value as resolved**: the record is closed whatever the word says, and a word it does not
+know is shown as it is or ignored, never read as a failure.
+
+A stored conflict record whose path leads out of the space (an original or conflict path that goes through a link pointing
+elsewhere) is `400` for every action, `keep-local` included, and no route clears such a record. That is cosmetic: nothing
+outside the space was or is touched.
 
 ---
 

@@ -7,7 +7,7 @@
  *
  * `files/tombstones.ts` held three things at once: the tombstone lifecycle (written pending, settled, published, pruned, applied
  * against arrivals), the move's marker (is this move still owed? forget it, record an attempt, remove a marker row unless the
- * move is owed), and the collection both are read through. It reached 778 code lines against a ceiling of 650, and the marker
+ * move is owed), and the collection both are read through. It grew past the size ceiling that holds a source file to one concern, and the marker
  * block — the part `no-remover-drops-an-owed-move-marker` and G5 (`move-marker-queries-are-read-through-the-pager`) hold — could
  * not be named as one place, so a rule about "the marker's questions" had to be stated as a list of functions in a file that is
  * mostly something else. The split is the cheapest honest way under the ceiling: it is not a FROZEN row.

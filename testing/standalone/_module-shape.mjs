@@ -15,8 +15,8 @@
  * No type checker and no resolution beyond a relative specifier: an import of a package, or of a path that leaves the tracked
  * tree, is not an edge. Dynamic `import()` is not an edge either (it is not evaluated at load, so it cannot make a cycle).
  */
-import { posix } from 'node:path';
 import { parseSource, ts } from '../_shared/syntax-tree.mjs';
+import { resolveRelativeSpecifier } from './_relative-specifier.mjs';
 
 const isExported = (node) => !!node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
 
@@ -74,9 +74,7 @@ export function relativeImports(file, text, known) {
   const set = known instanceof Set ? known : new Set(known);
   const out = [];
   const add = (spec, runtime) => {
-    if (!spec.startsWith('.')) return;
-    const base = posix.join(posix.dirname(file), spec);
-    const to = [base.replace(/\.js$/, '.ts'), `${base}.ts`, posix.join(base, 'index.ts')].find(c => set.has(c));
+    const to = resolveRelativeSpecifier(spec, file, c => set.has(c));
     if (to && to !== file) out.push({ to, runtime });
   };
   for (const st of sf.statements) {
@@ -102,10 +100,7 @@ export function namesImportedFrom(file, text, target, known) {
   for (const st of sf.statements) {
     const spec = (ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)
       ? st.moduleSpecifier.text : null;
-    if (!spec || !spec.startsWith('.')) continue;
-    const base = posix.join(posix.dirname(file), spec);
-    const to = [base.replace(/\.js$/, '.ts'), `${base}.ts`, posix.join(base, 'index.ts')].find(c => set.has(c));
-    if (to !== target) continue;
+    if (!spec || resolveRelativeSpecifier(spec, file, c => set.has(c)) !== target) continue;
     if (ts.isImportDeclaration(st)) {
       const nb = st.importClause?.namedBindings;
       if (nb && ts.isNamedImports(nb)) for (const el of nb.elements) names.add((el.propertyName ?? el.name).text);

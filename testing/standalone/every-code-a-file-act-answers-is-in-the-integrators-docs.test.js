@@ -10,7 +10,7 @@
  * answering it is a branch that never fires. Both were true at once while a move onto another file's records answered
  * `destination_taken_by_other` and the guide described the replacement it no longer made.
  *
- * The same defect arrived a second time as a LIST: the upgrade page (`02b-upgrading.md`) named seven of the eight codes
+ * The same defect arrived a second time as a LIST: the upgrade page (`02b-upgrading.md`) named all but one of the codes
  * while the status table named all of them, so an integrator who read the upgrade notes met `destination_held_after_move`
  * with no sentence about it. A page that lists the codes is somebody's whole reference for them, and a list that stops one
  * short is invisible from the inside.

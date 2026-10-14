@@ -123,7 +123,7 @@ and the Files page of another browser hears each one; a webhook endpoint that ca
 **New folder:** Click **New folder** in the toolbar. A name that is already a file, or a path that runs through a file,
 creates nothing and shows *Failed to create folder.*; a folder that already exists is not an error.
 
-**Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view.
+**Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view; with the keyboard, Up and Down move through the folders, Right opens a closed folder (and then steps into it), Left closes an open one (and then steps to its parent), and Enter or Space opens the folder in the list.
 
 **Folder sizes:** the Size column shows a folder's **total content size** — the sum of every file inside it (recursively), not just files. An empty folder shows `0 B`.
 

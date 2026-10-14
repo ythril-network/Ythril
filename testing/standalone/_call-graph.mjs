@@ -66,7 +66,8 @@
  */
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
+import { resolveRelativeSpecifier } from './_relative-specifier.mjs';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, balancedFrom, statementFrom } from './_structural-window.mjs';
@@ -266,7 +267,7 @@ export function topLevelBindings(src, taken = new Set()) {
 export function namespaceImports(src, file, has) {
   const map = new Map();
   const add = (local, spec) => {
-    const target = resolveSpecifier(spec, file, has);
+    const target = resolveRelativeSpecifier(spec, file, has);
     if (target) map.set(local, target);
   };
   for (const m of src.matchAll(/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s*['"]([^'"]+)['"]/g)) add(m[1], m[2]);
@@ -285,7 +286,7 @@ export function namespaceImports(src, file, has) {
 export function relativeImports(src, file, has) {
   const map = new Map();
   const add = (clause, spec) => {
-    const target = resolveSpecifier(spec, file, has);
+    const target = resolveRelativeSpecifier(spec, file, has);
     if (!target) return;
     for (const part of clause.split(',')) {
       const m = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+|\s*:\s*)?([A-Za-z_$][\w$]*)?\s*$/.exec(part);
@@ -308,15 +309,6 @@ export function relativeImports(src, file, has) {
   return map;
 }
 
-/** A relative specifier as a repo path, `.js` read back to the `.ts` it was written as. */
-function resolveSpecifier(spec, fromFile, has) {
-  if (!spec.startsWith('.')) return null;
-  const base = join(dirname(fromFile), spec).replace(/\\/g, '/');
-  for (const candidate of [base.replace(/\.js$/, '.ts'), `${base}.ts`, `${base}/index.ts`]) {
-    if (has(candidate)) return candidate;
-  }
-  return null;
-}
 
 /**
  * A body with every NESTED closure's block removed — what this function does when it is called, once.

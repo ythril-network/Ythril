@@ -50,6 +50,7 @@ import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwn
 import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
+import { spaceForWire } from './space-for-wire.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 /**
@@ -536,5 +537,5 @@ export async function voteOnSchemaEditIfNetworked(
   }
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
-  return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
+  return { status: 200, body: { space: spaceForWire(result.space), ...networkMergeNotice(result) } };
 }

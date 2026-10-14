@@ -39,16 +39,21 @@
  * they bring were never read, and do not run the scan themselves: the next tick does, at the ordinary pace.
  *
  * Everything it removes is counted (`ythril_leaked_rows_removed_total`, and what it read and kept `ythril_leaked_rows_kept_total`) and the
- * spaces still owing a scan are a gauge; one log line per space per pass says the counts. A failure of a space, or of looking at a path,
- * is the walk's to say (`eachSpace`): the cursor has been advanced past what was done, so the next tick resumes after it.
+ * spaces still owing a scan are a gauge; one log line per space per pass says the counts (at info when the pass removed anything or kept a
+ * row it could not explain, at debug when it met only the rows of live files), and a pass that removed anything writes one audit entry
+ * (`file.leaked_rows.repair`, no token). A failure of a space, or of looking at a path, is the walk's to say (`eachSpace`): the cursor has
+ * been advanced past what was done, so the next tick resumes after it. **A scan is complete only when every path of its last pass was
+ * looked at**: a final page with a path whose bytes could not be looked at does not complete it.
  */
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { idKeysetPage } from '../db/id-keyset-page.js';
-import { getConfig, saveConfig } from '../config/loader.js';
+import { getConfig } from '../config/loader.js';
 import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { authorRef } from '../config/author.js';
+import { logInternalAudit } from '../audit/audit.js';
+import { LEAKED_ROWS_REPAIR_OPERATION } from '../audit/middleware.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { removeFileLinksThisInstanceWrote } from '../brain/links.js';
 import { fileLinkSourcesAfter } from '../brain/link-adjacency.js';
@@ -57,10 +62,11 @@ import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import type { FileMetaDoc, SpaceConfig } from '../config/types.js';
 import { walkUpFileChains } from './ancestry.js';
-import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
-import { cancelMediaJob } from './media/job-queue.js';
+import { LIVE_FILE_ROW } from './live-file-row.js';
+import { cancelMediaJobs } from './media/job-queue.js';
 import { pathsCarriedByOwedMoves } from './move-markers.js';
 import { belongsTo } from './moved-paths.js';
+import { owningFilesOf } from './derived-rows.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { heldFileTombstones } from './tombstones.js';
 
@@ -82,6 +88,8 @@ interface RepairSteps {
   beforeRemove: (page: { spaceId: string; ids: readonly string[] }) => void | Promise<void>;
   /** Rows (and link sources) per page. */
   pageSize: number;
+  /** Pages one tick reads (the seam of "what is the cursor after ONE page"). */
+  pagesPerTick: number;
 }
 let steps: Partial<RepairSteps> | null = null;
 /** A test seam only: `null` puts the real behaviour back. */
@@ -106,13 +114,14 @@ const scanIsOwed = (state: ScanState | undefined, now: Date): boolean =>
 const generations = new Map<string, number>();
 const generationOf = (spaceId: string): number => generations.get(spaceId) ?? 0;
 
-/** Where the scan of a space is, set on its LIVE config entry (read at once by the next page); {@link persistScan} writes it down. */
+/**
+ * Where the scan of a space is, set on its LIVE config entry (read at once by the next page) and written down SOON: coalesced with the
+ * next ones (`saveConfigSoon`), so a tick of many pages is not a config write per page. A crash costs the progress since the last write,
+ * and the pages are idempotent.
+ */
 function remember(spaceId: string, state: ScanState): void {
-  const entry = getConfig().spaces.find(s => s.id === spaceId);
-  if (entry) entry.leakedRowScan = state;
+  changeSpaceEntries([spaceId], entry => { entry.leakedRowScan = state; return true; }, { save: 'soon' });
 }
-/** Write the config the scan state lives in, once per tick: a crash before it costs the progress of one tick, and the pages are idempotent. */
-const persistScan = (): void => { saveConfig(getConfig()); };
 
 /**
  * Start the scan of these spaces again from the beginning, before the caller answers: what a restore and an import do, because the rows
@@ -140,18 +149,21 @@ const notAfter = (stamp: string) => ({ createdAt: { $not: { $gt: stamp } }, upda
 
 interface Page { last?: string; end: boolean; failure?: Error }
 
-/** The row ids a leaked row's media jobs are keyed by: the row itself, the derived rows above it, and the file it named that is gone. */
+/** The row ids a leaked row's media jobs are keyed by: the row itself and the derived rows above it. Never the path of the file that is gone. */
 interface Leaked { id: string; jobIds: string[] }
 
 /**
  * Remove the rows `leaked` names — **claims first**, then the delete, whose filter carries the stamp. The jobs of the rows and of every
  * derived row above them (never the live file at the top of a foreign chain: that file is somebody's) are taken first, so a run that read its
- * parent live writes nothing after the children went (`every-remover-of-file-rows-revokes-claims-first`).
+ * parent live writes nothing after the children went (`every-remover-of-file-rows-revokes-claims-first`), in one batched cancel for the page.
+ *
+ * **The job at the gone file's own path is not taken**: nothing here says that path is still dead, and a file uploaded there since has a
+ * queued job of its own, which a cancel would take from it. The delete that made the file gone took that job.
  */
 async function removeLeakedRows(spaceId: string, leaked: readonly Leaked[], stamp: string): Promise<number> {
   if (leaked.length === 0) return 0;
   const ids = leaked.map(l => l.id);
-  for (const jobId of new Set(leaked.flatMap(l => l.jobIds))) await cancelMediaJob(spaceId, jobId);
+  await cancelMediaJobs(spaceId, leaked.flatMap(l => l.jobIds));
   await steps?.beforeRemove?.({ spaceId, ids });
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   let removed = 0;
@@ -163,13 +175,17 @@ async function removeLeakedRows(spaceId: string, leaked: readonly Leaked[], stam
 
 /** One page of the derived rows by `_id`: decide each row, remove the leaked ones, count what was kept. */
 async function derivedRowsPage(spaceId: string, after: string | undefined, stamp: string, size: number, outcome: RepairOutcome): Promise<Page> {
-  const { rows, last, end } = await idKeysetPage<{ _id: string; parentFileId: string; createdAt?: string; updatedAt?: string }>({
+  // The next `size` rows by `_id` of ANY kind, and the derived ones picked out of them here: a page whose query said "has a parent" could
+  // examine a long run of rows with none (the files, before the first derived row) and, on a timeout, never advance. A page of rows read
+  // is bounded by its size, and the cursor passes the last row READ whether or not it was derived, so the scan cannot wedge on a gap.
+  const { rows: read, last, end } = await idKeysetPage<{ _id: string; parentFileId?: unknown; deletedAt?: unknown; createdAt?: string; updatedAt?: string }>({
     collection: spaceCollection(spaceId, 'files'),
-    filter: { ...NOT_A_FLAGGED_ROW, parentFileId: { $type: 'string' } },
-    projection: { _id: 1, parentFileId: 1, createdAt: 1, updatedAt: 1 }, size,
-    // By `_id` and no other index: the cursor is the id, and the planner left to choose could read every derived row to sort a page.
+    filter: {},
+    projection: { _id: 1, parentFileId: 1, deletedAt: 1, createdAt: 1, updatedAt: 1 }, size,
+    // By `_id` and no other index: the cursor is the id, and the planner left to choose could read every row to sort a page.
     hint: { _id: 1 },
   }, after);
+  const rows = read.filter((r): r is typeof r & { parentFileId: string } => typeof r.parentFileId === 'string' && !('deletedAt' in r));
 
   const settled = rows.filter(r => !writtenAfter(r, stamp));
   outcome.kept.recent += rows.length - settled.length;
@@ -178,7 +194,7 @@ async function derivedRowsPage(spaceId: string, after: string | undefined, stamp
   for (const row of settled) {
     const { ancestors, result } = chains.get(row._id)!;
     if (result.end === 'too-deep') outcome.kept.depth++;
-    else if (result.end === 'gone') leaked.push({ id: row._id, jobIds: [row._id, ...ancestors.map(a => a._id), result.at] });
+    else if (result.end === 'gone') leaked.push({ id: row._id, jobIds: [row._id, ...ancestors.map(a => a._id)] });
     else if (result.end === 'top' && !belongsTo(row._id, result.at)) leaked.push({ id: row._id, jobIds: [row._id, ...ancestors.slice(0, -1).map(a => a._id)] });
     else outcome.kept.live++;
   }
@@ -189,20 +205,25 @@ async function derivedRowsPage(spaceId: string, after: string | undefined, stamp
 /**
  * The sources among `froms` whose links the repair may remove: this instance published the file's tombstone, nothing is at the path (no live row,
  * no bytes) and no move is carrying it. A path whose bytes cannot be looked at is neither: it is kept and named in `unlooked`.
+ *
+ * **A derived source is asked about its FILE** (`owningFilesOf`): `a.jpg#face-chunk0` has no tombstone of its own — the delete wrote one for
+ * `a.jpg` — so asked as itself it read "no tombstone" and its links stayed for ever, though the delete's own step takes them.
  */
 async function leakedLinkSources(spaceId: string, froms: readonly string[]): Promise<{ sources: string[]; unlooked: Array<{ path: string; err: unknown }> }> {
   const self = authorRef().instanceId;
-  const held = await heldFileTombstones(spaceId, froms);
-  const deletedHere = froms.filter(p => held.get(p)?.some(t => t.issuer === self));
+  const owner = await owningFilesOf(spaceId, froms);
+  const owners = [...new Set(owner.values())];
+  const held = await heldFileTombstones(spaceId, owners);
+  const deletedHere = owners.filter(p => held.get(p)?.some(t => t.issuer === self));
   const live = new Set((await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), deletedHere, { _id: 1 }, { filter: LIVE_FILE_ROW })).keys());
   const unmoved = deletedHere.filter(p => !live.has(p));
   const carried = await pathsCarriedByOwedMoves(spaceId, unmoved);
-  const sources: string[] = [];
+  const gone = new Set<string>();
   const unlooked: Array<{ path: string; err: unknown }> = [];
   for (const path of unmoved.filter(p => !carried.has(p))) {
-    try { if (!await bytesPresentAt(spaceId, path)) sources.push(path); } catch (err) { unlooked.push({ path, err }); }
+    try { if (!await bytesPresentAt(spaceId, path)) gone.add(path); } catch (err) { unlooked.push({ path, err }); }
   }
-  return { sources, unlooked };
+  return { sources: froms.filter(f => gone.has(owner.get(f)!)), unlooked };
 }
 
 /** One page of the links FROM files, by `from`: remove those a deleted file left, which this instance wrote. */
@@ -230,35 +251,42 @@ export async function repairLeakedRows(spaceId: string, now: Date, opts: { deadl
   const deadlineAt = opts.deadlineAt ?? leakedRowsDeadline();
   const size = steps?.pageSize ?? REPAIR_PAGE_SIZE;
   const stamp = now.toISOString();
+  const startedAt = Date.now();
   const generation = generationOf(spaceId);
 
   let at: ScanState = state?.phase !== undefined ? state : { phase: 'rows' };
   let failure: Error | undefined;
-  let moved = false;
   try {
-    for (let pages = 0; pages < REPAIR_PAGES_PER_TICK && Date.now() < deadlineAt; pages++) {
+    for (let pages = 0; pages < (steps?.pagesPerTick ?? REPAIR_PAGES_PER_TICK) && Date.now() < deadlineAt; pages++) {
       const phase = at.phase ?? 'rows';
       const page = await (phase === 'rows' ? derivedRowsPage : deletedFileLinksPage)(spaceId, at.after, stamp, size, outcome);
       // A restore or an import cleared the scan while this page ran: what it read is not what the space holds now, so it records nothing.
       if (generationOf(spaceId) !== generation) return outcome;
-      if (!page.end) at = { phase, ...(page.last !== undefined ? { after: page.last } : {}) };
+      // A final page with a path it could not look at is NOT the end of the scan: nothing is recorded as complete while a path of the pass
+      // was unlooked, so the gauge and the daily wait never claim a scan that did not see every path. The cursor passes the page, and the
+      // next tick (an empty final page, if nothing else arrived) completes it.
+      if (!page.end || (page.failure && phase === 'links')) at = { phase, ...(page.last !== undefined ? { after: page.last } : {}) };
       else if (phase === 'rows') at = { phase: 'links' };
       else at = { completedAt: now.toISOString() };
       remember(spaceId, at);
-      moved = true;
       outcome.completed = at.phase === undefined;
       if (page.failure) failure = page.failure;
       if (outcome.completed || failure) break;
     }
   } finally {
-    if (moved && generationOf(spaceId) === generation) persistScan();
     leakedRowsRemovedTotal.labels({ kind: 'derived' }).inc(outcome.derivedRemoved);
     leakedRowsRemovedTotal.labels({ kind: 'link' }).inc(outcome.linksRemoved);
     for (const reason of ['depth', 'recent', 'live'] as const) leakedRowsKeptTotal.labels({ reason }).inc(outcome.kept[reason]);
+    // One entry per space per pass that removed anything — in the `finally`, so rows removed by pages before a failing one are audited too.
+    if (outcome.derivedRemoved + outcome.linksRemoved > 0) {
+      logInternalAudit({ method: 'SWEEP', path: 'internal:leaked-rows-repair', spaceId, operation: LEAKED_ROWS_REPAIR_OPERATION, startedAt });
+    }
   }
   const said = `Leaked-rows repair of space '${peerText(spaceId)}': removed ${outcome.derivedRemoved} row(s) derived from files that are gone and ${outcome.linksRemoved} link(s) of deleted files; `
     + `kept ${outcome.kept.live} of live files, ${outcome.kept.recent} newer than the scan, ${outcome.kept.depth} too deep to follow; ${outcome.completed ? 'the scan is complete' : 'the scan goes on next cycle'}`;
-  if (outcome.derivedRemoved + outcome.linksRemoved > 0) log.info(said); else log.debug(said);
+  // Info when the pass removed anything or kept a row for a reason an operator may want to know (newer than the scan, too deep to follow);
+  // a pass that met only the rows of live files, which is every pass of a healthy space, says it at debug.
+  if (outcome.derivedRemoved + outcome.linksRemoved + outcome.kept.recent + outcome.kept.depth > 0) log.info(said); else log.debug(said);
   if (failure) throw failure;
   return outcome;
 }

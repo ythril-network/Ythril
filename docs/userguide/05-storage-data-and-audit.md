@@ -537,10 +537,13 @@ is back. A link goes only when this instance deleted the file, wrote the link it
 move in progress) is at its path: a link another instance wrote stays with that instance. A removed link is removed with
 a tombstone, so peers drop their copies. The scan starts again no sooner than a day after it finished, and starts over
 at once after a restore or an import (the rows they bring were never read). Its place in each space is kept on this
-instance only. The log says one line per space and pass with the counts (`Leaked-rows repair of space …`); they are
-also `ythril_leaked_rows_removed_total` (by `kind`: `derived` or `link`), `ythril_leaked_rows_kept_total` (by
-`reason`: `depth`, `recent` or `live`) and the gauge `ythril_leaked_rows_repair_pending_spaces`. Going back to an
-earlier release afterwards is harmless: it ignores the scan's place and does nothing it did.
+instance only. The log says one line per space and pass with the counts (`Leaked-rows repair of space …`), at info
+when the pass removed anything or kept a row it could not explain and at debug when it met only the rows of live files;
+they are also `ythril_leaked_rows_removed_total` (by `kind`: `derived` or `link`), `ythril_leaked_rows_kept_total` (by
+`reason`: `depth`, `recent` or `live`) and the gauge `ythril_leaked_rows_repair_pending_spaces`. A pass that removed
+anything is audited as `file.leaked_rows.repair` (one entry per space, with no token). A scan counts as finished only
+when every path of its last pass could be looked at. Going back to an earlier release afterwards is harmless: it
+ignores the scan's place and does nothing it did.
 
 Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
 

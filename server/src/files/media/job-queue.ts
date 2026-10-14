@@ -8,7 +8,8 @@
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
 import type { ClientSession } from 'mongodb';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
-import { readStoredById } from '../../db/read-by-id.js';
+import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
+import { inChunks } from '../../util/chunks.js';
 import { toDocId } from '../../util/paths.js';
 import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
@@ -717,8 +718,19 @@ export async function resetStalledJobs(
  * BEFORE anything a delete removes of the file's rows, and why its bound is the holder's (`revokingClaims`).
  */
 export async function cancelMediaJob(spaceId: string, filePath: string): Promise<void> {
-  const id = toDocId(filePath);
-  await revokingClaims(() => jobCollection(spaceId).deleteOne(asFilter<MediaJobDoc>({ _id: id })));
+  await cancelMediaJobs(spaceId, [filePath]);
+}
+
+/**
+ * {@link cancelMediaJob} for many files: one `$in` delete per {@link READ_CHUNK} ids, never one command per id (a page of the
+ * leaked-rows repair cancels hundreds). The same revocation, with the same bound, and the same place in a remover's order: BEFORE
+ * anything it removes of the files' rows (`every-remover-of-file-rows-revokes-claims-first` names it among the revokers).
+ */
+export async function cancelMediaJobs(spaceId: string, filePaths: readonly string[]): Promise<void> {
+  const ids = [...new Set(filePaths.map(toDocId))];
+  for (const part of inChunks(ids, READ_CHUNK)) {
+    await revokingClaims(() => jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: part } })));
+  }
 }
 
 /**

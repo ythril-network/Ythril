@@ -21,7 +21,7 @@
  *
  * **The counters are read as DELTAS of the scrape**, never as absolute values: other cases of the same file have moved them.
  *
- * ## The contract this module assumes of the implementation (the plan names these, the tests need them spelled)
+ * ## The contract this module assumes of the implementation
  *
  *  - metrics `ythril_leaked_rows_removed_total{kind=derived|link}`, `ythril_leaked_rows_kept_total{reason=depth|recent|live}`,
  *    gauge `ythril_leaked_rows_repair_pending_spaces`;
@@ -33,6 +33,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { REPO_ROOT } from './_sources.mjs';
 
@@ -144,3 +145,12 @@ export async function maxAncestry() {
   }
   throw new Error('MAX_ANCESTRY is exported by none of the modules this helper knows — re-anchor _leaked-rows-repair.mjs');
 }
+
+/**
+ * A file tombstone as this instance stores one it PUBLISHED itself (`origin: 'own'`), or one a peer's delete relayed here
+ * (`origin: 'relayed'`), for `p` in `space` — the proof the link half of the repair reads. `issuer` is the instance that deleted the file.
+ */
+export const fileTombstoneRow = (space, p, { issuer, origin = 'own', move, at = '2026-08-01T00:00:00.000Z' } = {}) => ({
+  _id: randomUUID(), spaceId: space, path: p, deletedAt: at, positionAt: at, writtenAt: at, origin, issuer,
+  ...(origin === 'relayed' ? { storedVia: issuer } : {}), ...(move ? { move } : {}),
+});

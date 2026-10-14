@@ -74,7 +74,7 @@ const CASES = [
   },
   {
     name: 'DestinationExists (sidecar)', status: 409, code: 'destination_exists', path: 'b.txt', says: [/'b\.txt' cannot be taken: '_converted\/b\.txt\.md' already exists/],
-    make: () => new answers.DestinationExists('b.txt', 'sidecar', '_converted/b.txt.md'),
+    make: () => new answers.DestinationExists('b.txt', 'sidecar', { detail: '_converted/b.txt.md' }),
   },
   {
     name: 'DestinationHeldAfterMove', status: 409, code: 'destination_held_after_move', path: '_converted/b.txt.md',

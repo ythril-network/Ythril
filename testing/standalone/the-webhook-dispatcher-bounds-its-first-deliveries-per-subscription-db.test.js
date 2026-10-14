@@ -12,19 +12,19 @@
  * ## What is held
  *
  *  - **There is a seam to observe it:** `setFirstDeliveryDepsForTest({ deliver })` on `webhooks/dispatcher.ts`, the retry worker's
- *    `RetryPollDeps` precedent for the first attempt (plan T-S10): a delivery is an outbound request the SSRF guard would refuse to send to
+ *    `RetryPollDeps` precedent for the first attempt: a delivery is an outbound request the SSRF guard would refuse to send to
  *    anything a test could listen on, so the bound can only be seen in flight through a handed-in `deliver(sub, body, event, spaceId,
- *    deliveryId)`. `null` restores production. THE NAME IS THIS TEST'S READING OF THE PLAN'S "delivery dependency seam": if the
- *    implementation names it differently, this file is the one place that changes.
- *  - **Bounded per subscription:** with sink A held, the deliveries to A in flight at once stay far below the number of events (the value
- *    of the bound is the dispatcher's, not pinned here: a quarter of the burst is the ceiling asserted, well above any sane limit and
- *    well below "all of them").
+ *    deliveryId)`. `null` restores production.
+ *  - **Bounded per subscription:** with sink A held, the deliveries to A in flight at once are exactly the concurrency the dispatcher
+ *    exports (`FIRST_DELIVERY_CONCURRENCY`, read from the module, so the test follows the constant and a limiter that admits more or fewer
+ *    than it declares is red), and the held sink overflows the burst less `FIRST_DELIVERY_BOUND`.
  *  - **A hung sink holds only its own slots:** while A is held, every event reaches sink B.
  *  - **Nothing is lost to the bound:** each event is delivered, or held in the sink's queue, or — beyond the queue's bound — persisted to
  *    the retry queue. After A is released, every event path is accounted for as a delivery or a retry row, and at least one overflowed
- *    to the queue (the burst is larger than any queue bound the plan allows).
+ *    to the queue (the burst is larger than the queue's bound).
  *  - **The bound is counted:** `ythril_webhook_first_deliveries_overflowed_total` rises by exactly the events persisted for overflow, and
- *    `ythril_webhook_first_deliveries_queued_total` is on the scrape (the operator's reading of whether a sink is being outrun).
+ *    `ythril_webhook_first_deliveries_queued_total` rises by at least the deliveries that waited behind the held sink's running ones (the
+ *    operator's reading of whether a sink is being outrun; without its increment the counter is on the scrape and says 0 for ever).
  *  - **A success writes nothing:** a first delivery that succeeds to a subscription that is already active and has no failures does not
  *    write the subscription (`markWebhookSuccess` writes only on a status change): a burst of N is not N writes of an unchanged row.
  *
@@ -46,7 +46,7 @@ import { waitFor } from '../_shared/wait-for.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'firstdeliv';
 const RETRY_QUEUE = '_webhook_retry_queue';
-/** More events than any per-sink bound the plan allows ("e.g. 64 in flight and queued"), so some must overflow to the retry queue. */
+/** More events than the per-sink bound (`FIRST_DELIVERY_BOUND`), so some must overflow to the retry queue. */
 const BURST = 1500;
 const pathOf = (tag, i) => `${tag}/f${String(i).padStart(5, '0')}.txt`;
 
@@ -137,8 +137,12 @@ describe('the dispatcher bounds its first deliveries per subscription (Q-469)', 
         () => `a held sink starved the other: ${state.delivered.get(b)?.size ?? 0} of ${BURST} events reached sink B while sink A hung`, { what: 'every event to the sink that is not held' });
       assert.equal(state.delivered.get(a)?.size ?? 0, 0, 'fixture: sink A was not held');
       assert.ok((state.peak.get(a) ?? 0) >= 1, 'no delivery to the held sink was ever started: the case is not the one it is about');
-      assert.ok(state.peak.get(a) <= BURST / 4,
-        `${state.peak.get(a)} first deliveries to ONE sink were in flight at once for ${BURST} events: nothing bounds a burst per subscription`);
+      // The bound the module declares, read from the module: a quarter of the burst was a ceiling that a limiter of several hundred passed.
+      assert.equal(typeof dispatcher.FIRST_DELIVERY_CONCURRENCY, 'number', 'the dispatcher exports no FIRST_DELIVERY_CONCURRENCY to hold the bound to');
+      assert.ok(state.peak.get(a) <= dispatcher.FIRST_DELIVERY_CONCURRENCY,
+        `${state.peak.get(a)} first deliveries to ONE sink were in flight at once, over the concurrency the dispatcher declares (${dispatcher.FIRST_DELIVERY_CONCURRENCY}) for ${BURST} events`);
+      assert.equal(state.peak.get(a), dispatcher.FIRST_DELIVERY_CONCURRENCY,
+        'the held sink never had its declared concurrency in flight: the limiter admits fewer than it says, or the burst did not reach it');
     } finally { await drainA(hold, state, 'held').catch(() => {}); }
   });
 
@@ -148,6 +152,7 @@ describe('the dispatcher bounds its first deliveries per subscription (Q-469)', 
     const { deps, state } = rig({ holdA: hold });
     dispatcher.setFirstDeliveryDepsForTest(deps);
     const overflowedBefore = await counted('ythril_webhook_first_deliveries_overflowed_total').catch(() => undefined);
+    const queuedBefore = await counted('ythril_webhook_first_deliveries_queued_total').catch(() => undefined);
     try {
       burst('kept');
       await waitFor(() => (state.delivered.get(b)?.size ?? 0) === BURST, 30_000, 50, 'sink B never received every event');
@@ -164,7 +169,14 @@ describe('the dispatcher bounds its first deliveries per subscription (Q-469)', 
     assert.notEqual(overflowedBefore, undefined, 'ythril_webhook_first_deliveries_overflowed_total is not on the scrape');
     assert.equal(await counted('ythril_webhook_first_deliveries_overflowed_total') - overflowedBefore, persisted.length,
       'the overflow counter does not equal the events persisted for overflow');
-    assert.ok(await counted('ythril_webhook_first_deliveries_queued_total') >= 0, 'ythril_webhook_first_deliveries_queued_total is not on the scrape');
+    // The bound, as the module declares it: what the held sink holds is its concurrency running plus the rest of the bound waiting, and
+    // the others of the burst overflow. So the overflow is the burst less the bound, EXACTLY, and the queued counter counts at least the
+    // waiting ones (sink B's own events may have queued behind a delivery too).
+    assert.equal(persisted.length, BURST - dispatcher.FIRST_DELIVERY_BOUND, 'the held sink overflowed a number of events other than the burst less its declared bound');
+    assert.notEqual(queuedBefore, undefined, 'ythril_webhook_first_deliveries_queued_total is not on the scrape');
+    const queuedDelta = await counted('ythril_webhook_first_deliveries_queued_total') - queuedBefore;
+    assert.ok(queuedDelta >= dispatcher.FIRST_DELIVERY_BOUND - dispatcher.FIRST_DELIVERY_CONCURRENCY,
+      `the queued counter moved by ${queuedDelta}, fewer than the ${dispatcher.FIRST_DELIVERY_BOUND - dispatcher.FIRST_DELIVERY_CONCURRENCY} deliveries that waited behind the held sink's running ones`);
   });
 
   it('a first delivery that succeeds to an active subscription writes nothing to the subscription', async () => {
