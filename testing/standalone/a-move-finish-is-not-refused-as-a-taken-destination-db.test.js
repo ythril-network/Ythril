@@ -173,7 +173,10 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
     assert.equal(ans.status, 409, `answered ${ans.status}: ${sentenceOf(retry)}`);
     assert.equal(ans.code, 'destination_held_after_move');
     assert.equal(ans.path, 'two.txt');
+    assert.equal((retry.body ?? retry.sc).heldBy, 'two.txt', 'the answer does not name the foreign file whose record holds the id');
     assert.match(sentenceOf(retry), /already moved/, 'the sentence does not say the bytes already moved');
+    assert.match(sentenceOf(retry), /held by the records of 'two\.txt'/, 'the sentence does not name the file that holds the id');
+    assert.match(sentenceOf(retry), /Housekeeping retries the move/, 'the sentence promises the move finishes on its own: housekeeping stops after its attempts');
     assert.deepEqual(await row('two.txt'), foreign, 'the foreign record was replaced');
     assert.equal((await row('one.txt'))?.description, 'ONE', 'the moved file\'s record left its source although nothing could carry it');
     assert.notEqual(await tombstones.moveMarkerOf(S, 'one.txt', 'two.txt'), undefined, 'the marker of a move that is still owed was cleared');
