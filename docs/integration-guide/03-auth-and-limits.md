@@ -164,6 +164,8 @@ to correct. The information is identical; only the envelope differs.
 
 ### Common Status Codes
 
+<!-- file-act-codes -->
+
 | Code | Meaning |
 |---|---|
 | 400 | Bad request / validation failure — **your request, and retrying it unchanged will fail identically**. On a file act, deleting the space's root directory is `code: "space_root_refused"`, and a `confirm` that is not a boolean is refused too |

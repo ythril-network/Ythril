@@ -458,6 +458,9 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 > `maxGiB` is not settable from either tool. It is the space's share of the host's disk, so it needs
 > instance-admin rights and the REST route.
 
+<!-- file-act-codes -->
+**A file tool that does not act answers with a `code`** (`write_file`, `create_dir`, `move_file`, `delete_file`): `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault`. The result is `isError: true` with the REST body `{ error, code, path }` in `structuredContent`, and `retryable: true` on `move_still_owed`. [Files](05-files-api.md#every-code-a-file-act-answers) has the status and the remedy of each.
+
 ### Example: save_fact
 
 ```json

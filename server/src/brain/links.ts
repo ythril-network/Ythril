@@ -246,15 +246,15 @@ const NO_AUTHOR: AuthorRef = { instanceId: '', instanceLabel: '' };
 /**
  * Which collections hold link arrays, and what kind their records are on the FROM side.
  *
- * Three and not five: an entity is only ever a `to`, and an edge names its endpoints through `from`/`to`
- * rather than through an array. Keyed by collection SUFFIX because the sync engine has only a collection
- * name in scope when it needs this.
+ * READ OUT OF `LINK_CLASSES` (`brain/link-adjacency.ts`), where the product fact is written once: a class is a (from kind, to kind)
+ * pair and each from kind lives in one collection. Written out here as well, it was a second copy that the day a record kind can
+ * name another record would be skipped by the sync engine and the conversion, silently. Keyed by collection SUFFIX because the sync
+ * engine has only a collection name in scope when it needs this.
+ * `the-link-bearing-collections-are-read-out-of-the-link-classes` holds both the value and that this declaration reads the classes.
  */
-export const LINK_BEARING_COLLECTIONS: Record<string, RefKind | undefined> = {
-  facts: 'fact',
-  chrono: 'chrono',
-  files: 'file',
-};
+export const LINK_BEARING_COLLECTIONS: Record<string, RefKind | undefined> = Object.fromEntries(
+  LINK_CLASSES.map(c => [c.collection, c.kind] as const),
+);
 
 /**
  * What one record's array for a class says RIGHT NOW — the input both halves of the door reconcile against.

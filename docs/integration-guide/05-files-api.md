@@ -496,3 +496,20 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one
 > act, and the half it could do alone left a file with no metadata — the state the File Meta tab cannot
 > render and nothing else repairs.
+
+### Every code a file act answers
+
+A refused or failed file act (an upload, a directory create, a move, a delete) carries one `code` in `{ "error", "code", "path" }`, the same body on `PATCH /api/files/:spaceId`, `POST /api/<tool>` and the MCP tools. Branch on it, and on the status when you meet a `code` you do not know.
+
+<!-- file-act-codes -->
+
+| Code | Status | What it says | What to do |
+|---|---|---|---|
+| `path_blocked` | `409` | A regular file stands where a directory must be, or the destination is the source itself or inside it | Change the path; nothing was created |
+| `destination_exists` | `409` | A file, a folder or a file's record already stands at the destination, and a move never replaces anything | Delete what stands there, or choose another name |
+| `destination_held_after_move` | `409` | The bytes moved, but the records of another file (`heldBy`) hold an id the moved records need | Delete the file in `heldBy` and repeat the move |
+| `confirm_required` | `422` | A directory delete did not send `confirm: true`; nothing was deleted | Repeat with `confirm: true` |
+| `space_root_refused` | `400` | The space's root directory is never deleted | Delete a directory below it |
+| `move_still_owed` | `503` | The bytes moved and some records did not follow yet; `Retry-After` and `retryable: true` | Wait or retry: the server finishes it |
+| `act_not_recorded` | `500` | The deletion could not be recorded, so nothing was moved or deleted | Report it if a retry fails the same way |
+| `file_system_fault` | `500` | The server's storage refused the act; the body names no path | Report it if a retry fails the same way |

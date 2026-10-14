@@ -5,7 +5,8 @@
  * ## The question it answers
  *
  * "This file act failed or was refused: what status, what body, and what may the caller do next?" Asked by the REST
- * file routes (`api/files.ts`, `api/files-upload.ts`) and by the MCP dispatcher (`mcp/call-tool.ts`) for the same
+ * file routes (`api/files.ts`, `api/files-upload.ts`, each through `sendCaughtFailure` in `api/send-failure.ts`, which asks
+ * {@link fileActAnswer} before any other classification) and by the MCP dispatcher (`mcp/call-tool.ts`) for the same
  * thrown error, so `PATCH /api/files`, `POST /api/move_file` and MCP `move_file` cannot answer one failure three ways
  * (they did: `500 Failed to move path`, `400` with the raw filesystem message — the absolute data path included —
  * and the same `400` again).
