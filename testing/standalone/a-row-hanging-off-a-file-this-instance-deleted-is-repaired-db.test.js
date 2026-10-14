@@ -34,10 +34,10 @@
  *  - the counters and the gauge: `ythril_leaked_rows_removed_total{kind=derived}`, `ythril_leaked_rows_kept_total{reason=...}` and
  *    `ythril_leaked_rows_repair_pending_spaces`, the last POISONED before the pass so a pass that does not write it fails.
  *
- * ## The entry point driven, and why it is a guess
+ * ## The entry point driven
  *
- * The plan puts the repair inside the TTL sweep, so every case runs `sweepExpired(now)` (`_leaked-rows-repair.mjs`). The seam and the
- * metric names are the contract spelled in that module's docblock.
+ * The repair is a step of the TTL sweep, so every case runs `sweepExpired(now)` (`_leaked-rows-repair.mjs`). The seam and the metric
+ * names are the contract spelled in that module's docblock.
  *
  * Run: node --test testing/standalone/a-row-hanging-off-a-file-this-instance-deleted-is-repaired-db.test.js
  * (requires a prior `npm run build:server`, and the test MongoDB)
@@ -202,15 +202,15 @@ describe('a derived row hanging off a file this instance deleted is repaired (re
       'the pass changed the space\'s META, which replicates: the cursor is local bookkeeping, and belongs on the config entry');
   });
 
-  it('revokes the claims of the jobs of a leaked row\'s file BEFORE it removes the first row', async () => {
+  it('revokes the claims of the jobs of a leaked row (an extracted image has one of its own) BEFORE it removes the first row', async () => {
     await seed();
-    const claim = await seedClaim(S, 'gone.pdf', { mediaType: 'text', mimeType: 'application/pdf' });
+    const claim = await seedClaim(S, '_extracted/gone.pdf/img.png', { mediaType: 'image', mimeType: 'image/png' });
     const proto = Object.getPrototypeOf(acts.door.mongo.col('probe'));
     const originals = { deleteMany: proto.deleteMany, bulkWrite: proto.bulkWrite, findOne: proto.findOne };
     let claimAtFirstRemoval;
     const sawJob = async () => {
       if (claimAtFirstRemoval !== undefined) return;
-      const job = await originals.findOne.call(acts.door.mongo.col(`${S}_media_jobs`), { _id: 'gone.pdf' });
+      const job = await originals.findOne.call(acts.door.mongo.col(`${S}_media_jobs`), { _id: '_extracted/gone.pdf/img.png' });
       claimAtFirstRemoval = job?.claimToken === claim.claimToken ? 'still claimed' : 'revoked';
     };
     for (const op of ['deleteMany', 'bulkWrite']) {
@@ -222,7 +222,7 @@ describe('a derived row hanging off a file this instance deleted is repaired (re
     try { await runPass(); } finally { for (const op of ['deleteMany', 'bulkWrite']) proto[op] = originals[op]; }
 
     assert.notEqual(claimAtFirstRemoval, undefined, 'fixture: the pass removed no file row, so there was no first removal to look before');
-    assert.equal(claimAtFirstRemoval, 'revoked', 'the first leaked row was removed while the claim of its file\'s job was still held: a run that read its parent live writes after the children went');
+    assert.equal(claimAtFirstRemoval, 'revoked', 'the first leaked row was removed while the claim of its own job was still held: a run that read its parent live writes after the children went');
   });
 
   it('a re-upload racing a page keeps its new rows (the stamp is in the delete\'s filter)', async () => {

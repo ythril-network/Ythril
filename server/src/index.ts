@@ -331,9 +331,11 @@ async function main(): Promise<void> {
     stopRetryWorker();
     // First deliveries still waiting in the dispatcher's per-subscription queues were never attempted: written to the retry queue now,
     // while the database is open, so the next boot delivers them instead of losing them (Q-469). Events emitted from here on go there too.
-    await drainFirstDeliveries().then(
-      persisted => { if (persisted > 0) log.debug(`Shutdown: ${persisted} queued webhook deliveries persisted for retry`); },
-      err => log.debug(`Shutdown: persisting queued webhook deliveries failed: ${err instanceof Error ? err.message : String(err)}`));
+    // Bounded by the shutdown's own drain budget (a database that stopped answering must cost the budget, not the orchestrator's kill), and
+    // done again after the HTTP drain below: an event a request emitted while the server drained goes to the same rows.
+    await drainFirstDeliveries({ withinMs: DRAIN_MS }).then(
+      persisted => { if (persisted > 0) log.info(`Shutdown: ${persisted} queued webhook deliveries persisted for retry`); },
+      err => log.warn(`Shutdown: persisting queued webhook deliveries failed: ${err instanceof Error ? err.message : String(err)}`));
     // The reindex watcher resumes a run whose lease is stale, which starts a sweep: not while the process drains.
     const { stopReindexWatcher } = await import('./brain/reindex.js');
     stopReindexWatcher();
@@ -361,6 +363,11 @@ async function main(): Promise<void> {
       forced.unref();
       server.close(() => { clearTimeout(forced); log.debug('HTTP server closed'); resolve(); });
     });
+    // The final flush: what requests that finished during the drain above emitted is in the dispatcher's rows now, and `closeMongo` is
+    // below. Before the inference stop, which is slower and has nothing to do with the retry queue.
+    await drainFirstDeliveries({ withinMs: DRAIN_MS }).then(
+      persisted => { if (persisted > 0) log.info(`Shutdown: ${persisted} more queued webhook deliveries persisted for retry`); },
+      err => log.warn(`Shutdown: the final flush of the webhook retry queue failed: ${err instanceof Error ? err.message : String(err)}`));
 
     // The local embedding model lives in a child process. Drain the inference in flight (a request that was mid-embed
     // when the HTTP drain ended, or the brain worker's job) and end the process, rather than leaving it to notice that

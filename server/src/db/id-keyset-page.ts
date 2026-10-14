@@ -3,6 +3,8 @@
  *
  * ## What it prevents
  *
+ * This is the one `_id` pager; Q-481 converts the older sweeps that still page by `_id` inline.
+ *
  * A walk that has to read a collection a page at a time, and has to be able to act on a page (delete it, flag it, decide on it)
  * between one read and the next, pages by `_id`: the cursor is the last id, so the rows the walk changes do not move it, and a row
  * written under it while it runs is either behind the cursor or read later, never read twice. It was written inline in each walk,

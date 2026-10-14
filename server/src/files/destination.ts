@@ -156,7 +156,7 @@ export async function assertDestinationFree(spaceId: string, src: string, dst: s
       // Not the destination's own sidecar: the one `sidecarsOwnedBy` leaves out is `_converted/<dst>.md` when a DIRECTORY stands there, the
       // converted tree of the directory `<dst>.md`, which is only debris when that directory is nothing.
       const directory = to.slice(CONVERTED_ROOT.length);
-      if (await bytesPresentAt(spaceId, directory) || await hasLiveFileRecordAt(spaceId, directory)) throw new DestinationExists(requested, 'sidecar', to);
+      if (await bytesPresentAt(spaceId, directory) || await hasLiveFileRecordAt(spaceId, directory)) throw new DestinationExists(requested, 'sidecar', { detail: to });
     }
     // The destination's own sidecar, whose owner has neither bytes nor a live record (checks 1 and 2), or the tree of a directory that is nothing.
     debris.push(to);
@@ -214,8 +214,8 @@ export async function assertNothingStandsAt(spaceId: string, dst: string, { plac
 async function assertNeitherBytesNorRecord(
   state: DestinationState, requested: string, act: 'move' | 'resolution', hasRecord: () => Promise<boolean>,
 ): Promise<void> {
-  if (state === 'occupied') throw new DestinationExists(requested, 'bytes', undefined, act);
-  if (state !== 'alias' && await hasRecord()) throw new DestinationExists(requested, 'record', undefined, act);
+  if (state === 'occupied') throw new DestinationExists(requested, 'bytes', { act });
+  if (state !== 'alias' && await hasRecord()) throw new DestinationExists(requested, 'record', { act });
 }
 
 /**

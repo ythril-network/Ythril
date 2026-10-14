@@ -529,6 +529,13 @@ export const PEER_SIDECAR_RETIREMENT_OPERATION = 'file.peer_sidecar.retire';
  */
 export const FILE_MOVE_FINISH_OPERATION = 'file.move.finish';
 
+/**
+ * Rows a deleted file left behind, removed by the instance's own recurring repair (`files/leaked-rows-repair.ts`): one entry per space per
+ * pass that removed any, with no token. Chunk, caption and face rows and links are deleted though no request was running, so it is audited as
+ * the other work no request named.
+ */
+export const LEAKED_ROWS_REPAIR_OPERATION = 'file.leaked_rows.repair';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

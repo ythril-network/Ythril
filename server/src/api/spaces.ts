@@ -15,6 +15,7 @@ import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { localToRemote } from '../sync/space-map.js';
+import { spaceForWire } from '../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../spaces/rename.js';
 import { reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
@@ -102,7 +103,7 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
 
   // One mapping from a failed rename to its status, shared with the `space_rename` tool (Q-139).
   const r = await renameSpaceAct(oldId, parsed.data);
-  if (r.status === 200) { res.json({ space: r.space }); return; }
+  if (r.status === 200) { res.json({ space: spaceForWire(r.space) }); return; }
   res.status(r.status).json(r.code ? { error: r.error, code: r.code } : { error: r.error });
 });
 
@@ -293,7 +294,7 @@ spacesRouter.post('/', globalRateLimit, requireCreateSpacesMfa, async (req, res)
     res.status(500).json({ error: result.error });
     return;
   }
-  res.status(201).json({ space: result.space });
+  res.status(201).json({ space: spaceForWire(result.space) });
 });
 
 // PATCH /api/spaces/:id
@@ -358,7 +359,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) });
     return;
   }
-  res.json({ space: result.space, ...networkMergeNotice(result) });
+  res.json({ space: spaceForWire(result.space), ...networkMergeNotice(result) });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
@@ -435,7 +436,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     before: { typeSchemas: previousTypeSchemas ?? {} },
     after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
-  res.json({ space: updated });
+  res.json({ space: spaceForWire(updated) });
 });
 
 // GET /api/spaces/:id/meta — read the meta block with derived stats

@@ -192,7 +192,7 @@ export async function placeIfFree(
   // Under both paths' locks (F-43). The occupied destination is the placing's own refusal and is answered BEFORE `fsRefusalOf` sees it:
   // the kernel's ENOTEMPTY or EISDIR of a rename is a name that is taken, not a path that cannot be created.
   await moveStoredIfFree(srcAbs, dstAbs, { begun, onLinkFallback: linkFellBack }).catch((err: unknown) => {
-    if (err instanceof DestinationOccupied) throw new DestinationExists(dstDocId, 'bytes', undefined, act);
+    if (err instanceof DestinationOccupied) throw new DestinationExists(dstDocId, 'bytes', { act });
     throw fsRefusalOf(err, [dstDocId]);
   });
   await hardenPath(dstAbs);

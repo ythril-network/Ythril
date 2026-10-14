@@ -81,6 +81,8 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
     const { initWebhookDeliveryIndexes } = await import('./webhooks/store.js');
     await initWebhookDeliveryIndexes();
+    const { initRetryQueueIndexes } = await import('./webhooks/dispatcher.js');
+    await initRetryQueueIndexes();
 
     const { resetStaleWatermarksIfNeeded } = await import('./util/seq.js');
     await resetStaleWatermarksIfNeeded();

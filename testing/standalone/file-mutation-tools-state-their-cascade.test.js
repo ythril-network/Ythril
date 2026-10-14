@@ -138,28 +138,47 @@ describe('delete_file describes the cascade it really performs', () => {
 
   it('removes the links of what it deleted after the bytes and before the row, calling the remover directly so its failure fails the delete (Q-464)', () => {
     const body = (fn) => {
-      const at = CASCADE.indexOf(`export async function ${fn}`);
+      const exported = CASCADE.indexOf(`export async function ${fn}`);
+      const at = exported > -1 ? exported : CASCADE.indexOf(`\nasync function ${fn}`);
       assert.ok(at > -1, `${fn} is no longer in delete-cascade.ts — re-anchor this gate`);
       return CASCADE.slice(at, CASCADE.indexOf('\n}\n', at));
     };
+    /** Every call of the link remover in `text`, as its offset and whether it is the second pass (bounded by `createdUntil`). */
+    const callsOfLinkRemover = (text) => [...text.matchAll(/(?<![.\w$])removeLinksOfDeletedFiles\(/g)].map(m => {
+      const statement = statementAround(text, m.index, 'the link remover\'s statement');
+      return { at: m.index, secondPass: /createdUntil/.test(statement) };
+    });
     const file = body('deleteFileCascade');
     const bytes = file.indexOf('deleteStoredIfPresent(');
-    const links = file.indexOf('removeLinksOfDeletedFiles(');
     const row = file.indexOf('removeFileHere(');
-    assert.ok(bytes > -1 && links > -1 && row > -1, `a file's delete must remove the bytes, the links and the row (deleteStoredIfPresent ${bytes}, removeLinksOfDeletedFiles ${links}, removeFileHere ${row})`);
-    assert.ok(bytes < links && links < row, 'a file delete must run bytes, then links, then the row — the row is last because it is what tells a retry the delete is still owed');
     const dir = body('deleteDirectoryCascade');
     const tree = dir.indexOf('removeTree(');
-    const dirLinks = dir.indexOf('removeLinksOfDeletedFiles(');
     const rows = dir.indexOf('retireRowsUnderDirectory(');
-    assert.ok(tree > -1 && dirLinks > -1 && rows > -1, `a directory delete must remove the tree, the links and the rows (removeTree ${tree}, removeLinksOfDeletedFiles ${dirLinks}, retireRowsUnderDirectory ${rows})`);
-    assert.ok(tree < dirLinks && dirLinks < rows, 'a directory delete must run tree, then links, then rows');
-    for (const [where, text, at] of [['deleteFileCascade', file, links], ['deleteDirectoryCascade', dir, dirLinks]]) {
-      // The statement the call sits in is the call itself, awaited: wrapped in a step that survives a failure it would be `unlessTheStoreFailed(…)` or `.catch(…)`.
-      const statement = statementAround(text, at, `${where}: the link remover's statement`);
-      assert.match(statement.trimStart(), /^await\s+removeLinksOfDeletedFiles\(/,`${where} does not await the link remover directly: a failure in it must fail the delete, never be logged and survived — ${statement.slice(0, 120)}`);
-      assert.deepEqual(enclosingBlocksMatching(text, at, /\b(?:try|catch)\b[^{]*\{$/, `${where}: blocks around the link remover`), [],
-        `${where} calls the link remover inside a try or a catch: the delete would answer done with the links left`);
+    assert.ok(bytes > -1 && row > -1, `a file's delete must remove the bytes and the row (deleteStoredIfPresent ${bytes}, removeFileHere ${row})`);
+    assert.ok(tree > -1 && rows > -1, `a directory delete must remove the tree and the rows (removeTree ${tree}, retireRowsUnderDirectory ${rows})`);
+    // EVERY call of the link remover in the cascades — never the first alone: the first pass stands after the bytes and before the row (the
+    // row is last because it is what tells a retry the delete is still owed), the second pass (`createdUntil`) after the row, and each is
+    // awaited directly and sits in no try or catch (a failure in it fails the delete, it is never logged and survived).
+    for (const [where, text, first, last] of [['deleteFileCascade', file, bytes, row], ['deleteDirectoryCascade', dir, tree, rows]]) {
+      const calls = callsOfLinkRemover(text);
+      assert.deepEqual(calls.map(c => c.secondPass), [false, true], `${where} must call the link remover twice: once before the row and once, bounded by createdUntil, after it (found ${calls.length} calls)`);
+      for (const { at, secondPass } of calls) {
+        assert.ok(secondPass ? at > last : (at > first && at < last),
+          `${where}: the ${secondPass ? 'second' : 'first'} link pass stands ${secondPass ? 'before' : 'outside bytes-then-row'}: it must run ${secondPass ? 'after the row' : 'after the bytes and before the row'}`);
+        // The statement the call sits in is the call itself, awaited: wrapped in a step that survives a failure it would be `unlessTheStoreFailed(…)` or `.catch(…)`.
+        const statement = statementAround(text, at, `${where}: the link remover's statement`);
+        assert.match(statement.trimStart(), /^await\s+removeLinksOfDeletedFiles\(/,`${where} does not await the link remover directly: a failure in it must fail the delete, never be logged and survived — ${statement.slice(0, 120)}`);
+        assert.deepEqual(enclosingBlocksMatching(text, at, /\b(?:try|catch)\b[^{]*\{$/, `${where}: blocks around the link remover`), [],
+          `${where} calls the link remover inside a try or a catch: the delete would answer done with the links left`);
+      }
+    }
+    // The delete of a path a move carried a file to takes the source's links too, as the cascades do: awaited directly, in no try or catch.
+    const carried = body('removeWhatAMovedFileLeftAtItsSource');
+    const carriedCalls = callsOfLinkRemover(carried);
+    assert.ok(carriedCalls.length >= 2, `removeWhatAMovedFileLeftAtItsSource calls the link remover ${carriedCalls.length} times: a kind of move source went without it`);
+    for (const { at } of carriedCalls) {
+      assert.match(statementAround(carried, at, 'the moved source\'s link remover statement').trimStart(), /^await\s+removeLinksOfDeletedFiles\(/, 'a moved source\'s link remover is not awaited directly');
+      assert.deepEqual(enclosingBlocksMatching(carried, at, /\b(?:try|catch)\b[^{]*\{$/, 'blocks around the moved source\'s link remover'), [], 'a moved source\'s link remover sits in a try or a catch');
     }
   });
 

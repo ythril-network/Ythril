@@ -68,8 +68,11 @@ export type DestinationAct = 'move' | 'resolution';
  */
 export class DestinationExists extends Error {
   override readonly name = 'DestinationExists';
-  constructor(readonly path: string, readonly standing: DestinationStanding, readonly detail?: string, act: DestinationAct = 'move') {
+  /** `detail` is the second path a `sidecar` standing names; `act` is whose sentence the refusal speaks (a move's, by default). */
+  readonly detail?: string;
+  constructor(readonly path: string, readonly standing: DestinationStanding, { detail, act = 'move' }: { detail?: string; act?: DestinationAct } = {}) {
     super(act === 'resolution' ? resolutionExistsSentence(path, standing) : destinationExistsSentence(path, standing, detail));
+    if (detail !== undefined) this.detail = detail;
   }
 }
 

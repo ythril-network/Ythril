@@ -23,7 +23,7 @@
  * fails this is a step of a larger cascade, and every caller of it (found by the call graph) must have revoked by the time it
  * calls. A step with no caller in the tree is an ENTRY and must be safe by itself.
  *
- * The revokers are the guard this rule is about, so they are named: `cancelMediaJob`, `cancelJobsOwnedBy`, `cancelEveryJobOfSpace`
+ * The revokers are the guard this rule is about, so they are named: `cancelMediaJob`, `cancelMediaJobs`, `cancelJobsOwnedBy`, `cancelEveryJobOfSpace`
  * and `holdJobsForMove` (`files/media/job-queue.ts`). A call of any function whose calls reach one counts, followed to exhaustion.
  *
  * ## Seen red
@@ -41,7 +41,7 @@ import { callSitesIn, memberCallSitesIn } from './_call-graph.mjs';
 
 const JOB_QUEUE = 'server/src/files/media/job-queue.ts';
 /** The functions that take a media job's claim away, by name: the guard the rule is about. */
-const REVOKER_NAMES = ['cancelMediaJob', 'cancelJobsOwnedBy', 'cancelEveryJobOfSpace', 'holdJobsForMove'];
+const REVOKER_NAMES = ['cancelMediaJob', 'cancelMediaJobs', 'cancelJobsOwnedBy', 'cancelEveryJobOfSpace', 'holdJobsForMove'];
 
 /**
  * Removers that need no revocation, with the reason. Keyed `file:function`. A row whose function no longer removes file rows fails

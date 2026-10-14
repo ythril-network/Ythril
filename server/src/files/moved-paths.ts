@@ -135,12 +135,30 @@ export function parentOfSidecar(key: string): { parent: string; role: Sidecar['r
  * `a#b.txt` spells a derived row of `a` AND a file uploaded with that name. Read as text alone, the move of `a` re-keyed the other file's
  * id, a delete of `a` took the other file's links and one of `a`'s surviving files kept them; read by each caller in its own words, only one
  * of three had the guard. **The guard is the data it is handed:** `topLevelFiles` are ids known to be top-level file rows (no
- * `parentFileId`), and a row that is one is a file of its own, never a derived row of anything. Required here (the rule cannot be asked without it): a caller that
- * does not hold the rows reads them with `topLevelFilesAmong` (`files/derived-rows.ts`); {@link NO_TOP_LEVEL_FILES} says out loud, at the call,
- * that the ids asked about are known derived (a row with a parent) or that the caller is purely textual.
+ * `parentFileId`), and a row that is one is a file of its own, never a derived row of anything. Required HERE, at the one rule (it cannot be
+ * asked without it): a caller that does not hold the rows reads them with `topLevelFilesAmong` (`files/derived-rows.ts`);
+ * {@link NO_TOP_LEVEL_FILES} says out loud, at the call, that the ids asked about are known derived (a row with a parent) or that the
+ * caller is purely textual.
+ *
+ * **The wrappers over it default the set** ({@link movedId}, {@link belongsTo}, {@link idAfterMove}), and that is deliberate: their callers
+ * ask about ids that are known derived or about a path that is not a row (a job id, a marker's path, the end of a chain the walk read
+ * as a live top-level row), and a required argument at every one of them would be `NO_TOP_LEVEL_FILES` typed eight times. The callers
+ * that hold rows and ask about a `#` name (the move plan's batch) pass `topLevel`; the default is the textual reading, and the one
+ * place it was wrong (a `#` name read as a derived row) is the one place the rows are in hand.
  */
 export function isDerivedRowOf(id: string, fileId: string, topLevelFiles: ReadonlySet<string>): boolean {
   return id.startsWith(`${fileId}#`) && !topLevelFiles.has(id);
+}
+
+/**
+ * The file a derived id would belong to: everything before its LAST `#` (a derived id's suffix, `chunk<n>`, `media-chunk<n>` or `face-chunk<n>`,
+ * holds none, so the last one separates it from its file whatever `#` the file's own name holds), or `null` for an id with none. A CANDIDATE
+ * only: whether the id really is a derived row of it is {@link isDerivedRowOf}'s answer, which needs the rows. Here because it is the other
+ * half of the one reading of the `#` (`derived-rows.ts` `owningFilesOf` asks both).
+ */
+export function derivedIdOwnerCandidate(id: string): string | null {
+  const cut = id.lastIndexOf('#');
+  return cut > 0 ? id.slice(0, cut) : null;
 }
 
 /** For a caller whose ids cannot be a top-level file's — a row that has a `parentFileId` — or that has no rows in hand to ask. */

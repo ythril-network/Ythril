@@ -27,7 +27,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
-import { webhookFirstDeliveryCounts } from '../webhooks/dispatcher.js';
+import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
@@ -795,7 +795,7 @@ fileMoveLinkFallbackTotal.inc(0);
  * The tally lives in the module that counts (it cannot import this one: this one is imported by everything that emits, so the
  * call back would be a runtime cycle), and the counter here is rebuilt from it on every scrape. Rebuilt means `reset()` then
  * one `inc` per series the tally holds, and the two halves are what a hand-written collector drops: without the reset a scrape
- * ADDS the tally to the last scrape's, so the counter climbs by its own value every fifteen seconds; without the inc of a
+ * ADDS the tally to the last scrape's, so the counter climbs by its own value on every scrape; without the inc of a
  * zero the series is absent until the first event, which is the gap the declared-at-zero gates exist to close. Both are in
  * here, so a caller cannot leave either out.
  *
@@ -858,6 +858,29 @@ export const webhookFirstDeliveriesOverflowedTotal = counterMirroringTally({
   name: 'ythril_webhook_first_deliveries_overflowed_total',
   help: 'Webhook first deliveries persisted straight to the retry queue because their subscription already had its bound in flight and queued',
   read: () => webhookFirstDeliveryCounts().overflowed,
+});
+
+/**
+ * First deliveries the dispatcher could not persist and so lost: the retry-queue write of an overflowed or shutdown-queued delivery failed
+ * (the database was not answering). Every other path of a first delivery either delivers or persists, so a value above zero is an event a
+ * subscriber was never sent and nothing will send; the line the dispatcher logs names the cause once per window, this counts them all.
+ */
+export const webhookFirstDeliveriesLostTotal = counterMirroringTally({
+  name: 'ythril_webhook_first_deliveries_lost_total',
+  help: 'Webhook first deliveries lost because writing them to the retry queue failed (an overflowed delivery, or one queued at shutdown)',
+  read: () => webhookFirstDeliveryCounts().lost,
+});
+
+/**
+ * Queued retries the retry poll removed and did not deliver, by `reason`: the subscription was deleted while the retry waited (`deleted`),
+ * switched off or never switched on (`disabled`), or marked failing (`failing`). The row is gone either way (it is removed before a
+ * delivery is attempted), so this is the only trace of the event a subscriber was not sent; the dispatcher says it once per window too.
+ */
+export const webhookRetriesDroppedTotal = counterMirroringTally({
+  name: 'ythril_webhook_retries_dropped_total',
+  help: 'Queued webhook retries dropped without a delivery attempt, by reason: deleted (the subscription is gone), disabled (switched off) or failing (marked failing after its schedule ran out)',
+  labelName: 'reason',
+  read: webhookRetriesDroppedCounts,
 });
 
 export const embedWaitSeconds = new Histogram({

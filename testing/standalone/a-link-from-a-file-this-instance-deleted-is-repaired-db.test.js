@@ -28,11 +28,10 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
-import { runPass, repairCounters, repairCountersOrZero, counterDelta, spaceEntry, addedKeys, fileRow } from './_leaked-rows-repair.mjs';
+import { runPass, repairCounters, repairCountersOrZero, counterDelta, spaceEntry, addedKeys, fileRow, fileTombstoneRow } from './_leaked-rows-repair.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -46,10 +45,7 @@ const links = () => acts.door.coll(S, 'links');
 const linkTombstones = () => acts.door.coll(S, 'tombstones');
 
 /** A file tombstone as this instance stores one it PUBLISHED itself, or one a peer's delete relayed here. */
-const tombstoneOf = (p, { issuer, origin = 'own', move } = {}) => ({
-  _id: randomUUID(), spaceId: S, path: p, deletedAt: T0, positionAt: T0, writtenAt: T0, origin, issuer,
-  ...(origin === 'relayed' ? { storedVia: issuer } : {}), ...(move ? { move } : {}),
-});
+const tombstoneOf = (p, opts) => fileTombstoneRow(S, p, { ...opts, at: T0 });
 /** A link FROM a file, to an entity, written by `author`. */
 function linkFrom(p, to, author) {
   return { _id: linkIdFor(p, 'file', to, 'entity'), spaceId: S, from: p, fromKind: 'file', to, toKind: 'entity',

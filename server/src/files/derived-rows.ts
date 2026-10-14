@@ -24,7 +24,7 @@ import { distinctStringsOf } from '../db/distinct-strings.js';
 import { inChunks } from '../util/chunks.js';
 import { MAX_ANCESTRY } from './ancestry.js';
 import { escapeRegex } from '../util/redos.js';
-import { idsUnder, movedRoot, type Sidecar } from './moved-paths.js';
+import { derivedIdOwnerCandidate, idsUnder, isDerivedRowOf, movedRoot, type Sidecar } from './moved-paths.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
 
@@ -123,4 +123,22 @@ export async function rootsOfDirectory(spaceId: string, dir: string): Promise<st
  */
 export async function topLevelFilesAmong(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
   return new Set((await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), ids, {}, { filter: { parentFileId: { $exists: false } } })).keys());
+}
+
+/**
+ * The file each of `ids` belongs to: a derived id (`a.jpg#face-chunk0`, `_extracted/x/img.png#media-chunk0`) belongs to the file before its
+ * last `#` ({@link derivedIdOwnerCandidate}), and anything else — an id with no `#`, or one a top-level row stands at (`a#b.txt` is a file of its own, {@link isDerivedRowOf}) —
+ * belongs to itself. Asked where a decision is made about a FILE (a tombstone, bytes, a move) for an id that may be one of its derived rows.
+ *
+ * What it prevents: asking a file's tombstone about a derived id, which never has one, and so reading "no tombstone" about every derived
+ * source of a deleted file. A derived id has exactly one `#` suffix of a fixed shape (`chunk<n>`, `media-chunk<n>`, `face-chunk<n>`), so the
+ * LAST `#` is the one that separates it from its file, whatever `#` the file's own name holds.
+ */
+export async function owningFilesOf(spaceId: string, ids: readonly string[]): Promise<Map<string, string>> {
+  const withHash = ids.filter(id => id.includes('#'));
+  const topLevel = await topLevelFilesAmong(spaceId, withHash);
+  return new Map(ids.map((id): [string, string] => {
+    const owner = derivedIdOwnerCandidate(id);
+    return [id, owner !== null && isDerivedRowOf(id, owner, topLevel) ? owner : id];
+  }));
 }

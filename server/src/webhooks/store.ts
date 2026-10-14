@@ -23,7 +23,8 @@ const DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * Ensure the delivery collection has a TTL index on `_expireAt`.
- * Called once during startup from index.ts.
+ * Called once during startup from index.ts. (The retry queue's own index is ensured by the module that owns the queue,
+ * `initRetryQueueIndexes` in `webhooks/dispatcher.ts`, called beside this one.)
  */
 export async function initWebhookDeliveryIndexes(): Promise<void> {
   const dc = col<WebhookDelivery>(DELIVERIES_COLLECTION);
@@ -90,11 +91,12 @@ export async function getWebhookFull(id: string): Promise<WebhookSubscription | 
 /**
  * Does this subscription take deliveries at all — switched on, and neither disabled nor failing? The ONE answer, asked by the event
  * match (what a new event is sent to) and by the retry worker (what a queued retry is still delivered to), so a subscription the
- * operator switched off or the dispatcher marked failing is not reached by one door while the other has stopped. An ABSENT `enabled`
- * or `status` is active: only an explicit `false`, `disabled` or `failing` stops it.
+ * operator switched off or the dispatcher marked failing is not reached by one door while the other has stopped. **It fails closed on
+ * `enabled`**: only an explicit `true` takes deliveries (a row with no `enabled` was never switched on, and the event match used to
+ * refuse it before this one answer existed). An ABSENT `status` is active: only `disabled` or `failing` stops it.
  */
 export function acceptsDeliveries(sub: Pick<WebhookSubscription, 'enabled' | 'status'>): boolean {
-  return sub.enabled !== false && sub.status !== 'disabled' && sub.status !== 'failing';
+  return sub.enabled === true && sub.status !== 'disabled' && sub.status !== 'failing';
 }
 
 /** Returns all enabled, non-failing subscriptions that match a given event+space. */

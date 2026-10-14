@@ -56,7 +56,7 @@ function rig({ due = [], deliver = async () => ok } = {}) {
   const deps = {
     dueJobs: async () => { state.dueCalls++; return typeof due === 'function' ? due(state.dueCalls) : due; },
     removeJob: async (id) => { events.push(`remove ${id}`); },
-    getWebhook: async (id) => ({ id, url: `https://example.invalid/${id}`, secret: 's' }),
+    getWebhook: async (id) => ({ id, url: `https://example.invalid/${id}`, secret: 's', enabled: true }),
     deliver: async (sub, j) => {
       events.push(`deliver ${j._id}`);
       state.inFlight++; state.peak = Math.max(state.peak, state.inFlight);
@@ -175,8 +175,8 @@ describe('what the poll did before is kept', () => {
  * down leaves a retry row per event; the subscription is marked failing after its schedule ran out (`getMatchingWebhooks` then sends it
  * nothing new), but the rows already queued kept being delivered: every one of them an attempt at a sink the operator or the dispatcher had
  * stopped. The row is removed before delivery (at-least-once), so dropping is the removal alone: no delivery, no requeue, no verdict about
- * the subscription. The fakes of the cases above carry no `status` and no `enabled`; an ABSENT field is not a reason to drop, which the
- * control states with an explicit active subscription.
+ * the subscription. **`enabled` fails closed** (the event match refused a row with none before the one predicate existed): the fakes of the
+ * cases above carry `enabled: true`, an ABSENT `enabled` is dropped like `false`, and an ABSENT `status` is active.
  */
 describe('a retry for a disabled or failing subscription is dropped', () => {
   const sub = (id, over) => ({ id, url: `https://example.invalid/${id}`, secret: 's', spaces: [], events: [], enabled: true, status: 'active', consecutiveFailures: 0,
@@ -186,6 +186,7 @@ describe('a retry for a disabled or failing subscription is dropped', () => {
     ['status disabled', { status: 'disabled' }],
     ['status failing', { status: 'failing', consecutiveFailures: 7 }],
     ['enabled: false alone', { enabled: false }],
+    ['no `enabled` at all (fail closed)', { enabled: undefined }],
   ];
   for (const [name, over] of CASES) {
     it(`${name}: the job leaves the queue and nothing is delivered, requeued or marked`, async () => {
@@ -234,4 +235,64 @@ describe('the timer', () => {
       `'${dispatcher.RETRY_JOB_LABEL}' is not a declared interval job: its timer is a bare setInterval`);
     assert.doesNotThrow(() => { dispatcher.startRetryWorker(); dispatcher.startRetryWorker(); dispatcher.stopRetryWorker(); dispatcher.stopRetryWorker(); });
   });
+});
+
+/*
+ * A subscription takes deliveries only when it is explicitly switched on: `acceptsDeliveries` fails closed on `enabled` (a row with none was
+ * refused by the event match before the one predicate existed, and the predicate made it active), and an absent `status` is active.
+ */
+describe('acceptsDeliveries fails closed on enabled', () => {
+  let accepts;
+  before(async () => { ({ acceptsDeliveries: accepts } = await import('../../server/dist/webhooks/store.js')); });
+  it('an absent enabled takes nothing, an absent status is active, and false, disabled and failing refuse', () => {
+    assert.equal(accepts({ enabled: true }), true, 'enabled with no status is active');
+    assert.equal(accepts({ enabled: true, status: 'active' }), true);
+    assert.equal(accepts({}), false, 'a subscription with no `enabled` took deliveries: the event match refused it before the predicate existed');
+    assert.equal(accepts({ status: 'active' }), false);
+    assert.equal(accepts({ enabled: false }), false);
+    assert.equal(accepts({ enabled: true, status: 'disabled' }), false);
+    assert.equal(accepts({ enabled: true, status: 'failing' }), false);
+  });
+});
+
+/*
+ * A retry the poll removes and does not deliver is COUNTED by why (`ythril_webhook_retries_dropped_total{reason}`) and said once per window per
+ * subscription and reason: the row was the event's only copy, and dropping it silently left no trace of an event a subscriber was not sent.
+ */
+describe('a dropped retry is counted by reason and said once per window', () => {
+  let register, getLogLines;
+  before(async () => {
+    ({ register } = await import('../../server/dist/metrics/registry.js'));
+    ({ getLogLines } = await import('../../server/dist/util/log.js'));
+  });
+  const active = (id, over) => ({ id, url: `https://example.invalid/${id}`, secret: 's', spaces: [], events: [], enabled: true, status: 'active', consecutiveFailures: 0, createdAt: '', updatedAt: '', ...over });
+  const REASONS = [
+    ['deleted', async () => null],
+    ['disabled', async (id) => active(id, { enabled: false, status: 'disabled' })],
+    ['disabled', async (id) => active(id, { enabled: undefined })],
+    ['failing', async (id) => active(id, { status: 'failing', consecutiveFailures: 7 })],
+  ];
+
+  it('every reason is on the scrape at 0 before anything is dropped', async () => {
+    const text = await register.getSingleMetricAsString('ythril_webhook_retries_dropped_total');
+    for (const reason of ['deleted', 'disabled', 'failing']) {
+      assert.match(text, new RegExp(`ythril_webhook_retries_dropped_total\\{reason="${reason}"\\} \\d`), `no series for reason=${reason}: not declared at zero`);
+    }
+  });
+
+  for (const [reason, getWebhook] of REASONS) {
+    it(`${reason}: counted once per dropped retry, and one line however many were dropped`, async () => {
+      const before = dispatcher.webhookRetriesDroppedCounts()[reason];
+      const id = `drop-${reason}-${Math.random().toString(36).slice(2)}`;
+      const r = rig({ due: [job(1, { webhookId: id }), job(2, { webhookId: id }), job(3, { webhookId: id })] });
+      r.deps.getWebhook = getWebhook;
+      r.worker.job.start();
+      await r.fire();
+      assert.deepEqual(r.events.filter(e => e.startsWith('deliver') || e.startsWith('requeue')), [], 'a dropped retry was delivered or requeued');
+      assert.equal(dispatcher.webhookRetriesDroppedCounts()[reason] - before, 3, `${reason}: three dropped retries were not counted as three`);
+      const said = getLogLines(500).filter(l => l.includes(id));
+      assert.equal(said.length, 1, `${reason}: ${said.length} lines for three drops of one subscription, not one per window: ${said.join(' | ')}`);
+      assert.match(said[0], new RegExp(reason));
+    });
+  }
 });
