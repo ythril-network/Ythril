@@ -109,7 +109,7 @@ export class FakeFileServer {
     const forcedAt = this.forced.findIndex(f => f.method === record.method && f.path === path);
     if (forcedAt >= 0) {
       const [f] = this.forced.splice(forcedAt, 1);
-      req.flush(f!.body, { status: f!.status, statusText: 'forced' });
+      req.flush(f!.body as Parameters<TestRequest['flush']>[0], { status: f!.status, statusText: 'forced' });
       return;
     }
     const files = /^\/api\/files\/[^/]+$/.test(url.pathname);

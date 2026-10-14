@@ -77,6 +77,7 @@ function namers() {
  */
 const PUBLISHED_ONLY_READERS = {
   'server/src/sync/stray-filemeta-drain.ts': 'discards a stray record on a tombstone, and waits on acts (bundle-30 I15)',
+  'server/src/files/leaked-rows-repair.ts': 'removes the links of a file THIS instance deleted, proved by its published tombstone: a pending one is a delete still running, whose own cascade takes the links (Q-465)',
 };
 
 describe('the stray drain reads only published tombstones; every arrival site asks the wider predicate (Q-348)', () => {
