@@ -40,8 +40,9 @@ const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
 // once its bytes are gone (the job, the artefacts, the cached hash, the usage figure, the row) is `remove-file-here.ts`'s,
 // shared with the media worker's reconcile and a peer's file tombstone. Read as one text, `delete-cascade.ts` first, so the
 // order assertions below still compare positions in the order the steps run.
+// LF throughout: the bodies below end at a closing brace on its own line, which a CRLF checkout spells differently.
 const CASCADE = stripComments(readFileSync('server/src/files/delete-cascade.ts', 'utf8')
-  + '\n' + readFileSync('server/src/files/remove-file-here.ts', 'utf8'));
+  + '\n' + readFileSync('server/src/files/remove-file-here.ts', 'utf8')).replace(/\r\n/g, '\n');
 const FILES = stripComments(readFileSync('server/src/files/files.ts', 'utf8'));
 // The file door (F-43): the rename and the parent-creation that `files.ts` used to do inline now happen here.
 const DOOR = stripComments(readFileSync('server/src/files/stored-bytes.ts', 'utf8'));
