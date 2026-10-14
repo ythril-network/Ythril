@@ -161,7 +161,7 @@ export async function writeUnderClaim<T>(
  * own figure would refuse it and the job would be retried at the same size for ever. A hold that encloses the write still ends it sooner.
  */
 const LEASED_WRITE_BOUND_FACTOR = 2;
-export const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
+const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
 
 /**
  * Run a write that TAKES A CLAIM AWAY from a run, or waits for one that holds it — a delete's job cancel, a move's hold, a space wipe's
