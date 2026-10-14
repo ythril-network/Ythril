@@ -389,8 +389,17 @@ export async function fileLinkSourcesOf(spaceId: string, path: string, kind: 'fi
   const id = toDocId(path).replace(/\/+$/, '');
   if (!id) throw new RangeError('fileLinkSourcesOf: an empty path would ask about every file in the space');
   if (kind === 'directory') return await fileLinkSourcesUnder(spaceId, id);
-  return await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
+  const sources = await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
     asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(id)}(?:#|$)` } }));
+  // `a#b.txt` spells a derived row of `a` AND a file whose own name holds a `#`: a source that is a top-level file row (no
+  // parentFileId) is that other file, and its links are not this file's to take.
+  const others = sources.filter(s => s !== id);
+  if (others.length === 0) return sources;
+  const files = await col<{ _id: string; parentFileId?: string }>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<{ _id: string; parentFileId?: string }>({ _id: { $in: others }, parentFileId: { $exists: false } }), { projection: { _id: 1 } })
+    .toArray();
+  const ownFiles = new Set(files.map(f => f._id));
+  return sources.filter(s => !ownFiles.has(s));
 }
 
 /**

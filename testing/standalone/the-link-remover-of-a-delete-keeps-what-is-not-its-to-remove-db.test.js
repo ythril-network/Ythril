@@ -85,4 +85,25 @@ describe('the remover of a delete\'s links', { skip }, () => {
       await assert.rejects(() => selector.fileLinkSourcesOf(S, '/', kind), RangeError);
     }
   });
+
+  it('a file whose own name holds a # is another file, and keeps its links when the file before the # is deleted', async () => {
+    const files = acts.door.coll(S, 'files');
+    await files.deleteMany({ _id: { $in: ['h/a', 'h/a#b.txt', 'h/a#chunk0'] } });
+    await files.insertMany([
+      { _id: 'h/a', spaceId: S, path: 'h/a', createdAt: OLD, updatedAt: OLD },
+      { _id: 'h/a#b.txt', spaceId: S, path: 'h/a#b.txt', createdAt: OLD, updatedAt: OLD },
+      { _id: 'h/a#chunk0', spaceId: S, parentFileId: 'h/a', createdAt: OLD, updatedAt: OLD },
+    ]);
+    try {
+      await putAt('h/a', 'e1', 'self', OLD);
+      await putAt('h/a#chunk0', 'e1', 'self', OLD);
+      const other = await putAt('h/a#b.txt', 'e1', 'self', OLD);
+      assert.deepEqual((await selector.fileLinkSourcesOf(S, 'h/a', 'file')).sort(), ['h/a', 'h/a#chunk0'],
+        'the file named a#b.txt was read as a derived row of a');
+      await remover.removeLinksOfDeletedFiles(S, 'h/a', 'file');
+      assert.deepEqual(await acts.links.idsUnder('h/a'), [other], 'deleting a took the links of the file named a#b.txt');
+    } finally {
+      await files.deleteMany({ _id: { $in: ['h/a', 'h/a#b.txt', 'h/a#chunk0'] } });
+    }
+  });
 });
