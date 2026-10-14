@@ -79,7 +79,7 @@ const CASES = [
   {
     name: 'DestinationHeldAfterMove', status: 409, code: 'destination_held_after_move', path: '_converted/b.txt.md',
     heldBy: 'other.txt',
-    says: [/bytes of 'a\.txt' already moved to 'b\.txt'/, /'_converted\/b\.txt\.md' is held by the records of 'other\.txt'/, /Housekeeping retries the move/, /delete 'other\.txt' and repeat the move/],
+    says: [/bytes of 'a\.txt' already moved to 'b\.txt'/, /'_converted\/b\.txt\.md' is held by the records of 'other\.txt'/, /The server keeps retrying the move\./, /Delete 'other\.txt' and repeat the move to finish it\./],
     make: () => new answers.DestinationHeldAfterMove('_converted/b.txt.md', 'a.txt', 'b.txt', 'other.txt'),
   },
   {

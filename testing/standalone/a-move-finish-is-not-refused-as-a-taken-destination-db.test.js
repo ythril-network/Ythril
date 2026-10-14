@@ -176,7 +176,15 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
     assert.equal((retry.body ?? retry.sc).heldBy, 'two.txt', 'the answer does not name the foreign file whose record holds the id');
     assert.match(sentenceOf(retry), /already moved/, 'the sentence does not say the bytes already moved');
     assert.match(sentenceOf(retry), /held by the records of 'two\.txt'/, 'the sentence does not name the file that holds the id');
-    assert.match(sentenceOf(retry), /Housekeeping retries the move/, 'the sentence promises the move finishes on its own: housekeeping stops after its attempts');
+    assert.match(sentenceOf(retry), /The server keeps retrying the move\. Delete 'two\.txt' and repeat the move to finish it\./, 'the sentence promises the move finishes on its own: housekeeping stops after its attempts');
+    // The same body on every door: the client reads `heldBy` and shows nothing where it is absent.
+    for (const via of ['TOOL', 'MCP']) {
+      const other = await acts.move(via, 'one.txt', 'two.txt');
+      const detail = 'code' in other ? (other.body?.data ?? other.body ?? {}) : (other.sc ?? {});
+      assert.equal(detail.code, 'destination_held_after_move', `${via}: ${sentenceOf(other)}`);
+      assert.equal(detail.heldBy, 'two.txt', `${via}: the body does not carry heldBy`);
+      assert.equal(detail.path, 'two.txt');
+    }
     assert.deepEqual(await row('two.txt'), foreign, 'the foreign record was replaced');
     assert.equal((await row('one.txt'))?.description, 'ONE', 'the moved file\'s record left its source although nothing could carry it');
     assert.notEqual(await tombstones.moveMarkerOf(S, 'one.txt', 'two.txt'), undefined, 'the marker of a move that is still owed was cleared');

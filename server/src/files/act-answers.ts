@@ -82,14 +82,17 @@ function destinationExistsSentence(path: string, standing: DestinationStanding, 
 
 /**
  * A move's bytes already moved, but a record of another file holds an id the moved records need, so they have not followed. The move
- * stays owed; deleting that other file lets it finish on its own, or repeating it does.
+ * stays owed. Housekeeping retries it, for a bounded number of attempts (the sentence says only that the server keeps retrying: how
+ * long is not a promise); deleting the foreign file and repeating the move finishes it.
  *
- * `path` is the held id; `from` and `to` are the move's own roots.
+ * `path` is the held id; `heldBy` is the foreign file whose records hold it (the top of the held row's chain: the file's own path, so a
+ * caller can name it and delete it), ALWAYS given and always in the body; `from` and `to` are the move's own roots. All space-relative.
  */
 export class DestinationHeldAfterMove extends Error {
   override readonly name = 'DestinationHeldAfterMove';
-  constructor(readonly path: string, readonly from: string, readonly to: string, readonly detail: string) {
-    super(`The bytes of '${from}' already moved to '${to}', but '${path}' is held by the records of another file, so the records of '${from}' have not followed. Delete that file; the move then finishes on its own, or repeat it.`);
+  constructor(readonly path: string, readonly from: string, readonly to: string, readonly heldBy: string) {
+    super(`The bytes of '${from}' already moved to '${to}', but '${path}' is held by the records of '${heldBy}', another file, so the records of '${from}' have not followed. `
+      + `The server keeps retrying the move. Delete '${heldBy}' and repeat the move to finish it.`);
   }
 }
 
@@ -152,6 +155,8 @@ export interface FileActAnswer {
     code: 'path_blocked' | 'destination_exists' | 'destination_held_after_move' | 'confirm_required' | 'space_root_refused'
       | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault';
     path?: string;
+    /** The foreign file whose records hold an id a finished move needs: `destination_held_after_move` only. */
+    heldBy?: string;
     retryable?: true;
   };
   /** Seconds a REST door puts in `Retry-After` (`sendRetryAfter`, the one writer of it); MCP has no place for it and says `retryable` in the body. */
@@ -203,7 +208,7 @@ export function fileActAnswerOf(err: unknown): FileActAnswer | undefined {
     return { status: 409, body: { error: err.message, code: 'destination_exists', path: err.path } };
   }
   if (err instanceof DestinationHeldAfterMove) {
-    return { status: 409, body: { error: err.message, code: 'destination_held_after_move', path: err.path } };
+    return { status: 409, body: { error: err.message, code: 'destination_held_after_move', path: err.path, heldBy: err.heldBy } };
   }
   if (err instanceof ConfirmRequired) {
     return { status: 422, body: { error: err.message, code: 'confirm_required', path: err.path } };
