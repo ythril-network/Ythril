@@ -14,7 +14,8 @@
  *
  *  - **The destination is read FIRST** ({@link assertNewIdsFree}), and any row at a new id that is not itself moving, and that the
  *    caller did not name as replaced, is refused before anything is written. The guard is the part both callers share: the edges'
- *    `EdgeIdentityTaken` and a move's `DestinationTakenByOther` are one rule with two refusals, not two rules.
+ *    `EdgeIdentityTaken` and a move's `StaleRekeyPlan` are one rule with two refusals, not two rules. (A move's own plan has
+ *    refused a destination other files' records hold before it gets here; a row that appears since is the stale plan.)
  *  - **It runs inside the caller's transaction** ({@link rekeyRows} takes the session), so the delete, the replacement of what the
  *    caller named and the insert commit together or not at all. A row that appeared at a new id since the caller planned fails the
  *    insert (`E11000`) and the whole batch rolls back — the caller's transaction (`db/bounded-transaction.ts`) answers it, never
@@ -49,7 +50,7 @@ export class StaleRekeyPlan extends Error {
 
 /** What a row at a new id may be: the caller named it as replaced, or it is itself being moved. */
 export interface RekeyReplacements {
-  /** Rows to delete by id, whatever they are: the occupant a move replaces. A row that is not there is not an error. */
+  /** Rows to delete by id, whatever they are: what the move's plan classified as its own late write or as debris (`holdsAtDestination`) — never a live file's. A row that is not there is not an error. */
   readonly replaced?: readonly string[];
   /** Rows to delete by id only while they carry `deletedAt` (a soft delete's audit record): a row that was revived meanwhile is NOT deleted and the plan is stale. */
   readonly flagged?: readonly string[];
