@@ -151,7 +151,10 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
    * burst of edits the base may have rolled off; then the coarse rule stands (report the overwrite rather than assert it was
    * uncontested; the value is applied either way).
    */
-  const captured = round.metaBase as Record<string, unknown> | undefined;
+  // A round is a peer's: a base that is not a plain object (null, a list, a string) is no base, and the round is judged as one from a peer
+  // before this release is — it must not be a way to make a conclusion throw.
+  const captured = typeof round.metaBase === 'object' && round.metaBase !== null && !Array.isArray(round.metaBase)
+    ? round.metaBase as Record<string, unknown> : undefined;
   const moved = (current?.version ?? 0) !== round.baseMetaVersion;
   const historyBase: Record<string, unknown> | undefined = captured !== undefined ? undefined
     : current?.version === round.baseMetaVersion
