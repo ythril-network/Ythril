@@ -1,6 +1,6 @@
 # 09 — A move the instance began is the instance's to finish, and a destination the tree refuses is `409`
 
-**Status:** accepted, 2026-10-13 · **Scope:** a file or directory move (`PATCH /api/files/:spaceId`, `POST /api/move_file`,
+**Status:** accepted, 2026-10-13; amended 2026-10-14: a move never replaces anything · **Scope:** a file or directory move (`PATCH /api/files/:spaceId`, `POST /api/move_file`,
 MCP `move_file`) and the doors that place bytes or a directory at a caller's path (`mkdir`, upload, chunked upload,
 `write_file`, `create_dir`)
 
@@ -42,16 +42,17 @@ receiver's **tree**, which can change.
   modification time the marker recorded), the move is not owed: the marker is kept as the operator's signal and nothing at
   the destination is overwritten. **A directory carries no identity**, so a directory move is judged on the other facts
   (the marker, bytes at the destination and none at the source, something of it still at the source), and what protects what
-  stands at its destination is the refusal per record: a record of another file at an id the move would take is `409`
-  `destination_taken_by_other`, and a record of a file the move replaces is replaced.
+  stands at its destination is the refusal made before the move (`destination_exists`); a record of another file met after
+  the bytes moved is `409` `destination_held_after_move`, and the move stays owed.
 - **An act that removes bytes records its tombstone first or does not begin.** A move and both delete doors (and the
   retention sweep's delete, which goes through the same cascade) refuse before any byte goes when the tombstone cannot be
   written: a store failure is `503`, anything else is `500` with `code: "act_not_recorded"`.
-- **A destination a file blocks, or that another file's records hold, is `409`** (`code: "path_blocked"` or
-  `"destination_taken_by_other"`, `path` relative to the space), the same on every door, and refused before anything is
+- **A destination a file blocks, or where something already stands, is `409`** (`code: "path_blocked"` or
+  `"destination_exists"`, `path` relative to the space), the same on every door, and refused before anything is
   written. Not `400`/`422`, for the sync reason above; not `404`, which says the **source** names nothing; and the error
-  is deliberately not a `RangeError`, which the REST routes answer as `400` before anything else. A name taken by a
-  *file* is not refused: the move replaces it.
+  is deliberately not a `RangeError`, which the REST routes answer as `400` before anything else. **A move never replaces
+  anything:** a file, a folder or a file's record at the destination refuses it, and deleting what stands there is the
+  way to replace it (an upload and a restore still replace).
 - **A move whose records did not all follow is `503` with `Retry-After` and `code: "move_still_owed"`**, not the store's
   "not answering": the bytes have moved, so "nothing was written" would be false.
 
@@ -71,7 +72,8 @@ receiver's **tree**, which can change.
   "deleted", which destroys a move that is merely unfinished; moving the completion into the settle or the worker, which
   is how a single slow move would hold every other space's housekeeping; answering a refused destination `400` or `422`,
   which silences a sync sender for a condition that can clear; and making the identity check fail open ("finish it anyway"),
-  which overwrites an unrelated file that happens to stand at the destination.
+  which overwrites an unrelated file that happens to stand at the destination; and letting a move replace what stands at its
+  destination, which loses a file or a record nobody named and removes it from every replica.
 
 ## Where the detail lives
 

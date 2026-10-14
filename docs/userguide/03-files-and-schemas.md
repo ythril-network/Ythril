@@ -52,18 +52,26 @@ and one that is interrupted is finished later (*An interrupted rename finishes o
 
 **A rename, delete or new folder that fails says so, and says why when the server says why — it never reports success.**
 A name a file blocks (one inside a file) says *'<path>' can't be used here: a file is in the way, or the destination is
-the item itself or inside it*; a name another file's records hold says *'<path>' is already taken by another file's records,
-so nothing was moved*; a rename onto a name that already holds something says *Something already exists at '<path>', so nothing was moved*; a rename or delete the server could not record says *Nothing was changed: the server could not
-record this action*; and a failure of the server's own file storage says so and points the administrator to the server
-log. All of these change nothing: the file is still there under its old name and trying again is safe. An answer the page
-has no words for shows the server's own sentence, and one with none shows *Failed to rename file.*, *Failed to delete
-file.* or *Failed to create folder.*
+the item itself or inside it*. **A rename never replaces anything:** onto a name that already holds a file, a folder or a
+file's record it says *Something already exists at '<path>', so nothing was moved. A move never replaces anything: delete
+what is there first (that deletes it on every instance it is replicated to), or choose another name*. Deleting what is
+there is the way to replace it, and it is deleted everywhere the file is replicated, so look at it first. A rename the
+server could not finish because another file's records hold a name the moved file's records need says *The file was
+moved, but '<path>' is held by the records of another file, so its details have not followed*: delete that other file and
+the rename finishes on its own, or repeat it. A rename or delete the server could not record says *Nothing was changed:
+the server could not record this action*, and a failure of the server's own file storage says so and points the
+administrator to the server log. A folder delete the server asked to have confirmed says *Deleting a folder needs
+confirmation*, and the root folder of a space cannot be deleted at all. Except for the half-done rename, all of these
+change nothing: the file is still there under its old name and trying again is safe. An answer the
+page has no words for shows the server's own sentence, and one with none shows *Failed to rename file.*, *Failed to
+delete file.* or *Failed to create folder.*
 
 **A move the server is finishing is not a failure.** When the file has moved and the server is completing the rest of the
-rename itself, the page says *The file was moved and the server is finishing the move. This list reloads once it has.*
-in an information message, leaves the rename box, and reloads the list once, after the few seconds the server asks for
-(a few when it names none), so the row appears under its new name without you refreshing. Nothing needs doing; the
-details are in *An interrupted rename finishes on its own*, below.
+rename itself, the page says *The file was moved and the server is finishing the move. This list reloads once, after a
+short wait.* in an information message, leaves the rename box, and reloads the list once, after the few seconds the
+server asks for (a few when it names none), so the row usually appears under its new name without you refreshing. If it
+does not, the move is still being finished: refresh later. Nothing needs doing; the details are in *An interrupted rename
+finishes on its own*, below.
 
 **An interrupted rename finishes on its own.** When a database outage or a restart stops a rename after the file itself
 moved, the list may briefly show the file under its new name without its status and tags while its metadata is not
@@ -74,7 +82,9 @@ and named in the server log (see [Storage, data and audit](05-storage-data-and-a
 for the administrator, who can repeat it through the API (`PATCH /api/files/:spaceId?path=…`) or the MCP `move_file`
 tool. This page cannot repeat it for you, because it no longer has a row for the old path. A delete that stopped after
 the file itself was removed is completed the same way: repeat it through the API (`DELETE /api/files/:spaceId?path=…`)
-or the MCP `delete_file` tool.
+or the MCP `delete_file` tool; a delete of a folder is repeated with `confirm: true` (`{ "confirm": true }` in the request
+body of the API call, the `confirm` parameter of the tool), which finds what the first one left. Without it a folder is
+refused and nothing is deleted. An MCP token with write access to files can delete a folder this way, as the API can.
 
 **A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
 from disk — although the **Files** count still includes it. Delete it through the API
@@ -92,7 +102,7 @@ first one did complete; check the file list before deleting again.
 
 **Which peers delete their copy when you delete a file.** Deleting a file, or moving it, tells synced peers, and a peer applies the notice only where the rule allows it: every peer that holds **a copy your instance wrote** deletes it, and on a **pub/sub network or a tree** everything *below* you does as well, including a file you only relayed from above. A file **another instance wrote**, deleted here on a club, closed or democratic network, is removed on your instance alone: the other peers keep it, and it stays gone here until the instance that wrote it changes the file again. A peer applies the notice to the version you deleted, so a file someone uploaded again to that path since is kept, and it removes the file's text, thumbnails and search entries with it. A peer that has no one below it applies the deletion and does not keep the file's name afterwards.
 
-**What a file's derived data does when the file is deleted.** Everything Ythril made from a file goes with it: the text it extracted, the images it pulled out of a document, and the captions, faces and search entries of those images — however many steps removed from the file they are. Each instance makes its own text and images from a file, by its own settings, and they never travel to a peer (see below), so a peer removes its own pieces when it applies the deletion; pieces an older peer delivered before this release are retired by the next retention pass. So no peer restores a deleted file or anything made from it. A file written again at the same path is a new file: it is converted afresh and its pieces are kept.
+**What a file's derived data does when the file is deleted.** Everything Ythril made from a file goes with it: the text it extracted, the images it pulled out of a document, and the captions, faces and search entries of those images — however many steps removed from the file they are. Each instance makes its own text and images from a file, by its own settings, and they never travel to a peer (see below), so a peer removes its own pieces when it applies the deletion; pieces an older peer delivered before this release are retired by the next retention pass. So no peer restores a deleted file or anything made from it. A file written again at the same path is a new file: it is converted afresh and its pieces are kept. **Work running for the file at that moment writes nothing afterwards**, whether the file is deleted, moved or its space wiped. Pieces an earlier version left behind in that situation stay until a later repair: they do not show in the file list, a leftover face can still turn up in a picture search, and one can attach to a file uploaded again at the same path.
 
 **A file a peer delivers is processed by your own settings, and the pieces are yours.** When a synced peer sends you a file — pushed to you, or fetched by your own sync — Ythril converts, chunks and analyses it the way it would an upload to this instance: the document mode, the models and, where you have confirmed an external one, the external assist model are your own, and a new version of the file replaces the passages of the old one. The converted text and extracted images are **not** sent to or from peers: a space with document conversion switched off holds no converted text of a file it was given, however the sender's instance is set up. After an upgrade, files a peer delivered earlier and your instance never converted are picked up by later sync cycles, a few at a time, so expect some conversion work (and external-model use, if you have confirmed one) for a while. A file that arrives from a peer is listed after the page is refreshed; the Files page does not move on its own for a change you did not make here.
 

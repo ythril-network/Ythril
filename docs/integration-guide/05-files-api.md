@@ -256,7 +256,21 @@ at its first range, with nothing left staged) and MCP `write_file`. Nothing is m
 tombstone is published. **It is `409`, not `400`, because the refusal is about the receiver's tree, which can change:** a
 sync sender reads `400` and `422` as a refusal about the bytes and stops re-sending them, and it must keep trying. It is
 not `404` either: a `404` on a move says the **source** names nothing, and that includes a source path that runs
-through a file. A name taken by a *file* is not refused: the moved file replaces it.
+through a file.
+
+**A move never replaces anything: `409` with `code: "destination_exists"`.** If a file, a folder (empty or not) or a file's
+record already stands at `destination`, the move is refused before anything changes: no byte moves, no tombstone is
+published and no job is held. The body is `{ "error", "code": "destination_exists", "path" }` with `path` the
+destination as requested, and it is the same on `PATCH`, `POST /api/move_file` and MCP `move_file`. **To replace, delete
+the destination first** (`DELETE` or `delete_file`; a folder needs `confirm: true`): that deletes it on every instance it
+is replicated to. A file record whose bytes are not here yet (its content may still be arriving from a peer, or an
+earlier delete was interrupted) blocks a move the same way, is removed by the same delete, and appears with its bytes
+once they have arrived. What does not block a move: a name that only a deleted file's audit record holds (see below), and
+what a file that no longer exists left behind (a conversion sidecar or a derived record whose file has neither bytes nor
+a live record), which the move removes. A **case-only rename** (`a.txt` to `A.txt`, or `Docs/a.txt` to `docs/a.txt`) on
+a case-insensitive file system is one file under a new spelling and succeeds, record included. **Only a move is
+refused:** an upload or a restore onto a name still replaces it, and so do the conflict resolutions that keep the
+incoming copy.
 
 A move carries what belongs to the path: the metadata, the derived records, the conversion sidecars (`_converted/<id>.md`
 and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing
@@ -317,7 +331,18 @@ DELETE /api/files/:spaceId?path=reports/q1.pdf
 
 **Response** `204`.
 
-To delete a directory, include `{ "confirm": true }` in the request body.
+**A directory.** Deleting a directory needs `{ "confirm": true }` in the request body (a boolean: any other value is
+`400`). Without it the answer is `422` with `{ "error", "code": "confirm_required", "path" }` and nothing is deleted. The
+space's root directory is never deleted: `400` with `code: "space_root_refused"`, whatever `confirm` says. A path the
+server's storage refuses to look at answers `500` with `code: "file_system_fault"` and names no path (it used to read as
+a missing path, `404`); a path with nothing at it is `404`. A directory delete that was interrupted is completed by
+repeating it with `confirm: true`, which finds what the first one left.
+
+**The MCP `delete_file` tool takes the same `confirm` parameter, and an MCP token with `files: write` can now delete a
+directory tree, with `confirm: true`, exactly as on REST.** It answers `Deleted '<path>'.`; without `confirm` a directory
+is refused `422` and nothing is deleted. `POST /api/delete_file` is the same tool. A directory delete fires no
+`file.deleted` webhook (a single file's does) and is audited with `kind: "directory"`
+([the audit log](13-audit-log-api.md#what-changed-changes)); a single file's delete records no change.
 
 Deleting a file cascades: its metadata record, any queued embedding job, and all conversion
 artifacts — chunk records plus the on-disk `_converted/<id>.md` and `_extracted/<id>/` sidecars —
@@ -329,6 +354,14 @@ A directory `<id>.md/` standing beside the file is not the file's: its converted
 touched by the file's delete. Deleting a **directory** does the same for every file beneath it,
 including the `_converted/<path>` and `_extracted/<path>` subtrees, and writes a sync **tombstone**
 per removed file so peers delete their copies too (otherwise the next sync would push them back).
+
+**A delete takes what derives from the file even work running at that moment.** A media job that is processing the file
+when it is deleted, moved or wiped with its space cannot write a derived record afterwards: every write it makes about
+its file is made under its claim on the job, and a delete, a move, a directory delete and a space wipe revoke the claims
+first. A run that lost its claim ends without completing or failing, and writes nothing about a file re-uploaded at the
+same path. **Records a previous version already leaked** (a derived record written after the delete by a job that was
+running) are not removed by this version; they stay until a later repair, are invisible to the file listing, but a
+leaked face record is still matched by gallery search, and one can attach to a file re-uploaded at the same path.
 
 **Who the deletion reaches.** A peer applies the tombstone to the copy it holds only when the deletion rule allows it
 (see [Sync API → file tombstones](09-sync-api.md#file-sync-artifacts)): a peer deletes **a copy this instance wrote**
@@ -418,25 +451,36 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   destination). It is not the store's "nothing was written": the file is at `destination` already. The move is not
   lost and needs no retry to survive: the record TTL sweep finishes it (the step `TTL sweep: finishing interrupted file
   moves`, see [Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)), and a retry of the same
-  `PATCH` or `move_file` completes it too. A retry finds the file at `destination`, the records at the old path and the
-  mark the first attempt left with its tombstones, and finishes them; without that mark — an old path whose file went
-  missing for another reason, or a file at `destination` that is not the one the move carried — it is `404`, and
-  nothing at `destination` is touched. That identity check is for a **file** (the mark records its size and modification
-  time); a **directory** carries none, so a retried directory move is judged on the mark, the bytes at `destination` and
-  something of it still at the old path, and what protects what stands at `destination` is the refusal per record
-  (`destination_taken_by_other`, below). **So a `404` on a retried move can mean it was finished**, by the sweep or by an
-  earlier attempt whose answer you never saw: look at `destination` before moving again. A move the sweep gave up on
-  is *stranded*: its records stay at the old path and its mark is kept, so a retry can still finish it
-  (`ythril_file_moves_stranded`). A move finished by the sweep fires `file.updated` once, with `previousPath`
-  ([webhooks](14-duplicates-and-webhooks.md#webhooks-api)).
+  `PATCH` or `move_file` completes it too. **A retry finishes the move it began and is never refused for what that
+  move already put at `destination`.** It finds the file at `destination`, the records at the old path and the mark the
+  first attempt left with its tombstones, and finishes them; without that mark — an old path whose file went missing
+  for another reason, or a file at `destination` that is not the one the move carried — it is `404`, and nothing at
+  `destination` is touched. That identity check is for a **file** (the mark records its size and modification time); a
+  **directory** carries none, so a retried directory move is judged on the mark, the bytes at `destination` and
+  something of it still at the old path. **So a `404` on a retried move can mean it was finished**, by the sweep or by
+  an earlier attempt whose answer you never saw: look at `destination` before moving again, because a new move onto
+  the finished destination is `409 destination_exists`. A move the sweep gave up on is *stranded*: its records stay at
+  the old path and its mark is kept, so a retry can still finish it (`ythril_file_moves_stranded`). A move finished by
+  the sweep fires `file.updated` once, with `previousPath` ([webhooks](14-duplicates-and-webhooks.md#webhooks-api)).
+- **A half-made link is finished by the next retry or by the sweep.** A move gives a file its new name by a hard link
+  and then removes the old name, so a failure between the two leaves one file under two names. A retry or the sweep
+  removes the old name; a failure to remove it undoes the new link and is the move's answer, so the file is never left
+  under both. Two names of one file with no mark of a move between them are an operator's own hard link: a move onto
+  one is refused `destination_exists` and both names stay.
+- **A finish that meets another file's records answers `409` with `code: "destination_held_after_move"`.** If, after
+  the bytes moved, the record of ANOTHER file (a peer's file arriving at that id, say) holds an id the moved records
+  need, the finish is refused with `path` the held id, and the sentence says the bytes already moved. Nothing of the
+  other file is touched; the mark is kept and the move stays owed (`ythril_file_moves_owed`, then
+  `ythril_file_moves_stranded` once the sweep gives up). Delete the other file and the move finishes on its own, or
+  repeat it. The file's own late writes at its old or new ids and the leftovers of a file that no longer exists are not
+  another file's: the finish replaces them (`ythril_file_move_rows_replaced_total`).
 - **What a move leaves is whole.** Each record of a moved file is wholly at its old path or wholly at its new one,
-  whatever fails, and the file's links are at one path or the other and never at neither. A file moved onto a file
-  it replaces takes that file's place: its records, derived records and jobs stand at the destination, and its links
-  **replace** the previous occupant's, so a file never inherits the people, facts or chrono entries linked to the one it
-  replaced. A move onto an existing file replaces its record, chunks, jobs and links where the moved file has a counterpart
-  (and its converted Markdown and extracted images on disk by the moved file's); rows of the replaced file beyond those
-  stay. A move that would take over records that belong to **another** file is refused `409` with `code:
-  "destination_taken_by_other"` and the relative `path`, before anything changes.
+  whatever fails, and the file's links are at one path or the other and never at neither. A move replaces no live file,
+  so a moved file keeps its own links and never inherits the people, facts or chrono entries linked to another.
+- **The no-overwrite guarantee needs hard-link support on the data volume** (see
+  [Hosting](02-hosting.md#data-persistence)). On a file system that refuses a hard link a move falls back to a rename,
+  counted in `ythril_file_move_link_fallback_total` and logged once, and a process outside Ythril that writes at the
+  destination in that instant can be overwritten.
 - **A delete or a move whose deletion cannot be recorded answers `500` with `code: "act_not_recorded"`.** The tombstone
   is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and
   the cause is the server's, so a retry that fails the same way is a fault to report, not a request to change. It

@@ -67,6 +67,10 @@ describe the file as uploaded, so two peers compare equal whether either one enc
 - **The data root must be one filesystem.** Writes land in `<data-root>/.stored-tmp/` and are renamed into place, and a
   rename cannot cross filesystems. Mounting `files/` from a different volume makes every write fail; the boot log
   says so in one line.
+- **The data root should support hard links.** A file stored in the clear is handed to a worker by a hard link (above),
+  and a move's no-overwrite guarantee rests on one (see [Hosting](02-hosting.md#data-persistence)). Where the file system
+  refuses a link a worker reads an unencrypted file in place, and a move falls back to a rename that a process outside
+  Ythril writing at the destination in that instant can defeat; `ythril_file_move_link_fallback_total` counts it.
 - **Kubernetes:** the shipped Deployment uses `strategy: Recreate`, so an old and a new pod never write the same
   volume at once during a rollout.
 
