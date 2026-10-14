@@ -17,7 +17,8 @@
  * and the row go. The question is asked of the file system (which spelling the entry really has), so a case-sensitive host, where the two
  * ids are two files, never answers yes.
  *
- * Runs where the files tree is case-insensitive (this development machine is NTFS); on a case-sensitive runner the cases skip and say why.
+ * The cases that need the alias run where the files tree is case-insensitive (this development machine is NTFS); on a case-sensitive runner
+ * (CI) they skip with `expected-in-ci:` and the cause. The two CONTROL cases need no alias and run on every file system.
  *
  * Run: node --test testing/standalone/a-peer-tombstone-for-an-old-spelling-keeps-the-bytes-db.test.js   (after `npm run build:server`)
  */
@@ -34,7 +35,9 @@ import { caseInsensitiveAt } from './_move-destination.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'oldspelling';
-const SKIPPED = 'the file system under the files tree is case-sensitive: the old and the new spelling are two entries, so a tombstone for one never names the other\'s bytes';
+// On a case-sensitive file system the old and the new spelling are two entries, so a tombstone for one never names the other's bytes.
+// Only the cases that need the alias skip there (listed in testing/_shared/expected-in-ci.mjs); the two CONTROL cases run everywhere.
+const SKIPPED = 'expected-in-ci: the file system is case-sensitive';
 
 let door, insensitive;
 const row = (id) => door.coll(S, 'files').findOne({ _id: id });
@@ -108,8 +111,7 @@ describe('a peer tombstone for an old spelling keeps the entry another record na
     assert.equal((await row('Case.txt'))?._id, 'Case.txt');
   });
 
-  it('CONTROL: the tombstone of the spelling the entry really has removes its bytes and its record, as before', async (t) => {
-    if (!insensitive) { t.skip(SKIPPED); return; }
+  it('CONTROL: the tombstone of the spelling the entry really has removes its bytes and its record, as before', async () => {
     await arrivalOfTheNewSpellingLanded();
 
     await deliver([tomb('Case.txt', 3, 4)]);
@@ -118,8 +120,7 @@ describe('a peer tombstone for an old spelling keeps the entry another record na
     assert.equal(await row('Case.txt'), null, 'a tombstone for the entry\'s own spelling left its record');
   });
 
-  it('CONTROL: no other record names the entry: the tombstone of a.txt removes the bytes and the record', async (t) => {
-    if (!insensitive) { t.skip(SKIPPED); return; }
+  it('CONTROL: no other record names the entry: the tombstone of a.txt removes the bytes and the record', async () => {
     door.writeLocalFile(S, 'only.txt', 'bytes');
     await door.coll(S, 'files').insertOne(build.filemeta(S, 'only.txt', 3, { author: PEER_AUTHOR, sizeBytes: 5 }));
 

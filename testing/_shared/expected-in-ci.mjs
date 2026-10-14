@@ -31,12 +31,22 @@ export const EXPECTED_IN_CI_PREFIX = 'expected-in-ci:';
 const CORPUS_WHY = 'the LoCoMo / LongMemEval corpora are fetched by URL against a pinned sha256 and never committed '
   + '(redistribution), so a CI runner that did not fetch them cannot run the sweep over them';
 
+const CASE_SENSITIVE_CAUSE = 'the file system is case-sensitive';
+const CASE_SENSITIVE_WHY = 'CI runners\' file systems are case-sensitive, so `a.txt` and `A.txt` are two entries there and the alias these cases '
+  + 'exercise (one directory entry under two spellings) cannot exist; they run for real in the local preflight on the NTFS development machine, '
+  + 'and the rule they test is held on CI by the pure classifier test (a-destination-is-classified-by-inode-link-count-and-marker) and the '
+  + 'settle seam test (a-case-only-settle-is-decided-by-the-move-not-the-disk-db)';
+
 /** @type {Readonly<Record<string, { causes: string[], why: string }>>} */
 export const EXPECTED_IN_CI = Object.freeze({
   'testing/standalone/an-extraction-describes-the-conversation-it-names.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
   'testing/standalone/the-extractor-finds-its-mentions.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
   'testing/standalone/the-extractor-shortlists-before-it-asks.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
   'testing/standalone/the-extractor-cannot-see-the-questions.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
+  'testing/standalone/a-case-only-rename-is-owed-until-its-records-carry-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
+  'testing/standalone/a-case-only-rename-moves-its-record-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
+  'testing/standalone/a-half-made-link-is-finished-or-undone-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
+  'testing/standalone/a-peer-tombstone-for-an-old-spelling-keeps-the-bytes-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
 });
 
 /**

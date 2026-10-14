@@ -18,7 +18,7 @@
  * ## Where it runs
  *
  * A case-insensitive file system is needed to see the alias at all; this development machine (NTFS) has one and the local preflight
- * runs these cases for real. On a case-sensitive host (the Linux CI runner) every case here skips and says why: there the spelling is a
+ * runs these cases for real. On a case-sensitive host (the Linux CI runner) every case here skips (`expected-in-ci:`, the file system is case-sensitive): there the spelling is a
  * different entry, the move is an ordinary move, and the RULE is held by the pure classification test
  * (`a-destination-is-classified-by-inode-link-count-and-marker`), which asserts the branch and not the operating system.
  *
@@ -50,7 +50,9 @@ const rowOf = (id) => files().findOne({ _id: id });
 const abs = (p) => path.join(acts.root(), p);
 const read = (p) => fs.readFileSync(abs(p), 'utf8');
 const namesIn = (dir) => fs.readdirSync(abs(dir)).sort();
-const SKIPPED = 'the file system under the files tree is case-sensitive: `a` and `A` are different entries, the move is an ordinary one, and the rule is held by a-destination-is-classified-by-inode-link-count-and-marker (pure)';
+// On a case-sensitive file system `a` and `A` are different entries and the move is an ordinary one; the rule is held on CI by
+// a-destination-is-classified-by-inode-link-count-and-marker (pure). The skip is listed in testing/_shared/expected-in-ci.mjs.
+const SKIPPED = 'expected-in-ci: the file system is case-sensitive';
 
 describe('a case-only rename moves its record (real MongoDB, case-insensitive file systems)', { skip }, () => {
   before(async () => {
