@@ -44,13 +44,22 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'tombpub';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let acts, door, files, tombstones, ttl, cascade, drainStrayFileMeta, pruneFileTombstonesToFloor;
+let acts, door, files, tombstones, ttl, cascade, drainStrayFileMeta, pruneFileTombstonesToFloor, stored;
 let F, faults;
 
 const root = () => acts.root();
 const onDisk = (p) => acts.onDisk(p);
 const raw = () => acts.raw();
 const seed = (p, extra) => acts.seed(p, extra);
+/**
+ * A directory with a file in it lands at a move's destination AFTER the move's check and before its bytes are placed (the seam of
+ * `moveStoredIfFree`): the one way a move still fails at its bytes now that an occupied destination is refused up front, with its
+ * tombstones already written pending. Whatever `to` the move asks for is where it lands, so one seam serves every destination.
+ */
+const directoryLandsAtTheDestination = () => {
+  assert.equal(typeof stored.setMoveStepsForTest, 'function', 'files/stored-bytes.ts exports no setMoveStepsForTest: the placing of a move\'s bytes has no seam');
+  stored.setMoveStepsForTest({ beforeLink: (_src, dst) => fs.mkdirSync(path.join(dst, 'inside'), { recursive: true }) });
+};
 /** A directory with a file in it, at `p` — what an unlink of `p` fails on, for a reason that is not the store's. */
 const directoryAt = (p) => fs.mkdirSync(path.join(root(), p, 'inside'), { recursive: true });
 
@@ -62,7 +71,6 @@ const cleanUpsSettled = () => tombstones.whenPendingFileTombstoneDropsSettle?.()
 const served = () => acts.served();
 const pushed = () => acts.pushed();
 const published = () => acts.published();
-const mcp = (tool, args) => acts.mcp(tool, args);
 const move = (via, src, dst) => acts.move(via, src, dst);
 const del = (via, p) => acts.del(via, p);
 const failed = (a) => acts.failed(a);
@@ -77,17 +85,19 @@ describe('a file tombstone is published only once its act happened', { skip }, (
     ttl = await import('../../server/dist/brain/ttl-sweep.js');
     ({ drainStrayFileMeta } = await import('../../server/dist/sync/stray-filemeta-drain.js'));
     ({ pruneFileTombstonesToFloor } = await import('../../server/dist/brain/tombstone-prune.js'));
+    stored = await import('../../server/dist/files/stored-bytes.js');
     faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany', 'deleteMany']);
   });
   after(async () => {
     faults?.restore();
+    stored?.setMoveStepsForTest?.(null);
     await acts?.close();
   });
   beforeEach(async () => {
     faults.clear();
     await acts.reset();
   });
-  afterEach(() => { faults.clear(); });
+  afterEach(() => { faults.clear(); stored?.setMoveStepsForTest?.(null); });
 
   it('the act\'s clean-up can be awaited', () => {
     assert.equal(typeof tombstones.whenPendingFileTombstoneDropsSettle, 'function',
@@ -110,7 +120,7 @@ describe('a file tombstone is published only once its act happened', { skip }, (
 
     it(`${via}: a move whose bytes cannot move publishes nothing, its clean-up never run`, async () => {
       await seed('stay.txt');
-      directoryAt('occupied');
+      directoryLandsAtTheDestination();
       cleanUpNeverRuns();
       const a = await move(via, 'stay.txt', 'occupied');
       assert.ok(failed(a), `a move onto a directory that holds a file succeeded: ${JSON.stringify(a.body ?? a.text)}`);
@@ -120,12 +130,10 @@ describe('a file tombstone is published only once its act happened', { skip }, (
     });
   }
 
-  it('a delete whose unlink fails for a reason that is not the store\'s publishes nothing, on the cascade and MCP', async () => {
+  it('a delete whose unlink fails for a reason that is not the store\'s publishes nothing (driven on the cascade: the doors answer a directory with a refusal before it)', async () => {
     directoryAt('adir');
     cleanUpNeverRuns();
     await assert.rejects(cascade.deleteFileCascade(S, 'adir'), 'unlinking a directory succeeded — the case is not reached');
-    const m = await mcp('delete_file', { path: 'adir' });
-    assert.ok(m.isError, `MCP delete_file of a directory succeeded: ${m.text}`);
     assert.ok(onDisk('adir/inside'), 'the directory went');
     await cleanUpsSettled();
     assert.deepEqual(await published(), NOTHING, 'a delete that removed nothing published a tombstone');
@@ -143,12 +151,12 @@ describe('a file tombstone is published only once its act happened', { skip }, (
   });
 
   it('a stale leftover is settled by the TTL sweep from the disk: dropped while its path has bytes, published once not', async () => {
-    directoryAt('occupied');
     await seed('kept.txt');
     await seed('gone.txt');
+    directoryLandsAtTheDestination();
     cleanUpNeverRuns();
-    assert.ok(failed(await move('REST', 'kept.txt', 'occupied')));
-    assert.ok(failed(await move('REST', 'gone.txt', 'occupied')));
+    assert.ok(failed(await move('REST', 'kept.txt', 'occupied-1')));
+    assert.ok(failed(await move('REST', 'gone.txt', 'occupied-2')));
     await cleanUpsSettled();
     faults.clear();
     fs.rmSync(path.join(root(), 'gone.txt'));   // the path lost its bytes after all
@@ -161,8 +169,8 @@ describe('a file tombstone is published only once its act happened', { skip }, (
   });
 
   it('no other reader takes a leftover for a deletion: the prune keeps it, the stray-metadata drain waits', async () => {
-    directoryAt('occupied');
     await files.writeFile(S, 'held.txt', 'bytes with no metadata row');
+    directoryLandsAtTheDestination();
     cleanUpNeverRuns();
     assert.ok(failed(await move('REST', 'held.txt', 'occupied')));
     await cleanUpsSettled();

@@ -25,7 +25,10 @@
  *
  * - The partial tree removal: `rm` on the directory unlinks part of the tree itself and then fails `EACCES`, as a
  *   recursive remove that meets a subtree it may not remove does.
- * - The move's sidecar: its destination is a directory holding a file, so the sidecar's rename fails on every OS.
+ * - The move's sidecar: the step that places the sidecar's bytes fails (`setMoveStepsForTest`, the seam of the step a move places its
+ *   bytes by), as a file system that fails one entry and not another does. It used to be a directory standing at the sidecar's
+ *   destination; a move never replaces anything, and what stands there is either refused up front or debris the move removes, so a
+ *   standing directory no longer makes a sidecar fail.
  * - The directory delete's sidecars: `rm` on the `_converted/` subtree fails `EACCES`.
  *
  * Run: node --test testing/standalone/a-file-tombstone-is-published-after-its-own-bytes-db.test.js
@@ -42,7 +45,7 @@ import { openFileActDoors, NOTHING } from './_file-act-doors.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'ownbytes';
 
-let acts, cascade, tombstones;
+let acts, cascade, tombstones, stored;
 const realRm = fsp.rm;
 /** `rm` of `rel` fails after unlinking the first `unlinks` files under it (sorted), as a recursive remove can. */
 function rmFailsUnder(rel, unlinks = 0) {
@@ -63,13 +66,15 @@ describe('a file tombstone is published after its own path\'s bytes', { skip }, 
     acts = await openFileActDoors({ suite: 'ownbytes', space: S });
     cascade = await import('../../server/dist/files/delete-cascade.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    stored = await import('../../server/dist/files/stored-bytes.js');
   });
   after(async () => {
     fsp.rm = realRm;
+    stored?.setMoveStepsForTest?.(null);
     await acts?.close();
   });
   beforeEach(() => acts.reset());
-  afterEach(() => { fsp.rm = realRm; });
+  afterEach(() => { fsp.rm = realRm; stored?.setMoveStepsForTest?.(null); });
 
   it('a directory delete that stops part way publishes the files it removed, and its retry the rest', async () => {
     const all = ['t/1.txt', 't/2.txt', 't/3.txt', 't/4.txt', 't/5.txt', 't/6.txt'];
@@ -93,8 +98,12 @@ describe('a file tombstone is published after its own path\'s bytes', { skip }, 
     it(`${via}: a move whose sidecar cannot move publishes no tombstone for the sidecar still here`, async () => {
       await acts.seed('a.txt');
       await acts.files.writeFile(S, '_converted/a.txt.md', '# converted');
-      fs.mkdirSync(path.join(acts.root(), '_converted', 'b.txt.md', 'inside'), { recursive: true });
-      fs.writeFileSync(path.join(acts.root(), '_converted', 'b.txt.md', 'inside', 'x'), 'x');
+      assert.equal(typeof stored.setMoveStepsForTest, 'function', 'files/stored-bytes.ts exports no setMoveStepsForTest: the placing of a move\'s bytes has no seam');
+      // Only the sidecar's destination fails: the file itself (`a.txt` to `b.txt`) is placed by the real step.
+      stored.setMoveStepsForTest({ link: async (src, dst) => {
+        if (path.basename(dst) === 'b.txt.md') throw Object.assign(new Error(`EIO: i/o error, link '${src}' -> '${dst}'`), { code: 'EIO' });
+        await fsp.link(src, dst);
+      } });
       const m = await acts.move(via, 'a.txt', 'b.txt');
       // A sidecar whose bytes cannot move keeps the move OWED (bundle-44): its records do not move away from its bytes, so the door
       // answers the move that is not finished, and housekeeping or the retry finishes it. It used to log, carry on and answer 200.
