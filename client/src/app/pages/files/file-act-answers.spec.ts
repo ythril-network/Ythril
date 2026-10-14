@@ -22,6 +22,7 @@ import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { FileManagerComponent } from './file-manager.component';
+import { FILE_REFUSALS_WITH_REMEDY } from './file-listing.store';
 
 const I18N = resolve(__dirname, '../../../../public/assets/i18n');
 const locale = (name: string): Record<string, string> =>
@@ -31,12 +32,20 @@ const en = locale('en');
 /** What a code reads as in en with its path filled in — the sentence under test, taken from the file that ships. */
 const said = (code: string, path?: string): string => en[`files.refusal.${code}`]!.replace('{{path}}', path ?? '');
 
+/** The codes a file act answers, read out of the module that defines them. */
+function serverCodes(): string[] {
+  return [...readFileSync(
+    resolve(__dirname, '../../../../../server/src/files/act-answers.ts'), 'utf8',
+  ).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]!).filter((v, i, all) => all.indexOf(v) === i);
+}
+
 /** A failed request as the HTTP client delivers it: the answer's body under `error`, its headers beside it. */
 function answer(status: number, body: unknown, headers: Record<string, string> = {}): HttpErrorResponse {
   return new HttpErrorResponse({ status, error: body, headers: new HttpHeaders(headers) });
 }
 
-interface Toasts { error: string[]; info: string[]; success: string[] }
+/** `errorLifetimes` holds the duration each error toast asked for, parallel to `error`: undefined is the service's default. */
+interface Toasts { error: string[]; info: string[]; success: string[]; errorLifetimes: (number | undefined)[] }
 
 function create(apiOverrides: Record<string, unknown>) {
   const listed: string[] = [];
@@ -53,7 +62,7 @@ function create(apiOverrides: Record<string, unknown>) {
     getFileMeta: () => of(null),
     ...apiOverrides,
   } as any;
-  const toasts: Toasts = { error: [], info: [], success: [] };
+  const toasts: Toasts = { error: [], info: [], success: [], errorLifetimes: [] };
   TestBed.configureTestingModule({
     imports: [FileManagerComponent, getTranslocoModule({ translation: { en } })],
     providers: [
@@ -62,7 +71,7 @@ function create(apiOverrides: Record<string, unknown>) {
       { provide: BrainApi, useValue: api },
       { provide: AuthService, useValue: { token: () => 't' } },
       { provide: ToastService, useValue: {
-        error: (m: string) => toasts.error.push(m),
+        error: (m: string, duration?: number) => { toasts.error.push(m); toasts.errorLifetimes.push(duration); },
         info: (m: string) => toasts.info.push(m),
         success: (m: string) => toasts.success.push(m),
         show: () => 0,
@@ -121,20 +130,115 @@ describe('the Files page — a refused file act says why', () => {
     }
   });
 
+  it('destination_held_after_move says in every locale that the server keeps retrying, and that deleting the holder and repeating the move finishes it', () => {
+    const statements: Record<string, RegExp[]> = {
+      en: [/\{\{heldBy\}\}/, /keeps retrying the move/, /Delete that file and repeat the move/],
+      de: [/\{\{heldBy\}\}/, /versucht den Vorgang weiter/, /Löschen Sie diese Datei und wiederholen Sie das Verschieben/],
+      pl: [/\{\{heldBy\}\}/, /ponawia przeniesienie/, /Usuń tamten plik i powtórz przeniesienie/],
+    };
+    for (const [lang, patterns] of Object.entries(statements)) {
+      const words = locale(lang)['files.refusal.destination_held_after_move']!;
+      for (const pattern of patterns) expect(words, `${lang} ${pattern}`).toMatch(pattern);
+      expect(words, lang).not.toMatch(/on its own|von selbst|samo/);
+    }
+  });
+
   it('pl says a path holds something with "Pod", not "W"', () => {
     expect(locale('pl')['files.refusal.destination_exists']).toContain("Pod '{{path}}' już coś istnieje");
   });
 
-  it('destination_held_after_move says the file moved and that deleting the other file lets the move finish', () => {
-    const { c, toasts } = create({
-      moveFile: () => throwError(() => answer(409, { error: 'server words', code: 'destination_held_after_move', path: 'b.txt' })),
-    });
+  const held = () => throwError(() => answer(
+    409, { error: 'server words', code: 'destination_held_after_move', path: 'b.txt', heldBy: 'other/c.txt' },
+  ));
+
+  it('destination_held_after_move names the held id and the file that holds it, and says the move finishes once that file is deleted', () => {
+    const { c, toasts } = create({ moveFile: held });
     rename(c);
-    expect(toasts.error).toEqual([said('destination_held_after_move', 'b.txt')]);
+    expect(toasts.error).toEqual([said('destination_held_after_move', 'b.txt').replace('{{heldBy}}', 'other/c.txt')]);
     expect(toasts.error[0]).toContain('b.txt');
+    expect(toasts.error[0]).toContain('other/c.txt');
     expect(toasts.error[0]).toMatch(/moved/);
     expect(toasts.error[0]).toMatch(/[Dd]elete that file/);
     expect(toasts.info).toEqual([]);
+  });
+
+  it('destination_held_after_move leaves edit mode, because the bytes did move', () => {
+    const { c } = create({ moveFile: held });
+    rename(c);
+    expect(c.renamingEntry()).toBe('');
+  });
+
+  it('destination_held_after_move reloads the listing once, after the wait, like a move the server is finishing', () => {
+    vi.useFakeTimers();
+    const { c, listed } = create({ moveFile: held });
+    rename(c);
+    listed.length = 0;
+    vi.advanceTimersByTime(4_999);
+    expect(listed).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(listed).toEqual(['/']);
+    vi.advanceTimersByTime(60_000);
+    expect(listed).toEqual(['/']);
+  });
+
+  it('a refusal that is not about a finished move keeps the row in edit mode and reloads nothing', () => {
+    vi.useFakeTimers();
+    const { c, listed } = create({
+      moveFile: () => throwError(() => answer(409, { error: 'x', code: 'destination_exists', path: 'b.txt' })),
+    });
+    rename(c);
+    listed.length = 0;
+    vi.advanceTimersByTime(120_000);
+    expect(listed).toEqual([]);
+    expect(c.renamingEntry()).toBe('a.txt');
+  });
+
+  it('every refusal that tells the operator what to do stays until it is dismissed, and one that does not times out as usual', () => {
+    const cases: [string, number, boolean][] = [
+      ['path_blocked', 409, true], ['destination_exists', 409, true], ['destination_held_after_move', 409, true],
+      ['act_not_recorded', 500, true], ['file_system_fault', 500, true],
+      ['confirm_required', 422, false], ['space_root_refused', 400, false],
+    ];
+    for (const [code, status, sticky] of cases) {
+      TestBed.resetTestingModule();
+      const { c, toasts } = create({
+        moveFile: () => throwError(() => answer(status, { error: 'server words', code, path: 'b.txt', heldBy: 'o.txt' })),
+      });
+      rename(c);
+      expect(toasts.errorLifetimes, code).toEqual([sticky ? 0 : undefined]);
+    }
+  });
+
+  it('a sentence the client has no words for, and the generic failure, time out as usual', () => {
+    const { c, toasts } = create({
+      moveFile: () => throwError(() => answer(409, { error: 'The server says why.', code: 'some_future_code' })),
+    });
+    rename(c);
+    expect(toasts.errorLifetimes).toEqual([undefined]);
+  });
+
+  it('a refusal that is the server\'s own fault carries the request id the server logged it under, and a refusal the caller caused does not', () => {
+    const { c, toasts } = create({
+      moveFile: () => throwError(() => answer(500, { error: 'x', code: 'act_not_recorded', path: 'a.txt' }, { 'X-Request-Id': 'req-77' })),
+    });
+    rename(c);
+    expect(toasts.error).toEqual([`${said('act_not_recorded', 'a.txt')} (request req-77)`]);
+    TestBed.resetTestingModule();
+    const again = create({
+      moveFile: () => throwError(() => answer(409, { error: 'x', code: 'destination_exists', path: 'b.txt' }, { 'X-Request-Id': 'req-78' })),
+    });
+    rename(again.c);
+    expect(again.toasts.error).toEqual([said('destination_exists', 'b.txt')]);
+  });
+
+  it('the remedy codes are all codes the server answers', () => {
+    const codes = new Set(serverCodes());
+    for (const code of FILE_REFUSALS_WITH_REMEDY) expect(codes.has(code), code).toBe(true);
+  });
+
+  it('the page words a refusal under the prefix the store names, never a literal copy of it', () => {
+    const source = readFileSync(resolve(__dirname, 'file-manager.component.ts'), 'utf8');
+    expect(source).not.toMatch(/['"`]files\.refusal\./);
   });
 
   it('confirm_required and space_root_refused each answer a delete in their own words', () => {
@@ -258,9 +362,7 @@ describe('the Files page — a move the server is finishing is not a failure', (
 
 describe('every answer a file act can give has words in every locale', () => {
   /** The codes are read out of the module that defines them, so a new code cannot ship without its sentences. */
-  const codes = [...readFileSync(
-    resolve(__dirname, '../../../../../server/src/files/act-answers.ts'), 'utf8',
-  ).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]!).filter((v, i, all) => all.indexOf(v) === i);
+  const codes = serverCodes();
 
   it('the server module names the codes this page must answer', () => {
     expect(codes).toEqual(expect.arrayContaining(['path_blocked', 'move_still_owed', 'destination_exists']));
