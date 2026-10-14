@@ -195,7 +195,8 @@ describe('delete_file describes the cascade it really performs', () => {
  */
 describe('delete_file removes what its conversion and its sidecars left, however deep (Q-349)', () => {
   const PIPELINE = stripComments(readFileSync('server/src/files/converters/pipeline.ts', 'utf8'));
-  const REMOVER = `${CASCADE}\n${PIPELINE}`;
+  // The row half of the remover is shared (`deleteRowsDerivedFrom`, `files/derived-rows.ts`) with a peer's record-only removal.
+  const REMOVER = `${CASCADE}\n${PIPELINE}\n${stripComments(readFileSync('server/src/files/derived-rows.ts', 'utf8'))}`;
   const SIDECAR_MODULES = trackedSources(['server/src/files'], { ext: ['.ts'], floor: 20, specs: false, untracked: true })
     .filter(f => /\bexport\s+(?:async\s+)?(?:function|const)\s+parentOfSidecar\b/.test(stripComments(readFileSync(f, 'utf8'))));
 
