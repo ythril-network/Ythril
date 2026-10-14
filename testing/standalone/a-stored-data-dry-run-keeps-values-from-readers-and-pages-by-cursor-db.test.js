@@ -17,19 +17,19 @@
  *  - **Values need knowledge:read.** A caller holding `schema: read` and `knowledge: none` gets the rows with `field` and
  *    `reason` and no `value`, and the stored value appears nowhere in the answer; a caller holding `knowledge: read` (and the
  *    instance admin) gets the values as before.
- *  - **A cursor, not an offset.** `{ limit }` bounds a page; the answer carries `nextCursor` while records are left, and the
- *    request's `cursor` continues from it. Rows come in ascending `_id` order, the pages are disjoint, their union is every
- *    violating record exactly once, and the last page has no `nextCursor` and says `complete`.
+ *  - **A cursor, not an offset.** `{ limit }` bounds a page; the answer carries `nextAfter` while records are left, and the
+ *    request's `after` continues from it. Rows come in ascending `_id` order, the pages are disjoint, their union is every
+ *    violating record exactly once, and the last page has no `nextAfter` and says `complete`.
  *  - **A fixed projection.** Each read of a record collection (entities, edges, facts, chrono) carries a projection that
  *    leaves the vector out, and a `projection` sent in the body changes nothing about what is read.
  *
- * The parameter names `cursor` / `nextCursor` are this test's reading of "pages by `_id` cursor" (R6-12, DI S13): the plan does
- * not spell them. The MCP half is the new `schema_validate` tool (both modes, same rights): it is part of the F-46 slice and
+ * The names `after` / `nextAfter` are the server's existing spelling for `_id`-keyset paging (file_stamp_report), so the
+ * dry run adds no second vocabulary for it (R6-12, DI S13); `complete` is the field this answer already carries. The MCP half is the new `schema_validate` tool (both modes, same rights): it is part of the F-46 slice and
  * is held where that tool is tested, not here.
  *
  * ## Seen red
  *
- * On 85c4c564 a `schema: read` caller receives the stored value in every row, there is no `nextCursor`, and the entity, fact
+ * On 85c4c564 a `schema: read` caller receives the stored value in every row, there is no `nextAfter`, and the entity, fact
  * and chrono reads carry no projection (only edges do).
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
@@ -108,7 +108,7 @@ describe('the stored-data dry run', { skip }, () => {
       let pages = 0;
       let last;
       do {
-        const out = await dryRun({ limit: 10, ...(cursor !== undefined ? { cursor } : {}) });
+        const out = await dryRun({ limit: 10, ...(cursor !== undefined ? { after: cursor } : {}) });
         assert.equal(out.status, 200, JSON.stringify(out.body).slice(0, 300));
         const rows = out.body.violations.filter(r => r.collection === 'entities').map(r => r._id);
         assert.ok(rows.length <= 10, `a page of limit 10 carried ${rows.length} rows`);
@@ -116,11 +116,11 @@ describe('the stored-data dry run', { skip }, () => {
         if (seen.length) assert.ok(rows.every(id => id > seen.at(-1)), 'a page repeats or precedes what an earlier page answered');
         seen.push(...rows);
         last = out.body;
-        cursor = out.body.nextCursor ?? undefined;
+        cursor = out.body.nextAfter ?? undefined;
         pages += 1;
         assert.ok(pages <= COUNT, 'the cursor never reaches an end');
       } while (cursor !== undefined);
-      assert.equal(pages, 3, `${COUNT} records at limit 10 came in ${pages} page(s) — the first page has no nextCursor, so the rest cannot be reached`);
+      assert.equal(pages, 3, `${COUNT} records at limit 10 came in ${pages} page(s) — the first page has no nextAfter, so the rest cannot be reached`);
       assert.deepEqual(seen, ids, 'the pages together are not every violating record exactly once');
       assert.equal(last.complete, true, 'the last page does not say the scan is complete');
     });
@@ -128,7 +128,7 @@ describe('the stored-data dry run', { skip }, () => {
     it('a page that leaves records says so: not complete, with a cursor', async () => {
       const out = await dryRun({ limit: 10 });
       assert.equal(out.body.complete, false, 'a first page of 10 of 25 says the scan is complete');
-      assert.ok(typeof out.body.nextCursor === 'string' && out.body.nextCursor.length > 0, `no nextCursor: ${JSON.stringify(Object.keys(out.body))}`);
+      assert.ok(typeof out.body.nextAfter === 'string' && out.body.nextAfter.length > 0, `no nextAfter: ${JSON.stringify(Object.keys(out.body))}`);
     });
   });
 
