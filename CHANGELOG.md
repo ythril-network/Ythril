@@ -220,7 +220,8 @@ A patch: a file whose name has a character outside Latin-1 downloads and preview
 
 ### Fixed
 
-- **Files:** A file named outside Latin-1 (`日本.txt`, an emoji, an accent sent decomposed) downloads and previews; it answered `500`. The download names the file by `filename*` (RFC 6266) with an ASCII `filename` beside it for older clients.
+- **Files:** A file named outside Latin-1 (`日本.txt`, an emoji, an accent sent decomposed) downloads and previews; it answered `500`.
+  The download names the file by `filename*` (RFC 6266) with an ASCII `filename` beside it for older clients.
 
 ## [5.6.8] — 2026-10-07
 
