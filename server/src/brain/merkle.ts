@@ -38,6 +38,7 @@ import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { canonicalJsonHash } from '../util/canonical-json.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -90,25 +91,12 @@ function sha256hex(input: string): string {
 const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
 
 /**
- * Canonical JSON of a document: keys sorted at every level, derived fields
- * dropped. Two instances holding the same document must produce byte-identical
- * output regardless of field insertion order (Mongo does not preserve it).
+ * Hash of a document's canonical JSON: keys sorted at every level, derived fields dropped at every level. Two
+ * instances holding the same document must produce byte-identical output regardless of field insertion order
+ * (Mongo does not preserve it) — which is why the text is `util/canonical-json.ts`'s and nobody else's.
  */
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      if (DERIVED_FIELDS.has(key)) continue;
-      out[key] = canonicalize((value as Record<string, unknown>)[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
 function canonicalDocHash(doc: Record<string, unknown>): string {
-  return sha256hex(JSON.stringify(canonicalize(doc)));
+  return canonicalJsonHash(doc, { omitKeys: DERIVED_FIELDS });
 }
 
 /**
