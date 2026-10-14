@@ -233,11 +233,19 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 | Option | Result |
 |--------|--------|
 | **Keep local** | Your version wins, the incoming version is discarded |
-| **Keep incoming** | The incoming version replaces yours |
+| **Keep incoming** | The incoming version replaces yours. This is the only option that replaces a file, and the file it replaces is the one in the conflict |
 | **Keep both** | Both versions are kept (you can rename the incoming copy) |
-| **Save to space** | The incoming version is copied to a different space, then the conflict is removed |
+| **Move to space** | The incoming version is moved to a different space (it leaves this one), then the conflict is removed |
 
 Every conflict ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
+
+**Keep both with a new name, and Move to space, never replace anything.** If a file, a folder or a file waiting for its content already
+has the name you chose (in the other space, for Move to space), the answer is that something already stands there: nothing is moved,
+the conflict stays open, and you can choose another name or space and try again. A new name that goes through a file
+(`notes.txt/old.txt`) or leaves the space is refused too. Moving into another space needs permission to write files in that space, not only to
+resolve conflicts, and the space must be a real one, not a proxy. When the incoming copy is already gone (an earlier attempt placed it
+and could not close the conflict), or the new name is the copy's own, there is nothing to place: the conflict closes and the page says that nothing
+was moved.
 
 **You do not have to do them one at a time.** Tick the conflicts you want — or use **Select all** — pick
 an action, and **Resolve N selected** applies it to every one. You are asked to confirm, with the count
@@ -245,7 +253,8 @@ and the action named, before anything happens.
 
 This matters after a sync that went wrong: a hundred conflicts is otherwise a hundred clicks, which is
 the point at which people start leaving them unresolved. If some of the batch cannot be resolved, the
-result says how many succeeded and how many failed rather than reporting the whole run as one outcome.
+result says how many succeeded and how many failed rather than reporting the whole run as one outcome, and
+lists each conflict that failed with the path it is about and the reason, in words that name nothing of the server.
 One batch holds at most 2 000 conflicts — the most the list shows at once — so **Select all** always fits.
 
 ---

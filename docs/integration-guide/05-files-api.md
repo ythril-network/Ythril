@@ -269,8 +269,10 @@ still arriving from a peer appears once it has. What does not block a move: a na
 what a file that no longer exists left behind (a conversion sidecar or a derived record whose file has neither bytes nor
 a live record), which the move removes. A **case-only rename** (`a.txt` to `A.txt`, or `Docs/a.txt` to `docs/a.txt`) on
 a case-insensitive file system is one file under a new spelling and succeeds, record included. **Only a move is
-refused:** an upload or a restore onto a name still replaces it, and so do the conflict resolutions that keep the
-incoming copy.
+refused:** an upload or a restore onto a name still replaces it, and so does the conflict resolution `keep-incoming`,
+which replaces your local file with the incoming copy by design. The other conflict resolutions that place the copy
+(`keep-both` with a `rename`, `save-to-space`) refuse an occupied destination as a move does (see
+[Conflicts](10-mfa-and-conflicts.md)).
 
 A move carries what belongs to the path: the metadata, the derived records, the conversion sidecars (`_converted/<id>.md`
 and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing

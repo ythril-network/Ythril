@@ -15,6 +15,11 @@
  *  - Validation: save-to-space with inaccessible targetSpaceId → 403
  *  - Validation: resolve non-existent conflict → 404
  *  - Validation: bulk-resolve empty ids → 400
+ *  - Validation: rename / targetSpaceId that are not strings → 400
+ *  - Q-466: keep-both with a rename and save-to-space never replace an occupied destination (409 destination_exists,
+ *    nothing moved, the conflict stays open); keep-incoming is the one action that replaces
+ *  - Q-466: a copy that is already gone closes the conflict with resolved: "nothing-to-place"
+ *  - Q-466: a bulk failure item is { id, error, code?, status?, path? }
  *
  * Strategy: seed ConflictDoc records directly into MongoDB via the sync
  * batch-upsert endpoint (which writes to <space>_conflicts), and create
@@ -148,6 +153,15 @@ describe('Conflict Resolution Actions', () => {
       });
       assert.equal(r.status, 400, JSON.stringify(r.body));
     });
+
+    it('a rename or targetSpaceId that is not a string → 400 on both doors, before the conflict is looked up', async () => {
+      for (const [action, extra] of [['keep-both', { rename: 5 }], ['keep-both', { rename: ['a.txt'] }], ['save-to-space', { targetSpaceId: { $ne: '' } }]]) {
+        const single = await post(INSTANCES.a, tokenA, '/api/conflicts/fake-id/resolve', { action, ...extra });
+        assert.equal(single.status, 400, `${action} ${JSON.stringify(extra)}: ${JSON.stringify(single.body)}`);
+        const bulk = await post(INSTANCES.a, tokenA, '/api/conflicts/bulk-resolve', { ids: ['fake-id'], action, ...extra });
+        assert.equal(bulk.status, 400, `bulk ${action} ${JSON.stringify(extra)}: ${JSON.stringify(bulk.body)}`);
+      }
+    });
   });
 
   describe('keep-local', () => {
@@ -278,6 +292,77 @@ describe('Conflict Resolution Actions', () => {
       // Verify: record gone
       const check = await get(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}`);
       assert.equal(check.status, 404);
+    });
+  });
+
+  describe('a placement never replaces what stands at its destination (Q-466)', () => {
+    it('keep-both with a rename onto an existing file → 409 destination_exists; the occupant, the copy and the conflict are untouched', async () => {
+      const origPath = `cr-occ-orig-${RUN}.txt`;
+      const confPath = `cr-occ-conf-${RUN}.txt`;
+      const taken = `cr-occ-taken-${RUN}.txt`;
+      await uploadFile('general', origPath, 'local version');
+      await uploadFile('general', confPath, 'incoming version');
+      await uploadFile('general', taken, 'the occupant file');
+      const conflictId = await seedConflict('general', origPath, confPath);
+
+      const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}/resolve`, { action: 'keep-both', rename: taken });
+      assert.equal(r.status, 409, JSON.stringify(r.body));
+      assert.equal(r.body.code, 'destination_exists');
+      assert.equal(r.body.path, taken);
+
+      assert.equal((await downloadFile('general', taken)).body, 'the occupant file', 'the occupant was replaced');
+      assert.equal((await downloadFile('general', confPath)).body, 'incoming version', 'the copy left its place');
+      assert.equal((await get(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}`)).status, 200, 'a refused resolution closed the conflict');
+    });
+
+    it('save-to-space onto a file of the target space → 409 destination_exists, and a bulk failure item carries the same code, status and path', async () => {
+      const origPath = `cr-occ2-orig-${RUN}.txt`;
+      const confPath = `cr-occ2-conf-${RUN}.txt`;
+      await uploadFile('general', origPath, 'local version');
+      await uploadFile('general', confPath, 'incoming version');
+      await uploadFile(targetSpaceId, confPath, 'the target own file');
+      const single = await seedConflict('general', origPath, confPath);
+
+      const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${single}/resolve`, { action: 'save-to-space', targetSpaceId });
+      assert.equal(r.status, 409, JSON.stringify(r.body));
+      assert.equal(r.body.code, 'destination_exists');
+
+      const bulk = await post(INSTANCES.a, tokenA, '/api/conflicts/bulk-resolve', { ids: [single, 'nonexistent-conflict-id'], action: 'save-to-space', targetSpaceId });
+      assert.equal(bulk.status, 200, JSON.stringify(bulk.body));
+      assert.equal(bulk.body.resolved, 0);
+      const byId = Object.fromEntries(bulk.body.failed.map(f => [f.id, f]));
+      assert.equal(byId[single].code, 'destination_exists', JSON.stringify(bulk.body));
+      assert.equal(byId[single].status, 409);
+      assert.equal(byId[single].path, confPath);
+      assert.equal(typeof byId['nonexistent-conflict-id'].error, 'string');
+      assert.equal((await downloadFile(targetSpaceId, confPath)).body, 'the target own file', 'the target file was replaced');
+    });
+
+    it('a rename through a file → 409 path_blocked', async () => {
+      const origPath = `cr-through-orig-${RUN}.txt`;
+      const confPath = `cr-through-conf-${RUN}.txt`;
+      const blocker = `cr-through-blocker-${RUN}.txt`;
+      await uploadFile('general', origPath, 'local version');
+      await uploadFile('general', confPath, 'incoming version');
+      await uploadFile('general', blocker, 'a file');
+      const conflictId = await seedConflict('general', origPath, confPath);
+
+      const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}/resolve`, { action: 'keep-both', rename: `${blocker}/inside.txt` });
+      assert.equal(r.status, 409, JSON.stringify(r.body));
+      assert.equal(r.body.code, 'path_blocked');
+    });
+
+    it('a copy that is already gone closes the conflict with resolved: "nothing-to-place" and replaces nothing', async () => {
+      const origPath = `cr-gone-orig-${RUN}.txt`;
+      await uploadFile('general', origPath, 'local version');
+      const conflictId = await seedConflict('general', origPath, `cr-gone-conf-${RUN}.txt`);
+
+      const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}/resolve`, { action: 'keep-incoming' });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.status, 'resolved');
+      assert.equal(r.body.resolved, 'nothing-to-place');
+      assert.equal((await downloadFile('general', origPath)).body, 'local version', 'the local file was replaced by nothing');
+      assert.equal((await get(INSTANCES.a, tokenA, `/api/conflicts/${conflictId}`)).status, 404, 'the conflict stayed open');
     });
   });
 
