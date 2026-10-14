@@ -509,6 +509,30 @@ export const schema_updateTool: ToolHandler = {
           + 'happened rather than a deadline. A chrono type schema can override it. Absent leaves it unset, '
           + 'which is the built-in behaviour.',
       },
+      stampSkew: {
+        type: 'object',
+        description: 'The stamp-integrity check: compare a record\'s OWN timestamp property against the server\'s `createdAt` on write '
+          + 'and warn (never refuse) when they disagree by more than `warnMinutes` (default 40; `0` DISABLES the check). `properties` names '
+          + 'the properties to read, the first that parses wins (default `stampedAt`, `postedAt`). The object is replaced whole: a field '
+          + 'you leave out is gone. Same as `meta.stampSkew` on `PATCH /api/spaces/:id`.',
+        properties: {
+          warnMinutes: {
+            type: 'number', minimum: 0, maximum: 525_600,
+            description: 'Warn when the record\'s own stamp and the server\'s `createdAt` differ by more than this many minutes. Default 40; `0` disables the check.',
+          },
+          properties: {
+            type: 'array', items: { type: 'string', minLength: 1, maxLength: 200 }, maxItems: 20,
+            description: 'Names of the properties holding the record\'s own timestamp, tried in order, the first that parses wins. Default `stampedAt`, `postedAt`.',
+          },
+        },
+        additionalProperties: false,
+      },
+      rules: {
+        type: 'object',
+        description: 'Space-level rules every record must satisfy: a map of rule name to `{ rule, message, kinds? }`, `kinds` being the '
+          + 'knowledge types the rule governs (omitted: every kind). The map is replaced whole: send it without a rule to delete it. '
+          + 'A rule is stored and checked for shape; enforcement is not on yet.',
+      },
     },
     required: ['space'],
     additionalProperties: false,
@@ -616,8 +640,8 @@ export const save_spaceTool: ToolHandler = {
       },
       meta: {
         type: 'object',
-        description: 'Initial meta: typeSchemas, validationMode, strictLinkage, usageNotes, suppressEmbeddings. '
-          + 'An explicit value here wins over the seeded strict defaults.',
+        description: 'Initial meta: typeSchemas, validationMode, strictLinkage, usageNotes, suppressEmbeddings, whenDuePasses, '
+          + 'stampSkew and rules (the keys `schema_update` takes). An explicit value here wins over the seeded strict defaults.',
       },
     },
     required: ['label'],

@@ -46,8 +46,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
 import { normaliseRecordTtl } from './record-ttl.js';
-import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedMeta, stripServerOwnedSpace } from './body-schemas.js';
-import type { TypeSchemasZ } from './body-schemas.js';
+import {
+  UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError, parseSpaceMeta,
+  stripServerOwnedMeta, stripServerOwnedSpace,
+} from './body-schemas.js';
+import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
+import { mergeMetaFields, metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
@@ -76,36 +80,55 @@ export function mergeSpaceMeta(
 ): Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> {
   // Spread the existing base (drop housekeeping fields that updateSpace re-adds)
   const { version: _v, updatedAt: _u, previousVersions: _pv, ...existingBase } = existing;
-  const merged: Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> = { ...existingBase };
 
-  // Scalar fields — replace if present in incoming
-  if (incoming.purpose !== undefined) merged.purpose = incoming.purpose;
-  if (incoming.usageNotes !== undefined) merged.usageNotes = incoming.usageNotes;
-  if (incoming.validationMode !== undefined) merged.validationMode = incoming.validationMode;
-  if (incoming.strictLinkage !== undefined) merged.strictLinkage = incoming.strictLinkage;
-  // Guarded on `!== undefined`, not on truthiness. `suppressEmbeddings: false` is how an operator turns
-  // suppression back OFF, and a truthy guard would drop that patch and leave the space suppressed while
-  // answering 200 — the flag reporting one thing and the write path doing another.
-  if (incoming.suppressEmbeddings !== undefined) merged.suppressEmbeddings = incoming.suppressEmbeddings;
-
+  // Every field by its kind (`spaces/meta-fields.ts`), which is where `whenDuePasses` and `stampSkew` used to fall out of a
+  // list of six: a scalar replaces when STATED (`!== undefined`, never truthiness — `suppressEmbeddings: false` is how an
+  // operator turns suppression back off), an object replaces whole, and the types are merged below.
+  //
   // typeSchemas — merge per-KT, per-type: incoming types add/update, existing untouched types preserved.
   // Under `replace` the payload is authoritative instead, so a type absent from it is deleted. Note the
   // guard is on `!== undefined`, so `replace` with `typeSchemas: {}` clears every type — which is the only
   // way to express "this space declares nothing" and has to be reachable.
-  if (incoming.typeSchemas !== undefined && typeSchemasMode === 'replace') {
-    merged.typeSchemas = incoming.typeSchemas;
-  } else if (incoming.typeSchemas !== undefined) {
-    const existingTs = existingBase.typeSchemas ?? {};
-    const mergedTs: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = { ...existingTs };
-    for (const [kt, ktMap] of Object.entries(incoming.typeSchemas) as
-        [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
+  return mergeMetaFields(existingBase as Record<string, unknown>, incoming as Record<string, unknown>, (existingTs, incomingTs) => {
+    if (typeSchemasMode === 'replace') return incomingTs;
+    const had = (existingTs ?? {}) as Partial<Record<KnowledgeType, Record<string, TypeSchema>>>;
+    const mergedTs: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = { ...had };
+    for (const [kt, ktMap] of Object.entries(incomingTs as object) as [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
       if (!ktMap) continue;
-      mergedTs[kt] = { ...(existingTs[kt] ?? {}), ...ktMap };
+      mergedTs[kt] = { ...(had[kt] ?? {}), ...ktMap };
     }
-    merged.typeSchemas = mergedTs;
-  }
+    return mergedTs;
+  }) as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>;
+}
 
-  return merged;
+/**
+ * What a NETWORKED write proposes: the fields the request named and, inside the types, only the types it changed (R6-6).
+ *
+ * A round used to carry the merged meta the write was computed from — the space's EFFECTIVE meta, own definitions and every network's
+ * layer — and conclusion then merged every one of those types into the proposer's own definitions and into the voted network's layer.
+ * A one-type edit copied each other network's types into this network's layer, and the network's types into this instance's own
+ * definitions, where they are served to every network the space is in ("nothing mixed is sent on"). So the round carries the edit
+ * and nothing else; a member applies exactly that.
+ *
+ * `changedTypes` is `kind:Type` for each type whose definition differs from the base the write was merged over
+ * (`typesAnEditChanges`), so a type the request merely repeated is not proposed again.
+ */
+export function proposalOf(merged: SpaceMeta, named: Partial<SpaceMeta> | undefined, changedTypes: readonly string[]): SpaceMeta {
+  const out: Record<string, unknown> = {};
+  const mergedFields = merged as Record<string, unknown>;
+  for (const field of proposedMetaFields(named ?? {})) {
+    if (metaFieldKind(field) !== 'per-type') { out[field] = mergedFields[field]; continue; }
+    const types: Record<string, Record<string, unknown>> = {};
+    const held = (mergedFields[field] ?? {}) as Record<string, Record<string, unknown> | undefined>;
+    for (const ref of changedTypes) {
+      const at = ref.indexOf(':');
+      const kind = ref.slice(0, at), type = ref.slice(at + 1);
+      const def = held[kind]?.[type];
+      if (def !== undefined) (types[kind] ??= {})[type] = def;
+    }
+    out[field] = types;
+  }
+  return out as SpaceMeta;
 }
 
 /**
@@ -177,8 +200,13 @@ export type MetaUpdatePlan = {
   space: SpaceConfig;
   /** The parsed body, with `description` already rewritten into `meta.purpose`. */
   data: z.infer<typeof UpdateSpaceBody>;
-  /** The merged meta to store, or `undefined` when the request touches no meta at all. */
-  mergedMeta: SpaceMeta | undefined;
+  /**
+   * The merged meta to store, or `undefined` when the request touches no meta at all. Parsed (`Q-216`): the parts the request
+   * changed went through the one body, and the rest is what the store already holds.
+   */
+  mergedMeta: ParsedSpaceMeta | undefined;
+  /** What a networked write proposes — the changed fields and types only (R6-6); `undefined` with `mergedMeta`. */
+  proposal: SpaceMeta | undefined;
   /** Present only when `documentExtraction` was in the body; already capped to the instance ceiling. */
   documentExtraction: DocExtractionMode | undefined;
   hasDocExtraction: boolean;
@@ -255,6 +283,12 @@ export function planSpaceMetaUpdate(input: {
     if (brokenRefs.length > 0) {
       return { ok: false, refusal: { status: 422, body: { error: brokenRefsError(brokenRefs) } } };
     }
+    // And a reference to an entry of ANOTHER kind: its endpoints and functional would never apply (`Q-215`). Checked here, at the save of
+    // the reference, against this instance's library — never inside the shared parse, because a peer's library is its own.
+    const wrongKind = findWrongKindLibraryRefs(parsed.data.meta.typeSchemas as z.infer<typeof TypeSchemasZ>);
+    if (wrongKind.length > 0) {
+      return { ok: false, refusal: { status: 422, body: { error: wrongKindRefsError(wrongKind) } } };
+    }
   }
 
   // Snapshot for the audit log's change list, taken BEFORE anything is applied. Handing the whole record
@@ -316,10 +350,16 @@ export function planSpaceMetaUpdate(input: {
   // Merge the incoming meta with the existing meta so that PATCH has true RFC-7396 semantics: scalar fields
   // overwrite, typeSchemas entries are added/updated, and types *not* mentioned in the body are preserved.
   // `typeSchemasMode: 'replace'` opts out of that last clause so a deletion can be expressed at all.
-  const mergedMeta: SpaceMeta | undefined =
-    parsed.data.meta !== undefined
-      ? mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge') as SpaceMeta
-      : undefined;
+  // What is stored is PARSED (`Q-216`): the merged result is read against `base`, so the parts the request changed go through the one
+  // body and every other part is, by construction, what the store already holds. The planner's own body parse above is for the
+  // request's shape; this is the value a store accepts.
+  let mergedMeta: ParsedSpaceMeta | undefined;
+  if (parsed.data.meta !== undefined) {
+    const minted = parseSpaceMeta(mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge'), { against: base });
+    if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
+    mergedMeta = minted.meta;
+  }
+  const changedTypes = typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined);
 
   return {
     ok: true,
@@ -328,6 +368,7 @@ export function planSpaceMetaUpdate(input: {
       space,
       data: parsed.data,
       mergedMeta,
+      proposal: mergedMeta === undefined ? undefined : proposalOf(mergedMeta, parsed.data.meta as Partial<SpaceMeta> | undefined, changedTypes),
       documentExtraction,
       hasDocExtraction,
       recordTtlDays,
@@ -335,7 +376,7 @@ export function planSpaceMetaUpdate(input: {
       audit,
       ...(targetNetwork !== undefined ? { targetNetwork } : {}),
       droppedTypes: typesAReplaceWouldDrop(base, parsed.data.meta as Partial<SpaceMeta> | undefined, parsed.data.typeSchemasMode ?? 'merge'),
-      changedTypes: typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined),
+      changedTypes,
     },
   };
 }
@@ -369,7 +410,7 @@ export type MetaUpdateOutcome =
  * `not_found` — the one thing that can change between planning and writing.
  */
 export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUpdateOutcome> {
-  const { spaceId: id, space, data: patchData, mergedMeta } = plan;
+  const { spaceId: id, space, data: patchData, mergedMeta, proposal } = plan;
   const cfg = getConfig();
 
   // Duplicate rules are local (never governed) — applied now, so they are not silently dropped when a meta change
@@ -420,7 +461,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           votes: [],
           // The network's id for the space, so each member resolves it to its own local id (F-39.4).
           spaceId: localToRemote(net, id),
-          pendingMeta: mergedMeta,
+          // Only what this write CHANGED (R6-6): the fields it named and the types it changed, never the whole meta it was
+          // merged over — which was the space's effective meta, and copied every other network's types into this network's layer.
+          pendingMeta: proposal,
           // Provenance, so conclusion can apply just this patch rather than this whole snapshot. Rounds stay open
           // for `votingDeadlineHours`, so a second proposal landing before the first concludes is ordinary, and
           // without these two fields the later one reverts the earlier one's edit with no error anywhere. See

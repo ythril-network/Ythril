@@ -48,10 +48,16 @@
  * version is therefore the compatibility switch, and the pre-upgrade behaviour is the fallback.
  */
 import type { SpaceMeta } from '../config/types.js';
+import { parseSpaceMeta, type ParsedSpaceMeta } from '../spaces/body-schemas.js';
+import { boundedNames, metaFieldKind, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
 
 /** The parts of a `VoteRound` this module reads. Kept structural so it is testable without a full round. */
 export interface MetaRoundProposal {
-  /** The full merged meta computed when the round was proposed. */
+  /**
+   * What the proposer's write CHANGED, laid out as a meta (R6-6): the fields it named and, inside `typeSchemas`, the types it
+   * changed — never the whole meta it was computed from, which carried every other type of the space into the network's layer.
+   * A round from a peer before that release holds the whole merged meta; `parseMetaRound` finds its parts by comparing it.
+   */
   pendingMeta: SpaceMeta;
   /**
    * Top-level meta fields the proposer changed. Absent on rounds from peers predating field-merge — see
@@ -72,6 +78,11 @@ export interface MetaRoundApplication {
   conflicts: string[];
   /** True when the round carried no provenance and was applied wholesale (pre-upgrade proposer). */
   wholesale: boolean;
+  /**
+   * The fields this release has never heard of that the round named (R6-7), by name, bounded. A tolerant reader applies what it
+   * knows and reports the rest here; it never stores one, so a newer peer's new key is not a reason to refuse the round.
+   */
+  unknownFields: string[];
 }
 
 /**
@@ -80,6 +91,10 @@ export interface MetaRoundApplication {
  * Pure: takes the current meta and the round, returns the result and what it collided with. Conclusion
  * happens independently on every peer, so this has to be a function of state both peers can see — anything
  * read from local wall-clock or ambient config would let two peers apply the same round differently.
+ *
+ * Each field is merged by its kind (`spaces/meta-fields.ts`): a scalar or a whole object replaces, the types are merged per type
+ * name (a round REPLACES a type by name, so what the new definition lacks is gone), and a field with no kind is reported, not stored.
+ * This is the raw merge; what may be STORED is {@link parseMetaRound}'s.
  */
 export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundProposal): MetaRoundApplication {
   const strip = (m: SpaceMeta): Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> => {
@@ -92,12 +107,16 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
   // Pre-upgrade round, or one whose proposer recorded no provenance: apply exactly as before. Field-merging
   // an unknown changed-set would mean applying nothing, so a carried motion would silently do nothing.
   if (round.baseMetaVersion === undefined || fields === undefined) {
-    return { meta: strip(round.pendingMeta), conflicts: [], wholesale: true };
+    const whole = strip(round.pendingMeta) as Record<string, unknown>;
+    const known = Object.fromEntries(Object.entries(whole).filter(([k]) => metaFieldKind(k) !== undefined));
+    const unknown = Object.keys(whole).filter(k => metaFieldKind(k) === undefined);
+    return { meta: known as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>, conflicts: [], wholesale: true, unknownFields: boundedNames(unknown) };
   }
 
   const base = current ? strip(current) : {};
   const merged: Record<string, unknown> = { ...base };
   const proposed = strip(round.pendingMeta) as Record<string, unknown>;
+  const unknownFields: string[] = [];
   // Only when the meta has actually moved since the proposal can an overwrite be a conflict. Equal
   // versions mean nothing else concluded in between, so every write is uncontested.
   const moved = (current?.version ?? 0) !== round.baseMetaVersion;
@@ -129,16 +148,22 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
   const conflicts: string[] = [];
 
   for (const field of fields) {
-    if (field === 'typeSchemas') {
+    const kind = metaFieldKind(field);
+    if (kind === undefined) {
+      // A field this release has never heard of: reported, never stored (R6-7).
+      unknownFields.push(field);
+      continue;
+    }
+    if (kind === 'per-type') {
       // Merged per knowledge-type and per type name rather than replaced, matching what `mergeSpaceMeta`
       // does on the request path. A type another round added stays; one this round added or edited wins.
       //
       // A type the proposer *deleted* is therefore not deleted here — but it was never deletable this way:
       // under merge semantics an absent type is indistinguishable from a removed one, which is exactly why
       // deletion goes through the schema PUT with its own precondition instead.
-      const currentTs = ((base as SpaceMeta).typeSchemas ?? {}) as Record<string, object>;
-      const proposedTs = ((proposed as SpaceMeta).typeSchemas ?? {}) as Record<string, object>;
-      const baseTs = ((baseMeta?.['typeSchemas'] ?? {}) as Record<string, object>);
+      const currentTs = ((base as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>;
+      const proposedTs = ((proposed as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>;
+      const baseTs = ((baseMeta?.[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>);
       const mergedTs: Record<string, unknown> = { ...currentTs };
       for (const [kt, ktMap] of Object.entries(proposedTs)) {
         if (!ktMap) continue;
@@ -147,10 +172,10 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
         // it is no longer where the round found it.
         if (moved && differs(currentTs[kt], mergedTs[kt])
             && (baseMeta === undefined || differs(baseTs[kt], currentTs[kt]))) {
-          conflicts.push(`typeSchemas.${kt}`);
+          conflicts.push(`${PER_TYPE_META_FIELD}.${kt}`);
         }
       }
-      merged['typeSchemas'] = mergedTs;
+      merged[PER_TYPE_META_FIELD] = mergedTs;
       continue;
     }
 
@@ -166,7 +191,30 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
     meta: merged as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>,
     conflicts,
     wholesale: false,
+    unknownFields: boundedNames(unknownFields),
   };
+}
+
+/** What {@link parseMetaRound} answers: the meta a store may take, or why this member cannot read the round. */
+export type MetaRoundParse =
+  | { ok: true; meta: ParsedSpaceMeta; conflicts: string[]; wholesale: boolean; unknownFields: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * The meta a passed round produces for `current`, PARSED — or the reason this member cannot read it (`Q-216`, R6-6).
+ *
+ * A passed round used to reach the stores with no parse at all, and `effectiveMeta` then dropped a layer that no longer parsed,
+ * silently: a member held a layer it did not run, and one bad type stopped every good type that came with it. The rule now: the
+ * round is merged ({@link applyMetaRound}) and the result is parsed AGAINST `current` — a part equal to what `current` holds is
+ * carried and only what differs is parsed, so a legacy wholesale round that repeats a stored type a stricter body would refuse
+ * today is not made unreadable by it — and if any changed part does not parse the round is NOT applied, in whole or in part.
+ * Never throws; `reason` names the failing types (bounded) and is what the round's view and `space_schema_layers` show.
+ */
+export function parseMetaRound(current: SpaceMeta | undefined, round: MetaRoundProposal): MetaRoundParse {
+  const applied = applyMetaRound(current, round);
+  const parsed = parseSpaceMeta(applied.meta, { against: current ?? {} });
+  if (!parsed.ok) return { ok: false, reason: parsed.failed.join('; ') };
+  return { ok: true, meta: parsed.meta, conflicts: applied.conflicts, wholesale: applied.wholesale, unknownFields: applied.unknownFields };
 }
 
 /**

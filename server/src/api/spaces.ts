@@ -38,8 +38,9 @@ import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import {
-  TypeSchemaZ, TypeSchemasZ, SpaceMetaBody,
-  stripServerOwnedMeta, findBrokenLibraryRefs,
+  TypeSchemasZ, SpaceMetaBody,
+  stripServerOwnedMeta, findBrokenLibraryRefs, findWrongKindLibraryRefs, wrongKindRefsError,
+  parseTypeSchema, withTypeSchemas,
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields } from '../auth/require-settings-fields.js';
@@ -395,6 +396,12 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
     return;
   }
+  // And a reference to an entry filed under ANOTHER kind (`Q-215`): its fields would never apply.
+  const wrongKind = findWrongKindLibraryRefs(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
+  if (wrongKind.length > 0) {
+    res.status(422).json({ error: wrongKindRefsError(wrongKind) });
+    return;
+  }
 
   // Write a backup of the previous schema before replacing it
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
@@ -424,7 +431,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
 
   // Replace the entire typeSchemas (full-replace semantics), through the own definitions (F-39.2) so a space whose
   // meta is rebuilt from network layers keeps the edit.
-  const updated = commitOwnMetaEdit(id, base => ({ ...base, typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'] }));
+  const updated = commitOwnMetaEdit(id, base => withTypeSchemas(base, parsed.data.typeSchemas));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -524,17 +531,24 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     return;
   }
 
-  const parsed = TypeSchemaZ.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  // Parsed WITH the collection it is filed under (`Q-215`): `TypeSchemaZ` alone cannot see it, so `endpoints` on an entity type
+  // was stored by this door while every other door refused it.
+  const parsed = parseTypeSchema(knowledgeType as KnowledgeType, typeName, req.body ?? {});
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.message });
     return;
   }
 
   // Validate any $ref against the instance schema library before writing
-  if ('$ref' in parsed.data) {
-    const brokenRefs = findBrokenLibraryRefs({ [knowledgeType]: { _check: parsed.data } });
+  if ('$ref' in parsed.schema) {
+    const brokenRefs = findBrokenLibraryRefs({ [knowledgeType]: { _check: parsed.schema } });
     if (brokenRefs.length > 0) {
       res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
+      return;
+    }
+    const wrongKind = findWrongKindLibraryRefs({ [knowledgeType]: { [typeName]: parsed.schema } });
+    if (wrongKind.length > 0) {
+      res.status(422).json({ error: wrongKindRefsError(wrongKind) });
       return;
     }
   }
@@ -567,10 +581,10 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   }
 
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.data } }, 'merge');
+  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.schema } }, 'merge');
   if (voted) { res.status(voted.status).json(voted.body); return; }
   // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
-  const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.data));
+  const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.schema));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -584,7 +598,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
 
-  res.json({ knowledgeType: kt, typeName, schema: parsed.data });
+  res.json({ knowledgeType: kt, typeName, schema: parsed.schema });
 });
 
 // DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — remove a single type definition

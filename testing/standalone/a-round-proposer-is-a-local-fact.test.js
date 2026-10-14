@@ -164,8 +164,9 @@ describe('this instance\'s round state never crosses the wire', () => {
     assert.deepEqual(served.votes, [yes(SELF)].map(v => ({ ...v, castAt: served.votes[0].castAt })));
   });
   it('names every local field — a list that lost one would pass every loop above', () => {
-    // How a round ended here (outcome, concludedAt) is this instance's own reading, like whether it applied the round.
-    assert.deepEqual([...localState.LOCAL_ROUND_FIELDS].sort(), ['appliedHere', 'concludedAt', 'outcome', 'proposedHere']);
+    // How a round ended here (outcome, concludedAt) is this instance's own reading, like whether it applied the round. So is why this
+    // member did not read the schema a meta_change round carries (`refusedHere`, R6-6): what one member cannot parse says nothing of another.
+    assert.deepEqual([...localState.LOCAL_ROUND_FIELDS].sort(), ['appliedHere', 'concludedAt', 'outcome', 'proposedHere', 'refusedHere']);
   });
 });
 

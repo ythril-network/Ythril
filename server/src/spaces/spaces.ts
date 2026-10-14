@@ -8,6 +8,7 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
+import type { ParsedSpaceMeta } from './body-schemas.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
 import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
@@ -39,10 +40,11 @@ export function spacePurpose(space: { meta?: SpaceMeta }): string | undefined {
 /** Update mutable fields (label, meta, quotas, ladders) of an existing space in config.
  *  When `meta` is provided the version counter is auto-incremented and the
  *  previous version is pushed to `previousVersions` (capped at META_VERSION_CAP).
- *  Returns the updated SpaceConfig, or null if the space was not found. */
+ *  `meta` is a `ParsedSpaceMeta` (`Q-216`): this is the store, and what it is handed was parsed by the one body or is made of what
+ *  it already holds. Returns the updated SpaceConfig, or null if the space was not found. */
 export function updateSpace(
   spaceId: string,
-  updates: { label?: string; maxGiB?: number | null; meta?: SpaceMeta; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: DocExtractionMode | null; imageAnalysis?: ImageLevel | null; audioAnalysis?: AudioLevel | null; videoAnalysis?: VideoLevel | null; textAnalysis?: TextLevel | null; completeLinkage?: boolean },
+  updates: { label?: string; maxGiB?: number | null; meta?: ParsedSpaceMeta; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: DocExtractionMode | null; imageAnalysis?: ImageLevel | null; audioAnalysis?: AudioLevel | null; videoAnalysis?: VideoLevel | null; textAnalysis?: TextLevel | null; completeLinkage?: boolean },
 ): SpaceConfig | null {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);

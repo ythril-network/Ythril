@@ -13,7 +13,8 @@ import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } 
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { log, peerList, peerText } from '../util/log.js';
-import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
+import type { SpaceConfig, FactDoc } from '../config/types.js';
+import type { ParsedSpaceMeta } from './body-schemas.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
 import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
@@ -611,7 +612,8 @@ export async function createSpace(opts: {
   folders?: string[];
   maxGiB?: number;
   proxyFor?: string[];
-  meta?: SpaceMeta;
+  /** The initial meta, parsed (`Q-216`): a space is stored with the schema it was created with, so it is a store like the others. */
+  meta?: ParsedSpaceMeta;
   /** Face descriptor width for this space. Create-only — see `SpaceConfig.faceDescriptorDims`. */
   faceDescriptorDims?: number;
 }, creator: SpaceCreator): Promise<SpaceConfig> {

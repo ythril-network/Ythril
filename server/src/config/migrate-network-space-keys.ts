@@ -50,7 +50,9 @@ export function migrateNetworkSpaceKeys(config: Pick<Config, 'networks'>): boole
       const alias = net.spaceMap ?? {};
       const layers = rekey(net.schemaLayers as Keyed | undefined, net.spaces, alias, 'schema layer', net.id);
       const origins = rekey(net.spaceOrigins as Keyed | undefined, net.spaces, alias, 'membership origin', net.id);
+      const unread = rekey(net.schemaLayerUnread as Keyed | undefined, net.spaces, alias, 'schema layer note', net.id);
       if (layers) { net.schemaLayers = layers as typeof net.schemaLayers; changed = true; }
+      if (unread) { net.schemaLayerUnread = unread as typeof net.schemaLayerUnread; changed = true; }
       if (origins) { net.spaceOrigins = origins as typeof net.spaceOrigins; changed = true; }
     } catch (err) {
       log.warn(`Network ${peerText(net.id)}: could not re-key its per-space entries (will retry next boot): ${peerText(err)}`);

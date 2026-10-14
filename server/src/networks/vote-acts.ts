@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
-import { concludeRoundIfReady } from '../sync/governance.js';
+import { concludeRoundIfReady, planPassedMetaChange } from '../sync/governance.js';
 import { getSyncHistory } from '../sync/history.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { parseStrictLimit } from '../util/strict-limit.js';
@@ -103,6 +103,21 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   const found = roundToVoteOn(net, roundId, now);
   if ('refusal' in found) return found.refusal;
   const { round } = found;
+
+  // A yes on a schema this member cannot read would be a vote for something it will not apply (`Q-216`, R6-6): a round whose changed
+  // parts a member cannot parse is applied whole or not at all, and the member says no yes to it — and says why, on the round.
+  // A veto is always its own to cast.
+  if (parsed.data.vote === 'yes' && round.type === 'meta_change') {
+    const plan = planPassedMetaChange(net, round);
+    if (plan && !plan.ok) {
+      round.refusedHere = peerText(plan.reason, { max: 1000 });
+      saveConfig(cfg);
+      return {
+        status: 409,
+        error: `This instance cannot read the schema this round proposes, so it casts no yes on it: ${peerText(plan.reason, { max: 1000 })}`,
+      };
+    }
+  }
 
   const instanceId = cfg.instanceId;
   const existing = round.votes.findIndex(v => v.instanceId === instanceId);

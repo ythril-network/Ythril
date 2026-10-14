@@ -25,7 +25,10 @@ import type { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { slugify } from './_shared.js';
 import { createSpace, type SpaceCreator } from './lifecycle.js';
-import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
+import {
+  CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError,
+  parseSpaceMeta, stripServerOwnedSpace,
+} from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
 import { isProxy, isWildcardProxy } from './proxy.js';
 import { refusalText } from '../brain/store-failure.js';
@@ -106,6 +109,11 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
     if (brokenRefs.length > 0) {
       return { ok: false, refusal: { status: 422, body: { error: brokenRefsError(brokenRefs) } } };
     }
+    // A reference to an entry of another kind would carry fields that never apply (`Q-215`): refused at the save of the reference.
+    const wrongKind = findWrongKindLibraryRefs(requestMeta.typeSchemas as z.infer<typeof TypeSchemasZ>);
+    if (wrongKind.length > 0) {
+      return { ok: false, refusal: { status: 422, body: { error: wrongKindRefsError(wrongKind) } } };
+    }
   }
 
   // New user-created spaces default to a fully-strict schema posture (owner decision 2026-07-25):
@@ -118,9 +126,16 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
     ? requestMeta
     : { validationMode: 'strict', strictLinkage: true, ...(requestMeta ?? {}) };
 
+  // What `createSpace` stores is parsed: the seeded meta is the caller's parsed meta with two defaults laid under it, and it
+  // goes through the one parse again so the plan carries the brand a store takes (`Q-216`).
+  const minted = seededMeta === undefined ? undefined : parseSpaceMeta(seededMeta);
+  if (minted && !minted.ok) {
+    return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
+  }
+
   return {
     ok: true,
-    plan: { args: { id, label, folders, maxGiB, proxyFor, meta: seededMeta, faceDescriptorDims } },
+    plan: { args: { id, label, folders, maxGiB, proxyFor, meta: minted?.ok ? minted.meta : undefined, faceDescriptorDims } },
   };
 }
 

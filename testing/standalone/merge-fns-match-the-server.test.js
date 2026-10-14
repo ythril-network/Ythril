@@ -88,7 +88,8 @@ describe('the merge-function lists agree across the API and the editor', () => {
       'the schema library declares its own merge-function sets again — import the grammar instead');
     assert.equal(setLiteral(read(LIBRARY), 'booleanFns'), null,
       'the schema library declares its own merge-function sets again — import the grammar instead');
-    assert.match(read(LIBRARY), /PropertySchemaZ.*from '\.\.\/spaces\/body-schemas\.js'/,
+    // Since Q-215 the library's body is built from `InlineTypeSchemaZ` (whose `propertySchemas` IS the shared grammar), so that is the import.
+    assert.match(read(LIBRARY), /(?:PropertySchemaZ|InlineTypeSchemaZ)[^;]*from '\.\.\/spaces\/body-schemas\.js'/,
       'and it no longer imports the shared one, so whatever it validates with is a copy');
   });
 

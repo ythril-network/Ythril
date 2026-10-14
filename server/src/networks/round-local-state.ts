@@ -15,6 +15,8 @@
  * - `outcome` and `concludedAt`: how THIS instance's conclusion read the round, and when. An instance's own reading, unsigned, which
  *   no decision reads back (`a-round-outcome-decides-nothing-and-is-never-markup.test.js`); taken from a peer it would let one
  *   instance label another's round.
+ * - `refusedHere`: why THIS instance did not read the schema a `meta_change` round carries (R6-6). What one member could not parse
+ *   says nothing of another, and taken from a peer it would let one instance tell another's operator its own round is unreadable.
  *
  * So every `pendingRounds.push` lives here, and a new site cannot forget the flag: opening a round records it, adopting
  * one strips whatever a peer sent, and serving one strips it on the way out. `a-round-proposer-is-a-local-fact.test.js`
@@ -25,7 +27,7 @@ import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
-export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt'] as const;
+export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere'] as const;
 type LocalField = typeof LOCAL_ROUND_FIELDS[number];
 
 /** `round` with every local field removed. */

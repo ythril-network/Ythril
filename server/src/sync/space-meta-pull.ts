@@ -13,13 +13,12 @@
  * Never throws. A schema that cannot be fetched or merged is logged and the data sync goes on: the owner's rule for
  * schema is that it never stops data.
  */
-import type { NetworkConfig, NetworkMember, SpaceMeta } from '../config/types.js';
-import { withoutBrokenLibraryRefs } from '../spaces/body-schemas.js';
+import type { NetworkConfig, NetworkMember } from '../config/types.js';
+import { readPeerMeta, withoutBrokenLibraryRefs } from '../spaces/body-schemas.js';
 import { storeNetworkLayer } from '../spaces/effective-meta.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { isUpstreamPeer } from '../networks/network-spaces.js';
-import { mergeReplicatedMeta } from './replicated-meta.js';
 import { peerSafeFetch } from './peer-fetch.js';
 
 /** @returns whether the local meta changed. */
@@ -55,22 +54,23 @@ export async function pullSpaceMetaFromUpstream(
  */
 export function acceptNetworkLayer(networkId: string, spaceId: string, incoming: unknown, from: string): boolean {
   try {
-    // Validated on its own, as the layer it becomes (F-39.2) — merged into nothing, so nothing local rides along.
-    const merged = mergeReplicatedMeta({}, incoming);
-    if (merged.invalid) {
-      log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}' refused whole, nothing merged: ${peerText(merged.invalid)}`);
+    // Validated on its own, as the layer it becomes (F-39.2) — merged into nothing, so nothing local rides along. Read as a
+    // TOLERANT reader (R6-7): what this release knows is kept and what it has never heard of is named, not a reason to refuse the
+    // layer. A field that is known and WRONG still refuses it whole.
+    const read = readPeerMeta(incoming);
+    if (!read.ok) {
+      log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}' refused whole, nothing merged: ${peerText(read.message)}`);
       return false;
     }
     // Q-60: a type naming a library entry this instance lacks is left out, and only it. The sender inlines every
     // reference it can resolve, so what remains is one the sender could not resolve either; refusing the whole
     // schema for it cost the member every other type and the space's posture.
-    const kept = withoutBrokenLibraryRefs(merged.meta.typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined);
+    const kept = withoutBrokenLibraryRefs(read.meta);
     if (kept.dropped.length) {
       log.warn(`Schema from ${peerText(from)} for '${peerText(spaceId)}': left out ${peerList(kept.dropped, ', ')}, which reference schema library entries neither side holds; the rest is merged`);
     }
-    const layer = { ...merged.meta, ...(merged.meta.typeSchemas ? { typeSchemas: kept.typeSchemas } : {}) } as SpaceMeta;
     // Kept as this network's layer; the effective meta is rebuilt from own ⊕ layers in precedence.
-    const changed = storeNetworkLayer(networkId, spaceId, layer);
+    const changed = storeNetworkLayer(networkId, spaceId, kept.meta, read.unknown);
     if (changed) log.info(`Schema for '${peerText(spaceId)}' merged from ${peerText(from)} (network ${peerText(networkId)})`);
     return changed;
   } catch (err) {

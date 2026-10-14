@@ -94,6 +94,12 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   targetNetwork: area('networks', 'write'),
   'meta.typeSchemas': area('schema', 'write'),
   'meta.whenDuePasses': area('schema', 'write'),
+  // `Q-217`: it changes what a space's records are checked against — a stamp that disagrees with the server's clock is a warning, and
+  // `warnMinutes: 0` switches the check off — which is the shape the schema area owns, and the same rung as `whenDuePasses`.
+  'meta.stampSkew': area('schema', 'write'),
+  // A rule says what every record of the space must satisfy, so it can start refusing writes that used to succeed: the same rung as
+  // `validationMode`, which is what decides whether a violation refuses at all (R6-12). Stored and enforced by nothing until F-46.
+  'meta.rules': area('schema', 'admin'),
 
   // ENFORCEMENT rather than shape: flipping either makes writes that used to succeed start failing, for
   // every caller in the space, without anything having changed about their data.

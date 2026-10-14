@@ -214,6 +214,7 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   forgetSpaceAliases(net, localId);
   const hadLayer = Boolean(net.schemaLayers?.[localId]);
   if (net.schemaLayers) delete net.schemaLayers[localId];
+  if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
   for (const member of net.members) {
     for (const key of PER_SPACE_WATERMARKS) delete (member[key] as Record<string, unknown> | undefined)?.[localId];

@@ -73,7 +73,9 @@ describe('the two surfaces are otherwise in step', () => {
   it('the library accepts suppressEmbeddings, as the inline schema does', () => {
     // The field that WAS a real gap of this shape, closed when it shipped. Pinned so the library does not fall behind
     // again the next time a per-type field is added.
-    assert.match(CODE, /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
+    // Since Q-215 the library's body is built from the inline definition's own shape, so the field cannot be missing from it unless the
+    // inline body lacks it (`the-library-door-takes-what-the-inline-door-takes.test.js` runs it, for every key).
+    assert.match(CODE, /\.\.\.InlineTypeSchemaZ\.shape/);
   });
 
   it('the client strips retention rather than relying on the 400', () => {

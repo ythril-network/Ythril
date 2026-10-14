@@ -127,8 +127,11 @@ describe('the grammar exists once', () => {
       + `accepts and the other refuses:\n  ${offenders.join('\n  ')}`);
   });
 
-  it('and the library imports the one that exists', () => {
-    assert.match(src(LIBRARY), /import\s*\{[^}]*PropertySchemaZ[^}]*\}\s*from\s*'\.\.\/spaces\/body-schemas\.js'/,
+  it('and the library takes the one that exists', () => {
+    // Since `Q-215` the library's whole body is built from the inline definition (`InlineTypeSchemaZ`), whose `propertySchemas` is
+    // the shared grammar — so it needs no import of `PropertySchemaZ` of its own, and the copy that used to sit here cannot return.
+    assert.match(src(LIBRARY), /import\s*\{[^}]*\b(?:PropertySchemaZ|InlineTypeSchemaZ)\b[^}]*\}\s*from\s*'\.\.\/spaces\/body-schemas\.js'/,
       'the schema library does not import the shared grammar, so whatever it validates with is a copy');
+    assert.match(src(LIBRARY), /\.\.\.InlineTypeSchemaZ\.shape/, 'the library body is not built from the inline definition');
   });
 });

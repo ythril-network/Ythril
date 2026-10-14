@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { clashesOf, replicatedMetaOf } from '../sync/replicated-meta.js';
+import { carriedLocalId } from '../sync/space-map.js';
 import { layersFor, recomputeEffectiveMeta } from './effective-meta.js';
 
 /** An act's answer: the HTTP status is the contract, so both doors carry it. */
@@ -38,7 +39,22 @@ export function schemaLayersAct(spaceId: string): SchemaLayersActResult {
     body: {
       spaceId,
       own: replicatedMetaOf(space.ownMeta ?? space.meta),
-      layers: layers.map(l => ({ networkId: l.networkId, networkLabel: label(l.networkId), meta: l.meta })),
+      layers: layers.map(l => {
+        const net = cfg.networks.find(n => n.id === l.networkId);
+        // What this release left out of the layer as the network sent it (R6-7): names only, bounded — a layer that is partly
+        // unread says so here instead of being refused, and an operator can see why it differs from what the peer holds.
+        const unknownFields = net?.schemaLayerUnread?.[spaceId];
+        // Rounds of this network about this space that passed or are open and that THIS member could not read (R6-6): its yes was
+        // never cast on them and none of them was applied, and the reason is the round's own `refusedHere`.
+        const refusedRounds = (net?.pendingRounds ?? [])
+          .filter(r => r.type === 'meta_change' && r.refusedHere !== undefined && carriedLocalId(net!, r.spaceId) === spaceId)
+          .map(r => ({ roundId: r.roundId, reason: r.refusedHere! }));
+        return {
+          networkId: l.networkId, networkLabel: label(l.networkId), meta: l.meta,
+          ...(unknownFields?.length ? { unknownFields } : {}),
+          ...(refusedRounds.length ? { refusedRounds } : {}),
+        };
+      }),
       precedence: layers.map(l => l.networkId),
       clashes: clashesOf(layers),
     },
