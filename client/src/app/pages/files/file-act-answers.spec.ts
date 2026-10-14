@@ -97,25 +97,56 @@ describe('the Files page — a refused file act says why', () => {
     expect(c.renamingEntry()).toBe('a.txt');
   });
 
-  it('destination_taken_by_other names the path and is not the generic failure', () => {
-    const { c, toasts } = create({
-      moveFile: () => throwError(() => answer(409, { error: 'server words', code: 'destination_taken_by_other', path: 'b.txt' })),
-    });
-    rename(c);
-    expect(toasts.error).toEqual([said('destination_taken_by_other', 'b.txt')]);
-    expect(toasts.error[0]).toContain('b.txt');
-    expect(toasts.error[0]).not.toBe(en['files.error.renameFailed']);
-  });
-
-  it('destination_exists (a move onto something that is already there) names the path and moves nothing', () => {
+  it('destination_exists (a move onto something that is already there) names the path, says what to do, and moves nothing', () => {
     const { c, toasts } = create({
       moveFile: () => throwError(() => answer(409, { error: 'server words', code: 'destination_exists', path: 'b.txt' })),
     });
     rename(c);
     expect(toasts.error).toEqual([said('destination_exists', 'b.txt')]);
     expect(toasts.error[0]).toContain('b.txt');
+    expect(toasts.error[0]).not.toBe(en['files.error.renameFailed']);
     expect(toasts.info).toEqual([]);
     expect(c.renamingEntry()).toBe('a.txt');
+  });
+
+  it('destination_exists says that a move replaces nothing and that deleting what is there deletes it everywhere it is replicated', () => {
+    const statements: Record<string, RegExp[]> = {
+      en: [/never replaces/, /delete what is there first/, /every instance it is replicated to/],
+      de: [/ersetzt nie/, /Löschen Sie zuerst/, /jeder Instanz/],
+      pl: [/niczego nie zastępuje/, /najpierw usuń/, /każdej instancji/],
+    };
+    for (const [lang, patterns] of Object.entries(statements)) {
+      const words = locale(lang)['files.refusal.destination_exists']!;
+      for (const pattern of patterns) expect(words, `${lang} ${pattern}`).toMatch(pattern);
+    }
+  });
+
+  it('pl says a path holds something with "Pod", not "W"', () => {
+    expect(locale('pl')['files.refusal.destination_exists']).toContain("Pod '{{path}}' już coś istnieje");
+  });
+
+  it('destination_held_after_move says the file moved and that deleting the other file lets the move finish', () => {
+    const { c, toasts } = create({
+      moveFile: () => throwError(() => answer(409, { error: 'server words', code: 'destination_held_after_move', path: 'b.txt' })),
+    });
+    rename(c);
+    expect(toasts.error).toEqual([said('destination_held_after_move', 'b.txt')]);
+    expect(toasts.error[0]).toContain('b.txt');
+    expect(toasts.error[0]).toMatch(/moved/);
+    expect(toasts.error[0]).toMatch(/[Dd]elete that file/);
+    expect(toasts.info).toEqual([]);
+  });
+
+  it('confirm_required and space_root_refused each answer a delete in their own words', () => {
+    for (const [code, status, path] of [['confirm_required', 422, 'docs'], ['space_root_refused', 400, '.']] as const) {
+      TestBed.resetTestingModule();
+      const { c, toasts } = create({
+        deleteFile: () => throwError(() => answer(status, { error: 'server words', code, path })),
+      });
+      c.listing.remove(c.activeSpaceId(), path, '/');
+      expect(toasts.error, code).toEqual([said(code, path)]);
+      expect(toasts.error[0], code).not.toBe(en['files.error.deleteFailed']);
+    }
   });
 
   it('act_not_recorded and file_system_fault each say their own sentence', () => {
@@ -170,6 +201,17 @@ describe('the Files page — a move the server is finishing is not a failure', (
     expect(c.renamingEntry()).toBe('');
   });
 
+  it('promises one reload after a wait, in every locale, because the store reloads once and not "when it is done"', () => {
+    const once: Record<string, RegExp> = {
+      en: /reloads once, after a short wait/,
+      de: /einmal nach kurzer Wartezeit/,
+      pl: /raz, po krótkim oczekiwaniu/,
+    };
+    for (const [lang, pattern] of Object.entries(once)) {
+      expect(locale(lang)['files.refusal.move_still_owed'], lang).toMatch(pattern);
+    }
+  });
+
   it('reloads the listing once, after the seconds the server asked for, and not before', () => {
     vi.useFakeTimers();
     const { c, listed } = create({ moveFile: owed('7') });
@@ -215,18 +257,23 @@ describe('the Files page — a move the server is finishing is not a failure', (
 });
 
 describe('every answer a file act can give has words in every locale', () => {
-  /**
-   * The codes are read out of the module that defines them, so a new code cannot ship without its sentences.
-   * `destination_exists` is named here as well because the server slice that introduces it lands apart from this
-   * one; once that module names it the entry is a duplicate, which the filter absorbs.
-   */
+  /** The codes are read out of the module that defines them, so a new code cannot ship without its sentences. */
   const codes = [...readFileSync(
     resolve(__dirname, '../../../../../server/src/files/act-answers.ts'), 'utf8',
-  ).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]!).concat('destination_exists').filter((v, i, all) => all.indexOf(v) === i);
+  ).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]!).filter((v, i, all) => all.indexOf(v) === i);
 
   it('the server module names the codes this page must answer', () => {
-    expect(codes).toEqual(expect.arrayContaining(['path_blocked', 'move_still_owed']));
+    expect(codes).toEqual(expect.arrayContaining(['path_blocked', 'move_still_owed', 'destination_exists']));
     expect(codes.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('a code the server no longer answers has no sentence left in any locale', () => {
+    for (const lang of ['en', 'de', 'pl']) {
+      const stale = Object.keys(locale(lang))
+        .filter(key => key.startsWith('files.refusal.'))
+        .filter(key => !codes.includes(key.slice('files.refusal.'.length)));
+      expect(stale, lang).toEqual([]);
+    }
   });
 
   for (const lang of ['en', 'de', 'pl']) {
