@@ -27,7 +27,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FileSystemFault, PathBlocked, fileActAnswer } from './act-answers.js';
+import { FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { isAtOrUnder } from './moved-paths.js';
 import { isMissingPath } from './stored-bytes.js';
@@ -90,7 +90,7 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
  * about which errors those are.
  */
 export function isPathBlocked(err: unknown): err is PathBlocked {
-  return fileActAnswer(err)?.body.code === 'path_blocked';
+  return fileActAnswerOf(err)?.body.code === 'path_blocked';
 }
 
 /** The filesystem's refusals that are about the CALLER'S path rather than about the server, each with what it means for the caller. */

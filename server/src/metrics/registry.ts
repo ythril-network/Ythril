@@ -26,6 +26,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
+import type { FileActAnswer } from '../files/act-answers.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
@@ -731,14 +732,49 @@ export const fileMovesFinishedByHousekeepingTotal = new Counter({
 });
 fileMovesFinishedByHousekeepingTotal.labels({ space: '' }).inc(0);
 
-/** Moves that replaced a live file's records at the ids they took: the record of the file a rename onto an existing path replaced. */
-export const fileMovesOntoTakenDestinationTotal = new Counter({
-  name: 'ythril_file_moves_onto_taken_destination_total',
-  help: 'File moves whose destination held a live file whose records at the moved ids were replaced (a rename onto an existing file replaces it), by space',
+/**
+ * Rows a finishing move replaced at the destination ids it took, counted BY ROW: the late or stale writes (a straggler at an id the
+ * batch already moved, debris of a deleted file), never a live file, because a move onto one is refused.
+ */
+export const fileMoveRowsReplacedTotal = new Counter({
+  name: 'ythril_file_move_rows_replaced_total',
+  help: 'Rows a finishing move replaced at its destination ids: late or stale writes, never a live file',
   labelNames: ['space'] as const,
   registers: [register],
 });
-fileMovesOntoTakenDestinationTotal.labels({ space: '' }).inc(0);
+fileMoveRowsReplacedTotal.labels({ space: '' }).inc(0);
+
+/** Moves whose bytes were taken by a rename because the file system refused a hard link, which is what a move's no-overwrite guarantee is built on. */
+export const fileMoveLinkFallbackTotal = new Counter({
+  name: 'ythril_file_move_link_fallback_total',
+  help: 'File moves that fell back to a rename because the file system does not support a hard link; a foreign writer at the destination in that instant can be overwritten',
+  registers: [register],
+});
+fileMoveLinkFallbackTotal.inc(0);
+
+/**
+ * One series per answer code, so each is scrapable at 0 before its first answer. The keys are typed against the answer's own code
+ * union, so a code added to `act-answers.ts` without a series here does not compile.
+ */
+const FILE_ACT_ANSWER_CODES: Readonly<Record<FileActAnswer['body']['code'], true>> = {
+  path_blocked: true,
+  destination_exists: true,
+  destination_held_after_move: true,
+  confirm_required: true,
+  space_root_refused: true,
+  move_still_owed: true,
+  act_not_recorded: true,
+  file_system_fault: true,
+};
+
+/** File acts answered with a refusal or a failure, by `code`: counted where the answer is built (`fileActAnswer`), so both doors and every code are in it. */
+export const fileActAnswersTotal = new Counter({
+  name: 'ythril_file_act_answers_total',
+  help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
+  labelNames: ['code'] as const,
+  registers: [register],
+});
+for (const code of Object.keys(FILE_ACT_ANSWER_CODES)) fileActAnswersTotal.inc({ code }, 0);
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
 export const fileMoveBatchReplansTotal = new Counter({

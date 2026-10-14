@@ -70,7 +70,7 @@ import { toDocId } from '../util/paths.js';
 import { warnOnce } from '../util/warn-once.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { fileMoveBatchReplansTotal, fileMovesOntoTakenDestinationTotal } from '../metrics/registry.js';
+import { fileMoveBatchReplansTotal, fileMoveRowsReplacedTotal } from '../metrics/registry.js';
 import { log, peerText } from '../util/log.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -142,7 +142,7 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
   }
   if (jobsMoved > 0) markSpaceMayHaveWork(spaceId);
   if (batch.replaced.length > 0) {
-    fileMovesOntoTakenDestinationTotal.labels({ space: spaceId }).inc();
+    fileMoveRowsReplacedTotal.labels({ space: spaceId }).inc(batch.replaced.length);
     saidReplaced(spaceId, () => log.info(`A move in space '${peerText(spaceId)}' replaced the records of a file that stood at its destination (a rename onto an existing file replaces it)`));
   }
   await retireLinks(spaceId, links.map(l => l.from));
@@ -158,7 +158,7 @@ async function carryBatchReplanning(spaceId: string, plan: MovePlan, batch: Move
     } catch (err) {
       if (!(err instanceof StaleRekeyPlan || isDuplicateKey(err)) || replans >= moveTiming().maxReplans) throw err;
       fileMoveBatchReplansTotal.labels({ space: spaceId }).inc();
-      const holds = await holdsAtDestination(spaceId, current.rows, plan.src, plan.dst, plan.kind);
+      const holds = await holdsAtDestination(spaceId, current.rows, plan.dst, plan.kind);
       current = { ...current, flagged: [...holds.flagged], replaced: [...holds.replaced] };
     }
   }

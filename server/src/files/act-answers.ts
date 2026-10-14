@@ -12,17 +12,26 @@
  *
  * ## What it prevents
  *
- * A refusal that is the CALLER's (a destination a regular file blocks, a destination another file's records hold)
+ * A refusal that is the CALLER's (a destination a regular file blocks, a destination something already stands at)
  * answered as a server fault, and a failure that is the SERVER's answered with the filesystem's or the driver's own
  * words. Every message here is built from the space-relative paths the act was given, never from `err.message` of a
  * lower layer.
  *
+ * ## Counted where it is answered
+ *
+ * {@link fileActAnswer} is what a door calls and it counts the answer by its `code` (`ythril_file_act_answers_total`);
+ * {@link fileActAnswerOf} classifies and counts nothing, for a caller that asks "is this refusal that kind?" and does not
+ * answer (`isPathBlocked`). A classification that counted would report an answer no door gave. Counting inside the answer
+ * is what a door cannot forget.
+ *
  * ## Why these statuses
  *
- * - `409` for a blocked or taken destination, not `400`/`422`: a peer's sync push reads `400` and `422` as "refused
- *   about the bytes" and stops re-sending those bytes until their hash changes (`sync/file-push.ts`), but these
- *   refusals are about the receiver's TREE, which can change, so the sender must keep retrying. Not `404` either: a
- *   `404` on a file act says the SOURCE names nothing.
+ * - `409` for a blocked destination or one something already stands at (`destination_exists`), not `400`/`422`: a
+ *   peer's sync push reads `400` and `422` as "refused about the bytes" and stops re-sending those bytes until their hash
+ *   changes (`sync/file-push.ts`), but these refusals are about the receiver's TREE, which can change, so the sender must
+ *   keep retrying. Not `404` either: a `404` on a file act says the SOURCE names nothing.
+ * - `422` for a directory delete that did not say `confirm: true`, and `400` for the space root: refusals about the
+ *   request itself, which no retry of the same request changes.
  * - `503` + `Retry-After` for a move whose bytes moved and whose records did not all follow yet: the move is owed, a
  *   retry (or housekeeping) finishes it. It is not the store's "not answering" — the store may be fine.
  * - `500` for an act that could not record its own deletion: nothing was moved or deleted, and the reason is ours.
@@ -30,6 +39,7 @@
  *   storage, said in words that name no path.
  */
 import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
+import { fileActAnswersTotal } from '../metrics/registry.js';
 
 /** The caller's path cannot be used: a regular file stands where a directory must be, it is the source itself or inside it, or the file system refuses it. Answered `path_blocked`. */
 export class PathBlocked extends Error {
@@ -40,11 +50,62 @@ export class PathBlocked extends Error {
   }
 }
 
-/** The rows a move would take are held by ANOTHER file's records (not the destination file it replaces). */
-export class DestinationTakenByOther extends Error {
-  override readonly name = 'DestinationTakenByOther';
-  constructor(readonly path: string, message: string) {
-    super(message);
+/** What stands at a move's destination: bytes, a live record without bytes, the records of another file, or a sidecar's destination. */
+export type DestinationStanding = 'bytes' | 'record' | 'rows' | 'sidecar';
+
+/**
+ * Something already stands at a move's destination, and a move never replaces anything.
+ *
+ * `path` is the destination as requested; `standing` says what stands there, and `detail` (a `'sidecar'` standing only) the
+ * sidecar path that is taken. The sentence names the remedy: delete what stands there (that is replicated), or choose another name.
+ */
+export class DestinationExists extends Error {
+  override readonly name = 'DestinationExists';
+  constructor(readonly path: string, readonly standing: DestinationStanding, readonly detail?: string) {
+    super(destinationExistsSentence(path, standing, detail));
+  }
+}
+
+/** The sentence of {@link DestinationExists}: built only from space-relative paths. */
+function destinationExistsSentence(path: string, standing: DestinationStanding, detail?: string): string {
+  switch (standing) {
+    case 'bytes':
+      return `'${path}' already exists, and a move never replaces anything. Delete it first (that deletes the file on every instance it is replicated to), or choose another name.`;
+    case 'record':
+      return `'${path}' has a file record but no bytes here (its content may still be arriving from a peer, or an earlier delete was interrupted), and a move never replaces anything. Delete it first with delete_file on '${path}' (that deletes it on every instance it is replicated to; a file whose content is still arriving from a peer appears once it has), or choose another name.`;
+    case 'rows':
+      return `'${path}' already has the records of another file, and a move never replaces anything. Delete that file first, or choose another name.`;
+    case 'sidecar':
+      return `'${path}' cannot be taken: '${detail ?? path}' already exists. Delete what stands there first, or choose another name.`;
+  }
+}
+
+/**
+ * A move's bytes already moved, but a record of another file holds an id the moved records need, so they have not followed. The move
+ * stays owed; deleting that other file lets it finish on its own, or repeating it does.
+ *
+ * `path` is the held id; `from` and `to` are the move's own roots.
+ */
+export class DestinationHeldAfterMove extends Error {
+  override readonly name = 'DestinationHeldAfterMove';
+  constructor(readonly path: string, readonly from: string, readonly to: string, readonly detail: string) {
+    super(`The bytes of '${from}' already moved to '${to}', but '${path}' is held by the records of another file, so the records of '${from}' have not followed. Delete that file; the move then finishes on its own, or repeat it.`);
+  }
+}
+
+/** A directory delete that did not say `confirm: true`. Answered `confirm_required`. */
+export class ConfirmRequired extends Error {
+  override readonly name = 'ConfirmRequired';
+  constructor(readonly path: string) {
+    super('Deleting a directory requires confirm: true.');
+  }
+}
+
+/** A delete of the space's root directory, which is never deleted. Answered `space_root_refused`. */
+export class SpaceRootRefused extends Error {
+  override readonly name = 'SpaceRootRefused';
+  constructor(readonly path: string) {
+    super('Cannot delete the space root directory.');
   }
 }
 
@@ -84,20 +145,50 @@ export class FileSystemFault extends Error {
 const OWED_MOVE_RETRY_AFTER_S = 5;
 
 export interface FileActAnswer {
-  status: 409 | 503 | 500;
+  status: 400 | 409 | 422 | 500 | 503;
   /** The REST body, and the MCP `structuredContent` — the same object on both doors. */
-  body: { error: string; code: 'path_blocked' | 'destination_taken_by_other' | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault'; path?: string; retryable?: true };
+  body: {
+    error: string;
+    code: 'path_blocked' | 'destination_exists' | 'destination_held_after_move' | 'confirm_required' | 'space_root_refused'
+      | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault';
+    path?: string;
+    retryable?: true;
+  };
   /** Seconds a REST door puts in `Retry-After` (`sendRetryAfter`, the one writer of it); MCP has no place for it and says `retryable` in the body. */
   retryAfterSeconds?: number;
 }
 
-/** The one answer to a file act's refusal or failure, or `undefined` when `err` is not one of them. */
+/**
+ * The one answer to a file act's refusal or failure, counted: what a door calls when it ANSWERS. `undefined` when `err` is not one of
+ * them, and then nothing is counted. The count is inside, so a door cannot answer without it; a caller that only classifies calls
+ * {@link fileActAnswerOf}.
+ */
 export function fileActAnswer(err: unknown): FileActAnswer | undefined {
+  const answer = fileActAnswerOf(err);
+  if (answer !== undefined) fileActAnswersTotal.inc({ code: answer.body.code });
+  return answer;
+}
+
+/**
+ * What `err` would be answered, or `undefined` when it is not a file act's refusal or failure: a pure classification with no side
+ * effect. A caller that does not put the answer on a door (it decides what to do with a refusal) asks this, so it does not count an
+ * answer no door gave.
+ */
+export function fileActAnswerOf(err: unknown): FileActAnswer | undefined {
   if (err instanceof PathBlocked) {
     return { status: 409, body: { error: err.message, code: 'path_blocked', path: err.path } };
   }
-  if (err instanceof DestinationTakenByOther) {
-    return { status: 409, body: { error: err.message, code: 'destination_taken_by_other', path: err.path } };
+  if (err instanceof DestinationExists) {
+    return { status: 409, body: { error: err.message, code: 'destination_exists', path: err.path } };
+  }
+  if (err instanceof DestinationHeldAfterMove) {
+    return { status: 409, body: { error: err.message, code: 'destination_held_after_move', path: err.path } };
+  }
+  if (err instanceof ConfirmRequired) {
+    return { status: 422, body: { error: err.message, code: 'confirm_required', path: err.path } };
+  }
+  if (err instanceof SpaceRootRefused) {
+    return { status: 400, body: { error: err.message, code: 'space_root_refused', path: err.path } };
   }
   if (err instanceof MoveStillOwed) {
     return {
