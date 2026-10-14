@@ -12,7 +12,7 @@ import { FileTreeComponent, type TreeNode } from './file-tree.component';
 import { FileToolbarComponent, type BreadcrumbSegment } from './file-toolbar.component';
 import { FileDetailPaneComponent, type DetailMode } from './file-detail-pane.component';
 import { FileTreeStore } from './file-tree.store';
-import { FileListingStore, FILE_REFUSAL_PREFIX, LISTING_FAILURE_KEYS } from './file-listing.store';
+import { FileListingStore, FILE_REFUSAL_PREFIX, FILE_REFUSALS_WITH_REMEDY, LISTING_FAILURE_KEYS } from './file-listing.store';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -326,16 +326,20 @@ export class FileManagerComponent implements OnInit, OnDestroy {
       if (kind === 'moved') this.renamingEntry.set('');
       if (kind === 'removed') this.filesChanged.emit();
     });
-    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(({ kind, error }) => {
+    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(({ kind, error, bytesMoved }) => {
       // The server's answer says WHY (`path_blocked`, `destination_exists`, ...): its code has words, and
-      // an answer without one still says the server's own sentence before the generic line.
-      this.toast.error(refusalText(this.transloco, error, LISTING_FAILURE_KEYS[kind], FILE_REFUSAL_PREFIX));
+      // an answer without one still says the server's own sentence before the generic line. A refusal that
+      // tells the operator what to do stays until dismissed.
+      const remedy = FILE_REFUSALS_WITH_REMEDY.has(error?.error?.code ?? '');
+      this.toast.error(refusalText(this.transloco, error, LISTING_FAILURE_KEYS[kind], FILE_REFUSAL_PREFIX), remedy ? 0 : undefined);
+      // A refused move whose file DID move (its records are held back) is not being edited any more; the store reloads once.
+      if (bytesMoved) this.renamingEntry.set('');
     });
     // A move the server is finishing is not a failure: the bytes moved, so the row leaves edit mode and the page
     // says what is happening. The store reloads the listing once the server's wait is over.
-    this.listing.moveOwed.pipe(takeUntilDestroyed()).subscribe(({ path }) => {
+    this.listing.moveOwed.pipe(takeUntilDestroyed()).subscribe(() => {
       this.renamingEntry.set('');
-      this.toast.info(this.transloco.translate('files.refusal.move_still_owed', { path: path ?? '' }));
+      this.toast.info(this.transloco.translate(`${FILE_REFUSAL_PREFIX}.move_still_owed`));
     });
 
     /*

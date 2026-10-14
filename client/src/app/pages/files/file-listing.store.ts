@@ -17,6 +17,17 @@ export const FILE_REFUSAL_PREFIX = 'files.refusal';
 /** The code of a move whose bytes moved and whose records the server is still finishing — not a failure. */
 const MOVE_STILL_OWED = 'move_still_owed';
 
+/** The code of a move whose bytes moved and whose records are held back by another file's — refused, but the file did move. */
+const DESTINATION_HELD = 'destination_held_after_move';
+
+/**
+ * The answers that tell the operator what to do about them. Their toast stays until it is dismissed: one that times out
+ * takes the instruction with it, and a screen reader's user may not have reached it yet. The others state a fact and expire.
+ */
+export const FILE_REFUSALS_WITH_REMEDY: ReadonlySet<string> = new Set([
+  'path_blocked', 'destination_exists', DESTINATION_HELD, 'act_not_recorded', 'file_system_fault',
+]);
+
 /** How long to wait before looking again when the answer names no `Retry-After`, and the bounds on one that does. */
 const OWED_DEFAULT_SECONDS = 5;
 const OWED_MAX_SECONDS = 60;
@@ -29,15 +40,14 @@ function retryAfterSeconds(err: unknown): number {
   return Math.min(seconds, OWED_MAX_SECONDS);
 }
 
-/** A write that failed: which one, and the answer exactly as the client received it (the page words it). */
+/**
+ * A write that failed: which one, and the answer exactly as the client received it (the page words it).
+ * `bytesMoved` is true for a refused move whose file did move, so the row is no longer the one being edited.
+ */
 export interface ListingMutationFailure {
   kind: ListingMutationKind;
   error: RefusedAnswer;
-}
-
-/** A move the server is finishing: the destination it named, when it named one. */
-export interface ListingMoveOwed {
-  path?: string;
+  bytesMoved: boolean;
 }
 
 /** What a mutation did, for whoever cares beyond the reload this store already performs. */
@@ -149,7 +159,7 @@ export class FileListingStore {
    * A write was ACCEPTED and is being finished by the server (`move_still_owed`). Not a failure: the bytes moved.
    * The listing is reloaded once, after the seconds the server asked for, so no stale row outlives the move.
    */
-  readonly moveOwed = new Subject<ListingMoveOwed>();
+  readonly moveOwed = new Subject<void>();
 
   /** The listing the page last asked for, so a delayed reload never drags the operator back to a folder they left. */
   private requested: { spaceId: string; path: string } | null = null;
@@ -240,21 +250,21 @@ export class FileListingStore {
   createDir(spaceId: string, path: string, reloadPath: string): void {
     this.filesApi.createDir(spaceId, path).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('created'); },
-      error: (err) => this.writeFailed('create', err, spaceId, reloadPath),
+      error: (err) => this.settleUnsuccessfulWrite('create', err, spaceId, reloadPath),
     });
   }
 
   move(spaceId: string, from: string, to: string, reloadPath: string): void {
     this.filesApi.moveFile(spaceId, from, to).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('moved'); },
-      error: (err) => this.writeFailed('move', err, spaceId, reloadPath),
+      error: (err) => this.settleUnsuccessfulWrite('move', err, spaceId, reloadPath),
     });
   }
 
   remove(spaceId: string, path: string, reloadPath: string): void {
     this.filesApi.deleteFile(spaceId, path).subscribe({
       next: () => { this.load(spaceId, reloadPath); this.mutated.next('removed'); },
-      error: (err) => this.writeFailed('remove', err, spaceId, reloadPath),
+      error: (err) => this.settleUnsuccessfulWrite('remove', err, spaceId, reloadPath),
     });
   }
 
@@ -262,18 +272,16 @@ export class FileListingStore {
    * What an answer to a write that did not succeed means — decided in ONE place for the three writes.
    *
    * `move_still_owed` is the one answer that is not a failure: the server has moved the bytes and finishes the
-   * records itself, so saying the write failed would be false. It is published as `moveOwed`, and the listing is
-   * reloaded ONCE after the `Retry-After` the server named (a default when it named none) rather than polled —
-   * the server finishes the move on its own, so one look after the wait is enough, and a reload that finds the
-   * move still owed would only repeat the same wait. Every other answer is a failure, and travels with its body.
+   * records itself, so saying the write failed would be false. It is published as `moveOwed`. `destination_held_after_move`
+   * IS a refusal, and travels as one, but the bytes moved there too. For both, the listing is reloaded ONCE after the
+   * `Retry-After` the server named (a default when it named none) rather than polled, so no row outlives the move under its
+   * old name. Every other answer is a failure, and travels with its body.
    */
-  private writeFailed(kind: ListingMutationKind, err: unknown, spaceId: string, reloadPath: string): void {
-    const body = (err as { error?: { code?: string; path?: string } | null } | null)?.error;
-    if (body?.code !== MOVE_STILL_OWED) {
-      this.mutationFailed.next({ kind, error: err as RefusedAnswer });
-      return;
-    }
-    this.moveOwed.next({ path: body.path });
+  private settleUnsuccessfulWrite(kind: ListingMutationKind, err: unknown, spaceId: string, reloadPath: string): void {
+    const code = (err as { error?: { code?: string } | null } | null)?.error?.code;
+    if (code === MOVE_STILL_OWED) this.moveOwed.next();
+    else this.mutationFailed.next({ kind, error: err as RefusedAnswer, bytesMoved: code === DESTINATION_HELD });
+    if (code !== MOVE_STILL_OWED && code !== DESTINATION_HELD) return;
     clearTimeout(this.owedReload);
     this.owedReload = setTimeout(() => {
       // Only if that folder is still the one being shown: an operator who moved on is not pulled back.

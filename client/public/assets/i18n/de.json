@@ -1722,7 +1722,7 @@
   "files.error.deleteFailed": "Datei konnte nicht gelöscht werden.",
   "files.refusal.path_blocked": "'{{path}}' kann hier nicht verwendet werden: Eine Datei steht im Weg, oder das Ziel ist das Element selbst oder liegt darin. Wählen Sie einen anderen Namen oder Ort.",
   "files.refusal.destination_exists": "Unter '{{path}}' existiert bereits etwas, daher wurde nichts verschoben. Ein Verschieben ersetzt nie etwas: Löschen Sie zuerst, was dort liegt (das löscht es auf jeder Instanz, auf die es repliziert wird), oder wählen Sie einen anderen Namen.",
-  "files.refusal.destination_held_after_move": "Die Datei wurde verschoben, aber '{{path}}' wird von den Datensätzen einer anderen Datei belegt, daher sind ihre Angaben nicht nachgezogen. Löschen Sie diese Datei; der Vorgang schließt dann von selbst ab, oder wiederholen Sie ihn.",
+  "files.refusal.destination_held_after_move": "Die Datei wurde verschoben, aber '{{path}}' wird von den Datensätzen einer anderen Datei belegt, '{{heldBy}}', daher sind ihre Angaben nicht nachgezogen. Der Server versucht den Vorgang weiter. Löschen Sie diese Datei und wiederholen Sie das Verschieben, um ihn abzuschließen.",
   "files.refusal.move_still_owed": "Die Datei wurde verschoben, und der Server schließt den Vorgang gerade ab. Diese Liste wird einmal nach kurzer Wartezeit neu geladen.",
   "files.refusal.confirm_required": "Zum Löschen eines Ordners ist eine Bestätigung nötig.",
   "files.refusal.space_root_refused": "Der Stammordner des Raums kann nicht gelöscht werden.",

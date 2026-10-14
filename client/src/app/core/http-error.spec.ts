@@ -11,7 +11,7 @@
  * had nothing to quote, while the answer sat in the server log behind a key they could not see.
  */
 import { describe, it, expect } from 'vitest';
-import { httpErrorReason } from './http-error';
+import { httpErrorReason, withRequestId } from './http-error';
 
 /** An HttpErrorResponse-shaped object: only the fields the function reads. */
 const res = (over: Record<string, unknown> = {}) => ({
@@ -19,6 +19,20 @@ const res = (over: Record<string, unknown> = {}) => ({
   statusText: 'Internal Server Error',
   headers: { get: (n: string) => (n === 'X-Request-Id' ? 'req-1234' : null) },
   ...over,
+});
+
+describe('withRequestId — the same rule for a sentence the client worded itself', () => {
+  it('appends the id to a server fault and to a request that got no answer, and to nothing the caller caused', () => {
+    expect(withRequestId('Try again.', res())).toBe('Try again. (request req-1234)');
+    expect(withRequestId('Try again.', res({ status: 0 }))).toBe('Try again. (request req-1234)');
+    expect(withRequestId('Choose another name.', res({ status: 409 }))).toBe('Choose another name.');
+  });
+
+  it('leaves the sentence alone without the header, without a response, and when the headers throw', () => {
+    expect(withRequestId('x', res({ headers: { get: () => null } }))).toBe('x');
+    expect(withRequestId('x', null)).toBe('x');
+    expect(withRequestId('x', res({ headers: { get: () => { throw new Error('no'); } } }))).toBe('x');
+  });
 });
 
 describe('httpErrorReason — the message', () => {
