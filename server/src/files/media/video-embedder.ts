@@ -19,7 +19,7 @@ import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaRunOpts } from './progress.js';
-import { isAbandonment } from './lease.js';
+import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { updateDerivedFileRow } from '../derived-fields.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
@@ -194,11 +194,8 @@ export async function embedVideo(
     for (const [i, { timestampS, jpegBytes }] of keyframes.entries()) {
       // Checked BEFORE the call, not after: stall recovery has already handed this file to another worker, so
       // spending another vision budget on it produces a caption that the other run will overwrite anyway.
-      if (opts.shouldStop?.()) {
-        log.warn(`Video embedder: lease lost after ${i}/${keyframes.length} keyframes for ${fileId} — stopping `
-          + 'rather than competing with the run that recovered this job');
-        break;
-      }
+      // It THROWS the lost lease (`stopIfLeaseLost`): breaking out would go on to re-embed the chunks with the captions so far and return.
+      stopIfLeaseLost(spaceId, opts);
       try {
         const caption = await vision.caption({ bytes: jpegBytes }, 'image/jpeg');
         if (typeof caption === 'string' && caption.trim()) {

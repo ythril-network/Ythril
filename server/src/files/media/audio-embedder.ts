@@ -22,7 +22,7 @@ import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
-import { isAbandonment } from './lease.js';
+import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 
 
@@ -270,12 +270,9 @@ export async function embedAudio(
     beat(0);
     for (let i = 0; i < chunks.length; i++) {
       // Before the call, not after: afterwards this run has already spent a full STT budget producing a chunk
-      // the recovering run is about to overwrite.
-      if (opts.shouldStop?.()) {
-        log.warn(`Audio embedder: lease lost after ${i}/${chunks.length} chunks for ${fileId} — stopping `
-          + 'rather than competing with the run that recovered this job');
-        break;
-      }
+      // the recovering run is about to overwrite. It THROWS the lost lease, so the worker ends the run as abandoned: returning what
+      // was transcribed so far would report a partial result for a file that is another run's now.
+      stopIfLeaseLost(spaceId, opts);
       const { startMs, endMs } = chunks[i]!;
       const startS = startMs / 1000;
       const endS = endMs / 1000;
