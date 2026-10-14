@@ -277,6 +277,14 @@ which replaces your local file with the incoming copy by design. The other confl
 A move carries what belongs to the path: the metadata, the derived records, the conversion sidecars (`_converted/<id>.md`
 and `_extracted/<id>/`, a peer's copy of one included) and the queued jobs of all of them. A directory `<id>.md/` standing
 beside the file is not the file's: its converted tree (`_converted/<id>.md/`) is never touched by the file's move.
+**One sidecar failure does not keep a move owed:** when something else stands at a sidecar's destination (`DestinationExists`)
+only after the file's own bytes moved, no retry can find it gone, so the move finishes **without that sidecar**. What stands
+there is untouched, the moved file's own sidecar (its bytes, its row and its jobs) at the old place is removed, the moved
+record carries **no `convertedFileId`** (a pointer would name the occupant's text as the file's own), the move answers
+success, and a conversion of the file afterwards is refused while bytes that no record derived from the file hold its
+converted path (delete that path, then reprocess the file with `retry_embed_file`). It is counted in
+`ythril_file_moves_finished_without_sidecar_total` and logged once. Any other failure of a sidecar (a file-system fault)
+keeps the move owed as above.
 
 **A directory move or delete has no size limit: it carries (or removes) every record under the directory, however many files
 it holds, and takes time in proportion to what it holds,** and one that is interrupted is finished later
@@ -373,8 +381,13 @@ first. A run that lost its claim ends without completing or failing, and writes 
 same path. **The one exception is a face run's auto-label:** linking the recognised person to the file is an authored write
 that cannot join the claim, so it is made just after a check that the run still holds it, and a file deleted and uploaded
 again at the same path in that instant can receive the link. **Records a previous version already leaked** (a derived record written after the delete by a job that was
-running) are not removed by this version; they stay until a later repair, are invisible to the file listing, but a
-leaked face record is still matched by gallery search, and one can attach to a file re-uploaded at the same path.
+running, a row a move did not re-root, a link a delete left) are **removed by a repair that runs in the background**,
+a few pages per sweep cycle (`TTL sweep: repairing rows a deleted file left`; see [Setup → Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)):
+the derived rows whose file is gone (no record, a deleted file's audit record, or another file), and the links of a
+file **this instance** deleted that this instance wrote, with a tombstone so peers drop them. It never removes a row it
+cannot explain (a chain of derived rows deeper than the walk reads), a row newer than the scan, or anything of a file
+that is back, and a removal is irreversible. Until it reaches them they are invisible to the file listing, but a leaked
+face record is still matched by gallery search, and one can attach to a file re-uploaded at the same path.
 
 **Who the deletion reaches.** A peer applies the tombstone to the copy it holds only when the deletion rule allows it
 (see [Sync API → file tombstones](09-sync-api.md#file-sync-artifacts)): a peer deletes **a copy this instance wrote**

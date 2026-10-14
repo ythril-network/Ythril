@@ -52,6 +52,7 @@ import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 import { spaceTtlDays } from './chrono-retention.js';
 import { findSpace } from '../spaces/proxy.js';
 import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
+import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 
 /** How often the sweep runs, ms. Cited by the docs (`doc-cited-constants`). */
@@ -70,6 +71,7 @@ const SETTLE_STEP = declareStep('TTL sweep: settling file tombstones');
 const FINISH_MOVES_STEP = declareStep('TTL sweep: finishing interrupted file moves');
 const INDEX_STEP = declareStep('TTL sweep: indexes');
 const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
+const REPAIR_STEP = declareStep('TTL sweep: repairing rows a deleted file left');
 /** The step a collection's READ failure is said under. */
 /**
  * The audit records of deleted files are their OWN unit, not a second pass of the `files` one.
@@ -352,6 +354,13 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   if (strippedRows > 0) {
     log.info(`Stripped what the bytes made from ${strippedRows} file record(s) flagged deleted before this release.`);
   }
+
+  // Rows that hang off a file this instance deleted (Q-465, `files/leaked-rows-repair.ts`): a cursor scan, a bounded number of pages per
+  // space per tick inside one time budget for the step, resuming where the last tick stopped, and not starting over within a day of its
+  // end. After the strip, so what is repaired here is what the strip left; the spaces share the budget, and a space that fails is passed over.
+  const repairUntil = leakedRowsDeadline();
+  await eachSpace(REPAIR_STEP, concreteSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
+  publishLeakedRowScansOwed(now);
 
   return total;
 }

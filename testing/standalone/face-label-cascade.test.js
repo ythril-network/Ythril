@@ -237,6 +237,9 @@ describe('face labels cascade when their person is deleted', { skip }, () => {
     // in the shared helper" is exactly the claim that stops being true when someone adds a fourth
     // delete path.
     await entities.updateOne({ _id: ALICE }, { $set: { _expireAt: new Date('2020-01-01T00:00:00Z') } });
+    // The photos exist: the same sweep runs the leaked-rows repair, which removes a derived row whose file is not there, so a face with no
+    // image under it would be gone before the cascade is looked at.
+    await files.insertMany(['a.jpg', 'b.jpg'].map(id => ({ _id: id, spaceId: SPACE, path: id, tags: [], sizeBytes: 1 })));
     await files.insertOne(faceChunk('a.jpg#face-chunk0', 'a.jpg', ALICE));
     await files.insertOne(faceChunk('b.jpg#face-chunk0', 'b.jpg', BOB));
 

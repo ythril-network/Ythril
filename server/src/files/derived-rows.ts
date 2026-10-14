@@ -12,7 +12,7 @@
  *
  * ## The rule
  *
- * The roots and every row beneath them down to `MAX_ANCESTRY` levels (`brain/suppress-embeddings.ts`: how far up `parentFileId` a
+ * The roots and every row beneath them down to `MAX_ANCESTRY` levels (`files/ancestry.ts`: how far up `parentFileId` a
  * derived record looks for its owner, so nothing is deeper), read a level at a time by the `parentFileId` index, one `$in` per
  * `READ_CHUNK`. A row reached twice is counted once. A root that has no row, or no children, is still returned: the answer is
  * "these and what descends from them", whether or not they are stored.
@@ -22,7 +22,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
 import { inChunks } from '../util/chunks.js';
-import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
+import { MAX_ANCESTRY } from './ancestry.js';
 import { escapeRegex } from '../util/redos.js';
 import { idsUnder, movedRoot, type Sidecar } from './moved-paths.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';

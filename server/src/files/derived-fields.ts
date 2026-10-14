@@ -224,9 +224,9 @@ function requireParent(parentFileId: string | undefined): string {
  * file takes the claims first** (a delete, a move, a directory delete, a space wipe). A write either lands before the revocation and the
  * removal then finds its row, or finds its claim gone and writes nothing.
  *
- * - **Rows a previous release already leaked stay** until the repair that is filed for them (Q-465): their parent is flagged or absent, so
- *   no default read reaches them, but a leaked FACE row is matched by the gallery search, and a file re-uploaded at the same path inherits
- *   them.
+ * - **Rows a previous release already leaked stay only until the repair reaches them** (`files/leaked-rows-repair.ts`, Q-465: a step of the TTL
+ *   sweep, a few pages per cycle, so it can take a while after an upgrade): their parent is flagged or absent, so no default read reaches
+ *   them, but a leaked FACE row is matched by the gallery search, and a file re-uploaded at the same path inherits them.
  * - **The face auto-label is not under the claim** (`media/face-embedder.ts`): it links an entity to the file through `updateFileMeta`, an
  *   authored write that cannot join a session. It is guarded by a `holdsClaim` read just before it and by rethrowing abandonment, which
  *   narrows the window a path reused in that instant could reach and does not close it.

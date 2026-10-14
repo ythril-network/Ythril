@@ -39,13 +39,13 @@ import { spaceCollection } from '../db/space-collection.js';
 import { inChunks } from '../util/chunks.js';
 import { inOneCommandChunks } from '../db/one-command.js';
 import { escapeRegex } from '../util/redos.js';
-import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
+import { walkUpFileChains, walkUpParentChains } from './ancestry.js';
 import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
-import { idAfterMove, movedId, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
+import { belongsTo, idAfterMove, isAtOrUnder, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
 
 /** One row a move carries. */
 export interface PlannedRow {
@@ -83,6 +83,11 @@ export interface MovePlan {
   /** File ids at `src` whose links follow: every file row carried, and every file under `src` that is the `from` of a link row. */
   linkFiles: string[];
   jobIds: string[];
+  /**
+   * The sidecar paths at `src` whose bytes were NOT placed at their destination because something else stands there, and which the move
+   * finished without (`files/move-cascade.ts`, Q-467). Set by the finish of a move that met an occupant, never by {@link planMove}.
+   */
+  unplacedSidecars?: readonly string[];
 }
 
 /**
@@ -91,14 +96,19 @@ export interface MovePlan {
  * as its id. The pointer is set here, by the row that holds it, so the move writes none by a scan on a field that has no index.
  * Everything else, the `seq`, the author and the stored `updatedAt`, is the stored row's: this write stamps no version, so it must not
  * move the timestamp read beside the version.
+ *
+ * `unplaced` are the sidecar paths (at the source) whose bytes could not be placed because something else stands at their destination
+ * (`MovePlan.unplacedSidecars`): a pointer at one of them is NOT carried, because it would name the occupant's text as the file's own.
  */
-export function rebuiltFileRow(row: FileMetaDoc, to: string, src: string, dst: string): FileMetaDoc {
+export function rebuiltFileRow(row: FileMetaDoc, to: string, src: string, dst: string, unplaced: readonly string[] = []): FileMetaDoc {
   const parent = row.parentFileId === undefined ? undefined : idAfterMove(row.parentFileId, src, dst);
   const converted = row.convertedFileId === undefined ? undefined : idAfterMove(row.convertedFileId, src, dst);
   const patch: Pick<FileMetaDoc, '_id' | 'path'> & Partial<Pick<FileMetaDoc, 'parentFileId' | 'convertedFileId'>> = { _id: to, path: to };
   if (parent !== undefined) patch['parentFileId'] = parent;
   if (converted !== undefined) patch['convertedFileId'] = converted;
-  return rekeyedRow(row, patch) as FileMetaDoc;
+  const rebuilt = rekeyedRow(row, patch) as FileMetaDoc;
+  if (row.convertedFileId !== undefined && unplaced.some(u => isAtOrUnder(row.convertedFileId!, u))) delete rebuilt.convertedFileId;
+  return rebuilt;
 }
 
 /** Each id's parent, flag and stored size, in chunks: one aggregation per chunk, projecting a size instead of the document. */
@@ -141,9 +151,6 @@ export interface DestinationHolds {
   refused: HeldId[];
 }
 
-/** Whether `id` is `root`, or anything that belongs to it: under it, a chunk of it, or its sidecar (`movedId` answers it for every spelling). */
-const belongsTo = (id: string, root: string): boolean => movedId(id, root, root) !== null;
-
 /**
  * What stands at the ids `rows` take, and what the PHASE does about it — the one classification, asked before the bytes (a refusal that
  * costs nothing), after them (the finish of an owed move) and for ONE batch whose plan went stale. Nothing throws from here: the callers
@@ -181,33 +188,23 @@ export async function holdsAtDestination(
   const holds: DestinationHolds = { flagged: new Set(), replaced: new Set(), refused: [] };
   if (rows.length === 0 || (kind === 'directory' && !await anythingUnderDestination(spaceId, to))) return holds;
   const moving = new Set(rows.map(r => r.from));
-  const filesColl = spaceCollection(spaceId, 'files');
   type Held = { _id: string; parentFileId?: string; deletedAt?: string };
-  const fields = { parentFileId: 1, deletedAt: 1 } as const;
-  const atDestination = await readStoredById<Held>(filesColl, rows.map(r => r.to).filter(id => !moving.has(id)), fields);
+  const atDestination = await readStoredById<Held>(spaceCollection(spaceId, 'files'), rows.map(r => r.to).filter(id => !moving.has(id)), { parentFileId: 1, deletedAt: 1 });
 
-  // Each derived row's chain, one level per read. `looking` maps a row at the destination to the id of the parent now being read.
-  let looking = new Map<string, string>();
+  // A derived row's chain is read by the one walk (`files/ancestry.ts`); what its end MEANS is this classification's.
+  const derived = new Map<string, string>();
   const refuse = (id: string, heldBy: string): void => { holds.refused.push({ id, heldBy }); };
   for (const [id, hit] of atDestination) {
     if (hit.deletedAt !== undefined) holds.flagged.add(id);
     else if (hit.parentFileId === undefined) refuse(id, id);
-    else looking.set(id, hit.parentFileId);
+    else derived.set(id, hit.parentFileId);
   }
-  for (let level = 0; level < MAX_ANCESTRY && looking.size > 0; level++) {
-    const parents = await readStoredById<Held>(filesColl, [...looking.values()], fields);
-    const next = new Map<string, string>();
-    for (const [id, at] of looking) {
-      const parent = parents.get(at);
-      if (parent === undefined || parent.deletedAt !== undefined) holds.replaced.add(id);
-      else if (parent.parentFileId !== undefined) next.set(id, parent.parentFileId);
-      else if (!belongsTo(at, to)) refuse(id, at);
-      else if (phase === 'after-the-bytes') holds.replaced.add(id);
-      else refuse(id, at);
-    }
-    looking = next;
+  for (const [id, { result }] of await walkUpFileChains(spaceId, derived)) {
+    if (result.end === 'gone') holds.replaced.add(id);
+    else if (result.end === 'too-deep' || !belongsTo(result.at, to)) refuse(id, result.at);
+    else if (phase === 'after-the-bytes') holds.replaced.add(id);
+    else refuse(id, result.at);
   }
-  for (const [id, at] of looking) refuse(id, at);
   return holds;
 }
 
@@ -228,15 +225,12 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
 
   const facts = (await rowFacts(spaceId, [...ids])).filter(r => r.deletedAt === undefined);
   const byId = new Map(facts.map(r => [r._id, r]));
-  const groupOf = (id: string): string => {
-    let at = id;
-    for (let depth = 0; depth < MAX_ANCESTRY; depth++) {
-      const parent = byId.get(at)?.parentFileId;
-      if (parent === undefined || !byId.has(parent)) break;
-      at = parent;
-    }
-    return at;
-  };
+  // A row's group is the highest row of its chain that the carried set holds: the one walk (`files/ancestry.ts`), read from the set itself.
+  const chains = await walkUpParentChains(
+    new Map(facts.flatMap((r): Array<[string, string]> => (r.parentFileId === undefined ? [] : [[r._id, r.parentFileId]]))),
+    async ids => new Map(ids.flatMap((id): Array<[string, (typeof facts)[number]]> => (byId.has(id) ? [[id, byId.get(id)!]] : []))),
+  );
+  const groupOf = (id: string): string => chains.get(id)?.ancestors.at(-1)?._id ?? id;
   const rows: PlannedRow[] = facts.map(r => ({
     from: r._id, to: idAfterMove(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));

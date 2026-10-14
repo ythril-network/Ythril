@@ -508,8 +508,9 @@ line carries the count and the first few ids — `TTL sweep: facts delete failed
 — retried next cycle` — and when a collection keeps failing so many records that the cycle gives up on it, it says so:
 `… records keep failing; the rest wait for the next cycle`. A collection that cannot even be read is named without
 `delete` (`TTL sweep: facts failed for space …`), and a failed settle of file tombstones, a failed finish of an
-interrupted file move and a failed index check are named `TTL sweep: settling file tombstones`,
-`TTL sweep: finishing interrupted file moves` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+interrupted file move, a failed repair of what a deleted file left behind and a failed index check are named
+`TTL sweep: settling file tombstones`, `TTL sweep: finishing interrupted file moves`,
+`TTL sweep: repairing rows a deleted file left` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
 
 **The same sweep finishes a file move that was interrupted.** A rename or move carries the file first and its records
 after, and a database outage or restart between the two leaves the records at the old path until something finishes
@@ -518,7 +519,28 @@ file moves`); a repeat of the rename finishes it as well. A move it finishes is 
 entry with no token) and announced to webhook subscribers once. A move it cannot finish after repeated attempts is
 named in the log (`… failed for space '<id>' (<from> → <to>): the move is stranded …`) and counted in
 `ythril_file_moves_stranded`; its records stay where they are and nothing is deleted. `ythril_file_moves_owed` counts
-the moves still waiting.
+the moves still waiting. **One failure does not keep a move waiting:** when something else already stands at the
+destination of one of the moved file's converted or extracted copies (a sidecar), that happened after the file's own bytes
+had moved, so no retry could ever find it gone. The move finishes without that copy: what stands there is left exactly
+as it is, the moved file's own copy at the old place is removed, the file has no converted text until it is
+reprocessed, and the log says so once (`… finished without its sidecar …`, counted in
+`ythril_file_moves_finished_without_sidecar_total`). Any other failure of a sidecar keeps the move waiting as above.
+
+**The same sweep repairs what an earlier release left behind when a file was deleted or moved.** Releases before this
+one could leave rows that belong to a file which is no longer there: the chunk, converted, extracted, caption and face
+rows of a deleted file, and the links that a deleted file had. They stay searchable, belong to nothing, and a file
+uploaded later at the same path inherits them. `TTL sweep: repairing rows a deleted file left` finds them in the
+background, a few pages of each space per cycle, and **removes them**. It removes only rows that hang off a file that is
+already deleted (never a file, a description or anything somebody wrote), and **a removal cannot be undone**; it leaves
+alone a row it cannot explain (a chain too deep to follow), a row written during the scan, and anything of a file that
+is back. A link goes only when this instance deleted the file, wrote the link itself, and nothing (no file, no bytes, no
+move in progress) is at its path: a link another instance wrote stays with that instance. A removed link is removed with
+a tombstone, so peers drop their copies. The scan starts again no sooner than a day after it finished, and starts over
+at once after a restore or an import (the rows they bring were never read). Its place in each space is kept on this
+instance only. The log says one line per space and pass with the counts (`Leaked-rows repair of space …`); they are
+also `ythril_leaked_rows_removed_total` (by `kind`: `derived` or `link`), `ythril_leaked_rows_kept_total` (by
+`reason`: `depth`, `recent` or `live`) and the gauge `ythril_leaked_rows_repair_pending_spaces`. Going back to an
+earlier release afterwards is harmless: it ignores the scan's place and does nothing it did.
 
 Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
 

@@ -733,11 +733,13 @@ export async function cancelMediaJob(spaceId: string, filePath: string): Promise
  * file with a text job of its own, which is neither the file's id nor under a tree; the file's delete read only the trees, so that
  * job ran on and left a chunk of the deleted file's text, searchable, belonging to nothing (bundle-71 verify).
  */
-export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKind): Promise<void> {
+export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKind, only?: readonly string[]): Promise<void> {
   const root = movedRoot(p);
   if (!root) return; // guard: an empty path would match everything
-  // The same set a move holds (`jobPathsOf`), less a FILE's own job, which `cancelMediaJob` takes.
-  const owned = kind === 'directory' ? jobPathsOf(root, kind) : sidecarsOf(root, kind);
+  // The same set a move holds (`jobPathsOf`), less a FILE's own job, which `cancelMediaJob` takes — and, when `only` names sidecar paths
+  // (a move that finished without one of its sidecars), no more than those: the jobs of the sidecars that WERE placed are the move's to re-key.
+  const owned = (kind === 'directory' ? jobPathsOf(root, kind) : sidecarsOf(root, kind)).filter(s => only === undefined || only.includes(s.path));
+  if (owned.length === 0) return;
   await revokingClaims(() => jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ $or: idsUnder(owned) })));
 }
 

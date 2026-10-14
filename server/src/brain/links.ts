@@ -224,6 +224,43 @@ export async function removeLinksFromMany(spaceId: string, froms: readonly strin
   return removed;
 }
 
+/**
+ * {@link removeLinksFromMany} for the links ONE INSTANCE wrote: of each source's link rows, those whose author is `instanceId` (and, when
+ * `createdUntil` is given, that were created at or before it) are removed, with their tombstones, and every other row stays — a link
+ * another instance wrote is that instance's statement, and removing it here would delete it from peers that never agreed. A source
+ * with nothing of that author's is not touched. Chunked (`READ_CHUNK`); returns how many rows were removed.
+ *
+ * It is the one removal that is selective by author, so the leaked-rows repair (`files/leaked-rows-repair.ts`) does not hand-write a
+ * second removal beside the writer: what stays is handed to the same reconcile as the desired end state.
+ */
+export async function removeLinksWrittenBy(
+  spaceId: string, froms: readonly string[], fromKind: RefKind, instanceId: string, opts: { createdUntil?: string } = {},
+): Promise<number> {
+  const empty = allClassesEmpty(fromKind);
+  if (Object.keys(empty).length === 0) return 0;
+  const written = (row: Pick<LinkDoc, 'author' | 'createdAt'>): boolean =>
+    row.author?.instanceId === instanceId && (opts.createdUntil === undefined || row.createdAt <= opts.createdUntil);
+  let removed = 0;
+  for (const part of inChunks([...froms], READ_CHUNK)) {
+    const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links')).find(
+      asFilter<LinkDoc>({ spaceId, fromKind, from: { $in: part } }), { projection: { from: 1, to: 1, toKind: 1, author: 1, createdAt: 1 } },
+    ).toArray();
+    const stays = new Map<string, Partial<Record<RefKind, string[]>>>();
+    const theirs = new Set<string>();
+    for (const row of rows) {
+      if (written(row)) { theirs.add(row.from); continue; }
+      const desired = stays.get(row.from) ?? allClassesEmpty(fromKind) as Partial<Record<RefKind, string[]>>;
+      (desired[row.toKind] ??= []).push(row.to);
+      stays.set(row.from, desired);
+    }
+    const counts = await reconcileLinkRows(spaceId, [...theirs].map(from => ({
+      from, fromKind, desired: stays.get(from) ?? empty, author: NO_AUTHOR, minted: false,
+    })));
+    for (const c of counts) removed += c.removed;
+  }
+  return removed;
+}
+
 /** Every class a record of this kind can hold, each set to empty — "remove all of this record's links". */
 function allClassesEmpty(fromKind: RefKind): DesiredLinks {
   const out: DesiredLinks = {};

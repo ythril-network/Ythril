@@ -100,6 +100,9 @@ async function seed() {
   const chain = Array.from({ length: levels + 1 }, (_, i) => `_extracted/deep.pdf/level${i}.png`);
   chain.forEach((id, i) => rows.push(derivedRow(S, id, i + 1 < chain.length ? chain[i + 1] : 'deep.pdf')));
   kept.push(chain[0]);
+  // The rows BELOW the top of that chain are leaked by the rule like any other: each one's chain does end, within the levels read, at the
+  // absent file (the walk reads one level per row, so the second row of the chain has three to go). Only the first is beyond the walk.
+  leaked.push(...chain.slice(1));
   // A row newer than the scan stamp, under an absent parent: a re-upload is writing it.
   add(derivedRow(S, 'fresh.pdf#chunk0', 'fresh.pdf', { createdAt: FUTURE }), 'kept');
 

@@ -66,6 +66,7 @@ import { PageStoppedError } from '../sync/page-stopped.js';
 import { CounterBehindError } from '../sync/counter-after-page.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
+import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 
 /**
  * What an import may carry: every REPLICATED family, by collection name — the same list the export streams, so
@@ -144,8 +145,17 @@ const familyFailed = (err: unknown): string =>
  *
  * Extracted from `app.ts` so it can be exercised without an HTTP server: the route is argument handling and a
  * status code, and everything that decides what is stored is here and in the arrival writer.
+ *
+ * **It restarts the space's leaked-rows scan before it answers** (`files/leaked-rows-repair.ts`), whatever the payload carried and
+ * however far it got: the records it brought were never read, and a scan that had completed would sit out its day over them. The scan
+ * is not run here; the next tick of the sweep does it.
  */
 export async function importDocuments(spaceId: string, payload: Record<string, unknown>): Promise<ImportResult> {
+  try { return await importInto(spaceId, payload); }
+  finally { restartLeakedRowScans([spaceId]); }
+}
+
+async function importInto(spaceId: string, payload: Record<string, unknown>): Promise<ImportResult> {
   const results = Object.fromEntries(
     IMPORT_TYPES.map(t => [t, { inserted: 0, updated: 0, errors: 0 } as ImportTypeResult]),
   ) as Record<ImportType, ImportTypeResult>;

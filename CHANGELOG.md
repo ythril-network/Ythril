@@ -17,13 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `DELETE /api/files/:spaceId`, `POST /api/delete_file` and `delete_file` answer `404` for a second delete of a flagged file or a derived record (chunk, face), with no tombstone, `file.deleted` or `seq`; a store failure there is `503` | A `404` on a retry can mean the first delete completed |
 | A path with neither bytes nor metadata, a move with a missing source and a path through a regular file (`a.txt/x`) answer `404` on REST and MCP (MCP said `400`, REST `500`) | Handle `404` on both doors |
 | A path a regular file blocks (move, `mkdir`, upload, `write_file`; a directory into itself) is `409` `path_blocked`, was REST `500`, MCP `400` | Branch on `code` |
-| A move onto a file, folder or file record is `409` `destination_exists` and changes nothing, was a `200` replace (an upload, a restore and `keep-incoming` conflict resolution still replace) | Delete the destination first (deleted on every replica) |
-| A conflict resolution placing the copy (`keep-both` with `rename`, `save-to-space`) onto a file, folder or file record is `409` `destination_exists`, was a `200` replace; `save-to-space` needs `files: write` on a concrete target | Choose another name or space |
+| A move onto a file, folder or file record is `409` `destination_exists` and changes nothing, was a `200` replace (upload, restore and `keep-incoming` still replace) | Delete the destination first (deleted on every replica) |
+| `keep-both` (`rename`) and `save-to-space` onto a file, folder or record are `409` `destination_exists`, were a `200` replace; `save-to-space` needs `files: write` there | Choose another name or space |
 | A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400` `space_root_refused`; non-boolean `400`), on MCP too, so a `files: write` token can delete a tree | Send `confirm`; review `files: write` tokens |
-| A directory delete fires one `file.deleted` per live file it removed (it fired none) | A subscriber on `file.deleted` gets a burst: deduplicate on `X-Ythril-Delivery` |
+| A directory delete fires one `file.deleted` per file it removed (it fired none) | Deduplicate on `X-Ythril-Delivery` |
 | A delete the storage refuses is `500` `file_system_fault` (an unreadable path was `404`); REST's other delete failure is `500` `Failed to delete`, was `… file` / `… directory` | Update body matchers |
 | A partly finished move is `503` `move_still_owed` with `Retry-After`; an act whose deletion cannot be recorded is `500` `act_not_recorded` | Retry (a `404` can mean it finished); repeat a move an older version stranded |
 | A move another file's records hold back is `409` `destination_held_after_move` (`path`, `heldBy`) | Delete the file in `heldBy`, repeat the move |
+| A move whose sidecar destination was taken after its bytes moved finishes without that sidecar; it stayed `503` `move_still_owed` | Reprocess the file |
+| The sweep removes what earlier releases left behind deleted files, irreversibly | Watch `ythril_leaked_rows_removed_total` |
 | `POST /api/admin/reload-config` answers `500` naming spaces that failed to initialise, or `503` with `Retry-After` when the database was down, where it answered success | The next reload retries them |
 | `npm run links:convert` exits non-zero when a space could not be converted; the other spaces are still converted | Check the exit code in upgrade scripts |
 | A background job's failure is logged as `<job> failed for space '<id>' (<part>): <reason> — retried <when>` or `<job> stopped: the store is not answering …` | Update log matchers |
@@ -125,10 +127,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Networks:** A club is a mesh: members pair directly via `POST /api/sync/networks/:id/pair` and `/pair/confirm`.
 - **Files:** A file's extract returns its converted Markdown whole or in whole paragraphs that page to the end (**Show more**; it was cut at 256K characters), and its image list says when it is cut. `GET …/files/extract` takes `read_file`'s budget parameters.
 - **Files:** A chunked upload's `202` carries `maxBodyBytes`; a chunk may send `x-expected-sha256` (`422` on a mismatch). A push above a peer's single-body limit goes chunked (it was `413` every cycle); a pull streams and verifies.
-- **Files:** A file or directory delete removes the links this instance wrote from the file and its derived ids, with a tombstone each; links another instance wrote stay with it.
+- **Files:** A delete removes the links this instance wrote from the file and its derived ids, tombstoned; others' links stay.
 - **Files:** `read_file` and the extract hold only their window in memory. An unrecognised extension is marked `skipped`; identical bytes of a document or media file whose job is `pending` or `processing` are left alone.
 <!-- file-act-codes -->
-- **Files:** A refused or failed file act carries one `code`: `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault`: the Files API page says what each asks of you.
+- **Files:** Every refused or failed file act carries one `code`: `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault`.
 - **Import/Export:** The admin export streams every replicated family, links included, omitting this instance's own state (vector, its model, `matchedText`, an edge's write guard). The import keeps the export's retention stamps as dates and a file's sync base, never the replaced copy's.
 - **Import/Export:** The import drops file chunks, face records, byte-describing file keys and a restored file's old `embedding`, keeps the highest seq of a repeated id, and names records restored over a local deletion in `restoredOverTombstone`.
 - **UI:** **Settings → Preferences** has a **Date and time** card (**Automatic** by default, **ISO 8601** or **Day.month.year, 24-hour**; **local time** or **UTC**), kept in this browser; hover shows ISO 8601 UTC.

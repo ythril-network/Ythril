@@ -67,6 +67,18 @@ receiver's **tree**, which can change.
   says they are owed, and finding them would be an unbounded scan. A retry of the same move still finishes one.
 - **A stranded move needs a person.** Its records stay where they are and its marker stays until the move is finished or is
   no longer a move; the log line and the gauge name it.
+- **One failure after the bytes moved is not owed, and it is told from every other by its class alone.** A sidecar whose
+  destination something else took after the file's bytes moved (`DestinationExists`) can never be placed by any retry, so the
+  move finishes without it: the occupant is untouched, the moved file's own stale sidecar (bytes, row, jobs) is removed, the
+  moved record carries no `convertedFileId`, and a conversion afterwards is refused while bytes no row derived from the file
+  owns hold its converted path (a reprocess never overwrites an occupant). Keyed on anything wider, an I/O fault (`EIO`) would
+  strand a move's sidecar and delete the file's stale copy for a condition that may clear: that stays owed. It is counted
+  (`ythril_file_moves_finished_without_sidecar_total`), not failed. Cost: the moved file has no converted text until it is
+  reprocessed, and an orphan left by a process killed between the conversion's write and its commit blocks the next
+  conversion of that file until it is deleted.
+- **Moves stranded before this change are not repaired by the move; the rows they and deletes leaked are** — by a recurring
+  cursor scan in the retention sweep (`files/leaked-rows-repair.ts`), which removes only derived rows of a file that is gone and
+  the links this instance wrote from a path whose file tombstone it published, irreversibly, and never a row it cannot explain.
 - **A `404` on a retried move can mean it was finished**, by housekeeping or by an earlier attempt the caller never saw.
   Integrators list the destination before moving again.
 - **A sync sender keeps retrying a `409`.** That is the point, and also the cost: a path that stays blocked on the

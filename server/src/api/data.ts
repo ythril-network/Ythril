@@ -31,6 +31,7 @@ import { restoreDatabase } from '../db/restore.js';
 import { reportDatabaseReplaced } from '../db/mongo.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { concreteSpaces } from '../spaces/proxy.js';
+import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import { ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
 import { ensureEdgeGuardIndex, edgeIndexFailure } from '../spaces/edge-guard-index.js';
 import { testConnection } from '../db/conn-test.js';
@@ -388,7 +389,10 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
   const wasMaintenance = isMaintenanceActive();
   setMaintenanceActive(true);
   try {
-    await restoreDatabase(getMongoUri(), backupDir);
+    // The leaked-rows scan of every space starts again once the rows are in, and also when the restore stopped part-way: either way the
+    // rows now there were never read, and a scan that had completed would sit out its day over them. Nothing is scanned here.
+    try { await restoreDatabase(getMongoUri(), backupDir); }
+    finally { restartLeakedRowScans(concreteSpaces().map(s => s.id)); }
     // The restore wrote through its own client, which the record-write observer never sees: tell every listener
     // the database was replaced, so nothing keeps answering from the data as it was before (`Q-95`).
     reportDatabaseReplaced();

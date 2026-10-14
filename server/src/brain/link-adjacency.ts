@@ -427,6 +427,24 @@ export async function fileLinksThisInstanceWrote(
 }
 
 /**
+ * One page of the file-sourced link rows, in `from` order, after `after` (absent at the start): the `from` of each row read, at most
+ * `limit` ROWS, so a source with more links than a page still ends the page with its own name and the next page starts after it.
+ * `rows` is how many link rows the page held, which is what tells the caller whether it was the last one (`rows < limit`).
+ *
+ * The cursor of the leaked-rows repair (`files/leaked-rows-repair.ts`): it walks the file sources by name and asks the one question
+ * of each, so it reads no link row's other fields and never decides what a link means. On the `{ from, fromKind, … }` index.
+ */
+export async function fileLinkSourcesAfter(
+  spaceId: string, after: string | undefined, limit: number,
+): Promise<{ froms: string[]; last?: string; rows: number }> {
+  const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({ fromKind: 'file', ...(after !== undefined ? { from: { $gt: after } } : {}) }),
+          { projection: { from: 1 }, sort: { from: 1 }, limit })
+    .toArray() as unknown as Array<{ from: string }>;
+  return { froms: [...new Set(rows.map(r => r.from))], ...(rows.length > 0 ? { last: rows[rows.length - 1]!.from } : {}), rows: rows.length };
+}
+
+/**
  * The ids of records of one class that link to ANY of `ids` — the single-class form, for a caller with one
  * class in hand.
  *

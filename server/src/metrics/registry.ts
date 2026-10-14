@@ -734,6 +734,42 @@ export const fileMovesFinishedByHousekeepingTotal = new Counter({
 fileMovesFinishedByHousekeepingTotal.labels({ space: '' }).inc(0);
 
 /**
+ * Moves that FINISHED without a sidecar because something else stood at the sidecar's destination after the file's bytes had moved
+ * (`files/move-cascade.ts`, Q-467). The occupant is untouched and the moved file carries no pointer to a converted copy; a move that
+ * keeps failing for any other reason is NOT counted here, it stays owed. Unlabelled: the line the move logs names the paths.
+ */
+export const fileMovesFinishedWithoutSidecarTotal = new Counter({
+  name: 'ythril_file_moves_finished_without_sidecar_total',
+  help: 'File moves finished without a sidecar of the moved file because something else stood at the sidecar destination after the bytes moved',
+  registers: [register],
+});
+
+/** What the leaked-rows repair removed, by kind: a row derived from a file this instance deleted, or a link a deleted file left behind. */
+export const leakedRowsRemovedTotal = new Counter({
+  name: 'ythril_leaked_rows_removed_total',
+  help: 'Rows the leaked-rows repair removed, by kind: derived (a chunk, converted, extracted, caption or face row of a file that is gone) or link',
+  labelNames: ['kind'] as const,
+  registers: [register],
+});
+for (const kind of ['derived', 'link'] as const) leakedRowsRemovedTotal.labels({ kind }).inc(0);
+
+/** What the leaked-rows repair read and kept, by why: its chain was too deep to say, the row is newer than the scan, or its file is live. */
+export const leakedRowsKeptTotal = new Counter({
+  name: 'ythril_leaked_rows_kept_total',
+  help: 'Derived rows the leaked-rows repair read and kept, by reason: depth (chain too deep to follow), recent (newer than the scan) or live (its file is there)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+for (const reason of ['depth', 'recent', 'live'] as const) leakedRowsKeptTotal.labels({ reason }).inc(0);
+
+/** Spaces whose leaked-rows scan is owed: never completed, or completed more than a day ago and not yet run again. Written by every pass of the repair. */
+export const leakedRowsRepairPendingSpaces = new Gauge({
+  name: 'ythril_leaked_rows_repair_pending_spaces',
+  help: 'Spaces whose leaked-rows scan has not reached its end within the last day (0 once every space has been scanned)',
+  registers: [register],
+});
+
+/**
  * Rows a finishing move replaced at the destination ids it took, counted BY ROW: the late or stale writes (a straggler at an id the
  * batch already moved, debris of a deleted file), never a live file, because a move onto one is refused.
  */
