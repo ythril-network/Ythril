@@ -66,7 +66,7 @@ export interface MoveBatch {
   linkFiles: string[];
   /** The jobs this batch re-keys. */
   jobIds: string[];
-  /** The ids of this batch's new ids that hold a flagged audit row, and those that hold a live occupant's row. */
+  /** The ids among this batch's new ids that hold a flagged audit row (`flagged`), and those whose row the batch's transaction replaces (`replaced`): debris, and — once the bytes have moved — the move's own late rows. Never a live file's. */
   flagged: string[];
   replaced: string[];
 }
