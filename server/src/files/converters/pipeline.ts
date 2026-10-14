@@ -34,7 +34,7 @@ import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
 import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
-import { rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
+import { deleteRowsDerivedFrom, rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
 import { embedConcurrency } from './embed-concurrency.js';
@@ -630,10 +630,7 @@ async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[],
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The selection a move carries as well (`rowsOfFiles`): what the roots and the sidecars' rows leave, at every level.
   const { atSidecars, ids } = await rowsOfFiles(spaceId, roots, owned);
-  const parents = [...ids];
-  for (const part of inChunks(parents, READ_CHUNK)) {
-    await files.deleteMany(asFilter<FileMetaDoc>({ parentFileId: { $in: part } }));
-  }
+  await deleteRowsDerivedFrom(spaceId, ids);
   const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
   for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
   for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);

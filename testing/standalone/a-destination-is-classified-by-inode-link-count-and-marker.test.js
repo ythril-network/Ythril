@@ -10,8 +10,10 @@
  *  - nothing at the destination: `free`;
  *  - another inode, another device, an inode the file system does not number (`0`), or a link count that is not a finite number:
  *    `occupied` — the answer fails CLOSED on every ambiguity, because the wrong guess either overwrites somebody's file or unlinks one;
- *  - the same inode and the two names the SAME NAME UNDER CASE FOLDING (a case-only rename in any path component, `Docs/a.txt` to
- *    `docs/a.txt`): one directory entry under two spellings, an `alias` — a rename, never an unlink. **The link count plays no part**: a
+ *  - the same inode, the two names the SAME NAME UNDER CASE FOLDING (a case-only rename in any path component, `Docs/a.txt` to
+ *    `docs/a.txt`) AND the file system resolving both to ONE real spelling (`realpath`; a case-sensitive host keeps each spelling, so two
+ *    entries that share an inode there are two entries, and a rename between them would do nothing and report success): one directory
+ *    entry under two spellings, an `alias` — a rename, never an unlink. **The link count plays no part**: a
  *    converter holds a scratch hard link to the file while it runs, so a case-only rename of a file being converted meets two entries
  *    for one name and is still the same file;
  *  - the same inode under two DIFFERENT names is never an alias, whatever the file system numbers: a colliding or synthesised inode
@@ -49,9 +51,10 @@ after(() => { try { fs.rmSync(root, { recursive: true, force: true }); } catch {
 
 /** An `lstat(..., { bigint: true })` record, as the classifier reads it. `nlink` may be left out: a file system that does not say. */
 const rec = ({ dev = 1n, ino = 100n, nlink = 1n, noLink = false, dir = false } = {}) => ({ dev, ino, ...(noLink ? {} : { nlink }), isDirectory: () => dir });
-const classify = (src, dst, begun, names) => {
+/** `sameRealPath` is whether the file system resolves both paths to one real spelling: true on a case-insensitive host for a case-only pair, false on a case-sensitive one, which keeps each spelling. */
+const classify = (src, dst, begun, names, sameRealPath = true) => {
   assert.equal(typeof stored.classifyDestination, 'function', 'files/stored-bytes.ts exports no classifyDestination');
-  return stored.classifyDestination(src, dst, { begun, names });
+  return stored.classifyDestination(src, dst, { begun, names, sameRealPath });
 };
 const CROSS_DIRECTORY = { src: 'Docs/a.txt', dst: 'docs/a.txt' };
 /** Two names that are one name under case folding, and two that are not. */
@@ -87,6 +90,32 @@ describe('a destination is classified by inode, link count, the names and the be
   for (const [name, src, dst, begun, names, expected] of TABLE) {
     it(`${name}: ${expected}`, () => { assert.equal(classify(src, dst, begun, names), expected); });
   }
+
+  // A case-SENSITIVE host keeps each spelling (`realpath` of `a.txt` is `a.txt`, of `A.txt` is `A.txt`): two directory entries, whatever
+  // their names fold to and however many links the inode has. Renaming one onto the other would do nothing and report success.
+  const CASE_SENSITIVE = [
+    ['a file: two entries sharing an inode, names that fold alike, no marker (an operator\'s hard link a.txt and A.txt)', rec({ nlink: 2n }), rec({ nlink: 2n }), false, FOLDED, 'occupied'],
+    ['a file: two entries, names that fold alike, with a marker (the move\'s own link, made before its unlink)', rec({ nlink: 2n }), rec({ nlink: 2n }), true, FOLDED, 'half-linked'],
+    ['a file: ONE entry and names that fold alike but two real spellings (a synthesised inode)', rec({ nlink: 1n }), rec({ nlink: 1n }), false, FOLDED, 'occupied'],
+    ['a file: no link count and names that fold alike but two real spellings', rec({ noLink: true }), rec({ noLink: true }), true, FOLDED, 'occupied'],
+    ['a directory: the same inode, names that fold alike, two real spellings', rec({ dir: true }), rec({ dir: true }), false, FOLDED, 'occupied'],
+    ['a cross-directory pair, two real spellings', rec({ nlink: 2n }), rec({ nlink: 2n }), false, CROSS_DIRECTORY, 'occupied'],
+  ];
+  for (const [name, src, dst, begun, names, expected] of CASE_SENSITIVE) {
+    it(`case-sensitive file system, ${name}: ${expected}`, () => { assert.equal(classify(src, dst, begun, names, false), expected); });
+  }
+
+  it('an alias needs all three: the same inode, names that fold alike AND one real spelling', () => {
+    const one = [rec({ nlink: 1n }), rec({ nlink: 1n })];
+    assert.equal(classify(...one, false, FOLDED, true), 'alias');
+    assert.notEqual(classify(...one, false, FOLDED, false), 'alias', 'the same inode and names that fold alike were read as one entry without the file system saying so');
+    assert.notEqual(classify(...one, false, DIFFERENT, true), 'alias', 'one real spelling was read as one entry for two names that do not fold alike');
+    assert.notEqual(classify(rec({ ino: 1n }), rec({ ino: 2n }), false, FOLDED, true), 'alias');
+  });
+
+  it('a decision that is not told the real spellings is refused, never read as "one entry"', () => {
+    assert.throws(() => stored.classifyDestination(rec(), rec(), { begun: false, names: FOLDED }), undefined, 'a caller that drops the real-path answer was answered');
+  });
 
   it('the marker decides between an operator\'s link and the move\'s own, and nothing else does', () => {
     const pair = [rec({ nlink: 2n }), rec({ nlink: 2n })];

@@ -218,6 +218,21 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     assert.deepEqual(await acts.published(), NOTHING);
   });
 
+  it('(4b) CASE-SENSITIVE file system: two entries a.txt and A.txt sharing an inode are two entries, so the move between them is refused and neither is touched', async (t) => {
+    if (insensitive) { t.skip('the file system is case-insensitive: `a.txt` and `A.txt` cannot both exist; the classification is held by a-destination-is-classified-by-inode-link-count-and-marker'); return; }
+    await acts.seed('pair.txt', { description: 'P' });
+    fs.linkSync(abs('pair.txt'), abs('Pair.txt'));
+
+    const answer = await acts.move('REST', 'pair.txt', 'Pair.txt');
+
+    assert.equal(acts.statusOf(answer), 409, `a rename between two hard-linked entries was answered ${acts.statusOf(answer)}: ${sentenceOf(answer)}`);
+    assert.equal(acts.answerOf(answer).code, 'destination_exists');
+    assert.deepEqual(names().filter(n => n.toLowerCase() === 'pair.txt'), ['Pair.txt', 'pair.txt'], 'one of the two entries is gone');
+    assert.equal((await rowOf('pair.txt'))?.description, 'P');
+    assert.equal(await rowOf('Pair.txt'), null, 'a record was carried by a rename that did nothing');
+    assert.deepEqual(await acts.published(), NOTHING);
+  });
+
   it('(5) the request that finished a case-only rename, repeated, is a first attempt that changes nothing', async (t) => {
     if (!insensitive) { t.skip(SKIPPED); return; }
     await acts.seed('again.txt', { description: 'A' });

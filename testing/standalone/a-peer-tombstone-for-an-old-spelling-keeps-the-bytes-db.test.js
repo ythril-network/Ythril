@@ -75,6 +75,27 @@ describe('a peer tombstone for an old spelling keeps the entry another record na
     assert.equal(await row('case.txt'), null, 'the record the tombstone names was not removed');
   });
 
+  it('what the old id\'s record derived goes with it (chunks, a converted-sidecar row, an extracted image and its caption, the job), and nothing of the new id\'s does', async (t) => {
+    if (!insensitive) { t.skip(SKIPPED); return; }
+    await arrivalOfTheNewSpellingLanded();
+    door.writeLocalFile(S, '_converted/Case.txt.md', '# converted');
+    const derived = (id, parent) => build.filemeta(S, id, 5, { author: PEER_AUTHOR, parentFileId: parent, sizeBytes: 1 });
+    await door.coll(S, 'files').insertMany([
+      derived('case.txt#chunk-0', 'case.txt'), derived('_converted/case.txt.md', 'case.txt'),
+      derived('_extracted/case.txt/img.png', 'case.txt'), derived('_extracted/case.txt/img.png#caption', '_extracted/case.txt/img.png'),
+      derived('Case.txt#chunk-0', 'Case.txt'), derived('_converted/Case.txt.md', 'Case.txt'),
+    ]);
+    await door.coll(S, 'media_jobs').insertMany([{ _id: 'case.txt', spaceId: S, status: 'pending' }, { _id: 'Case.txt', spaceId: S, status: 'pending' }]);
+
+    await deliver([tomb('case.txt', 5)]);
+
+    const left = (await door.coll(S, 'files').find({}, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
+    assert.deepEqual(left, ['Case.txt', 'Case.txt#chunk-0', '_converted/Case.txt.md'], 'a row of the old id survived (an orphan), or a row of the new id was removed');
+    assert.deepEqual((await door.coll(S, 'media_jobs').find({}).toArray()).map(j => j._id), ['Case.txt'], 'the old id\'s job was not removed, or the new id\'s was');
+    assert.equal(fs.readFileSync(path.join(tree(), 'Case.txt'), 'utf8'), 'the bytes that arrived');
+    assert.equal(fs.readFileSync(path.join(tree(), '_converted/Case.txt.md'), 'utf8'), '# converted', 'the sidecar the new id\'s record stands on was removed');
+  });
+
   it('the same on the pull door: the tombstone relayed by the sender\'s cycle', async (t) => {
     if (!insensitive) { t.skip(SKIPPED); return; }
     await arrivalOfTheNewSpellingLanded();

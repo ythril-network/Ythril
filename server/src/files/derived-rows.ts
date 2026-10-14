@@ -80,6 +80,19 @@ export async function rowsOfFiles(spaceId: string, roots: readonly string[], own
 }
 
 /**
+ * Remove the ROWS derived from `ids` (every row whose parent is one of them): the row half of taking away what a file left, shared by the
+ * delete of a file's conversion (`deleteConversionArtifacts`) and by a peer's tombstone that removes only a record (`removeOnlyTheRecordNamed`),
+ * so neither spells the delete a second way. `ids` is {@link rowsOfFiles}'s set, which holds every level, so the caption and face rows beneath an
+ * extracted image go with it. It removes no bytes and not the roots' own rows, and a caller revokes the claims of the jobs first.
+ */
+export async function deleteRowsDerivedFrom(spaceId: string, ids: ReadonlySet<string>): Promise<void> {
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  for (const part of inChunks([...ids], READ_CHUNK)) {
+    await files.deleteMany(asFilter<FileMetaDoc>({ parentFileId: { $in: part } }));
+  }
+}
+
+/**
  * THE one answer to "the roots of everything a directory holds": the live file rows under `dir/` and every parent a derived row under
  * `dir/` names — so a derived row whose own parent has no row (an orphan: the file it came from is gone) still has a root, and the
  * walk down from the roots ({@link rowsOfFiles}) reaches it.
