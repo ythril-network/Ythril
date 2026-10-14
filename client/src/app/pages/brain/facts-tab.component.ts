@@ -313,7 +313,9 @@ export class FactsTabComponent extends RecordTabBase {
   private editStored: ReadonlySet<string> = new Set();
   private editOriginalType = '';
   memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
-  editMemory = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  /** `type` is optional on the model: an edit model without one (an older caller's) leaves the memory's type alone. */
+  editMemory: { fact: string; type?: string; tags: string[]; linkEntities: string; description: string; properties: Record<string, string | number | boolean> } =
+    { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: {} };
 
 
   protected override resetOnSpaceChange(): void {

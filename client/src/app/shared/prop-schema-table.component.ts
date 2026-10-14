@@ -36,6 +36,10 @@ export interface PropSchemaRow {
             <tr class="prop-row" [class.prow-open]="expandedKey() === p.key" (click)="toggleExpand(p.key)">
               <td>
                 <div class="prop-name">
+                  <!-- The row's click toggles it for the mouse; this BUTTON is how a keyboard reaches it. -->
+                  <button type="button" class="prop-caret prop-toggle" [attr.aria-expanded]="expandedKey() === p.key"
+                    [attr.aria-label]="'spaces.schema.propDetail.toggle' | transloco: { key: p.key }"
+                    (click)="$event.stopPropagation(); toggleExpand(p.key)"><ph-icon [name]="expandedKey() === p.key ? 'caret-up' : 'caret-down'" [size]="13"/></button>
                   <span class="prop-name-key">{{ p.key }}</span>
                   <label class="req-toggle" [class.is-req]="p.s.required" (click)="$event.stopPropagation()">
                     <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required; changed.emit()" />

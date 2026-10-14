@@ -129,4 +129,15 @@ export const SCHEMA_MD_STYLES = `
 .ends-opt input { margin:0; }
 .ends-pairs { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
 .sch-type-badges .badge { font-size:9px; }
+/* A property a network layer supplies: the network's name beside the key, and the proposal buttons after it. */
+.layer-mark { display:inline-flex; align-items:center; gap:3px; margin-inline-start:6px; font-size:10.5px; color:var(--info); border:1px solid var(--info); border-radius:3px; padding:0 4px; }
+.layer-propose { font-size:10.5px; padding:0 6px; margin-inline-start:4px; }
+/* The rules section: the help is collapsed, the example is code, the applicable space rules are a plain list. */
+.rules-help { margin-block-start:6px; font-size:12px; color:var(--text-secondary); }
+.rules-help summary { cursor:pointer; }
+.rules-example { font-family:var(--font-mono, ui-monospace, monospace); font-size:12px; background:var(--bg-secondary); padding:6px 8px; border-radius:4px; margin:4px 0 0; white-space:pre-wrap; }
+.applicable-rules { list-style:none; margin:0; padding:0; font-size:12.5px; }
+.applicable-rules li { padding-block:2px; }
+.applicable-rules .rule-name { font-family:var(--font-mono, ui-monospace, monospace); }
+.rules-count { font-size:9px; }
 `;

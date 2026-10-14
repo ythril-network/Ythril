@@ -121,7 +121,7 @@ async function mount(opts: MountOptions = {}) {
     '/api/brain/spaces/work/stats': { spaceId: 'work', facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 },
   };
   const flushReads = () => {
-    for (const req of http.match(r => r.method === 'GET' && r.url.split('?')[0]! in answers)) req.flush(answers[req.request.url.split('?')[0]!]);
+    for (const req of http.match(r => r.method === 'GET' && r.url.split('?')[0]! in answers)) req.flush(answers[req.request.url.split('?')[0]!] as never);
   };
   /** Let change detection, deferred blocks and the reads they issued run to rest. */
   const settle = async (until?: () => boolean): Promise<void> => {
@@ -421,7 +421,7 @@ describe('a refused schema save opens the failing rule and moves focus to it', (
     // A changed field of the settings form, so the footer Save has something to send whichever tab is open.
     h.state.stForm.purpose = 'changed purpose';
     h.fixture.componentInstance.saveSettings();
-    h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/work').flush(body, { status, statusText: 'refused' });
+    h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/work').flush(body as never, { status, statusText: 'refused' });
     await h.settle();
   }
 

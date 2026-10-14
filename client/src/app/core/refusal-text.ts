@@ -134,6 +134,15 @@ export function answerErrorField(err: unknown): string {
   return nonEmpty(bodyOf(err)?.['error']);
 }
 
+/**
+ * The `issues` a refused request body lists (a zod-body refusal: `{ error, issues: [{ code, path, keys? }] }`), or [] when it lists none.
+ * For the caller that follows an issue's path to the control it is about; the words for the refusal as a whole are `refusalText`'s.
+ */
+export function refusalIssues(err: unknown): unknown[] {
+  const issues = bodyOf(err)?.['issues'];
+  return Array.isArray(issues) ? issues : [];
+}
+
 /** The body's own prose: its `message` when `error` is a code, else its `error`; '' when it states none. */
 function proseOf(err: unknown): string {
   const body = bodyOf(err);

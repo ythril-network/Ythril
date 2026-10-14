@@ -43,7 +43,9 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import type { KnowledgeType, PropertySchema } from '../../core/api.types';
-import type { TypeSchemaState } from './space-settings-state.service';
+import type { RuleRow, TypeSchemaState } from './space-settings-state.service';
+import { RuleRowsComponent, type RuleRowRefusal } from '../../shared/rule-rows.component';
+import { RULE_LIMITS } from '../../shared/rule-limits';
 import {
   addProp, removeProp, addEnumVal, removeEnumVal,
   toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, endNamesFor, isStaleEndName, UNTYPED_END, type EndpointSide,
@@ -53,11 +55,18 @@ import { CHIP_STYLES } from '../../shared/chip.styles';
 import { PROP_TABLE_STYLES } from '../../shared/prop-table.styles';
 import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
 
+/** A property whose definition a network layer supplies: the network that applies, and the networks holding another definition. */
+export interface LayerMark {
+  networkId: string;
+  networkLabel: string;
+  others: { networkId: string; networkLabel: string }[];
+}
+
 @Component({
   selector: 'app-schema-type-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TranslocoPipe, PhIconComponent, HscrollTopDirective],
+  imports: [FormsModule, TranslocoPipe, PhIconComponent, HscrollTopDirective, RuleRowsComponent],
   // Neither of these is decoration, and BOTH came loose when this editor was extracted out of the schema tab.
   // Angular scopes styles, so a class this template renders and this array does not define gets browser
   // defaults — with no error, in a component that still works perfectly.
@@ -107,6 +116,14 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
     } @else {
       <div class="sch-hint" style="margin-top:8px;">{{ 'spaces.schema.libRef.noProps' | transloco }}</div>
     }
+  }
+  <!-- The linked entry's rules, read-only like its properties: they are enforced on this type, and unlinking is how they become editable. -->
+  @if (linkedRules().length) {
+    <div class="sch-section-label" style="margin-top:12px;">{{ 'rules.title' | transloco }}
+      <span class="sch-hint">{{ 'rules.linkedHint' | transloco }}</span></div>
+    <div data-testid="rules-section">
+      <app-rule-rows [rules]="linkedRules()" [readOnly]="true" idPrefix="linked-rules" />
+    </div>
   }
 } @else {
   <!-- WHAT THIS TYPE IS FOR, in the operator's own words. F-24, and it is deliberately prose: the
@@ -294,10 +311,28 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
         @for (p of d().propertySchemas; track p.key) {
           <tr class="prop-row" [class.prow-open]="isOpen(p.key)"
             (click)="toggleOpen(p.key)">
-            <td><span class="prop-caret"><ph-icon [name]="isOpen(p.key) ? 'caret-up' : 'caret-down'" [size]="13"/></span></td>
+            <td>
+              <!-- The row's click toggles it for the mouse; the BUTTON is how a keyboard reaches it. -->
+              <button type="button" class="prop-caret prop-toggle" [attr.aria-expanded]="isOpen(p.key)"
+                [attr.aria-label]="'spaces.schema.propDetail.toggle' | transloco: { key: p.key }"
+                (click)="$event.stopPropagation(); toggleOpen(p.key)"><ph-icon [name]="isOpen(p.key) ? 'caret-up' : 'caret-down'" [size]="13"/></button>
+            </td>
             <td>
               <div class="prop-name">
                 <span class="prop-name-key">{{ p.key }}</span>
+                @if (layerMarks()[p.key]; as mark) {
+                  <!-- A network layer supplies this property's definition (a clash it wins): said by name, and the other networks can be
+                       offered it as a proposal - a vote there, never a direct write. Siblings of each other, not nested in the row's
+                       disclosure, so a keyboard reaches them. -->
+                  <span class="layer-mark" data-testid="layer-marker" [attr.title]="'spaces.schema.layerMarker.title' | transloco: { network: mark.networkLabel }">
+                    <ph-icon name="link" [size]="11"/> {{ mark.networkLabel }}</span>
+                  @for (other of mark.others; track other.networkId) {
+                    <button type="button" class="btn btn-ghost btn-sm layer-propose" data-testid="propose-to-network"
+                      [attr.title]="'spaces.schema.layerMarker.proposeTitle' | transloco: { network: other.networkLabel }"
+                      [attr.aria-label]="'spaces.schema.layerMarker.proposeTitle' | transloco: { network: other.networkLabel }"
+                      (click)="$event.stopPropagation(); proposeTo.emit({ key: p.key, networkId: other.networkId })">{{ 'spaces.schema.layerMarker.propose' | transloco }}</button>
+                  }
+                }
                 <label class="req-toggle" [class.is-req]="p.s.required" (click)="$event.stopPropagation()">
                   <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required" />
                   {{ 'spaces.schema.propDetail.required' | transloco }}
@@ -413,6 +448,29 @@ import { mergeFnsFor, mergeFnAfterTypeChange } from '../../shared/merge-fns';
       <ph-icon name="plus-circle" [size]="18"/>
     </button>
   </div>
+  <!-- RULES (F-46): an expression over the record that a write must satisfy, after the property table because a property declares
+       what may be stored and a rule says how values must relate. -->
+  <div class="sch-section-label">{{ 'rules.title' | transloco }}
+    <span class="sch-hint">{{ 'rules.hint' | transloco }}</span></div>
+  <div data-testid="rules-section">
+    <app-rule-rows [rules]="d().rules" [max]="limits.perType" [refusal]="ruleRefusal()" idPrefix="type-rules" />
+    <details class="rules-help">
+      <summary>{{ 'rules.help.title' | transloco }}</summary>
+      <p>{{ 'rules.help.fields' | transloco }}</p>
+      <p>{{ 'rules.help.absent' | transloco }}</p>
+      <pre class="rules-example">{{ 'rules.help.example' | transloco }}</pre>
+    </details>
+  </div>
+  @if (applicableRules().length) {
+    <!-- The space-wide rules that also apply to this kind of record: read-only here, edited under the validation bar. -->
+    <div class="sch-section-label">{{ 'rules.applicable.title' | transloco }}
+      <span class="sch-hint">{{ 'rules.applicable.hint' | transloco }}</span></div>
+    <ul class="applicable-rules" data-testid="applicable-rules">
+      @for (r of applicableRules(); track r.name) {
+        <li><span class="rule-name">{{ r.name }}</span> <span class="sch-hint">{{ r.message }}</span></li>
+      }
+    </ul>
+  }
 }
   `,
 })
@@ -427,6 +485,17 @@ export class SchemaTypeEditorComponent {
   readonly libRef = input<string | null>(null);
   /** A linked entry's properties, resolved by the host, for the read-only view. */
   readonly linkedProps = input<{ key: string; s: PropertySchema }[]>([]);
+  /** A linked entry's rules, resolved by the host, for the read-only view (they are enforced on this type until it is unlinked). */
+  readonly linkedRules = input<RuleRow[]>([]);
+  /** The space-wide rules that apply to this kind of record, shown read-only: they are edited in the space rules section. */
+  readonly applicableRules = input<{ name: string; message: string }[]>([]);
+  /** The rule a refused save named, when it is one of THIS type's: its row opens, says why and takes focus. */
+  readonly ruleRefusal = input<RuleRowRefusal | null>(null);
+  /** The properties a network layer supplies, by key: which network applies, and the others a proposal can go to. */
+  readonly layerMarks = input<Record<string, LayerMark>>({});
+  /** The operator asked to propose a property's applying definition to another network. */
+  readonly proposeTo = output<{ key: string; networkId: string }>();
+  protected readonly limits = RULE_LIMITS;
   /** The retention window this collection inherits from the space, or null. Shown as the fallback hint. */
   readonly spaceWindowDays = input<number | null>(null);
   /**

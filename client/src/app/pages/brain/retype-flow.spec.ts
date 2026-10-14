@@ -94,7 +94,7 @@ async function spyConfirm(answer: (keys: { key: string; value: unknown }[]) => b
   try { Service = (await import(/* @vite-ignore */ path)).RetypeConfirmService; } catch { /* absent on the base */ }
   if (!Service) return vi.fn(async (_keys: { key: string; value: unknown }[]) => false);
   const real = TestBed.inject(Service);
-  return vi.spyOn(real, 'confirm').mockImplementation(async keys => answer(keys));
+  return vi.spyOn(real, 'confirm').mockImplementation(async (...args: unknown[]) => answer(args[0] as { key: string; value: unknown }[]));
 }
 
 interface Run {
@@ -306,7 +306,7 @@ describe.each(SURFACES)('retype from the $label editor', ({ kind, mode, a, b }) 
     for (const body of resends) {
       expect(body.deleteFields!.length, 'a write may delete at most 100 fields').toBeLessThanOrEqual(100);
     }
-    const asked = r.confirm.mock.calls.map(c => c[0].map((k: { key: string }) => k.key));
+    const asked = r.confirm.mock.calls.map((c: unknown[]) => (c[0] as { key: string }[]).map(k => k.key));
     expect(asked[1].length, 'the second confirm lists what the first resend did not remove').toBeLessThan(asked[0].length);
     const removed = new Set(resends.flatMap(b => b.deleteFields!.map(f => f.replace(/^properties\./, ''))));
     expect([...removed].sort(), 'every introduced key is removed by the end').toEqual(many);
