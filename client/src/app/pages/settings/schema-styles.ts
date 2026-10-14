@@ -93,10 +93,22 @@ export const SCHEMA_MD_STYLES = `
 .ret-row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; }
 .ret-row .field { flex:1 1 190px; min-width:0; max-width:260px; }
 .ret-row input { max-width:150px; }
-.sch-msg { font-size:12px; margin-top:6px; }
+.sch-msg { font-size:12px; margin-block-start:6px; }
 .sch-msg.err { color:var(--error); }
+.sch-msg.warn { color:var(--warning); }
 .sch-msg.ok  { color:var(--success); }
 .sch-msg.info { color:var(--text-muted); }
+/* A message told apart from its neighbours by colour alone is lost to a reader who cannot see the colour (and to forced
+   colours, which replace it): each variant carries a mark of its own, and forced-colors draws a rule beside the text. */
+.sch-msg.err::before { content:"\\2715\\00a0"; }
+.sch-msg.warn::before { content:"\\26A0\\00a0"; }
+.sch-msg.ok::before { content:"\\2713\\00a0"; }
+.sch-msg.info::before { content:"\\2139\\00a0"; }
+@media (forced-colors: active) {
+  .sch-msg { border-inline-start:3px solid CanvasText; padding-inline-start:6px; }
+  .sch-msg.err { border-inline-start-style:double; }
+  .sch-msg.warn { border-inline-start-style:dashed; }
+}
 /* The two ends sit side by side like the retention windows, and for the same reason each column needs a
    basis: a flex column's intrinsic width is its widest child, and a long type name would otherwise claim
    the row. Wider than .ret-row's columns because these hold a list rather than one number. */

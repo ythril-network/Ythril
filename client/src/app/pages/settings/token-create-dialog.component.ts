@@ -10,6 +10,7 @@ import { RightsMatrixComponent } from './rights-matrix.component';
 import { DIALOG_STYLES } from './dialog.styles';
 import type { TokenRights } from './rights-glyph.component';
 import type { Space, TokenRecord } from '../../core/api.types';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * The create-token dialog: a label, an optional expiry, and the rights matrix.
@@ -230,7 +231,7 @@ export class TokenCreateDialogComponent {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.error ?? this.transloco.translate('tokens.error.createFailed'));
+        this.createError.set(refusalText(this.transloco, err, 'tokens.error.createFailed'));
       },
     });
   }

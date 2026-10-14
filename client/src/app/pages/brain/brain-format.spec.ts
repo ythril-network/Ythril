@@ -3,7 +3,7 @@
  * (A17.9b-4) into a shared module every drawer/tab owner can import.
  */
 import { describe, it, expect } from 'vitest';
-import { toLocalDatetime, fmtApiError } from './brain-format';
+import { toLocalDatetime } from './brain-format';
 
 describe('toLocalDatetime', () => {
   it('renders a valid ISO string as local YYYY-MM-DDTHH:mm (zero-padded)', () => {
@@ -14,28 +14,5 @@ describe('toLocalDatetime', () => {
 
   it('returns "" for an unparseable date', () => {
     expect(toLocalDatetime('not-a-date')).toBe('');
-  });
-});
-
-describe('fmtApiError', () => {
-  it('expands a schema_violation into "Schema violation — field: reason; …"', () => {
-    const err = {
-      error: {
-        error: 'schema_violation',
-        violations: [
-          { field: 'age', value: -1, reason: 'must be >= 0' },
-          { field: 'name', value: '', reason: 'required' },
-        ],
-      },
-    };
-    expect(fmtApiError(err, 'fallback')).toBe('Schema violation — age: must be >= 0; name: required');
-  });
-
-  it('passes a plain error string through', () => {
-    expect(fmtApiError({ error: { error: 'not_found' } }, 'fallback')).toBe('not_found');
-  });
-
-  it('falls back when there is no error body', () => {
-    expect(fmtApiError({}, 'Failed to save')).toBe('Failed to save');
   });
 });

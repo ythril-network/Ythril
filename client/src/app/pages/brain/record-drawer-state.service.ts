@@ -1,16 +1,21 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import type { Observable } from 'rxjs';
 import { ChronoType, ChronoStatus, Fact, Entity, Edge, ChronoEntry, KnowledgeType } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
+import { httpErrorReason, type RefusalSource, type WireRow } from '../../core/refusal-text';
+import { RetypeConfirmService } from '../../core/retype-confirm.service';
+import { splitWriteWarnings } from '../../core/write-warnings';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
-import { toLocalDatetime, fmtApiError } from './brain-format';
+import { toLocalDatetime } from './brain-format';
+import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 
 /**
  * State for the record detail drawer — one drawer edits ONE record (memory/entity/edge/chrono),
  * opened from every record tab.
  *
  * Extracted from BrainComponent (A17.9b-5). Owns the drawer's own signals (`drawerRecord`/`Saving`/
- * `Error`), its four plain edit models, and the open/save/close cycle. It consumes the already-split
+ * `Failure`/`Warnings`), its four plain edit models, and the open/save/close cycle. It consumes the already-split
  * collaborators — `BrainStore` (record lists + schema helpers), `EntityRefPicker` (chip name
  * resolution), `BrainApi` (persistence) — and the pure `brain-format` utils.
  *
@@ -18,6 +23,13 @@ import { toLocalDatetime, fmtApiError } from './brain-format';
  *
  * The plain edit models render under OnPush only because `open()` writes the `drawerRecord` SIGNAL in
  * the same turn — that coupling is load-bearing and pinned by the drawer component's spec.
+ *
+ * ## What a save answers (bundle-23, Q-93)
+ *
+ * The drawer holds what the last save ANSWERED, as data: `drawerFailure` is the refused answer itself (the component that shows
+ * it has the translation service and words it, and marks the property rows it names) and `drawerWarnings` the `warnings` of a
+ * save that succeeded, kept until the next save replaces them. Every save goes through `saveWithRetype`, so a type change a strict
+ * space refuses for the keys it would leave behind can be confirmed and sent again with those keys removed.
  *
  * Provided by BrainComponent (not root): one instance per mounted page.
  */
@@ -40,18 +52,32 @@ export type DrawerRecord =
   | { kind: 'edge'; record: Edge }
   | { kind: 'chrono'; record: ChronoEntry };
 
+type Props = Record<string, string | number | boolean>;
+
 @Injectable()
 export class RecordDrawerState {
   private brainApi = inject(BrainApi);
   private store = inject(BrainStore);
   private picker = inject(EntityRefPicker);
+  private retype = inject(RetypeConfirmService);
 
   /** Active brain space. Kept in sync by the shell, whose `activeSpaceId` is nav state. */
   readonly spaceId = signal('');
 
   drawerRecord = signal<DrawerRecord | null>(null);
   drawerSaving = signal(false);
-  drawerError = signal('');
+  /** The refused answer of the last save, as the request gave it; null when the last save did not fail. */
+  readonly drawerFailure = signal<RefusalSource | null>(null);
+  /** The same failure as a plain, untranslated sentence ('' when there is none): for a host that wants a string and not rows. */
+  readonly drawerError = computed(() => {
+    const failure = this.drawerFailure();
+    return failure ? httpErrorReason(failure) || String(failure.status ?? '') || 'error' : '';
+  });
+  /** The `warnings` of the last successful save: shown until the next save replaces them or the reader dismisses them. */
+  readonly drawerWarnings = signal<WireRow[]>([]);
+
+  /** The keys the record STORED when it was opened or last saved: what a type change must never treat as an untouched seed. */
+  private stored: ReadonlySet<string> = new Set();
 
   /**
    * The last record a `save()` persisted, for hosts that keep their OWN copies of records.
@@ -64,14 +90,30 @@ export class RecordDrawerState {
    */
   readonly lastSaved = signal<DrawerRecord | null>(null);
 
-  drawerEditMemory = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
-  drawerEditEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
-  drawerEditEdge = { label: '', type: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
-  drawerEditChrono = { title: '', kind: 'event' as string, status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', confidence: null as number | null, linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
+  drawerEditMemory = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Props };
+  drawerEditEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Props };
+  drawerEditEdge = { label: '', type: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Props };
+  drawerEditChrono = { title: '', kind: 'event' as string, status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', confidence: null as number | null, linkFacts: [] as string[], properties: {} as Props };
 
-  /** Re-seed a drawer entity's properties when its type changes (mirrors the create/inline forms). */
+  /** A memory's type changed (the type is a free choice, so it may also be cleared): re-seed from the new type's schema. */
+  onMemoryTypeChange(type: string): void {
+    const from = this.drawerEditMemory.type;
+    this.drawerEditMemory.type = type;
+    this.drawerEditMemory.properties = this.store.retypeProperties('fact', this.drawerEditMemory.properties, from, type, this.stored);
+  }
+
+  /** A drawer entity's type changed: the old type's untouched seeds go, the new type's are added (mirrors the create/inline forms). */
   onEntityTypeChange(type: string): void {
-    this.drawerEditEntity.properties = this.store.buildPropertiesObject('entity', this.drawerEditEntity.properties, type);
+    const from = this.drawerEditEntity.type;
+    this.drawerEditEntity.type = type;
+    this.drawerEditEntity.properties = this.store.retypeProperties('entity', this.drawerEditEntity.properties, from, type, this.stored);
+  }
+
+  /** A drawer edge's relation changed: an edge's properties belong to its label, so they follow it. */
+  onEdgeLabelChange(label: string): void {
+    const from = this.drawerEditEdge.label;
+    this.drawerEditEdge.label = label;
+    this.drawerEditEdge.properties = this.store.retypeProperties('edge', this.drawerEditEdge.properties, from, label, this.stored);
   }
 
   /** Effective chrono type for schema lookup. */
@@ -79,9 +121,11 @@ export class RecordDrawerState {
     return this.drawerEditChrono.kind;
   }
 
-  /** Re-seed the drawer chrono's properties when its kind changes (mirrors the create/inline forms). */
-  onDrawerChronoKindChange(): void {
-    this.drawerEditChrono.properties = this.store.buildPropertiesObject('chrono', this.drawerEditChrono.properties, this.drawerChronoKind());
+  /** A drawer chrono's kind changed (mirrors the create/inline forms). */
+  onChronoKindChange(kind: string): void {
+    const from = this.drawerEditChrono.kind;
+    this.drawerEditChrono.kind = kind;
+    this.drawerEditChrono.properties = this.store.retypeProperties('chrono', this.drawerEditChrono.properties, from, kind, this.stored);
   }
 
   /**
@@ -101,8 +145,10 @@ export class RecordDrawerState {
     // has already been checked against a single legal (kind, record) pairing.
     const target = { kind, record } as DrawerRecord;
     this.drawerRecord.set(target);
-    this.drawerError.set('');
+    this.drawerFailure.set(null);
+    this.drawerWarnings.set([]);
     this.drawerSaving.set(false);
+    this.stored = new Set(Object.keys(record.properties ?? {}));
     // Only facts and chrono entries carry entity references — the other two kinds have no such field.
     const ids: string[] = 'linkEntities' in record ? (record.linkEntities ?? []) : [];
     if (ids.length) this.picker.resolveEntityNames(ids);
@@ -114,7 +160,8 @@ export class RecordDrawerState {
         tags: [...(r.tags ?? [])],
         linkEntities: (r.linkEntities ?? []).join(', '),
         description: r.description ?? '',
-        properties: this.store.buildPropertiesObject('fact', r.properties ?? {}),
+        // A memory is seeded from ITS OWN type, and none at all while it has none.
+        properties: this.store.buildPropertiesObject('fact', r.properties ?? {}, r.type),
       };
     } else if (target.kind === 'entity') {
       const r = target.record;
@@ -158,19 +205,25 @@ export class RecordDrawerState {
 
   close(): void {
     this.drawerRecord.set(null);
-    this.drawerError.set('');
+    this.drawerFailure.set(null);
+    this.drawerWarnings.set([]);
+  }
+
+  /** The reader closed the warnings notice. */
+  dismissWarnings(): void {
+    this.drawerWarnings.set([]);
   }
 
   save(): void {
     const dr = this.drawerRecord();
     if (!dr) return;
     this.drawerSaving.set(true);
-    this.drawerError.set('');
+    this.drawerFailure.set(null);
     const id = dr.record._id;
     const spaceId = this.spaceId();
     if (dr.kind === 'fact') {
       const props = this.drawerEditMemory.properties;
-      this.brainApi.updateFact(spaceId, id, {
+      const body: Parameters<BrainApi['updateFact']>[2] = {
         fact: this.drawerEditMemory.fact.trim(),
         // Trimmed, and sent even when empty: on an UPDATE an absent field means "leave it alone", so clearing the
         // box has to reach the API as an explicit empty value or the type could be set and never unset.
@@ -179,54 +232,45 @@ export class RecordDrawerState {
         linkEntities: this.drawerEditMemory.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
         description: this.drawerEditMemory.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
-      }).subscribe({
-        next: (updated) => {
-          this.drawerSaving.set(false);
-          this.drawerRecord.set({ kind: 'fact', record: updated });
-          this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
-          this.lastSaved.set({ kind: 'fact', record: updated });
-        },
-        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(fmtApiError(err, 'Failed to save')); },
+      };
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateFact(spaceId, id, b), body, body.type !== (dr.record.type ?? '')), dr, updated => {
+        this.drawerRecord.set({ kind: 'fact', record: updated });
+        this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
+        this.lastSaved.set({ kind: 'fact', record: updated });
       });
     } else if (dr.kind === 'entity') {
       const props = this.store.stripEmptyOptionalProps(this.drawerEditEntity.properties, this.store.entitySchema(this.drawerEditEntity.type));
-      this.brainApi.updateEntity(spaceId, id, {
+      const body: Parameters<BrainApi['updateEntity']>[2] = {
         name: this.drawerEditEntity.name.trim(),
         type: this.drawerEditEntity.type.trim(),
         tags: this.drawerEditEntity.tags,
         description: this.drawerEditEntity.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
-      }).subscribe({
-        next: (updated) => {
-          this.drawerSaving.set(false);
-          this.drawerRecord.set({ kind: 'entity', record: updated });
-          this.store.entities.update(list => list.map(e => e._id === id ? updated : e));
-          this.lastSaved.set({ kind: 'entity', record: updated });
-        },
-        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(fmtApiError(err, 'Failed to save')); },
+      };
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEntity(spaceId, id, b), body, body.type !== (dr.record.type ?? '')), dr, updated => {
+        this.drawerRecord.set({ kind: 'entity', record: updated });
+        this.store.entities.update(list => list.map(e => e._id === id ? updated : e));
+        this.lastSaved.set({ kind: 'entity', record: updated });
       });
     } else if (dr.kind === 'edge') {
       const props = this.store.stripEmptyOptionalProps(this.drawerEditEdge.properties, this.store.edgeSchema(this.drawerEditEdge.label));
-      this.brainApi.updateEdge(spaceId, id, {
+      const body: Parameters<BrainApi['updateEdge']>[2] = {
         label: this.drawerEditEdge.label.trim(),
         ...(this.drawerEditEdge.type.trim() ? { type: this.drawerEditEdge.type.trim() } : {}),
         ...(this.drawerEditEdge.weight != null ? { weight: this.drawerEditEdge.weight } : {}),
         tags: this.drawerEditEdge.tags,
         description: this.drawerEditEdge.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
-      }).subscribe({
-        next: (updated) => {
-          this.drawerSaving.set(false);
-          this.drawerRecord.set({ kind: 'edge', record: updated });
-          this.store.edges.update(list => list.map(e => e._id === id ? updated : e));
-          this.lastSaved.set({ kind: 'edge', record: updated });
-        },
-        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(fmtApiError(err, 'Failed to save')); },
+      };
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEdge(spaceId, id, b), body, body.label !== dr.record.label), dr, updated => {
+        this.drawerRecord.set({ kind: 'edge', record: updated });
+        this.store.edges.update(list => list.map(e => e._id === id ? updated : e));
+        this.lastSaved.set({ kind: 'edge', record: updated });
       });
     } else if (dr.kind === 'chrono') {
       const resolvedKind = this.drawerEditChrono.kind as ChronoType;
       const chronoProps = this.store.stripEmptyOptionalProps(this.drawerEditChrono.properties, this.store.chronoSchema(resolvedKind));
-      this.brainApi.updateChrono(spaceId, id, {
+      const body: Parameters<BrainApi['updateChrono']>[2] = {
         title: this.drawerEditChrono.title.trim(),
         type: resolvedKind,
         status: this.drawerEditChrono.status as ChronoStatus,
@@ -238,15 +282,42 @@ export class RecordDrawerState {
         ...(this.drawerEditChrono.linkFacts.length ? { linkFacts: this.drawerEditChrono.linkFacts } : {}),
         ...(this.drawerEditChrono.confidence != null ? { confidence: this.drawerEditChrono.confidence } : {}),
         ...(Object.keys(chronoProps).length ? { properties: chronoProps } : {}),
-      }).subscribe({
-        next: (updated) => {
-          this.drawerSaving.set(false);
-          this.drawerRecord.set({ kind: 'chrono', record: updated });
-          this.store.chrono.update(list => list.map(c => c._id === id ? updated : c));
-          this.lastSaved.set({ kind: 'chrono', record: updated });
-        },
-        error: (err) => { this.drawerSaving.set(false); this.drawerError.set(fmtApiError(err, 'Failed to save')); },
+      };
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateChrono(spaceId, id, b), body, body.type !== dr.record.type), dr, updated => {
+        this.drawerRecord.set({ kind: 'chrono', record: updated });
+        this.store.chrono.update(list => list.map(c => c._id === id ? updated : c));
+        this.lastSaved.set({ kind: 'chrono', record: updated });
       });
     }
+  }
+
+  /**
+   * One save's outcome, the same for all four kinds: a saved record is split from its `warnings` (which the notice keeps), a
+   * refusal is held as it was answered, and a type change the person declined puts the type control back.
+   */
+  private persist<T extends Fact | Entity | Edge | ChronoEntry>(save: Observable<T>, was: DrawerRecord, onSaved: (record: T) => void): void {
+    save.subscribe({
+      next: answer => {
+        const { record, warnings } = splitWriteWarnings(answer);
+        this.drawerSaving.set(false);
+        this.drawerWarnings.set(warnings);
+        // Its keys are stored now: a later type change must not take them for seeds.
+        this.stored = new Set(Object.keys(record.properties ?? {}));
+        onSaved(record);
+      },
+      error: err => {
+        this.drawerSaving.set(false);
+        if (isRetypeCancelled(err)) { this.restoreType(was); return; }
+        this.drawerFailure.set(err);
+      },
+    });
+  }
+
+  /** Declining the removal puts the type control back to the record's own and re-seeds the properties for it: nothing was sent, nothing is lost. */
+  private restoreType(was: DrawerRecord): void {
+    if (was.kind === 'fact') this.onMemoryTypeChange(was.record.type ?? '');
+    else if (was.kind === 'entity') this.onEntityTypeChange(was.record.type ?? '');
+    else if (was.kind === 'edge') this.onEdgeLabelChange(was.record.label);
+    else this.onChronoKindChange(was.record.type);
   }
 }

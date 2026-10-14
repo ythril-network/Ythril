@@ -20,7 +20,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
-import { refusalText } from '../../core/refusal-text';
+import { refusalText, RefusalSource } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-danger-tab',
@@ -414,9 +414,9 @@ export class SpaceDangerTabComponent {
         this.rebuildingIndexes.set(false);
         this.toast.success(this.transloco.translate('spaces.dangerZone.rebuildIndexesStarted'));
       },
-      error: (err: { error?: { error?: string }; message?: string }) => {
+      error: (err: unknown) => {
         this.rebuildingIndexes.set(false);
-        this.toast.error(err?.error?.error ?? err?.message ?? this.transloco.translate('spaces.dangerZone.rebuildIndexesFailed'));
+        this.toast.error(refusalText(this.transloco, err as RefusalSource, 'spaces.dangerZone.rebuildIndexesFailed'));
       },
     });
   }
@@ -475,7 +475,7 @@ export class SpaceDangerTabComponent {
           error: () => this.state.dangerWipeLoading.set(false),
         });
       },
-      error: (err) => { this.state.dangerWiping.set(false); this.state.dangerWipeError.set(err.error?.error ?? this.transloco.translate('spaces.error.wipeFailed')); },
+      error: (err) => { this.state.dangerWiping.set(false); this.state.dangerWipeError.set(refusalText(this.transloco, err, 'spaces.error.wipeFailed')); },
     });
   }
 
@@ -500,7 +500,7 @@ export class SpaceDangerTabComponent {
         this.store.spaces.update(list => list.filter(s => s.id !== target.id));
         this.state.closeSettings();
       },
-      error: (err) => { this.state.dangerDeleting.set(false); this.state.dangerDeleteError.set(err.error?.error ?? this.transloco.translate('spaces.error.deleteFailed')); },
+      error: (err) => { this.state.dangerDeleting.set(false); this.state.dangerDeleteError.set(refusalText(this.transloco, err, 'spaces.error.deleteFailed')); },
     });
   }
 

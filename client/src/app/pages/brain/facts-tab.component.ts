@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, output, signal } from '@ang
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { catchError, of, switchMap } from 'rxjs';
 import { Fact } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
@@ -18,11 +18,16 @@ import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
 import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordSearchBarComponent } from './record-search-bar.component';
-import { fmtApiError } from './brain-format';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
+import { refusalText, type RefusalSource } from '../../core/refusal-text';
+import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
+import { RetypeConfirmService } from '../../core/retype-confirm.service';
+import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
+import { WriteWarningsComponent } from '../../shared/write-warnings.component';
+import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 
 /**
  * The Memories record tab, extracted from BrainComponent (A17.9b-6d) — the first of the five record
@@ -44,7 +49,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-facts-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -82,12 +87,12 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                        there the free-text control is still the right one. -->
                   <label>{{ 'common.form.type' | transloco }}</label>
                   @if (store.memoryTypesAreRestricted()) {
-                    <select [(ngModel)]="memoryForm.type" name="memFormType">
+                    <select [ngModel]="memoryForm.type" (ngModelChange)="onMemoryTypeChange($event, 'create')" name="memFormType">
                       <option value="">{{ 'brain.facts.form.typePlaceholder' | transloco }}</option>
                       @for (t of store.memoryAllowedTypes(); track t) { <option [value]="t">{{ t }}</option> }
                     </select>
                   } @else {
-                    <input type="text" [(ngModel)]="memoryForm.type" name="memFormType" list="memTypeOptions"
+                    <input type="text" [ngModel]="memoryForm.type" (ngModelChange)="onMemoryTypeChange($event, 'create')" name="memFormType" list="memTypeOptions"
                            [placeholder]="'brain.facts.form.typePlaceholder' | transloco" />
                     <datalist id="memTypeOptions">
                       @for (t of store.memoryTypeOptions(); track t) { <option [value]="t"></option> }
@@ -104,7 +109,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                 </div>
                 <div class="field">
                   <label>{{ 'common.form.properties' | transloco }}</label>
-                  <app-properties-editor [schema]="store.memorySchema()" [required]="store.requiredProps(store.memorySchema())" [(value)]="memoryForm.properties" />
+                  <app-properties-editor [schema]="store.memorySchema(memoryForm.type)" [required]="store.requiredProps(store.memorySchema(memoryForm.type))" [errors]="createErrors()" [(value)]="memoryForm.properties" />
                 </div>
               </div>
               <div style="display:flex; gap:8px;">
@@ -117,9 +122,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             </form>
           }
 
-          @if (createMemoryError()) {
-            <div class="alert alert-error" style="margin-bottom:12px;">{{ createMemoryError() }}</div>
-          }
+          <app-refusal-alert [view]="createRefusal()" idPrefix="mem-create-refusal" />
+          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
 
           <!-- Tag/type filtering now docks in the column headers (2b-ii). The active ENTITY filter —
                set by clicking an entity chip in a row — stays as an indicator chip here since it has
@@ -178,6 +182,21 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             <label>{{ 'common.form.description' | transloco }}</label>
                             <textarea [(ngModel)]="editMemory.description" name="editDesc" rows="2" style="resize:vertical;"></textarea>
                           </div>
+                          <div class="field" style="flex:1; min-width:140px; margin-bottom:0;">
+                            <label>{{ 'common.form.type' | transloco }}</label>
+                            @if (store.memoryTypesAreRestricted()) {
+                              <select [ngModel]="editMemory.type" (ngModelChange)="onMemoryTypeChange($event, 'inline')" name="editMemType">
+                                <option value="">{{ 'brain.facts.form.typePlaceholder' | transloco }}</option>
+                                @for (t of store.memoryAllowedTypes(); track t) { <option [value]="t">{{ t }}</option> }
+                              </select>
+                            } @else {
+                              <input type="text" [ngModel]="editMemory.type" (ngModelChange)="onMemoryTypeChange($event, 'inline')" name="editMemType" list="memEditTypeOptions"
+                                     [placeholder]="'brain.facts.form.typePlaceholder' | transloco" />
+                              <datalist id="memEditTypeOptions">
+                                @for (t of store.memoryTypeOptions(); track t) { <option [value]="t"></option> }
+                              </datalist>
+                            }
+                          </div>
                           <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
                             <label>{{ 'common.form.tags' | transloco }}</label>
                             <app-tag-input [(value)]="editMemory.tags" [suggestions]="store.memoryTagSuggestions()" inputName="memEditTags" />
@@ -189,8 +208,9 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                           <div class="field" style="flex:1; min-width:220px; margin-bottom:0;">
                             <label>{{ 'common.form.properties' | transloco }}</label>
                             <app-properties-editor
-                              [schema]="store.memorySchema()"
-                              [required]="store.requiredProps(store.memorySchema())"
+                              [schema]="store.memorySchema(editMemory.type)"
+                              [required]="store.requiredProps(store.memorySchema(editMemory.type))"
+                              [errors]="editErrors()"
                               [(value)]="editMemory.properties"
                             />
                           </div>
@@ -200,7 +220,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             </button>
                             <button class="btn btn-sm btn-secondary" (click)="recordList.cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
-                          @if (recordList.editError()) { <div style="font-size:12px; color:var(--error);">{{ recordList.editError() }}</div> }
+                          <app-refusal-alert style="flex-basis:100%" [view]="editRefusal()" idPrefix="mem-edit-refusal" />
                         </div>
                       </td>
                     </tr>
@@ -224,7 +244,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                           </div>
                         } @else { <span style="color:var(--text-muted)">—</span> }
                       </td>
-                      <td><app-properties-view [properties]="mem.properties" [schema]="store.memorySchema()" /></td>
+                      <td><app-properties-view [properties]="mem.properties" [schema]="store.memorySchema(mem.type)" /></td>
                       <td><app-timestamp [value]="mem.createdAt"/></td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('fact', mem)"><ph-icon name="eye" [size]="16"/></button>
@@ -273,6 +293,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
 export class FactsTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
+  private transloco = inject(TranslocoService);
+  private retype = inject(RetypeConfirmService);
 
   /** Emitted after a create/delete so the shell can refresh the space's tab-count stats. */
   readonly mutated = output<void>();
@@ -281,9 +303,17 @@ export class FactsTabComponent extends RecordTabBase {
 
   showMemoryForm = signal(false);
   creatingMemory = signal(false);
-  createMemoryError = signal('');
+  /** The refused answer of the last create, as the request gave it; `createRefusal` is its words and rows, `createErrors` the messages on property keys. */
+  createFailure = signal<RefusalSource | null>(null);
+  readonly createRefusal = refusalViewOf(this.transloco, this.createFailure, 'refusal.failed.createMemory');
+  readonly createErrors = propertyErrorsOf(this.createRefusal);
+  readonly editRefusal = refusalViewOf(this.transloco, this.recordList.editFailure, 'refusal.failed.save');
+  readonly editErrors = propertyErrorsOf(this.editRefusal);
+  /** The keys the memory being edited STORED, and the type it had: what a type change must keep, and what Cancel on the retype confirmation goes back to. */
+  private editStored: ReadonlySet<string> = new Set();
+  private editOriginalType = '';
   memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
-  editMemory = { fact: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  editMemory = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
 
   protected override resetOnSpaceChange(): void {
@@ -366,13 +396,25 @@ export class FactsTabComponent extends RecordTabBase {
 
   openMemoryForm(): void {
     this.memoryForm = { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: this.store.buildPropertiesObject('fact') };
+    this.createFailure.set(null);
     this.showMemoryForm.set(true);
+  }
+
+  /**
+   * A memory's type changed (create form or inline row): the old type's untouched seeds go and the new type's are added. A memory is
+   * seeded from ITS OWN type; one with none is open and seeds nothing.
+   */
+  onMemoryTypeChange(type: string, target: 'create' | 'inline'): void {
+    const form = target === 'create' ? this.memoryForm : this.editMemory;
+    const from = form.type;
+    form.type = type;
+    form.properties = this.store.retypeProperties('fact', form.properties, from, type, target === 'create' ? undefined : this.editStored);
   }
 
   createMemory(): void {
     if (!this.memoryForm.fact.trim()) return;
     this.creatingMemory.set(true);
-    this.createMemoryError.set('');
+    this.createFailure.set(null);
     const linkEntities = this.memoryForm.linkEntities.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<BrainApi['createMemory']>[1] = { fact: this.memoryForm.fact.trim() };
     // Sent only when non-empty: an empty `type` must stay ABSENT rather than become the string "", which would
@@ -383,46 +425,60 @@ export class FactsTabComponent extends RecordTabBase {
     if (this.memoryForm.description.trim()) body.description = this.memoryForm.description.trim();
     if (Object.keys(this.memoryForm.properties).length) body.properties = this.memoryForm.properties;
     this.brainApi.createMemory(this.spaceId(), body).subscribe({
-      next: () => {
+      next: (answer) => {
+        this.takeWarnings(answer);
         this.creatingMemory.set(false);
         this.showMemoryForm.set(false);
         this.memoryForm = { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
         this.mutated.emit();
         this.load();
       },
-      error: (err) => { this.creatingMemory.set(false); this.createMemoryError.set(fmtApiError(err, 'Failed to create memory')); },
+      error: (err) => { this.creatingMemory.set(false); this.createFailure.set(err); },
     });
   }
 
   startEditMemory(mem: Fact): void {
     this.recordList.editingId.set(mem._id);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
+    this.editStored = new Set(Object.keys(mem.properties ?? {}));
+    this.editOriginalType = mem.type ?? '';
     this.editMemory = {
       fact: mem.fact,
+      type: mem.type ?? '',
       tags: mem.tags ?? [],
       linkEntities: (mem.linkEntities ?? []).join(', '),
       description: mem.description ?? '',
-      properties: this.store.buildPropertiesObject('fact', mem.properties ?? {}),
+      properties: this.store.buildPropertiesObject('fact', mem.properties ?? {}, mem.type),
     };
   }
 
   saveEditMemory(id: string): void {
     this.recordList.editSaving.set(true);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
     const memProps = this.editMemory.properties;
-    this.brainApi.updateFact(this.spaceId(), id, {
+    const body: Parameters<BrainApi['updateFact']>[2] = {
       fact: this.editMemory.fact.trim(),
+      // Sent even when empty, as the drawer does: on an UPDATE an absent field means "leave it alone", so a cleared type has to
+      // reach the API as an explicit empty value or the type could be set and never unset.
+      ...(this.editMemory.type !== undefined ? { type: this.editMemory.type.trim() } : {}),
       tags: this.editMemory.tags,
       linkEntities: this.editMemory.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
       description: this.editMemory.description.trim(),
       ...(Object.keys(memProps).length ? { properties: memProps } : {}),
-    }).subscribe({
-      next: (updated) => {
+    };
+    saveWithRetype(this.retype, b => this.brainApi.updateFact(this.spaceId(), id, b), body, (body.type ?? this.editOriginalType) !== this.editOriginalType).subscribe({
+      next: (answer) => {
+        const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);
         this.recordList.editingId.set('');
         this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
       },
-      error: (err) => { this.recordList.editSaving.set(false); this.recordList.editError.set(fmtApiError(err, 'Failed to save')); },
+      error: (err) => {
+        this.recordList.editSaving.set(false);
+        // Declining the removal puts the type back, and the properties with it: nothing was sent.
+        if (isRetypeCancelled(err)) { this.onMemoryTypeChange(this.editOriginalType, 'inline'); return; }
+        this.recordList.failEdit(err);
+      },
     });
   }
 
@@ -434,7 +490,7 @@ export class FactsTabComponent extends RecordTabBase {
       // Said out loud. All four record tabs answered a failed delete with `error: () => {}`,
       // so the row stayed on screen and nothing explained why — the operator's own click
       // looked like it had not registered.
-      error: (e) => this.recordList.deleteError.set(fmtApiError(e, 'Failed to delete')),
+      error: (e) => this.recordList.deleteError.set(refusalText(this.transloco, e, 'refusal.failed.delete')),
     });
   }
 }

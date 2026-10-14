@@ -10,10 +10,13 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { PipelineStatus, HealthState, ModelStageStatus, SidecarStatus } from './media-processing.types';
+import { refusalText } from '../../../core/refusal-text';
+import { TranslocoService } from '@jsverse/transloco';
 
 @Injectable()
 export class PipelineStatusService {
   private readonly http = inject(HttpClient);
+  private readonly transloco = inject(TranslocoService);
 
   readonly status = signal<PipelineStatus | null>(null);
   readonly loading = signal(false);
@@ -43,7 +46,7 @@ export class PipelineStatusService {
       // A failed status fetch must not read as "everything is off". The dots fall back to `unknown`
       // and the tab says why — reporting a probe failure as a component failure would be the same
       // dishonesty this screen exists to end.
-      error: err => { this.error.set(err?.error?.error ?? err?.message ?? 'Could not read pipeline status'); this.loading.set(false); },
+      error: err => { this.error.set(refusalText(this.transloco, err, 'refusal.failed.pipelineStatus')); this.loading.set(false); },
     });
   }
 

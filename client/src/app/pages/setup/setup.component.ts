@@ -6,6 +6,7 @@ import { AuthService } from '../../core/auth.service';
 import { CommonModule } from '@angular/common';
 import { BrandLogoComponent } from '../../shared/brand-logo.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-setup',
@@ -145,7 +146,7 @@ export class SetupComponent {
         error: (err) => {
           this.loading.set(false);
           this.error.set(
-            err.error?.error ?? this.transloco.translate('setup.error.failed'),
+            refusalText(this.transloco, err, 'setup.error.failed'),
           );
         },
       });

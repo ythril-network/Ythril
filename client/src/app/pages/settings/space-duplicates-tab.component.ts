@@ -17,6 +17,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { SpacesStore } from './spaces-store.service';
 import type { DupeActionRule } from '../../core/api.types';
 import { TranslocoService } from '@jsverse/transloco';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-duplicates-tab',
@@ -155,7 +156,7 @@ export class SpaceDuplicatesTabComponent {
         // Re-baseline the dupe dirty snapshot so the close guard doesn't flag freshly-saved rules.
         this.state.markDupePristine();
       },
-      error: (e) => { this.state.dupeSaving.set(false); this.state.dupeError.set(e?.error?.error || this.transloco.translate('spaces.dupe.saveError')); },
+      error: (e) => { this.state.dupeSaving.set(false); this.state.dupeError.set(refusalText(this.transloco, e, 'spaces.dupe.saveError')); },
     });
   }
 }

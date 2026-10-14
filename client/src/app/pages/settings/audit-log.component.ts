@@ -11,6 +11,7 @@ import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-audit-log',
@@ -595,7 +596,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(err?.error?.error ?? 'Failed to load audit log');
+        this.error.set(refusalText(this.transloco, err, 'refusal.failed.auditLoad'));
         this.loading.set(false);
       },
     });
@@ -665,7 +666,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
       error: (err) => {
         // Surfaced rather than swallowed: a download that silently does nothing is indistinguishable from an
         // empty result, and for an audit export those two must never look the same.
-        this.exportError.set(err?.error?.error ?? this.transloco.translate('auditLog.exportAllFailed'));
+        this.exportError.set(refusalText(this.transloco, err, 'auditLog.exportAllFailed'));
         this.exportingAll.set(false);
       },
     });

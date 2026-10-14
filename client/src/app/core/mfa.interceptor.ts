@@ -2,6 +2,7 @@ import { HttpInterceptorFn, HttpRequest, HttpHandlerFn } from '@angular/common/h
 import { inject } from '@angular/core';
 import { catchError, from, switchMap, throwError } from 'rxjs';
 import { MfaService } from './mfa.service';
+import { answerErrorField } from './refusal-text';
 
 /** HTTP method groups that can trigger an MFA challenge */
 const MFA_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
@@ -37,7 +38,7 @@ export const mfaInterceptor: HttpInterceptorFn = (req: HttpRequest<unknown>, nex
 
   return next(outReq).pipe(
     catchError(err => {
-      const errorCode: string = err?.error?.error ?? '';
+      const errorCode: string = answerErrorField(err);
       if (err.status !== 403 || (errorCode !== 'MFA_REQUIRED' && errorCode !== 'MFA_INVALID')) {
         return throwError(() => err);
       }

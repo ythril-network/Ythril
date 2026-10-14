@@ -30,6 +30,7 @@ import { httpErrorReason } from '../../core/http-error';
 import { saveBlob } from '../../core/authenticated-download';
 import { ModalDirective } from '../../shared/modal.directive';
 import { CHIP_STYLES } from '../../shared/chip.styles';
+import { refusalText } from '../../core/refusal-text';
 
 // ── Local form state ────────────────────────────────────────────────────────
 
@@ -878,7 +879,7 @@ export class SchemaLibraryComponent implements OnInit {
     forkJoin(unlinks$.length ? unlinks$ : [Promise.resolve()]).subscribe({
       next: () => this._doDelete(d.entryName),
       error: (err) => {
-        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: err?.error?.error ?? 'Failed to unlink one or more spaces.' } : s);
+        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: refusalText(this.transloco, err, 'refusal.failed.unlinkSpaces') } : s);
       },
     });
   }
@@ -891,7 +892,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.deleteDialog.set(null);
       },
       error: (err) => {
-        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: err?.error?.error ?? this.transloco.translate('schemaLib.error.deleteFailed') } : s);
+        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: refusalText(this.transloco, err, 'schemaLib.error.deleteFailed') } : s);
       },
     });
   }
@@ -953,7 +954,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.closeDialog();
       },
       error: (err) => {
-        this.dialogError.set(err?.error?.error ?? this.transloco.translate('schemaLib.error.saveFailed'));
+        this.dialogError.set(refusalText(this.transloco, err, 'schemaLib.error.saveFailed'));
       },
     });
   }
@@ -1020,7 +1021,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.showAddCatalog.set(false);
       },
       error: (err) => {
-        this.catalogError.set(err?.error?.error ?? this.transloco.translate('schemaLib.catalog.saveError'));
+        this.catalogError.set(refusalText(this.transloco, err, 'schemaLib.catalog.saveError'));
       },
     });
   }
@@ -1056,7 +1057,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.libTokenRevealed.set(plaintext);
       },
       error: (err) => {
-        this.libTokenError.set(err?.error?.error ?? this.transloco.translate('tokens.error.createFailed'));
+        this.libTokenError.set(refusalText(this.transloco, err, 'tokens.error.createFailed'));
       },
     });
   }
@@ -1078,7 +1079,7 @@ export class SchemaLibraryComponent implements OnInit {
     this.schemaApi.browseCatalog(catalogName).subscribe({
       next: ({ entries }) => this.browsing.update(b => b ? { ...b, entries, loading: false } : b),
       error: (err) => {
-        const msg = err?.error?.error ?? this.transloco.translate('schemaLib.catalog.fetchFailed');
+        const msg = refusalText(this.transloco, err, 'schemaLib.catalog.fetchFailed');
         this.browsing.update(b => b ? { ...b, loading: false, error: msg } : b);
       },
     });
@@ -1226,7 +1227,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.exportSpaceDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {
-        this.exportSpaceDialog.update(s => s ? { ...s, error: err?.error?.error ?? this.transloco.translate('schemaLib.exportSpace.errorFailed') } : s);
+        this.exportSpaceDialog.update(s => s ? { ...s, error: refusalText(this.transloco, err, 'schemaLib.exportSpace.errorFailed') } : s);
       },
     });
   }
@@ -1257,7 +1258,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.applyGroupDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {
-        this.applyGroupDialog.update(s => s ? { ...s, error: err?.error?.error ?? this.transloco.translate('schemaLib.applyGroup.errorFailed') } : s);
+        this.applyGroupDialog.update(s => s ? { ...s, error: refusalText(this.transloco, err, 'schemaLib.applyGroup.errorFailed') } : s);
       },
     });
   }

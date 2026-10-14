@@ -4,6 +4,14 @@ import {
   KnowledgeType, ChronoType, ChronoStatus,
 } from '../../core/api.types';
 
+/** The value a new record's property row starts with, from its declared schema: enum -> first option, number -> 0, boolean -> false, else ''. */
+function seedValue(schema: PropertySchema): string | number | boolean {
+  if (schema.enum?.length) return schema.enum[0] as string | number | boolean;
+  if (schema.type === 'number') return 0;
+  if (schema.type === 'boolean') return false;
+  return '';
+}
+
 /**
  * Records for the active brain space, and the client-side view of them.
  *
@@ -82,19 +90,23 @@ export class BrainStore {
   }
 
   entitySchema(typeName: string | undefined): Record<string, PropertySchema> | undefined {
-    if (!typeName) return undefined;
-    return this.spaceMeta()?.typeSchemas?.entity?.[typeName]?.propertySchemas;
+    return this.schemaFor('entity', typeName);
   }
 
   edgeSchema(labelName: string | undefined): Record<string, PropertySchema> | undefined {
-    if (!labelName) return undefined;
-    return this.spaceMeta()?.typeSchemas?.edge?.[labelName]?.propertySchemas;
+    return this.schemaFor('edge', labelName);
   }
 
-  memorySchema(): Record<string, PropertySchema> | undefined {
-    const ts = this.spaceMeta()?.typeSchemas?.fact;
-    if (!ts) return undefined;
-    return Object.values(ts)[0]?.propertySchemas;
+  /**
+   * The property schemas of the memory type `typeName` - ITS OWN, as the other three kinds do.
+   *
+   * It used to answer the FIRST declared fact type's schema whatever the memory's type, so a `decision` memory was edited, seeded and
+   * marked against the schema of whichever type happened to be declared first. A typeless memory, and a type the space does not
+   * declare, have no schema (undefined): an open record.
+   */
+  memorySchema(typeName?: string): Record<string, PropertySchema> | undefined {
+    if (!typeName) return undefined;
+    return this.spaceMeta()?.typeSchemas?.fact?.[typeName]?.propertySchemas;
   }
 
   /** Property schema for a chrono type (kind or custom-kind name); undefined when none is defined. */
@@ -178,23 +190,49 @@ export class BrainStore {
     const meta = this.spaceMeta();
     const typeSchemas = meta?.typeSchemas?.[type];
     if (!typeSchemas || Object.keys(typeSchemas).length === 0) return existing;
-    // Use the specified type's schema; fall back to the first type when no name is given
-    const schemas = (typeName ? typeSchemas[typeName] : Object.values(typeSchemas)[0])?.propertySchemas ?? {};
+    // Use the specified type's schema. With no name given a form that has no type yet is pre-filled from the first declared
+    // type - except a memory, which has no "first": it is typeless until the person picks one, and seeds nothing.
+    const schemas = (typeName ? typeSchemas[typeName] : type === 'fact' ? undefined : Object.values(typeSchemas)[0])?.propertySchemas ?? {};
     if (Object.keys(schemas).length === 0) return existing;
     const result = { ...existing };
     for (const [key, schema] of Object.entries(schemas)) {
       if (key in result) continue;
-      if (schema.enum?.length) {
-        result[key] = schema.enum[0] as string | number | boolean;
-      } else if (schema.type === 'number') {
-        result[key] = 0;
-      } else if (schema.type === 'boolean') {
-        result[key] = false;
-      } else {
-        result[key] = '';
-      }
+      result[key] = seedValue(schema);
     }
     return result;
+  }
+
+  /**
+   * The properties of a record after its type changed from `fromType` to `toType`: what was only SEEDED from the old type and never
+   * touched is dropped, the new type's seeds are added, and everything else stays (bundle-23, Q-93).
+   *
+   * One question, asked by every surface that changes a record's type (the four tabs' create forms and inline rows and the
+   * drawer's four kinds): without it the next save carries the old type's seeds, which the new type does not declare, and a
+   * strict space refuses it with a list of keys the person never typed. What counts as untouched is exact: the key is declared by
+   * the OLD type, its value is still the value that type would have seeded, and the record did not STORE it (`storedKeys`) - a
+   * stored key is data, even when its value happens to equal the old default, and a value the person edited is theirs. Whatever
+   * stays and the new type does not declare is shown marked "not declared" by the properties editor, never silently dropped.
+   */
+  retypeProperties(
+    type: KnowledgeType,
+    current: Record<string, string | number | boolean>,
+    fromType: string | undefined,
+    toType: string | undefined,
+    storedKeys: ReadonlySet<string> = new Set(),
+  ): Record<string, string | number | boolean> {
+    const from = this.schemaFor(type, fromType);
+    const kept: Record<string, string | number | boolean> = {};
+    for (const [key, value] of Object.entries(current)) {
+      const untouchedSeed = !!from && Object.hasOwn(from, key) && !storedKeys.has(key) && value === seedValue(from[key]);
+      if (!untouchedSeed) kept[key] = value;
+    }
+    return this.buildPropertiesObject(type, kept, toType);
+  }
+
+  /** The property schemas of one type of a kind (an edge is keyed by its label, a chrono entry by its type); undefined when there are none. */
+  schemaFor(type: KnowledgeType, typeName: string | undefined): Record<string, PropertySchema> | undefined {
+    if (!typeName) return undefined;
+    return this.spaceMeta()?.typeSchemas?.[type]?.[typeName]?.propertySchemas;
   }
 
   /** Strip optional properties whose value is an empty string; required fields are preserved even if empty (server will reject them with a clear error). */

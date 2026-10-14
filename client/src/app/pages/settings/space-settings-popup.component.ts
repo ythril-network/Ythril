@@ -49,6 +49,7 @@ import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { SpaceDuplicatesTabComponent } from './space-duplicates-tab.component';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-settings-popup',
@@ -249,7 +250,7 @@ export class SpaceSettingsPopupComponent {
         this.state.markPristine();
         this.state.closeSettings();
       },
-      error: (err) => { this.state.settingsSaving.set(false); this.state.settingsError.set(err.error?.error ?? this.transloco.translate('spaces.error.saveFailed')); },
+      error: (err) => { this.state.settingsSaving.set(false); this.state.settingsError.set(refusalText(this.transloco, err, 'spaces.error.saveFailed')); },
     });
   }
 }

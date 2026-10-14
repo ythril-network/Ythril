@@ -353,7 +353,9 @@ describe('every client source that updates a brain record goes through the retyp
   });
 
   it('every non-spec source that calls a brain update method references saveWithRetype or RetypeConfirmService', () => {
-    const callers = SOURCES.filter(s => s.file !== API && CALL.test(s.text));
+    // The spec helpers under testing/ are tracked non-spec sources too, and the editor harness NAMES the update methods (as strings,
+    // to mock them); naming a method is not calling it, and they are not the app.
+    const callers = SOURCES.filter(s => s.file !== API && !s.file.startsWith('src/app/testing/') && CALL.test(s.text));
     expect(callers.length, 'no caller of a brain update method was found').toBeGreaterThanOrEqual(1);
     const bare = callers.filter(s => !/\bsaveWithRetype\b|\bRetypeConfirmService\b/.test(s.text)).map(s => s.file);
     expect(bare, 'these call a brain update directly and bypass the retype flow').toEqual([]);

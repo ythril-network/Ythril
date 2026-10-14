@@ -32,6 +32,7 @@ import { saveBlob } from '../../core/authenticated-download';
 
 import { SCHEMA_MD_STYLES } from './schema-styles';
 import { SchemaTypeEditorComponent } from './schema-type-editor.component';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-schema-tab',
@@ -145,18 +146,18 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
           <span class="nm">{{ name }}</span>
           <span class="sch-type-badges">
             @if (state.typeLibRef(kt,name)) {
-              <span class="badge badge-blue">Library</span>
+              <span class="badge badge-blue">{{ 'spaces.schema.badge.library' | transloco }}</span>
             } @else {
               @if (state.typeState(kt,name).propertySchemas.length) {
                 <span class="badge badge-gray">{{ state.typeState(kt,name).propertySchemas.length }}p</span>
               }
               @if (kt === 'entity' && state.typeState(kt,name).namingPattern) {
-                <span class="badge badge-gray">pat</span>
+                <span class="badge badge-gray">{{ 'spaces.schema.badge.pattern' | transloco }}</span>
               }
               <!-- A window deletes records, so it is visible from the list rather than only after selecting
                    the type. Amber, not grey: this is the one badge here that describes data loss. -->
               @if (state.typeState(kt,name).retentionDays || state.typeState(kt,name).retentionContentDays) {
-                <span class="badge badge-yellow">ttl</span>
+                <span class="badge badge-yellow">{{ 'spaces.schema.badge.ttl' | transloco }}</span>
               }
             }
           </span>
@@ -515,7 +516,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         }));
       },
       error: (err) => {
-        this.exportLibDialog.set({ ...d, saving: false, error: err?.error?.error ?? this.transloco.translate('spaces.schema.exportToLibrary.failed') });
+        this.exportLibDialog.set({ ...d, saving: false, error: refusalText(this.transloco, err, 'spaces.schema.exportToLibrary.failed') });
       },
     });
   }
@@ -759,7 +760,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         if (losesRetention) this.toast.info(this.transloco.translate('spaces.schema.retention.libDropped', { name }));
       },
       error: (err) => {
-        this.schImportError.set(err?.error?.error ?? this.transloco.translate('spaces.schema.libSave.failed'));
+        this.schImportError.set(refusalText(this.transloco, err, 'spaces.schema.libSave.failed'));
       },
     });
   }

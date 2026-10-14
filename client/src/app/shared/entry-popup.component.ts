@@ -14,6 +14,9 @@ import { BrainApi } from '../core/brain-api.service';
 import { KnowledgeType } from '../core/api.types';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ModalDirective } from './modal.directive';
+import { saveWithRetype, isRetypeCancelled, RetypeBody } from '../pages/brain/retype-flow';
+import { httpErrorReason } from '../core/refusal-text';
+import { RetypeConfirmService } from '../core/retype-confirm.service';
 
 type RecordType = KnowledgeType;
 
@@ -383,6 +386,7 @@ interface FieldEntry {
 })
 export class EntryPopupComponent {
   private brainApi = inject(BrainApi);
+  private retype = inject(RetypeConfirmService);
 
   @Input() record: Record<string, unknown> | null = null;
   @Input() recordType: RecordType = 'entity';
@@ -528,7 +532,9 @@ export class EntryPopupComponent {
     this.clearStatus();
 
     const body = this.buildPatchBody();
-    const call = this.getUpdateCall(id, body);
+    // Through the retype flow like every other brain update: a strict space refuses a type change that leaves keys the new type does
+    // not declare, and the way out (remove them with the change) is asked of the person, not decided here.
+    const call = saveWithRetype(this.retype, b => this.getUpdateCall(id, b), body as Record<string, unknown> & RetypeBody, this.retypes(body));
 
     call.subscribe({
       next: (result) => {
@@ -539,15 +545,24 @@ export class EntryPopupComponent {
         this.statusType.set('success');
         this.saved.emit(result as Record<string, unknown>);
       },
-      error: (err: { message?: string }) => {
+      error: (err: unknown) => {
         this.saving.set(false);
-        this.statusMsg.set(err.message ?? 'Save failed');
+        // Declining the removal sends nothing and changes nothing: the JSON is still in the editor.
+        if (isRetypeCancelled(err)) return;
+        this.statusMsg.set(httpErrorReason(err) || 'Save failed');
         this.statusType.set('error');
       },
     });
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
+
+  /** Does this PATCH change the record's type (an edge's label, an entity's or memory's type, a chrono entry's type) from what was loaded? */
+  private retypes(body: Record<string, unknown>): boolean {
+    const was = this.snapshot();
+    const key = this.recordType === 'edge' ? 'label' : 'type';
+    return key in body && body[key] !== was[key];
+  }
 
   private buildPatchBody(): Record<string, unknown> {
     const d = { ...this.draft() };

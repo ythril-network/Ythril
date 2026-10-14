@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, effect, inject, input, signal } fro
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
+import { refusalText } from '../../core/refusal-text';
 
 type Clash = SchemaLayersView['clashes'][number];
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
@@ -126,7 +127,7 @@ export class SpaceSchemaLayersComponent {
         this.toast.success(this.transloco.translate('spaces.schema.layers.proposed', { network: this.labelOf(networkId) }));
         this.api.getSchemaLayers(this.spaceId()).subscribe({ next: v => this.show(v) });
       },
-      error: err => { this.proposing.set(false); this.toast.error(err.error?.error ?? this.transloco.translate('spaces.schema.layers.proposeFailed')); },
+      error: err => { this.proposing.set(false); this.toast.error(refusalText(this.transloco, err, 'spaces.schema.layers.proposeFailed')); },
     });
   }
 
@@ -134,7 +135,7 @@ export class SpaceSchemaLayersComponent {
     this.saving.set(true);
     this.api.setNetworkPrecedence(this.spaceId(), this.order()).subscribe({
       next: v => { this.saving.set(false); this.show(v); this.toast.success(this.transloco.translate('spaces.schema.layers.saved')); },
-      error: err => { this.saving.set(false); this.toast.error(err.error?.error ?? this.transloco.translate('spaces.schema.layers.saveFailed')); },
+      error: err => { this.saving.set(false); this.toast.error(refusalText(this.transloco, err, 'spaces.schema.layers.saveFailed')); },
     });
   }
 }

@@ -10,6 +10,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
+import { refusalText } from '../../core/refusal-text';
 
 /** Roles with members BELOW them, so a note written here reaches somebody: a publisher, a tree root or inner node. */
 const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
@@ -144,7 +145,7 @@ export class NetworkChangeNotesComponent {
       },
       error: (err) => {
         this.sending.set(false);
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.network.changeNotes.failed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.network.changeNotes.failed'));
       },
     });
   }
