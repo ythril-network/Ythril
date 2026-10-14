@@ -1,7 +1,9 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
+import { refusalText } from '../../core/refusal-text';
+import { SpaceSettingsState } from './space-settings-state.service';
 
 type Clash = SchemaLayersView['clashes'][number];
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
@@ -38,6 +40,13 @@ export function proposalFor(c: Clash, targetLayer: Record<string, unknown>): Rec
   imports: [TranslocoPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (loadFailed()) {
+      <!-- A failed load said nothing: the panel simply was not there, so a space governed by networks looked ungoverned. Said, with a way to try again. -->
+      <div class="alert alert-error" role="alert" data-testid="layers-error" style="margin:12px 0; display:flex; align-items:center; gap:10px; font-size:13px;">
+        <span style="flex:1;">{{ 'spaces.schema.layers.loadFailed' | transloco }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" data-testid="layers-retry" (click)="load()">{{ 'spaces.schema.layers.retry' | transloco }}</button>
+      </div>
+    }
     @if (view(); as v) {
       @if (v.layers.length) {
         <div style="margin:12px 0; padding:10px 12px; border:1px solid var(--border-muted); border-radius:6px;">
@@ -53,6 +62,18 @@ export function proposalFor(c: Clash, targetLayer: Record<string, unknown>): Rec
           }
           @if (dirty()) {
             <button class="btn-secondary btn btn-sm" style="margin-top:6px;" [disabled]="saving()" (click)="save()">{{ 'spaces.schema.layers.save' | transloco }}</button>
+          }
+          <!-- An edit that was ACCEPTED and is not in effect: a higher-precedence layer overrides the value this instance holds. -->
+          @for (h of (v.hidden ?? []); track h.path) {
+            <div class="sch-msg info" data-testid="hidden-edit" style="margin:6px 0 0;">
+              <code>{{ h.path }}</code> {{ 'spaces.schema.layers.hiddenEdit' | transloco: { path: h.path, network: labelOf(h.networkId) } }}
+            </div>
+          }
+          <!-- A round that is still open stays listed after the dialog that proposed it was closed. -->
+          @for (r of (v.rounds ?? []); track r.id) {
+            <div class="sch-msg warn" data-testid="pending-round" style="margin:6px 0 0;">
+              {{ 'spaces.schema.layers.pendingRound' | transloco: { network: labelOf(r.networkId), paths: r.paths.join(', ') } }}
+            </div>
           }
           @if (v.clashes.length) {
             <div class="section-title" style="margin-top:10px;">{{ 'spaces.schema.layers.clashes' | transloco: { count: v.clashes.length } }}</div>
@@ -82,8 +103,12 @@ export class SpaceSchemaLayersComponent {
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
 
+  /** Inside the settings dialog the view is the dialog's ONE copy (the Schema tab marks properties from it); on its own it is local. */
+  private shared = inject(SpaceSettingsState, { optional: true });
+
   spaceId = input.required<string>();
-  view = signal<SchemaLayersView | null>(null);
+  view = this.shared?.schemaLayers ?? signal<SchemaLayersView | null>(null);
+  loadFailed = signal(false);
   order = signal<string[]>([]);
   dirty = signal(false);
   saving = signal(false);
@@ -91,12 +116,24 @@ export class SpaceSchemaLayersComponent {
 
   constructor() {
     effect(() => {
-      const id = this.spaceId();
-      this.api.getSchemaLayers(id).subscribe({ next: v => this.show(v), error: () => this.view.set(null) });
+      this.spaceId();
+      // The Schema tab asks for a reload after it proposed something.
+      this.shared?.layersRefresh();
+      untracked(() => this.load());
+    });
+  }
+
+  /** Load the layers (again). A failure is said, with a retry; it no longer hides the panel. */
+  load(): void {
+    this.loadFailed.set(false);
+    this.api.getSchemaLayers(this.spaceId()).subscribe({
+      next: v => this.show(v),
+      error: () => { this.view.set(null); this.loadFailed.set(true); },
     });
   }
 
   private show(v: SchemaLayersView): void {
+    this.loadFailed.set(false);
     this.view.set(v); this.order.set([...v.precedence]); this.dirty.set(false);
   }
 
@@ -124,9 +161,9 @@ export class SpaceSchemaLayersComponent {
       next: () => {
         this.proposing.set(false);
         this.toast.success(this.transloco.translate('spaces.schema.layers.proposed', { network: this.labelOf(networkId) }));
-        this.api.getSchemaLayers(this.spaceId()).subscribe({ next: v => this.show(v) });
+        this.load();
       },
-      error: err => { this.proposing.set(false); this.toast.error(err.error?.error ?? this.transloco.translate('spaces.schema.layers.proposeFailed')); },
+      error: err => { this.proposing.set(false); this.toast.error(refusalText(this.transloco, err, 'spaces.schema.layers.proposeFailed')); },
     });
   }
 
@@ -134,7 +171,7 @@ export class SpaceSchemaLayersComponent {
     this.saving.set(true);
     this.api.setNetworkPrecedence(this.spaceId(), this.order()).subscribe({
       next: v => { this.saving.set(false); this.show(v); this.toast.success(this.transloco.translate('spaces.schema.layers.saved')); },
-      error: err => { this.saving.set(false); this.toast.error(err.error?.error ?? this.transloco.translate('spaces.schema.layers.saveFailed')); },
+      error: err => { this.saving.set(false); this.toast.error(refusalText(this.transloco, err, 'spaces.schema.layers.saveFailed')); },
     });
   }
 }

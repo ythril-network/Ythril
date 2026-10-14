@@ -1,11 +1,12 @@
 import { Injectable, inject, signal } from '@angular/core';
 import {
-  Space, SpaceMeta, SpaceStats, KnowledgeType, PropertySchema, TypeSchema,
+  Space, SpaceMeta, SpaceStats, KnowledgeType, PropertySchema, TypeSchema, SchemaRule, SpaceSchemaRule,
   ValidationMode, DupeActionRule,
   KNOWLEDGE_TYPES,
 } from '../../core/api.types';
 import { TranslocoService } from '@jsverse/transloco';
 import { SpacesApi } from '../../core/spaces-api.service';
+import type { SchemaLayersView } from '../../core/schema-api.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import {
   addProp as addPropTo,
@@ -13,6 +14,42 @@ import {
   addEnumVal as addEnumValTo,
   removeEnumVal as removeEnumValFrom,
 } from './type-schema-edits';
+
+/**
+ * One CEL rule of a type or of the space, as a ROW in the editor: a keyed LIST like `propertySchemas`, because a name is being
+ * typed and the row needs a stable identity while it is. The wire format is a map keyed by name (`TypeSchema.rules`).
+ */
+export interface RuleRow { name: string; rule: string; message: string }
+
+/** A space rule row: the same, plus the kinds it applies to. An EMPTY list means every kind, and is omitted on the wire. */
+export interface SpaceRuleRow extends RuleRow { kinds: KnowledgeType[] }
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The rows of a `rules` map as it arrives from the API, a file or a library entry, copied BY VALUE.
+ *
+ * Read defensively because a file is arbitrary JSON: a value that is not a map is no rules, and an entry that is not
+ * `{ rule: string, message: string }` is skipped rather than turned into a save the API refuses. Order is the map's own.
+ */
+export function ruleRowsFromWire(raw: unknown): RuleRow[] {
+  if (!isPlainObject(raw)) return [];
+  const rows: RuleRow[] = [];
+  for (const [name, def] of Object.entries(raw)) {
+    if (!isPlainObject(def) || typeof def['rule'] !== 'string' || typeof def['message'] !== 'string') continue;
+    rows.push({ name, rule: def['rule'], message: def['message'] });
+  }
+  return rows;
+}
+
+/** The space's rule rows: the type rows' reading, plus the kinds a rule names (only real kinds; none means every kind). */
+export function spaceRuleRowsFromWire(raw: unknown): SpaceRuleRow[] {
+  if (!isPlainObject(raw)) return [];
+  return ruleRowsFromWire(raw).map(row => {
+    const kinds = (raw[row.name] as Record<string, unknown>)['kinds'];
+    return { ...row, kinds: Array.isArray(kinds) ? kinds.filter((k): k is KnowledgeType => (KNOWLEDGE_TYPES as readonly string[]).includes(k as string)) : [] };
+  });
+}
 
 /**
  * Editable form state for one type schema.
@@ -74,6 +111,12 @@ export interface TypeSchemaState {
    */
   whenDuePasses: 'overdue' | 'nothing' | null;
   propertySchemas: { key: string; s: PropertySchema; _enumInput: string }[];
+  /**
+   * The CEL rules of this type (F-46): an enforced constraint, so losing one on an unrelated save widens what the space accepts with no
+   * message anywhere. Carried by every path that builds this state (the loader, a file, a library entry) and written by
+   * `typeSchemaFromState`, which REBUILDS the wire object and would otherwise delete them.
+   */
+  rules: RuleRow[];
   _newPropInput:   string;
   _newTagInput:    string;
   /**
@@ -97,9 +140,54 @@ export function emptyTypeSchemaState(over: Partial<TypeSchemaState> = {}): TypeS
   return {
     description: '', namingPattern: '', retentionDays: null, retentionContentDays: null, suppressEmbeddings: null,
     whenDuePasses: null,
-    propertySchemas: [], _newPropInput: '', _newTagInput: '',
+    propertySchemas: [], rules: [], _newPropInput: '', _newTagInput: '',
     ...over,
   };
+}
+
+/**
+ * The editor state of a wire `TypeSchema` - the reverse of {@link typeSchemaFromState}, in one place.
+ *
+ * Three paths turned a wire schema into editor state, each by its own list of fields: the loader (a space opening), a file import and
+ * "unlink a library entry". The last read two fields of nine, so unlinking a type deleted its description, its edge ends and its
+ * embedding setting on the next save; a file import read seven and lost the rest. A field this does not read is deleted the next
+ * time anybody saves any type, which is why there is one reader and it is written beside the serialiser.
+ *
+ * The input is read DEFENSIVELY (it may be a file: arbitrary JSON) and copied BY VALUE (the dialog must never mutate the object a list
+ * renders from). A retention window that is not a positive integer reads as "inherit", a stated flag that is not a boolean as "not
+ * stated". A library reference `{ $ref: 'library:<name>' }` becomes the `_libRef` sentinel `buildMeta()` turns back into one.
+ */
+export function typeStateFromSchema(raw: unknown): TypeSchemaState {
+  if (!isPlainObject(raw)) return emptyTypeSchemaState();
+  const ref = raw['$ref'];
+  if (typeof ref === 'string' && ref.startsWith('library:')) return emptyTypeSchemaState({ _libRef: ref.slice('library:'.length) });
+  const str = (k: string): string => (typeof raw[k] === 'string' ? raw[k] as string : '');
+  const flag = (k: string): boolean | null => (typeof raw[k] === 'boolean' ? raw[k] as boolean : null);
+  const retention = isPlainObject(raw['retention']) ? raw['retention'] : {};
+  const window = (k: string): number | null => {
+    const v = retention[k];
+    return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
+  };
+  const endpoints = isPlainObject(raw['endpoints']) ? raw['endpoints'] : null;
+  const names = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((n): n is string => typeof n === 'string') : undefined);
+  const from = endpoints ? names(endpoints['from']) : undefined;
+  const to = endpoints ? names(endpoints['to']) : undefined;
+  const props = isPlainObject(raw['propertySchemas']) ? raw['propertySchemas'] : {};
+  return emptyTypeSchemaState({
+    description:   str('description'),
+    namingPattern: str('namingPattern'),
+    // `null`, never 0: an absent window means "inherit the space default", and 0 is a value the API rejects.
+    retentionDays: window('days'),
+    retentionContentDays: window('contentDays'),
+    suppressEmbeddings: flag('suppressEmbeddings'),
+    whenDuePasses: raw['whenDuePasses'] === 'overdue' || raw['whenDuePasses'] === 'nothing' ? raw['whenDuePasses'] : null,
+    // An edge label's ends and cardinality: no control carries them in every host, and a save rebuilds the object.
+    endpoints: endpoints ? { ...(from ? { from: [...from] } : {}), ...(to ? { to: [...to] } : {}) } : undefined,
+    functional: typeof raw['functional'] === 'boolean' ? raw['functional'] : undefined,
+    // Spread preserves every field of a property, including `$ref`.
+    propertySchemas: Object.entries(props).map(([key, ps]) => ({ key, s: { ...(ps as PropertySchema) }, _enumInput: '' })),
+    rules: ruleRowsFromWire(raw['rules']),
+  });
 }
 
 /**
@@ -192,6 +280,14 @@ export function typeSchemaFromState(
     // who unticks it is saying this label is not functional rather than declining to say.
     if (state.functional !== undefined) ts.functional = state.functional;
   }
+  // Rules, as the map the wire holds, keyed by name; omitted when the type has none, so a type without rules carries no empty map.
+  // `rule` and `message` only: the row's other fields are the editor's own (an open disclosure, a buffer).
+  const rules = state.rules.filter(r => r.name.trim());
+  if (rules.length) {
+    const map: Record<string, SchemaRule> = {};
+    for (const r of rules) map[r.name.trim()] = { rule: r.rule, message: r.message };
+    ts.rules = map;
+  }
   if (state.propertySchemas.length) {
     const ps: Record<string, PropertySchema> = {};
     for (const { key, s } of state.propertySchemas) {
@@ -273,6 +369,26 @@ function clearedValueOf(was: unknown): unknown {
   return null;
 }
 
+/** Where an issue of a refused save points inside the rules: a type's rule (its collection and type) or a space rule. */
+export type RuleLocation =
+  | { scope: 'type'; kt: KnowledgeType; type: string; name: string; field: 'rule' | 'message' }
+  | { scope: 'space'; name: string; field: 'rule' | 'message' };
+
+/** A refused save's rule, with the sentence its row says. */
+export type RuleRefusal = RuleLocation & { text: string };
+
+/** Which rule (and which of its two texts) an issue path names, or null when it names none. */
+export function ruleLocationOf(path: unknown): RuleLocation | null {
+  if (!Array.isArray(path)) return null;
+  const p = path.map(String);
+  const field = (v: string | undefined): 'rule' | 'message' => (v === 'message' ? 'message' : 'rule');
+  if (p[0] === 'meta' && p[1] === 'rules' && p[2]) return { scope: 'space', name: p[2], field: field(p[3]) };
+  if (p[0] === 'meta' && p[1] === 'typeSchemas' && p[4] === 'rules' && p[5] && (KNOWLEDGE_TYPES as readonly string[]).includes(p[2]!)) {
+    return { scope: 'type', kt: p[2] as KnowledgeType, type: p[3]!, name: p[5], field: field(p[6]) };
+  }
+  return null;
+}
+
 @Injectable()
 export class SpaceSettingsState {
   private spacesApi = inject(SpacesApi);
@@ -327,6 +443,24 @@ export class SpaceSettingsState {
    */
   settingsSubmitted = signal(false);
   schemaCollTab = signal<KnowledgeType>('entity');
+  /**
+   * The save was refused because somebody else changed the schema first (412): the footer offers a reload, and nothing else can fix it
+   * (saving again sends the same stale version).
+   */
+  settingsConflict = signal(false);
+  /**
+   * The space's network schema layers, as the layers panel last loaded them: the ONE copy, so the panel above the tab and the tab's own
+   * markers (a property a network supplies, with its Propose action) cannot disagree. `layersRefresh` is how the tab asks the panel to
+   * load again after it proposed something.
+   */
+  schemaLayers = signal<SchemaLayersView | null>(null);
+  layersRefresh = signal(0);
+  /**
+   * The rule a refused save named (an issue whose path runs into `rules`), where the Schema tab shows it: its collection, its type and its
+   * row are opened, the row carries the message and focus moves into it. One object, replaced by each refusal: its identity IS the
+   * request to the tab to open and focus the row again.
+   */
+  ruleRefusal = signal<RuleRefusal | null>(null);
 
   // ── settings tab ───────────────────────────────────────────────────────────
   stForm = { label: '', purpose: '', usageNotes: '', maxGiB: null as number | null, documentExtraction: '' as '' | 'off' | 'ocr' | 'vlm' | 'repair' | 'auto',
@@ -358,6 +492,16 @@ export class SpaceSettingsState {
     entity: {}, fact: {}, edge: {}, chrono: {},
   };
   schNewTypeInputs:  Record<string, string> = { entity: '', fact: '', edge: '', chrono: '' };
+  /**
+   * The space-wide rules (F-46): the rows of `meta.rules`, each with the kinds it applies to. A plain field like the rest of this tab's
+   * model; `buildMeta()` writes them out as one map, SENT WHOLE (the server replaces the map, so a rule left out of it is deleted).
+   */
+  schRules: SpaceRuleRow[] = [];
+  /**
+   * The version of the space's meta the dialog read. A schema save sends it as `If-Match`, so a save made on top of somebody else's
+   * change is refused (412) instead of overwriting it.
+   */
+  schMetaVersion: number | undefined = undefined;
   /** The type shown in the master/detail editor pane (single-select — that's what master/detail is). */
   schSelectedType:   { kt: KnowledgeType; name: string } | null = null;
   /** Property editors open in the detail pane. Multiple may be open at once (U4). Keyed `kt|type|prop`. */
@@ -386,6 +530,8 @@ export class SpaceSettingsState {
     this.settingsNotice.set('');
     this.settingsSubmitted.set(false);
     this.settingsSaving.set(false);
+    this.settingsConflict.set(false);
+    this.ruleRefusal.set(null);
     this.stForm = { label: s.label, purpose: s.meta?.purpose ?? '', usageNotes: s.meta?.usageNotes ?? '', maxGiB: s.maxGiB ?? null, documentExtraction: s.documentExtraction ?? '',
       imageAnalysis: s.imageAnalysis ?? '', audioAnalysis: s.audioAnalysis ?? '', videoAnalysis: s.videoAnalysis ?? '', textAnalysis: s.textAnalysis ?? '' };
     this.dupeRulesState = (s.dupeRules ?? []).map(r => ({ ...r }));
@@ -400,45 +546,10 @@ export class SpaceSettingsState {
     this.schNewTypeInputs  = { entity: '', fact: '', edge: '', chrono: '' };
     this.schSelectedType   = null;
     this.schExpandedProps.clear();
-    const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> => {
-      const map: Record<string, TypeSchemaState> = {};
-      for (const [name, ts] of Object.entries(meta.typeSchemas?.[kt] ?? {})) {
-        // Preserve $ref as _libRef sentinel so buildMeta() can round-trip it
-        if (ts.$ref?.startsWith('library:')) {
-          map[name] = emptyTypeSchemaState({ _libRef: ts.$ref.slice('library:'.length) });
-        } else {
-          map[name] = emptyTypeSchemaState({
-            description:     ts.description     ?? '',
-            namingPattern:   ts.namingPattern   ?? '',
-            // `?? null`, never `?? 0`: an absent window means "inherit the space default", and 0 is a value the
-            // API rejects. Reading it as 0 would round-trip a blank field into an invalid save.
-            retentionDays:        ts.retention?.days        ?? null,
-            retentionContentDays: ts.retention?.contentDays ?? null,
-            // `?? null` again, and for the same reason: absent must round-trip as absent, or opening and saving
-            // a type would write a value nobody chose.
-            suppressEmbeddings:   ts.suppressEmbeddings      ?? null,
-            whenDuePasses:        ts.whenDuePasses           ?? null,
-            /*
-             * An edge label's ends and cardinality, and this line is the one that was MISSING.
-             *
-             * `typeSchemaFromState` has written both fields since S-1, specifically so a UI save could not
-             * delete a declaration made through the API — and it wrote `state.endpoints`, which nothing ever
-             * filled. So the declaration was dropped when the space loaded and the save wrote it back as
-             * absent: opening Space Settings and pressing Save deleted it, silently, with no control anywhere
-             * in the dialog that mentioned the field.
-             *
-             * The carry-through was tested at the serialiser and the loader was never asked. Found by looking
-             * at the finished control against an instance where the API had declared the rule — the boxes were
-             * empty.
-             */
-            endpoints:  ts.endpoints  ? { ...(ts.endpoints.from ? { from: [...ts.endpoints.from] } : {}), ...(ts.endpoints.to ? { to: [...ts.endpoints.to] } : {}) } : undefined,
-            functional: ts.functional,
-            propertySchemas: Object.entries(ts.propertySchemas ?? {}).map(([k, ps]) => ({ key: k, s: { ...ps }, _enumInput: '' })),
-          });
-        }
-      }
-      return map;
-    };
+    const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> =>
+      Object.fromEntries(Object.entries(meta.typeSchemas?.[kt] ?? {}).map(([name, ts]) => [name, typeStateFromSchema(ts)]));
+    this.schRules = spaceRuleRowsFromWire(meta.rules);
+    this.schMetaVersion = meta.version;
     this.schTypeSchemas = {
       entity: loadKt('entity'),
       fact: loadKt('fact'),
@@ -463,6 +574,33 @@ export class SpaceSettingsState {
   }
 
   closeSettings(): void { this.settingsSpace.set(null); }
+
+  /**
+   * A refused save that NAMES a rule: open it where the operator can fix it (F-46, R6-14).
+   *
+   * The refusal is the server's zod answer, `{ error, issues: [{ path: ['meta', 'typeSchemas', kt, type, 'rules', name, field?] }] }`
+   * or `['meta', 'rules', name, field?]` for a space rule. The first issue that points at a rule the dialog holds wins: its collection
+   * tab and type are selected, the Schema tab is shown, and `ruleRefusal` tells that row to open, say `text` and take focus. Returns
+   * whether a rule was found: an issue about anything else is only the footer's sentence.
+   */
+  showRuleRefusal(issues: unknown, text: string): boolean {
+    for (const issue of Array.isArray(issues) ? issues : []) {
+      const at = ruleLocationOf((issue as { path?: unknown } | null)?.path);
+      if (!at) continue;
+      const exists = at.scope === 'space'
+        ? this.schRules.some(r => r.name === at.name)
+        : !!this.schTypeSchemas[at.kt]?.[at.type]?.rules.some(r => r.name === at.name);
+      if (!exists) continue;
+      this.settingsTab.set('schema');
+      if (at.scope === 'type') {
+        this.schemaCollTab.set(at.kt);
+        this.schSelectedType = { kt: at.kt, name: at.type };
+      }
+      this.ruleRefusal.set({ ...at, text });
+      return true;
+    }
+    return false;
+  }
 
   // ── unsaved-changes tracking (U4) ────────────────────────────────────────────
   private initialSnapshot = '';
@@ -616,6 +754,14 @@ export class SpaceSettingsState {
       typeSchemas[kt] = out;
     }
     meta.typeSchemas = typeSchemas;
+    // The space's rules, as one map. Absent when there are none: a removed LAST rule is then a key that vanished from the payload,
+    // which `changedSettings()` sends as the explicit empty map (the server replaces the map; omission would change nothing).
+    const rules = this.schRules.filter(r => r.name.trim());
+    if (rules.length) {
+      const map: Record<string, SpaceSchemaRule> = {};
+      for (const r of rules) map[r.name.trim()] = { rule: r.rule, message: r.message, ...(r.kinds.length ? { kinds: [...r.kinds] } : {}) };
+      meta.rules = map;
+    }
     return meta;
   }
 

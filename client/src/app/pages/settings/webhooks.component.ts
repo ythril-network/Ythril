@@ -16,6 +16,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import {
   Space, WebhookSubscription, WebhookDelivery, WebhookEventType, WEBHOOK_EVENT_GROUPS,
 } from '../../core/api.types';
+import { refusalText } from '../../core/refusal-text';
 
 /** Editable form model for the create/edit dialog. */
 interface WebhookForm {
@@ -333,7 +334,7 @@ export class WebhooksComponent implements OnInit {
         this.closeForm();
         this.load();
       },
-      error: (err) => { this.saving.set(false); this.formError.set(err.error?.error ?? this.transloco.translate('webhooks.toast.saveFailed')); },
+      error: (err) => { this.saving.set(false); this.formError.set(refusalText(this.transloco, err, 'webhooks.toast.saveFailed')); },
     });
   }
 
@@ -341,7 +342,7 @@ export class WebhooksComponent implements OnInit {
     this.testingIds.update(s => new Set(s).add(w.id));
     this.admin.testWebhook(w.id).subscribe({
       next: () => { this.clearTesting(w.id); this.toast.success(this.transloco.translate('webhooks.toast.testQueued')); },
-      error: (err) => { this.clearTesting(w.id); this.toast.error(err.error?.error ?? this.transloco.translate('webhooks.toast.testFailed')); },
+      error: (err) => { this.clearTesting(w.id); this.toast.error(refusalText(this.transloco, err, 'webhooks.toast.testFailed')); },
     });
   }
 
@@ -359,7 +360,7 @@ export class WebhooksComponent implements OnInit {
     if (!ok) return;
     this.admin.deleteWebhook(w.id).subscribe({
       next: () => { this.toast.success(this.transloco.translate('webhooks.toast.deleted')); this.load(); },
-      error: (err) => this.toast.error(err.error?.error ?? this.transloco.translate('webhooks.toast.deleteFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'webhooks.toast.deleteFailed')),
     });
   }
 

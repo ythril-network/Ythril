@@ -66,7 +66,10 @@ export function httpFailure(status: number, body: unknown): { status: number; er
   return { status, error: body };
 }
 
-type Anything = Record<string, any>;
+// `any`, not Record<string, any>: the tabs and the drawer are driven through members the harness cannot type (forms, handlers), and under
+// noPropertyAccessFromIndexSignature a record type turns every dotted access into a compile error.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Anything = any;
 
 /** One tab editor: how to mount it and how to drive its create form and its inline edit with the least valid input. */
 export interface TabEditor {

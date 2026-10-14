@@ -3,6 +3,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { Network } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * "Announced, waiting for you" on a network card (S-9): the spaces an upstream announced that this instance did not
@@ -75,7 +76,7 @@ export class NetworkPendingSpacesComponent {
       },
       error: (err) => {
         delete this.resolving[spaceId];
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.pendingFailed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.error.pendingFailed'));
       },
     });
   }

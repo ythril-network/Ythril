@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, output, signal } from '@ang
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { Edge, Entity } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
@@ -18,11 +18,16 @@ import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
 import { RecordSearchBarComponent } from './record-search-bar.component';
-import { fmtApiError } from './brain-format';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
+import { refusalText, type RefusalSource } from '../../core/refusal-text';
+import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
+import { RetypeConfirmService } from '../../core/retype-confirm.service';
+import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
+import { WriteWarningsComponent } from '../../shared/write-warnings.component';
+import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 
 /**
  * The Edges record tab, extracted from BrainComponent (A17.9b-6f) following the facts pattern.
@@ -37,7 +42,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-edges-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -65,13 +70,13 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                 <div class="field" style="flex:1; min-width:120px;">
                   <label>{{ 'brain.edges.form.relation' | transloco }} <span style="color:var(--error)">*</span></label>
                   @if (store.edgeLabelNames().length) {
-                    <select [(ngModel)]="edgeForm.label" name="label" required>
+                    <select [ngModel]="edgeForm.label" (ngModelChange)="onEdgeLabelChange($event, 'create')" name="label" required>
                       @for (l of store.edgeLabelNames(); track l) {
                         <option [value]="l">{{ l }}</option>
                       }
                     </select>
                   } @else {
-                    <input type="text" [(ngModel)]="edgeForm.label" name="label" required />
+                    <input type="text" [ngModel]="edgeForm.label" (ngModelChange)="onEdgeLabelChange($event, 'create')" name="label" required />
                   }
                 </div>
                 <div class="field" style="flex:1; min-width:120px;">
@@ -103,6 +108,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   <app-properties-editor
                     [schema]="store.edgeSchema(edgeForm.label)"
                     [required]="store.requiredProps(store.edgeSchema(edgeForm.label))"
+                    [errors]="createErrors()"
                     [(value)]="edgeForm.properties"
                   />
                 </div>
@@ -117,9 +123,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             </form>
           }
 
-          @if (createEdgeError()) {
-            <div class="alert alert-error" style="margin-bottom:12px;">{{ createEdgeError() }}</div>
-          }
+          <app-refusal-alert [view]="createRefusal()" idPrefix="edge-create-refusal" />
+          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
           @if (recordList.deleteError()) {
             <div class="delete-error" role="alert">
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
@@ -174,13 +179,13 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
                             <label>{{ 'brain.edges.form.relation' | transloco }}</label>
                             @if (store.edgeLabelNames().length) {
-                              <select [(ngModel)]="editEdge.label" name="editEdgeLabel">
+                              <select [ngModel]="editEdge.label" (ngModelChange)="onEdgeLabelChange($event, 'inline')" name="editEdgeLabel">
                                 @for (l of store.edgeLabelNames(); track l) {
                                   <option [value]="l">{{ l }}</option>
                                 }
                               </select>
                             } @else {
-                              <input type="text" [(ngModel)]="editEdge.label" name="editEdgeLabel" />
+                              <input type="text" [ngModel]="editEdge.label" (ngModelChange)="onEdgeLabelChange($event, 'inline')" name="editEdgeLabel" />
                             }
                           </div>
                           <div class="field" style="width:80px; margin-bottom:0;">
@@ -200,6 +205,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             <app-properties-editor
                               [schema]="store.edgeSchema(editEdge.label)"
                               [required]="store.requiredProps(store.edgeSchema(editEdge.label))"
+                              [errors]="editErrors()"
                               [(value)]="editEdge.properties"
                             />
                           </div>
@@ -209,7 +215,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             </button>
                             <button class="btn btn-sm btn-secondary" (click)="recordList.cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
-                          @if (recordList.editError()) { <div style="font-size:12px; color:var(--error);">{{ recordList.editError() }}</div> }
+                          <app-refusal-alert style="flex-basis:100%" [view]="editRefusal()" idPrefix="edge-edit-refusal" />
                         </div>
                       </td>
                     </tr>
@@ -276,6 +282,8 @@ import { TimestampComponent } from '../../shared/timestamp.component';
 export class EdgesTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
+  private transloco = inject(TranslocoService);
+  private retype = inject(RetypeConfirmService);
 
   /** Emitted after a create so the shell can refresh the space's tab-count stats. (Delete does NOT — matches the shell's original edge behaviour.) */
   readonly mutated = output<void>();
@@ -289,7 +297,15 @@ export class EdgesTabComponent extends RecordTabBase {
 
   showEdgeForm = signal(false);
   creatingEdge = signal(false);
-  createEdgeError = signal('');
+  /** The refused answer of the last create, as the request gave it; `createRefusal` is its words and rows, `createErrors` the messages on property keys. */
+  createFailure = signal<RefusalSource | null>(null);
+  readonly createRefusal = refusalViewOf(this.transloco, this.createFailure, 'refusal.failed.createEdge');
+  readonly createErrors = propertyErrorsOf(this.createRefusal);
+  readonly editRefusal = refusalViewOf(this.transloco, this.recordList.editFailure, 'refusal.failed.save');
+  readonly editErrors = propertyErrorsOf(this.editRefusal);
+  /** The keys the edge being edited STORED, and the label it had: what a relation change must keep, and what Cancel on the retype confirmation goes back to. */
+  private editStored: ReadonlySet<string> = new Set();
+  private editOriginalLabel = '';
   edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   editEdge = { from: '', to: '', fromName: undefined as string | undefined, toName: undefined as string | undefined, label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
 
@@ -353,13 +369,26 @@ export class EdgesTabComponent extends RecordTabBase {
   openEdgeForm(): void {
     const firstLabel = Object.keys(this.store.spaceMeta()?.typeSchemas?.edge ?? {})[0] ?? '';
     this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: firstLabel, weight: null, tags: [], description: '', properties: this.store.buildPropertiesObject('edge', {}, firstLabel) };
+    this.createFailure.set(null);
     this.showEdgeForm.set(true);
+  }
+
+  /**
+   * An edge's relation changed (create form or inline row). An edge's properties belong to its label, so they follow it: the old
+   * label's untouched seeds go and the new label's are added; whatever else the form holds stays, shown marked when the new
+   * label does not declare it.
+   */
+  onEdgeLabelChange(label: string, target: 'create' | 'inline'): void {
+    const form = target === 'create' ? this.edgeForm : this.editEdge;
+    const from = form.label;
+    form.label = label;
+    form.properties = this.store.retypeProperties('edge', form.properties, from, label, target === 'create' ? undefined : this.editStored);
   }
 
   createEdge(): void {
     if (!this.edgeForm.from.trim() || !this.edgeForm.to.trim() || !this.edgeForm.label.trim()) return;
     this.creatingEdge.set(true);
-    this.createEdgeError.set('');
+    this.createFailure.set(null);
     const body: Parameters<BrainApi['createEdge']>[1] = {
       from: this.edgeForm.from.trim(),
       to: this.edgeForm.to.trim(),
@@ -371,20 +400,23 @@ export class EdgesTabComponent extends RecordTabBase {
     const edgeProps = this.store.stripEmptyOptionalProps(this.edgeForm.properties, this.store.edgeSchema(this.edgeForm.label));
     if (Object.keys(edgeProps).length) body.properties = edgeProps;
     this.brainApi.createEdge(this.spaceId(), body).subscribe({
-      next: () => {
+      next: (answer) => {
+        this.takeWarnings(answer);
         this.creatingEdge.set(false);
         this.showEdgeForm.set(false);
         this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null, tags: [], description: '', properties: {} as Record<string, string | number | boolean> };
         this.mutated.emit();
         this.load();
       },
-      error: (err) => { this.creatingEdge.set(false); this.createEdgeError.set(fmtApiError(err, 'Failed to create edge')); },
+      error: (err) => { this.creatingEdge.set(false); this.createFailure.set(err); },
     });
   }
 
   startEditEdge(edge: Edge): void {
     this.recordList.editingId.set(edge._id);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
+    this.editStored = new Set(Object.keys(edge.properties ?? {}));
+    this.editOriginalLabel = edge.label;
     this.editEdge = {
       from: edge.from,
       to: edge.to,
@@ -400,21 +432,28 @@ export class EdgesTabComponent extends RecordTabBase {
 
   saveEditEdge(id: string): void {
     this.recordList.editSaving.set(true);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
     const edgeProps = this.store.stripEmptyOptionalProps(this.editEdge.properties, this.store.edgeSchema(this.editEdge.label));
-    this.brainApi.updateEdge(this.spaceId(), id, {
+    const body: Parameters<BrainApi['updateEdge']>[2] = {
       label: this.editEdge.label.trim(),
       tags: this.editEdge.tags,
       description: this.editEdge.description.trim(),
       ...(this.editEdge.weight != null ? { weight: this.editEdge.weight } : {}),
       ...(Object.keys(edgeProps).length ? { properties: edgeProps } : {}),
-    }).subscribe({
-      next: (updated) => {
+    };
+    saveWithRetype(this.retype, b => this.brainApi.updateEdge(this.spaceId(), id, b), body, body.label !== this.editOriginalLabel).subscribe({
+      next: (answer) => {
+        const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);
         this.recordList.editingId.set('');
         this.store.edges.update(list => list.map(e => e._id === id ? updated : e));
       },
-      error: (err) => { this.recordList.editSaving.set(false); this.recordList.editError.set(fmtApiError(err, 'Failed to save')); },
+      error: (err) => {
+        this.recordList.editSaving.set(false);
+        // Declining the removal puts the relation back, and the properties with it: nothing was sent.
+        if (isRetypeCancelled(err)) { this.onEdgeLabelChange(this.editOriginalLabel, 'inline'); return; }
+        this.recordList.failEdit(err);
+      },
     });
   }
 
@@ -426,7 +465,7 @@ export class EdgesTabComponent extends RecordTabBase {
       // Said out loud. All four record tabs answered a failed delete with `error: () => {}`,
       // so the row stayed on screen and nothing explained why — the operator's own click
       // looked like it had not registered.
-      error: (e) => this.recordList.deleteError.set(fmtApiError(e, 'Failed to delete')),
+      error: (e) => this.recordList.deleteError.set(refusalText(this.transloco, e, 'refusal.failed.delete')),
     });
   }
 

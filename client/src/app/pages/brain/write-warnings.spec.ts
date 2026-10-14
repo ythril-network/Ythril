@@ -26,7 +26,7 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import {
   TAB_EDITORS, DRAWER_EDITORS, derivedEditorTabFiles, derivedDrawerKinds, uncoveredEditors,
-  mountTab, mountDrawer, settle, writeWarningsNotice, WARNINGS_DISMISS_SELECTOR,
+  mountTab, mountDrawer, writeWarningsNotice, WARNINGS_DISMISS_SELECTOR,
   type MountedTab, type MountedDrawer, type TabEditor, type DrawerEditor, type WireRow,
 } from '../../testing/brain-editors-harness';
 

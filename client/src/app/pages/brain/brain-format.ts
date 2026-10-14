@@ -12,15 +12,5 @@ export function toLocalDatetime(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Turn an API error into a user-facing message; expands schema violations into `field: reason` lists. */
-export function fmtApiError(
-  err: { error?: { error?: string; violations?: { field: string; value: unknown; reason: string }[] } },
-  fallback: string,
-): string {
-  const body = err?.error;
-  if (body?.error === 'schema_violation' && Array.isArray(body.violations) && body.violations.length > 0) {
-    const details = body.violations.map(v => `${v.field}: ${v.reason}`).join('; ');
-    return `Schema violation — ${details}`;
-  }
-  return body?.error ?? fallback;
-}
+// `fmtApiError` lived here. A refusal is worded by ONE module now (`core/refusal-text.ts`: `describeRefusal` for a view with
+// rows, `refusalText` for a string), in the viewer's language; nothing here builds an English sentence from an error body.

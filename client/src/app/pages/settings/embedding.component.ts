@@ -4,6 +4,8 @@ import { TranslocoModule } from '@jsverse/transloco';
 import { HttpClient } from '@angular/common/http';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
+import { refusalText } from '../../core/refusal-text';
+import { TranslocoService } from '@jsverse/transloco';
 
 /**
  * Who may frame and restyle this instance.
@@ -123,6 +125,7 @@ import { SettingsCardComponent } from '../../shared/settings-card.component';
 })
 export class EmbeddingComponent {
   private http = inject(HttpClient);
+  private transloco = inject(TranslocoService);
 
   origins = signal<string[]>([]);
   /** Entries the SERVER refused, so the row that is wrong is the row that is marked. */
@@ -188,7 +191,7 @@ export class EmbeddingComponent {
         this.saving.set(false);
         const invalid: string[] = err?.error?.invalid ?? [];
         this.rejected.set(invalid);
-        this.problem.set(err?.error?.error ?? 'The change was refused.');
+        this.problem.set(refusalText(this.transloco, err, 'refusal.failed.embeddingChange'));
       },
     });
   }

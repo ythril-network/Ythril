@@ -23,6 +23,7 @@ import type { SpacesApi } from '../../core/spaces-api.service';
 import type { ToastService } from '../../core/toast.service';
 import type { ReindexRunState, ReindexStatus } from '../../core/embed-ops.types';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
+import { refusalText } from '../../core/refusal-text';
 
 /** While a run is going the page asks again on this interval. */
 export const REINDEX_POLL_MS = 5_000;
@@ -118,7 +119,7 @@ export class BrainReindex {
         }
         // The server's own words when it has them: a proxy refusal names the member spaces to reindex instead,
         // and "check server logs" would send the reader to the one place that does not say it.
-        this.host.toast.error(err?.error?.error ?? this.host.transloco.translate('brain.reindex.failed'));
+        this.host.toast.error(refusalText(this.host.transloco, err, 'brain.reindex.failed'));
       },
     });
   }

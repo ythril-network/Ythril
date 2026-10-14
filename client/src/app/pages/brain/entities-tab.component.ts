@@ -16,7 +16,6 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
-import { fmtApiError } from './brain-format';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
@@ -24,6 +23,12 @@ import { TimestampComponent } from '../../shared/timestamp.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
+import { refusalText, type RefusalSource } from '../../core/refusal-text';
+import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
+import { RetypeConfirmService } from '../../core/retype-confirm.service';
+import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
+import { WriteWarningsComponent } from '../../shared/write-warnings.component';
+import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 
 /**
  * The Entities record tab, extracted from BrainComponent (A17.9b-6e) following the facts pattern.
@@ -41,7 +46,7 @@ import { firstValueFrom } from 'rxjs';
   selector: 'app-entities-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -69,7 +74,7 @@ import { firstValueFrom } from 'rxjs';
                 <div class="field" style="width:150px;">
                   <label>{{ 'brain.entities.table.type' | transloco }} <span style="color:var(--error)">*</span></label>
                   @if (store.entityTypeNames().length) {
-                    <select [(ngModel)]="entityForm.type" name="type" required (ngModelChange)="onEntityTypeChange($event, 'create')">
+                    <select [ngModel]="entityForm.type" name="type" required (ngModelChange)="onEntityTypeChange($event, 'create')">
                       @for (t of store.entityTypeNames(); track t) {
                         <option [value]="t">{{ t }}</option>
                       }
@@ -82,7 +87,7 @@ import { firstValueFrom } from 'rxjs';
                       TEXT rather than a picker here because a space that declares nothing has no vocabulary
                       to offer — the operator names the kind of thing this is.
                     -->
-                    <input type="text" [(ngModel)]="entityForm.type" name="type" required [placeholder]="'brain.entities.form.typePlaceholder' | transloco" />
+                    <input type="text" [ngModel]="entityForm.type" (ngModelChange)="onEntityTypeChange($event, 'create')" name="type" required [placeholder]="'brain.entities.form.typePlaceholder' | transloco" />
                   }
                 </div>
                 <div class="field" style="flex:2; min-width:180px;">
@@ -101,6 +106,7 @@ import { firstValueFrom } from 'rxjs';
                   <app-properties-editor
                     [schema]="store.entitySchema(entityForm.type)"
                     [required]="store.requiredProps(store.entitySchema(entityForm.type))"
+                    [errors]="createErrors()"
                     [(value)]="entityForm.properties"
                   />
                 </div>
@@ -115,9 +121,8 @@ import { firstValueFrom } from 'rxjs';
             </form>
           }
 
-          @if (createEntityError()) {
-            <div class="alert alert-error" style="margin-bottom:12px;">{{ createEntityError() }}</div>
-          }
+          <app-refusal-alert [view]="createRefusal()" idPrefix="ent-create-refusal" />
+          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
 
           <!--
             A delete that did not happen, said out loud. It sits ABOVE the table rather than in the
@@ -170,15 +175,15 @@ import { firstValueFrom } from 'rxjs';
                             <input type="text" [(ngModel)]="editEntity.name" name="editEntName" />
                           </div>
                           <div class="field" style="width:120px; margin-bottom:0;">
-                            <label>Type @if (store.entityTypeNames().length) { <span style="color:var(--error)">*</span> }</label>
+                            <label>{{ 'brain.entities.table.type' | transloco }} @if (store.entityTypeNames().length) { <span style="color:var(--error)">*</span> }</label>
                             @if (store.entityTypeNames().length) {
-                              <select [(ngModel)]="editEntity.type" name="editEntType" (ngModelChange)="onEntityTypeChange($event, 'inline')">
+                              <select [ngModel]="editEntity.type" name="editEntType" (ngModelChange)="onEntityTypeChange($event, 'inline')">
                                 @for (t of store.entityTypeNames(); track t) {
                                   <option [value]="t">{{ t }}</option>
                                 }
                               </select>
                             } @else {
-                              <input type="text" [(ngModel)]="editEntity.type" name="editEntType" />
+                              <input type="text" [ngModel]="editEntity.type" (ngModelChange)="onEntityTypeChange($event, 'inline')" name="editEntType" />
                             }
                           </div>
                           <div class="field" style="flex:1; min-width:160px; margin-bottom:0;">
@@ -194,16 +199,17 @@ import { firstValueFrom } from 'rxjs';
                             <app-properties-editor
                               [schema]="store.entitySchema(editEntity.type)"
                               [required]="store.requiredProps(store.entitySchema(editEntity.type))"
+                              [errors]="editErrors()"
                               [(value)]="editEntity.properties"
                             />
                           </div>
                           <div style="display:flex; gap:6px; align-items:flex-end;">
                             <button class="btn btn-sm btn-primary" [disabled]="recordList.editSaving()" (click)="saveEditEntity(ent._id)">
-                              @if (recordList.editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } Save
+                              @if (recordList.editSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                             </button>
                             <button class="btn btn-sm btn-secondary" (click)="recordList.cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
-                          @if (recordList.editError()) { <div style="font-size:12px; color:var(--error);">{{ recordList.editError() }}</div> }
+                          <app-refusal-alert style="flex-basis:100%" [view]="editRefusal()" idPrefix="ent-edit-refusal" />
                         </div>
                       </td>
                     </tr>
@@ -265,6 +271,7 @@ export class EntitiesTabComponent extends RecordTabBase {
   private route = inject(ActivatedRoute);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private retype = inject(RetypeConfirmService);
 
   /**
    * `?type=` seeds the type filter, so the Overview's data-model panel can link straight to "the entities
@@ -291,7 +298,15 @@ export class EntitiesTabComponent extends RecordTabBase {
 
   showEntityForm = signal(false);
   creatingEntity = signal(false);
-  createEntityError = signal('');
+  /** The refused answer of the last create, as the request gave it; `createRefusal` is its words and rows, `createErrors` the messages on property keys. */
+  createFailure = signal<RefusalSource | null>(null);
+  readonly createRefusal = refusalViewOf(this.transloco, this.createFailure, 'refusal.failed.createEntity');
+  readonly createErrors = propertyErrorsOf(this.createRefusal);
+  readonly editRefusal = refusalViewOf(this.transloco, this.recordList.editFailure, 'refusal.failed.save');
+  readonly editErrors = propertyErrorsOf(this.editRefusal);
+  /** The keys the entity being edited STORED, and the type it had: what a type change must keep, and what Cancel on the retype confirmation goes back to. */
+  private editStored: ReadonlySet<string> = new Set();
+  private editOriginalType = '';
   entityForm = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   editEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
 
@@ -336,22 +351,25 @@ export class EntitiesTabComponent extends RecordTabBase {
   openEntityForm(): void {
     const firstType = Object.keys(this.store.spaceMeta()?.typeSchemas?.entity ?? {})[0] ?? '';
     this.entityForm = { name: '', type: firstType, tags: [], description: '', properties: this.store.buildPropertiesObject('entity', {}, firstType) };
+    this.createFailure.set(null);
     this.showEntityForm.set(true);
   }
 
-  /** Called when the entity type dropdown changes. Rebuilds properties: keeps existing values, adds defaults for any new schema-required fields. */
+  /**
+   * Called when the entity type changes: the old type's untouched seeds go and the new type's are added; whatever else the form
+   * holds stays (a stored key the new type does not declare is shown marked, never silently dropped).
+   */
   onEntityTypeChange(type: string, target: 'create' | 'inline'): void {
-    if (target === 'create') {
-      this.entityForm.properties = this.store.buildPropertiesObject('entity', this.entityForm.properties, type);
-    } else {
-      this.editEntity.properties = this.store.buildPropertiesObject('entity', this.editEntity.properties, type);
-    }
+    const form = target === 'create' ? this.entityForm : this.editEntity;
+    const from = form.type;
+    form.type = type;
+    form.properties = this.store.retypeProperties('entity', form.properties, from, type, target === 'create' ? undefined : this.editStored);
   }
 
   createEntity(): void {
     if (!this.entityForm.name.trim()) return;
     this.creatingEntity.set(true);
-    this.createEntityError.set('');
+    this.createFailure.set(null);
     // `type` in the initialiser rather than assigned after: it is required in the signature now, which is
     // what makes a second caller unable to omit it and find out from a 400. Owner's ruling `P-31`.
     const body: Parameters<BrainApi['createEntity']>[1] = {
@@ -363,20 +381,23 @@ export class EntitiesTabComponent extends RecordTabBase {
     const props = this.store.stripEmptyOptionalProps(this.entityForm.properties, this.store.entitySchema(this.entityForm.type));
     if (Object.keys(props).length) body.properties = props;
     this.brainApi.createEntity(this.spaceId(), body).subscribe({
-      next: () => {
+      next: (answer) => {
+        this.takeWarnings(answer);
         this.creatingEntity.set(false);
         this.showEntityForm.set(false);
         this.entityForm = { name: '', type: '', tags: [], description: '', properties: {} as Record<string, string | number | boolean> };
         this.mutated.emit();
         this.load();
       },
-      error: (err) => { this.creatingEntity.set(false); this.createEntityError.set(fmtApiError(err, 'Failed to create entity')); },
+      error: (err) => { this.creatingEntity.set(false); this.createFailure.set(err); },
     });
   }
 
   startEditEntity(ent: Entity): void {
     this.recordList.editingId.set(ent._id);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
+    this.editStored = new Set(Object.keys(ent.properties ?? {}));
+    this.editOriginalType = ent.type ?? '';
     this.editEntity = {
       name: ent.name,
       type: ent.type ?? '',
@@ -388,21 +409,28 @@ export class EntitiesTabComponent extends RecordTabBase {
 
   saveEditEntity(id: string): void {
     this.recordList.editSaving.set(true);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
     const entProps = this.store.stripEmptyOptionalProps(this.editEntity.properties, this.store.entitySchema(this.editEntity.type));
-    this.brainApi.updateEntity(this.spaceId(), id, {
+    const body: Parameters<BrainApi['updateEntity']>[2] = {
       name: this.editEntity.name.trim(),
       type: this.editEntity.type.trim(),
       tags: this.editEntity.tags,
       description: this.editEntity.description.trim(),
       ...(Object.keys(entProps).length ? { properties: entProps } : {}),
-    }).subscribe({
-      next: (updated) => {
+    };
+    saveWithRetype(this.retype, b => this.brainApi.updateEntity(this.spaceId(), id, b), body, body.type !== this.editOriginalType).subscribe({
+      next: (answer) => {
+        const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);
         this.recordList.editingId.set('');
         this.store.entities.update(list => list.map(e => e._id === id ? updated : e));
       },
-      error: (err) => { this.recordList.editSaving.set(false); this.recordList.editError.set(fmtApiError(err, 'Failed to save')); },
+      error: (err) => {
+        this.recordList.editSaving.set(false);
+        // Declining the removal puts the type back, and the properties with it: nothing was sent.
+        if (isRetypeCancelled(err)) { this.onEntityTypeChange(this.editOriginalType, 'inline'); return; }
+        this.recordList.failEdit(err);
+      },
     });
   }
 
@@ -451,7 +479,7 @@ export class EntitiesTabComponent extends RecordTabBase {
       if (e?.status !== 409) {
         // Every other failure — a 500, an expired token, a space that has gone away. Identical to a
         // click that never happened until this line existed.
-        this.recordList.deleteError.set(fmtApiError(e ?? {}, 'Failed to delete entity'));
+        this.recordList.deleteError.set(refusalText(this.transloco, e ?? {}, 'refusal.failed.delete'));
         return;
       }
       // A refusal that already carries the fresh preview (a stale token) saves the round trip.

@@ -94,7 +94,7 @@ async function spyConfirm(answer: (keys: { key: string; value: unknown }[]) => b
   try { Service = (await import(/* @vite-ignore */ path)).RetypeConfirmService; } catch { /* absent on the base */ }
   if (!Service) return vi.fn(async (_keys: { key: string; value: unknown }[]) => false);
   const real = TestBed.inject(Service);
-  return vi.spyOn(real, 'confirm').mockImplementation(async keys => answer(keys));
+  return vi.spyOn(real, 'confirm').mockImplementation(async (...args: unknown[]) => answer(args[0] as { key: string; value: unknown }[]));
 }
 
 interface Run {
@@ -306,7 +306,7 @@ describe.each(SURFACES)('retype from the $label editor', ({ kind, mode, a, b }) 
     for (const body of resends) {
       expect(body.deleteFields!.length, 'a write may delete at most 100 fields').toBeLessThanOrEqual(100);
     }
-    const asked = r.confirm.mock.calls.map(c => c[0].map((k: { key: string }) => k.key));
+    const asked = r.confirm.mock.calls.map((c: unknown[]) => (c[0] as { key: string }[]).map(k => k.key));
     expect(asked[1].length, 'the second confirm lists what the first resend did not remove').toBeLessThan(asked[0].length);
     const removed = new Set(resends.flatMap(b => b.deleteFields!.map(f => f.replace(/^properties\./, ''))));
     expect([...removed].sort(), 'every introduced key is removed by the end').toEqual(many);
@@ -353,7 +353,9 @@ describe('every client source that updates a brain record goes through the retyp
   });
 
   it('every non-spec source that calls a brain update method references saveWithRetype or RetypeConfirmService', () => {
-    const callers = SOURCES.filter(s => s.file !== API && CALL.test(s.text));
+    // The spec helpers under testing/ are tracked non-spec sources too, and the editor harness NAMES the update methods (as strings,
+    // to mock them); naming a method is not calling it, and they are not the app.
+    const callers = SOURCES.filter(s => s.file !== API && !s.file.startsWith('src/app/testing/') && CALL.test(s.text));
     expect(callers.length, 'no caller of a brain update method was found').toBeGreaterThanOrEqual(1);
     const bare = callers.filter(s => !/\bsaveWithRetype\b|\bRetypeConfirmService\b/.test(s.text)).map(s => s.file);
     expect(bare, 'these call a brain update directly and bypass the retype flow').toEqual([]);

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { catchError, of, switchMap } from 'rxjs';
 import { ChronoEntry, ChronoType, ChronoStatus } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
@@ -18,11 +18,17 @@ import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
 import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordSearchBarComponent } from './record-search-bar.component';
-import { fmtApiError, toLocalDatetime } from './brain-format';
+import { toLocalDatetime } from './brain-format';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
+import { refusalText, type RefusalSource } from '../../core/refusal-text';
+import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
+import { RetypeConfirmService } from '../../core/retype-confirm.service';
+import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
+import { WriteWarningsComponent } from '../../shared/write-warnings.component';
+import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 
 /**
  * The Chrono record tab, extracted from BrainComponent (A17.9b-6g) following the memories/edges pattern.
@@ -40,7 +46,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -62,7 +68,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                 </div>
                 <div class="field" style="width:160px;">
                   <label>{{ 'common.form.type' | transloco }}</label>
-                  <select [(ngModel)]="chronoForm.kind" name="kind" (ngModelChange)="onChronoFormKindChange()">
+                  <select [ngModel]="chronoForm.kind" name="kind" (ngModelChange)="onChronoFormKindChange($event)">
                     @for (k of store.chronoAllowedTypes(); track k) { <option [value]="k">{{ k }}</option> }
                   </select>
                 </div>
@@ -101,6 +107,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                   <app-properties-editor
                     [schema]="store.chronoSchema(chronoFormKind())"
                     [required]="store.requiredProps(store.chronoSchema(chronoFormKind()))"
+                    [errors]="createErrors()"
                     [(value)]="chronoForm.properties"
                   />
                 </div>
@@ -115,9 +122,9 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             </form>
           }
 
-          @if (createChronoError()) {
-            <div class="alert alert-error" style="margin-bottom:12px;">{{ createChronoError() }}</div>
-          }
+          <app-refusal-alert [view]="createRefusal()" idPrefix="chrono-create-refusal" />
+          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
+
 
           @if (recordList.deleteError()) {
             <div class="delete-error" role="alert">
@@ -167,7 +174,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                           </div>
                           <div class="field" style="width:130px; margin-bottom:0;">
                             <label>{{ 'common.form.type' | transloco }}</label>
-                            <select [(ngModel)]="editChrono.kind" name="editChronoKind" (ngModelChange)="onEditChronoKindChange()">
+                            <select [ngModel]="editChrono.kind" name="editChronoKind" (ngModelChange)="onEditChronoKindChange($event)">
                               @for (k of store.chronoAllowedTypes(); track k) { <option [value]="k">{{ k }}</option> }
                             </select>
                           </div>
@@ -202,6 +209,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             <app-properties-editor
                               [schema]="store.chronoSchema(editChrono.kind)"
                               [required]="store.requiredProps(store.chronoSchema(editChrono.kind))"
+                              [errors]="editErrors()"
                               [(value)]="editChrono.properties"
                             />
                           </div>
@@ -211,7 +219,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                             </button>
                             <button class="btn btn-sm btn-secondary" (click)="recordList.cancelEdit()">{{ 'common.cancel' | transloco }}</button>
                           </div>
-                          @if (recordList.editError()) { <div style="font-size:12px; color:var(--error);">{{ recordList.editError() }}</div> }
+                          <app-refusal-alert style="flex-basis:100%" [view]="editRefusal()" idPrefix="chrono-edit-refusal" />
                         </div>
                       </td>
                     </tr>
@@ -284,10 +292,20 @@ import { TimestampComponent } from '../../shared/timestamp.component';
 export class ChronoTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
+  private transloco = inject(TranslocoService);
+  private retype = inject(RetypeConfirmService);
 
   showChronoForm = signal(false);
   creatingChrono = signal(false);
-  createChronoError = signal('');
+  /** The refused answer of the last create, as the request gave it; `createRefusal` is its words and rows, `createErrors` the messages on property keys. */
+  createFailure = signal<RefusalSource | null>(null);
+  readonly createRefusal = refusalViewOf(this.transloco, this.createFailure, 'refusal.failed.createChrono');
+  readonly createErrors = propertyErrorsOf(this.createRefusal);
+  readonly editRefusal = refusalViewOf(this.transloco, this.recordList.editFailure, 'refusal.failed.save');
+  readonly editErrors = propertyErrorsOf(this.editRefusal);
+  /** The keys the entry being edited STORED, and the kind it had: what a kind change must keep, and what Cancel on the retype confirmation goes back to. */
+  private editStored: ReadonlySet<string> = new Set();
+  private editOriginalKind = '';
   chronoForm = { title: '', kind: 'event' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
   editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
 
@@ -383,17 +401,25 @@ export class ChronoTabComponent extends RecordTabBase {
     // does not allow the built-ins, so opening on 'event' there armed the form with a value the server 400s on.
     const kind = this.store.chronoAllowedTypes()[0] ?? 'event';
     this.chronoForm = { title: '', kind, startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: this.store.buildPropertiesObject('chrono', {}, kind) };
+    this.createFailure.set(null);
     this.showChronoForm.set(true);
   }
 
-  /** Reseed the create form's properties from the newly selected kind's schema (preserving values). */
-  onChronoFormKindChange(): void {
-    this.chronoForm.properties = this.store.buildPropertiesObject('chrono', this.chronoForm.properties, this.chronoFormKind());
+  /**
+   * The create form's kind changed: the old kind's untouched seeds go and the new kind's are added; whatever else the form holds
+   * stays. Called with no argument it re-seeds for the kind the form already holds.
+   */
+  onChronoFormKindChange(kind?: string): void {
+    const from = this.chronoForm.kind;
+    if (kind !== undefined) this.chronoForm.kind = kind;
+    this.chronoForm.properties = this.store.retypeProperties('chrono', this.chronoForm.properties, from, this.chronoForm.kind);
   }
 
-  /** Reseed the inline-edit form's properties from the newly selected kind's schema. */
-  onEditChronoKindChange(): void {
-    this.editChrono.properties = this.store.buildPropertiesObject('chrono', this.editChrono.properties, this.editChrono.kind);
+  /** The inline-edit form's kind changed: as the create form's, except a key the entry STORED is never taken for a seed. */
+  onEditChronoKindChange(kind?: string): void {
+    const from = this.editChrono.kind;
+    if (kind !== undefined) this.editChrono.kind = kind;
+    this.editChrono.properties = this.store.retypeProperties('chrono', this.editChrono.properties, from, this.editChrono.kind, this.editStored);
   }
 
   createChrono(): void {
@@ -403,7 +429,7 @@ export class ChronoTabComponent extends RecordTabBase {
     const resolvedKind = this.chronoForm.kind as ChronoType;
     if (!resolvedKind) return;
     this.creatingChrono.set(true);
-    this.createChronoError.set('');
+    this.createFailure.set(null);
     const linkEntities = this.chronoForm.linkEntities.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<BrainApi['createChrono']>[1] = {
       title: this.chronoForm.title.trim(),
@@ -418,19 +444,22 @@ export class ChronoTabComponent extends RecordTabBase {
     const props = this.store.stripEmptyOptionalProps(this.chronoForm.properties, this.store.chronoSchema(resolvedKind));
     if (Object.keys(props).length) body.properties = props;
     this.brainApi.createChrono(this.spaceId(), body).subscribe({
-      next: () => {
+      next: (answer) => {
+        this.takeWarnings(answer);
         this.creatingChrono.set(false);
         this.showChronoForm.set(false);
         this.chronoForm = { title: '', kind: resolvedKind, startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: this.store.buildPropertiesObject('chrono', {}, resolvedKind) };
         this.load();
       },
-      error: (err) => { this.creatingChrono.set(false); this.createChronoError.set(fmtApiError(err, 'Failed to create chrono entry')); },
+      error: (err) => { this.creatingChrono.set(false); this.createFailure.set(err); },
     });
   }
 
   startEditChrono(entry: ChronoEntry): void {
     this.recordList.editingId.set(entry._id);
-    this.recordList.editError.set('');
+    this.recordList.clearEditFailure();
+    this.editStored = new Set(Object.keys(entry.properties ?? {}));
+    this.editOriginalKind = entry.type;
     this.editChrono = {
       title: entry.title,
       kind: entry.type,
@@ -448,8 +477,8 @@ export class ChronoTabComponent extends RecordTabBase {
 
   saveEditChrono(id: string): void {
     this.recordList.editSaving.set(true);
-    this.recordList.editError.set('');
-    this.brainApi.updateChrono(this.spaceId(), id, {
+    this.recordList.clearEditFailure();
+    const body: Parameters<BrainApi['updateChrono']>[2] = {
       title: this.editChrono.title.trim(),
       type: this.editChrono.kind as ChronoType,
       status: this.editChrono.status as ChronoStatus,
@@ -460,13 +489,20 @@ export class ChronoTabComponent extends RecordTabBase {
       linkEntities: this.editChrono.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
       linkFacts: this.editChrono.linkFacts,
       properties: this.store.stripEmptyOptionalProps(this.editChrono.properties, this.store.chronoSchema(this.editChrono.kind)),
-    }).subscribe({
-      next: (updated) => {
+    };
+    saveWithRetype(this.retype, b => this.brainApi.updateChrono(this.spaceId(), id, b), body, body.type !== this.editOriginalKind).subscribe({
+      next: (answer) => {
+        const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);
         this.recordList.editingId.set('');
         this.store.chrono.update(list => list.map(c => c._id === id ? updated : c));
       },
-      error: (err) => { this.recordList.editSaving.set(false); this.recordList.editError.set(fmtApiError(err, 'Failed to save')); },
+      error: (err) => {
+        this.recordList.editSaving.set(false);
+        // Declining the removal puts the kind back, and the properties with it: nothing was sent.
+        if (isRetypeCancelled(err)) { this.onEditChronoKindChange(this.editOriginalKind); return; }
+        this.recordList.failEdit(err);
+      },
     });
   }
 
@@ -478,7 +514,7 @@ export class ChronoTabComponent extends RecordTabBase {
       // Said out loud. All four record tabs answered a failed delete with `error: () => {}`,
       // so the row stayed on screen and nothing explained why — the operator's own click
       // looked like it had not registered.
-      error: (e) => this.recordList.deleteError.set(fmtApiError(e, 'Failed to delete')),
+      error: (e) => this.recordList.deleteError.set(refusalText(this.transloco, e, 'refusal.failed.delete')),
     });
   }
 }

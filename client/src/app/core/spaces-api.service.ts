@@ -18,8 +18,37 @@ import type {
  * dirty — then prompted to discard changes that had in fact been submitted for a vote.
  */
 export type UpdateSpaceResult =
-  | { space: Space; status?: undefined }
-  | { status: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; message: string; space?: undefined };
+  | { space: Space; status?: undefined; layers?: SchemaWriteLayer[] }
+  | { status: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; message: string; space?: undefined; layers?: SchemaWriteLayer[] };
+
+/**
+ * What a schema write did in ONE network the space sits in (bundle-23, Q-67, R5-1): `applied` (the network's rule let it through, or it
+ * holds no vote on it) or `vote_pending` (a round is open). The later outcome - passed, vetoed, not carried - is derived on read by
+ * `space_schema_layers`, never recorded here. A space in two networks can answer one of each, which is why the dialog cannot decide
+ * "applied, close" or "pending, stay" from the answer as a whole.
+ */
+export interface SchemaWriteLayer {
+  networkId: string;
+  networkLabel: string;
+  outcome: 'applied' | 'vote_pending';
+}
+
+/**
+ * The answer of `POST /api/spaces/:id/validate-schema` - the live check of a schema against a sample record or against stored data.
+ * Stored-data mode is PAGED: `complete` is false until the whole space has been read, and the cursor carries the next page. A check that
+ * is not complete has found nothing yet, which is not the same as nothing being wrong.
+ */
+export interface ValidateSchemaResult {
+  spaceId: string;
+  /** Per collection: how many records were looked at of how many there are. */
+  checked: Record<string, { checked: number; total: number }>;
+  complete: boolean;
+  totalViolations: number;
+  violations: { collection: string; _id: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
+  staleGuards?: unknown[];
+  /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
+  nextAfter?: string;
+}
 
 /** Spaces, their per-type schemas, stats, reindex, and destructive wipe. */
 @Injectable({ providedIn: 'root' })
@@ -34,8 +63,22 @@ export class SpacesApi {
     return this.http.post<{ space: Space }>('/api/spaces', body);
   }
 
-  updateSpace(id: string, body: { label?: string; maxGiB?: number | null; meta?: Partial<SpaceMeta>; typeSchemasMode?: 'merge' | 'replace'; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: 'off' | 'ocr' | 'vlm' | 'repair' | 'auto' | null; imageAnalysis?: 'off' | 'caption' | 'recognition' | 'auto' | null; audioAnalysis?: 'off' | 'on' | 'auto' | null; videoAnalysis?: 'off' | 'audio' | 'full' | 'auto' | null; textAnalysis?: 'off' | 'embed' | 'chunk' | 'auto' | null }): Observable<UpdateSpaceResult> {
-    return this.http.patch<UpdateSpaceResult>(`/api/spaces/${id}`, body);
+  /**
+   * `ifMatch` is the version of the space's meta the caller read: sent as `If-Match`, so a schema save made on top of somebody else's
+   * change is refused with 412 instead of silently overwriting it. A bare integer in quotes, the entity-tag spelling the server accepts.
+   */
+  updateSpace(id: string, body: { label?: string; maxGiB?: number | null; meta?: Partial<SpaceMeta>; typeSchemasMode?: 'merge' | 'replace'; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: 'off' | 'ocr' | 'vlm' | 'repair' | 'auto' | null; imageAnalysis?: 'off' | 'caption' | 'recognition' | 'auto' | null; audioAnalysis?: 'off' | 'on' | 'auto' | null; videoAnalysis?: 'off' | 'audio' | 'full' | 'auto' | null; textAnalysis?: 'off' | 'embed' | 'chunk' | 'auto' | null }, options: { ifMatch?: number } = {}): Observable<UpdateSpaceResult> {
+    const headers = options.ifMatch === undefined ? undefined : { 'If-Match': `"${options.ifMatch}"` };
+    return this.http.patch<UpdateSpaceResult>(`/api/spaces/${id}`, body, headers ? { headers } : undefined);
+  }
+
+  /**
+   * Check a schema against one pasted record (`sample`: nothing is scanned) or against the space's stored data, a page at a time
+   * (`after`: the previous answer's `nextAfter`). `meta` is the STAGED schema to check, so the dialog can ask before it saves; without
+   * it the stored schema is checked.
+   */
+  validateSchema(spaceId: string, body: { sample?: unknown; after?: string; meta?: Partial<SpaceMeta> }): Observable<ValidateSchemaResult> {
+    return this.http.post<ValidateSchemaResult>(`/api/spaces/${encodeURIComponent(spaceId)}/validate-schema`, body);
   }
 
   reorderSpaces(ids: string[]): Observable<{ spaces: Space[] }> {

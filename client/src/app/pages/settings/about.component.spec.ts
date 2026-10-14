@@ -81,7 +81,8 @@ describe('AboutComponent', () => {
     expect(el(f).textContent).toContain('boom from server');
 
     const g = make(() => throwError(() => ({})));
-    expect(g.componentInstance.error()).toBe('Failed to load about info');
+    // The fallback is the translated sentence (the test transloco echoes the key), not a hard-coded English literal.
+    expect(g.componentInstance.error()).toBe('about.error.load');
   });
 
   it('while the request is pending it stays in the loading state (no info yet)', () => {

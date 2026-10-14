@@ -142,6 +142,22 @@ export interface PropertySchema {
   default?: string | number | boolean;
 }
 
+/**
+ * One CEL rule of a type (F-46): `rule` is the expression over the record (`self.properties.age >= 0`), `message` the sentence a
+ * refused write says. Stored in a map keyed by the rule's name, which is what a violation row's `rules.<name>` field names.
+ */
+export interface SchemaRule {
+  rule: string;
+  message: string;
+}
+
+/** A space-wide rule (`SpaceMeta.rules`): a type rule that also says which kinds of record it applies to; no `kinds` means every kind. */
+export interface SpaceSchemaRule {
+  rule: string;
+  message: string;
+  kinds?: KnowledgeType[];
+}
+
 export interface TypeSchema {
   /** Reference to a schema library entry. Format: `"library:<name>"`. */
   $ref?: string;
@@ -163,6 +179,8 @@ export interface TypeSchema {
   endpoints?: { from?: string[]; to?: string[] };
   /** EDGE only — at most one edge with this label per subject. Carried through a save; no control yet. */
   functional?: boolean;
+  /** CEL rules of this type, by name (F-46). A write that breaks one is a violation; replaced WITH the type, never merged into it. */
+  rules?: Record<string, SchemaRule>;
 }
 
 /** An entry in the instance-level schema library. */
@@ -215,6 +233,8 @@ export interface SpaceMeta {
   /** Space-wide default for what a passed chrono due moment means — the outer tier of schema > space.
    *  Absent is today's behaviour (`overdue`). Any chrono type schema that states a value overrides it. */
   whenDuePasses?: 'overdue' | 'nothing';
+  /** Space-wide CEL rules, by name (F-46): each applies to the kinds it names, or to every kind. Replaced WHOLE by a write that sends the map. */
+  rules?: Record<string, SpaceSchemaRule>;
   updatedAt?: string;
 }
 

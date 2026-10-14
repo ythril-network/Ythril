@@ -7,6 +7,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
+import { refusalText } from '../../core/refusal-text';
 
 type MfaState = 'idle' | 'enrolling' | 'disabling';
 
@@ -179,7 +180,7 @@ export class MfaComponent implements OnInit, OnDestroy {
         this.enrollError.set('');
         this.state.set('enrolling');
       },
-      error: (err) => this.enrollError.set(err.error?.error ?? this.transloco.translate('mfa.error.setupFailed')),
+      error: (err) => this.enrollError.set(refusalText(this.transloco, err, 'mfa.error.setupFailed')),
     });
   }
 

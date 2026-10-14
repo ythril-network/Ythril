@@ -30,6 +30,7 @@ import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
 import { NetworkEnableWizardComponent } from './network-enable-wizard.component';
+import { refusalText } from '../../core/refusal-text';
 @Component({
   selector: 'app-networks',
   standalone: true,
@@ -505,7 +506,7 @@ export class NetworksComponent implements OnInit {
     if (!ok) return;
     this.networksApi.leaveNetwork(net.id).subscribe({
       next: () => this.networks.update(list => list.filter(n => n.id !== net.id)),
-      error: (err) => this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.leaveFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'networks.error.leaveFailed')),
     });
   }
 
@@ -521,7 +522,7 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         delete this.savingSchedule[net.id];
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.saveScheduleFailed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.error.saveScheduleFailed'));
       },
     });
   }
@@ -553,7 +554,7 @@ export class NetworksComponent implements OnInit {
       },
       error: (err) => {
         delete this.removingMember[key];
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.removeMemberFailed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.error.removeMemberFailed'));
       },
     });
   }

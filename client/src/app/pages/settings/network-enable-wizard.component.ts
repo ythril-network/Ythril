@@ -6,6 +6,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { refusalText, httpErrorReason } from '../../core/refusal-text';
 
 /**
  * Enable-Networks wizard, extracted from the (large) NetworksComponent as the last of the three dialogs
@@ -232,7 +233,7 @@ export class NetworkEnableWizardComponent implements OnInit {
         next: () => this.executeEnableNetworks(host),
         error: (err) => {
           this.enableAutoRunning.set(false);
-          this.enableWizardError.set(err.error?.error ?? this.transloco.translate('networks.wizard.error.bootstrapFailed'));
+          this.enableWizardError.set(refusalText(this.transloco, err, 'networks.wizard.error.bootstrapFailed'));
         },
       });
       return;
@@ -255,7 +256,7 @@ export class NetworkEnableWizardComponent implements OnInit {
       },
       error: (err) => {
         this.enableAutoRunning.set(false);
-        this.enableWizardError.set(err.error?.error ?? this.transloco.translate('networks.wizard.error.autoSetupFailed'));
+        this.enableWizardError.set(refusalText(this.transloco, err, 'networks.wizard.error.autoSetupFailed'));
       },
     });
   }
@@ -287,7 +288,7 @@ export class NetworkEnableWizardComponent implements OnInit {
       error: (err) => {
         this.localAgentCanExecute.set(false);
         this.localAgentChecking.set(false);
-        const detail = err?.error?.error ?? err?.message ?? `HTTP ${err?.status ?? 'unknown'}`;
+        const detail = httpErrorReason(err) || `HTTP ${err?.status ?? 'unknown'}`;
         this.localAgentStatusMessage.set(this.transloco.translate('networks.wizard.status.connectorStartFailed', { detail }));
       },
     });

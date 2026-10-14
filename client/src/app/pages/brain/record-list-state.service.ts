@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { httpErrorReason, type RefusalSource } from '../../core/refusal-text';
 
 /**
  * Singleton interaction state shared by every record tab (memories/entities/edges/chrono/filemeta).
@@ -22,6 +23,9 @@ export class RecordListState {
   /** The `_id` of the row being inline-edited (empty = none). */
   editingId = signal('');
   editSaving = signal(false);
+  /** The refused answer of the last inline-edit save, as the request gave it; the tab that shows it words it and marks the rows it names. */
+  readonly editFailure = signal<RefusalSource | null>(null);
+  /** The same failure as one plain, untranslated sentence ('' when none): for a host that wants a string and not rows. */
   editError = signal('');
 
   /** The `_id` of the row whose delete is awaiting confirmation (empty = none). */
@@ -41,8 +45,19 @@ export class RecordListState {
    */
   deleteError = signal('');
 
+  /** The inline edit's save was refused: hold the answer itself, and its sentence for whoever wants a string. */
+  failEdit(failure: RefusalSource): void {
+    this.editFailure.set(failure);
+    this.editError.set(httpErrorReason(failure) || String(failure.status ?? '') || 'error');
+  }
+
+  clearEditFailure(): void {
+    this.editFailure.set(null);
+    this.editError.set('');
+  }
+
   cancelEdit(): void {
     this.editingId.set('');
-    this.editError.set('');
+    this.clearEditFailure();
   }
 }

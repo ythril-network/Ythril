@@ -3,6 +3,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { InviteBundle, inviteTextOf } from '../../core/invite-code';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * The invite panel on a network card: generate one, show it, copy it.
@@ -72,7 +73,7 @@ export class NetworkInvitePanelComponent {
       next: (bundle) => { this.generating.set(false); this.bundle.set(bundle); },
       error: (err) => {
         this.generating.set(false);
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.generateInviteFailed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.error.generateInviteFailed'));
       },
     });
   }
