@@ -39,6 +39,11 @@
  * overwritten while the meta had moved on, and the caller logs them. An operator whose edit was superseded
  * learns it from the log rather than from noticing the value is wrong weeks later.
  *
+ * "Moved on" is a question about the FIELD (R6-8): the round carries what its changed fields held when it was proposed (`metaBase`), and
+ * a field is overwritten only when the stored value differs from that. The version it replaced for this cannot be read for a network's
+ * layer or the own definitions a layer set apart, which have none — a first conclusion into either read every field as moved and warned
+ * of an overwrite nobody made.
+ *
  * ## Peers that have not upgraded
  *
  * `VoteRound` is gossiped, so a round proposed by an older peer arrives with neither field set. Those apply
@@ -47,6 +52,7 @@
  * unknown would apply an empty set — a passed round that changes nothing at all. The absence of the
  * version is therefore the compatibility switch, and the pre-upgrade behaviour is the fallback.
  */
+import { isDeepStrictEqual } from 'node:util';
 import type { SpaceMeta } from '../config/types.js';
 import { parseSpaceMeta, type ParsedSpaceMeta } from '../spaces/body-schemas.js';
 import { boundedNames, metaFieldKind, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
@@ -66,6 +72,16 @@ export interface MetaRoundProposal {
   metaChangedFields?: string[];
   /** The space's `meta.version` the proposal was computed against. Absent on pre-upgrade rounds. */
   baseMetaVersion?: number;
+  /**
+   * What the changed fields HELD when the proposal was computed (R6-8): each named field's value, and for the types it changed, those
+   * types' definitions (`typeSchemas.<kind>.<name>`). A field absent here held nothing. Absent altogether on a round from a peer
+   * before this release, which is judged by the version history as it always was.
+   *
+   * It is what makes "somebody changed this field since the proposal" a question about the FIELD. The version cannot answer it: a
+   * network's layer has none (`replicatedMetaOf` strips the counters), nor do the own definitions a layer set apart, so a first
+   * conclusion into either compared version 0 against the base's and read every field as moved.
+   */
+  metaBase?: SpaceMeta;
 }
 
 /** Housekeeping the space layer owns — a round must never carry these across. */
@@ -117,33 +133,35 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
   const merged: Record<string, unknown> = { ...base };
   const proposed = strip(round.pendingMeta) as Record<string, unknown>;
   const unknownFields: string[] = [];
-  // Only when the meta has actually moved since the proposal can an overwrite be a conflict. Equal
-  // versions mean nothing else concluded in between, so every write is uncontested.
-  const moved = (current?.version ?? 0) !== round.baseMetaVersion;
+  const differs = (a: unknown, b: unknown) => !isDeepStrictEqual(a, b);
 
   /**
-   * The meta as it stood when the round was proposed, recovered from the space's own version history.
+   * Did somebody ELSE change this field since the round was proposed? Asked of the FIELD, against what it held at the proposal.
    *
-   * Without it, "the meta moved and this round is writing field X" is indistinguishable from "someone
-   * else changed field X" — and reporting the first as a collision would fire on every ordinary
-   * concurrent edit of *different* fields, which is precisely the case this module makes safe. A warning
-   * that cries wolf on the normal path is one operators learn to skip.
+   * Without that base, "the meta moved and this round is writing field X" is indistinguishable from "someone else changed field X" —
+   * and reporting the first as a collision would fire on every ordinary concurrent edit of *different* fields, which is precisely the
+   * case this module makes safe. A warning that cries wolf on the normal path is one operators learn to skip.
    *
-   * `previousVersions` is capped, so on a space with a burst of edits the base may have rolled off. Then
-   * the coarse rule stands: report the overwrite rather than assert it was uncontested. Over-reporting a
-   * genuinely rare case is the right side to err on; the value is still applied either way.
+   * A round of this release CARRIES the base (`metaBase`, R6-8) and the answer is a comparison of values: the stored one against the
+   * captured one. No version is read, because the stores a conclusion writes do not all have one (a network's layer and the own
+   * definitions a layer set apart are stripped of their counters), and a first conclusion into either read every field as moved.
+   *
+   * A round from a peer before this release carries none, and keeps what it always did: only a meta that has MOVED past the base
+   * version can be contested, and the base is recovered from the space's own version history. That is capped, so on a space with a
+   * burst of edits the base may have rolled off; then the coarse rule stands (report the overwrite rather than assert it was
+   * uncontested; the value is applied either way).
    */
-  const baseMeta: Record<string, unknown> | undefined =
-    current?.version === round.baseMetaVersion
+  const captured = round.metaBase as Record<string, unknown> | undefined;
+  const moved = (current?.version ?? 0) !== round.baseMetaVersion;
+  const historyBase: Record<string, unknown> | undefined = captured !== undefined ? undefined
+    : current?.version === round.baseMetaVersion
       ? (base as Record<string, unknown>)
       : current?.previousVersions?.find(h => h.version === round.baseMetaVersion)?.meta as Record<string, unknown> | undefined;
-
-  const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
-  /** Did somebody ELSE change this field since the round was proposed? */
-  const contested = (field: string, currentValue: unknown, incoming: unknown) =>
-    moved
-    && differs(currentValue, incoming)                          // the round is actually changing it now
-    && (baseMeta === undefined || differs(baseMeta[field], currentValue)); // and not from where it started
+  const contested = (field: string, currentValue: unknown, incoming: unknown): boolean => {
+    if (!differs(currentValue, incoming)) return false;                          // the round is not changing it now
+    if (captured !== undefined) return differs(captured[field], currentValue);   // and it is no longer where the round found it
+    return moved && (historyBase === undefined || differs(historyBase[field], currentValue));
+  };
 
   const conflicts: string[] = [];
 
@@ -161,19 +179,21 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
       // A type the proposer *deleted* is therefore not deleted here — but it was never deletable this way:
       // under merge semantics an absent type is indistinguishable from a removed one, which is exactly why
       // deletion goes through the schema PUT with its own precondition instead.
-      const currentTs = ((base as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>;
-      const proposedTs = ((proposed as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>;
-      const baseTs = ((baseMeta?.[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>);
+      const currentTs = ((base as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, Record<string, unknown>>;
+      const proposedTs = ((proposed as Record<string, unknown>)[PER_TYPE_META_FIELD] ?? {}) as Record<string, Record<string, unknown>>;
+      const capturedTs = (captured?.[PER_TYPE_META_FIELD] ?? {}) as Record<string, Record<string, unknown>>;
+      const historyTs = (historyBase?.[PER_TYPE_META_FIELD] ?? {}) as Record<string, object>;
       const mergedTs: Record<string, unknown> = { ...currentTs };
       for (const [kt, ktMap] of Object.entries(proposedTs)) {
         if (!ktMap) continue;
         mergedTs[kt] = { ...(currentTs[kt] ?? {}), ...ktMap };
-        // Per knowledge-type, on the same rule as a scalar: contested only if this round changes it AND
-        // it is no longer where the round found it.
-        if (moved && differs(currentTs[kt], mergedTs[kt])
-            && (baseMeta === undefined || differs(baseTs[kt], currentTs[kt]))) {
-          conflicts.push(`${PER_TYPE_META_FIELD}.${kt}`);
-        }
+        // Per knowledge-type, on the same rule as a scalar: contested only if this round changes it AND it is no longer where the
+        // round found it. With the captured base that is asked of each TYPE the round changes (and the base holds exactly those);
+        // without one, of the knowledge type as a whole.
+        const collided = captured !== undefined
+          ? Object.entries(ktMap).some(([name, def]) => differs(currentTs[kt]?.[name], def) && differs(capturedTs[kt]?.[name], currentTs[kt]?.[name]))
+          : moved && differs(currentTs[kt], mergedTs[kt]) && (historyBase === undefined || differs(historyTs[kt], currentTs[kt]));
+        if (collided) conflicts.push(`${PER_TYPE_META_FIELD}.${kt}`);
       }
       merged[PER_TYPE_META_FIELD] = mergedTs;
       continue;

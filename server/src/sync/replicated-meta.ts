@@ -139,16 +139,63 @@ export function metaForNetwork(own: SpaceMeta | undefined, layer: MetaLayer | un
   return layer ? layOverStored({ ...(own ?? {}) }, layer.meta) : { ...(own ?? {}) };
 }
 
-export interface MetaClash {
-  /** A top-level meta field (`purpose`, `validationMode`, …) — or absent for a type-schema clash. */
+/**
+ * One place a definition lives in a meta: a top-level field, a property of a type, or one of a type's own fields. The same address
+ * for a clash between layers and for a field's own value against the one the space runs on, so the two views name a thing alike.
+ */
+export interface MetaPlace {
+  /** A top-level meta field (`purpose`, `validationMode`, …) — or absent for a type-schema place. */
   field?: string;
   kind?: string;
   type?: string;
-  /** A property of the type — or absent when the clash is one of the type's own fields (see `typeField`). */
+  /** A property of the type — or absent when the place is one of the type's own fields (see `typeField`). */
   property?: string;
   typeField?: string;
+}
+
+export interface MetaClash extends MetaPlace {
   values: { networkId: string; value: unknown }[];
 }
+
+/**
+ * Every place a meta holds a definition, with the value it holds there: each top-level field, and inside the types each property and
+ * each of a type's own fields. THE walk of the shape for the two views that compare metas place by place — the clashes between layers
+ * and a field's own value against the one the space runs on — so the two cannot read the shape differently. A place whose value is
+ * `undefined` is not a place. Own keys only: a name a peer chose is never read off a prototype.
+ */
+function placesOf(meta: unknown): Array<{ place: MetaPlace; value: unknown }> {
+  const out: Array<{ place: MetaPlace; value: unknown }> = [];
+  const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
+  for (const [field, value] of Object.entries(m)) {
+    if (field === PER_TYPE_META_FIELD || value === undefined) continue;
+    out.push({ place: { field }, value });
+  }
+  const heldTypes = m[PER_TYPE_META_FIELD];
+  const schemas = isObj(heldTypes) ? heldTypes : {};
+  for (const [kind, types] of Object.entries(schemas)) {
+    if (!isObj(types)) continue;
+    for (const [type, def] of Object.entries(types)) {
+      if (!isObj(def)) continue;
+      for (const [typeField, value] of Object.entries(def)) {
+        if (typeField === 'propertySchemas' && isObj(value)) {
+          for (const [property, p] of Object.entries(value)) out.push({ place: { kind, type, property }, value: p });
+        } else out.push({ place: { kind, type, typeField }, value });
+      }
+    }
+  }
+  return out;
+}
+
+/** What `meta` holds at `place`, or `undefined`. The read half of {@link placesOf}: own keys only, whatever the place's names are. */
+function valueAt(meta: unknown, place: MetaPlace): unknown {
+  const own = (o: unknown, key: string | undefined): unknown => (isObj(o) && key !== undefined && Object.hasOwn(o, key) ? o[key] : undefined);
+  const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
+  if (place.field !== undefined) return own(m, place.field);
+  const def = own(own(own(m, PER_TYPE_META_FIELD), place.kind), place.type);
+  return place.property !== undefined ? own(own(def, 'propertySchemas'), place.property) : own(def, place.typeField);
+}
+
+const placeKey = (p: MetaPlace): string => JSON.stringify([p.field, p.kind, p.type, p.property, p.typeField]);
 
 /**
  * Every place two layers define the same thing differently, with each network's value. Shown to the operator and
@@ -156,33 +203,60 @@ export interface MetaClash {
  * proposing a combined definition to a network as an ordinary `meta_change`.
  */
 export function clashesOf(layers: readonly MetaLayer[]): MetaClash[] {
-  const out: MetaClash[] = [];
-  const add = (key: Omit<MetaClash, 'values'>, networkId: string, value: unknown) => {
-    const hit = out.find(c => c.field === key.field && c.kind === key.kind && c.type === key.type
-      && c.property === key.property && c.typeField === key.typeField);
-    if (hit) hit.values.push({ networkId, value });
-    else out.push({ ...key, values: [{ networkId, value }] });
-  };
+  const out = new Map<string, MetaClash>();
   for (const { networkId, meta } of layers) {
-    const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
-    for (const [field, value] of Object.entries(m)) {
-      if (field === PER_TYPE_META_FIELD) continue;
-      add({ field }, networkId, value);
-    }
-    const heldTypes = m[PER_TYPE_META_FIELD];
-    const schemas = isObj(heldTypes) ? heldTypes : {};
-    for (const [kind, types] of Object.entries(schemas)) {
-      if (!isObj(types)) continue;
-      for (const [type, def] of Object.entries(types)) {
-        if (!isObj(def)) continue;
-        for (const [typeField, value] of Object.entries(def)) {
-          if (typeField === 'propertySchemas' && isObj(value)) {
-            for (const [property, p] of Object.entries(value)) add({ kind, type, property }, networkId, p);
-          } else add({ kind, type, typeField }, networkId, value);
-        }
-      }
+    for (const { place, value } of placesOf(meta)) {
+      const hit = out.get(placeKey(place));
+      if (hit) hit.values.push({ networkId, value });
+      else out.set(placeKey(place), { ...place, values: [{ networkId, value }] });
     }
   }
   // A clash is two or more networks holding DIFFERENT values; one network, or agreement, is not one.
-  return out.filter(c => c.values.length > 1 && c.values.some(v => !isDeepStrictEqual(v.value, c.values[0]!.value)));
+  return [...out.values()].filter(c => c.values.length > 1 && c.values.some(v => !isDeepStrictEqual(v.value, c.values[0]!.value)));
+}
+
+/** One place a layer supplies, as the own definitions and the space's effective meta see it (R6-8). */
+export interface MetaPlaceView extends MetaPlace {
+  /** What this instance's own definitions hold there; absent when they hold nothing. */
+  own?: unknown;
+  /** What the space runs on there. */
+  effective: unknown;
+  /** The network whose layer the effective value comes from: the first of `layers` that supplies the place. */
+  winner: string;
+  /** The own definitions hold a value the space does not run on — an edit a layer outranks (`Q-67`). */
+  hidden: boolean;
+}
+
+/**
+ * For every place some layer supplies: what the own definitions hold, what the space runs on, which network's layer wins, and whether
+ * the own value is HIDDEN by it (R6-8, `Q-67`).
+ *
+ * ## Derived, and that is the point
+ *
+ * Computed from the own definitions, the layers and their order at the moment of the read — `effectiveMeta`, the one merge the space's
+ * meta is built by — and recorded nowhere. A hidden edit used to be invisible (the write answered saved, the space ran on a network's
+ * value); a RECORD of it ("this edit was hidden by round X") would go stale with a precedence reorder, a layer arriving, a rename or a
+ * network's removal, each of which changes the answer. Reading it fresh cannot.
+ *
+ * A place no layer supplies is the own definitions' and is not listed: nothing outranks it. `layers` are highest precedence first.
+ */
+export function ownAgainstEffective(own: SpaceMeta | undefined, layers: readonly MetaLayer[]): MetaPlaceView[] {
+  const effective = effectiveMeta(own, layers);
+  const rows = new Map<string, MetaPlaceView>();
+  for (const { networkId, meta } of layers) {
+    for (const { place } of placesOf(meta)) {
+      const key = placeKey(place);
+      if (rows.has(key)) continue;
+      const mine = valueAt(own, place);
+      const runsOn = valueAt(effective, place);
+      rows.set(key, {
+        ...place,
+        ...(mine !== undefined ? { own: mine } : {}),
+        effective: runsOn,
+        winner: networkId,
+        hidden: mine !== undefined && !isDeepStrictEqual(mine, runsOn),
+      });
+    }
+  }
+  return [...rows.values()];
 }

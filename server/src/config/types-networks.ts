@@ -220,6 +220,13 @@ export interface VoteRound {
    */
   baseMetaVersion?: number;
   /**
+   * What the changed fields held when the proposal was computed (meta_change rounds, R6-8): each named field's value and, for the types the
+   * round changes, their definitions. It travels with the round, which no merkle hash covers and no wire schema strips, so every member
+   * judges "was this field changed since the proposal" against the same base. Absent on a round from a peer before this release, which is
+   * judged by `baseMetaVersion` and the version history. See `sync/meta-round-merge.ts`.
+   */
+  metaBase?: SpaceMeta;
+  /**
    * A proposal for ONE network's layer rather than an edit of the proposer's own definitions (meta_change rounds,
    * `F-39.5`). Passed, it lands in that network's layer on every member — the proposer included, which is the only
    * instance it changes anything for: everyone else stores a passed meta_change as the network's layer anyway.

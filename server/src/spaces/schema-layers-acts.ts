@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { clashesOf, replicatedMetaOf } from '../sync/replicated-meta.js';
+import { clashesOf, ownAgainstEffective, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { carriedLocalId } from '../sync/space-map.js';
 import { layersFor, recomputeEffectiveMeta } from './effective-meta.js';
 
@@ -25,8 +25,9 @@ export const NetworkPrecedenceBody = z.object({ networks: z.array(z.string().min
 const notFound = (id: string) => ({ status: 404 as const, error: `Space '${id}' not found` });
 
 /**
- * The space's own definitions, each network layer in the order it applies, and every clash between layers — the
- * network that currently wins each clash is the first one listed in its `values`.
+ * The space's own definitions, each network layer in the order it applies, every clash between layers — the
+ * network that currently wins each clash is the first one listed in its `values` — and, per place a layer supplies, the own
+ * value against the effective one (`fields`, with `hidden` for an own edit a layer outranks).
  */
 export function schemaLayersAct(spaceId: string): SchemaLayersActResult {
   const cfg = getConfig();
@@ -57,6 +58,10 @@ export function schemaLayersAct(spaceId: string): SchemaLayersActResult {
       }),
       precedence: layers.map(l => l.networkId),
       clashes: clashesOf(layers),
+      // Every place a layer supplies: the own value against what the space runs on, the layer that wins, and whether an own edit is
+      // hidden by it (R6-8, Q-67). Read fresh from the own definitions and the layers — nothing is recorded, so a reorder, a layer
+      // arriving, a rename or a network's removal change it with no round.
+      fields: ownAgainstEffective(space.ownMeta ?? space.meta, layers),
     },
   };
 }

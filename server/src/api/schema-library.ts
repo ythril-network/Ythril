@@ -27,7 +27,7 @@
  *   GET    /api/schema-library/public/:name           — a single published entry
  */
 
-import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
+import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { Router } from 'express';
 import { isDeepStrictEqual } from 'node:util';
@@ -444,7 +444,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   // Through the own definitions (F-39.2): the group's references land in what this instance defines, so a space
   // whose meta is rebuilt from network layers keeps them.
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(spaceId, typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(spaceId, typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   const updated = commitOwnMetaEdit(spaceId, base => {
     const own = { ...base.typeSchemas };

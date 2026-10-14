@@ -113,13 +113,16 @@ describe('the same note, written for a voter before the round has passed', () =>
 describe('every door reports it', () => {
   const read = f => stripComments(readFileSync(f, 'utf8'));
   it('PATCH /api/spaces/:id and every schema route through voteOnSchemaEditIfNetworked', () => {
-    assert.equal((read('server/src/api/spaces.ts').match(/\.\.\.networkMergeNotice\(result\)/g) ?? []).length, 2, 'the 202 and the 200 of PATCH');
-    assert.equal((read('server/src/spaces/meta-update.ts').match(/\.\.\.networkMergeNotice\(result\)/g) ?? []).length, 2, 'the 202 and the 200 of the schema routes');
+    // The notice is `networkWriteNotice` since R5-1 (the merge note plus `layers` and the member warnings, one spread for every door): it
+    // takes the caller, because a member's label is the networks area's to read.
+    assert.equal((read('server/src/api/spaces.ts').match(/\.\.\.networkWriteNotice\(result, /g) ?? []).length, 2, 'the 202 and the 200 of PATCH');
+    assert.equal((read('server/src/spaces/meta-update.ts').match(/\.\.\.networkWriteNotice\(result, /g) ?? []).length, 2, 'the 202 and the 200 of the schema routes');
   });
   it('MCP schema_update, in the text and the structured half', () => {
     const src = read('server/src/mcp/tools/spaces.ts');
-    assert.equal((src.match(/\.\.\.networkMergeNotice\(result\)/g) ?? []).length, 2);
-    assert.equal((src.match(/mergeLine\(result\)/g) ?? []).length, 2);
+    assert.equal((src.match(/networkWriteNotice\(r, caller\)/g) ?? []).length, 1, 'the one notice both outcomes are answered with');
+    assert.equal((src.match(/\.\.\.notice\b/g) ?? []).length, 2, 'the structured half of the 202 and the 200');
+    assert.equal((src.match(/noticeText\(notice\)/g) ?? []).length, 2, 'the text of the 202 and the 200');
   });
   it('the note is queued where a round PASSES on the proposer, so a round that passes later sends one too', () => {
     const gov = read('server/src/sync/governance.ts');
