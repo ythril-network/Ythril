@@ -22,7 +22,9 @@
  * {@link fileActAnswer} is what a door calls and it counts the answer by its `code` (`ythril_file_act_answers_total`);
  * {@link fileActAnswerOf} classifies and counts nothing, for a caller that asks "is this refusal that kind?" and does not
  * answer (`isPathBlocked`). A classification that counted would report an answer no door gave. Counting inside the answer
- * is what a door cannot forget.
+ * is what a door cannot forget. The tally lives here and the metrics registry reads it at scrape time
+ * ({@link fileActAnswerCounts}), because this module is imported below the registry and importing the registry back would be
+ * a runtime import cycle.
  *
  * ## Why these statuses
  *
@@ -39,8 +41,6 @@
  *   storage, said in words that name no path.
  */
 import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
-import { fileActAnswersTotal } from '../metrics/registry.js';
-
 /** The caller's path cannot be used: a regular file stands where a directory must be, it is the source itself or inside it, or the file system refuses it. Answered `path_blocked`. */
 export class PathBlocked extends Error {
   override readonly name = 'PathBlocked';
@@ -165,8 +165,29 @@ export interface FileActAnswer {
  */
 export function fileActAnswer(err: unknown): FileActAnswer | undefined {
   const answer = fileActAnswerOf(err);
-  if (answer !== undefined) fileActAnswersTotal.inc({ code: answer.body.code });
+  if (answer !== undefined) answered[answer.body.code] += 1;
   return answer;
+}
+
+/**
+ * Answers given since the process started, per code, every code present (0 before its first answer): the registry's
+ * `ythril_file_act_answers_total` is read from it at scrape time. The keys are typed against the answer's own code union, so a code
+ * added to {@link FileActAnswer} without a tally here does not compile.
+ */
+const answered: Record<FileActAnswer['body']['code'], number> = {
+  path_blocked: 0,
+  destination_exists: 0,
+  destination_held_after_move: 0,
+  confirm_required: 0,
+  space_root_refused: 0,
+  move_still_owed: 0,
+  act_not_recorded: 0,
+  file_system_fault: 0,
+};
+
+/** A snapshot of the tally {@link fileActAnswer} keeps: how many answers each code has been given. */
+export function fileActAnswerCounts(): Readonly<Record<FileActAnswer['body']['code'], number>> {
+  return { ...answered };
 }
 
 /**

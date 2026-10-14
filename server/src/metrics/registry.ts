@@ -26,7 +26,7 @@ import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
-import type { FileActAnswer } from '../files/act-answers.js';
+import { fileActAnswerCounts } from '../files/act-answers.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
@@ -753,28 +753,20 @@ export const fileMoveLinkFallbackTotal = new Counter({
 fileMoveLinkFallbackTotal.inc(0);
 
 /**
- * One series per answer code, so each is scrapable at 0 before its first answer. The keys are typed against the answer's own code
- * union, so a code added to `act-answers.ts` without a series here does not compile.
+ * File acts answered with a refusal or a failure, by `code`: counted where the answer is built (`fileActAnswer`), so both doors and
+ * every code are in it. The tally is kept by `files/act-answers.ts` and mirrored here at scrape time (that module is imported below
+ * this one, so it cannot call into the registry), and it holds every code, so every series is scrapable at 0.
  */
-const FILE_ACT_ANSWER_CODES: Readonly<Record<FileActAnswer['body']['code'], true>> = {
-  path_blocked: true,
-  destination_exists: true,
-  destination_held_after_move: true,
-  confirm_required: true,
-  space_root_refused: true,
-  move_still_owed: true,
-  act_not_recorded: true,
-  file_system_fault: true,
-};
-
-/** File acts answered with a refusal or a failure, by `code`: counted where the answer is built (`fileActAnswer`), so both doors and every code are in it. */
 export const fileActAnswersTotal = new Counter({
   name: 'ythril_file_act_answers_total',
   help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
   labelNames: ['code'] as const,
   registers: [register],
+  collect() {
+    this.reset();
+    for (const [code, count] of Object.entries(fileActAnswerCounts())) this.inc({ code }, count);
+  },
 });
-for (const code of Object.keys(FILE_ACT_ANSWER_CODES)) fileActAnswersTotal.inc({ code }, 0);
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
 export const fileMoveBatchReplansTotal = new Counter({

@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { stripComments } from './_strip-comments.mjs';
 
 const answers = await import('../../server/dist/files/act-answers.js');
 const destination = await import('../../server/dist/files/destination.js');
@@ -34,7 +35,7 @@ const SOURCE = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 's
 
 /** The module's source with comments removed, so a code spelled in prose is not a code spelled in a branch. */
 function sourceWithoutComments() {
-  return readFileSync(SOURCE, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return stripComments(readFileSync(SOURCE, 'utf8'));
 }
 
 /** Every `code: '<x>'` the module's return branches spell, in the spelling the client spec reads. */
