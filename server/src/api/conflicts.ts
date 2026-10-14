@@ -1,14 +1,23 @@
-import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
+import { spacesWhereTokenMay, holdsRungOnEvery } from '../auth/reachable-spaces.js';
 import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { Router } from 'express';
-import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
-import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
-import { deleteStoredIfPresent, moveStored } from '../files/stored-bytes.js';
+import { fileKeyOf, resolveSafePathChecked } from '../files/sandbox.js';
+import { deleteStoredIfPresent, lstatIfPresent, moveStored } from '../files/stored-bytes.js';
+import { placeIfFree } from '../files/files.js';
+import { assertDestinationReachable, assertNothingStandsAt, fsRefusalOf } from '../files/destination.js';
+import { FileSystemFault, fileActAnswer } from '../files/act-answers.js';
+import { mkdirPrivate } from '../util/fs-modes.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
+import { isProxySpace } from '../spaces/proxy.js';
+import { storeFailureAnswer } from '../brain/store-failure.js';
+import { reportServerFailure } from '../util/report-failure.js';
+import { toDocId } from '../util/paths.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
@@ -24,50 +33,88 @@ type ResolveAction = typeof VALID_ACTIONS[number];
  * `spacesWhereTokenMay` for a list, `findWhereTokenMay` for a record by id — and neither has a default (`Q-304`).
  */
 
-/** Perform the file operations for a given resolve action, then delete the conflict record. */
+/** What a resolution did: it did its action and closed the record, or there was no copy to place and it closed the record having touched no file. */
+type Resolution = 'resolved' | 'nothing-to-place';
+
+/**
+ * Place the incoming copy at a path the CALLER chose (`rename`) or at the conflict's own path in another space (save-to-space), and never
+ * replace what stands there: the one sequence of questions `keep-both` with a rename and `save-to-space` share, so neither can leave one out.
+ *
+ * ## What it prevents
+ *
+ * Both placed the copy with a rename, which replaces: a rename onto a file, a folder or a file's record destroyed it, and a replicated
+ * file's loss travels to every instance; in another space the same, for a token that held only the data-quality area there (Q-466).
+ *
+ * ## The order, and why
+ *
+ *  1. the destination through the sandbox's CHECKED resolve (a lexical one follows a link on the way out of the space);
+ *  2. a path this instance keeps for itself (`isInstanceLocalFile`) is refused when the CALLER named it: a conversion's output tree, a
+ *     schema snapshot, a conflict copy's own name. The default destination of a save (the copy's own name) is not the caller's choice;
+ *  3. a file standing where a directory is needed (`assertDestinationReachable`: `409 path_blocked`, not the `500` a rename gave);
+ *  4. NOTHING TO PLACE (the destination is the copy's own path, or the copy is gone: a retry after a placement whose record delete
+ *     failed) closes the record and moves nothing. It comes before the next question, because the placement of an earlier attempt is
+ *     standing at the destination and must not be refused against itself;
+ *  5. nothing stands at the destination (`assertNothingStandsAt`), except this copy's own half-made link, which the placing finishes;
+ *  6. the placing, which asks again under the locks (`placeIfFree`).
+ */
+async function placeIncomingCopy(
+  srcAbs: string, spaceId: string, dstSpaceId: string, dstPath: string, { callerChose }: { callerChose: boolean },
+): Promise<Resolution> {
+  const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
+  if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
+  if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {
+    throw new RangeError(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
+  }
+  await assertDestinationReachable(dstSpaceId, dstPath);
+  if (await lstatIfPresent(srcAbs) === null) return 'nothing-to-place';
+  await assertNothingStandsAt(dstSpaceId, dstPath, { placing: srcAbs });
+  // `begun`: the conflict record being open IS the evidence that a hard link of the copy at the destination is this placing's own.
+  await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun: true, act: 'resolution' });
+  return 'resolved';
+}
+
+/**
+ * Perform the file operations for a given resolve action, then delete the conflict record.
+ *
+ * Every path of the conflict (the copy's and the original's) and every destination goes through the sandbox's CHECKED resolve before it
+ * is touched, whichever action runs: a conflict record's paths come from a peer, and a link on the way out of the space must not be
+ * followed by a delete or a move. `keep-incoming` is the one action that REPLACES (the local file, which is its purpose); every other
+ * placement refuses an occupied destination.
+ */
 async function executeResolve(
   doc: ConflictDoc,
   spaceId: string,
   action: ResolveAction,
   rename?: string,
   targetSpaceId?: string,
-): Promise<void> {
+): Promise<Resolution> {
+  const srcAbs = await resolveSafePathChecked(spaceId, doc.conflictPath);
+  let outcome: Resolution = 'resolved';
   switch (action) {
     case 'keep-local': {
       // Delete the conflict copy, keep the original
       // Already gone is fine.
-      await deleteStoredIfPresent(resolveSafePath(spaceId, doc.conflictPath));
+      await deleteStoredIfPresent(srcAbs);
       break;
     }
     case 'keep-incoming': {
       // Replace the original with the conflict copy, then delete the conflict copy
-      const srcAbs = resolveSafePath(spaceId, doc.conflictPath);
-      const dstAbs = resolveSafePath(spaceId, doc.originalPath);
-      await fs.mkdir(path.dirname(dstAbs), { recursive: true });
+      const dstAbs = await resolveSafePathChecked(spaceId, doc.originalPath);
+      if (dstAbs === srcAbs || await lstatIfPresent(srcAbs) === null) { outcome = 'nothing-to-place'; break; }
+      await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
       // A move, under both paths' locks: the stored bytes (ciphertext or not) are valid wherever they land (F-43).
-      await moveStored(srcAbs, dstAbs);
+      await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
       break;
     }
     case 'keep-both': {
       // Keep both files. If rename is provided, rename the conflict copy.
-      if (rename) {
-        const srcAbs = resolveSafePath(spaceId, doc.conflictPath);
-        const dstAbs = resolveSafePath(spaceId, rename);
-        await fs.mkdir(path.dirname(dstAbs), { recursive: true });
-        await moveStored(srcAbs, dstAbs);
-      }
       // Without rename, both files stay as-is — nothing to do.
+      if (rename) outcome = await placeIncomingCopy(srcAbs, spaceId, spaceId, rename, { callerChose: true });
       break;
     }
     case 'save-to-space': {
-      // Copy conflict file to target space, then delete from source space
-      const srcAbs = resolveSafePath(spaceId, doc.conflictPath);
-      const destPath = rename || doc.conflictPath;
-      const dstRoot = spaceRoot(targetSpaceId!);
-      await fs.mkdir(dstRoot, { recursive: true });
-      const dstAbs = resolveSafePath(targetSpaceId!, destPath);
-      await fs.mkdir(path.dirname(dstAbs), { recursive: true });
-      await moveStored(srcAbs, dstAbs);
+      // The move IS the save: the copy leaves this space for the target, then the conflict record is deleted.
+      outcome = await placeIncomingCopy(srcAbs, spaceId, targetSpaceId!, rename || doc.conflictPath, { callerChose: !!rename });
       break;
     }
   }
@@ -75,6 +122,70 @@ async function executeResolve(
   // Remove the conflict record
   await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
     .deleteOne(asFilter<ConflictDoc>({ _id: doc._id }));
+  return outcome;
+}
+
+/** The body a resolution answers `200` with: `resolved` is present only when there was nothing to place. */
+const resolvedBody = (outcome: Resolution): { status: 'resolved'; resolved?: 'nothing-to-place' } =>
+  outcome === 'nothing-to-place' ? { status: 'resolved', resolved: 'nothing-to-place' } : { status: 'resolved' };
+
+/**
+ * Why a resolution's body cannot be served, or null: the action, the two strings a caller chooses a destination by, and the target a
+ * save needs. One function for both doors, so neither takes what the other refuses.
+ *
+ * `rename` and `targetSpaceId` are read as strings downstream (`path.resolve`, a space lookup): an array or an object reached them
+ * unchecked, and a rename of `['a.txt']` was the file `a.txt` by its `toString`. An empty rename is no rename (as it always was).
+ */
+export function resolveBodyError(body: unknown): string | null {
+  const { action, rename, targetSpaceId } = (body ?? {}) as Record<string, unknown>;
+  if (!action || !VALID_ACTIONS.includes(action as ResolveAction)) return `action must be one of: ${VALID_ACTIONS.join(', ')}`;
+  for (const [name, value] of [['rename', rename], ['targetSpaceId', targetSpaceId]] as const) {
+    if (value !== undefined && value !== null && typeof value !== 'string') return `${name} must be a string`;
+  }
+  if (action === 'save-to-space' && !targetSpaceId) return 'targetSpaceId is required for save-to-space action';
+  return null;
+}
+
+/**
+ * Whether the token may save a conflict's copy to `targetSpaceId`: `null` when it may, else the refusal. A save is a WRITE of a file in
+ * the target space, so it needs `files:write` THERE on top of the data-quality area that lets it resolve conflicts, and the target must
+ * be a concrete space (a proxy holds no files of its own).
+ *
+ * The rights are asked BEFORE the target is looked at, so a token that may not write there is refused identically whatever the target
+ * holds and cannot use a resolution to learn what is in a space it may not write in. `spaces` is the set the token may resolve
+ * conflicts in (`spacesWhereTokenMay`, the iteration set of the route).
+ */
+function saveTargetRefusal(
+  rights: TokenRights | undefined, spaces: readonly string[], targetSpaceId: string,
+): { status: 400 | 403; error: string } | null {
+  if (!spaces.includes(targetSpaceId)) return { status: 403, error: 'Token does not have access to target space' };
+  if (!holdsRungOnEvery(rights, [targetSpaceId], 'files', 'write')) {
+    return { status: 403, error: 'Token does not have write access to files in the target space' };
+  }
+  if (isProxySpace(targetSpaceId)) return { status: 400, error: `'${targetSpaceId}' is a proxy space and holds no files of its own: choose one of its member spaces` };
+  return null;
+}
+
+/** One conflict a bulk resolution could not resolve: the id, our sentence, and, for a file act's refusal, its code, status and path. */
+interface FailedResolution { id: string; error: string; code?: string; status?: number; path?: string }
+
+/**
+ * A bulk resolution's failure for one id, in the file act's one answer (`fileActAnswer`), never `err.message`, which for a file-system
+ * failure names the server's absolute data path. A failure that is not one of the file acts' is the store's answer when it is the
+ * store's, a `400` for a path outside the space, and otherwise the file-system-fault sentence (its code, no path); the cause is logged.
+ */
+function failedResolution(id: string, err: unknown, where: string): FailedResolution {
+  const act = fileActAnswer(err);
+  if (act) {
+    if (act.status >= 500) reportServerFailure(where, err);
+    return { id, error: act.body.error, code: act.body.code, status: act.status, ...(act.body.path !== undefined ? { path: act.body.path } : {}) };
+  }
+  if (err instanceof RangeError) return { id, error: err.message, status: 400 };
+  const store = storeFailureAnswer(err, where);
+  if (store) return { id, error: store.body.error, status: store.status };
+  reportServerFailure(where, err);
+  const fault = fileActAnswer(new FileSystemFault(err))!;
+  return { id, error: fault.body.error, code: fault.body.code, status: fault.status };
 }
 
 // Bounds for the cross-space list endpoints below. Without these the fan-in was up to 500·N docs
@@ -218,50 +329,44 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
  * conflict listing shows, which is what a caller selects from. It took any number, and any value per entry.
  */
 export function bulkResolveBodyError(body: unknown): string | null {
-  const { ids, action } = (body ?? {}) as Record<string, unknown>;
+  const { ids } = (body ?? {}) as Record<string, unknown>;
   if (!Array.isArray(ids) || ids.length === 0) return 'ids must be a non-empty array';
   if (ids.some(id => typeof id !== 'string' || !id)) return 'ids must contain non-empty strings';
   const tooMany = countError('ids', ids, MAX_CONFLICT_IDS);
   if (tooMany) return tooMany;
-  if (!action || !VALID_ACTIONS.includes(action as typeof VALID_ACTIONS[number])) {
-    return `action must be one of: ${VALID_ACTIONS.join(', ')}`;
-  }
-  return null;
+  return resolveBodyError(body);
 }
 
 // POST /api/conflicts/bulk-resolve — resolve multiple conflicts at once
 conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { ids, action, rename, targetSpaceId } = req.body ?? {};
-    const bodyErr = bulkResolveBodyError({ ids, action });
+    const bodyErr = bulkResolveBodyError({ ids, action, rename, targetSpaceId });
     if (bodyErr) {
       res.status(400).json({ error: bodyErr });
       return;
     }
-    if (action === 'save-to-space' && !targetSpaceId) {
-      res.status(400).json({ error: 'targetSpaceId is required for save-to-space action' });
-      return;
-    }
     const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
-    if (action === 'save-to-space' && !spaces.includes(targetSpaceId)) {
-      res.status(403).json({ error: 'Token does not have access to target space' });
+    const refusal = action === 'save-to-space' ? saveTargetRefusal(req.authToken?.rights, spaces, targetSpaceId) : null;
+    if (refusal) {
+      res.status(refusal.status).json({ error: refusal.error });
       return;
     }
 
     let resolved = 0;
-    const failed: { id: string; error: string }[] = [];
+    const failed: FailedResolution[] = [];
 
     for (const id of ids) {
       try {
         const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', id);
         if (!found) {
-          failed.push({ id, error: 'Conflict not found' });
+          failed.push({ id, error: 'Conflict not found', status: 404 });
           continue;
         }
         await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
         resolved++;
       } catch (err: unknown) {
-        failed.push({ id, error: err instanceof Error ? err.message : 'Unknown error' });
+        failed.push(failedResolution(id, err, 'POST /api/conflicts/bulk-resolve'));
       }
     }
 
@@ -311,21 +416,19 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
   try {
     const { action, rename, targetSpaceId } = req.body ?? {};
 
-    // Validate action
-    if (!action || !VALID_ACTIONS.includes(action)) {
-      res.status(400).json({ error: `action must be one of: ${VALID_ACTIONS.join(', ')}` });
-      return;
-    }
-    if (action === 'save-to-space' && !targetSpaceId) {
-      res.status(400).json({ error: 'targetSpaceId is required for save-to-space action' });
+    // Validate the action and the strings a destination is chosen by (400 before any 403: a malformed request says what is wrong with it)
+    const bodyErr = resolveBodyError({ action, rename, targetSpaceId });
+    if (bodyErr) {
+      res.status(400).json({ error: bodyErr });
       return;
     }
 
     const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
 
-    // Validate target space access for save-to-space
-    if (action === 'save-to-space' && !spaces.includes(targetSpaceId)) {
-      res.status(403).json({ error: 'Token does not have access to target space' });
+    // A save is a write in the target space: files:write there, and a concrete target
+    const refusal = action === 'save-to-space' ? saveTargetRefusal(req.authToken?.rights, spaces, targetSpaceId) : null;
+    if (refusal) {
+      res.status(refusal.status).json({ error: refusal.error });
       return;
     }
 
@@ -335,9 +438,11 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
       return;
     }
 
-    await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
-    res.status(200).json({ status: 'resolved' });
+    const outcome = await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
+    res.status(200).json(resolvedBody(outcome));
   } catch (err) {
+    // A path outside the space (or through a link out of it) is the request's: 400, as the file doors answer it.
+    if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
     sendCaughtFailure(res, `POST /api/conflicts/:id/resolve`, err);
   }
 });

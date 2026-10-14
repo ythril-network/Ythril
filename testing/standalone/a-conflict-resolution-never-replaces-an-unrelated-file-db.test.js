@@ -419,7 +419,7 @@ describe('resolving a conflict never replaces a file it was not about (Q-466)', 
       }
       return { hits, restore: () => { for (const n of names) fsp[n] = real[n]; } };
     }
-    const leaks = (text) => [process.env['DATA_ROOT'], 'EACCES', 'locked-dir'].filter(w => w && text.includes(w));
+    const leaks = (text) => [process.env['DATA_ROOT'], 'permission denied', 'locked-dir'].filter(w => w && text.includes(w));
 
     it('single: a destination the file system refuses is 500 file_system_fault in words that name no path', async () => {
       const id = await conflict();

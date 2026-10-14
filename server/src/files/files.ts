@@ -8,7 +8,7 @@ import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterr
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
-import { DestinationExists } from './act-answers.js';
+import { DestinationExists, type DestinationAct } from './act-answers.js';
 import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
@@ -160,9 +160,48 @@ function linkFellBack(err: unknown): void {
 }
 
 /**
+ * Place a stored file or directory at a path NOTHING stands at, and NEVER replace what does: the one step that puts bytes under a name for
+ * an act that must not clobber — the move (`moveFile`) and the placing of a conflict's incoming copy (`api/conflicts.ts`, keep-both with
+ * a rename and save-to-space).
+ *
+ * ## What it prevents
+ *
+ * A rename replaces. The two acts above each wrote their own way of putting bytes down, and the one that wrote `moveStored` replaced a
+ * file, a replicated one, whose loss travelled to every instance. Here the destination is classified UNDER the locks and the bytes are
+ * placed by a step the kernel refuses on an existing name (`moveStoredIfFree`), so something that appears between a caller's check and
+ * this placing is refused too, and what is refused is {@link DestinationExists} (`409 destination_exists`, answered by every door through
+ * `fileActAnswer`), the occupant untouched. The parent directories are made here, so a caller cannot create them before it has asked
+ * whether the placing may happen; every failure of the file system is said once (`fsRefusalOf`), never in its own words.
+ *
+ * `dstDocId` is the destination as the caller named it, space-relative: it is what the refusal names. `begun` is the caller's reading of
+ * whether it holds evidence that a half-made link at the destination is its OWN (a move's begun-move marker; an open conflict record for
+ * the copy being placed), taken before it started: without it the same inode under two names is somebody's hard link and is refused. An
+ * explicit argument at every call. `act` says whose sentence a refusal carries (`DestinationExists`).
+ *
+ * The mode of what was placed is hardened here (a rename carries the source's mode, so placing a file that predates the hardening would
+ * reintroduce an 0644 file into a tightened tree), by `hardenPath` and not `harden(dstAbs, FILE_MODE)`: a DIRECTORY is placed too, and
+ * `0600` on a directory removes the execute bit that makes it openable at all (see the note on `hardenPath`).
+ */
+export async function placeIfFree(
+  srcAbs: string,
+  dstAbs: string,
+  dstDocId: string,
+  { begun, act = 'move' }: { begun: boolean; act?: DestinationAct },
+): Promise<void> {
+  await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [dstDocId]); });
+  // Under both paths' locks (F-43). The occupied destination is the placing's own refusal and is answered BEFORE `fsRefusalOf` sees it:
+  // the kernel's ENOTEMPTY or EISDIR of a rename is a name that is taken, not a path that cannot be created.
+  await moveStoredIfFree(srcAbs, dstAbs, { begun, onLinkFallback: linkFellBack }).catch((err: unknown) => {
+    if (err instanceof DestinationOccupied) throw new DestinationExists(dstDocId, 'bytes', undefined, act);
+    throw fsRefusalOf(err, [dstDocId]);
+  });
+  await hardenPath(dstAbs);
+}
+
+/**
  * Move/rename a file or directory — and NEVER replace what stands at the destination: something there is {@link DestinationExists}
  * (`409 destination_exists`, answered by every door through `fileActAnswer`), whether it was there when the move was asked
- * (`assertDestinationFree`) or appeared in the instant between that check and the bytes being placed (`moveStoredIfFree`).
+ * (`assertDestinationFree`) or appeared in the instant between that check and the bytes being placed ({@link placeIfFree}).
  *
  * `begun` is the cascade's reading, taken before its own marker was written, of whether a begun-move marker names this very pair: it is
  * what tells a half-made link of this move from an operator's hard link. An explicit argument at every call.
@@ -175,20 +214,7 @@ export async function moveFile(
 ): Promise<void> {
   const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
   const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
-  await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [srcPath, dstPath]); });
-  // Under both paths' locks (F-43). The occupied destination is the move's own refusal and is answered BEFORE `fsRefusalOf` sees it:
-  // the kernel's ENOTEMPTY or EISDIR of a rename is a name that is taken, not a path that cannot be created.
-  await moveStoredIfFree(srcAbs, dstAbs, { begun, onLinkFallback: linkFellBack }).catch((err: unknown) => {
-    if (err instanceof DestinationOccupied) throw new DestinationExists(toDocId(dstPath), 'bytes');
-    throw fsRefusalOf(err, [srcPath, dstPath]);
-  });
-  // A rename carries the source's mode with it, so moving a file that predates this hardening would silently
-  // reintroduce an 0644 file into a tightened tree.
-  //
-  // `hardenPath`, not `harden(dstAbs, FILE_MODE)`: this function moves DIRECTORIES too, and `0600` on a directory
-  // removes the execute bit that makes it openable at all. Getting that wrong took the server down — see the note
-  // on `hardenPath`.
-  await hardenPath(dstAbs);
+  await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun });
 }
 
 /**
