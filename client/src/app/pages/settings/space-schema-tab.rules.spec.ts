@@ -548,9 +548,9 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     await h.settle();
     button(h)!.click();
     const req = post(h);
-    const body = req.request.body as { sample?: unknown; cursor?: unknown };
+    const body = req.request.body as { sample?: unknown; after?: unknown };
     expect(body.sample).toEqual(record);
-    expect(body.cursor).toBeUndefined();
+    expect(body.after).toBeUndefined();
     req.flush(answer());
   });
 
@@ -594,11 +594,11 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     button(h)!.click();
 
     const first = post(h);
-    const firstBody = first.request.body as { sample?: unknown; cursor?: unknown };
+    const firstBody = first.request.body as { sample?: unknown; after?: unknown };
     expect(firstBody.sample, 'stored-data mode sent a sample').toBeUndefined();
-    expect(firstBody.cursor, 'the first page carries no cursor').toBeUndefined();
-    // Both spellings of the answer's cursor field are given, so the spec asks for the BEHAVIOUR (carry it) not the name.
-    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, complete: false, cursor: 'cur-1', nextCursor: 'cur-1' }));
+    expect(firstBody.after, 'the first page carries no after').toBeUndefined();
+    // The server pages by `_id` keyset: the answer's `nextAfter` is sent back as `after` (one spelling on REST, MCP and here).
+    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, complete: false, nextAfter: 'cur-1' }));
     await h.settle();
 
     const progress = $(h.el, '[data-testid="validate-progress"]');
@@ -612,7 +612,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const next = $(h.el, '[data-testid="validate-continue"]');
     if (next) { next.click(); await h.settle(); }
     const second = post(h);
-    expect((second.request.body as { cursor?: unknown }).cursor).toBe('cur-1');
+    expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
     second.flush(answer({ checked: { entities: { checked: 250, total: 250 } }, complete: true }));
     await h.settle();
 

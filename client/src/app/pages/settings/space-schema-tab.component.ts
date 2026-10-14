@@ -610,7 +610,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         return;
       }
     } else if (next && this.validateCursor()) {
-      body.cursor = this.validateCursor()!;
+      body.after = this.validateCursor()!;
     }
     if (!next) this.resetValidate();
     this.validateError.set('');
@@ -620,7 +620,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         this.validating.set(false);
         this.validateResult.set(result);
         this.validateAccumulated.update(all => [...all, ...(result.violations ?? [])]);
-        this.validateCursor.set(result.complete ? null : (result.nextCursor ?? result.cursor ?? result.nextAfter ?? null));
+        this.validateCursor.set(result.complete ? null : (result.nextAfter ?? null));
       },
       error: (err) => {
         this.validating.set(false);

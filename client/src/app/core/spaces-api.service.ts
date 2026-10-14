@@ -46,9 +46,7 @@ export interface ValidateSchemaResult {
   totalViolations: number;
   violations: { collection: string; _id: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
   staleGuards?: unknown[];
-  /** The cursor of the next page (the server spells it one of these); absent when the check is complete. */
-  nextCursor?: string;
-  cursor?: string;
+  /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
   nextAfter?: string;
 }
 
@@ -76,10 +74,10 @@ export class SpacesApi {
 
   /**
    * Check a schema against one pasted record (`sample`: nothing is scanned) or against the space's stored data, a page at a time
-   * (`cursor` from the previous answer). `meta` is the STAGED schema to check, so the dialog can ask before it saves; without it the
-   * stored schema is checked.
+   * (`after`: the previous answer's `nextAfter`). `meta` is the STAGED schema to check, so the dialog can ask before it saves; without
+   * it the stored schema is checked.
    */
-  validateSchema(spaceId: string, body: { sample?: unknown; cursor?: string; meta?: Partial<SpaceMeta> }): Observable<ValidateSchemaResult> {
+  validateSchema(spaceId: string, body: { sample?: unknown; after?: string; meta?: Partial<SpaceMeta> }): Observable<ValidateSchemaResult> {
     return this.http.post<ValidateSchemaResult>(`/api/spaces/${encodeURIComponent(spaceId)}/validate-schema`, body);
   }
 
