@@ -628,7 +628,7 @@ describe('FileManagerComponent — what a write MEANS beyond the write (characte
     expect(toasted.length).toBe(1);
   });
 
-  it('and an ACCEPTED one closes the form, reloads the FOLDER, and reloads the tree root', () => {
+  it('and an ACCEPTED one closes the form and reloads the FOLDER (the tree takes the new folder in WITHOUT a root reload: file-delete.spec.ts)', () => {
     /*
      * Asserted from a folder that is not the root, because the two reloads are different requests for the
      * same path when you are at the root — the folder you are in, and the tree's root. A `toContain('/')`
@@ -649,7 +649,10 @@ describe('FileManagerComponent — what a write MEANS beyond the write (characte
     expect(c.newFolderName()).toBe('');
     expect(c.showNewFolder()).toBe(false);
     expect(listed).toContain('/docs');   // the folder we are in
-    expect(listed).toContain('/');       // the tree's root
+    // DELIBERATE EDIT (Q-470): this used to assert `toContain('/')`, the tree's root, because a created folder reloaded the whole
+    // tree and collapsed everything the operator had opened. The tree now merges one parent into itself and keeps what is open;
+    // `file-delete.spec.ts` ("a created or moved folder reaches the tree without collapsing it") holds the rule that replaces this.
+    expect(listed, 'a create no longer re-lists the tree root').not.toContain('/');
   });
 
 

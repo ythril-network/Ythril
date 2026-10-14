@@ -21,6 +21,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
+import { serverActCodes } from '../../testing/server-act-codes';
 import { FileManagerComponent } from './file-manager.component';
 import { FILE_REFUSALS_WITH_REMEDY } from './file-listing.store';
 
@@ -33,11 +34,7 @@ const en = locale('en');
 const said = (code: string, path?: string): string => en[`files.refusal.${code}`]!.replace('{{path}}', path ?? '');
 
 /** The codes a file act answers, read out of the module that defines them. */
-function serverCodes(): string[] {
-  return [...readFileSync(
-    resolve(__dirname, '../../../../../server/src/files/act-answers.ts'), 'utf8',
-  ).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]!).filter((v, i, all) => all.indexOf(v) === i);
-}
+const serverCodes = serverActCodes;
 
 /** A failed request as the HTTP client delivers it: the answer's body under `error`, its headers beside it. */
 function answer(status: number, body: unknown, headers: Record<string, string> = {}): HttpErrorResponse {
@@ -197,7 +194,9 @@ describe('the Files page — a refused file act says why', () => {
     const cases: [string, number, boolean][] = [
       ['path_blocked', 409, true], ['destination_exists', 409, true], ['destination_held_after_move', 409, true],
       ['act_not_recorded', 500, true], ['file_system_fault', 500, true],
-      ['confirm_required', 422, false], ['space_root_refused', 400, false],
+      // A delete that needs the folder confirmation says what is now true ("this is a folder; delete it again"), and that
+      // instruction stays until it is dismissed (Q-470).
+      ['confirm_required', 422, true], ['space_root_refused', 400, false],
     ];
     for (const [code, status, sticky] of cases) {
       TestBed.resetTestingModule();

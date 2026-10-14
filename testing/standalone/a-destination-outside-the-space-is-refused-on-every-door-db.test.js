@@ -18,7 +18,9 @@
  * ## Doors held
  *
  * REST `PATCH /api/files`, `POST /api/move_file` and MCP `move_file`; REST upload, `POST /api/write_file` and MCP `write_file`; REST
- * `mkdir`, `POST /api/create_dir` and MCP `create_dir`. The doors are the real handlers (`_file-act-doors.mjs`); only auth is skipped.
+ * `mkdir`, `POST /api/create_dir` and MCP `create_dir`; and (Q-466) conflict resolution, single and bulk, where the caller chooses the
+ * destination (`rename`, with `keep-both` or `save-to-space`): a bulk resolution is a `200` whose refusal is the failed item, so for it the
+ * item's own `status` is the answer. The doors are the real handlers (`_file-act-doors.mjs`); only auth is skipped.
  * "Nothing outside the space" is a listing of the whole data root before and after, less the space's own tree.
  *
  * Run: node --test testing/standalone/a-destination-outside-the-space-is-refused-on-every-door-db.test.js
@@ -44,6 +46,24 @@ function normalised(answer) {
   return { status: answer.status, wire: JSON.stringify({ text: answer.text, sc: answer.sc }) };
 }
 
+/**
+ * A conflict resolution as the other doors answer: `{ status, wire }`. A bulk resolution answers `200` with the refusal in `failed[]`, so the
+ * item's `status` is what it answered; an item with none (a raw failure) is a `500`, which is not the caller's refusal.
+ */
+function normalisedConflict(res) {
+  const failed = res.body?.failed;
+  if (Array.isArray(failed) && failed.length > 0) return { status: failed[0].status ?? 500, wire: JSON.stringify({ body: res.body }) };
+  return normalised(res);
+}
+
+let conflictSeq = 0;
+/** Resolve a fresh conflict (the copy `c.txt` beside the original `o.txt`) with `action`, placing the copy at `dst`; `bulk` answers through bulk-resolve. */
+const viaConflicts = (action, bulk = false) => async (dst) => {
+  const id = await acts.conflicts.seed({ id: `outside-${++conflictSeq}`, original: 'o.txt', conflict: 'c.txt' });
+  const opts = action === 'keep-both' ? { rename: dst } : { targetSpaceId: S, rename: dst };
+  return normalisedConflict(bulk ? await acts.conflicts.bulk([id], action, opts) : await acts.conflicts.resolve(id, action, opts));
+};
+
 /** Each door that can be asked to place something at `dst`; `run(dst)` answers normalised. A move's source is `s.txt`. */
 const DOORS = () => [
   { name: 'REST PATCH /api/files (move)', move: true, run: async (dst) => normalised(await acts.rest('PATCH', { path: 's.txt' }, { destination: dst })) },
@@ -55,6 +75,10 @@ const DOORS = () => [
   { name: 'REST mkdir', dir: true, run: async (dst) => normalised(await acts.post('mkdir', { query: { path: dst } })) },
   { name: 'POST /api/create_dir', dir: true, run: async (dst) => normalised(await acts.tool('create_dir', { path: dst })) },
   { name: 'MCP create_dir', dir: true, run: async (dst) => normalised(await acts.mcp('create_dir', { path: dst })) },
+  { name: 'REST conflicts resolve keep-both (rename)', run: viaConflicts('keep-both') },
+  { name: 'REST conflicts resolve save-to-space (rename)', run: viaConflicts('save-to-space') },
+  { name: 'REST conflicts bulk-resolve keep-both (rename)', run: viaConflicts('keep-both', true) },
+  { name: 'REST conflicts bulk-resolve save-to-space (rename)', run: viaConflicts('save-to-space', true) },
 ];
 
 /** Every path under the data root, with its size, except the space's own tree: what "outside the space" holds. */
@@ -105,6 +129,7 @@ describe('a destination that leaves the space writes nothing outside it', { skip
   after(async () => { await acts?.close(); });
   beforeEach(async () => {
     await acts.reset();
+    await acts.conflicts.reset();
     // A neighbour of the space under the data root, with something in it: what an escape would write into.
     outside = path.join(process.env['DATA_ROOT'], 'files', 'outside');
     fs.rmSync(outside, { recursive: true, force: true });

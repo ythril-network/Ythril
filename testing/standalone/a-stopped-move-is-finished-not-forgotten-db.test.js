@@ -103,7 +103,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
   beforeEach(async () => {
     faults.clear();
     await acts.reset();
-    await acts.door.coll(S, 'media_jobs').deleteMany({});
+    for (const part of ['media_jobs', 'links', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
   });
   afterEach(() => { worker.stopMediaEmbeddingWorker(); faults.clear(); });
 
@@ -235,6 +235,31 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
       const retry = await acts.move(via, 'gone-from.txt', 'gone-to.txt');
       assert.equal(status(retry), 404, `the retried move of a deleted file: ${body(retry)}`);
       assert.equal(acts.onDisk('gone-to.txt'), false, 'the retried move brought the deleted file back');
+    });
+  }
+
+  // The links of the file (Q-464): a delete at the destination removes the links this instance wrote from the source's name AND the
+  // destination's, and the marker goes in the same act. Before, a link the delete left kept the move "owed" for ever: the marker stayed
+  // and the next file uploaded at the source path was taken for the rest of this move.
+  for (const via of ['REST', 'MCP']) {
+    it(`${via}: deleting the destination of an owed move removes the links of both names, and clears the marker in the same act`, async () => {
+      await acts.seed('lk-from.txt');
+      const own = [await acts.links.put('lk-from.txt', 'e1', 'self'), await acts.links.put('lk-from.txt', 'e2', 'none'), await acts.links.put('lk-from.txt#chunk-0', 'e1', 'self')];
+      fail('deleteMany', FILES, F.storeGone.single);
+      const stopped = await acts.move(via, 'lk-from.txt', 'lk-to.txt');
+      assert.equal(status(stopped), 503, `the move was not stopped by the store: ${body(stopped)}`);
+      faults.clear();
+      assert.ok(acts.onDisk('lk-to.txt') && !acts.onDisk('lk-from.txt'), 'fixture: the bytes did not move');
+      assert.equal((await tombstones.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt')) !== undefined, true, 'fixture: the move left no marker');
+
+      const del = await acts.del(via, 'lk-to.txt');
+      assert.ok(!acts.failed(del), `the delete of the file where the move put it was refused: ${body(del)}`);
+
+      assert.deepEqual(await acts.links.idsUnder('lk-from.txt'), [], 'a link this instance wrote still names the source of the deleted file');
+      assert.deepEqual(await acts.links.idsUnder('lk-to.txt'), [], 'a link this instance wrote still names the file at the destination, which is gone');
+      assert.deepEqual((await acts.links.tombstoned()).filter(id => own.includes(id)), [...own].sort(), 'a link was removed without its tombstone');
+      assert.equal(await tombstones.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt'), undefined,
+        'the marker of the move outlived the delete: a link kept the move owed, so the next file at the source path is taken for the rest of it');
     });
   }
 

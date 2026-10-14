@@ -21,7 +21,8 @@
  * with the FIRST one held: at most four are in flight at once, four are reached, and the five others are delivered while the slow
  * one is still held; a delivery that throws does not stop the others of its tick; a job is removed from the queue BEFORE its
  * delivery (at-least-once: a crash mid-delivery gives a duplicate, not a loss); a failed delivery is re-queued with the next
- * attempt number and the last attempt marks the webhook failing; the timer is unref'd and `stop` disarms it.
+ * attempt number and the last attempt marks the webhook failing; the timer is unref'd and `stop` disarms it; a retry for a subscription that
+ * is switched off or failing is dropped without a delivery (Q-469).
  *
  * No timer fires here: the job is handed an `arm` that keeps the tick function, and the test calls it (`IntervalJobDeps`).
  *
@@ -166,6 +167,51 @@ describe('what the poll did before is kept', () => {
     r.worker.job.start();
     await r.fire();
     assert.deepEqual(r.events, ['remove job-1']);
+  });
+});
+
+/*
+ * A retry for a subscription that is switched off or failing is dropped, not delivered (bundle-113, Q-469). A large burst to a sink that went
+ * down leaves a retry row per event; the subscription is marked failing after its schedule ran out (`getMatchingWebhooks` then sends it
+ * nothing new), but the rows already queued kept being delivered: every one of them an attempt at a sink the operator or the dispatcher had
+ * stopped. The row is removed before delivery (at-least-once), so dropping is the removal alone: no delivery, no requeue, no verdict about
+ * the subscription. The fakes of the cases above carry no `status` and no `enabled`; an ABSENT field is not a reason to drop, which the
+ * control states with an explicit active subscription.
+ */
+describe('a retry for a disabled or failing subscription is dropped', () => {
+  const sub = (id, over) => ({ id, url: `https://example.invalid/${id}`, secret: 's', spaces: [], events: [], enabled: true, status: 'active', consecutiveFailures: 0,
+    createdAt: '', updatedAt: '', ...over });
+  const CASES = [
+    ['switched off (enabled: false)', { enabled: false, status: 'disabled' }],
+    ['status disabled', { status: 'disabled' }],
+    ['status failing', { status: 'failing', consecutiveFailures: 7 }],
+    ['enabled: false alone', { enabled: false }],
+  ];
+  for (const [name, over] of CASES) {
+    it(`${name}: the job leaves the queue and nothing is delivered, requeued or marked`, async () => {
+      const r = rig({ due: [job(1)], deliver: async () => failed });
+      r.deps.getWebhook = async (id) => sub(id, over);
+      r.worker.job.start();
+      await r.fire();
+      assert.deepEqual(r.events, ['remove job-1'], `a retry for a subscription that is ${name} was delivered, requeued or counted against it: ${r.events.join(' | ')}`);
+    });
+  }
+
+  it('control: an active, enabled subscription is delivered as before', async () => {
+    const r = rig({ due: [job(1)] });
+    r.deps.getWebhook = async (id) => sub(id, {});
+    r.worker.job.start();
+    await r.fire();
+    assert.deepEqual(r.events, ['remove job-1', 'deliver job-1', 'success sink-1']);
+  });
+
+  it('a dropped retry does not hold a slot of the four: the others of its tick are delivered', async () => {
+    const r = rig({ due: [job(1), job(2), job(3)] });
+    r.deps.getWebhook = async (id) => sub(id, id === 'sink-1' ? { status: 'failing' } : {});
+    r.worker.job.start();
+    await r.fire();
+    assert.deepEqual([...r.state.delivered].sort(), ['job-2', 'job-3']);
+    assert.ok(!r.events.includes('deliver job-1'), 'the failing subscription was delivered to');
   });
 });
 

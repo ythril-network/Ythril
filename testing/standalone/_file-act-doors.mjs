@@ -15,6 +15,19 @@
  * sync cycle PUSHES (`syncFiles` against a fake peer that records what it is sent). Reading the collection instead
  * cannot tell a pending tombstone from a published one, which is the whole question; reading one door alone passes
  * when the other one forgets the filter.
+ *
+ * ## What it also drives (bundle-113)
+ *
+ *  - `webhooks()` — what a file act ANNOUNCES: a subscription aimed where the SSRF guard refuses at once, so every dispatch
+ *    that reaches it leaves a retry row carrying its payload, and a listener on the in-process bus. Read by the PATH in the payload
+ *    (`a-byte-arrival-emits-nothing-db.test.js` is the method, copied here because the second test that needed it was about to
+ *    copy it). A negative is read only after a control dispatch has been seen, so "nothing was announced" cannot be a read that
+ *    came before the dispatcher's own asynchronous hop.
+ *  - `links` — the link rows of files: seeded with the author the case needs (this instance, another instance, none: a link
+ *    the file delete removes is the one this instance wrote), read by source, and the link tombstones a removal writes.
+ *  - `conflicts` — a sync conflict record and its two resolution doors (`POST /api/conflicts/:id/resolve` and
+ *    `POST /api/conflicts/bulk-resolve`) through the router's own handlers, as a token with chosen rights.
+ *  - `otherSpaces` — further concrete spaces on the same door, with `seedIn` / `onDiskIn` / `rootOf` for the one a conflict is saved to.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +35,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { openPushDoor } from './_push-door.mjs';
 import { privateHostAddress } from './_private-address.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
@@ -92,8 +106,9 @@ export async function toolDoor(space) {
  * `monitorCommands` opens the door with command monitoring, for `door.commandsDuring` (`openPushDoor`).
  * Skip a suite with `mongoSkipReason()` and `privateAddressSkipReason()` before calling this.
  */
-export async function openFileActDoors({ suite, space: S, monitorCommands = false }) {
-  const door = await openPushDoor({ suite, monitorCommands, spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
+export async function openFileActDoors({ suite, space: S, monitorCommands = false, otherSpaces = [] }) {
+  const door = await openPushDoor({ suite, monitorCommands,
+    spaces: [S, ...otherSpaces].map(id => ({ id, label: id, folders: [], meta: { suppressEmbeddings: true } })) });
   const files = await import('../../server/dist/files/files.js');
   const { syncFiles } = await import('../../server/dist/sync/file-sync.js');
   const { callTool } = await import('../../server/dist/mcp/call-tool.js');
@@ -169,6 +184,169 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     return { status: out.status, isError: !!out.result.isError, text, sc: out.result.structuredContent ?? {} };
   }
 
+  // ── What a file act announces (Q-469) ────────────────────────────────────────────────────────────────────────
+
+  const RETRY_QUEUE = '_webhook_retry_queue';
+  let controlSeq = 0;
+  /**
+   * A subscription to every event of every space, aimed at an address the SSRF guard refuses at once (`127.0.0.1:9`): a dispatch
+   * that reaches it fails its first attempt and enqueues a retry row, which carries the payload it would have sent, whether the
+   * dispatcher delivered it, queued it or overflowed it to the queue. Plus a listener on the in-process bus (what the live Files
+   * page is told). Close it with `close()`.
+   */
+  async function webhooks() {
+    const store = await import('../../server/dist/webhooks/store.js');
+    const bus = await import('../../server/dist/brain/brain-events.js');
+    const made = await store.createWebhook({ url: 'http://127.0.0.1:9/hook', secret: `${suite}-secret` });
+    const seen = [];
+    const unsubscribe = bus.subscribeBrainChanges(S, (ev) => { seen.push(ev); });
+    const dispatches = async () => (await door.mongo.col(RETRY_QUEUE).find({ webhookId: made.id }).toArray())
+      .map(r => ({ event: r.event, spaceId: r.spaceId, path: JSON.parse(r.body)?.entry?.path }));
+    const api = {
+      id: made.id,
+      /** Every dispatch made for the subscription: `{ event, spaceId, path }`. */
+      dispatches,
+      /** The paths dispatched as `event`, sorted. */
+      async pathsOf(event) { return (await dispatches()).filter(d => d.event === event).map(d => d.path).sort(); },
+      /** The bus events the space published since the capture opened (or `clear()`). */
+      bus: () => [...seen],
+      busPathsOf: (event) => seen.filter(e => e.event === event).map(e => e.entry?.path).sort(),
+      clear() { seen.length = 0; },
+      /**
+       * A person's delete of a fresh file (MCP `delete_file` passes an actor), waited for until its dispatch has appeared: after
+       * it returns, the dispatcher's own asynchronous hop has ended for everything made before it, so a negative read is not early.
+       */
+      async control() {
+        const p = `control-${suite}-${++controlSeq}.txt`;
+        await files.writeFile(S, p, `content of ${p}`);
+        await door.coll(S, 'files').insertOne({ _id: p, spaceId: S, path: p, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0 });
+        const a = await mcp('delete_file', { path: p });
+        assert.ok(!a.isError, `the control delete was refused: ${a.text}`);
+        await waitFor(async () => (await dispatches()).some(d => d.event === 'file.deleted' && d.path === p), 15_000, 50,
+          () => `no dispatch for the control delete of ${p}`, { what: 'the control dispatch' });
+        return p;
+      },
+      /** Stop listening and remove the subscription and its rows. */
+      async close() {
+        unsubscribe();
+        await store.deleteWebhook(made.id).catch(() => {});
+        await door.mongo.col(RETRY_QUEUE).deleteMany({}).catch(() => {});
+      },
+    };
+    return api;
+  }
+
+  // ── The links of files (Q-464) ───────────────────────────────────────────────────────────────────────────────
+
+  let linkSeq = 0;
+  const OTHER_INSTANCE = Object.freeze({ instanceId: `${suite}-another-instance`, instanceLabel: 'Another instance' });
+  const links = {
+    /** The author of a link row another instance wrote. */
+    OTHER_INSTANCE,
+    /**
+     * One link row FROM `from` (a file id, or a derived id such as `a.txt#chunk-0`) to the entity `to`, authored by `who`: `self` (this
+     * instance), `peer` (another instance) or `none` (a row with no author). Raw: it is the row a write once left, so a case can hold
+     * a link another instance wrote, which no local door can make. Returns the row's id.
+     */
+    async put(from, to, who = 'self') {
+      const { linkIdFor } = await import('../../server/dist/brain/link-id.js');
+      const { authorRef } = await import('../../server/dist/config/author.js');
+      const author = who === 'self' ? authorRef() : who === 'peer' ? OTHER_INSTANCE : undefined;
+      const _id = linkIdFor(from, 'file', to, 'entity');
+      await door.coll(S, 'links').insertOne({ _id, spaceId: S, from, fromKind: 'file', to, toKind: 'entity', ...(author ? { author } : {}),
+        createdAt: T0, updatedAt: T0, seq: 1_000 + (++linkSeq) });
+      return _id;
+    },
+    /** {@link links.put} for many sources at once (one insert): `from` is each of `froms`, `to` the same entity. Returns the ids. */
+    async putMany(froms, to, who = 'self') {
+      const { linkIdFor } = await import('../../server/dist/brain/link-id.js');
+      const { authorRef } = await import('../../server/dist/config/author.js');
+      const author = who === 'self' ? authorRef() : who === 'peer' ? OTHER_INSTANCE : undefined;
+      const rows = froms.map(from => ({ _id: linkIdFor(from, 'file', to, 'entity'), spaceId: S, from, fromKind: 'file', to, toKind: 'entity',
+        ...(author ? { author } : {}), createdAt: T0, updatedAt: T0, seq: 1_000 + (++linkSeq) }));
+      if (rows.length > 0) await door.coll(S, 'links').insertMany(rows);
+      return rows.map(r => r._id);
+    },
+    /** The ids of the link rows whose source is any of `froms`, sorted. */
+    async idsFrom(...froms) {
+      return (await door.coll(S, 'links').find({ from: { $in: froms } }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
+    },
+    /** The ids of every link row whose source is `root` itself, a derived id of it (`root#…`), or anything under `root/`, sorted. */
+    async idsUnder(root) {
+      const esc = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return (await door.coll(S, 'links').find({ fromKind: 'file', from: { $regex: `^${esc}(?:[#/]|$)` } }, { projection: { _id: 1 } }).toArray())
+        .map(r => r._id).sort();
+    },
+    /** Every link row's id, sorted. */
+    async ids() { return (await door.coll(S, 'links').find({}, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort(); },
+    /** The ids of the link tombstones the space holds, sorted: what a removal tells peers. */
+    async tombstoned() {
+      return (await door.coll(S, 'tombstones').find({ type: 'link' }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
+    },
+    /** Empty the space's links and tombstones of every kind. */
+    async reset() { for (const part of ['links', 'tombstones']) await door.coll(S, part).deleteMany({}); },
+  };
+
+  // ── Further spaces on the same door ──────────────────────────────────────────────────────────────────────────
+
+  const rootOf = (space) => path.join(process.env['DATA_ROOT'], 'files', space);
+  /** A file at `p` in `space` with its record, as `seed` makes one in the door's own space. */
+  const seedIn = async (space, p, extra = {}) => {
+    await files.writeFile(space, p, `content of ${p} in ${space}`);
+    await door.coll(space, 'files').insertOne({ _id: p, spaceId: space, path: p, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0, ...extra });
+  };
+
+  // ── Conflict resolution (Q-466) ──────────────────────────────────────────────────────────────────────────────
+
+  // Resolved on first use: a suite that never resolves a conflict does not load the conflicts router.
+  let conflictDoorsCache;
+  const conflictDoorsOf = async () => {
+    if (conflictDoorsCache) return conflictDoorsCache;
+    const { conflictsRouter } = await import('../../server/dist/api/conflicts.js');
+    const handlerOf = (m, route) => {
+      const layer = conflictsRouter.stack.find(l => l.route?.path === route && l.route.methods[m]);
+      assert.ok(layer, `no ${m.toUpperCase()} ${route} on the conflicts router — re-anchor _file-act-doors.mjs`);
+      return layer.route.stack.at(-1).handle;
+    };
+    conflictDoorsCache = { resolve: handlerOf('post', '/:id/resolve'), bulk: handlerOf('post', '/bulk-resolve') };
+    return conflictDoorsCache;
+  };
+  const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
+    status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
+    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } });
+  /** The rights a resolver holds: `{ [space]: { area: rung } }` over no floor — for a token that is not an administrator. */
+  const rightsFor = (perSpace) => ({ instanceAdmin: false, createSpaces: false, floor: null,
+    perSpace: Object.fromEntries(Object.entries(perSpace).map(([sp, areas]) => [sp, { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none', ...areas }])) });
+  const conflictCall = async (which, req, rights) => {
+    const res = fakeRes();
+    await (await conflictDoorsOf())[which]({ method: 'POST', query: {}, headers: {}, ip: '127.0.0.1', get: () => undefined,
+      authToken: { id: 't', name: 'test', rights: rights ?? ADMIN }, ...req }, res);
+    return res;
+  };
+  const resolveBody = (action, { rename, targetSpaceId }) => ({ action, ...(rename !== undefined ? { rename } : {}), ...(targetSpaceId !== undefined ? { targetSpaceId } : {}) });
+  const conflicts = {
+    rightsFor,
+    /**
+     * A conflict record in `space` (default the door's own) and the bytes of its two files: the original, and the incoming copy under
+     * its conflict name. `original: null` / `conflict: null` leave that file absent. Returns the record's id.
+     */
+    async seed({ id, original = 'doc.txt', conflict = 'doc.conflict-peer.txt', space = S, originalContent, conflictContent } = {}) {
+      if (original !== null) await files.writeFile(space, original, originalContent ?? `local ${original}`);
+      if (conflict !== null) await files.writeFile(space, conflict, conflictContent ?? `incoming ${conflict}`);
+      await door.coll(space, 'conflicts').insertOne({ _id: id, spaceId: space, originalPath: original ?? 'doc.txt', conflictPath: conflict ?? 'doc.conflict-peer.txt',
+        peerInstanceId: 'a-peer', peerInstanceLabel: 'A peer', detectedAt: T0 });
+      return id;
+    },
+    /** `POST /api/conflicts/:id/resolve` through the router's own handler. Answers as `rest` does: `code`, `body`, `headers`. */
+    resolve: (id, action, o = {}) => conflictCall('resolve', { params: { id }, body: resolveBody(action, o) }, o.rights),
+    /** `POST /api/conflicts/bulk-resolve`. */
+    bulk: (ids, action, o = {}) => conflictCall('bulk', { params: {}, body: { ids, ...resolveBody(action, o) } }, o.rights),
+    /** The record with this id in `space`, or null: a resolution that completed is the one thing that removes it. */
+    record: (id, space = S) => door.coll(space, 'conflicts').findOne({ _id: id }),
+    /** Remove every conflict record of `spaces` (default the door's own). */
+    async reset(...spaces) { for (const sp of spaces.length ? spaces : [S]) await door.coll(sp, 'conflicts').deleteMany({}); },
+  };
+
   return {
     door, files, root,
     /** Whether the space's files tree holds `p`. */
@@ -187,6 +365,9 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
       fs.mkdirSync(root(), { recursive: true });
     },
     rest, post, mcp, tool, answerOf, served, pushed,
+    webhooks, links, conflicts, rootOf, seedIn,
+    /** Whether `p` is on disk in `space`. */
+    onDiskIn: (space, p) => fs.existsSync(path.join(rootOf(space), p)),
     /** Both ways a peer learns of a tombstone, by path. */
     async published() {
       const paths = (list) => list.map(t => t.path).sort();
