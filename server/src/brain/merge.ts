@@ -40,6 +40,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
+import { isObjectInternalKey } from '../util/object-internal-keys.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -384,15 +385,9 @@ async function detectDuplicateEdges(
 
 // ── Resolution application ─────────────────────────────────────────────────
 
-/**
- * Property keys that must never be written through a computed index, or they
- * would mutate the object prototype instead of adding a data property.
- */
-const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-/** True when `key` is safe to assign as a plain data property. */
+/** True when `key` is safe to assign as a plain data property (`util/object-internal-keys.ts` holds the keys). */
 function isSafeKey(key: string): boolean {
-  return !PROTO_KEYS.has(key);
+  return !isObjectInternalKey(key);
 }
 
 /**

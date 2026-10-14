@@ -38,6 +38,7 @@
  * instead of to their own caller.
  */
 import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
+import { isObjectInternalKey } from '../util/object-internal-keys.js';
 
 /**
  * The operators a filter may NOT use — a denylist, which is the opposite of how this started and needs its
@@ -122,13 +123,12 @@ function guardRegex(op: string, val: unknown): void {
  *
  * Both filter builders assign exactly like that, so one of these keys does not reach the database as a
  * constraint at all: it **silently vanishes from the filter** and mutates the object being built. That is
- * the accepted-and-ignored failure this area keeps producing, with prototype pollution on top.
+ * the accepted-and-ignored failure this area keeps producing, with prototype pollution on top. The keys
+ * themselves are `isObjectInternalKey`'s, shared with every other door that uses a caller's key as an object key.
  */
-const UNSAFE_FILTER_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
-
 /** The refusal for one such key, or `null`. One sentence, one place, so both grammars answer identically. */
 export function unsafeFilterKey(key: string): string | null {
-  return UNSAFE_FILTER_KEYS.has(key)
+  return isObjectInternalKey(key)
     ? `Filter key '${key}' is not allowed: it names an object's internals rather than a field, so it would `
       + 'change the filter being built instead of constraining anything.'
     : null;
