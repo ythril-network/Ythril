@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { FilesApi } from '../../core/files-api.service';
-import { joinPath } from './file-format';
+import { joinPath, parentPath } from './file-format';
 import { httpErrorReason } from '../../core/http-error';
 import type { TreeNode } from './file-tree.component';
 import type { FileEntry } from '../../core/api.types';
@@ -90,6 +90,7 @@ export class FileTreeStore {
    */
   loadRoot(spaceId: string): void {
     if (!spaceId) return;
+    this.loadedFor = spaceId;
     this.rootError.set(null);
     this.filesApi.listFiles(spaceId, '/').subscribe({
       next: ({ entries }) => {
@@ -213,6 +214,67 @@ export class FileTreeStore {
     node.loading = true;
     node.error = null;
     this.bump();
+  }
+
+  /** The space the tree was last loaded for: an answer that arrives after the page moved to another space is not for this tree. */
+  private loadedFor = '';
+
+  /** A node by path, anywhere in the loaded tree, or undefined (a path under a folder that was never opened is not in it). */
+  private find(path: string, list: TreeNode[] = this.treeRoot()): TreeNode | undefined {
+    for (const node of list) {
+      if (node.path === path) return node;
+      const inner = node.children ? this.find(path, node.children) : undefined;
+      if (inner) return inner;
+    }
+    return undefined;
+  }
+
+  /**
+   * Take a folder out of the tree, and everything under it, without asking the server and without touching any other node.
+   *
+   * The delete used to reload the root, which rebuilt every node collapsed: deleting one folder closed everything the operator
+   * had opened. A node is identified by its exact path, so `/docs` never removes `/docs-archive`, and a path the tree does not
+   * hold (never opened, or already gone) is a no-op. It ends in `bump()` like every other mutation here.
+   */
+  removeByPath(path: string): void {
+    const parent = parentPath(path) === '/' ? null : this.find(parentPath(path));
+    const siblings = parent ? parent.children : this.treeRoot();
+    if (!siblings?.some(node => node.path === path)) return;
+    const kept = siblings.filter(node => node.path !== path);
+    if (parent) parent.children = kept;
+    else this.treeRoot.set(kept);
+    this.bump();
+  }
+
+  /**
+   * Re-list ONE folder and merge the answer into its node, keeping every child the operator had opened.
+   *
+   * Used for a created folder (its parent) and a moved one (the old parent and the new): the tree learns about a change under
+   * one folder from one request for that folder, instead of a reload of the root that collapses it all. A child that is in
+   * both the old and the new listing is kept AS IT WAS, with its own children and its expanded flag; one that is only in the
+   * new listing is a fresh collapsed node; one that is only in the old is gone.
+   *
+   * A folder whose children were never loaded has nothing to merge into (the next time it is opened it lists itself), and an
+   * answer for a space the page has since left is dropped. A failure changes nothing: the tree is a convenience beside a
+   * listing that already says what happened.
+   */
+  reloadParent(spaceId: string, path: string): void {
+    const loadable = path === '/' || this.find(path)?.children != null;
+    if (!loadable || spaceId !== this.loadedFor) return;
+    this.filesApi.listFiles(spaceId, path).subscribe({
+      next: ({ entries }) => {
+        if (spaceId !== this.loadedFor) return;
+        // Looked up again: the node the request was made for may have been replaced while it was in flight.
+        const parent = path === '/' ? null : this.find(path);
+        const current = parent ? parent.children : this.treeRoot();
+        if (!current) return;
+        const known = new Map(current.map(node => [node.path, node]));
+        const merged = this.nodesFrom(entries, path).map(fresh => known.get(fresh.path) ?? fresh);
+        if (parent) parent.children = merged;
+        else this.treeRoot.set(merged);
+        this.bump();
+      },
+    });
   }
 
   /**

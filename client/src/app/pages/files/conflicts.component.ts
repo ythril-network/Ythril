@@ -13,8 +13,24 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { refusalText } from '../../core/refusal-text';
 
 type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-space';
+
+/**
+ * The family of translation keys a refused conflict resolution names: `conflicts.refusal.<code>`. A prefix, not a key: the code
+ * arrives with the answer. Its own family and not `files.refusal`, because its sentences are about a CONFLICT ("nothing was
+ * moved", "choose another name or space") and the Files page's are about a file the operator moved.
+ */
+export const CONFLICT_REFUSAL_PREFIX = 'conflicts.refusal';
+
+/** The label of each action, so a sentence that names the action the operator chose says the label and never the code. */
+const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
+  'keep-local': 'conflicts.action.keepLocal',
+  'keep-incoming': 'conflicts.action.keepIncoming',
+  'keep-both': 'conflicts.action.keepBoth',
+  'save-to-space': 'conflicts.action.saveToSpace',
+};
 
 @Component({
   selector: 'app-conflicts',
@@ -22,7 +38,8 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
   imports: [InstantComponent, SlicePipe, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
   template: `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
-      <a routerLink="/files" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> {{ 'conflicts.backToFiles' | transloco }}</a>
+      <!-- The Files tab of the Brain: there is no /files route any more, and the old link led to a page that no longer shows the files. -->
+      <a routerLink="/brain" [queryParams]="{ tab: 'files' }" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> {{ 'conflicts.backToFiles' | transloco }}</a>
     </div>
 
     @if (loading()) {
@@ -73,14 +90,14 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
         <table>
           <thead>
             <tr>
-              <th style="width:30px"></th>
+              <th style="width:30px"><span class="sr-only">{{ 'conflicts.table.selectColumn' | transloco }}</span></th>
               <th>{{ 'conflicts.table.space' | transloco }}</th>
               <th>{{ 'conflicts.table.localFile' | transloco }}</th>
               <th>{{ 'conflicts.table.incomingFile' | transloco }}</th>
               <th>{{ 'conflicts.table.fromPeer' | transloco }}</th>
               <th>{{ 'conflicts.table.detected' | transloco }}</th>
               <th>{{ 'conflicts.table.action' | transloco }}</th>
-              <th></th>
+              <th><span class="sr-only">{{ 'conflicts.resolveButton' | transloco }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -88,6 +105,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
               <tr>
                 <td>
                   <input type="checkbox" [checked]="selectedIds().includes(c.id)"
+                         [attr.aria-label]="'conflicts.table.select' | transloco: { path: c.originalPath, peer: peerName(c) }"
                          (change)="toggleSelect(c.id)"/>
                 </td>
                 <td><span class="badge badge-blue mono">{{ c.spaceId }}</span></td>
@@ -205,7 +223,12 @@ export class ConflictsComponent implements OnInit {
     });
   }
 
-  resolve(c: ConflictRecord): void {
+  /** The peer a conflict came from, as a reader knows it: its label, or the start of its id. */
+  peerName(c: ConflictRecord): string {
+    return c.peerInstanceLabel || c.peerInstanceId.slice(0, 8);
+  }
+
+  async resolve(c: ConflictRecord): Promise<void> {
     const action = this.conflictActions[c.id] || 'keep-local';
     const opts: { targetSpaceId?: string } = {};
     if (action === 'save-to-space') {
@@ -215,14 +238,37 @@ export class ConflictsComponent implements OnInit {
         return;
       }
     }
+    // Keep-incoming replaces the local file with the other copy and nothing brings it back: asked about, like a delete.
+    if (action === 'keep-incoming') {
+      const ok = await this.confirmDialog.confirm({
+        title: this.transloco.translate('conflicts.confirm.keepIncomingTitle'),
+        message: this.transloco.translate('conflicts.confirm.keepIncoming', { path: c.originalPath }),
+        confirmLabel: this.transloco.translate(ACTION_LABEL_KEYS[action]),
+        danger: true,
+      });
+      if (!ok) return;
+    }
     this.resolving.set(c.id);
     this.filesApi.resolveConflict(c.id, action, opts).subscribe({
-      next: () => {
+      next: (answer) => {
         this.conflicts.update(list => list.filter(x => x.id !== c.id));
         this.selectedIds.update(ids => ids.filter(x => x !== c.id));
         this.resolving.set(null);
+        if (answer.resolved === 'nothing-to-place') {
+          this.toast.info(this.transloco.translate('conflicts.resolved.gone'));
+        } else if (action === 'save-to-space') {
+          const target = this.spaces().find(s => s.id === opts.targetSpaceId);
+          this.toast.success(this.transloco.translate('conflicts.resolved.movedToSpace', {
+            space: target?.label || opts.targetSpaceId, path: c.originalPath,
+          }));
+        }
       },
-      error: () => this.resolving.set(null),
+      // A refusal says why and stays: it tells the operator what to do, and a toast that expires takes that with it. The record
+      // stays in the list, because nothing was resolved.
+      error: (err) => {
+        this.resolving.set(null);
+        this.toast.error(refusalText(this.transloco, err, 'conflicts.error.resolveFailed', CONFLICT_REFUSAL_PREFIX), 0);
+      },
     });
   }
 
@@ -233,24 +279,29 @@ export class ConflictsComponent implements OnInit {
       title: this.transloco.translate('conflicts.confirm.bulkResolveTitle'),
       message: this.transloco.translate('conflicts.confirm.bulkResolve', {
         count: ids.length,
-        action: this.bulkAction,
+        action: this.transloco.translate(ACTION_LABEL_KEYS[this.bulkAction]),
       }),
     });
     if (!ok) return;
     this.bulkResolving.set(true);
     this.filesApi.bulkResolveConflicts(ids, this.bulkAction).subscribe({
       next: (r) => {
+        // One line per failed record, written BEFORE the list drops the resolved ones: a failed item names its record by path
+        // (the answer's own, else the conflict's), because an operator knows files and never a uuid.
+        const details = r.failed.map(f => {
+          const path = f.path ?? this.conflicts().find(c => c.id === f.id)?.originalPath ?? f.id;
+          return `${path}: ${refusalText(this.transloco, { error: f }, 'conflicts.error.resolveFailed', CONFLICT_REFUSAL_PREFIX)}`;
+        }).join('\n');
         const resolvedSet = new Set(ids.filter(id => !r.failed.some(f => f.id === id)));
         this.conflicts.update(list => list.filter(x => !resolvedSet.has(x.id)));
         this.selectedIds.update(sel => sel.filter(x => !resolvedSet.has(x)));
         this.bulkResolving.set(false);
         if (r.failed.length > 0) {
-          const details = r.failed.map(f => `${f.id}: ${f.error}`).join('\n');
           const summary = this.transloco.translate('conflicts.error.bulkResolveFailedSummary', {
             resolved: r.resolved,
             failed: r.failed.length,
           });
-          this.toast.error(`${summary}\n${details}`);
+          this.toast.error(`${summary}\n${details}`, 0);
         }
       },
       error: () => this.bulkResolving.set(false),

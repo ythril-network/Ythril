@@ -20,12 +20,30 @@ const MOVE_STILL_OWED = 'move_still_owed';
 /** The code of a move whose bytes moved and whose records are held back by another file's — refused, but the file did move. */
 const DESTINATION_HELD = 'destination_held_after_move';
 
+/** The code of a delete that needs the folder confirmation: the row the operator clicked is a folder now. */
+const CONFIRM_REQUIRED = 'confirm_required';
+
 /**
  * The answers that tell the operator what to do about them. Their toast stays until it is dismissed: one that times out
- * takes the instruction with it, and a screen reader's user may not have reached it yet. The others state a fact and expire.
+ * takes the instruction with it, and a screen reader's user may not have reached it yet.
+ *
+ * `confirm_required` is one of them since the delete stopped sending `confirm` for a file: it now means "this row is a
+ * folder, the list was refreshed, delete it again to delete the folder", which is an instruction.
+ *
+ * EVERY code the server answers is in exactly one of this set and `FILE_REFUSALS_THAT_STATE_A_FACT`; a gate holds that
+ * (`the-client-sorts-every-file-act-code-into-exactly-one-toast-set`), so a code the server gains cannot be silently
+ * classified as a fact by being in neither.
  */
 export const FILE_REFUSALS_WITH_REMEDY: ReadonlySet<string> = new Set([
-  'path_blocked', 'destination_exists', DESTINATION_HELD, 'act_not_recorded', 'file_system_fault',
+  'path_blocked', 'destination_exists', DESTINATION_HELD, CONFIRM_REQUIRED, 'act_not_recorded', 'file_system_fault',
+]);
+
+/**
+ * The answers that state what happened and tell the operator nothing to do: their toast expires like any other. Named
+ * rather than implied by absence, so that a code in neither set is one nobody decided and not one quietly treated as this.
+ */
+export const FILE_REFUSALS_THAT_STATE_A_FACT: ReadonlySet<string> = new Set([
+  MOVE_STILL_OWED, 'space_root_refused',
 ]);
 
 /** How long to wait before looking again when the answer names no `Retry-After`, and the bounds on one that does. */
@@ -48,10 +66,23 @@ export interface ListingMutationFailure {
   kind: ListingMutationKind;
   error: RefusedAnswer;
   bytesMoved: boolean;
+  /** The path the write was about and whether it was a directory: the page words a folder's failure differently and clears that row's pending state. */
+  path: string;
+  isDirectory: boolean;
 }
 
-/** What a mutation did, for whoever cares beyond the reload this store already performs. */
-export type ListingMutation = 'created' | 'moved' | 'removed';
+/**
+ * What a mutation did, for whoever cares beyond the reload this store already performs.
+ *
+ * It says WHERE, because what the page does about a write depends on it: a created or removed folder changes one parent of the
+ * tree, a move changes two (`from` and `to`), and a removal closes a preview that is at or under `path`. It used to be a bare
+ * word, which left the page reloading the whole tree for a one-folder change and collapsing everything the operator had open.
+ * For a move `path` is the destination.
+ */
+export type ListingMutation =
+  | { kind: 'created'; path: string; isDirectory: true }
+  | { kind: 'moved'; path: string; isDirectory: boolean; from: string; to: string }
+  | { kind: 'removed'; path: string; isDirectory: boolean };
 
 /** Which mutation failed. The MESSAGE is the page's business — this class holds no translations. */
 export type ListingMutationKind = 'create' | 'move' | 'remove';
@@ -68,6 +99,14 @@ export const LISTING_FAILURE_KEYS: Record<ListingMutationKind, string> = {
   move: 'files.error.renameFailed',
   remove: 'files.error.deleteFailed',
 };
+
+/**
+ * The translation key for a write that failed, one lookup for every caller. A refused delete says what KIND of thing it could not
+ * delete: "Failed to delete file" over a folder, with everything in it, is a sentence that is wrong about the thing that matters.
+ */
+export function listingFailureKey(failure: Pick<ListingMutationFailure, 'kind' | 'isDirectory'>): string {
+  return failure.kind === 'remove' && failure.isDirectory ? 'files.error.deleteFolderFailed' : LISTING_FAILURE_KEYS[failure.kind];
+}
 
 /**
  * The directory listing: its state, its five requests, and the one rule that decides how it loads.
@@ -249,22 +288,28 @@ export class FileListingStore {
    */
   createDir(spaceId: string, path: string, reloadPath: string): void {
     this.filesApi.createDir(spaceId, path).subscribe({
-      next: () => { this.load(spaceId, reloadPath); this.mutated.next('created'); },
-      error: (err) => this.settleUnsuccessfulWrite('create', err, spaceId, reloadPath),
+      next: () => { this.load(spaceId, reloadPath); this.mutated.next({ kind: 'created', path, isDirectory: true }); },
+      error: (err) => this.settleUnsuccessfulWrite('create', err, spaceId, reloadPath, path, true),
     });
   }
 
-  move(spaceId: string, from: string, to: string, reloadPath: string): void {
+  /** `isDirectory` is what the row was when the operator acted on it; it travels with the answer, and is not sent. */
+  move(spaceId: string, from: string, to: string, reloadPath: string, isDirectory = false): void {
     this.filesApi.moveFile(spaceId, from, to).subscribe({
-      next: () => { this.load(spaceId, reloadPath); this.mutated.next('moved'); },
-      error: (err) => this.settleUnsuccessfulWrite('move', err, spaceId, reloadPath),
+      next: () => { this.load(spaceId, reloadPath); this.mutated.next({ kind: 'moved', path: to, isDirectory, from, to }); },
+      error: (err) => this.settleUnsuccessfulWrite('move', err, spaceId, reloadPath, from, isDirectory),
     });
   }
 
-  remove(spaceId: string, path: string, reloadPath: string): void {
-    this.filesApi.deleteFile(spaceId, path).subscribe({
-      next: () => { this.load(spaceId, reloadPath); this.mutated.next('removed'); },
-      error: (err) => this.settleUnsuccessfulWrite('remove', err, spaceId, reloadPath),
+  /**
+   * `isDirectory` decides whether the request says `confirm: true`, so it is what the row was when the operator clicked and
+   * not something this store looks up. It defaults to false: a caller that forgets it gets `confirm_required` back, which
+   * deletes nothing, where the reverse default would delete a folder on a click made on a file.
+   */
+  remove(spaceId: string, path: string, reloadPath: string, isDirectory = false): void {
+    this.filesApi.deleteFile(spaceId, path, isDirectory).subscribe({
+      next: () => { this.load(spaceId, reloadPath); this.mutated.next({ kind: 'removed', path, isDirectory }); },
+      error: (err) => this.settleUnsuccessfulWrite('remove', err, spaceId, reloadPath, path, isDirectory),
     });
   }
 
@@ -276,11 +321,17 @@ export class FileListingStore {
    * IS a refusal, and travels as one, but the bytes moved there too. For both, the listing is reloaded ONCE after the
    * `Retry-After` the server named (a default when it named none) rather than polled, so no row outlives the move under its
    * old name. Every other answer is a failure, and travels with its body.
+   *
+   * `confirm_required` on a delete means the row on screen is out of date (it was a file and is a folder now), so the
+   * listing reloads at once: the operator is told to delete it again, and has to be looking at the folder when they do.
    */
-  private settleUnsuccessfulWrite(kind: ListingMutationKind, err: unknown, spaceId: string, reloadPath: string): void {
+  private settleUnsuccessfulWrite(
+    kind: ListingMutationKind, err: unknown, spaceId: string, reloadPath: string, path: string, isDirectory: boolean,
+  ): void {
     const code = (err as { error?: { code?: string } | null } | null)?.error?.code;
+    if (kind === 'remove' && code === CONFIRM_REQUIRED) this.load(spaceId, reloadPath);
     if (code === MOVE_STILL_OWED) this.moveOwed.next();
-    else this.mutationFailed.next({ kind, error: err as RefusedAnswer, bytesMoved: code === DESTINATION_HELD });
+    else this.mutationFailed.next({ kind, error: err as RefusedAnswer, bytesMoved: code === DESTINATION_HELD, path, isDirectory });
     if (code !== MOVE_STILL_OWED && code !== DESTINATION_HELD) return;
     clearTimeout(this.owedReload);
     this.owedReload = setTimeout(() => {

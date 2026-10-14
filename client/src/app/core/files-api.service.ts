@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
 import { Observable, Subscription, of } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
-import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord } from './api.types';
+import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord, BulkConflictFailure } from './api.types';
 import { filterCall } from './filter-call';
 import { hydrateLinks } from './record-links';
 
@@ -33,9 +33,17 @@ export class FilesApi {
     );
   }
 
-  deleteFile(spaceId: string, path: string): Observable<void> {
+  /**
+   * Delete a file, or a directory with everything in it.
+   *
+   * `confirm: true` goes out ONLY for a directory, and `isDirectory` defaults to false so a caller that forgets it is refused
+   * (`confirm_required`) rather than deleting a folder it did not mean to. It used to be sent for every delete, which made the
+   * server's guard useless for the case it exists for: a row that was a file when the list loaded and has since become a
+   * folder was deleted, with its contents, on a click that was made on a file.
+   */
+  deleteFile(spaceId: string, path: string, isDirectory = false): Observable<void> {
     const params = new HttpParams().set('path', path);
-    return this.http.delete<void>(`/api/files/${spaceId}`, { params, body: { confirm: true } });
+    return this.http.delete<void>(`/api/files/${spaceId}`, { params, body: isDirectory ? { confirm: true } : undefined });
   }
 
   createDir(spaceId: string, path: string): Observable<void> {
@@ -227,11 +235,19 @@ export class FilesApi {
     return this.http.get<any>('/api/conflicts');
   }
 
-  resolveConflict(id: string, action: string = 'keep-local', opts?: { rename?: string; targetSpaceId?: string }): Observable<{ status: string }> {
-    return this.http.post<{ status: string }>(`/api/conflicts/${id}/resolve`, { action, ...opts });
+  /**
+   * `resolved: 'nothing-to-place'` says the record closed because there was no copy left to place (it was already gone, or the
+   * move was onto itself): the operator is told so, in words, rather than being shown a vanished row.
+   */
+  resolveConflict(id: string, action: string = 'keep-local', opts?: { rename?: string; targetSpaceId?: string }): Observable<{ status: string; resolved?: string }> {
+    return this.http.post<{ status: string; resolved?: string }>(`/api/conflicts/${id}/resolve`, { action, ...opts });
   }
 
-  bulkResolveConflicts(ids: string[], action: string, opts?: { rename?: string; targetSpaceId?: string }): Observable<{ resolved: number; failed: { id: string; error: string }[] }> {
+  /**
+   * A failed item is the same answer a single resolve gives, with the record's id: its `code` has words on the client, its `path`
+   * names the record to a reader, and `error` is the server's own sentence for a code the client has none for.
+   */
+  bulkResolveConflicts(ids: string[], action: string, opts?: { rename?: string; targetSpaceId?: string }): Observable<{ resolved: number; failed: BulkConflictFailure[] }> {
     return this.http.post<any>('/api/conflicts/bulk-resolve', { ids, action, ...opts });
   }
 }
