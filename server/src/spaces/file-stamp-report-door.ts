@@ -20,6 +20,7 @@
  */
 import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
+import { refusalOfParse } from '../util/log.js';
 import { isProxy } from './proxy.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 import {
@@ -47,14 +48,6 @@ export const FILE_STAMP_REPORT_RATE_LIMITED = `file_stamp_report is rate limited
 /** The spaces a report is running for. Module state, so a second door finds the first one's run. */
 const running = new Set<string>();
 
-/** Why a body was refused, naming the parameter — the sentence both doors send. */
-function bodyRefusal(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'Invalid body';
-  const where = issue.path.join('.');
-  return where ? `${where}: ${issue.message}` : issue.message;
-}
-
 /**
  * Run a report for `spaceId`.
  *
@@ -68,7 +61,8 @@ export async function beginFileStampReport(spaceId: string, body: unknown, calle
     return { status: 400, error: `'${spaceId}' is a proxy space and holds no files of its own. Report on its members instead: ${(space.proxyFor ?? []).join(', ')}.` };
   }
   const parsed = FileStampReportBody.safeParse(body ?? {});
-  if (!parsed.success) return { status: 400, error: bodyRefusal(parsed.error) };
+  // Why a body was refused, naming each parameter — the one sentence both doors send (`refusalOfParse`, which `bodyRefusal` here was a copy of).
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   // Before the rail, so a call that finds the space busy costs the caller no slot. No `await` between this check, the
   // rail and the claim: two calls cannot both pass it.
   if (running.has(spaceId)) return { status: 409, error: `A file stamp report for '${spaceId}' is already running — try again when it ends` };

@@ -24,6 +24,7 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const save_factTool: ToolHandler = {
   name: 'save_fact',
@@ -359,7 +360,7 @@ export const update_factTool: ToolHandler = {
     let updCheck: UpdateValidation | undefined;
     const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updated) { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
-    if (!updated) throw new Error(`Fact '${id}' not found`);
+    if (!updated) throw new NotFoundError(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
@@ -434,7 +435,7 @@ export const delete_factTool: ToolHandler = {
     const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'fact'));
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteFact(mid, id, ctx.actor));
-    if (!deleted) throw new Error(`Fact '${id}' not found`);
+    if (!deleted) throw new NotFoundError(`Fact '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Fact deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true },

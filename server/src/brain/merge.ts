@@ -20,7 +20,7 @@ import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
-import { log, peerList, peerText } from '../util/log.js';
+import { log, peerList, peerText, NAME_QUOTED } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { edgeEndpointKind } from './entity-refs.js';
@@ -32,7 +32,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
-import { classifyMergedEntity } from './write-validation.js';
+import { classifyMergedEntity, countSchemaRefusal, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
@@ -459,25 +459,35 @@ export function applyResolutions(
  * Typed rather than a bare `Error` so a caller can tell "this merge is not allowed" from "the merge broke".
  * `dupe-scanner.ts` runs `automerge` unattended and must be able to count refusals without parsing prose — a
  * refusal it cannot see is the do-nothing option wearing the strict option's name.
+ *
+ * **It is a `SchemaViolationError`** (`Q-315`): the refusal every other write door answers, with the same body and the same
+ * `toStructured()` — it used to define a second one, `{ violations }` and nothing else, so a caller that reads `introduced` to say
+ * which of its fields to fix had to special-case merge. Only what the merge INTRODUCED is blamed, and the check it is built from
+ * says so (`classifyMergedEntity`). The status is not the family's: a refused merge is 400 on every merge door (published), and
+ * `mergeRefusal` is what says so before the generic mapping is asked.
  */
-export class MergeSchemaViolation extends Error {
+export class MergeSchemaViolation extends SchemaViolationError {
   constructor(
     readonly survivorId: string,
     readonly absorbedId: string,
     readonly spaceId: string,
-    readonly violations: SchemaViolation[],
+    check: UpdateValidation,
   ) {
-    super(
-      `merge refused: the survivor '${survivorId}' would violate the schema of space '${spaceId}' after `
-      + `absorbing '${absorbedId}' — ${violations.map(v => `${v.field}: ${v.reason}`).join('; ')}`,
-    );
+    // A refused merge names what the MERGE introduced and nothing else: the survivor's own stored undeclared keys are carried as its own
+    // (`classifyMergedEntity`), so they are neither blamed in `introduced` nor listed as `preExisting`, and `violations` is the list the
+    // merge broke — a caller reading the refusal is told what to change about the MERGE, never about records it left alone.
+    super({ ...check, preExisting: [], all: check.introduced, message: mergeRefusedMessage(survivorId, absorbedId, spaceId, check.introduced) });
     this.name = 'MergeSchemaViolation';
   }
+}
 
-  /** What a door carries beside the message (`structuredContent` on MCP, the body on REST): the violations. */
-  toStructured(): Record<string, unknown> {
-    return { violations: this.violations };
-  }
+/**
+ * The sentence a refused merge says: the two ids, the space, and what the merge introduced. The ids and the names are what a caller or a
+ * peer chose, so each is bounded where the sentence is built (R6-11) — a megabyte property key is a sentence, not a megabyte of one.
+ */
+function mergeRefusedMessage(survivorId: string, absorbedId: string, spaceId: string, introduced: readonly SchemaViolation[]): string {
+  return `merge refused: the survivor '${peerText(survivorId)}' would violate the schema of space '${peerText(spaceId)}' after `
+    + `absorbing '${peerText(absorbedId)}' — ${peerList(introduced.map(v => `${v.field}: ${v.reason}`), '; ', { count: 10, each: NAME_QUOTED })}`;
 }
 
 /**
@@ -597,7 +607,11 @@ function mergeTooLargeMessage({ survivor, absorbed, spaceId, tally, bound, rever
  */
 export function mergeRefusal(err: unknown): MergeRefusal | null {
   if (err instanceof MergeTooLarge) return { status: 422, refusal: err, body: { error: err.message, ...err.toStructured() } };
-  if (err instanceof MergeSchemaViolation) return { status: 400, refusal: err, body: { error: err.message, ...err.toStructured() } };
+  // The standard schema-refusal body, with the status a merge has always answered it with (never the family's 422/400 verb split).
+  if (err instanceof MergeSchemaViolation) {
+    countSchemaRefusal('merge', err);
+    return { status: 400, refusal: err, body: err.toStructured() };
+  }
   return null;
 }
 
@@ -698,7 +712,7 @@ export async function executeMerge(
   const check = classifyMergedEntity(meta, survivor, mergedProperties, beforeRows, afterRows);
   // What the refusal and the warning name: the violations THIS merge introduced, never the survivor's own stored ones.
   const violations = check.introduced;
-  if (check.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
+  if (check.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, check);
   const verdict = applyValidation(meta, violations);
   if (verdict.warnings.length > 0) {
     log.warn(

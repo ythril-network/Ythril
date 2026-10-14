@@ -36,7 +36,7 @@ import { ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
 import { ensureEdgeGuardIndex, edgeIndexFailure } from '../spaces/edge-guard-index.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { mapLimit } from '../util/map-limit.js';
 import { sendCaughtFailure } from './send-failure.js';
 
@@ -323,7 +323,7 @@ dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
 
   const parsed = BackupConfigSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

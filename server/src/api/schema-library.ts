@@ -45,7 +45,7 @@ import type { SchemaLibraryEntry, SchemaCatalog, KnowledgeType } from '../config
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
-import { peerText, peerList } from '../util/log.js';
+import { peerText, peerList, refusalOfParse } from '../util/log.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -292,7 +292,7 @@ export const ExportSpaceBodyZ = z.object({
 schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = ExportSpaceBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -409,7 +409,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   const group = req.params['group'] as string;
   const parsed = ApplyGroupBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -478,7 +478,7 @@ schemaLibraryRouter.get('/:name', globalRateLimit, requireAuth, (req, res) => {
 schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = LibraryEntryBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -534,7 +534,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
 
   const parsed = LibraryEntryPutBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -637,7 +637,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
 
   const parsed = LibraryEntryPatchBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const patch = parsed.data;
@@ -777,7 +777,7 @@ schemaLibraryRouter.patch('/:name/publish', globalRateLimit, requireAdminMfa, (r
 
   const parsed = PublishPatchZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -796,7 +796,7 @@ schemaLibraryRouter.patch('/:name/publish', globalRateLimit, requireAdminMfa, (r
 schemaLibraryRouter.post('/catalogs', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = CatalogBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

@@ -56,7 +56,7 @@ import { announcedSpaces, isDirectionalNetwork, widenPeerTokensOf } from '../net
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import { SSRF_SAFE_URL, safeMemberList } from './networks/_shared.js';
 import { stampAdmission, isMeshNetwork } from '../networks/member-introductions.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
@@ -140,7 +140,7 @@ function rsaDecrypt(cipherBase64: string, privateKeyPem: string): string {
 // `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed (`F-37`).
 inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const parsed = GenerateBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
 
   const { networkId, reparentInstanceId, expectedInstanceId } = parsed.data;
   const cfg = getConfig();
@@ -263,7 +263,7 @@ export const RedeemBody = z.object({ inviteKey: z.string().min(20).max(200) }).s
 
 inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
   const parsed = RedeemBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   const cfg = getConfig();
   let net: (typeof cfg.networks)[number] | undefined;
   for (const n of cfg.networks) {
@@ -287,7 +287,7 @@ inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
 
 inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   const parsed = ApplyBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
 
   const { handshakeId, networkId, instanceId, instanceLabel, instanceUrl, rsaPublicKeyPem } = parsed.data;
 
@@ -410,7 +410,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
 
 inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
   const parsed = FinalizeBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
 
   const { handshakeId, encryptedTokenForA } = parsed.data;
 

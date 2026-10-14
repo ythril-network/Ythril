@@ -18,6 +18,7 @@
  */
 
 import { Router } from 'express';
+import { refusalOfParse } from '../util/log.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { enableMfa, disableMfa, isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
@@ -51,7 +52,7 @@ mfaRouter.post('/setup', authRateLimit, requireAdminMfa, (_req, res) => {
 mfaRouter.post('/verify', authRateLimit, requireAdmin, (req, res) => {
   const parsed = VerifyBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   if (!isMfaEnabled()) {

@@ -23,7 +23,7 @@
  *
  * The writer's classification is handed back by `onValidation`; this re-derives nothing.
  */
-import type { UpdateValidation } from '../brain/write-validation.js';
+import { writeWarningFields, type UpdateValidation } from '../brain/write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 
 /**
@@ -39,7 +39,7 @@ export interface SchemaWarningAnswer {
   /** Lines for the text answer, one per violation, without a leading newline. Empty when there is nothing to say. */
   lines: string[];
   /** Spread into `structuredContent`: `{ warnings }` when the mode reports any, `{}` otherwise. */
-  structured: { warnings?: SchemaViolation[] };
+  structured: ReturnType<typeof writeWarningFields>;
 }
 
 /**
@@ -56,6 +56,8 @@ export function schemaWarningAnswer(
   const lines = meta?.validationMode === 'warn'
     ? [...(check?.all ?? []), ...inlineEdges].map(v => `⚠️ Schema: ${v.field} — ${v.reason}`)
     : [];
+  // The same bound the REST routes answer (`writeWarningFields`): at most twenty rows, each quoting the caller's choices bounded, and
+  // `warningsTruncated` when rows were left out — the text lines above are the writer's whole list, as they always were.
   const warnings = [...(check?.warnings ?? []), ...inlineEdges];
-  return { lines, structured: warnings.length > 0 ? { warnings } : {} };
+  return { lines, structured: writeWarningFields(warnings) };
 }

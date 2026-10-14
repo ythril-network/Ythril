@@ -88,17 +88,23 @@ export class BatchRefs {
    * an item that failed. The dependant's reason now carries the failure it actually depends on, and the key is
    * absent from `toJSON` so no caller is handed an id for a record that was never written.
    */
-  fail(key: string, reason: string): void {
+  fail(key: string, reason: string, violation?: Record<string, unknown>): void {
     this.minted.delete(key);
-    if (!this.failed.has(key)) this.failed.set(key, reason);
+    // The structured half of a schema refusal is kept with its reason, so an item that names this one is handed the same object (`Q-315`).
+    if (!this.failed.has(key)) this.failed.set(key, violation ? { reason, violation } : { reason });
   }
 
   /** Why the item declaring `key` was not written, or undefined. */
   failure(key: string): string | undefined {
-    return this.failed.get(key);
+    return this.failed.get(key)?.reason;
   }
 
-  private readonly failed = new Map<string, string>();
+  /** The structured schema refusal behind {@link failure}, when the item was refused by the schema. */
+  failureViolation(key: string): Record<string, unknown> | undefined {
+    return this.failed.get(key)?.violation;
+  }
+
+  private readonly failed = new Map<string, { reason: string; violation?: Record<string, unknown> }>();
 
   get size(): number {
     return this.minted.size;
@@ -119,6 +125,8 @@ export interface RefResolution {
   id?: string;
   kind?: RefKind;
   error?: string;
+  /** With `error`, when the item the reference names was refused by the schema: that refusal's structured body, which the dependant's row carries. */
+  violation?: Record<string, unknown>;
 }
 
 /**
@@ -139,7 +147,8 @@ export function resolveRef(value: unknown, refs: BatchRefs, statedKind?: RefKind
   const found = refs.get(key);
   const failed = refs.failure(key);
   if (!found && failed !== undefined) {
-    return { error: `$ref "${key}" names an item of this request that was not written: ${failed}` };
+    const violation = refs.failureViolation(key);
+    return { error: `$ref "${key}" names an item of this request that was not written: ${failed}`, ...(violation ? { violation } : {}) };
   }
   if (!found) {
     return {

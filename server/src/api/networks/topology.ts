@@ -5,6 +5,7 @@
  * MCP `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` (F-36 slice 5).
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../../util/log.js';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { ReparentSelfBody, adoptMemberAct, reparentSelfAct, revertParentAct } from '../../networks/topology-acts.js';
@@ -19,7 +20,7 @@ export const topologyRouter = Router();
 
 topologyRouter.post('/:id/reparent-self', globalRateLimit, requireAdmin, (req, res) => {
   const parsed = ReparentSelfBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   sendAct(res, reparentSelfAct(String(req.params['id']), parsed.data));
 });
 

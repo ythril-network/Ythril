@@ -27,6 +27,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
+import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
@@ -830,6 +831,23 @@ export const fileActAnswersTotal = counterMirroringTally({
   help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
   labelName: 'code',
   read: fileActAnswerCounts,
+});
+
+/**
+ * Schema refusals answered, by the door that answered (`rest`, `mcp`, `tool`, `bulk`, `merge`) and what blocked the write (`R6-13`): counted
+ * where the refusal is answered (`countSchemaRefusal`), once per refusal. The tally is kept by `brain/schema-refusal-tally.ts` and mirrored
+ * here at scrape time like the file act answers, so every pair is on the scrape at 0 from the start. Both labels are a fixed vocabulary:
+ * no space, rule or property name, which a caller could mint a new series with.
+ */
+export const schemaRefusalsTotal = new Counter({
+  name: 'ythril_schema_refusals_total',
+  help: 'Writes the space\'s strict schema refused, by the door that answered and what blocked the write',
+  labelNames: ['door', 'outcome'] as const,
+  registers: [register],
+  collect() {
+    this.reset();
+    for (const { door, outcome, count } of schemaRefusalCounts()) this.inc({ door, outcome }, count);
+  },
 });
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */

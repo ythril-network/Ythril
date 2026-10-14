@@ -108,7 +108,8 @@ describe('the merge path runs the write path validators', () => {
     );
     assert.match(merge, /throw new MergeSchemaViolation/, 'a blocked merge must refuse, not warn and proceed');
     assert.match(
-      merge, /class MergeSchemaViolation extends Error/,
+      // `extends SchemaViolationError`, not `Error` (r4.1, Q-315: "MergeSchemaViolation becomes a SchemaViolationError"): one family, one body.
+      merge, /class MergeSchemaViolation extends SchemaViolationError/,
       'the refusal must be its own type so a caller can count it',
     );
   });

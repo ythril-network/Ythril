@@ -21,6 +21,7 @@
  * which returns the right status while stranding a space the caller has to clean up.
  */
 import type { SpaceConfig, SpaceMeta } from '../config/types.js';
+import { refusalOfParse } from '../util/log.js';
 import type { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { slugify } from './_shared.js';
@@ -70,7 +71,7 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   // `builtIn: true` and requires a 201 with the flag not injectable.
   const parsed = CreateSpaceBody.safeParse(stripServerOwnedSpace(body));
   if (!parsed.success) {
-    return { ok: false, refusal: { status: 400, body: { error: parsed.error.message } } };
+    return { ok: false, refusal: { status: 400, body: refusalOfParse(parsed.error) } };
   }
   const { id: rawId, label, folders, maxGiB, proxyFor, meta, faceDescriptorDims } = parsed.data;
   const id = rawId ?? slugify(label);

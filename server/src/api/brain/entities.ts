@@ -18,7 +18,7 @@ import { getConfig } from '../../config/loader.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { UUID_V4_RE, webhookToken, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
@@ -158,7 +158,7 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
     const warnings = [...(check?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, ENTITIES_CREATE_BODY_KEYS)];
-    if (warnings.length > 0) result['warnings'] = warnings;
+    Object.assign(result, writeWarningFields(warnings));
     // Advisory, never blocking: the write already happened. An agent correcting an outdated fact must be
     // able to contradict the record it supersedes — the point is that it is TOLD, not that it is stopped.
     if (similar && similar.length > 0) result['similar'] = similar;
@@ -405,7 +405,7 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
        */
       const connected = await applyConnections(updated.spaceId, updated._id, 'entity', req.body, updated.author, webhookToken(req));
       const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, ENTITIES_UPDATE_BODY_KEYS)];
-      res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
+      res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
       return;
     }
     // The record was there a moment ago and the write matched nothing, so the precondition is what

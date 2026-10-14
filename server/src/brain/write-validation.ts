@@ -54,6 +54,7 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
+import { tallySchemaRefusal, type SchemaRefusalDoor } from './schema-refusal-tally.js';
 
 /**
  * Identity of a violation for before/after comparison.
@@ -256,22 +257,54 @@ export class SchemaViolationError extends Error {
       ...(truncated ? { truncated: true } : {}),
     };
   }
+
+  /**
+   * The same refusal as ONE ROW of a batch's answer carries it (`bulk.ts`, `Q-315`): `toStructured()` without `violations`. Every row
+   * of `introduced` and `preExisting` is already in it, and the second list is the bloat a five-hundred-item batch would pay for five
+   * hundred times. Derived from `toStructured()`, so a row cannot say something a single-record caller does not read.
+   */
+  toRowViolation(): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(this.toStructured()).filter(([k]) => k !== 'violations'));
+  }
+}
+
+/**
+ * The `warnings` fields of a SUCCESSFUL write's answer — the violations the space's mode says to report, and the keys the route did not
+ * understand — bounded like a refusal's rows (R6-11): at most {@link MAX_ROWS} of them, each quoting the caller's `field` and string
+ * `value` through the one renderer, and `warningsTruncated: true` when rows were left out. `{}` when there are none, so a caller spreads
+ * it and a write with nothing to say answers no key. Both doors: every REST create and update route and the MCP tools' structured
+ * answer say it through this, so a record carrying a hundred undeclared keys does not answer a hundred rows on one door and twenty on
+ * the other.
+ */
+export function writeWarningFields(rows: readonly SchemaViolation[]): { warnings?: SchemaViolation[]; warningsTruncated?: true } {
+  if (rows.length === 0) return {};
+  return { warnings: boundedRows(rows), ...(rows.length > MAX_ROWS ? { warningsTruncated: true as const } : {}) };
 }
 
 /** How many violation rows one refusal lists per list. The classification is of every row; only what is SAID is cut. */
 export const MAX_ROWS = 20;
 
-/** A violation's value as a refusal quotes it: a string through the bounded renderer, a number or a boolean as it is, anything nested as its bounded text. */
+/**
+ * A violation's value as a refusal quotes it: a STRING through the one bounded renderer (cut, credential-redacted, line breaks
+ * escaped), anything else exactly as it came. A number, a boolean, `null`, an array or an object is the caller's structured value, and
+ * stringifying it would change what a caller that compares it sees (R5-4).
+ */
 function boundedValue(value: unknown): unknown {
-  if (typeof value === 'string') return peerText(value, { max: NAME_QUOTED });
-  if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') return value;
-  return peerText(JSON.stringify(value) ?? String(value), { max: NAME_QUOTED });
+  return typeof value === 'string' ? peerText(value) : value;
 }
 
-/** At most {@link MAX_ROWS} rows, each with its value bounded. */
+/**
+ * At most {@link MAX_ROWS} rows, each quoting the caller's choices bounded: the `field` (a property key the caller chose) at
+ * `NAME_QUOTED`, a string `value` by `peerText`. The one place a refusal's rows are rendered, so `introduced`, `preExisting`
+ * and `violations` cannot differ in what they quote.
+ */
 function boundedRows(rows: readonly SchemaViolation[]): SchemaViolation[] {
-  // A row with no value stays without one: a `value: undefined` key is a field the row never had.
-  return rows.slice(0, MAX_ROWS).map(v => (Object.hasOwn(v, 'value') ? { ...v, value: boundedValue(v.value) } : { ...v }));
+  return rows.slice(0, MAX_ROWS).map(v => {
+    const row: SchemaViolation = { ...v, field: peerText(v.field, { max: NAME_QUOTED }) };
+    // A row with no value stays without one: a `value: undefined` key is a field the row never had.
+    if (Object.hasOwn(v, 'value')) row.value = boundedValue(v.value);
+    return row;
+  });
 }
 
 export function assertUpdateAllowed(check: UpdateValidation): void {
@@ -323,6 +356,26 @@ export function danglingReferenceCheck(field: string, value: string, message: st
 }
 
 /**
+ * The status a schema refusal answers with, from the verb alone: a create is `400`, an update `422`. The two have always differed, and a
+ * status is part of a caller's contract even when the pair looks inconsistent — so it is spelled here and nowhere else, and a door that
+ * needs only the status (`callTool`, which answers a tool call as an edit of what the caller named) asks this and does not run the
+ * answering mapper, which COUNTS the refusal.
+ */
+export function schemaRefusalStatus(verb: 'create' | 'update'): 400 | 422 {
+  return verb === 'create' ? 400 : 422;
+}
+
+/**
+ * Count one schema refusal at the door that answered it (`ythril_schema_refusals_total`, R6-13), once per refusal and by what blocked
+ * the write: the first violation it INTRODUCED. Called by every mapper that answers one — `connectionRefusalAnswer` (REST),
+ * `callTool` (MCP and `POST /api/<tool>`), `mergeRefusal` and the bulk row's reason — so a door cannot answer without it.
+ */
+export function countSchemaRefusal(door: SchemaRefusalDoor, err: SchemaViolationError): void {
+  const first = err.check.introduced[0] ?? err.check.all[0];
+  tallySchemaRefusal(door, first && isUndeclaredKey(first) ? 'undeclared' : 'property');
+}
+
+/**
  * What a record write refused for its connections, or its own schema, answers on REST — the status and the body, from
  * ONE place; `null` when the failure is none of those and the route answers it as it always has.
  *
@@ -337,7 +390,10 @@ export function danglingReferenceCheck(field: string, value: string, message: st
 export function connectionRefusalAnswer(
   err: unknown, verb: 'create' | 'update',
 ): { status: number; body: Record<string, unknown> } | null {
-  if (err instanceof SchemaViolationError) return { status: verb === 'create' ? 400 : 422, body: err.toStructured() };
+  if (err instanceof SchemaViolationError) {
+    countSchemaRefusal('rest', err);
+    return { status: schemaRefusalStatus(verb), body: err.toStructured() };
+  }
   if (err instanceof ReferenceRefusal) return { status: 400, body: { error: err.message } };
   return null;
 }

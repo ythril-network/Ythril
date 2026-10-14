@@ -22,6 +22,7 @@ import { defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_EDGE_LABELS } from '../../util/request-bounds.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -302,7 +303,7 @@ export const update_edgeTool: ToolHandler = {
     let updCheck: UpdateValidation | undefined;
     const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEdge) { const s = audit.snapshots(updatedEdge); ctx.recordChanges?.(s.before, s.after); }
-    if (!updatedEdge) throw new Error(`Edge '${id}' not found`);
+    if (!updatedEdge) throw new NotFoundError(`Edge '${id}' not found`);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updatedEdge.spaceId), updCheck);
     return {
       content: [{ type: 'text' as const, text: [`Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).`, ...schemaWarnings.lines].join('\n') }],
@@ -453,7 +454,7 @@ export const delete_edgeTool: ToolHandler = {
     if (!wt.ok) throw new Error(wt.error);
 
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteEdge(mid, id, ctx.actor));
-    if (!deleted) throw new Error(`Edge '${id}' not found`);
+    if (!deleted) throw new NotFoundError(`Edge '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
   },

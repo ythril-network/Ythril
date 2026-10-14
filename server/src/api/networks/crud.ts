@@ -4,6 +4,7 @@
  * Split out of the api/networks.ts monolith (A17.5); handlers are unchanged.
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../../util/log.js';
 import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { visibleNetworks } from '../../auth/network-rights.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
@@ -117,7 +118,7 @@ crudRouter.post('/peers/:peerId/sync', globalRateLimit, requireAdmin, async (req
 crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
   const parsed = CreateNetworkBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   sendAct(res, createNetworkAct(req.authToken as Parameters<typeof createNetworkAct>[0], parsed.data));
 });
 
@@ -136,7 +137,7 @@ crudRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req
 // F-34: the settings are shared by every space the network carries, so `networks: admin` on every one.
 crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   const parsed = UpdateNetworkBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   const r = updateNetworkAct(req.authToken as Parameters<typeof updateNetworkAct>[0], req.params['id'] as string, parsed.data);
   // The three fields this act can change, never the record: it also holds invite and member token hashes.
   if (r.audit) req.auditSnapshots = r.audit;
@@ -148,7 +149,7 @@ crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) 
 // The rights are the act's: accepting runs the join rule over the accepting token, dismissing needs the settings right.
 crudRouter.post('/:id/pending-spaces', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const parsed = ResolvePendingSpaceBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   const r = await resolvePendingSpaceAct(req.authToken as Parameters<typeof resolvePendingSpaceAct>[0], req.params['id'] as string, parsed.data);
   if (r.audit) req.auditSnapshots = r.audit;
   sendAct(res, r);
@@ -159,7 +160,7 @@ crudRouter.post('/:id/pending-spaces', globalRateLimit, requireAuth, denyReadOnl
 // The publisher of a pub/sub network or the root of a braintree; the rights are the act's (`networkAddSpaceRefusal`).
 crudRouter.post('/:id/spaces', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   const parsed = AddNetworkSpaceBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   const r = addNetworkSpaceAct(req.authToken as Parameters<typeof addNetworkSpaceAct>[0], req.params['id'] as string, parsed.data);
   if (r.audit) req.auditSnapshots = r.audit;
   sendAct(res, r);

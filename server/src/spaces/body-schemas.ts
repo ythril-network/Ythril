@@ -52,7 +52,7 @@ import { RECORD_TYPES } from '../config/types.js';
 import { DATE_PASSED_VALUES } from '../brain/chrono-date-policy.js';
 import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
-import { NAME_QUOTED, peerText } from '../util/log.js';
+import { NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal } from '../util/log.js';
 import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames } from './meta-fields.js';
 
 // ── Zod schema for PropertySchema ──────────────────────────────────────────
@@ -624,29 +624,35 @@ function readKnownMeta(raw: Obj, names: UnknownNames): Obj {
   return out;
 }
 
-/** The part of a refusal a person reads: for a union (a type is a `$ref` or an inline definition) the branch that is about the field. */
-function reasonOf(issue: z.core.$ZodIssue): string {
-  const branches = (issue as { errors?: z.core.$ZodIssue[][] }).errors;
-  if (issue.code === 'invalid_union' && Array.isArray(branches) && branches.length > 0) {
-    const real = branches.find(b => b.length > 0 && b.every(i => i.code !== 'unrecognized_keys' && i.path[0] !== '$ref')) ?? branches[branches.length - 1]!;
-    const first = real[0];
-    return first ? `${first.path.length ? `${first.path.join('.')}: ` : ''}${reasonOf(first)}` : issue.message;
-  }
-  return issue.message;
+/**
+ * For a union (a type is a `$ref` or an inline definition), the branch that is ABOUT the field: the first that is not merely an unknown key or
+ * a missing `$ref`, else the last. Handed to `refusalOfParse`, so a refusal names what is wrong inside the type and not zod's `Invalid input`.
+ */
+function branchAboutTheField(branches: readonly ParseIssueLike[][]): readonly ParseIssueLike[] | undefined {
+  const isPath = (i: ParseIssueLike): unknown[] => (Array.isArray(i.path) ? i.path : []);
+  return branches.find(b => b.length > 0 && b.every(i => i.code !== 'unrecognized_keys' && isPath(i)[0] !== '$ref')) ?? branches[branches.length - 1];
 }
 
-/** `kind:Type — reason` for a failing type, `field — reason` for a failing top-level field: where a refusal says WHAT was refused. */
-function failedParts(issues: readonly z.core.$ZodIssue[]): string[] {
+/**
+ * `kind:Type — reason` for a failing type, `field — reason` for a failing top-level field: where a refusal says WHAT was refused. Read from
+ * the one bounded refusal (`refusalOfParse`), never from zod's issues: a type's name and a property's key are the caller's.
+ */
+function failedParts(refusal: ParseRefusal): string[] {
   const out: string[] = [];
-  for (const issue of issues) {
-    const [head, kind, type] = issue.path;
-    const part = head === PER_TYPE_META_FIELD && kind !== undefined && type !== undefined ? `${String(kind)}:${String(type)}` : String(head ?? 'meta');
-    const line = peerText(`${part} — ${reasonOf(issue)}`, { max: NAME_QUOTED });
+  refusal.issues.forEach((issue, i) => {
+    const [head, kind, type, ...rest] = issue.path;
+    const typed = head === PER_TYPE_META_FIELD && kind !== undefined && type !== undefined;
+    const part = typed ? `${kind}:${type}` : (head ?? 'meta');
+    // Where inside the part it failed, when it says more than the part does.
+    const inside = typed ? rest : issue.path.slice(1);
+    const line = peerText(`${part} — ${inside.length > 0 ? `${inside.join('.')}: ` : ''}${refusal.reasons[i] ?? issue.code}`, { max: NAME_QUOTED });
     if (!out.includes(line)) out.push(line);
-    if (out.length >= 20) break;
-  }
+  });
   return out;
 }
+
+/** How many failing parts a refused meta names. */
+const FAILED_PARTS_MAX = 20;
 
 /** What {@link parseSpaceMeta} answers. */
 export type MetaParse =
@@ -705,7 +711,12 @@ export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): 
   }
 
   const result = SpaceMetaBody.safeParse(toParse);
-  if (!result.success) return { ok: false, message: result.error.message, failed: failedParts(result.error.issues) };
+  if (!result.success) {
+    // Bounded prose for the message, and the failing parts read from the SAME refusal — never from zod's own issues, whose paths and
+    // messages are the caller's names whole.
+    const refusal = refusalOfParse(result.error, { maxIssues: FAILED_PARTS_MAX, unionBranch: branchAboutTheField });
+    return { ok: false, message: refusal.error, failed: failedParts(refusal) };
+  }
   const parsed = result.data as Obj;
   if (!options.against) return { ok: true, meta: parsed as unknown as ParsedSpaceMeta, unknown: names.list() };
 
@@ -785,7 +796,7 @@ export function readStoredMeta(stored: unknown): { meta: Obj; skipped: string[] 
 export function parseTypeSchema(kind: KnowledgeType, typeName: string, input: unknown):
   { ok: true; schema: ParsedTypeSchema } | { ok: false; message: string } {
   const result = TypeSchemasZ.safeParse({ [kind]: { [typeName]: input } });
-  if (!result.success) return { ok: false, message: result.error.message };
+  if (!result.success) return { ok: false, message: refusalOfParse(result.error, { unionBranch: branchAboutTheField }).error };
   const schema = (result.data[kind] as Obj | undefined)?.[typeName];
   if (!isObj(schema)) return { ok: false, message: `type '${peerText(typeName, { max: NAME_QUOTED })}' did not parse to a definition` };
   return { ok: true, schema: schema as unknown as ParsedTypeSchema };
@@ -801,7 +812,7 @@ export function parseTypeSchema(kind: KnowledgeType, typeName: string, input: un
 export function parseInlineDefinition(body: z.ZodType, kind: KnowledgeType, schema: unknown):
   { ok: true; schema: ParsedTypeSchema } | { ok: false; message: string } {
   const result = body.safeParse(schema);
-  if (!result.success) return { ok: false, message: result.error.message };
+  if (!result.success) return { ok: false, message: refusalOfParse(result.error, { unionBranch: branchAboutTheField }).error };
   const scope = collectionScopeIssues(kind, result.data);
   if (scope.length > 0) return { ok: false, message: scope.map(i => i.message).join(' ') };
   return { ok: true, schema: result.data as ParsedTypeSchema };

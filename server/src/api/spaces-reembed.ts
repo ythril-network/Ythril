@@ -11,6 +11,7 @@
  */
 
 import type { Router } from 'express';
+import { refusalOfParse } from '../util/log.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
@@ -47,7 +48,7 @@ export function registerReembedRoute(spacesRouter: Router): void {
     }
     const parsed = ReembedBody.safeParse(req.body ?? {});
     if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' });
+      res.status(400).json(refusalOfParse(parsed.error));
       return;
     }
     try {

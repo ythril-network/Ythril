@@ -10,6 +10,7 @@
  * `schema: admin`, because the order decides which definition the space enforces.
  */
 import { z } from 'zod';
+import { NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { clashesOf, ownAgainstEffective, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { carriedLocalId } from '../sync/space-map.js';
@@ -72,13 +73,14 @@ export function schemaLayersAct(spaceId: string): SchemaLayersActResult {
  */
 export function setNetworkPrecedenceAct(spaceId: string, input: unknown): SchemaLayersActResult {
   const parsed = NetworkPrecedenceBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return notFound(spaceId);
   const carrying = new Set(cfg.networks.filter(n => n.spaces.includes(spaceId)).map(n => n.id));
   const stray = parsed.data.networks.filter(id => !carrying.has(id));
-  if (stray.length) return { status: 400, error: `Not networks that carry '${spaceId}': ${stray.join(', ')}` };
+  // The ids are the caller's: quoted through the bounded list renderer, each cut at `NAME_QUOTED` (R6-11), never joined whole.
+  if (stray.length) return { status: 400, error: `Not networks that carry '${peerText(spaceId, { max: NAME_QUOTED })}': ${peerList(stray, ', ', { each: NAME_QUOTED })}` };
   const order = [...new Set(parsed.data.networks)];
   space.networkPrecedence = order.length ? order : undefined;
   saveConfig(cfg);

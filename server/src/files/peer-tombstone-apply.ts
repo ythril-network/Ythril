@@ -66,7 +66,8 @@ import { getConfig } from '../config/loader.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { MAX_CURSOR_ID_LENGTH } from '../util/seq-keyset.js';
-import { seqRefusal, arrivalId, refusedFieldsOf, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
+import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from '../sync/arrivals.js';
+import { refusalOfParse } from '../util/log.js';
 import { authorises, fileTargetOf, MAX_ISSUER, type Delivery, type DeletionGround } from '../sync/deletion-authority.js';
 import { recordDecline, sayDeclines, saidDeletions } from '../sync/decline-report.js';
 import { servesOnward } from '../sync/served-watermark.js';
@@ -123,7 +124,7 @@ type HeldFile = Pick<FileMetaDoc, 'author' | 'seq' | 'sha256' | 'deletedAt'> & {
  */
 async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{ ok: Admitted } | { refused: ArrivalRefusal } | { ignored: true }> {
   const parsed = FileTombstoneShape.safeParse(raw);
-  if (!parsed.success) return { refused: { _id: arrivalId(raw), reason: `not a file tombstone (${refusedFieldsOf(parsed.error)})` } };
+  if (!parsed.success) return { refused: { _id: arrivalId(raw), reason: `not a file tombstone (${refusalOfParse(parsed.error).error})` } };
   const t = parsed.data;
   const why = seqRefusal(t.rowSeq, { optional: true });
   if (why) return { refused: { _id: t._id, reason: `rowSeq: ${why}` } };

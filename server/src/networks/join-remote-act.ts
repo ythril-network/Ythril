@@ -24,7 +24,7 @@ import { createToken, revokeToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
 import { throwIfStoreSide } from '../brain/store-failure.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { mergePeerRoster } from './member-introductions.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -104,7 +104,7 @@ async function relay(r: Response): Promise<NetworkActResult> {
 
 export async function joinRemoteAct(caller: Caller, input: unknown): Promise<NetworkActResult> {
   const parsed = JoinRemoteBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
 
   // `rsaPublicKeyPem` is validated by JoinRemoteBody but not needed here — Brain A's key is read
   // back from the apply response below, so it is deliberately not destructured.
@@ -406,7 +406,7 @@ export const JoinByKeyBody = z.object({
  */
 export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promise<NetworkActResult> {
   const parsed = JoinByKeyBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { publisherUrl, inviteKey, myUrl, spaceMap, syncSchedule } = parsed.data;
   // Refused before the key is redeemed, so a bad schedule does not spend a handshake (Q-137).
   const scheduleRefusal = syncScheduleRefusal(syncSchedule);

@@ -19,7 +19,7 @@ import { concludeRoundIfReady, planPassedMetaChange } from '../sync/governance.j
 import { getSyncHistory } from '../sync/history.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { parseStrictLimit } from '../util/strict-limit.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { NetworkActResult } from './network-acts.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { roundIsOpen, roundClosedRefusal, type RoundRefusal } from './round-state.js';
@@ -95,7 +95,7 @@ export function roundToVoteOn(net: Pick<NetworkConfig, 'pendingRounds'>, roundId
  */
 export function castVoteAct(id: string, roundId: string, input: unknown): NetworkActResult {
   const parsed = CastVoteBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === id);
   if (!net) return notFound;

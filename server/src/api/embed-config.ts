@@ -45,6 +45,7 @@
  */
 
 import { Router } from 'express';
+import { refusalOfParse } from '../util/log.js';
 import { z } from 'zod';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
@@ -82,9 +83,13 @@ embedConfigRouter.get('/', requireAdmin, (_req, res) => {
 embedConfigRouter.patch('/', requireAdminMfa, (req, res) => {
   const parsed = EmbedConfigBody.safeParse(req.body);
   if (!parsed.success) {
+    // What the body must be stays the `error`; WHAT was wrong is the bounded refusal — `detail` one `path: reason` line per issue, as it was,
+    // and `issues` the structured half every parse refusal answers (the caller's keys are quoted bounded, never whole).
+    const refusal = refusalOfParse(parsed.error);
     res.status(400).json({
       error: 'Body must be {"allowedOrigins": ["https://portal.example.com"]} and nothing else.',
-      detail: parsed.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`),
+      detail: refusal.issues.map((i, k) => `${i.path.join('.') || '(root)'}: ${refusal.reasons[k]}`),
+      issues: refusal.issues,
     });
     return;
   }

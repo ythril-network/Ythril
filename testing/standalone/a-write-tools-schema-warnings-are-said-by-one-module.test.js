@@ -81,10 +81,14 @@ describe('every write tool says its schema warnings through the module', () => {
   it('the structured key is the REST twin\'s', () => {
     const routes = sources.filter(s => s.file.startsWith('server/src/api/brain/') && /\bcheck\??\.warnings\b|Check\??\.warnings\b/.test(s.code));
     assert.ok(routes.length >= 4, `only ${routes.length} REST record route file(s) read a classification's warnings`);
-    const offKey = routes.filter(r => !/\[\s*'warnings'\s*\]\s*=|\bwarnings\s*:\s*\w*[wW]arnings\b|\{\s*\.\.\.updated,\s*warnings\s*\}/.test(r.code)).map(r => r.file);
+    // A route answers under `warnings` either by writing the key itself or through `writeWarningFields`, the one function that owns the key AND the
+    // bound on it (R6-11: at most twenty rows, `warningsTruncated` beside them) — the MCP module asks the same function, so the two doors cannot differ.
+    const offKey = routes.filter(r => !/\[\s*'warnings'\s*\]\s*=|\bwarnings\s*:\s*\w*[wW]arnings\b|\{\s*\.\.\.updated,\s*warnings\s*\}|\bwriteWarningFields\s*\(/.test(r.code)).map(r => r.file);
     assert.deepEqual(offKey, [], `REST route(s) answer their warnings under another key than \`warnings\`, which the MCP module uses`);
     const mod = sources.find(s => s.file === MODULE);
-    assert.ok(mod && /\{\s*warnings\s*\}/.test(mod.code), `${MODULE} no longer answers \`{ warnings }\``);
+    assert.ok(mod && /\{\s*warnings\s*\}|\bwriteWarningFields\s*\(/.test(mod.code), `${MODULE} no longer answers \`{ warnings }\``);
+    const owner = sources.find(s => s.file === 'server/src/brain/write-validation.ts');
+    assert.ok(owner && /warnings\s*:\s*boundedRows\(/.test(owner.code), '`writeWarningFields` no longer answers its rows under `warnings`');
   });
 
   it('every tool that captures a classification asks the module', () => {

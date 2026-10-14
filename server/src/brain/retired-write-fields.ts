@@ -79,8 +79,10 @@ export const RETIRED_WRITE_FIELDS: Readonly<Record<string, RetiredWriteField>> =
 export function retiredWriteFieldError(body: unknown): string | null {
   if (!body || typeof body !== 'object') return null;
   const bag = body as Record<string, unknown>;
+  // OWN keys, both ways (R6-11): a caller's name is looked up in the table, and the table's names are looked up in the body, by
+  // `hasOwn` — `in` and a bare index would also answer for what `Object.prototype` carries (`constructor`, `__proto__`, `toString`).
   for (const name of Object.keys(RETIRED_WRITE_FIELDS)) {
-    if (name in bag) return RETIRED_WRITE_FIELDS[name]!.message;
+    if (Object.hasOwn(bag, name)) return RETIRED_WRITE_FIELDS[name]!.message;
   }
   return null;
 }
@@ -92,5 +94,5 @@ export function retiredWriteFieldError(body: unknown): string | null {
  * which refuses from the schema before any handler runs.
  */
 export function retiredWriteFieldHint(name: string): string | null {
-  return RETIRED_WRITE_FIELDS[name]?.message ?? null;
+  return Object.hasOwn(RETIRED_WRITE_FIELDS, name) ? RETIRED_WRITE_FIELDS[name]!.message : null;
 }
