@@ -327,7 +327,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
       if (kind === 'removed') this.filesChanged.emit();
     });
     this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(({ kind, error }) => {
-      // The server's answer says WHY (`path_blocked`, `destination_taken_by_other`, ...): its code has words, and
+      // The server's answer says WHY (`path_blocked`, `destination_exists`, ...): its code has words, and
       // an answer without one still says the server's own sentence before the generic line.
       this.toast.error(refusalText(this.transloco, error, LISTING_FAILURE_KEYS[kind], FILE_REFUSAL_PREFIX));
     });
