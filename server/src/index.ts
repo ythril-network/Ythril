@@ -327,8 +327,13 @@ async function main(): Promise<void> {
     // `processing`, and the next boot waits out a stall timeout to rediscover it.
     const { stopBrainEmbeddingWorker } = await import('./brain/embed-worker.js');
     stopBrainEmbeddingWorker();
-    const { stopRetryWorker } = await import('./webhooks/dispatcher.js');
+    const { stopRetryWorker, drainFirstDeliveries } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
+    // First deliveries still waiting in the dispatcher's per-subscription queues were never attempted: written to the retry queue now,
+    // while the database is open, so the next boot delivers them instead of losing them (Q-469). Events emitted from here on go there too.
+    await drainFirstDeliveries().then(
+      persisted => { if (persisted > 0) log.debug(`Shutdown: ${persisted} queued webhook deliveries persisted for retry`); },
+      err => log.debug(`Shutdown: persisting queued webhook deliveries failed: ${err instanceof Error ? err.message : String(err)}`));
     // The reindex watcher resumes a run whose lease is stale, which starts a sweep: not while the process drains.
     const { stopReindexWatcher } = await import('./brain/reindex.js');
     stopReindexWatcher();

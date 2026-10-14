@@ -4,6 +4,8 @@
  * - HMAC-SHA256 signature using the subscription's shared secret
  * - At-least-once delivery with exponential backoff retries
  * - MongoDB-backed retry queue — retries survive process restarts
+ * - First deliveries bounded per subscription: a burst or a hung sink cannot open unbounded connections (see
+ *   {@link FIRST_DELIVERY_BOUND}); what does not fit is persisted to the retry queue, never dropped
  * - Delivery logging for debugging
  * - Fire-and-forget from the caller's perspective (non-blocking)
  */
@@ -11,7 +13,7 @@
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Filter, Sort } from 'mongodb';
-import { getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess, markWebhookFailure } from './store.js';
+import { getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess, markWebhookFailure, acceptsDeliveries } from './store.js';
 import { col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
@@ -21,6 +23,9 @@ import type { WebhookEventType, WebhookEventPayload, WebhookDelivery, WebhookSub
 import { withJitter } from '../util/backoff.js';
 import { intervalJob, type IntervalJob, type IntervalJobDeps } from '../util/interval-job.js';
 import { mapLimit } from '../util/map-limit.js';
+import { keyedLimiter } from '../util/keyed-limiter.js';
+import { writeInOneCommands } from '../db/one-command.js';
+import { warnOnce } from '../util/warn-once.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -132,6 +137,10 @@ async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
 
     const sub = await deps.getWebhook(job.webhookId);
     if (!sub) return; // webhook deleted while retry was queued
+    // Switched off, disabled or failing: the retry is dropped (its row is already gone), with no delivery and no verdict about the
+    // subscription. A burst to a sink that went down leaves a row per event; once the subscription is marked failing, delivering the rest
+    // is an attempt at a sink the dispatcher has stopped sending to.
+    if (!acceptsDeliveries(sub)) return;
 
     const result = await deps.deliver(sub, job);
 
@@ -139,29 +148,30 @@ async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
       await deps.markSuccess(sub.id);
     } else if (job.attempt < MAX_ATTEMPTS) {
       await deps.requeue(job);
-      log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${peerText(job.webhookId)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`);
+      sayDeliveryFailureOnce('retry', job.webhookId, () => { log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${peerText(job.webhookId)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`); });
     } else {
       await deps.markFailure(sub.id);
       log.error(`Webhook ${peerText(sub.id)} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
     }
   } catch (err) {
-    log.warn(`Webhook retry queue error for ${peerText(job.webhookId)}: ${peerText(err)}`);
+    sayDeliveryFailureOnce('retry-error', job.webhookId, () => { log.warn(`Webhook retry queue error for ${peerText(job.webhookId)}: ${peerText(err)}`); });
   }
 }
 
-async function enqueueRetry(
+/** One retry-queue document for a delivery's attempt number `attempt` (2 is the first retry). The ONE shape, written by every writer. */
+function retryJobFor(
   webhookId: string,
   body: string,
   event: WebhookEventType,
   spaceId: string,
   deliveryId: string,
   attempt: number,
-): Promise<void> {
+): RetryJob {
   // Jittered: one webhook target going down fails every event queued against it at once, and without
   // jitter they would all come back at the same instant — a burst aimed at an endpoint that is, by
   // definition, already having a bad time. See `util/backoff.ts`.
   const delayMs = withJitter(RETRY_DELAYS_MS[attempt - 2] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!);
-  const job: RetryJob = {
+  return {
     _id: uuidv4(),
     webhookId,
     body,
@@ -172,7 +182,35 @@ async function enqueueRetry(
     scheduledAt: new Date(Date.now() + delayMs),
     createdAt: new Date(),
   };
-  await col<RetryJob>(RETRY_COLLECTION).insertOne(job as any);
+}
+
+async function enqueueRetry(
+  webhookId: string,
+  body: string,
+  event: WebhookEventType,
+  spaceId: string,
+  deliveryId: string,
+  attempt: number,
+): Promise<void> {
+  await col<RetryJob>(RETRY_COLLECTION).insertOne(retryJobFor(webhookId, body, event, spaceId, deliveryId, attempt) as any);
+}
+
+// ── Delivery failure lines ──────────────────────────────────────────────────
+
+/**
+ * How long a failure line for one subscription is not said again. A sink that is down fails every delivery of a burst, and a line per
+ * delivery is the burst's size in log lines (the log ring is bounded, so they push out what an operator needs). Said again after the
+ * window, so a failure that goes on is still visible.
+ */
+const DELIVERY_FAILURE_WINDOW_MS = 10 * 60_000;
+const deliveryFailureSaid = warnOnce<string>({ max: 500, every: DELIVERY_FAILURE_WINDOW_MS });
+
+/**
+ * Say a delivery failure line once per window per subscription and kind; `kind` keeps a first-delivery failure and a retry failure apart.
+ * `say` writes the line (a `log.warn` with its values bounded where they enter the text), so what is said stays at the site that knows it.
+ */
+function sayDeliveryFailureOnce(kind: string, webhookId: string, say: () => void): void {
+  deliveryFailureSaid(`${kind}:${webhookId}`, say);
 }
 
 // ── Public emit API ─────────────────────────────────────────────────────────
@@ -216,12 +254,35 @@ export function emitWebhookEvent(opts: EmitWebhookEventOptions): void {
   // the single choke point every write already funnels through, so it fires regardless of whether any
   // webhook subscription matches.
   publishBrainChange({ event: opts.event, spaceId: opts.spaceId, entry: opts.entry });
-  _emitAsync(opts).catch(err => {
-    log.warn(`Webhook emit error: ${peerText(err)}`);
-  });
+  emitQueue.push({ opts, at: new Date().toISOString() });
+  emitDrain ??= drainEmitQueue();
 }
 
-async function _emitAsync(opts: EmitWebhookEventOptions): Promise<void> {
+/**
+ * Emitted events wait here and are resolved ONE AT A TIME, in emit order. Resolving them all at once made a burst move in lockstep: every
+ * event of a directory delete was past the subscription lookup in the same instant, so every one of them reached a sink's first-delivery
+ * bound together, before a single delivery could finish and free a slot. One at a time, a sink that answers keeps pace with the resolution
+ * and a sink that does not fills its own bound and overflows to the retry queue (Q-469). The cost is bounded by the burst itself: the
+ * lookup is the in-memory subscription cache, and the entries queued here were already held by the callers' closures.
+ */
+const emitQueue: Array<{ opts: EmitWebhookEventOptions; at: string }> = [];
+let emitDrain: Promise<void> | null = null;
+
+async function drainEmitQueue(): Promise<void> {
+  try {
+    for (let next = emitQueue.shift(); next !== undefined; next = emitQueue.shift()) {
+      try {
+        await _emitAsync(next.opts, next.at);
+      } catch (err) {
+        sayDeliveryFailureOnce('emit-error', 'all', () => { log.warn(`Webhook emit error: ${peerText(err)}`); });
+      }
+    }
+  } finally {
+    emitDrain = null; // reached with no await after the loop's last check, so an event pushed meanwhile was taken by the loop
+  }
+}
+
+async function _emitAsync(opts: EmitWebhookEventOptions, at: string): Promise<void> {
   const { event, spaceId, entry, tokenId, tokenLabel } = opts;
 
   const subs = await getMatchingWebhooks(event, spaceId);
@@ -233,7 +294,7 @@ async function _emitAsync(opts: EmitWebhookEventOptions): Promise<void> {
 
   const payload: WebhookEventPayload = {
     event,
-    timestamp: new Date().toISOString(),
+    timestamp: at, // when it was emitted, not when its turn in the queue came
     spaceId,
     spaceName,
     entry,
@@ -247,31 +308,138 @@ async function _emitAsync(opts: EmitWebhookEventOptions): Promise<void> {
     const full = await getWebhookFull(sub.id);
     if (!full) continue;
 
-    deliverFirst(full, body, event, spaceId).catch(err => {
-      log.warn(`Webhook delivery error for ${peerText(sub.id)}: ${peerText(err)}`);
-    });
+    offerFirstDelivery({ sub: full, body, event, spaceId, deliveryId: uuidv4() });
   }
+}
+
+// ── First deliveries, bounded per subscription ──────────────────────────────
+
+/**
+ * How many first deliveries to ONE subscription run at once, and how many may be running plus waiting before the rest go to the retry
+ * queue. Per subscription, so a sink that hangs holds only its own slots and every other sink's events go out meanwhile.
+ *
+ * ## What this closes (Q-469)
+ *
+ * `emitWebhookEvent` started a delivery per matching subscription per event, un-awaited and with no limit: ten thousand `file.deleted`
+ * events were ten thousand simultaneous outbound connections, and a sink that stayed down turned each into a retry row at once. Only the
+ * retries were bounded. A directory delete is the first emitter to make a burst of N.
+ *
+ * ## Where an event goes
+ *
+ * Started when its subscription has a free slot, waits in memory behind the running ones, or — when the subscription is at its bound —
+ * is written straight to the retry queue as a retry document (attempt 2, the first retry), and the retry poll delivers it at its own
+ * pace. An event is never dropped by the bound. At shutdown the queued-not-attempted ones are persisted the same way
+ * ({@link drainFirstDeliveries}); a delivery already in flight is not waited for, as before.
+ */
+export const FIRST_DELIVERY_CONCURRENCY = 8;
+export const FIRST_DELIVERY_BOUND = 64;
+/** What a first delivery needs: the subscription, the signed body's payload, and its ids. */
+interface FirstDelivery {
+  sub: WebhookSubscription;
+  body: string;
+  event: WebhookEventType;
+  spaceId: string;
+  deliveryId: string;
+}
+
+/** What one first delivery reaches. Production is {@link attemptDelivery}; a test hands in a fake (see {@link setFirstDeliveryDepsForTest}). */
+export interface FirstDeliveryDeps {
+  deliver(sub: WebhookSubscription, body: string, event: WebhookEventType, spaceId: string, deliveryId: string): Promise<WebhookDelivery>;
+}
+
+/** The handed-in delivery, or null for production. */
+let firstDeliveryOverride: FirstDeliveryDeps | null = null;
+
+/**
+ * Test seam: hand in the first delivery (`null` restores production). A delivery is an outbound request the SSRF guard would refuse to
+ * send to anything a test could listen on, so the per-subscription bound can only be seen in flight through a handed-in `deliver`.
+ */
+export function setFirstDeliveryDepsForTest(deps: FirstDeliveryDeps | null): void {
+  firstDeliveryOverride = deps;
+}
+
+/** The tally behind `ythril_webhook_first_deliveries_queued_total` and `_overflowed_total`; the registry reads it at scrape time. */
+const firstDeliveryTally = { queued: 0, overflowed: 0 };
+export function webhookFirstDeliveryCounts(): { queued: number; overflowed: number } {
+  return { ...firstDeliveryTally };
+}
+
+const firstDeliveries = keyedLimiter<string, FirstDelivery>({
+  concurrency: FIRST_DELIVERY_CONCURRENCY,
+  bound: FIRST_DELIVERY_BOUND,
+  run: (_id, d) => deliverFirst(d),
+  onError: (id, err) => { sayDeliveryFailureOnce('delivery-error', id, () => { log.warn(`Webhook delivery error for ${peerText(id)}: ${peerText(err)}`); }); },
+});
+
+/** Start the delivery, queue it behind its subscription's running ones, or — at the bound, or after shutdown began — persist it for retry. */
+function offerFirstDelivery(d: FirstDelivery): void {
+  switch (firstDeliveries.submit(d.sub.id, d)) {
+    case 'started': return;
+    case 'queued': firstDeliveryTally.queued++; return;
+    case 'refused': persistForRetry(d, !firstDeliveries.closed); return;
+  }
+}
+
+/**
+ * Overflow rows are written in batches, not one `insertOne` per event: a burst that overflows is thousands of events in one tick, and a
+ * write each is thousands of pending driver operations. One flush at a time; rows that arrive while it writes are taken by the same loop.
+ */
+const pendingRetryRows: Array<{ job: RetryJob; overflow: boolean }> = [];
+let flushingRetryRows: Promise<void> | null = null;
+
+function persistForRetry(d: FirstDelivery, overflow: boolean): void {
+  pendingRetryRows.push({ job: retryJobFor(d.sub.id, d.body, d.event, d.spaceId, d.deliveryId, 2), overflow });
+  flushingRetryRows ??= flushRetryRows();
+}
+
+async function flushRetryRows(): Promise<void> {
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve)); // the rest of the burst joins this batch
+    while (pendingRetryRows.length > 0) {
+      const batch = pendingRetryRows.splice(0);
+      try {
+        // Sliced by bytes and count so each write is ONE wire command (`db/one-command.ts`): a retry body is a whole event payload.
+        await writeInOneCommands(batch.map(b => b.job), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice as any, { ordered }), { ordered: false });
+        firstDeliveryTally.overflowed += batch.filter(b => b.overflow).length;
+      } catch (err) {
+        sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted: ${peerText(err)}`); });
+      }
+    }
+  } finally {
+    flushingRetryRows = null; // reached with no await after the loop's last check, so a row pushed meanwhile was taken by the loop
+  }
+}
+
+/**
+ * Shutdown: the first deliveries that were queued and never attempted are written to the retry queue (so a restart delivers them), and
+ * every first delivery offered afterwards goes there as well. Resolves when the rows are written. Called before the HTTP drain, while the
+ * database is still open. Returns how many queued deliveries were persisted.
+ */
+export async function drainFirstDeliveries(): Promise<number> {
+  const queued = firstDeliveries.close();
+  for (const d of queued) persistForRetry(d, false);
+  // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
+  await emitDrain;
+  await flushingRetryRows;
+  return queued.length;
 }
 
 /**
  * Deliver a webhook payload to a specific subscription (first attempt).
  * If delivery fails, enqueue for retry instead of sleeping.
  */
-async function deliverFirst(
-  sub: WebhookSubscription,
-  body: string,
-  event: WebhookEventType,
-  spaceId: string,
-): Promise<void> {
-  const deliveryId = uuidv4();
-  const result = await attemptDelivery(sub, body, event, spaceId, deliveryId);
+async function deliverFirst(d: FirstDelivery): Promise<void> {
+  const { sub, body, event, spaceId, deliveryId } = d;
+  const result = await (firstDeliveryOverride
+    ? firstDeliveryOverride.deliver(sub, body, event, spaceId, deliveryId)
+    : attemptDelivery(sub, body, event, spaceId, deliveryId));
 
   if (result.success) {
     await markWebhookSuccess(sub.id);
   } else {
     // Enqueue first retry (attempt 2)
     await enqueueRetry(sub.id, body, event, spaceId, deliveryId, 2);
-    log.warn(`Webhook first delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)} — queued for retry`);
+    sayDeliveryFailureOnce('first', sub.id, () => { log.warn(`Webhook first delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)} — queued for retry`); });
   }
 }
 

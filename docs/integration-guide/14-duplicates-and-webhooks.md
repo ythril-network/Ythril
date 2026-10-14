@@ -628,7 +628,20 @@ whitespace are not preserved by a parse/stringify round trip.
   indefinitely. Deduplicating on the delivery id is what bounds that: a replay of an id you have already
   processed is a no-op. If you need a hard time bound as well, reject deliveries whose `X-Ythril-Delivery`
   you have not seen **and** whose payload timestamp is older than your own tolerance.
-- After all retries are exhausted, the subscription status changes to `failing`.
+- **First deliveries are bounded per subscription.** A burst of events (a directory delete announces every file it removed)
+  does not open a connection per event: each subscription has a small number of deliveries in flight and a short queue
+  behind them, and a subscription that hangs holds only its own, never another subscription's. An event that does not fit
+  is not dropped: it is stored straight in the retry queue and delivered from there, so it reaches your endpoint later than
+  the first deliveries did, and in no particular order relative to them. Events queued in memory when the server stops are
+  stored in the retry queue as well. The deliveries that were being sent at that moment are not waited for. The server
+  reports both paths as `ythril_webhook_first_deliveries_queued_total` and `ythril_webhook_first_deliveries_overflowed_total`
+  (see [Setup and API](11-setup-api.md)).
+- **An event the server had not yet announced when it stopped is not announced later.** The announcement of a change is
+  at-most-once: a stop between a write and its announcement loses the event, and a directory delete announces its files
+  after their rows are removed. Deduplicate for repeats, and reconcile from the data (a listing) when a gap would matter.
+- After all retries are exhausted, the subscription status changes to `failing`. **A subscription that is down for longer
+  than the retry schedule while a large burst of events is sent is marked `failing` and receives nothing more until it is
+  re-enabled**, including the retries already queued for it, which are dropped when they come due.
 - Re-enabling a failing subscription (`PATCH` with `enabled: true`) resets the failure counter.
 
 ---

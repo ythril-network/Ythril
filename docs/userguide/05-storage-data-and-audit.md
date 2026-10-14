@@ -585,6 +585,8 @@ The page lists every webhook with its endpoint, event/space filters, and a statu
 - **Deliveries** — view recent delivery attempts with their HTTP status, latency, and any error.
 - **Delete** — stop and remove a webhook.
 
+A webhook that is **failing** (its endpoint stayed down past the whole retry schedule) is sent nothing new, and the deliveries already waiting for it are dropped as they come due, until you re-enable it. A burst of events (a directory delete announces every file it removed) is sent to each endpoint a few at a time; the rest wait in the retry queue and arrive a little later, which the `ythril_webhook_first_deliveries_overflowed_total` metric counts.
+
 All endpoints must be HTTPS and are SSRF-checked (private/reserved addresses are rejected). Everything the page does is also available directly through the admin API at `/api/admin/webhooks`:
 
 ### Listing and creating

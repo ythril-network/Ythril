@@ -27,6 +27,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
+import { webhookFirstDeliveryCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
@@ -776,6 +777,33 @@ export const fileMoveBatchReplansTotal = new Counter({
   registers: [register],
 });
 fileMoveBatchReplansTotal.labels({ space: '' }).inc(0);
+
+/**
+ * First deliveries of a webhook event that waited in the in-memory queue behind their subscription's running ones (`webhooks/dispatcher.ts`,
+ * Q-469). Unlabelled: a subscription id is operator data, and the question is whether sinks are being outrun at all. The tally is kept
+ * by the dispatcher and mirrored here at scrape time (as the file act answers are), so every series is on the scrape at 0 from the
+ * start, and the dispatcher never imports this module back (that would be a runtime cycle through everything that emits).
+ */
+export const webhookFirstDeliveriesQueuedTotal = new Counter({
+  name: 'ythril_webhook_first_deliveries_queued_total',
+  help: 'Webhook first deliveries that waited in the in-memory queue behind their subscription\'s deliveries already in flight',
+  registers: [register],
+  collect() {
+    this.reset();
+    this.inc(webhookFirstDeliveryCounts().queued);
+  },
+});
+
+/** First deliveries that found their subscription's queue full and were written straight to the retry queue instead, counted by the rows persisted. */
+export const webhookFirstDeliveriesOverflowedTotal = new Counter({
+  name: 'ythril_webhook_first_deliveries_overflowed_total',
+  help: 'Webhook first deliveries persisted straight to the retry queue because their subscription already had its bound in flight and queued',
+  registers: [register],
+  collect() {
+    this.reset();
+    this.inc(webhookFirstDeliveryCounts().overflowed);
+  },
+});
 
 export const embedWaitSeconds = new Histogram({
   name: 'ythril_embed_wait_seconds',

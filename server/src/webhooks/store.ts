@@ -87,6 +87,16 @@ export async function getWebhookFull(id: string): Promise<WebhookSubscription | 
   return { ...sub, secret: getPlaintextSecret(sub.secret) };
 }
 
+/**
+ * Does this subscription take deliveries at all — switched on, and neither disabled nor failing? The ONE answer, asked by the event
+ * match (what a new event is sent to) and by the retry worker (what a queued retry is still delivered to), so a subscription the
+ * operator switched off or the dispatcher marked failing is not reached by one door while the other has stopped. An ABSENT `enabled`
+ * or `status` is active: only an explicit `false`, `disabled` or `failing` stops it.
+ */
+export function acceptsDeliveries(sub: Pick<WebhookSubscription, 'enabled' | 'status'>): boolean {
+  return sub.enabled !== false && sub.status !== 'disabled' && sub.status !== 'failing';
+}
+
 /** Returns all enabled, non-failing subscriptions that match a given event+space. */
 export async function getMatchingWebhooks(
   event: WebhookEventType,
@@ -94,8 +104,7 @@ export async function getMatchingWebhooks(
 ): Promise<WebhookSubscription[]> {
   const subs = await ensureCache();
   return subs.filter(s => {
-    if (!s.enabled) return false;
-    if (s.status === 'disabled' || s.status === 'failing') return false;
+    if (!acceptsDeliveries(s)) return false;
     if (s.spaces.length > 0 && !s.spaces.includes(spaceId)) return false;
     if (s.events.length > 0 && !s.events.includes(event)) return false;
     return true;
@@ -203,7 +212,16 @@ export async function listDeliveries(webhookId: string, limit = 100): Promise<We
 
 // ── Status tracking ─────────────────────────────────────────────────────────
 
+/**
+ * A delivery succeeded. Writes the subscription only when that CHANGES it — it was not active, or it carried failures — so a burst of
+ * N successful deliveries to a healthy sink is not N writes of an unchanged row (and N cache invalidations, each making the next
+ * event re-read every subscription). The cache is this process's copy and every write goes through here and invalidates it, so the
+ * cached row is what the collection holds.
+ */
 export async function markWebhookSuccess(id: string): Promise<void> {
+  const sub = (await ensureCache()).find(s => s.id === id);
+  if (!sub) return; // deleted while the delivery was in flight: nothing to mark
+  if (sub.status === 'active' && (sub.consecutiveFailures ?? 0) === 0) return;
   await col<WebhookSubscription>(COLLECTION).updateOne(
     { id } as Filter<WebhookSubscription>,
     { $set: { status: 'active', consecutiveFailures: 0 } } as UpdateFilter<WebhookSubscription>,
