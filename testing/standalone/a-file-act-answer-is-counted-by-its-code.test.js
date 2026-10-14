@@ -78,8 +78,9 @@ const CASES = [
   },
   {
     name: 'DestinationHeldAfterMove', status: 409, code: 'destination_held_after_move', path: '_converted/b.txt.md',
-    says: [/bytes of 'a\.txt' already moved to 'b\.txt'/, /'_converted\/b\.txt\.md' is held by the records of another file/, /Delete that file/],
-    make: () => new answers.DestinationHeldAfterMove('_converted/b.txt.md', 'a.txt', 'b.txt', 'held by another file'),
+    heldBy: 'other.txt',
+    says: [/bytes of 'a\.txt' already moved to 'b\.txt'/, /'_converted\/b\.txt\.md' is held by the records of 'other\.txt'/, /Housekeeping retries the move/, /delete 'other\.txt' and repeat the move/],
+    make: () => new answers.DestinationHeldAfterMove('_converted/b.txt.md', 'a.txt', 'b.txt', 'other.txt'),
   },
   {
     name: 'ConfirmRequired', status: 422, code: 'confirm_required', path: 'docs', says: [/Deleting a directory requires confirm: true\./],
@@ -150,6 +151,7 @@ describe('every answer class is answered by value and counted exactly once', () 
       assert.equal(answer.status, c.status);
       assert.equal(answer.body.code, c.code);
       assert.equal(answer.body.path, c.path);
+      assert.equal(answer.body.heldBy, c.heldBy, 'the body names the file that holds the id for the held finish and for no other answer');
       assert.equal(typeof answer.body.error, 'string');
       for (const fragment of c.says ?? []) assert.match(answer.body.error, fragment, 'the sentence does not say what the table promises');
       assert.ok(!answer.body.error.includes('/data/'), 'the sentence names an absolute path');

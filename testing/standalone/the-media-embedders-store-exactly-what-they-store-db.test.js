@@ -519,14 +519,15 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       assert.deepEqual(beats[0].steps, ['a', 'b'], 'a caller\'s step list is passed through');
     });
 
-    it('a lost lease stops BEFORE the next chunk: what was stored stays, and the call returns normally', async () => {
+    it('a lost lease stops BEFORE the next chunk and ENDS THE RUN: what was stored stays, and the call rejects with the lost lease', async () => {
       await seedParent('calls/q3.wav');
       ff.durationS = 12;
       ff.silenceStderr = 'silence_start: 3\nsilence_end: 5\n';
       let asked = 0;
-      const result = await runAudio(OPEN, 'calls/q3.wav', Buffer.from('x'), 'audio/wav', undefined, { shouldStop: () => ++asked > 1 });
-      assert.deepEqual(result.records.map(r => r.chunkId), ['calls/q3.wav#media-chunk0']);
-      assert.equal(result.total, 2);
+      await assert.rejects(
+        () => runAudio(OPEN, 'calls/q3.wav', Buffer.from('x'), 'audio/wav', undefined, { shouldStop: () => ++asked > 1 }),
+        (err) => err instanceof Error && err.name === 'JobLeaseLostError', 'a run that lost its lease returned a result: the worker would record it as done');
+      assert.deepEqual((await files().find({ parentFileId: 'calls/q3.wav' }, { projection: { _id: 1 } }).toArray()).map(r => r._id), ['calls/q3.wav#media-chunk0']);
       assert.equal(sttCalls.length, 1, 'the transcriber was asked for a chunk after the lease was lost');
     });
 
@@ -710,12 +711,14 @@ describe('the media embedders store exactly what they store today (real MongoDB,
       ]);
     });
 
-    it('a lease lost before the keyframe loop captions nothing: the chunks stay as the audio pass stored them', async () => {
+    it('a lease lost before the keyframe loop captions nothing and ENDS THE RUN: the chunks stay as the audio pass stored them', async () => {
       await seedParent('calls/q3.mp4');
       ff.frames = 2;
       // The audio stage asks once per chunk (one chunk here); the next question is the first keyframe's.
       let asked = 0;
-      await runVideo(OPEN, 'calls/q3.mp4', Buffer.from('x'), 'video/mp4', { opts: { shouldStop: () => ++asked > 1 } });
+      await assert.rejects(
+        () => runVideo(OPEN, 'calls/q3.mp4', Buffer.from('x'), 'video/mp4', { opts: { shouldStop: () => ++asked > 1 } }),
+        (err) => err instanceof Error && err.name === 'JobLeaseLostError', 'a run that lost its lease returned a result: the worker would record it as done');
       assert.deepEqual(visionCalls, []);
       assert.equal((await files().findOne({ _id: 'calls/q3.mp4#media-chunk0' })).content, 'welcome to the quarterly call');
     });

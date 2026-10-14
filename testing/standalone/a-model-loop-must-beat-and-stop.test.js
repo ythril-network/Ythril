@@ -91,7 +91,9 @@ describe('a model loop beats and stops', () => {
   });
 
   it('every looped model call checks its lease inside its own loop', () => {
-    const unstoppable = loopedProviderCalls().filter(c => !/shouldStop/.test(c.loop));
+    // Through `stopIfLeaseLost`, which THROWS the lost lease so the worker ends the run as abandoned: a loop that tested the flag and
+    // `break`ed returned a partial result for a file that is another run's now (`an-embedder-that-loses-its-claim-ends-the-run-instead-of-returning-db`).
+    const unstoppable = loopedProviderCalls().filter(c => !/stopIfLeaseLost\s*\(/.test(c.loop));
     assert.deepEqual(
       unstoppable.map(c => `${c.file}: \`${c.call}\``), [],
       'Stall recovery clears the claim token and hands the file to another worker. A loop that never checks '
@@ -134,7 +136,7 @@ describe('a model loop beats and stops', () => {
       src, src.search(/await\s+vision\.caption\s*\(/), FOR_LOOP, 'the keyframe loop');
     assert.ok(loop, 'no enclosing keyframe loop — re-point this gate');
     assert.ok(
-      loop.indexOf('shouldStop') < loop.indexOf('vision.caption'),
+      loop.search(/stopIfLeaseLost\s*\(/) !== -1 && loop.search(/stopIfLeaseLost\s*\(/) < loop.indexOf('vision.caption'),
       'the lease check must come before the model call: after it, the run has already spent up to a full '
       + 'vision budget on work another worker is redoing.',
     );
