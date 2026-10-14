@@ -48,6 +48,8 @@ import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { isDerivedRowOf } from '../files/moved-paths.js';
+import { topLevelFilesAmong } from '../files/derived-rows.js';
 import { escapeRegex } from '../util/redos.js';
 
 /** One class of link: a record kind that names another record kind through one array field. */
@@ -391,15 +393,12 @@ export async function fileLinkSourcesOf(spaceId: string, path: string, kind: 'fi
   if (kind === 'directory') return await fileLinkSourcesUnder(spaceId, id);
   const sources = await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
     asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(id)}(?:#|$)` } }));
-  // `a#b.txt` spells a derived row of `a` AND a file whose own name holds a `#`: a source that is a top-level file row (no
-  // parentFileId) is that other file, and its links are not this file's to take.
+  // `a#b.txt` spells a derived row of `a` AND a file whose own name holds a `#`: a source that is a top-level file row is that other
+  // file, and its links are not this file's to take ({@link isDerivedRowOf}, whose guard is the rows read here).
   const others = sources.filter(s => s !== id);
   if (others.length === 0) return sources;
-  const files = await col<{ _id: string; parentFileId?: string }>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<{ _id: string; parentFileId?: string }>({ _id: { $in: others }, parentFileId: { $exists: false } }), { projection: { _id: 1 } })
-    .toArray();
-  const ownFiles = new Set(files.map(f => f._id));
-  return sources.filter(s => !ownFiles.has(s));
+  const topLevel = await topLevelFilesAmong(spaceId, others);
+  return sources.filter(s => s === id || isDerivedRowOf(s, id, topLevel));
 }
 
 /**

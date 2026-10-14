@@ -36,11 +36,10 @@
  */
 import { log, peerText } from '../util/log.js';
 import { toDocId } from '../util/paths.js';
-import { inChunks } from '../util/chunks.js';
-import { READ_CHUNK } from '../db/read-by-id.js';
-import { fileLinkSourcesOf, fileLinksThisInstanceWrote } from '../brain/link-adjacency.js';
-import { removeWithTombstones } from '../brain/tombstones.js';
-import type { PathKind } from './moved-paths.js';
+import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
+import { removeFileLinksThisInstanceWrote } from '../brain/links.js';
+import { isDerivedRowOf, type PathKind } from './moved-paths.js';
+import { topLevelFilesAmong } from './derived-rows.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { cancelMediaJob } from './media/job-queue.js';
@@ -118,15 +117,14 @@ export async function removeLinksOfDeletedFiles(
   let sources = await fileLinkSourcesOf(spaceId, path, kind);
   if (surviving.length > 0) {
     const alive = new Set(surviving.map(toDocId));
-    const parentOf = (id: string): string => id.slice(0, Math.max(id.lastIndexOf('#'), 0));
-    sources = sources.filter(s => !alive.has(s) && !alive.has(parentOf(s)));
+    // A derived row of a file that is still there goes with that file, never ahead of it; one that is a top-level file of its own is read as that file.
+    const derived = sources.filter(s => s.includes('#') && !alive.has(s));
+    const topLevel = await topLevelFilesAmong(spaceId, derived);
+    const survivors = [...alive];
+    const ofSurvivor = (s: string): boolean => s.includes('#') && survivors.some(a => isDerivedRowOf(s, a, topLevel));
+    sources = sources.filter(s => !alive.has(s) && !ofSurvivor(s));
   }
-  let removed = 0;
-  for (const part of inChunks(sources, READ_CHUNK)) {
-    const rows = await fileLinksThisInstanceWrote(spaceId, part, createdUntil === undefined ? {} : { createdUntil });
-    await removeWithTombstones(spaceId, 'links', rows.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })));
-    removed += rows.length;
-  }
+  const removed = await removeFileLinksThisInstanceWrote(spaceId, sources, createdUntil === undefined ? {} : { createdUntil });
   if (kind === 'directory' && removed > 0) log.info(`Removed ${removed} link(s) of the files of directory ${peerText(path)} (space: ${peerText(spaceId)})`);
   return removed;
 }

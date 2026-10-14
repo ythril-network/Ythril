@@ -1,5 +1,4 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
-import { SlicePipe } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { ConflictRecord } from '../../core/api.types';
@@ -35,7 +34,7 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
 @Component({
   selector: 'app-conflicts',
   standalone: true,
-  imports: [InstantComponent, SlicePipe, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
+  imports: [InstantComponent, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
   template: `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
       <!-- The Files tab of the Brain: there is no /files route any more, and the old link led to a page that no longer shows the files. -->
@@ -74,9 +73,9 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
           <span style="flex:1"></span>
           @if (selectedIds().length > 0) {
             <select [(ngModel)]="bulkAction" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="width:auto;">
-              <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
-              <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
-              <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
+              @for (a of bulkActions; track a) {
+                <option [value]="a">{{ actionLabelKeys[a] | transloco }}</option>
+              }
             </select>
             <button class="btn btn-sm btn-primary" (click)="bulkResolve()"
                     [disabled]="bulkResolving()">
@@ -113,7 +112,7 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
                 <td class="mono" style="font-size:12px; color:var(--text-muted)">{{ c.conflictPath }}</td>
                 <td>
                   <span title="{{ c.peerInstanceId }}" class="mono" style="font-size:12px">
-                    {{ c.peerInstanceLabel || (c.peerInstanceId | slice:0:8) }}
+                    {{ peerName(c) }}
                   </span>
                 </td>
                 <td style="color:var(--text-muted); white-space:nowrap">
@@ -123,10 +122,9 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
                   <select [(ngModel)]="conflictActions[c.id]"
                           [attr.aria-label]="'conflicts.resolveActionAriaLabel' | transloco"
                           style="width:auto;">
-                    <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
-                    <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
-                    <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
-                    <option value="save-to-space">{{ 'conflicts.action.saveToSpace' | transloco }}</option>
+                    @for (a of rowActions; track a) {
+                      <option [value]="a">{{ actionLabelKeys[a] | transloco }}</option>
+                    }
                   </select>
                   @if (conflictActions[c.id] === 'save-to-space') {
                     <select [(ngModel)]="conflictTargetSpace[c.id]"
@@ -175,6 +173,12 @@ export class ConflictsComponent implements OnInit {
   conflictActions: Record<string, ResolveAction> = {};
   conflictTargetSpace: Record<string, string> = {};
   bulkAction: ResolveAction = 'keep-local';
+  /** The label key of each action: the options of both selects are read out of it, so a label is spelled once and an action cannot be offered without one. */
+  protected readonly actionLabelKeys = ACTION_LABEL_KEYS;
+  /** One conflict's actions, in the order the label table lists them. */
+  protected readonly rowActions = Object.keys(ACTION_LABEL_KEYS) as ResolveAction[];
+  /** A bulk resolution names no target space, so it offers every action but the one that needs one. */
+  protected readonly bulkActions = this.rowActions.filter(a => a !== 'save-to-space');
 
   ngOnInit(): void {
     this.load();

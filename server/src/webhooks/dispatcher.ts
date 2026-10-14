@@ -26,6 +26,7 @@ import { mapLimit } from '../util/map-limit.js';
 import { keyedLimiter } from '../util/keyed-limiter.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { warnOnce } from '../util/warn-once.js';
+import { drainedQueue } from '../util/drained-queue.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -255,7 +256,6 @@ export function emitWebhookEvent(opts: EmitWebhookEventOptions): void {
   // webhook subscription matches.
   publishBrainChange({ event: opts.event, spaceId: opts.spaceId, entry: opts.entry });
   emitQueue.push({ opts, at: new Date().toISOString() });
-  emitDrain ??= drainEmitQueue();
 }
 
 /**
@@ -265,22 +265,10 @@ export function emitWebhookEvent(opts: EmitWebhookEventOptions): void {
  * and a sink that does not fills its own bound and overflows to the retry queue (Q-469). The cost is bounded by the burst itself: the
  * lookup is the in-memory subscription cache, and the entries queued here were already held by the callers' closures.
  */
-const emitQueue: Array<{ opts: EmitWebhookEventOptions; at: string }> = [];
-let emitDrain: Promise<void> | null = null;
-
-async function drainEmitQueue(): Promise<void> {
-  try {
-    for (let next = emitQueue.shift(); next !== undefined; next = emitQueue.shift()) {
-      try {
-        await _emitAsync(next.opts, next.at);
-      } catch (err) {
-        sayDeliveryFailureOnce('emit-error', 'all', () => { log.warn(`Webhook emit error: ${peerText(err)}`); });
-      }
-    }
-  } finally {
-    emitDrain = null; // reached with no await after the loop's last check, so an event pushed meanwhile was taken by the loop
-  }
-}
+const emitQueue = drainedQueue<{ opts: EmitWebhookEventOptions; at: string }>(
+  async ([next]) => { await _emitAsync(next!.opts, next!.at); },
+  { batchSize: 1, onError: err => { sayDeliveryFailureOnce('emit-error', 'all', () => { log.warn(`Webhook emit error: ${peerText(err)}`); }); } },
+);
 
 async function _emitAsync(opts: EmitWebhookEventOptions, at: string): Promise<void> {
   const { event, spaceId, entry, tokenId, tokenLabel } = opts;
@@ -384,30 +372,24 @@ function offerFirstDelivery(d: FirstDelivery): void {
  * Overflow rows are written in batches, not one `insertOne` per event: a burst that overflows is thousands of events in one tick, and a
  * write each is thousands of pending driver operations. One flush at a time; rows that arrive while it writes are taken by the same loop.
  */
-const pendingRetryRows: Array<{ job: RetryJob; overflow: boolean }> = [];
-let flushingRetryRows: Promise<void> | null = null;
+const pendingRetryRows = drainedQueue<{ job: RetryJob; overflow: boolean }>(
+  async (batch) => {
+    try {
+      // Sliced by bytes and count so each write is ONE wire command (`db/one-command.ts`): a retry body is a whole event payload.
+      await writeInOneCommands(batch.map(b => b.job), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice as any, { ordered }), { ordered: false });
+      firstDeliveryTally.overflowed += batch.filter(b => b.overflow).length;
+    } catch (err) {
+      sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted: ${peerText(err)}`); });
+    }
+  },
+  {
+    beforeFirstBatch: () => new Promise<void>(resolve => setImmediate(resolve)), // the rest of the burst joins this batch
+    onError: err => { sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue flush failed: ${peerText(err)}`); }); },
+  },
+);
 
 function persistForRetry(d: FirstDelivery, overflow: boolean): void {
   pendingRetryRows.push({ job: retryJobFor(d.sub.id, d.body, d.event, d.spaceId, d.deliveryId, 2), overflow });
-  flushingRetryRows ??= flushRetryRows();
-}
-
-async function flushRetryRows(): Promise<void> {
-  try {
-    await new Promise<void>(resolve => setImmediate(resolve)); // the rest of the burst joins this batch
-    while (pendingRetryRows.length > 0) {
-      const batch = pendingRetryRows.splice(0);
-      try {
-        // Sliced by bytes and count so each write is ONE wire command (`db/one-command.ts`): a retry body is a whole event payload.
-        await writeInOneCommands(batch.map(b => b.job), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice as any, { ordered }), { ordered: false });
-        firstDeliveryTally.overflowed += batch.filter(b => b.overflow).length;
-      } catch (err) {
-        sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted: ${peerText(err)}`); });
-      }
-    }
-  } finally {
-    flushingRetryRows = null; // reached with no await after the loop's last check, so a row pushed meanwhile was taken by the loop
-  }
 }
 
 /**
@@ -419,8 +401,8 @@ export async function drainFirstDeliveries(): Promise<number> {
   const queued = firstDeliveries.close();
   for (const d of queued) persistForRetry(d, false);
   // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
-  await emitDrain;
-  await flushingRetryRows;
+  await emitQueue.settled();
+  await pendingRetryRows.settled();
   return queued.length;
 }
 

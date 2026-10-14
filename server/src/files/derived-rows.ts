@@ -19,7 +19,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { READ_CHUNK } from '../db/read-by-id.js';
+import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
 import { inChunks } from '../util/chunks.js';
 import { MAX_ANCESTRY } from './ancestry.js';
@@ -114,4 +114,13 @@ export async function rootsOfDirectory(spaceId: string, dir: string): Promise<st
   const live = (await files.find(asFilter<FileMetaDoc>({ _id: { $regex: prefix }, ...LIVE_FILE_ROW }), { projection: { _id: 1 } }).toArray()).map(r => String(r._id));
   const parents = await distinctStringsOf(files, 'parentFileId', asFilter<FileMetaDoc>({ parentFileId: { $regex: prefix } }));
   return [...new Set([...live, ...parents])];
+}
+
+/**
+ * Which of `ids` are TOP-LEVEL file rows — a row of the space with no `parentFileId`. The read behind {@link isDerivedRowOf}'s guard
+ * (`files/moved-paths.ts`): `a#b.txt` is a derived row of `a` only when no file of that name stands by itself. A row flagged deleted is
+ * still a top-level row here (it is a file's record, not a derived one); an id with no row is not in the answer. One `$in` per `READ_CHUNK`.
+ */
+export async function topLevelFilesAmong(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
+  return new Set((await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), ids, {}, { filter: { parentFileId: { $exists: false } } })).keys());
 }

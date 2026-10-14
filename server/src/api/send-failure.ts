@@ -26,7 +26,8 @@ import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-fail
 import type { ToolCallOutcome } from '../mcp/call-tool.js';
 import { reportServerFailure } from '../util/report-failure.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
-import { fileActAnswer, type FileActAnswer } from '../files/act-answers.js';
+import type { FileActAnswer } from '../files/act-answers.js';
+import { answerFileActFailure } from '../files/act-failure-answer.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -62,11 +63,10 @@ export function sendConnectionsNotWritten(res: express.Response, err: Connection
 
 /**
  * Put a file act's refusal on the wire (`fileActAnswer`): its status, its `Retry-After` (a move still owed) and its body, the
- * same object MCP carries as `structuredContent`. A refusal that is the server's own (`500`, `503`) is reported to the operator as
- * any other server failure is; one that is the caller's (`409`) is not a failure of ours and is not logged.
+ * same object MCP carries as `structuredContent`. The answer is the one `answerFileActFailure` gave, which has already reported the
+ * server's own (`500`, `503`) to the operator and counted it; this only sends it.
  */
-function sendFileActAnswer(res: express.Response, answer: FileActAnswer, where: string, err: unknown): void {
-  if (answer.status >= 500) reportServerFailure(where, err);
+function sendFileActAnswer(res: express.Response, answer: FileActAnswer): void {
   sendRetryAfter(res, answer.retryAfterSeconds);
   res.status(answer.status).json(answer.body);
 }
@@ -94,8 +94,8 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   if (err instanceof ConnectionsNotWritten) { sendConnectionsNotWritten(res, err, where); return; }
   // A file act's refusal (a destination a file blocks, a move still owed) is its own answer, whatever route met it: none of them is a
   // `RangeError`, so a route's own `RangeError` branch above this call cannot take one for a malformed path.
-  const fileAct = fileActAnswer(err);
-  if (fileAct) { sendFileActAnswer(res, fileAct, where, err); return; }
+  const fileAct = answerFileActFailure(err, where);
+  if (fileAct) { sendFileActAnswer(res, fileAct); return; }
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
   reportServerFailure(where, err);

@@ -42,7 +42,8 @@ import { col, asFilter } from '../db/mongo.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
-import { LINK_CLASSES, linkClassesFrom, linksStartingFrom } from './link-adjacency.js';
+import { LINK_CLASSES, linkClassesFrom, linksStartingFrom, fileLinksThisInstanceWrote } from './link-adjacency.js';
+import { removeWithTombstones } from './tombstones.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
@@ -225,38 +226,30 @@ export async function removeLinksFromMany(spaceId: string, froms: readonly strin
 }
 
 /**
- * {@link removeLinksFromMany} for the links ONE INSTANCE wrote: of each source's link rows, those whose author is `instanceId` (and, when
- * `createdUntil` is given, that were created at or before it) are removed, with their tombstones, and every other row stays — a link
- * another instance wrote is that instance's statement, and removing it here would delete it from peers that never agreed. A source
- * with nothing of that author's is not touched. Chunked (`READ_CHUNK`); returns how many rows were removed.
+ * Remove the link rows FROM these file sources that THIS instance wrote, each with its tombstone — the one remover of "the links this
+ * instance owes a file's removal", asked by the delete (`removeLinksOfDeletedFiles`, `files/remove-file-here.ts`) and by the repair of
+ * what a delete left (`files/leaked-rows-repair.ts`).
  *
- * It is the one removal that is selective by author, so the leaked-rows repair (`files/leaked-rows-repair.ts`) does not hand-write a
- * second removal beside the writer: what stays is handed to the same reconcile as the desired end state.
+ * ## What it prevents
+ *
+ * Which links are "ours" was written twice: the delete read it with the DATABASE (an author that is this instance's, or none) and the repair
+ * with a second predicate of its own in memory (an author equal to the instance id, so a row with no author was nobody's), so a link
+ * written before authorship was stamped was removed by the delete and kept for ever by the repair that exists to finish the delete's work.
+ * The removal was written twice as well (the writer's reconcile, the tombstoned delete). Here the selection is
+ * {@link fileLinksThisInstanceWrote}'s alone — a missing author is this instance's, because `LinkDoc.author` is required and a row without
+ * one was written here before it was stamped — and a row another instance wrote stays with it (ADR 05; D-31 is the owner's).
+ *
+ * `createdUntil` ends the read at an instant: a link written after it is not the one the caller decided on. Chunked (`READ_CHUNK`); a
+ * failure is thrown, never logged, because a caller that survived it would answer a delete that is still owed. Returns how many rows went.
  */
-export async function removeLinksWrittenBy(
-  spaceId: string, froms: readonly string[], fromKind: RefKind, instanceId: string, opts: { createdUntil?: string } = {},
+export async function removeFileLinksThisInstanceWrote(
+  spaceId: string, sources: readonly string[], { createdUntil }: { createdUntil?: string } = {},
 ): Promise<number> {
-  const empty = allClassesEmpty(fromKind);
-  if (Object.keys(empty).length === 0) return 0;
-  const written = (row: Pick<LinkDoc, 'author' | 'createdAt'>): boolean =>
-    row.author?.instanceId === instanceId && (opts.createdUntil === undefined || row.createdAt <= opts.createdUntil);
   let removed = 0;
-  for (const part of inChunks([...froms], READ_CHUNK)) {
-    const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links')).find(
-      asFilter<LinkDoc>({ spaceId, fromKind, from: { $in: part } }), { projection: { from: 1, to: 1, toKind: 1, author: 1, createdAt: 1 } },
-    ).toArray();
-    const stays = new Map<string, Partial<Record<RefKind, string[]>>>();
-    const theirs = new Set<string>();
-    for (const row of rows) {
-      if (written(row)) { theirs.add(row.from); continue; }
-      const desired = stays.get(row.from) ?? allClassesEmpty(fromKind) as Partial<Record<RefKind, string[]>>;
-      (desired[row.toKind] ??= []).push(row.to);
-      stays.set(row.from, desired);
-    }
-    const counts = await reconcileLinkRows(spaceId, [...theirs].map(from => ({
-      from, fromKind, desired: stays.get(from) ?? empty, author: NO_AUTHOR, minted: false,
-    })));
-    for (const c of counts) removed += c.removed;
+  for (const part of inChunks([...sources], READ_CHUNK)) {
+    const rows = await fileLinksThisInstanceWrote(spaceId, part, createdUntil === undefined ? {} : { createdUntil });
+    await removeWithTombstones(spaceId, 'links', rows.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })));
+    removed += rows.length;
   }
   return removed;
 }
