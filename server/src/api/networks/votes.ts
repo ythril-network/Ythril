@@ -5,6 +5,7 @@
  * Split out of the api/networks.ts monolith (A17.5). The decisions live in `networks/vote-acts.ts` since F-36 slice 2.
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../../util/log.js';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { CastVoteBody, castVoteAct, listOpenVotesAct, voteOutcomesAct } from '../../networks/vote-acts.js';
@@ -39,7 +40,7 @@ votesRouter.post('/:id/votes/:roundId', globalRateLimit, requireAdmin, (req, res
   try {
     // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
     const parsed = CastVoteBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, castVoteAct(req.params['id'] as string, req.params['roundId'] as string, parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks votes`, err);

@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import { SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 
@@ -26,7 +26,7 @@ export const ReparentSelfBody = z.object({
  */
 export function reparentSelfAct(networkId: string, input: unknown): NetworkActResult {
   const parsed = ReparentSelfBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
 
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);

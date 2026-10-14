@@ -23,7 +23,7 @@ import {
 import { deliverToWebhook } from '../webhooks/dispatcher.js';
 import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 import { parseLimit } from '../util/pagination.js';
 import { sendCaughtFailure } from './send-failure.js';
@@ -87,7 +87,7 @@ webhooksRouter.get('/:id', async (req, res) => {
 webhooksRouter.post('/', async (req, res) => {
   const parsed = CreateBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -110,7 +110,7 @@ webhooksRouter.post('/', async (req, res) => {
 webhooksRouter.patch('/:id', async (req, res) => {
   const parsed = UpdateBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

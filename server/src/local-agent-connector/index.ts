@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 // This process writes only to the console. `redactSecrets` is the same rule `log.*` applies on the
 // server side; `util/log.ts` has no imports of its own, so borrowing it costs nothing.
-import { redactSecrets } from '../util/log.js';
+import { redactSecrets, refusalOfParse } from '../util/log.js';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { envInt } from '../config/env-num.js';
@@ -354,7 +354,7 @@ app.get('/v1/status', requireConnectorAuth, (_req, res) => {
 app.post('/v1/actions/enable-networks', requireConnectorAuth, async (req, res) => {
   const parsed = EnableNetworksBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

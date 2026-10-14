@@ -30,7 +30,7 @@ import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { searchReadinessSnapshot, isSearchDown } from '../spaces/search-readiness.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -95,7 +95,7 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
   const oldId = req.params['id'] as string;
   const parsed = RenameSpaceBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   // The rename IS the change, so the snapshot is just the two ids. Set before the attempt and only read
@@ -112,7 +112,7 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
 spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = ReorderSpacesBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const reordered = reorderSpaces(parsed.data.ids);
@@ -386,7 +386,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
 
   const parsed = PutSchemaBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

@@ -14,7 +14,7 @@ import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { NOTIFY_DATA_MAX_BYTES, NOTIFY_RING_MAX_BYTES } from '../util/request-bounds.js';
 
 export const notifyRouter = Router();
@@ -95,7 +95,7 @@ export const notifyRing = new NotifyRing();
 notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
   const parsed = NotifyBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

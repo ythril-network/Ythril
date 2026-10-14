@@ -5,6 +5,7 @@
  * with their MCP tools (F-36); the peer-protocol `/:id/join` stays here.
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../../util/log.js';
 import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
@@ -22,7 +23,7 @@ export const joinRouter = Router();
 joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const parsed = JoinRemoteBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks/join-remote`, err);
@@ -36,7 +37,7 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
 joinRouter.post('/join-by-key', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const parsed = JoinByKeyBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, await joinByInviteKeyAct(req.authToken as Parameters<typeof joinByInviteKeyAct>[0], parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks/join-by-key`, err);
@@ -63,7 +64,7 @@ joinRouter.post('/:id/invite', globalRateLimit, requireAuth, denyReadOnly, async
 joinRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res) => {
   try {
     const parsed = JoinNetworkBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, await admitByInviteKeyAct(String(req.params['id']), parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks/:id/join`, err);
@@ -85,7 +86,7 @@ joinRouter.post('/:id/fork', globalRateLimit, requireAdmin, (req, res) => {
   try {
     // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
     const parsed = ForkNetworkBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, forkNetworkAct(String(req.params['id'] ?? ''), parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks/:id/fork`, err);
