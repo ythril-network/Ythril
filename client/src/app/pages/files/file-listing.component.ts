@@ -116,7 +116,7 @@ export interface FileRow {
                   <span class="tag-list">@for (t of row.entry.tags; track t) { <span class="tag-chip">{{ t }}</span> }</span>
                 }
               </td>
-              <td style="color:var(--text-muted)">
+              <td style="color:var(--text-muted); white-space:nowrap">
                 {{ formatSize(row.entry.size) }}
               </td>
               <td><app-timestamp [value]="row.entry.modified"/></td>
