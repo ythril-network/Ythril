@@ -21,18 +21,23 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { toDocId } from '../util/paths.js';
 import { hasLiveFileRecordExactlyAt, retireFileMeta } from './file-meta.js';
-import { cancelMediaJob } from './media/job-queue.js';
+import { cancelJobsOwnedBy, cancelMediaJob } from './media/job-queue.js';
+import { deleteRowsDerivedFrom, rowsOfFiles } from './derived-rows.js';
 import { spaceRoot } from './sandbox.js';
 import { isMissingPath, isOneNameUnderTwoSpellings } from './stored-bytes.js';
 
 /**
- * Remove the record a peer's tombstone names, and its job, and nothing of the entry: the other spelling's record stands on those bytes and
- * on the sidecars beside them, which a sidecar's own spelling shares. The job first, as every remover of a file's rows revokes the claims
- * of its jobs before it removes the rows.
+ * Remove the record a peer's tombstone names, the rows derived from it (chunks, the converted-sidecar row, extracted images and the captions
+ * and faces beneath them: they belong to the record, and left behind they are orphans) and its jobs — and nothing of the entry: the other
+ * spelling's record stands on those bytes and on the sidecar files beside them, which both spellings name. The jobs first, as every remover of
+ * a file's rows revokes the claims before it removes the rows.
  */
 export async function removeOnlyTheRecordNamed(spaceId: string, rel: string): Promise<void> {
-  await cancelMediaJob(spaceId, rel);
-  await retireFileMeta(spaceId, rel);
+  const id = toDocId(rel);
+  await cancelMediaJob(spaceId, id);
+  await cancelJobsOwnedBy(spaceId, id, 'file');
+  await deleteRowsDerivedFrom(spaceId, (await rowsOfFiles(spaceId, [id], [])).ids);
+  await retireFileMeta(spaceId, id);
 }
 
 export async function liveRecordAtAnotherSpellingOfEntry(spaceId: string, rel: string, abs: string): Promise<string | null> {

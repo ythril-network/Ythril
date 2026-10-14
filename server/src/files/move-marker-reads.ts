@@ -25,7 +25,7 @@ import path from 'node:path';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency.js';
-import { bytesPresentAt, classifyDestination, destinationStateAt, isOneNameUnderTwoSpellings, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt, classifyDestination, destinationStateAt, isOneNameUnderTwoSpellings, lstatIfPresent, realPathsAgree } from './stored-bytes.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
 import { jobIdClausesOf, kindAt, movedId, movedRoot, type PathKind } from './moved-paths.js';
@@ -83,7 +83,8 @@ export async function movedBytesOf(spaceId: string, marker: MovePair): Promise<M
   const atTo = await lstatAt(spaceId, marker.to);
   if (atTo === null) return null;
   if (atFrom === null) return viewOf(atTo);
-  if (classifyDestination(atFrom, atTo, { begun: true, names: { src: marker.from, dst: marker.to } }) === 'half-linked') return viewOf(atTo);
+  const sameRealPath = await realPathsAgree(await resolveSafePathChecked(spaceId, marker.from), await resolveSafePathChecked(spaceId, marker.to));
+  if (classifyDestination(atFrom, atTo, { begun: true, names: { src: marker.from, dst: marker.to }, sameRealPath }) === 'half-linked') return viewOf(atTo);
   return await pairOnDisk(spaceId, marker.from, marker.to) === 'one-entry-new-spelling' ? viewOf(atTo) : null;
 }
 

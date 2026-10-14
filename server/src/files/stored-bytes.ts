@@ -420,30 +420,48 @@ export function isOneNameUnderTwoSpellings(a: string, b: string): boolean {
  *
  *  - nothing at the destination: `free`;
  *  - another inode or device, or an inode the file system does not number (`0`): `occupied`;
- *  - the same inode and the two NAMES one name under case folding ({@link isOneNameUnderTwoSpellings}: a case-only rename in any path
- *    component, `Docs/a.txt` to `docs/a.txt`), a file or a directory: one directory entry under two spellings, an `alias` — a rename, never an
- *    unlink. **The link count plays no part**: a converter holds a scratch hard link to a file while it works on it, so the entry has two
- *    links and is still the one file;
- *  - the same inode under two names that are NOT one name is never an alias, whatever the file system numbers: a colliding or synthesised
+ *  - the same inode, the two NAMES one name under case folding ({@link isOneNameUnderTwoSpellings}: a case-only rename in any path
+ *    component, `Docs/a.txt` to `docs/a.txt`) AND the file system resolving both to ONE real spelling (`sameRealPath`, {@link realPathsAgree}),
+ *    a file or a directory: ONE directory entry under two spellings, an `alias` — a rename, never an unlink. **The link count plays no part**:
+ *    a converter holds a scratch hard link to a file while it works on it, so the entry has two links and is still the one file. A
+ *    case-SENSITIVE host keeps each spelling, so two entries there that share an inode (an operator's `a.txt` and `A.txt`) are two entries,
+ *    never an alias: a rename between them would do nothing and say it had worked;
+ *  - the same inode under two entries is never an alias, whatever the names and whatever the file system numbers: a colliding or synthesised
  *    inode (a FUSE or network file system) must not read another file as the source. A FILE with two or more links and `begun` (a begun-move
  *    marker names this very pair) is the move's OWN link whose removal of the source name did not happen: `half-linked`. Anything else —
  *    no marker (somebody's hard link), one link, a link count that is not a number, a directory — is `occupied`.
  *
  * `begun` is the caller's reading of the marker, taken BEFORE the attempt writes its own: the attempt's own marker would otherwise
- * make every operator's link look like the move's. `names` is not optional and is not defaulted: a decision made without the names cannot
- * tell an alias from a second name, and the caller that drops them gets a refusal, not a guess.
+ * make every operator's link look like the move's. `names` and `sameRealPath` are not optional and not defaulted: a decision made without
+ * them cannot tell an alias from a second entry, and the caller that drops them gets a refusal, not a guess.
  */
-export function classifyDestination(src: StatRecord, dst: StatRecord | null, { begun, names }: { begun: boolean; names: PairNames }): DestinationState {
-  if (names === undefined) throw new TypeError('classifyDestination is asked about a pair of paths: the two names are required');
+export function classifyDestination(
+  src: StatRecord, dst: StatRecord | null, { begun, names, sameRealPath }: { begun: boolean; names: PairNames; sameRealPath: boolean },
+): DestinationState {
+  if (names === undefined || typeof sameRealPath !== 'boolean') throw new TypeError('classifyDestination is asked about a pair of paths: the two names and whether they resolve to one real path are required');
   if (dst === null) return 'free';
   if (dst.dev !== src.dev || dst.ino !== src.ino || src.ino === 0n || src.ino === 0) return 'occupied';
-  const oneName = isOneNameUnderTwoSpellings(names.src, names.dst);
-  if (src.isDirectory()) return dst.isDirectory() && oneName ? 'alias' : 'occupied';
+  const oneEntry = sameRealPath && isOneNameUnderTwoSpellings(names.src, names.dst);
+  if (src.isDirectory()) return dst.isDirectory() && oneEntry ? 'alias' : 'occupied';
   if (dst.isDirectory()) return 'occupied';
-  if (oneName) return 'alias';
+  if (oneEntry) return 'alias';
   const links = src.nlink === undefined ? Number.NaN : Number(src.nlink);
   if (!Number.isFinite(links) || links < 2) return 'occupied';
   return begun ? 'half-linked' : 'occupied';
+}
+
+/**
+ * Whether the file system resolves two paths to the same real path (`realpath`): on a case-insensitive host `a.txt` and `A.txt` are one
+ * entry and both resolve to its real spelling; a case-sensitive one keeps each. A path that cannot be resolved (gone meanwhile) is not the
+ * same, which fails closed.
+ */
+export async function realPathsAgree(aAbs: string, bAbs: string): Promise<boolean> {
+  try {
+    return await fsp.realpath(aAbs) === await fsp.realpath(bAbs);
+  } catch (err) {
+    if (isMissingPath(err)) return false;
+    throw err;
+  }
 }
 
 /** {@link classifyDestination} for two paths on the disk, and whether the source is a directory. A source that is gone is `occupied`: nothing can be said of it. */
@@ -451,7 +469,8 @@ async function readDestination(srcAbs: string, dstAbs: string, begun: boolean): 
   const dst = await lstatIfPresent(dstAbs, { bigint: true });
   const src = await lstatIfPresent(srcAbs, { bigint: true });
   if (src === null) return { state: dst === null ? 'free' : 'occupied', srcIsDirectory: false };
-  return { state: classifyDestination(src, dst, { begun, names: { src: srcAbs, dst: dstAbs } }), srcIsDirectory: src.isDirectory() };
+  const sameRealPath = dst !== null && await realPathsAgree(srcAbs, dstAbs);
+  return { state: classifyDestination(src, dst, { begun, names: { src: srcAbs, dst: dstAbs }, sameRealPath }), srcIsDirectory: src.isDirectory() };
 }
 
 /** What stands at `dstAbs` for a move of `srcAbs` ({@link classifyDestination}), read from the disk. Any failure to look other than "not there" is thrown. */
