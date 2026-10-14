@@ -23,6 +23,14 @@
  * (preship-3 P3-3). A directory's tree removal that stops part way publishes the files it did remove (preship-4 P4-2),
  * and its sidecars' tombstones wait for their own removal (P4-3).
  *
+ * **The links go after the bytes and before the row** (Q-464): the links THIS instance wrote from the file and from its derived ids
+ * (`removeLinksOfDeletedFiles`, `files/remove-file-here.ts`), each with a link tombstone, so nothing a later upload at the path inherits and
+ * nothing a peer restores. Links another instance wrote stay with it (ADR 05, owner decision D-31). The step is called directly and its
+ * failure fails the delete, the row still there to find it owed on every door (REST, `POST /api/delete_file`, MCP, the TTL sweep); a second
+ * pass after the row removes a link written while the row was still live, bounded to links written by the instant the row went. A file's
+ * own tombstone is published after its links are gone, so a delete whose link step failed has told no peer yet and its retry tells them once.
+ * A directory runs the same steps over its tree: its links are those of the files gone from disk (never of one a failure left standing).
+ *
  * **After the bytes, a store failure still fails the delete** (bundle-30 I14, verify-drive-4 D1). The job, the
  * artifacts and the metadata each used to be `.catch(log.warn)`: with the store paused, a delete unlinked the bytes,
  * failed all three and answered `204`. Now each step's own failure is still logged and survived, but the STORE's is
@@ -49,11 +57,11 @@ import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, re
 import { forgetFileHashesByPrefix } from './manifest.js';
 import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
-import { removeFileHere } from './remove-file-here.js';
+import { removeFileHere, removeLinksOfDeletedFiles } from './remove-file-here.js';
 import { sidecarsOf, type PathKind } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
+import { actUnderPendingTombstones, confirmFileTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
 import { forgetFinishedMove, moveIsOwed, movesBegunInto, type MoveMarker } from './move-markers.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
@@ -78,10 +86,17 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
     if (!present) return;
     movedHere = await removeWhatAMovedFileLeftAtItsSource(spaceId, filePath, 'file');
     await deleteStoredIfPresent(abs);
-  });
+  }, pendingAmong(pending, []));   // published below, once the links are gone: a failure of that step leaves the tombstone pending and the retry's its replacement, so peers are told once
+  // The links this instance wrote from the file and from its derived ids, with the tombstones that tell peers: after the bytes and
+  // before the row, so a failure leaves the delete owed (the row finds it), called directly so it IS thrown (`removeLinksOfDeletedFiles`).
+  await removeLinksOfDeletedFiles(spaceId, filePath, 'file');
+  await confirmFileTombstones(pending);
   // The job, the artefacts, the cached hash and — last, so a retry finds the delete still owed — the row: the one list of
   // what a file leaves, shared with the media worker's reconcile and a peer's file tombstone (`remove-file-here.ts`).
   await removeFileHere(spaceId, filePath, { failure: 'throw' });
+  // A link written while the row was still live (a `save_link` between the pass above and the row's removal): the same removal, bounded to
+  // links written by the instant the row went, so a file uploaded at this path since keeps the links it is given.
+  await removeLinksOfDeletedFiles(spaceId, filePath, 'file', { createdUntil: new Date().toISOString() });
   for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
   // The brain family's one rule (`if (actor) emitWebhookEvent`): a delete no user made — the TTL sweep passes its own
   // actor, so it still reports; a caller with none is silent on the webhook AND the live view (bundle-48, Q-259).
@@ -136,8 +151,8 @@ const CANNOT_EXIST = new Set(['ENAMETOOLONG', 'ELOOP']);
  *   and is never deleted.
  * - Everything else is {@link deleteFileCascade} or {@link deleteDirectoryCascade}.
  *
- * A directory delete takes no actor: it emits no `file.deleted` webhook, on any door (Q-469). Returns what was deleted, for the door
- * that audits the act.
+ * A directory delete is handed the actor like a file's, and announces what it removed (`file.deleted`, once per live file; Q-469). Returns
+ * what was deleted, for the door that audits the act.
  */
 export async function deletePath(spaceId: string, filePath: string, { confirm, actor }: { confirm?: unknown; actor?: WebhookActor } = {}): Promise<PathDeleted> {
   const confirmed = confirmOf(confirm);
@@ -161,8 +176,8 @@ export async function deletePath(spaceId: string, filePath: string, { confirm, a
   }
   if (confirmed !== true) throw new ConfirmRequired(filePath);
   if (abs === spaceRoot(spaceId)) throw new SpaceRootRefused(filePath);
-  // Tombstones, tree, jobs, sidecars, metadata — in the order this module's header explains.
-  await deleteDirectoryCascade(spaceId, filePath);
+  // Tombstones, tree, jobs, sidecars, links, metadata — in the order this module's header explains.
+  await deleteDirectoryCascade(spaceId, filePath, actor);
   return 'directory';
 }
 
@@ -171,8 +186,14 @@ export async function deletePath(spaceId: string, filePath: string, { confirm, a
  * and the same failures as `deleteFileCascade`, over a tree. A tree already gone whose records remain (a delete a
  * store failure stopped after the tree went) is completed: its records' paths are tombstoned and the rest removed.
  * The caller has checked the path is a directory (or was one: `isUnfinishedDirectoryDelete`) and is not the root.
+ *
+ * The links this instance wrote from the files that are gone go between the tree and the rows (`removeLinksOfDeletedFiles`; Q-464),
+ * and a caller with an `actor` is told of every live file the rows retire, once each, as `file.deleted` (Q-469): read page by page
+ * BEFORE a page is retired and announced once it has been, so a retry never announces a file twice, and none for a sidecar, a derived
+ * row or one an earlier delete had flagged. With no actor (the shape every internal caller has) nothing is announced, on the webhook
+ * and on the live view alike.
  */
-export async function deleteDirectoryCascade(spaceId: string, dirPath: string): Promise<void> {
+export async function deleteDirectoryCascade(spaceId: string, dirPath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, dirPath);
   const present = await bytesPresent(abs);
   // Every file about to go — the folder tree (or, with the tree gone, every record under it) AND its conversion
@@ -198,9 +219,15 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
   // That removal survives its own failure, so the sidecars' tombstones are settled from the disk: published where the
   // bytes went, dropped where they are still here.
   await settlePendingFileTombstones(pendingAmong(pending, sidecars));
+  // The links this instance wrote from the files that are gone from disk (those a failure left standing keep theirs), before the rows
+  // and called directly, so a failure fails the delete with the rows still there to find it owed.
+  const surviving = await filesStillUnder(spaceId, dirPath);
+  await removeLinksOfDeletedFiles(spaceId, dirPath, 'directory', { surviving });
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
-  await retireRowsUnderDirectory(spaceId, dirPath);
+  await retireRowsUnderDirectory(spaceId, dirPath, announcedBy(spaceId, actor));
+  // A link written while the rows were still live: the pass above again, bounded to links written by the instant the rows went.
+  await removeLinksOfDeletedFiles(spaceId, dirPath, 'directory', { surviving: await filesStillUnder(spaceId, dirPath), createdUntil: new Date().toISOString() });
   for (const m of movedHere) await forgetFinishedMove(spaceId, m.from, m.to);
 }
 
@@ -223,15 +250,36 @@ async function removeWhatADirectoryLeftBesideItsRows(spaceId: string, dirPath: s
   await unlessTheStoreFailed(`forgetFileHashesByPrefix error ${at}`, () => forgetFileHashesByPrefix(spaceId, dirPath));
 }
 
-/** The records under a directory, as the configured retention says (`retireFileMetaUnder`), failing with the store's failure. */
-async function retireRowsUnderDirectory(spaceId: string, dirPath: string): Promise<void> {
-  await unlessTheStoreFailed(`retireFileMetaUnder error ${directoryAt(spaceId, dirPath)}`, () => retireFileMetaUnder(spaceId, dirPath));
+/**
+ * The records under a directory, as the configured retention says (`retireFileMetaUnder`), failing with the store's failure.
+ * `onRetired` is told the paths of each page of live files once the page is retired (the announcement a directory delete makes).
+ */
+async function retireRowsUnderDirectory(spaceId: string, dirPath: string, onRetired?: (paths: readonly string[]) => void): Promise<void> {
+  await unlessTheStoreFailed(`retireFileMetaUnder error ${directoryAt(spaceId, dirPath)}`,
+    () => retireFileMetaUnder(spaceId, dirPath, onRetired ? { onRetired } : {}));
+}
+
+/**
+ * What a directory delete tells its subscribers about the files it removed: a `file.deleted` per path, as one file's delete tells it, and
+ * for a caller with no actor nothing at all (the brain family's one rule; the TTL sweep, which has an actor of its own, still reports).
+ */
+function announcedBy(spaceId: string, actor: WebhookActor | undefined): (paths: readonly string[]) => void {
+  return (paths) => {
+    if (actor) for (const path of paths) emitWebhookEvent({ event: 'file.deleted', spaceId, entry: { path }, ...actor });
+  };
+}
+
+/** The files still on disk under a directory, as ids: what a delete that stopped part way left, or a write into it meanwhile. None when the tree is gone. */
+async function filesStillUnder(spaceId: string, dirPath: string): Promise<string[]> {
+  return (await listFilesRecursive(spaceId, dirPath)).map(toDocId);
 }
 
 /**
  * A path deleted where a move carried a file TO it, while the move is still owed: whatever the move had not yet carried away from
  * its source goes with it, the records of `from` by the one list of what a file leaves ({@link removeFileHere}) — for a directory, by
- * the directory delete's own removal by prefix, not file by file. Returns the moves,
+ * the directory delete's own removal by prefix, not file by file — and the links this instance wrote from `from`
+ * ({@link removeLinksOfDeletedFiles}, before the rows, as the cascade does): a link at the source is something of the file still there,
+ * which keeps the move owed, so a delete that left it left the marker standing. Returns the moves,
  * so the caller clears their markers once the bytes at `to` are gone (before that the move still reads as owed: a link row
  * the delete does not remove keeps it so).
  *
@@ -251,8 +299,10 @@ async function removeWhatAMovedFileLeftAtItsSource(spaceId: string, to: string, 
     if (!(await moveIsOwed(spaceId, move.from, move.to))) continue;
     if (kind === 'directory') {
       await removeWhatADirectoryLeftBesideItsRows(spaceId, move.from);
+      await removeLinksOfDeletedFiles(spaceId, move.from, 'directory', { surviving: await filesStillUnder(spaceId, move.from) });
       await retireRowsUnderDirectory(spaceId, move.from);
     } else {
+      await removeLinksOfDeletedFiles(spaceId, move.from, 'file');
       await removeFileHere(spaceId, move.from, { failure: 'throw' });
     }
     carried.push(move);

@@ -157,7 +157,7 @@ describe('delete_file describes the cascade it really performs', () => {
     for (const [where, text, at] of [['deleteFileCascade', file, links], ['deleteDirectoryCascade', dir, dirLinks]]) {
       // The statement the call sits in is the call itself, awaited: wrapped in a step that survives a failure it would be `unlessTheStoreFailed(…)` or `.catch(…)`.
       const statement = statementAround(text, at, `${where}: the link remover's statement`);
-      assert.match(statement, /^await\s+removeLinksOfDeletedFiles\(/, `${where} does not await the link remover directly: a failure in it must fail the delete, never be logged and survived — ${statement.slice(0, 120)}`);
+      assert.match(statement.trimStart(), /^await\s+removeLinksOfDeletedFiles\(/,`${where} does not await the link remover directly: a failure in it must fail the delete, never be logged and survived — ${statement.slice(0, 120)}`);
       assert.deepEqual(enclosingBlocksMatching(text, at, /\b(?:try|catch)\b[^{]*\{$/, `${where}: blocks around the link remover`), [],
         `${where} calls the link remover inside a try or a catch: the delete would answer done with the links left`);
     }

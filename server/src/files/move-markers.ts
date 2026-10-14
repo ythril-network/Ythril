@@ -39,7 +39,7 @@ import { inChunks } from '../util/chunks.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { removeConvergedLinks } from './move-links.js';
 import { isTheMovedBytes, movedBytesOf, somethingOfTheFileIsAt } from './move-marker-reads.js';
-import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
+import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
 import { kindAt, moveKey, movedPairs, parentOfSidecar } from './moved-paths.js';
 import {
   ask, tombstonesAtPaths, tombstonesOf, type FileTombstoneQuery, type FileTombstoneQuerySample, type MoveMarker, type StoredFileTombstone,
@@ -108,7 +108,7 @@ export async function abandonMove(spaceId: string, from: string, to: string): Pr
   if (!marker || !(await movedBytesOf(spaceId, marker))) return;
   if (await moveIsOwed(spaceId, from, to)) return;
   const kind = await kindAt(spaceId, marker.to);
-  const froms = kind === 'file' ? [toDocId(from)] : await fileLinkSourcesUnder(spaceId, toDocId(from));
+  const froms = await fileLinkSourcesOf(spaceId, from, kind);
   await removeConvergedLinks(spaceId, movedPairs(froms, from, to));
   await forgetFinishedMove(spaceId, from, to);
 }

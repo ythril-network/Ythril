@@ -42,6 +42,8 @@ import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
 import { getConfig } from '../config/loader.js';
+import { authorRef } from '../config/author.js';
+import { toDocId } from '../util/paths.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -366,6 +368,53 @@ export async function fileLinkSourcesUnder(spaceId: string, root: string): Promi
   if (!root) throw new RangeError('fileLinkSourcesUnder: an empty root would ask about every file in the space');
   return await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
     asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(root)}/` } }));
+}
+
+/**
+ * The file ids that are the `from` of a link row and belong to `path` taken as a `kind` — each once. THE selection of "the links a file
+ * (or a directory's files) holds", asked by the move that carries them, the move whose abandon takes them back, and the delete that
+ * removes them ({@link fileLinksThisInstanceWrote} reads the rows of what this returns).
+ *
+ * - `'file'`: the file's own id AND its derived ids (`path#…`: the chunk and face rows a conversion leaves, which a link can start
+ *   from). On whole names — `a.txt` takes `a.txt` and `a.txt#chunk0`, never `a.txt.bak` — which is what a prefix of the TEXT would get wrong.
+ * - `'directory'`: everything under `path/`, derived ids included ({@link fileLinkSourcesUnder}).
+ *
+ * ## What it prevents
+ *
+ * A file's links hang off its path, so a delete that leaves them gives them to whatever is uploaded at the path next. A selection that
+ * read only the file's own id left its derived ids' links behind, and one that matched the text as a prefix took another file's. Written
+ * here once, the three callers cannot disagree about which links a path owns. An empty path is refused rather than read as "every file".
+ */
+export async function fileLinkSourcesOf(spaceId: string, path: string, kind: 'file' | 'directory'): Promise<string[]> {
+  const id = toDocId(path).replace(/\/+$/, '');
+  if (!id) throw new RangeError('fileLinkSourcesOf: an empty path would ask about every file in the space');
+  if (kind === 'directory') return await fileLinkSourcesUnder(spaceId, id);
+  return await distinctStringsOf(col<LinkDoc>(spaceCollection(spaceId, 'links')), 'from',
+    asFilter<LinkDoc>({ fromKind: 'file', from: { $regex: `^${escapeRegex(id)}(?:#|$)` } }));
+}
+
+/**
+ * The link rows starting from any of the file ids `froms` that THIS instance wrote — an author that is this instance's, or none (a row
+ * written before authorship was stamped is this instance's, as a file row with no author is, `derived-fields.ts`) — as the id and seq
+ * a removal's tombstone needs. A link another instance wrote is not here: it is that instance's, and its deletion is that instance's
+ * to make (ADR 05).
+ *
+ * `createdUntil` ends the read at an instant: a link written AFTER it is not the one a delete is taking, and is not returned. The
+ * second pass of a delete, run once the file's row is gone, asks with the instant the row went, so it catches a link written while
+ * the row was still live and never the new link of a file uploaded at the path since. Chunked by the caller (an `$in` of ids).
+ */
+export async function fileLinksThisInstanceWrote(
+  spaceId: string, froms: readonly string[], { createdUntil }: { createdUntil?: string } = {},
+): Promise<Array<{ _id: string; seq: number | undefined }>> {
+  if (froms.length === 0) return [];
+  const self = authorRef().instanceId ?? null;
+  const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({
+      fromKind: 'file', from: { $in: [...froms] },
+      $or: [{ author: { $exists: false } }, { 'author.instanceId': self }],
+      ...(createdUntil === undefined ? {} : { createdAt: { $lte: createdUntil } }),
+    }), { projection: { _id: 1, seq: 1 } }).toArray() as Array<{ _id: string; seq?: number }>;
+  return rows.map(r => ({ _id: r._id, seq: r.seq }));
 }
 
 /**
