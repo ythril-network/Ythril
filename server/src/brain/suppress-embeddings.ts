@@ -5,6 +5,7 @@ import { RECORD_SUPPRESS_FIELD, parseRecordFlag } from './record-flag.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
+import { walkUpFileChains } from '../files/ancestry.js';
 
 /**
  * Should this record be embedded at all?
@@ -205,10 +206,6 @@ export function embeddingSuppressedFor(
   });
 }
 
-/** How far up `parentFileId` a derived record looks for its owner. A caption chunk of an image extracted from a
- *  document is two levels down; nothing is deeper. */
-export const MAX_ANCESTRY = 3;
-
 /**
  * Whether a derived record's ANCESTORS say its embeddings are suppressed — the half of {@link fileEmbeddingSuppressed}
  * that reads other rows.
@@ -216,22 +213,20 @@ export const MAX_ANCESTRY = 3;
  * A chunk carries no flag of its own: its owner set one on the file. Read only one level up, the caption chunk of an
  * image extracted from a suppressed document would still embed, because the extracted image is the parent and the
  * document is the grandparent. A missing ancestor counts as suppressed — fail closed, because the alternative sends
- * the passage to an embedder that may be external, against a choice nobody can see any more.
+ * the passage to an embedder that may be external, against a choice nobody can see any more. A flagged ancestor reads
+ * as missing, which is the right answer too: nothing derived from a deleted file should be handed to an embedder.
+ *
+ * The walk is `files/ancestry.ts`'s, the one the move plan and the leaked-rows repair read their chains by, and it stops
+ * at the first ancestor that carries the flag, so a record whose parent is suppressed costs one read.
  */
 async function ancestorSuppressed(spaceId: string, file: Record<string, unknown>): Promise<boolean> {
-  let parentId = file['parentFileId'];
-  for (let depth = 0; depth < MAX_ANCESTRY && typeof parentId === 'string'; depth++) {
-    const parent = await col(spaceCollection(spaceId, 'files')).findOne(
-      // A flagged ancestor reads as missing, which this function already treats as suppressed: the fail-closed
-      // answer, and the right one — nothing derived from a deleted file should be handed to an embedder.
-      asFilter({ _id: parentId, ...NOT_A_FLAGGED_ROW }),
-      { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
-    ) as Record<string, unknown> | null;
-    if (!parent) return true;
-    if (recordSuppression(parent) === true) return true;
-    parentId = parent['parentFileId'];
-  }
-  return false;
+  const parentId = file['parentFileId'];
+  if (typeof parentId !== 'string') return false;
+  const chain = (await walkUpFileChains(spaceId, new Map([['self', parentId]]), {
+    fields: { [RECORD_SUPPRESS_FIELD]: 1 },
+    stopWhen: ancestor => recordSuppression({ ...ancestor }) === true,
+  })).get('self')!;
+  return chain.result.end === 'gone' || chain.result.end === 'stopped';
 }
 
 /**

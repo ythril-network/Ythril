@@ -33,7 +33,11 @@
  * `MoveStillOwed` — never swallowed, never a success. The bytes are at the destination and some records are not, and the move is
  * finished by the retry of the request or, if nobody retries, by housekeeping (`files/finish-owed-moves.ts`); nothing that runs by
  * itself forgets the marker or removes the records while it is owed (`moveIsOwed`). A sidecar whose bytes cannot be moved keeps the
- * move owed: its rows do not move away from their bytes. A sidecar destination holding only DEBRIS (the sidecars of a file that has
+ * move owed: its rows do not move away from their bytes. **The one exception is a sidecar whose destination something else took
+ * after the bytes moved (`DestinationExists`, and only that answer: an I/O fault stays owed):** no retry will find it gone, so the
+ * move finishes without that sidecar — the occupant untouched, the moved file's own sidecar at the source removed with its rows and
+ * jobs (`removeSidecarsAMoveCouldNotPlace`), the moved record carrying no `convertedFileId`, one log line and
+ * `ythril_file_moves_finished_without_sidecar_total`. A sidecar destination holding only DEBRIS (the sidecars of a file that has
  * neither bytes nor a record) is removed before the bytes move (`assertDestinationFree` names it), so a move onto a name a converted
  * file once had finishes; a live record of ANOTHER file that arrived at an id the move still has to take is `DestinationHeldAfterMove`
  * (`409`), which keeps the move owed until that file is gone, and says the bytes already moved.
@@ -80,8 +84,9 @@ import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { fileMoveBatchReplansTotal, fileMoveRowsReplacedTotal } from '../metrics/registry.js';
-import { log, peerText } from '../util/log.js';
+import { fileMoveBatchReplansTotal, fileMoveRowsReplacedTotal, fileMovesFinishedWithoutSidecarTotal } from '../metrics/registry.js';
+import { log, peerList, peerText } from '../util/log.js';
+import { removeSidecarsAMoveCouldNotPlace } from './converters/pipeline.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -139,7 +144,7 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
       if (moves.length > 0) {
         await rekeyRows<FileMetaDoc>(filesColl, session, {
           moves,
-          rebuild: (row, to) => rebuiltFileRow(row, to, src, dst),
+          rebuild: (row, to) => rebuiltFileRow(row, to, src, dst, plan.unplacedSidecars),
           // A row at a new id that the plan did not name appeared since it was made: the plan is stale, and is made again.
           refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the batch was planned`),
           replacements: { replaced: batch.replaced, flagged: batch.flagged },
@@ -207,19 +212,32 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
     // The bytes have moved, so what the path IS is read where they went.
     const kind = await kindAt(spaceId, dst);
     let sidecarFailed = false;
+    const unplaced: Array<{ from: string; to: string }> = [];
     for (const sidecar of await movedSidecars(spaceId, src, dst, kind)) {
       if (!(await bytesPresentAt(spaceId, sidecar.from))) continue;
       await moveFile(spaceId, sidecar.from, sidecar.to, { begun: true }).catch((err: unknown) => {
+        // Something else stands at the sidecar's destination (`DestinationExists`, the one answer that says so): the occupant is not ours to
+        // touch, and no retry will ever find it gone. Any other failure of a sidecar keeps the move owed.
+        if (err instanceof DestinationExists) { unplaced.push(sidecar); return; }
         sidecarFailed = true;
         log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`);
       });
+    }
+    // The move finishes without the sidecars an occupant took (Q-467): what is left of them at the source (the bytes, their rows, their jobs)
+    // goes, and the moved file's pointer to a converted copy is not carried (`rebuiltFileRow`). Only when every other sidecar was placed: a move
+    // that stays owed meets the occupant again on its retry, and decides then.
+    if (!sidecarFailed && unplaced.length > 0) {
+      await removeSidecarsAMoveCouldNotPlace(spaceId, src, kind, unplaced.map(s => s.from));
+      fileMovesFinishedWithoutSidecarTotal.inc();
+      log.warn(`The move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} finished without its sidecar: ${peerList(unplaced.map(s => s.to))} already exists and was left as it is. `
+        + 'The moved file has no converted copy until it is reprocessed.');
     }
     // Every byte this move will carry has moved, or failed to: the tombstones it left pending are settled from the disk. A sidecar that
     // could not move is still here, so its tombstone is dropped rather than published.
     await settleBegunMove(spaceId, src, dst);
     if (sidecarFailed) throw new Error('a sidecar of the moved path could not be moved, so its records stay with its bytes');
 
-    const plan = await planMove(spaceId, src, dst, kind, 'after-the-bytes');
+    const plan: MovePlan = { ...await planMove(spaceId, src, dst, kind, 'after-the-bytes'), unplacedSidecars: unplaced.map(s => s.from) };
     const refused = plan.refusedAtDestination[0];
     if (refused) throw new DestinationHeldAfterMove(refused.id, src, dst, refused.heldBy);
     const cameBack = await cameBackAtSource(spaceId, plan);

@@ -282,11 +282,28 @@ function distinctMoves(rows: ReadonlyArray<{ move?: MoveMarker }>): MoveMarker[]
  * either, and what the worker would remove is the record the move still has to carry.
  */
 export async function moveCarriesRecordsAt(spaceId: string, path: string): Promise<boolean> {
-  const at = toDocId(path);
+  return (await pathsCarriedByOwedMoves(spaceId, [path])).has(toDocId(path));
+}
+
+/** The sources a begun move would have to have for it to be carrying the records at `at`: `at`, each directory above it, and the same for the file a sidecar belongs to. */
+function sourcesThatCouldCarry(at: string): string[] {
   const parent = parentOfSidecar(at)?.parent;
-  const from = [at, ...(parent ? [parent] : [])].flatMap(p => p.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')));
-  const owed = await movesStillOwed(spaceId, (await movesBegunFrom(spaceId, [...new Set(from)])).map(move => ({ move })));
-  return owed.size > 0;
+  return [at, ...(parent ? [parent] : [])].flatMap(p => p.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')));
+}
+
+/**
+ * Which of `paths` a begun move is still carrying ({@link moveCarriesRecordsAt}'s question for many paths at once, by their stored
+ * spelling): the begun moves out of every source that could carry any of them are read in one chunked pass, and each is judged owed
+ * ONCE however many paths it names. For a caller that is about to REMOVE something at those paths, so a move that cannot be looked
+ * at counts as carrying them (`movesStillOwed`).
+ */
+export async function pathsCarriedByOwedMoves(spaceId: string, paths: readonly string[]): Promise<Set<string>> {
+  const at = [...new Set(paths.map(toDocId))];
+  const sources = new Map(at.map(p => [p, sourcesThatCouldCarry(p)]));
+  const begun = await movesBegunFrom(spaceId, [...new Set([...sources.values()].flat())]);
+  const owed = await movesStillOwed(spaceId, begun.map(move => ({ move })));
+  const owedSources = new Set(begun.filter(m => owed.has(moveKey(m))).map(m => m.from));
+  return new Set(at.filter(p => sources.get(p)!.some(s => owedSources.has(s))));
 }
 
 /**

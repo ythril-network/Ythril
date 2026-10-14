@@ -142,6 +142,13 @@ export function movedId(id: string, src: string, dst: string): string | null {
 }
 
 /**
+ * Whether `id` is `root`, or anything that belongs to it: under it, a chunk of it, or its sidecar ({@link movedId} answers it for every
+ * spelling). Asked by the move plan (is the file at the end of a chain inside the destination?) and by the leaked-rows repair (is the
+ * file at the end of a row's chain the file the row's own id names?), so both mean the same by "belongs".
+ */
+export const belongsTo = (id: string, root: string): boolean => movedId(id, root, root) !== null;
+
+/**
  * Whether `p` is `root` itself or lies under `root/` — on whole path segments, so `a` does not take `ab`. The one spelling of "at or
  * under", for the id rule above and for the question of whether a running move is carrying a path (`files/move-flight.ts`).
  */

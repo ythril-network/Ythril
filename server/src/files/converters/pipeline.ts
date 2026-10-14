@@ -33,10 +33,11 @@ import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/typ
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
-import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type Sidecar } from '../moved-paths.js';
+import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type PathKind, type Sidecar } from '../moved-paths.js';
 import { deleteRowsDerivedFrom, rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
-import { READ_CHUNK } from '../../db/read-by-id.js';
+import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
+import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
@@ -291,6 +292,26 @@ export async function runConversionPipeline(
 
 
 /**
+ * Refuse to write a file's converted Markdown over bytes that are not its own (Q-467).
+ *
+ * ## What it prevents
+ *
+ * The converted copy is written at a path derived from the file's. A move that finished without its sidecar (something stood at the
+ * destination) leaves the occupant at exactly the path a later conversion of the moved file would write, and a reprocess would overwrite it
+ * for good. **Whose bytes are those is told by the rows**: bytes at the path are the file's own when a row derived from the file (its
+ * `parentFileId`) stands at that id — the row an earlier run of this conversion wrote with them — and anyone's otherwise. A conversion
+ * the lease still holds fails here once, with the path named, and a delete of that path (or of the file's stale copy) lets a reprocess go through.
+ * A path with no bytes, or with the file's own, is written as before.
+ */
+async function refuseConvertedPathHeldByOthers(spaceId: string, originalId: string, convertedPath: string): Promise<void> {
+  if (!await bytesPresentAt(spaceId, convertedPath)) return;
+  const own = await readStoredById<{ parentFileId?: string }>(spaceCollection(spaceId, 'files'), [toDocId(convertedPath)], { parentFileId: 1 }, { filter: NOT_A_FLAGGED_ROW });
+  if (own.get(toDocId(convertedPath))?.parentFileId === originalId) return;
+  throw new Error(`The converted copy of '${peerText(originalId)}' was not written: '${peerText(toDocId(convertedPath))}' already holds bytes that no record derived from this file owns (another file's, or one that arrived there). `
+    + `Delete that path if it is not wanted, then reprocess the file.`);
+}
+
+/**
  * Store a converted file's chunk records in the {spaceId}_files collection.
  * Each chunk gets its own record with a per-chunk embedding.
  * Extracted images (from hi_res PDF/DOCX/EPUB conversion) are written as
@@ -349,6 +370,7 @@ export async function storeConversionResults(
   let convertedFileId: string | null = null;
   if (convertedMarkdown !== null) {
     const convertedPath = convertedFileOf(originalId);
+    await refuseConvertedPathHeldByOthers(spaceId, originalId, convertedPath);
     await writeFile(spaceId, convertedPath, convertedMarkdown);
     convertedFileId = toDocId(convertedPath);
 
@@ -636,6 +658,24 @@ async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[],
   for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);
 
   await removeSidecarBytes(spaceId, owned);
+}
+
+/**
+ * Take what a move could not place of its sidecars (Q-467): the jobs, the rows and the bytes of the sidecars of `src` named by `paths`
+ * (their paths AT THE SOURCE), and nothing of the file itself or of the sidecars that were placed.
+ *
+ * ## What it prevents
+ *
+ * A move whose sidecar met an occupant at its destination finishes without that sidecar. What stays behind at the source is the moved
+ * file's own, and nothing can ever move it: the bytes, the row that describes them and the jobs that would work on them. Carried on
+ * with the rest, that row would be stored at the destination id and call the OCCUPANT's bytes the file's own sidecar — which is exactly
+ * what lets a reprocess of the file write over them (`storeConversionResults` refuses a converted path held by bytes no row derived
+ * from the file owns). The jobs go first (the claim is the fence), as for every remover of file rows.
+ */
+export async function removeSidecarsAMoveCouldNotPlace(spaceId: string, src: string, kind: PathKind, paths: readonly string[]): Promise<void> {
+  const owned = (await sidecarsOwnedBy(spaceId, src, kind)).filter(s => paths.includes(s.path));
+  await cancelJobsOwnedBy(spaceId, src, kind, owned.map(s => s.path));
+  await removeWhatSidecarsLeft(spaceId, [], owned);
 }
 
 /**
