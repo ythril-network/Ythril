@@ -257,7 +257,8 @@ export const update_spaceTool: ToolHandler = {
     + 'administering a different space does not grant this one. `purpose` is the space-level directive MCP '
     + 'clients receive at handshake. Its `description` alias was removed in 3.0 — sending `description` is now '
     + 'rejected, not silently folded into `purpose`. To change the space\'s storage quota you need instance-admin '
-    + 'rights and the REST route: `maxGiB` is the space\'s share of the host disk, so it is not a space setting. `faceDescriptorDims` is accepted here and refused by the space\'s STATE rather than by this surface: 409 if the gallery already holds descriptors, or if its index is built at a different width. On a space that has never held a face it succeeds, which is the case an operator was blocked on.',
+    + 'rights and the REST route: `maxGiB` is the space\'s share of the host disk, so it is not a space setting. `faceDescriptorDims` is accepted here and refused by the space\'s STATE rather than by this surface: 409 if the gallery already holds descriptors, or if its index is built at a different width. On a space that has never held a face it succeeds, which is the case an operator was blocked on. On a space in more than one network a `purpose` change opens a round per network and the reply '
+    + 'carries `layers` (`applied` or `vote_pending` per network), exactly as `schema_update`\'s does.',
   mutating: true,
   spaceAdmin: true,
   spaceRequired: true,
@@ -334,11 +335,24 @@ async function runSpaceMetaUpdate(
   rights: TokenRights | undefined,
   recordChanges?: ToolContext['recordChanges'],
 ): Promise<ToolResult> {
-  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } = await import('../../spaces/meta-update.js');
-  // Q-61: a networked replace is applied as a merge; the text says which types it kept, as the structured half does.
-  const mergeLine = (r: Parameters<typeof networkMergeNotice>[0]): string => {
-    const note = networkMergeNotice(r)['mergeNote'];
-    return typeof note === 'string' ? `\n\n${note}` : '';
+  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } = await import('../../spaces/meta-update.js');
+  // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice`, the one spread): the structured half is the
+  // notice itself and the text says the same in words — the merge note (Q-61: a networked replace is applied as a merge, naming the types
+  // it kept), what became of the write in each network it reached (R5-1), and the members that may refuse a key an earlier release does
+  // not know (R6-7), named only where this token may read networks.
+  const caller = { ...(rights ? { rights } : {}) };
+  const noticeOf = (r: Parameters<typeof networkWriteNotice>[0]) => networkWriteNotice(r, caller);
+  const noticeText = (notice: Record<string, unknown>): string => {
+    const lines: string[] = [];
+    if (typeof notice['mergeNote'] === 'string') lines.push(notice['mergeNote']);
+    if (Array.isArray(notice['layers'])) {
+      lines.push('Per network: ' + (notice['layers'] as Array<{ networkLabel: string; outcome: string }>)
+        .map(l => `${l.networkLabel} ${l.outcome === 'applied' ? 'applied it' : 'is voting on it'}`).join('; ') + '.');
+    }
+    for (const w of Array.isArray(notice['warnings']) ? notice['warnings'] as Array<{ message?: string }> : []) {
+      if (typeof w.message === 'string') lines.push(`Warning: ${w.message}`);
+    }
+    return lines.length > 0 ? `\n\n${lines.join('\n\n')}` : '';
   };
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
@@ -377,6 +391,7 @@ async function runSpaceMetaUpdate(
   if (result.outcome === 'not_found') {
     return { content: [{ type: 'text' as const, text: `Space '${spaceId}' not found` }], isError: true };
   }
+  const notice = noticeOf(result);
   if (result.outcome === 'vote_pending') {
     // NOT reported as success. The space belongs to a network that votes on meta changes, so nothing is stored yet
     // and an agent that read this as "done" would build on a schema that does not exist.
@@ -385,11 +400,11 @@ async function runSpaceMetaUpdate(
       content: [{ type: 'text' as const, text:
         `Proposed, NOT yet applied: '${spaceId}' belongs to ${result.rounds.length === 1 ? 'a network' : 'networks'} `
         + `that votes on meta changes (${nets}), so this opened a vote round instead of writing. The change takes `
-        + `effect if and when the round concludes in favour.` + mergeLine(result) }],
-      structuredContent: { outcome: 'vote_pending', rounds: result.rounds, ...networkMergeNotice(result) },
+        + `effect if and when the round concludes in favour.` + noticeText(notice) }],
+      structuredContent: { outcome: 'vote_pending', rounds: result.rounds, ...notice },
     };
   }
-  return { content: [{ type: 'text' as const, text: okText + mergeLine(result) }], structuredContent: { outcome: 'applied', ...networkMergeNotice(result) } };
+  return { content: [{ type: 'text' as const, text: okText + noticeText(notice) }], structuredContent: { outcome: 'applied', ...notice } };
 }
 
 /**
@@ -454,7 +469,12 @@ export const schema_updateTool: ToolHandler = {
     + 'link is kept; a CHANGED definition beside a `$ref` is refused (400, naming the field), because the '
     + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. On a space whose '
     + 'network votes on meta changes this opens a vote round instead of writing — the reply says so, and nothing is '
-    + 'stored until the round concludes.',
+    + 'stored until the round concludes. A space in MORE THAN ONE network gets a round per network and the reply carries '
+    + '`layers`: for each network, `applied` (its round passed on this instance\'s own vote) or `vote_pending`; what '
+    + 'happens after that (a round that fails, a network\'s layer that outranks the edit) is not in the reply — read '
+    + '`space_schema_layers`. When the write sets a key that members on an earlier release refuse (`stampSkew`, `rules`) the '
+    + 'reply is still a success and carries a `warnings` row naming the keys and the members behind (their labels only '
+    + 'with `networks: read`, otherwise a count): upgrade every instance of the network.',
   mutating: true,
   /*
    * NOT `spaceAdmin: true`, since 2026-09-08, and the REST door is why.

@@ -36,8 +36,8 @@ const notFound = { status: 404 as const, error: 'Network not found' };
 /** What a round that is not here reads as: concluded. The refusal for it is the 404 every closed round gets. */
 const NOT_HERE = { concluded: true } as const;
 
-/** What a round carries that is not for an operator: the proposal body, a candidate's credential record, the invite key's hash. */
-const NOT_FOR_AN_OPERATOR = ['pendingMeta', 'pendingMember', 'inviteKeyHash'] as const;
+/** What a round carries that is not for an operator: the proposal body and the values it was computed from, a candidate's credential record, the invite key's hash. */
+const NOT_FOR_AN_OPERATOR = ['pendingMeta', 'metaBase', 'pendingMember', 'inviteKeyHash'] as const;
 
 /**
  * A round as an operator door shows it — the one projection every act that answers a round goes through (the list, and the cast's

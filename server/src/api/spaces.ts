@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
+import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
@@ -44,7 +44,7 @@ import {
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields } from '../auth/require-settings-fields.js';
-import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } from '../spaces/meta-update.js';
+import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
@@ -357,10 +357,10 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     return;
   }
   if (result.outcome === 'vote_pending') {
-    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) });
+    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, req.authToken as WriteCaller) });
     return;
   }
-  res.json({ space: spaceForWire(result.space), ...networkMergeNotice(result) });
+  res.json({ space: spaceForWire(result.space), ...networkWriteNotice(result, req.authToken as WriteCaller) });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
@@ -405,7 +405,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
 
   // Write a backup of the previous schema before replacing it
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, parsed.data.typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(id, parsed.data.typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   const previousTypeSchemas = space.meta?.typeSchemas;
   if (previousTypeSchemas && Object.keys(previousTypeSchemas).length > 0) {
@@ -581,7 +581,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   }
 
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.schema } }, 'merge');
+  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.schema } }, 'merge', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
   const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.schema));
@@ -634,7 +634,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   }
 
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, withoutType(existingMeta, kt, typeName).typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(id, withoutType(existingMeta, kt, typeName).typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   // Through the own definitions (F-39.2). A type a network layer defines comes back at the next recompute: a
   // replicated schema is additive, so only the network can take its own type away.

@@ -40,6 +40,14 @@
  *     landed edge and link is checked for strict linkage — on every door (it was the single edge route's and the
  *     batch's links only).
  *
+ *  7. **Recorded** (`sync/arrival-recording.ts`, `Q-93`, R6-9), in two halves that straddle the write. BEFORE it, each family's documents the
+ *     plan may write are judged against the space's schema and the copy each replaces is read — afterwards it is gone. AFTER it, for the
+ *     documents that LANDED (the winners and the forks, whatever else the page did), what each carries that the replaced copy lacked is
+ *     answered per document (`AcceptedFamily.recorded`: the single routes' rows, the batch's count) and said once for the page — a counter,
+ *     one line per (space, peer) per window, and a summary of names and counts the pull's history row keeps. A space in `off` records nothing,
+ *     and a recorder that breaks never stops the write: it says so once and the page goes on. This is the ONE recording site of a peer's
+ *     documents; the admin restore asks the same module.
+ *
  * Every operation of the page is bounded (bundle-30 `B2`): a stalled lock on a record or on the counter row would
  * otherwise hang a push with no bound at all, so the door could never answer the retryable 503 a stall is, and a
  * pull would hold its member's cycle. The fork's hold, nested inside, keeps whichever deadline is sooner.
@@ -61,6 +69,8 @@ import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
+import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
+import type { SchemaViolation } from '../spaces/schema-validation.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 
@@ -75,6 +85,15 @@ export interface AcceptedFamily {
   invalid: boolean[];
   /** Each document as its schema parsed it, or undefined where it was refused before parsing succeeded. */
   docs: Array<Arrived | undefined>;
+  /**
+   * What each document that was STORED carries that its schema does not accept and the copy it replaced lacked (`Q-93`, R6-9), by its
+   * index in what was handed in; undefined for a document that was not stored or has nothing new to answer for. Recorded here, once, by
+   * `sync/arrival-recording.ts`: a door that answers it (a single push route's rows, the batch's count) reads it from here and decides
+   * nothing of its own.
+   */
+  recorded: Array<SchemaViolation[] | undefined>;
+  /** What this family's page recorded, in names and counts — the sync history keeps it. Absent when nothing was recorded. */
+  summary?: RecordedSummary;
 }
 
 export interface AcceptOptions {
@@ -112,7 +131,7 @@ export async function acceptArrivingPage(
     for (const { payloadKey: key } of REPLICATED_FAMILIES) {
       const docs = page[key] ?? [];
       const res: AcceptedFamily = { verdicts: docs.map(() => 'rejected' as ArrivalVerdict), forkIds: docs.map(() => undefined),
-        reasons: docs.map(() => undefined), invalid: docs.map(() => false), docs: docs.map(() => undefined) };
+        reasons: docs.map(() => undefined), invalid: docs.map(() => false), docs: docs.map(() => undefined), recorded: docs.map(() => undefined) };
       results[key] = res;
       const { admitted, refused } = admitArrivals(key, docs);
       for (const r of refused) { res.reasons[r.index] = r.reason; res.invalid[r.index] = r.invalid; }
@@ -131,7 +150,10 @@ export async function acceptArrivingPage(
 
     // ── 2-3. plan and write, family by family ────────────────────────────────────────────────────────────────
     const forks: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
-    const landed: Array<{ key: PayloadKey; doc: Arrived }> = [];
+    const landed: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
+    // What each family's documents carried against the space's schema, looked at BEFORE they were written (the copy they replace is gone
+    // afterwards), and what it came to for the ones that landed (`sync/arrival-recording.ts`).
+    const watches = new Map<PayloadKey, ArrivalWatch | null>();
     let failure: { err: unknown } | undefined;
     try {
       const tombstones = await readPageTombstones(spaceId, REPLICATED_FAMILIES
@@ -152,6 +174,8 @@ export async function acceptArrivingPage(
         const res = results[key];
         plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
         for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
+        // Every version the plan may write: the newest of each id, and the older ones a failed write falls back to.
+        watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)), door));
 
         // The winners, then — for any whose write failed — the version accepted before it, until each id lands
         // or runs out of versions.
@@ -189,7 +213,7 @@ export async function acceptArrivingPage(
             }
             const clean = plan.tombstoneCleanups.get(id);
             if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq, ...(clean.via !== undefined ? { via: clean.via } : {}) });
-            landed.push({ key, doc: top.doc });
+            landed.push({ key, index: items[top.index]!.index, doc: top.doc });
           }
           pending = next;
         }
@@ -217,26 +241,52 @@ export async function acceptArrivingPage(
     } catch (err) {
       failure = { err };
     }
-    // ── 4. the counter, whatever became of the write; the write's own error is the one thrown (`Q-224`) ──────────
+    // ── 4. what landed, recorded against the schema; the counter, whatever became of the write; the write's own error is the one thrown (`Q-224`) ──
+    // The recording is made of what LANDED so far even when the page failed: a record that is stored and unrecorded is never recorded —
+    // the sender offers it again and the plan skips it as already held. It never throws, and never stops what follows.
+    const recorded = new Map<PayloadKey, Map<string, SchemaViolation[]>>();
+    const record = (key: PayloadKey, entries: ReadonlyArray<{ index: number; doc: Arrived }>, watch: ArrivalWatch | null) => {
+      const rows = recordedOf(watch, entries.map(e => e.doc), door);
+      for (const e of entries) {
+        const found = rows.get(e.doc);
+        if (!found) continue;
+        results[key].recorded[e.index] = found;
+        (recorded.get(key) ?? recorded.set(key, new Map()).get(key)!).set(e.doc._id, found);
+      }
+    };
+    for (const { payloadKey: key } of REPLICATED_FAMILIES) record(key, landed.filter(l => l.key === key), watches.get(key) ?? null);
+    const say = (): void => {
+      const families = new Map([...recorded].map(([key, docs]) => [key, docs] as const));
+      sayRecorded({ spaceId, source: door, peer, families });
+      for (const [key, docs] of recorded) results[key].summary = summarise(new Map([[key, docs]]));
+    };
     const behind = await advanceCounterPast(spaceId, maxReceived, where);
-    if (failure) throw failure.err;
-    if (behind) throw behind;
+    if (failure) { say(); throw failure.err; }
+    if (behind) { say(); throw behind; }
 
     // ── 5. forks ─────────────────────────────────────────────────────────────────────────────────────────────
-    if (forks.length > 0) {
-      let forkOut: ArrivalOutcome | undefined;
-      await withAllocatedSeqs(spaceId, forks.length, async (first) => {
-        // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
-        forkOut = await writePage(spaceId, 'facts', forks.map((f, k) => ({ ...f.doc, seq: first + k })),
-          { from: peer, deliveredBy, deferEnqueue: true });
-      }, `sync.${door}.fork`);
-      await forkOut?.enqueue();
-      const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
-      for (const f of forks) {
-        if (!failed.has(f.doc._id)) continue;
-        results[f.key].verdicts[f.index] = 'rejected';
-        results[f.key].forkIds[f.index] = undefined;
+    try {
+      if (forks.length > 0) {
+        // A fork is a new record under an id nothing holds, so there is no copy it replaces; looked at before it is written like any other.
+        const forkWatch = await watchArrivals(spaceId, 'facts', forks.map(f => f.doc), door);
+        let forkOut: ArrivalOutcome | undefined;
+        await withAllocatedSeqs(spaceId, forks.length, async (first) => {
+          // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
+          forkOut = await writePage(spaceId, 'facts', forks.map((f, k) => ({ ...f.doc, seq: first + k })),
+            { from: peer, deliveredBy, deferEnqueue: true });
+        }, `sync.${door}.fork`);
+        await forkOut?.enqueue();
+        const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
+        for (const f of forks) {
+          if (!failed.has(f.doc._id)) continue;
+          results[f.key].verdicts[f.index] = 'rejected';
+          results[f.key].forkIds[f.index] = undefined;
+        }
+        record('facts', forks.filter(f => !failed.has(f.doc._id)), forkWatch);
       }
+    } finally {
+      // Said once for the page, whatever the forks did: what landed is stored, and an operator is told what it carried.
+      say();
     }
 
     // ── 6. report ────────────────────────────────────────────────────────────────────────────────────────────

@@ -19,12 +19,13 @@ import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../co
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_ROWS } from '../../brain/write-validation.js';
+import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, familiesAfter, type PayloadKey } from '../../sync/replicated-families.js';
-import { KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
+import { REPLICATED_FAMILIES, familyOf, familiesAfter, type PayloadKey } from '../../sync/replicated-families.js';
 
 export const syncDocsRouter = Router();
 
@@ -241,6 +242,13 @@ const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEP
 const refusedError = (r: AcceptedFamily) => ({ error: r.reasons[0] ?? 'the document was refused and was not written' });
 
 /**
+ * What a single route answers a sender about the one document it stored: the rows the page accept recorded for it, at most `MAX_ROWS`
+ * (a document carrying a hundred undeclared keys answers twenty; the count is in the metric and the history). Rows keep their value — they
+ * answer the sender about its own document — which is the one sink of the recording that does.
+ */
+const recordedRows = (r: AcceptedFamily): SchemaViolation[] => (r.recorded[0] ?? []).slice(0, MAX_ROWS);
+
+/**
  * One document through the page accept, for a single route: its family's result, or `null` once the route has
  * answered — a document its wire schema refuses is a `400` in the route's own words (`Invalid <kind> document`), as
  * it always was, and the schema is the shared step's (`sync/arrival-shape.ts`), not a parse of the route's own.
@@ -269,10 +277,10 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (!one) return;
     const { r: facts, doc } = one;
     const verdict = facts.verdicts[0];
-    // Reported on every exit that KEPT something; `tombstoned` and `skipped` store nothing to describe.
-    const violations = () => violationsAgainstLocalSchema(spaceId, 'fact', doc);
-    if (verdict === 'inserted' || verdict === 'updated') { res.status(200).json(withSchemaViolations({ status: verdict }, violations())); return; }
-    if (verdict === 'forked') { res.status(200).json(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, violations())); return; }
+    // Reported on every exit that STORED something: what the page accept recorded for it (`sync/arrival-recording.ts`), which is nothing for
+    // a document that was skipped, tombstoned or refused — and for one whose replaced copy already had the same break.
+    if (verdict === 'inserted' || verdict === 'updated') { res.status(200).json(withSchemaViolations({ status: verdict }, recordedRows(facts))); return; }
+    if (verdict === 'forked') { res.status(200).json(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, recordedRows(facts))); return; }
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
@@ -293,11 +301,11 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'entities', 'entity');
     if (!one) return;
-    const { r: entities, doc } = one;
+    const { r: entities } = one;
     const verdict = entities.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
-    res.status(200).json(withSchemaViolations({ status: 'ok' }, violationsAgainstLocalSchema(spaceId, 'entity', doc)));
+    res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(entities)));
   } catch (err) {
     sendCaughtFailure(res, 'sync POST entities', err);
   }
@@ -315,12 +323,11 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'edges', 'edge');
     if (!one) return;
-    const { r: edges, doc } = one;
+    const { r: edges } = one;
     const verdict = edges.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
-    res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' },
-      violationsAgainstLocalSchema(spaceId, 'edge', doc)));
+    res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, recordedRows(edges)));
   } catch (err) {
     sendCaughtFailure(res, 'sync POST edges', err);
   }
@@ -342,7 +349,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'chrono', 'chrono');
     if (!one) return;
-    const { r: chrono, doc } = one;
+    const { r: chrono } = one;
     const verdict = chrono.verdicts[0];
     if (verdict === 'unknownType') {
       const allowed = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
@@ -351,7 +358,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     }
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
-    res.status(200).json(withSchemaViolations({ status: 'ok' }, violationsAgainstLocalSchema(spaceId, 'chrono', doc)));
+    res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(chrono)));
   } catch (err) {
     sendCaughtFailure(res, 'sync POST chrono', err);
   }
@@ -364,13 +371,6 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
 
 /** Documents per family per request. What is sent past it is counted `rejected`, never dropped unsaid. */
 const BATCH_FAMILY_CAP = 500;
-
-/** The knowledge type a family's documents are checked against in this space's schema, or none (links, files). */
-const schemaKindOf = (key: PushKey): KnowledgeType | undefined => {
-  const family = familyOf(key);
-  const rt = RECORD_TYPE_OF[family.collection];
-  return rt !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(rt) ? rt as KnowledgeType : undefined;
-};
 
 /**
  * POST /api/sync/batch-upsert?spaceId=&networkId=
@@ -409,11 +409,9 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     linkage.start({ stillToCome: familiesAfter(REPLICATED_FAMILIES.map(f => f.payloadKey).filter(k => page[k].length > 0)) });
 
     const parsed = (key: PushKey) => out[key].docs.filter((d): d is NonNullable<typeof d> => d !== undefined);
-    // P-21 = C: validated against THIS space's schema, counted, and let in — never refused for it.
-    const violated = (key: PushKey): number => {
-      const kind = schemaKindOf(key);
-      return kind === undefined ? 0 : parsed(key).filter(d => violationsAgainstLocalSchema(spaceId, kind, d).length > 0).length;
-    };
+    // P-21 = C: judged against THIS space's schema, counted, and let in — never refused for it. The count is the page accept's: documents
+    // that were STORED carrying something the copy they replaced did not (`sync/arrival-recording.ts`), recounted nowhere.
+    const violated = (key: PushKey): number => out[key].recorded.filter(rows => rows !== undefined).length;
     const count = (key: PushKey, v: ArrivalVerdict) => out[key].verdicts.filter(x => x === v).length;
     const rejected = (key: PushKey, ...also: ArrivalVerdict[]) =>
       overflow[key] + count(key, 'rejected') + also.reduce((n, v) => n + count(key, v), 0);

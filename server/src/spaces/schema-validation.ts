@@ -547,7 +547,7 @@ export function applyPropertyDefaults(
  * undeclared-key rule asks (R6-1). The value rules run in every mode and the MODE decides what is surfaced (`applyValidation`); a rule
  * that is new has no history to keep, so it is held to the stricter reading.
  */
-const judgesKeys = (meta: SpaceMeta | undefined): boolean => meta?.validationMode === 'warn' || meta?.validationMode === 'strict';
+export const judgesKeys = (meta: SpaceMeta | undefined): boolean => meta?.validationMode === 'warn' || meta?.validationMode === 'strict';
 
 /** An own property's value, or `undefined`: a key named like something on `Object.prototype` is not on a record because the prototype has it. */
 const ownValue = (props: Readonly<Record<string, unknown>>, key: string): unknown => (Object.hasOwn(props, key) ? props[key] : undefined);
