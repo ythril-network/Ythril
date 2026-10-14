@@ -29,6 +29,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -60,17 +61,8 @@ async function seedParent(id, over = {}, space = OPEN) {
   return doc;
 }
 
-/** The claim a conversion commits under: a real job row in `processing` with a token. */
-async function claimFor(space, fileId) {
-  const claimToken = `run-${fileId}`;
-  const now = new Date().toISOString();
-  await jobs(space).insertOne({
-    _id: fileId, spaceId: space, filePath: fileId, mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt',
-    status: 'processing', attempts: 1, maxAttempts: 3, lastError: null, claimedAt: now, progressAt: now, claimToken, claimableAfter: null,
-    createdAt: now, updatedAt: now,
-  });
-  return { jobId: fileId, claimToken };
-}
+/** The claim a conversion commits under: a real `processing` job with a token (`_media-claim.mjs`), as a text job holds it. */
+const claimFor = (space, fileId) => seedClaim(space, fileId, { mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt' });
 
 const chunk = (chunkIndex, content, headingText = '') => ({ chunkIndex, content, headingText });
 const store = (space, id, chunks, converted = null, images = [], opts) => pipeline.storeConversionResults(space, id, chunks, converted, images, opts);

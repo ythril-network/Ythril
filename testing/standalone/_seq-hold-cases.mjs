@@ -18,6 +18,7 @@ import { build } from './_push-door.mjs';
 import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 export const T0 = '2026-09-01T00:00:00.000Z';
@@ -197,7 +198,8 @@ export function holderCases(ctx, S) {
     // decline would take no number at all and the hold this case is about would never be entered.
     'server/src/files/derived-fields.ts:setDerivedDescriptionIfUnset': [{
       label: 'a derived file description', lock: 'counter',
-      run: () => ctx.mods.derivedFields.setDerivedDescriptionIfUnset(S, HELD_FILE, 'derived'),
+      // The write is the run's, so it holds a claim (`_media-claim.mjs`): the claim's job document is part of the transaction.
+      run: async () => ctx.mods.derivedFields.setDerivedDescriptionIfUnset(S, await seedClaim(S, HELD_FILE), HELD_FILE, 'derived'),
     }],
     'server/src/files/file-meta.ts:updateFileMeta': [{
       label: 'a file record updated', lock: 'counter',

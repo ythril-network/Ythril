@@ -54,6 +54,7 @@ import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -115,17 +116,8 @@ async function seedFile(space, id, over = {}) {
   await files(space).insertOne({ _id: id, spaceId: space, path: id, sizeBytes: 100, ...BASE, ...over });
 }
 
-/** The claim a conversion commits under. */
-async function claimFor(space, fileId) {
-  const claimToken = `run-${fileId}`;
-  await jobs(space).insertOne({
-    _id: fileId, spaceId: space, filePath: fileId, mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt',
-    status: 'processing', attempts: 1, maxAttempts: 3, lastError: null, claimedAt: new Date().toISOString(),
-    progressAt: new Date().toISOString(), claimToken, claimableAfter: null,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  });
-  return { jobId: fileId, claimToken };
-}
+/** The claim a conversion commits under: a real `processing` job with a token (`_media-claim.mjs`), as a text job holds it. */
+const claimFor = (space, fileId) => seedClaim(space, fileId, { mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt' });
 
 /**
  * The four producers, driven as the worker drives them. `fileId` is the file the job was claimed for; `chunkIds` are the
@@ -149,20 +141,20 @@ const PRODUCERS = {
     fileId: 'photos/whiteboard.png',
     chunkIds: ['photos/whiteboard.png#media-chunk0'],
     run: async (space, fileId) => {
-      await imageMod.embedImage(space, fileId, Buffer.from('png'), 'image/png', vision);
+      await imageMod.embedImage(space, fileId, Buffer.from('png'), 'image/png', vision, { claim: await seedClaim(space, fileId) });
       return 0;
     },
   },
   audio: {
     fileId: 'calls/q3.wav',
     chunkIds: ['calls/q3.wav#media-chunk0'],
-    run: async (space, fileId) => (await audioMod.embedAudio(space, fileId, Buffer.from('wav'), 'audio/wav', stt)).failed,
+    run: async (space, fileId) => (await audioMod.embedAudio(space, fileId, Buffer.from('wav'), 'audio/wav', stt, undefined, { claim: await seedClaim(space, fileId) })).failed,
   },
   video: {
     fileId: 'calls/q3.mp4',
     chunkIds: ['calls/q3.mp4#media-chunk0'],
     // Keyframes ON: the caption-prefixed re-embed is the second place a video stores a vector.
-    run: async (space, fileId) => (await videoMod.embedVideo(space, fileId, Buffer.from('mp4'), 'video/mp4', vision, stt, true)).audioFailed,
+    run: async (space, fileId) => (await videoMod.embedVideo(space, fileId, Buffer.from('mp4'), 'video/mp4', vision, stt, true, undefined, undefined, { claim: await seedClaim(space, fileId) })).audioFailed,
   },
 };
 
@@ -276,7 +268,7 @@ describe('a suppressed file holds no vector on its conversion or media passages 
     const imageId = '_extracted/docs/secret.pdf/image-0.png';
     await seedFile(OPEN, imageId, { parentFileId: 'docs/secret.pdf' });
 
-    await imageMod.embedImage(OPEN, imageId, Buffer.from('png'), 'image/png', vision);
+    await imageMod.embedImage(OPEN, imageId, Buffer.from('png'), 'image/png', vision, { claim: await seedClaim(OPEN, imageId) });
 
     const caption = await files(OPEN).findOne({ _id: `${imageId}#media-chunk0` });
     assert.ok(caption, 'precondition: the caption chunk was stored');
@@ -290,7 +282,7 @@ describe('a suppressed file holds no vector on its conversion or media passages 
     const imageId = '_extracted/docs/open.pdf/image-0.png';
     await seedFile(OPEN, imageId, { parentFileId: 'docs/open.pdf' });
 
-    await imageMod.embedImage(OPEN, imageId, Buffer.from('png'), 'image/png', vision);
+    await imageMod.embedImage(OPEN, imageId, Buffer.from('png'), 'image/png', vision, { claim: await seedClaim(OPEN, imageId) });
 
     const caption = await files(OPEN).findOne({ _id: `${imageId}#media-chunk0` });
     assert.ok(Array.isArray(caption.embedding) && caption.embedding.length === DIMS);

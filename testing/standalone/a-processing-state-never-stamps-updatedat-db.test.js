@@ -53,6 +53,7 @@ import { waitFor } from '../_shared/wait-for.mjs';
 import { moduleIndex, walkFrom, callsIn } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { fileRowWrites, processingTouched, NOT_A_PROCESSING_MARK } from './_processing-state-writes.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -124,13 +125,13 @@ const CASES = [
   { name: 'enqueueTextJob', entries: ['server/src/files/media/job-queue.ts:enqueueTextJob'], status: 'pending',
     run: async (id) => { await seed(id); await jobQueue.enqueueTextJob(SPACE, id, 'md'); } },
   { name: 'completeJob (complete)', entries: ['server/src/files/media/job-queue.ts:completeJob'], status: 'complete',
-    run: async (id) => { await seed(id); await seedJob(id, 'processing'); await jobQueue.completeJob(SPACE, id, 'complete'); } },
+    run: async (id) => { await seed(id); await jobQueue.completeJob(SPACE, await seedClaim(SPACE, id), 'complete'); } },
   { name: 'completeJob (partial)', entries: ['server/src/files/media/job-queue.ts:completeJob'], status: 'partial',
-    run: async (id) => { await seed(id); await seedJob(id, 'processing'); await jobQueue.completeJob(SPACE, id, 'partial'); } },
+    run: async (id) => { await seed(id); await jobQueue.completeJob(SPACE, await seedClaim(SPACE, id), 'partial'); } },
   { name: 'failJob (retries exhausted: the file is marked failed)', entries: ['server/src/files/media/job-queue.ts:failJob'], status: 'failed',
-    run: async (id) => { await seed(id); await seedJob(id, 'processing'); await jobQueue.failJob(SPACE, id, 3, 3, 'boom'); } },
+    run: async (id) => { await seed(id); await jobQueue.failJob(SPACE, await seedClaim(SPACE, id), 3, 3, 'boom'); } },
   { name: 'failJob (retries left: the control, the file row is not touched)', entries: ['server/src/files/media/job-queue.ts:failJob'], status: 'processing',
-    run: async (id) => { await seed(id); await seedJob(id, 'processing'); await jobQueue.failJob(SPACE, id, 1, 3, 'transient'); } },
+    run: async (id) => { await seed(id); await jobQueue.failJob(SPACE, await seedClaim(SPACE, id), 1, 3, 'transient'); } },
   { name: 'retryJob', entries: ['server/src/files/media/job-queue.ts:retryJob'], status: 'pending',
     run: async (id) => {
       await seed(id, { embeddingStatus: 'failed', mediaJobError: 'boom' }); await seedJob(id, 'failed');

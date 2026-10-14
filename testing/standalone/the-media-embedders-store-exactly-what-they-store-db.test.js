@@ -39,6 +39,7 @@ import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -174,10 +175,11 @@ const handleOf = (bytes, mime, mediaType) => {
   return { path: p, size: bytes.length, copied: true, dispose: async () => { /* the suite removes its scratch */ } };
 };
 
-const runImage = (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, handleOf(bytes, mime, 'image'), mime, vision, opts);
-const runAudio = (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, handleOf(bytes, mime, 'audio'), mime, stt, overlapMs, opts);
-const runVideo = (space, id, bytes = Buffer.from('mp4-bytes'), mime = 'video/mp4', { keyframes = true, overlapMs, intervalS, opts } = {}) =>
-  videoMod.embedVideo(space, id, handleOf(bytes, mime, 'video'), mime, vision, stt, keyframes, overlapMs, intervalS, opts);
+/** A run holds its job's claim (`_media-claim.mjs`): every write an embedder makes is under it, and the caller's `opts` ride beside it. */
+const runImage = async (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, handleOf(bytes, mime, 'image'), mime, vision, { ...opts, claim: await seedClaim(space, id) });
+const runAudio = async (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, handleOf(bytes, mime, 'audio'), mime, stt, overlapMs, { ...opts, claim: await seedClaim(space, id) });
+const runVideo = async (space, id, bytes = Buffer.from('mp4-bytes'), mime = 'video/mp4', { keyframes = true, overlapMs, intervalS, opts } = {}) =>
+  videoMod.embedVideo(space, id, handleOf(bytes, mime, 'video'), mime, vision, stt, keyframes, overlapMs, intervalS, { ...opts, claim: await seedClaim(space, id) });
 
 /** The keys a chunk row of each kind carries, exactly: a key added or dropped by a move into another writer is a finding. */
 const VECTOR = ['embedding', 'embeddingModel'];
