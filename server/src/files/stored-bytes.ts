@@ -42,6 +42,7 @@ import {
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { log, peerText } from '../util/log.js';
 import { sha256Tap, type TapExpectation } from '../util/sha256-tap.js';
 import { resolveSafePathChecked } from './sandbox.js';
 
@@ -317,8 +318,11 @@ export async function isStoredDirectory(abs: string): Promise<boolean> {
  * read as an answer ({@link isMissingPath}); any other is thrown, on the terms of {@link bytesPresent}. For a caller that needs more than
  * whether something is there: its kind (`isStoredDirectory`) or its size and mtime (a move's marker).
  */
-export async function lstatIfPresent(abs: string): Promise<fs.Stats | null> {
-  return fsp.lstat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
+export async function lstatIfPresent(abs: string): Promise<fs.Stats | null>;
+/** The same read with exact inode and device numbers (`bigint`): what a move needs to tell one directory entry under two spellings from two entries. */
+export async function lstatIfPresent(abs: string, opts: { bigint: true }): Promise<fs.BigIntStats | null>;
+export async function lstatIfPresent(abs: string, opts?: { bigint: true }): Promise<fs.Stats | fs.BigIntStats | null> {
+  return (opts ? fsp.lstat(abs, opts) : fsp.lstat(abs)).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
 }
 
 /** Delete a stored file under its path lock. */
@@ -348,11 +352,220 @@ export async function deleteStoredIfPresent(abs: string, { skipDirectory = false
 /**
  * Move a stored file under both paths' locks, taken in SORTED order rather than source-then-destination: two moves
  * crossing (A to B while B to A) would otherwise each hold one lock and wait for ever on the other.
+ *
+ * **It REPLACES whatever is at `dstAbs`** (a rename does), and that is the point of its one family of callers: a conflict resolution
+ * that keeps the incoming copy means to overwrite the local one (`api/conflicts.ts`). A MOVE never replaces anything, so no path of
+ * `moveFile` or the move cascade reaches this: they go through {@link moveStoredIfFree}.
+ * `every-door-that-places-bytes-checks-its-destination` names every caller.
  */
 export async function moveStored(srcAbs: string, dstAbs: string): Promise<void> {
   const [first, second] = [path.resolve(srcAbs), path.resolve(dstAbs)].sort();
   const move = () => fsp.rename(srcAbs, dstAbs);
   await withPathLock(first, () => first === second ? move() : withPathLock(second, move));
+}
+
+// ── A move that never replaces ───────────────────────────────────────────────────────────────────────────────────
+
+/** What stands at a move's destination, relative to its source: see {@link classifyDestination}. */
+export type DestinationState = 'free' | 'alias' | 'half-linked' | 'occupied';
+
+/**
+ * What {@link classifyDestination} reads of a path: the numbers `lstat(..., { bigint: true })` gives. `nlink` is optional because a file
+ * system may not say, and a count that is not there is read as "cannot tell".
+ */
+export interface StatRecord {
+  dev: bigint | number;
+  ino: bigint | number;
+  nlink?: bigint | number | undefined;
+  isDirectory(): boolean;
+}
+
+/**
+ * THE decision of what stands at a move's destination, relative to its source — pure, over what the file system says. Asked by the
+ * pre-check of a move ({@link destinationStateAt}, through `files/destination.ts`), by the step that places the bytes under the locks
+ * ({@link moveStoredIfFree}) and by the marker's reading of "the bytes have moved" (`files/tombstones.ts`), so the three cannot
+ * answer it three ways.
+ *
+ * ## What it prevents
+ *
+ * A move told "the destination exists" by its own half-made link refuses its own retry, and one told "the same inode, so it is mine"
+ * unlinks a file that was never the move's. The two are told apart by evidence, and the answer fails CLOSED on every ambiguity,
+ * because the wrong guess either overwrites somebody's file or deletes one.
+ *
+ *  - nothing at the destination: `free`;
+ *  - another inode or device, an inode the file system does not number (`0`), or a link count that is not a number: `occupied`;
+ *  - the same inode and a FILE: one directory entry (`nlink` 1) under two spellings is an `alias` (a case-only rename in any path
+ *    component, `Docs/a.txt` to `docs/a.txt`): a rename, never an unlink. Two or more entries is the move's OWN link whose removal of the
+ *    source name did not happen (`half-linked`) only when `begun` says a begun-move marker names this very pair; without one it is
+ *    somebody's hard link, `occupied`. The same inode and a link count alone never license an unlink;
+ *  - the same inode and a DIRECTORY: `alias`. A directory cannot be hard-linked, and its link count is the number of subdirectories on
+ *    some file systems, so it says nothing there.
+ *
+ * `begun` is the caller's reading of the marker, taken BEFORE the attempt writes its own: the attempt's own marker would otherwise
+ * make every operator's link look like the move's.
+ */
+export function classifyDestination(src: StatRecord, dst: StatRecord | null, { begun }: { begun: boolean }): DestinationState {
+  if (dst === null) return 'free';
+  if (dst.dev !== src.dev || dst.ino !== src.ino || src.ino === 0n || src.ino === 0) return 'occupied';
+  if (src.isDirectory()) return dst.isDirectory() ? 'alias' : 'occupied';
+  if (dst.isDirectory()) return 'occupied';
+  const links = src.nlink === undefined ? Number.NaN : Number(src.nlink);
+  if (!Number.isFinite(links) || links < 1) return 'occupied';
+  if (links === 1) return 'alias';
+  return begun ? 'half-linked' : 'occupied';
+}
+
+/** {@link classifyDestination} for two paths on the disk, and whether the source is a directory. A source that is gone is `occupied`: nothing can be said of it. */
+async function readDestination(srcAbs: string, dstAbs: string, begun: boolean): Promise<{ state: DestinationState; srcIsDirectory: boolean }> {
+  const dst = await lstatIfPresent(dstAbs, { bigint: true });
+  const src = await lstatIfPresent(srcAbs, { bigint: true });
+  if (src === null) return { state: dst === null ? 'free' : 'occupied', srcIsDirectory: false };
+  return { state: classifyDestination(src, dst, { begun }), srcIsDirectory: src.isDirectory() };
+}
+
+/** What stands at `dstAbs` for a move of `srcAbs` ({@link classifyDestination}), read from the disk. Any failure to look other than "not there" is thrown. */
+export async function destinationStateAt(srcAbs: string, dstAbs: string, { begun }: { begun: boolean }): Promise<DestinationState> {
+  return (await readDestination(srcAbs, dstAbs, begun)).state;
+}
+
+/** The step that places a move's bytes found something at the destination: the move is refused, the foreign entry untouched. Never leaves the files layer: `moveFile` answers it as `DestinationExists`. */
+export class DestinationOccupied extends Error {
+  override readonly name = 'DestinationOccupied';
+}
+
+/**
+ * The file-system steps of a move, replaceable by a test and by nothing else: a foreign write cannot be timed to land between the check
+ * and the placing of the bytes from outside, and a file system that refuses a hard link or fails one unlink is not available on request.
+ * `beforeLink` runs under the locks after the destination was classified free and before the bytes are placed (for a directory, before
+ * its rename). `null` restores the real steps. Never called by the server.
+ */
+export interface MoveSteps {
+  link: (srcAbs: string, dstAbs: string) => Promise<void>;
+  unlink: (abs: string) => Promise<void>;
+  rename: (srcAbs: string, dstAbs: string) => Promise<void>;
+  beforeLink: ((srcAbs: string, dstAbs: string) => void | Promise<void>) | undefined;
+}
+
+// Through the module object at call time, so a test that replaces `fsp.rename` (the way a failing step is made) reaches a move as it reaches a write.
+const REAL_MOVE_STEPS: MoveSteps = {
+  link: (s, d) => fsp.link(s, d),
+  unlink: (p) => fsp.unlink(p),
+  rename: (s, d) => fsp.rename(s, d),
+  beforeLink: undefined,
+};
+let moveSteps: MoveSteps = REAL_MOVE_STEPS;
+export function setMoveStepsForTest(steps: Partial<MoveSteps> | null): void {
+  moveSteps = steps === null ? REAL_MOVE_STEPS : { ...REAL_MOVE_STEPS, ...steps };
+}
+
+/** What a failed link or rename says about the NAME rather than about the file system: the kernel's refusal of an entry that is there. */
+const NAME_TAKEN = new Set(['EEXIST', 'ENOTEMPTY', 'EISDIR']);
+/** A file system that cannot make a hard link says one of these; the move then falls back to a rename (counted, and said once by its caller). */
+const LINK_UNSUPPORTED = new Set(['EPERM', 'EACCES', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK']);
+const codeOf = (err: unknown): string | undefined => (err as NodeJS.ErrnoException | null)?.code;
+
+/** Remove the source's name; that it is already gone is the move's success, not a failure. */
+async function unlinkSourceName(srcAbs: string): Promise<void> {
+  await moveSteps.unlink(srcAbs).catch((err: unknown) => { if (!isMissingPath(err)) throw err; });
+}
+
+/**
+ * Move a stored file or directory to a path NOTHING stands at, under both paths' locks (sorted, as {@link moveStored}), and refuse
+ * with {@link DestinationOccupied} when anything does. THE step every move places its bytes by.
+ *
+ * ## What it prevents
+ *
+ * A rename replaces. Checked first by `lstat`, a destination that appears between the check and the rename was overwritten, and an
+ * operator's file lost to a move that was never told it was there. So the classification ({@link classifyDestination}) is made
+ * UNDER the locks, and the placing is a step the kernel refuses on an existing name:
+ *
+ *  - a FILE is placed by a hard link (`EEXIST` whoever wrote the name), and the source's name is removed after;
+ *  - a DIRECTORY by a rename, which the kernel refuses for a non-empty directory and for a file.
+ *
+ * ## What each state does
+ *
+ *  - `occupied`: refused. `alias` (one entry, two spellings): renamed, never unlinked. `half-linked` (a link this move made, whose
+ *    unlink did not happen): the source's name is removed, which finishes the move's bytes.
+ *  - `free`: placed. A failure to remove the source's name after the link rolls the link BACK (the destination's name is removed) and
+ *    throws that failure, so the move is wholly not done; the source having gone meanwhile (`ENOENT`) is a success.
+ *
+ * ## Where the guarantee ends
+ *
+ *  - On a file system that refuses a hard link the step falls back to a rename (`onLinkFallback`, so the caller counts it and says it
+ *    once). The in-process guarantee holds (the classification under the locks); a foreign PROCESS writing at the destination between
+ *    that read and the rename is overwritten.
+ *  - A rollback that itself fails leaves two names for the file. Its pending records are dropped with the error, so the next attempt
+ *    meets two names and no marker, reads an operator's link and refuses: loud in the log, resolved by removing one name.
+ *  - A half-link whose names no longer share an inode on a retry is `occupied` (fail closed); housekeeping finishing a marked half-link
+ *    at its next pass (`finishInterruptedLink`) is what keeps that window short.
+ *  - On Windows a rename of a directory onto a directory that appeared in that instant is refused by the system with a permission code;
+ *    the destination being there afterwards is what says it was the name.
+ */
+export async function moveStoredIfFree(
+  srcAbs: string, dstAbs: string, { begun, onLinkFallback }: { begun: boolean; onLinkFallback: (err: unknown) => void },
+): Promise<void> {
+  const [first, second] = [path.resolve(srcAbs), path.resolve(dstAbs)].sort();
+  const run = async (): Promise<void> => {
+    const { state, srcIsDirectory } = await readDestination(srcAbs, dstAbs, begun);
+    if (state === 'occupied') throw new DestinationOccupied(`something stands at the destination of a move of ${path.basename(srcAbs)}`);
+    if (state === 'half-linked') return unlinkSourceName(srcAbs);
+    if (state === 'alias') return moveSteps.rename(srcAbs, dstAbs);
+    await moveSteps.beforeLink?.(srcAbs, dstAbs);
+    if (srcIsDirectory) return renameOntoNothing(srcAbs, dstAbs);
+    try {
+      await moveSteps.link(srcAbs, dstAbs);
+    } catch (err) {
+      const code = codeOf(err);
+      if (code === undefined || !LINK_UNSUPPORTED.has(code)) {
+        if (code !== undefined && NAME_TAKEN.has(code)) throw new DestinationOccupied(`something appeared at the destination of a move of ${path.basename(srcAbs)}`);
+        throw err;
+      }
+      // A refused link is the file system's, unless the name is there now: then it is the name's.
+      if (await lstatIfPresent(dstAbs) !== null) throw new DestinationOccupied(`something appeared at the destination of a move of ${path.basename(srcAbs)}`);
+      onLinkFallback(err);
+      return moveSteps.rename(srcAbs, dstAbs);
+    }
+    try {
+      await unlinkSourceName(srcAbs);
+    } catch (err) {
+      await moveSteps.unlink(dstAbs).catch((rollback: unknown) => {
+        log.warn(`A move of ${peerText(path.basename(srcAbs))} made a link and could not remove the source name, and the link could not be rolled back (${peerText(codeOf(rollback) ?? rollback)}): `
+          + `the file has two names until one is removed. Source ${peerText(srcAbs)}, destination ${peerText(dstAbs)}`);
+      });
+      throw err;
+    }
+  };
+  await withPathLock(first, () => first === second ? run() : withPathLock(second, run));
+}
+
+/** Rename a directory to a name that was free when it was read: the kernel refusing it says something is there now. */
+async function renameOntoNothing(srcAbs: string, dstAbs: string): Promise<void> {
+  try {
+    await moveSteps.rename(srcAbs, dstAbs);
+  } catch (err) {
+    const code = codeOf(err);
+    if ((code !== undefined && NAME_TAKEN.has(code)) || ((code === 'EPERM' || code === 'EACCES') && await lstatIfPresent(dstAbs) !== null)) {
+      throw new DestinationOccupied(`something appeared at the destination of a move of ${path.basename(srcAbs)}`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Finish the bytes of a move that a crash stopped between its link and the removal of the source's name: under both locks, when the
+ * pair is a `half-linked` one (the same inode, two entries, and the begun-move marker the caller has read for this very pair),
+ * remove the source's name. Anything else — no second name, a different file at the destination — is left alone.
+ *
+ * @returns whether it removed a name.
+ */
+export async function finishInterruptedLink(srcAbs: string, dstAbs: string): Promise<boolean> {
+  const [first, second] = [path.resolve(srcAbs), path.resolve(dstAbs)].sort();
+  const run = async (): Promise<boolean> => {
+    if ((await destinationStateAt(srcAbs, dstAbs, { begun: true })) !== 'half-linked') return false;
+    await unlinkSourceName(srcAbs);
+    return true;
+  };
+  return withPathLock(first, () => first === second ? run() : withPathLock(second, run));
 }
 
 // ── Encrypting a file that is already stored ──────────────────────────────────────────────────────────────────
