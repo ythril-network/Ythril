@@ -28,15 +28,35 @@ function worthCorrelating(status: number | undefined): boolean {
   return status === 0 || status === undefined || status >= 500;
 }
 
+/** What an HTTP failure looks like to the two readers below: its status and, narrowed to the one method used, its headers. */
+interface CorrelatableFailure {
+  status?: number;
+  // HttpHeaders, narrowed to the one method used — `headers` is absent on a plain thrown Error.
+  headers?: { get(name: string): string | null };
+}
+
+/**
+ * `text` with the failure's request id appended when it is one worth quoting (see the section above): a server fault or a
+ * request that got no answer, and only when the response carried the header. Any sentence about a failure goes through this,
+ * so a refusal worded by the client names the log line the way `httpErrorReason` does, rather than by a second copy of the rule.
+ */
+export function withRequestId(text: string, err: unknown): string {
+  const e = err as CorrelatableFailure | null;
+  if (!e || !worthCorrelating(e.status)) return text;
+  let id: string | null = null;
+  // Defensive: `headers.get` throws on nothing real, but this runs inside every error path in the app and
+  // must never be the reason an error message fails to render.
+  try { id = e.headers?.get(REQUEST_ID_HEADER) ?? null; } catch { id = null; }
+  if (!id) return text;
+  return text ? `${text} (request ${id})` : `request ${id}`;
+}
+
 export function httpErrorReason(err: unknown): string {
-  const e = err as {
+  const e = err as (CorrelatableFailure & {
     error?: { error?: unknown };
     statusText?: string;
-    status?: number;
     message?: string;
-    // HttpHeaders, narrowed to the one method used — `headers` is absent on a plain thrown Error.
-    headers?: { get(name: string): string | null };
-  } | null;
+  }) | null;
   if (!e) return '';
 
   const base = (() => {
@@ -50,11 +70,5 @@ export function httpErrorReason(err: unknown): string {
     return '';
   })();
 
-  if (!worthCorrelating(e.status)) return base;
-  let id: string | null = null;
-  // Defensive: `headers.get` throws on nothing real, but this runs inside every error path in the app and
-  // must never be the reason an error message fails to render.
-  try { id = e.headers?.get(REQUEST_ID_HEADER) ?? null; } catch { id = null; }
-  if (!id) return base;
-  return base ? `${base} (request ${id})` : `request ${id}`;
+  return withRequestId(base, e);
 }

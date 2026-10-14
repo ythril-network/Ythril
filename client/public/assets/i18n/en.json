@@ -1722,7 +1722,7 @@
   "files.error.deleteFailed": "Failed to delete file.",
   "files.refusal.path_blocked": "'{{path}}' can't be used here: a file is in the way, or the destination is the item itself or inside it. Choose another name or location.",
   "files.refusal.destination_exists": "Something already exists at '{{path}}', so nothing was moved. A move never replaces anything: delete what is there first (that deletes it on every instance it is replicated to), or choose another name.",
-  "files.refusal.destination_held_after_move": "The file was moved, but '{{path}}' is held by the records of another file, so its details have not followed. Delete that file; the move then finishes on its own, or repeat it.",
+  "files.refusal.destination_held_after_move": "The file was moved, but '{{path}}' is held by the records of another file, '{{heldBy}}', so its details have not followed. The server keeps retrying the move. Delete that file and repeat the move to finish it.",
   "files.refusal.move_still_owed": "The file was moved and the server is finishing the move. This list reloads once, after a short wait.",
   "files.refusal.confirm_required": "Deleting a folder needs confirmation.",
   "files.refusal.space_root_refused": "The space's root folder cannot be deleted.",

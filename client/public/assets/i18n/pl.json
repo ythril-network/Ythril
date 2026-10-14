@@ -1722,7 +1722,7 @@
   "files.error.deleteFailed": "Nie udało się usunąć pliku.",
   "files.refusal.path_blocked": "Ścieżki '{{path}}' nie można tu użyć: na drodze stoi plik albo miejsce docelowe jest samym elementem lub znajduje się w jego wnętrzu. Wybierz inną nazwę lub lokalizację.",
   "files.refusal.destination_exists": "Pod '{{path}}' już coś istnieje, więc nic nie zostało przeniesione. Przeniesienie niczego nie zastępuje: najpierw usuń to, co tam jest (usuwa to również na każdej instancji, na którą jest replikowane), albo wybierz inną nazwę.",
-  "files.refusal.destination_held_after_move": "Plik został przeniesiony, ale '{{path}}' jest zajęte przez rekordy innego pliku, więc jego dane nie podążyły za nim. Usuń tamten plik; przeniesienie dokończy się wtedy samo, albo powtórz je.",
+  "files.refusal.destination_held_after_move": "Plik został przeniesiony, ale '{{path}}' jest zajęte przez rekordy innego pliku, '{{heldBy}}', więc jego dane nie podążyły za nim. Serwer wciąż ponawia przeniesienie. Usuń tamten plik i powtórz przeniesienie, aby je dokończyć.",
   "files.refusal.move_still_owed": "Plik został przeniesiony, a serwer kończy tę operację. Lista odświeży się raz, po krótkim oczekiwaniu.",
   "files.refusal.confirm_required": "Usunięcie folderu wymaga potwierdzenia.",
   "files.refusal.space_root_refused": "Folderu głównego przestrzeni nie można usunąć.",
