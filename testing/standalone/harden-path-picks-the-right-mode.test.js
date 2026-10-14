@@ -68,20 +68,26 @@ describe('hardenPath picks a mode by what the path IS', () => {
 });
 
 describe('no caller applies a file mode to something that may be a directory', () => {
-  it('moveFile hardens by path kind, not by assumption', () => {
+  it('the placing a move goes through hardens by path kind, not by assumption', () => {
     // Pinned at the call site as well as in the helper: the helper being correct does not help if a caller
-    // reintroduces `harden(dst, FILE_MODE)`, which is exactly the line that caused the outage.
+    // reintroduces `harden(dst, FILE_MODE)`, which is exactly the line that caused the outage. The step is `placeIfFree`
+    // (`moveFile` and a conflict resolution's placement both go through it, Q-466), so it is the step that is read, and
+    // `moveFile` is held to calling it.
     const src = readFileSync('server/src/files/files.ts', 'utf8');
-    const at = src.indexOf('export async function moveFile(');
-    assert.ok(at > 0, 'moveFile is gone — re-anchor this gate');
+    const move = src.indexOf('export async function moveFile(');
+    assert.ok(move > 0, 'moveFile is gone — re-anchor this gate');
+    assert.match(src.slice(move, src.indexOf('\n}', move)), /placeIfFree\(/, 'moveFile no longer places its bytes through placeIfFree, the step that hardens'
+      + ' what it placed: a directory move would no longer be hardened by path kind');
+    const at = src.indexOf('export async function placeIfFree(');
+    assert.ok(at > 0, 'placeIfFree is gone — re-anchor this gate');
     // Comments stripped before matching. The first version of this assertion failed against the fixed code,
     // because the comment explaining the bug quotes the very call it warns against — a gate that reads prose as
     // code is a gate that fires on its own documentation.
     const body = src.slice(at, src.indexOf('\n}', at))
       .replace(/^[ \t]*\/\/.*$/gm, '')
       .replace(/\/\*[\s\S]*?\*\//g, '');
-    assert.match(body, /hardenPath\(/, 'moveFile must use hardenPath — it moves directories as well as files');
+    assert.match(body, /hardenPath\(/, 'placeIfFree must use hardenPath — a move places directories as well as files');
     assert.doesNotMatch(body, /harden\([^)]*FILE_MODE/,
-      'moveFile must not force FILE_MODE: its destination can be a directory, and 0600 on a directory is a brick');
+      'placeIfFree must not force FILE_MODE: its destination can be a directory, and 0600 on a directory is a brick');
   });
 });

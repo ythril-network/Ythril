@@ -19,6 +19,8 @@
  * - {@link assertNotMovedIntoItself}: is this move onto itself, or into its own subtree? Decided on whole path segments, so `a`
  *   to `ab` is a move.
  * - {@link assertDestinationFree}: does anything already stand where a MOVE would put its file? A move never replaces anything.
+ * - {@link assertNothingStandsAt}: does ANYTHING stand at this path in this space — bytes of any kind, or a live record? The
+ *   destination-only question of a placing with no source in the same space (a conflict's incoming copy), in the words of a resolution.
  * - {@link fsRefusalOf}: what a failed filesystem call means for the caller, asked AFTER it failed: a refusal about the path the
  *   checks above could not see (a name held by a directory, a race), and any other failure, which becomes a fault in words that
  *   carry no path.
@@ -31,7 +33,7 @@ import path from 'node:path';
 import { DestinationExists, FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { CONVERTED_ROOT, isAtOrUnder, kindAt, movedSidecars, sidecarsOwnedBy } from './moved-paths.js';
-import { bytesPresentAt, destinationStateAt, isMissingPath, type DestinationState } from './stored-bytes.js';
+import { bytesPresentAt, destinationStateAt, isMissingPath, lstatIfPresent, type DestinationState } from './stored-bytes.js';
 import { hasLiveFileRecordAt, hasLiveFileRecordExactlyAt } from './file-meta.js';
 import { toDocId } from '../util/paths.js';
 
@@ -162,6 +164,41 @@ export async function assertDestinationFree(spaceId: string, src: string, dst: s
     debris.push(to);
   }
   return { debris };
+}
+
+/**
+ * Refuse a placing whose destination ANYTHING stands at — a file, a directory (empty or not), a link, or a live file record with no bytes —
+ * in the space the bytes are going to. The destination-only question: it reads no source's space, so a placing across spaces asks it
+ * of the space it will land in ({@link assertDestinationFree} resolves both paths in ONE space and reads a save to the same name in
+ * another as an alias of the source, which passes).
+ *
+ * ## What it prevents
+ *
+ * A conflict resolution that put the incoming copy where the CALLER chose (`rename`, `targetSpaceId`) placed it by a rename, which replaced
+ * whatever stood there: a file, a replicated one, whose loss travelled to every instance; in another space, for a token that held only the
+ * data-quality area there. The bytes are looked at by `lstat` (a link standing there is a name taken, never followed) and the record
+ * exactly at the destination is asked on its own (`hasLiveFileRecordExactlyAt`), never only through bytes: a peer's file whose content has
+ * not arrived is an occupant too. It decides nothing about the PLACING: the step that puts the bytes down asks again under the locks
+ * (`placeIfFree`, `files/files.ts`), because this is a reading of one instant.
+ *
+ * `placing` is the absolute path of the stored file about to be placed, when the caller holds evidence that a half-made link of its own
+ * placing may be at the destination (a conflict resolution retried after a crash between the link and the removal of the source's name:
+ * the open conflict record is the evidence). The same file under both names is the placing's own work to finish and not an occupant, and
+ * `placeIfFree` finishes it. Without `placing`, nothing is exempt.
+ *
+ * @throws DestinationExists (`standing`: `bytes` or `record`), in a resolution's words, naming the destination as requested.
+ * @throws RangeError when the path leaves the space; PathBlocked/FileSystemFault for a path that cannot be looked at.
+ */
+export async function assertNothingStandsAt(spaceId: string, dst: string, { placing }: { placing?: string } = {}): Promise<void> {
+  const requested = toDocId(dst);
+  const dstAbs = await resolveSafePathChecked(spaceId, dst);
+  const state: DestinationState = placing === undefined
+    ? ((await lstatIfPresent(dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); })) === null ? 'free' : 'occupied')
+    : await destinationStateAt(placing, dstAbs, { begun: true }).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); });
+  if (state === 'occupied') throw new DestinationExists(requested, 'bytes', undefined, 'resolution');
+  // An alias is the placed file itself under another spelling of its name: its record, if any, is its own. A half-made link is not, so its
+  // destination's record is asked like any other.
+  if (state !== 'alias' && await hasLiveFileRecordExactlyAt(spaceId, requested)) throw new DestinationExists(requested, 'record', undefined, 'resolution');
 }
 
 /**

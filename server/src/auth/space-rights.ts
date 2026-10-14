@@ -264,6 +264,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/conflicts/:id', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/conflicts/:id/resolve', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/bulk-resolve', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
+  // Both resolve routes above ask one more right in the handler: `files:write` in the TARGET space of a `save-to-space` (`saveTargetRefusal`,
+  // `api/conflicts.ts`), because the save writes a file there. The row is the area that lets a token resolve a conflict at all.
   { route: '/api/conflicts/link-violations', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/conflicts/link-violations', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations/:id', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },

@@ -54,17 +54,31 @@ export class PathBlocked extends Error {
 /** What stands at a move's destination: bytes, a live record without bytes, the records of another file, or a sidecar's destination. */
 export type DestinationStanding = 'bytes' | 'record' | 'rows' | 'sidecar';
 
+/** The act whose destination something stands at: a move, or the resolution of a sync conflict that places the incoming copy (`api/conflicts.ts`). */
+export type DestinationAct = 'move' | 'resolution';
+
 /**
- * Something already stands at a move's destination, and a move never replaces anything.
+ * Something already stands at an act's destination, and neither a move nor a conflict resolution replaces anything there.
  *
  * `path` is the destination as requested; `standing` says what stands there, and `detail` (a `'sidecar'` standing only) the
  * sidecar path that is taken. The sentence names the remedy: delete what stands there (that is replicated), or choose another name.
+ *
+ * `act` is whose sentence it is. A resolution's remedy is not a move's: the copy is not a file being moved, the caller chooses a name or a
+ * space for it, and `delete_file` of the occupant is one way out and not the way. The default is a move's, so a move cannot say it wrong.
  */
 export class DestinationExists extends Error {
   override readonly name = 'DestinationExists';
-  constructor(readonly path: string, readonly standing: DestinationStanding, readonly detail?: string) {
-    super(destinationExistsSentence(path, standing, detail));
+  constructor(readonly path: string, readonly standing: DestinationStanding, readonly detail?: string, act: DestinationAct = 'move') {
+    super(act === 'resolution' ? resolutionExistsSentence(path, standing) : destinationExistsSentence(path, standing, detail));
   }
+}
+
+/** The sentence of {@link DestinationExists} for a conflict resolution: built only from space-relative paths, and naming no move. */
+function resolutionExistsSentence(path: string, standing: DestinationStanding): string {
+  const remedy = 'Choose another name or space for the copy, or delete what stands there first (that deletes it on every instance it is replicated to).';
+  return standing === 'record'
+    ? `'${path}' has a file record but no bytes here (its content may still be arriving from a peer, or an earlier delete was interrupted), and resolving a conflict never replaces it; nothing was moved. ${remedy}`
+    : `'${path}' already exists where the copy would be placed, and resolving a conflict never replaces it; nothing was moved. ${remedy}`;
 }
 
 /** The sentence of {@link DestinationExists}: built only from space-relative paths. */
