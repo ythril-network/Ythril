@@ -45,7 +45,7 @@ before(async () => {
 after(() => { try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ } });
 
 /** An `lstat(..., { bigint: true })` record, as the classifier reads it. `nlink` may be left out: a file system that does not say. */
-const rec = ({ dev = 1n, ino = 100n, nlink = 1n, dir = false } = {}) => ({ dev, ino, ...(nlink === undefined ? {} : { nlink }), isDirectory: () => dir });
+const rec = ({ dev = 1n, ino = 100n, nlink = 1n, noLink = false, dir = false } = {}) => ({ dev, ino, ...(noLink ? {} : { nlink }), isDirectory: () => dir });
 const classify = (src, dst, begun = false) => {
   assert.equal(typeof stored.classifyDestination, 'function', 'files/stored-bytes.ts exports no classifyDestination');
   return stored.classifyDestination(src, dst, { begun });
@@ -63,7 +63,7 @@ describe('a destination is classified by inode, link count and the begun-move ma
     ['a file: two entries and a marker (the move\'s own half-made link)', rec({ nlink: 2n }), rec({ nlink: 2n }), true, 'half-linked'],
     ['a file: two entries and NO marker (an operator\'s hard link)', rec({ nlink: 2n }), rec({ nlink: 2n }), false, 'occupied'],
     ['a file: many entries and a marker', rec({ nlink: 3n }), rec({ nlink: 3n }), true, 'half-linked'],
-    ['a file: a link count the file system does not give', rec({ nlink: undefined }), rec({ nlink: undefined }), true, 'occupied'],
+    ['a file: a link count the file system does not give', rec({ noLink: true }), rec({ noLink: true }), true, 'occupied'],
     ['a directory: the same inode (an alias whatever its link count says)', rec({ dir: true, nlink: 5n }), rec({ dir: true, nlink: 5n }), false, 'alias'],
     ['a directory: another inode', rec({ dir: true, ino: 7n }), rec({ dir: true, ino: 8n }), false, 'occupied'],
     ['a directory onto a file', rec({ dir: true, ino: 7n }), rec({ ino: 8n }), false, 'occupied'],
@@ -86,6 +86,10 @@ describe('a case-only rename is not a re-upload at the source (cameBackAtSource)
 
   it('an ALIAS: nothing came back, for a file and for a directory', async () => {
     assert.equal(typeof cascade.cameBackAtSource, 'function', 'files/move-cascade.ts exports no cameBackAtSource: the guard has no seam');
+    // The bytes ARE at the source (that is what an alias is: the old spelling still names the file), so without the guard they would read as a re-upload.
+    fs.mkdirSync(path.join(root, 'files', 'general', 'adir'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'files', 'general', 'case.txt'), 'x');
+    fs.writeFileSync(path.join(root, 'files', 'general', 'adir', 'x.txt'), 'x');
     assert.deepEqual([...await cascade.cameBackAtSource('general', plan('file', 'case.txt'), async () => true)], []);
     assert.deepEqual([...await cascade.cameBackAtSource('general', plan('directory', 'adir'), async () => true)], []);
   });

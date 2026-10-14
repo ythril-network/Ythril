@@ -33,7 +33,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
-import { MOVE_DOORS, stateOf, sentenceOf } from './_move-destination.mjs';
+import { MOVE_DOORS, stateOf, sentenceOf, withJobsHandedBack } from './_move-destination.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -94,11 +94,12 @@ describe('a move never overwrites what appears at its destination after the chec
       assert.equal(await rowOf('b.txt'), null, 'a record appeared at the destination of a refused move');
       await tombstones.whenPendingFileTombstoneDropsSettle();
       assert.deepEqual(await acts.raw(), [], 'a move that lost the race left a tombstone, pending or published');
-      assert.deepEqual(await acts.published(), { served: [], pushed: [] }, 'a move that lost the race published a tombstone');
       const after = await stateOf(acts, S);
-      assert.deepEqual(after.jobs, before.jobs, 'the job the move held was not handed back as it was');
-      assert.deepEqual({ ...after, tree: undefined }, { ...before, tree: undefined }, 'a refused move changed a record, a link or a job');
-      assert.deepEqual(after.tree, { ...before.tree, 'b.txt': 'FOREIGN' }, 'the files tree changed by more than the foreign file');
+      assert.equal(after.jobs[0]?.claimableAfter, null, 'the job the move held was not handed back');
+      assert.deepEqual(withJobsHandedBack(after), withJobsHandedBack({ ...before, tree: { ...before.tree, 'b.txt': 'FOREIGN' } }),
+        'a refused move changed the foreign file, a record, a link or a job, or left something in the tree');
+      // Read last: a sync cycle that asks what a peer would be told writes its own bookkeeping on the records.
+      assert.deepEqual(await acts.published(), { served: [], pushed: [] }, 'a move that lost the race published a tombstone');
     });
   }
 
@@ -122,11 +123,12 @@ describe('a move never overwrites what appears at its destination after the chec
   it('a file system that refuses a hard link: a free destination still moves, counted and said ONCE; an occupied one is still refused', async () => {
     await acts.seed('a.txt', { description: 'A' });
     await acts.seed('c.txt', { description: 'C' });
+    await acts.seed('e.txt', { description: 'E' });
     await acts.seed('taken.txt', { description: 'T' });
     seam({ link: async () => { throw Object.assign(new Error('EPERM: operation not permitted, link'), { code: 'EPERM' }); } });
     const before = await linkMetric();
 
-    const { lines, result } = await logLinesDuring(async () => [await acts.move('REST', 'a.txt', 'b.txt'), await acts.move('REST', 'c.txt', 'd.txt'), await acts.move('REST', 'c.txt', 'taken.txt')]);
+    const { lines, result } = await logLinesDuring(async () => [await acts.move('REST', 'a.txt', 'b.txt'), await acts.move('REST', 'c.txt', 'd.txt'), await acts.move('REST', 'e.txt', 'taken.txt')]);
 
     const [first, second, third] = result;
     assert.equal(acts.statusOf(first), 200, `the move was refused or failed without a hard link: ${sentenceOf(first)}`);
@@ -142,6 +144,7 @@ describe('a move never overwrites what appears at its destination after the chec
     assert.equal(answer.status, 409, 'without a hard link, a move onto an existing file was not refused');
     assert.equal(answer.code, 'destination_exists');
     assert.equal(read('taken.txt'), 'content of taken.txt');
+    assert.equal(read('e.txt'), 'content of e.txt', 'a refused move took its source\'s bytes');
   });
 
   it('a write to the destination that is waiting for the move\'s locks lands AFTER the move, never inside it', async () => {
@@ -156,7 +159,7 @@ describe('a move never overwrites what appears at its destination after the chec
     assert.equal(acts.statusOf(answer), 200, `the move was refused by a write that has to wait for its locks: ${sentenceOf(answer)}`);
     assert.equal(read('b.txt'), 'WRITER', 'the write did not land after the move');
     assert.equal(acts.onDisk('a.txt'), false);
-    const leftovers = fs.existsSync(stored.storedTmpDir()) ? fs.readdirSync(stored.storedTmpDir()) : [];
-    assert.deepEqual(leftovers, [], 'a staged temp file was left behind');
+    const tmp = stored.storedTmpDir();
+    assert.deepEqual(fs.existsSync(tmp) ? fs.readdirSync(tmp) : [], [], 'a staged temp file was left behind');
   });
 });
