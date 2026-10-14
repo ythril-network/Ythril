@@ -30,6 +30,10 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blockAfter } from './_structural-window.mjs';
+import { validationEntryPoints, callsOf } from './_validation-entry-points.mjs';
+
+/** The validators and classifiers a door must not call, read from the modules that export them (never a literal list of kinds). */
+const ENTRY_POINTS = await validationEntryPoints();
 
 let classifyUpdateViolations;
 let describeUpdateViolations;
@@ -259,9 +263,8 @@ describe('every update path runs the gate', () => {
      */
     const offenders = [];
     for (const p of PATHS) {
-      for (const m of strip(readFileSync(p, 'utf8')).matchAll(/classifyUpdateViolations\(/g)) {
-        offenders.push(`${p}: ${m[0]}`);
-      }
+      // Every classifier, derived — not `classifyUpdateViolations` alone: `classifyFactUpsertAgainst(` in a door is the same copy.
+      for (const m of callsOf(ENTRY_POINTS.classifiers, strip(readFileSync(p, 'utf8')))) offenders.push(`${p}: ${m}`);
     }
     assert.deepEqual(offenders, [],
       'these rebuild the merged record and validate it themselves, twenty lines from the writer that does the '
@@ -280,7 +283,9 @@ describe('every update path runs the gate', () => {
       const src = strip(readFileSync(p, 'utf8'));
       const at = src.indexOf('if (dfPaths) {');
       if (at === -1) return false;
-      return /validate(Memory|Entity|Edge|Chrono)\(/.test(blockAfter(src, at, `the dfPaths branch in ${p}`));
+      // The validators are DERIVED from the module (`_validation-entry-points.mjs`): this read `validate(Memory|...)`, the
+      // name the fact type had before the rename, so a `validateFact(` inside the branch was invisible (Q-93, R6-16).
+      return callsOf(ENTRY_POINTS.validators, blockAfter(src, at, `the dfPaths branch in ${p}`)).length > 0;
     });
     assert.deepEqual(offenders, [],
       'validation must not be conditional on deleteFields — that was the original gap');
@@ -296,7 +301,7 @@ describe('every update path runs the gate', () => {
     const offenders = [];
     for (const p of PATHS.filter(x => x.includes('/mcp/'))) {
       const src = strip(readFileSync(p, 'utf8'));
-      if (/validate(Entity|Memory|Edge|Chrono)\(/.test(src)) offenders.push(p);
+      if (callsOf(ENTRY_POINTS.validators, src).length > 0) offenders.push(p);
     }
     assert.deepEqual(offenders, [],
       'these run a validator directly, which is a second implementation of the rule the writer holds:\n  '
