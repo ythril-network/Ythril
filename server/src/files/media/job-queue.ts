@@ -14,7 +14,7 @@ import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
 import { log, peerText } from '../../util/log.js';
 import { withJitter } from '../../util/backoff.js';
-import { newClaimToken, stalledJobWarning } from './lease.js';
+import { newClaimToken, revokingClaims, stalledJobWarning, writeUnderClaim, type JobClaim } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
 import { eachSpace } from '../../util/housekeeping-walk.js';
 import { declareStep } from '../../util/housekeeping-signals.js';
@@ -417,51 +417,55 @@ export async function claimNextJob(
 // ── Complete / fail ────────────────────────────────────────────────────────
 
 /**
- * End a job for good: the file ROW's final state first, THEN the job's terminal status (`Q-434`).
+ * End a job for good: the file ROW's final state and the job's terminal status, in ONE transaction under the run's claim (`Q-434`).
  *
- * ## The order is the whole point, and it is the part a hand-written copy gets backwards
+ * ## Why one transaction, and why under the claim
  *
- * Ending a job is two writes. With the job first, anything that stops the second — the process killed, the store
- * refusing, a write that times out — leaves a `complete` or `failed` job over a row that reads `processing` for ever.
- * Nothing revisits it: stall recovery re-queues a job that stopped reporting while CLAIMED, and a terminal job is not
- * claimed. The file shows a spinner indefinitely, Retry is never offered on a file that reads as in progress, and the
- * job collection says the work is done.
+ * Ending a job is two writes, and the order between them used to be the whole argument (`Q-434`): with the job first, anything that
+ * stopped the second left a `complete` or `failed` job over a row that read `processing` for ever — nothing revisits a terminal job, so
+ * the file showed a spinner indefinitely and Retry was never offered. With the row first, a failure between the two left the job CLAIMED
+ * and stall recovery re-ran it. Both writes are now the one transaction, so there is no between: both land or neither does, and a
+ * failure leaves the job claimed for recovery, as the row-first order did.
  *
- * Row first, a failure between the two leaves the job CLAIMED, and stall recovery re-runs it — an idempotent re-run
- * over the same chunk ids, which is the cheap direction to be wrong in. Both terminal branches used to write the job
- * first, each on its own; this is the one place that order is decided, so a third terminal branch inherits it.
+ * It is the run's own claim that makes the transaction: a job's id is its file's path, so an end written by id lands on whichever job
+ * holds the path — a run that lost its claim to a delete and a re-upload would complete the NEW run's job while that run was still
+ * working. A run that no longer holds its claim ends nothing and gets `JobLeaseLostError`.
  *
- * A failure of the row write is THROWN, not logged: the caller's job is still claimed, and it is the caller that knows
- * whether to retry, release or let recovery have it.
+ * A failure is THROWN, not logged: the caller's job is still claimed, and it is the caller that knows whether to retry, release or let
+ * recovery have it.
  */
 async function endJob(
   spaceId: string,
-  fileId: string,
+  claim: JobClaim,
   row: Parameters<typeof setFileProcessingState>[2],
   job: { status: 'complete' | 'failed'; lastError?: string | null },
 ): Promise<void> {
-  await setFileProcessingState(spaceId, fileId, row);
-  await jobCollection(spaceId).updateOne(
-    asFilter<MediaJobDoc>({ _id: fileId }),
-    asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() } }),
-  );
+  await writeUnderClaim(spaceId, claim, async (session) => {
+    await setFileProcessingState(spaceId, claim.jobId, row, { session });
+    await jobCollection(spaceId).updateOne(
+      asFilter<MediaJobDoc>({ _id: claim.jobId }),
+      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() } }),
+      { session },
+    );
+  });
 }
 
 /** Mark a job done. The job itself is always `complete` (no more retries), but the
  *  FILE's embeddingStatus reflects whether every chunk actually embedded: pass
  *  'partial' when some chunks stored without a vector so the file stays distinguishable
- *  and retry-eligible instead of masquerading as fully embedded (B3). */
+ *  and retry-eligible instead of masquerading as fully embedded (B3). Under the run's `claim`
+ *  (see {@link endJob}). */
 export async function completeJob(
   spaceId: string,
-  fileId: string,
+  claim: JobClaim,
   fileEmbeddingStatus: 'complete' | 'partial' = 'complete',
 ): Promise<void> {
-  await endJob(spaceId, fileId, { embeddingStatus: fileEmbeddingStatus }, { status: 'complete' });
+  await endJob(spaceId, claim, { embeddingStatus: fileEmbeddingStatus }, { status: 'complete' });
 }
 
 export async function failJob(
   spaceId: string,
-  fileId: string,
+  claim: JobClaim,
   attempts: number,
   maxAttempts: number,
   errorMessage: string,
@@ -469,31 +473,36 @@ export async function failJob(
   const now = new Date().toISOString();
   // Sanitise error: never surface raw internal paths/URLs in the API response
   const safeError = sanitiseError(errorMessage);
+  const fileId = claim.jobId;
 
   if (attempts < maxAttempts) {
     // Still has retries — reset to pending with backoff
     // `attempts` here is the number of attempts already made (incremented by
     // the claim). Schedule the *next* claim for `attempts + 1` slots out.
     const claimableAfter = nextClaimableAfter(attempts + 1);
-    await jobCollection(spaceId).updateOne(
-      asFilter<MediaJobDoc>({ _id: fileId }),
-      asUpdate<MediaJobDoc>({
-        $set: {
-          status: 'pending',
-          claimedAt: null,
-          claimableAfter,
-          lastError: safeError,
-          updatedAt: now,
-        },
-      }),
-    );
+    // A fenced write too: a run that lost its claim must not put the job that replaced it behind a backoff.
+    await writeUnderClaim(spaceId, claim, async (session) => {
+      await jobCollection(spaceId).updateOne(
+        asFilter<MediaJobDoc>({ _id: fileId }),
+        asUpdate<MediaJobDoc>({
+          $set: {
+            status: 'pending',
+            claimedAt: null,
+            claimableAfter,
+            lastError: safeError,
+            updatedAt: now,
+          },
+        }),
+        { session },
+      );
+    });
     // Pending again (behind a backoff). Announce it: the probe it triggers is cheap, and it
     // keeps the invariant simple — everything that makes a job pending marks the space.
     markSpaceMayHaveWork(spaceId);
     log.warn(`Media job ${spaceId}/${fileId} failed (attempt ${attempts}/${maxAttempts}), retry after ${claimableAfter}: ${errorMessage}`);
   } else {
-    // Exhausted retries: ended through `endJob`, so the row is told before the job stops being claimed.
-    await endJob(spaceId, fileId,
+    // Exhausted retries: ended through `endJob`, so the row and the job stop together.
+    await endJob(spaceId, claim,
       { embeddingStatus: 'failed', mediaJobError: safeError || undefined },
       { status: 'failed', lastError: safeError });
     log.warn(`Media job ${spaceId}/${fileId} exhausted retries: ${errorMessage}`);
@@ -581,7 +590,8 @@ export async function touchJobProgress(
 ): Promise<boolean> {
   const now = new Date().toISOString();
   try {
-    const res = await jobCollection(spaceId).updateOne(
+    // A revoker's bound (`revokingClaims`): the heartbeat writes the job document a fenced write holds, so it waits as long as the holder may.
+    const res = await revokingClaims(() => jobCollection(spaceId).updateOne(
       // With a token, the heartbeat is also a lease check: it matches only while this run still holds the
       // claim. Without one (an older caller), it degrades to the previous behaviour rather than failing.
       asFilter<MediaJobDoc>({
@@ -592,7 +602,7 @@ export async function touchJobProgress(
       // The step report rides along in the write the heartbeat already performs — reporting which
       // step is running costs nothing extra on top of saying that something happened.
       asUpdate<MediaJobDoc>({ $set: { progressAt: now, ...(progress ? { progress } : {}) } }),
-    );
+    ));
     return res.matchedCount > 0;
   } catch {
     // A failed heartbeat is not evidence the lease is gone — a dropped connection would otherwise abort a
@@ -701,10 +711,14 @@ export async function resetStalledJobs(
  * Delete the media job for a single file, if one exists. Called when the file
  * is deleted so a queued job cannot outlive its source and retry forever
  * against a path that no longer exists.
+ *
+ * It is also the revocation of the claim a RUNNING job holds: a run's writes are fenced by its job document (`media/lease.ts`), so a
+ * run that has not yet written finds nothing to match and writes nothing, and one that is writing is waited for. That is why it comes
+ * BEFORE anything a delete removes of the file's rows, and why its bound is the holder's (`revokingClaims`).
  */
 export async function cancelMediaJob(spaceId: string, filePath: string): Promise<void> {
   const id = toDocId(filePath);
-  await jobCollection(spaceId).deleteOne(asFilter<MediaJobDoc>({ _id: id }));
+  await revokingClaims(() => jobCollection(spaceId).deleteOne(asFilter<MediaJobDoc>({ _id: id })));
 }
 
 /**
@@ -724,7 +738,18 @@ export async function cancelJobsOwnedBy(spaceId: string, p: string, kind: PathKi
   if (!root) return; // guard: an empty path would match everything
   // The same set a move holds (`jobPathsOf`), less a FILE's own job, which `cancelMediaJob` takes.
   const owned = kind === 'directory' ? jobPathsOf(root, kind) : sidecarsOf(root, kind);
-  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ $or: idsUnder(owned) }));
+  await revokingClaims(() => jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ $or: idsUnder(owned) })));
+}
+
+/**
+ * Delete EVERY job of a space — the revocation a space wipe makes before it removes the space's file rows.
+ *
+ * A wipe is a remover like a delete: a run that read its parent live would otherwise write its derived rows after the wipe removed
+ * them, under files that are gone. With the jobs taken first, a run that has not yet written finds its claim gone, and one that is
+ * writing is waited for (`revokingClaims`); the wipe's own removal of the rows then finds whatever that run wrote.
+ */
+export async function cancelEveryJobOfSpace(spaceId: string): Promise<void> {
+  await revokingClaims(() => jobCollection(spaceId).deleteMany({}));
 }
 
 // ── Move (a file or directory changes path) ────────────────────────────────
@@ -755,14 +780,14 @@ export async function holdJobsForMove(spaceId: string, src: string, kind: PathKi
   const ids = (await jobCollection(spaceId).find(open, { projection: { _id: 1 } }).toArray()).map(j => String(j._id));
   if (ids.length === 0) return [];
   const now = new Date().toISOString();
-  await jobCollection(spaceId).updateMany(
+  await revokingClaims(() => jobCollection(spaceId).updateMany(
     asFilter<MediaJobDoc>({ _id: { $in: ids }, status: { $in: ['pending', 'processing'] } }),
     // Handed back rather than failed: nothing went wrong, so `attempts` is not charged — the same terms as a release.
     asUpdate<MediaJobDoc>({ $set: {
       status: 'pending', claimedAt: null, claimToken: null, updatedAt: now,
       claimableAfter: new Date(Date.now() + moveTiming().holdMs).toISOString(),
     } }),
-  );
+  ));
   return ids;
 }
 
@@ -777,10 +802,10 @@ export async function extendMoveHold(spaceId: string, src: string, kind: PathKin
   if (owned.length === 0) return;
   const { holdMs, holdMarginMs } = moveTiming();
   const now = Date.now();
-  await jobCollection(spaceId).updateMany(
+  await revokingClaims(() => jobCollection(spaceId).updateMany(
     asFilter<MediaJobDoc>({ $or: owned, status: 'pending', claimableAfter: { $ne: null, $lt: new Date(now + holdMarginMs).toISOString() } }),
     asUpdate<MediaJobDoc>({ $set: { claimableAfter: new Date(now + holdMs).toISOString() } }),
-  );
+  ));
 }
 
 /** The ids of every job belonging to `src` as a `kind` — the set a move holds and re-keys (`jobPathsOf`), whatever its state. */
@@ -793,10 +818,10 @@ export async function jobIdsOwnedBy(spaceId: string, src: string, kind: PathKind
 /** Undo `holdJobsForMove` where they stand — the move failed, so the jobs belong to the old path after all. */
 export async function releaseMoveHold(spaceId: string, heldIds: string[]): Promise<void> {
   if (heldIds.length === 0) return;
-  await jobCollection(spaceId).updateMany(
+  await revokingClaims(() => jobCollection(spaceId).updateMany(
     asFilter<MediaJobDoc>({ _id: { $in: heldIds } }),
     asUpdate<MediaJobDoc>({ $set: { claimableAfter: null, updatedAt: new Date().toISOString() } }),
-  );
+  ));
   markSpaceMayHaveWork(spaceId);
 }
 
@@ -806,7 +831,8 @@ export async function releaseMoveHold(spaceId: string, heldIds: string[]): Promi
  * metadata it follows goes through, and a job is local state, so the row is a plain spread. A finished job keeps its state: it
  * describes bytes that moved unchanged. The jobs are the ones `holdJobsForMove` holds, by the same `kind`.
  *
- * Anything already queued at a destination id is replaced: a move onto an existing path replaces that file.
+ * A job still queued at a destination id is replaced: it is a stale one — a deleted file's, or a finished one — because a move never replaces a
+ * live file (the move is refused before it gets here).
  *
  * With `within` — the cascade's batch transaction and the ids of the jobs that belong to the batch — the re-key is part of THAT
  * transaction, and waking the worker is the caller's, once the transaction has committed: a wake before the commit finds no row at

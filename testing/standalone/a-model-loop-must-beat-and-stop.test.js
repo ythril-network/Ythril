@@ -238,19 +238,19 @@ describe('a model loop beats and stops', () => {
     for (const step of ['caption', 'faces']) assert.ok(steps.includes(step), `IMAGE_STEPS [${steps}] does not contain '${step}'`);
 
     const image = stripComments(readFileSync('server/src/files/media/image-embedder.ts', 'utf8'));
-    const captionBeat = image.search(/step:\s*'caption'/);
-    const facesBeat = image.search(/step:\s*'faces'/);
+    const captionBeat = image.search(/(?:beat\(|step:)\s*'caption'/);
+    const facesBeat = image.search(/(?:beat\(|step:)\s*'faces'/);
     assert.ok(captionBeat >= 0 && facesBeat >= 0, 'the image embedder must beat both hops: caption and faces');
     assert.ok(captionBeat < image.search(/await\s+vision\.caption\s*\(/), 'the caption beat must come BEFORE the vision call');
     assert.ok(facesBeat < image.search(/await\s+embedFaces\s*\(/), 'the faces beat must come BEFORE the face step');
-    assert.match(image, /shouldStop/, 'the image embedder never checks its lease');
+    assert.match(image, /shouldStop|stopIfLeaseLost/, 'the image embedder never checks its lease');
     assert.match(image, /IMAGE_STEPS/, 'the image embedder reports against no named route');
 
     const face = stripComments(readFileSync('server/src/files/media/face-embedder.ts', 'utf8'));
     const loop = enclosingBlockMatching(face, face.search(/await\s+gallerySearch\s*\(/), FOR_LOOP, 'the per-face loop');
     assert.ok(loop, 'no per-face loop found — re-point this gate');
     assert.match(loop, /onProgress|beat\(/, 'the per-face loop does not beat once per face');
-    assert.match(loop, /shouldStop/, 'the per-face loop does not check the lease');
+    assert.match(loop, /shouldStop|stopIfLeaseLost/, 'the per-face loop does not check the lease');
 
     const worker = stripComments(readFileSync('server/src/files/media/worker.ts', 'utf8'));
     const at = worker.indexOf('embedImage(');

@@ -49,6 +49,8 @@ import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from
 import { spaceCollection } from '../../db/space-collection.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
+import { holdsClaim, isAbandonment, JobLeaseLostError, stopIfLeaseLost } from './lease.js';
+import { IMAGE_STEPS, type MediaRunOpts } from './progress.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
 
@@ -269,16 +271,20 @@ export async function gallerySearch(
  * Detect all faces in an image and persist one face-chunk record per face.
  *
  * Called from embedImage() when config.mediaEmbedding.faceRecognition.enabled
- * is true.  Errors are non-fatal — the parent image job continues.
+ * is true.  A failure of a face is non-fatal — the parent image job continues. **The loss of the run's claim is not a failure of a face**:
+ * every row is written under the claim (`upsertDerivedFileRow`), the loop beats once per face and checks the lease before it spends a
+ * gallery search, and abandonment propagates to the worker instead of being absorbed.
  *
  * @param spaceId  Space that owns the file
  * @param fileId   File _id (normalised path) — the parent FileMetaDoc
  * @param image  The file's plaintext, as a path and a size (`files/plaintext-file.ts`)
+ * @param opts  The run's heartbeat, lease flag and claim (`MediaRunOpts`)
  */
 export async function embedFaces(
   spaceId: string,
   fileId: string,
   image: PlaintextFile,
+  opts: MediaRunOpts,
 ): Promise<void> {
   const faceCfg = getFaceRecognitionConfig();
 
@@ -377,6 +383,9 @@ export async function embedFaces(
 
   // ── 3. Process each detected face ────────────────────────────────────────
   for (let i = 0; i < faces.length; i++) {
+    // The entry of each face is a hop of its own (a gallery search per face): beat, and stop if the claim is gone.
+    opts.onProgress?.({ step: 'faces', steps: [...(opts.steps ?? IMAGE_STEPS)], done: i, total: faces.length });
+    stopIfLeaseLost(spaceId, opts);
     const face = faces[i]!;
 
     const embedding: number[] | undefined = face.embedding;
@@ -427,14 +436,19 @@ export async function embedFaces(
       ...(boxRaw !== undefined ? { faceBbox: boxRaw as [number, number, number, number] } : {}),
     };
 
-    // Through the one writer of a derived row, which reads the PARENT first: a face row written after the picture was
-    // deleted is a face recall still finds, for a file nobody can open.
-    await upsertDerivedFileRow(spaceId, chunkDoc as FileMetaDoc);
+    // Through the one writer of a derived row, which holds the claim and reads the PARENT in the same transaction: a face row
+    // written after the picture was deleted is a face recall still finds, for a file nobody can open.
+    await upsertDerivedFileRow(spaceId, opts.claim, chunkDoc as FileMetaDoc);
   }
 
   // ── 5. Auto-label parent file ───────────────────────────────────────────
+  //
+  // NOT under the claim, and said so: linking an entity to the file is an authored, seq-carrying write (`updateFileMeta`) that cannot
+  // join the claim's transaction. It is guarded by a read of the claim just before it and by rethrowing abandonment, which narrows
+  // the window in which a path reused in that instant could take the label and does not close it (see `parentIsLive`, which says the same).
   if (autoLabelEntityId) {
     try {
+      if (!(await holdsClaim(spaceId, opts.claim))) throw new JobLeaseLostError(spaceId, opts.claim.jobId);
       const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
         // The parent read decides the auto-label, so it asks whether the parent is still here: labelling links an
         // entity to a file, and a deleted file takes no label.
@@ -457,6 +471,7 @@ export async function embedFaces(
         log.info(`Face recogniser: auto-labeled ${spaceId}/${fileId} → entity ${autoLabelEntityId}`);
       }
     } catch (err) {
+      if (isAbandonment(err)) throw err;
       log.warn(
         `Face recogniser: auto-label failed for ${spaceId}/${fileId}: ` +
         `${err instanceof Error ? err.message : String(err)}`,

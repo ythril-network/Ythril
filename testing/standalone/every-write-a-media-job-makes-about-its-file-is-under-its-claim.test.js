@@ -112,16 +112,16 @@ describe('the job files, and the writers they reach the store through, are found
 });
 
 /**
- * What hands the claim over: the claim named, or the caller's own `opts` bag spread (`{ ...opts, steps }`), which `MediaRunOpts` requires to carry
+ * What hands the claim over: the claim named, or the caller's own `opts` bag passed whole or spread (`{ ...opts, steps }`), which `MediaRunOpts` requires to carry
  * it — so the compiler holds that half: a bag without a claim does not type-check.
  */
-const HANDS_THE_CLAIM = /\bclaim\b|\.\.\.opts\b/;
+const HANDS_THE_CLAIM = /\bclaim\b|\.\.\.opts\b|(?:^|,\s*)opts\s*(?:,|$)/;
 
 describe('every write a media job makes about its file is under its claim', () => {
   it('every call of a writer from a job file hands the run\'s claim over', () => {
     const calls = callsInJobFiles(new Set(SUBJECTS.keys())).filter(c => !(c.name in NOT_ABOUT_ITS_FILE));
     assert.ok(calls.length >= 12, `only ${calls.length} call(s) found — the call scan is broken, not the code`);
-    const without = calls.filter(c => !/\bclaim\b/.test(c.args)).map(c => `${c.key} calls ${c.name}(${c.args.slice(0, 80)})`);
+    const without = calls.filter(c => !HANDS_THE_CLAIM.test(c.args)).map(c => `${c.key} calls ${c.name}(${c.args.slice(0, 80)})`);
     assert.deepEqual(without, [],
       'these write about the run\'s file without handing the writer its claim: a run that lost it (a delete and a re-upload of the path) writes into the file that replaced its own');
   });

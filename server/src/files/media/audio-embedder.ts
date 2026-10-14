@@ -21,7 +21,8 @@ import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { log } from '../../util/log.js';
-import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
+import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
+import { isAbandonment } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 
 
@@ -221,7 +222,7 @@ export async function embedAudio(
   _mimeType: string,
   stt: SttProvider,
   overlapMs = 5000,
-  opts?: MediaProgressOpts,
+  opts: MediaRunOpts,
 ): Promise<AudioEmbedResult> {
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
@@ -235,7 +236,7 @@ export async function embedAudio(
 
   try {
     // Step 1: total duration
-    const totalDurationS = await getDurationSeconds(inputPath, opts?.signal);
+    const totalDurationS = await getDurationSeconds(inputPath, opts.signal);
     if (totalDurationS <= 0) {
       log.warn(`Audio embedder: could not determine duration for ${fileId}, treating as single chunk`);
     }
@@ -245,7 +246,7 @@ export async function embedAudio(
       '-i', inputPath,
       '-af', 'silencedetect=n=-30dB:d=0.5',
       '-f', 'null', '-',
-    ], { signal: opts?.signal }).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
+    ], { signal: opts.signal }).catch(({ stderr: s }: { stderr: string }) => ({ stderr: s, stdout: Buffer.alloc(0) }));
 
     // The fallback duration is a guess from the SIZE (16 kHz mono 16-bit is 32 000 bytes a second), and the size now
     // comes from the handle's stat rather than from the length of a buffer nobody holds any more.
@@ -265,12 +266,12 @@ export async function embedAudio(
     // however high that budget is; without the lease check the recovered run and this one transcribe the same
     // audio into the same chunk ids at the same time.
     const beat = (done: number): void =>
-      opts?.onProgress?.({ step: 'transcribe', steps: [...(opts.steps ?? AUDIO_STEPS)], done, total: chunks.length });
+      opts.onProgress?.({ step: 'transcribe', steps: [...(opts.steps ?? AUDIO_STEPS)], done, total: chunks.length });
     beat(0);
     for (let i = 0; i < chunks.length; i++) {
       // Before the call, not after: afterwards this run has already spent a full STT budget producing a chunk
       // the recovering run is about to overwrite.
-      if (opts?.shouldStop?.()) {
+      if (opts.shouldStop?.()) {
         log.warn(`Audio embedder: lease lost after ${i}/${chunks.length} chunks for ${fileId} — stopping `
           + 'rather than competing with the run that recovered this job');
         break;
@@ -281,7 +282,7 @@ export async function embedAudio(
       const segPath = path.join(tmpDir, `seg${i}.wav`);
 
       try {
-        await extractSegment(inputPath, startS, endS, segPath, opts?.signal);
+        await extractSegment(inputPath, startS, endS, segPath, opts.signal);
         const segBytes = await fs.readFile(segPath);
 
         const sttResult = await stt.transcribe(segBytes, 'audio/wav');
@@ -318,12 +319,16 @@ export async function embedAudio(
           chunkDurationMs: endMs - startMs,
         };
 
-        // Through the one writer of a derived row, which reads the PARENT first: a transcript segment written after
-        // the file was deleted is an orphan row nothing removes.
-        await upsertDerivedFileRow(spaceId, chunkDoc);
+        // Through the one writer of a derived row, which holds the claim and reads the PARENT in the same transaction: a transcript
+        // segment written after the file was deleted, or by a run whose claim went, is an orphan row nothing removes.
+        await upsertDerivedFileRow(spaceId, opts.claim, chunkDoc);
 
         results.push({ chunkId, startMs, endMs, transcript });
       } catch (err) {
+        // An abandonment is not a chunk that failed: the claim is gone (or the space is no longer writable), and counting it as a failed
+        // chunk let the run go on transcribing, and paying for, a file that is not its own. The `finally` below still removes the
+        // segment and beats.
+        if (isAbandonment(err)) throw err;
         failed++;
         lastError = err instanceof Error ? err.message : String(err);
         log.warn(`Audio embedder: chunk ${i} of ${fileId} failed: ${lastError}`);

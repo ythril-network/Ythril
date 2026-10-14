@@ -31,6 +31,7 @@
  * through one job. The TOP-LEVEL caller picks the route; each embedder names only which stage it is in.
  */
 import type { StepProgress } from '../converters/types.js';
+import type { JobClaim } from './lease.js';
 
 export interface MediaProgressOpts {
   /** Stamp progress on the job row. Called once per item of a long loop, never once per job. */
@@ -49,8 +50,22 @@ export interface MediaProgressOpts {
   steps?: readonly string[];
 }
 
+/**
+ * What a media RUN is handed: the heartbeat and lease flag (`MediaProgressOpts`) and the CLAIM its writes speak for.
+ *
+ * The one carrier. Every write an embedder makes about its file goes through a writer that takes the run's claim (`writeUnderClaim`,
+ * `files/media/lease.ts`), so the claim is required here and an embedder cannot be called without one: the video's hop into the audio
+ * stage spreads this bag and carries it on, and a caller that forgets it fails to compile instead of writing unfenced.
+ */
+export interface MediaRunOpts extends MediaProgressOpts {
+  claim: JobClaim;
+}
+
 /** An audio file's route. */
 export const AUDIO_STEPS = ['transcribe', 'embed'] as const;
 
 /** A keyframed video's route — its audio track first, then the frames, then the combined re-embed. */
 export const VIDEO_STEPS = ['transcribe', 'caption', 'embed'] as const;
+
+/** An image's route — the caption, then the faces (which beat once per face). */
+export const IMAGE_STEPS = ['caption', 'faces'] as const;

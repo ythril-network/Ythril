@@ -44,7 +44,7 @@ import { moveCarriesRecordsAt } from '../tombstones.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
-import { setFileProcessingState, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState, type MachineMadeSource } from '../derived-fields.js';
+import { markFileProcessing, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState, type MachineMadeSource } from '../derived-fields.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
 import {
@@ -73,7 +73,7 @@ import { providerHopMs } from './providers.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 import { assistHopMs } from '../../config/assist-backend.js';
-import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
+import { AUDIO_STEPS, IMAGE_STEPS, VIDEO_STEPS } from './progress.js';
 import { runSlotPool } from './slot-pool.js';
 import { bytesPresent, isMissingPath, StoredFileUnreadable } from '../stored-bytes.js';
 import { openPlaintextFile, readPlaintext, type PlaintextFile } from '../plaintext-file.js';
@@ -463,9 +463,10 @@ async function processJob(
       throw new Error(`Could not read file for embedding: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Mark file as "processing" in file meta
-    await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'processing' })
-      .catch(() => {}); // non-fatal — job tracking is the source of truth
+    // Mark file as "processing" in file meta — under the run's claim, like every write it makes about its file: a run whose claim
+    // went (a delete and a re-upload of the path) marks nothing, and is abandoned here rather than at its first embedder write.
+    await markFileProcessing(spaceId, claim, { embeddingStatus: 'processing' })
+      .catch(err => { if (isAbandonment(err)) throw err; }); // otherwise non-fatal — job tracking is the source of truth
 
     // Run the appropriate embedder
     let derivedDescription: string | undefined;
@@ -480,7 +481,8 @@ async function processJob(
     let fileEmbeddingStatus: 'complete' | 'partial' = 'complete';
     switch (mediaType) {
       case 'image':
-        derivedDescription = await embedImage(spaceId, fileId, plaintext, mimeType, providers.vision, { arrival: job.arrival === true });
+        derivedDescription = await embedImage(spaceId, fileId, plaintext, mimeType, providers.vision,
+          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: IMAGE_STEPS, claim, arrival: job.arrival === true });
         // A caption IS model output, so the record says so. It was the reference point for the whole
         // complaint — the images carried generated captions while the parent carried a truncation — and it
         // had no provenance of its own either.
@@ -491,7 +493,7 @@ async function processJob(
         // discarded here, so an operator saw success over audio that was never transcribed — the
         // document path has modelled this correctly all along and audio simply never carried the number.
         const a = await embedAudio(spaceId, fileId, plaintext, mimeType, providers.stt, undefined,
-          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: AUDIO_STEPS });
+          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: AUDIO_STEPS, claim });
         if (a.failed > 0) {
           fileEmbeddingStatus = 'partial';
           log.warn(`Media worker: ${a.failed}/${a.total} audio chunks failed for ${spaceId}/${fileId} — recording partial`);
@@ -505,7 +507,7 @@ async function processJob(
         // Same rule as audio: a video whose spoken content partly failed to transcribe is not complete,
         // however good its keyframe captions are.
         const v = await embedVideo(spaceId, fileId, plaintext, mimeType, providers.vision, providers.stt, doKeyframes,
-          undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: VIDEO_STEPS });
+          undefined, undefined, { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: VIDEO_STEPS, claim });
         if (v.audioFailed > 0) {
           fileEmbeddingStatus = 'partial';
           log.warn(`Media worker: ${v.audioFailed}/${v.audioTotal} audio chunks failed for ${spaceId}/${fileId} — recording partial`);
@@ -577,7 +579,9 @@ async function processJob(
           //
           // Still not a throw: failing the job would retry a document whose analysis already succeeded and
           // re-pay for the model. What was missing is that the loss be VISIBLE.
-          await setFileProcessingState(spaceId, fileId, processed).catch((err: unknown) => {
+          await markFileProcessing(spaceId, claim, processed).catch((err: unknown) => {
+            // The loss of the claim is not a failed write: the run is abandoned, and nothing of its is the file's now.
+            if (isAbandonment(err)) throw err;
             log.warn(`Media worker: ${spaceId}/${fileId} described but the metadata write failed — the `
               + `description, excerpt and source from this run are lost and will not be recomputed: ${err}`);
           });
@@ -623,9 +627,10 @@ async function processJob(
       if (derivedExcerpt) {
         // Through the one writer of a derived field, which asks whether the file is still here: the excerpt is
         // derived from bytes a delete may have removed while the conversion ran.
-        await setDerivedExcerpt(spaceId, filePath, derivedExcerpt).catch(err =>
-          log.warn(`Media worker: failed to write excerpt to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-        );
+        await setDerivedExcerpt(spaceId, claim, filePath, derivedExcerpt).catch(err => {
+          if (isAbandonment(err)) throw err;
+          log.warn(`Media worker: failed to write excerpt to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
       // The description is a CONDITIONAL write, decided by the database in one operation.
       //
@@ -635,13 +640,14 @@ async function processJob(
       // Nothing reported it — no field missing, no status wrong, the description simply somebody else's. Same shape as
       // the 2.5.1 defect that computed a vector from the record as the write had read it.
       if (derivedDescription) {
-        await setDerivedDescriptionIfUnset(spaceId, filePath, derivedDescription, derivedSource).catch(err =>
-          log.warn(`Media worker: failed to write description to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
-        );
+        await setDerivedDescriptionIfUnset(spaceId, claim, filePath, derivedDescription, derivedSource).catch(err => {
+          if (isAbandonment(err)) throw err;
+          log.warn(`Media worker: failed to write description to file meta ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
     }
 
-    await completeJob(spaceId, fileId, fileEmbeddingStatus);
+    await completeJob(spaceId, claim, fileEmbeddingStatus);
     mediaJobsCompletedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
     log.info(`Media worker: completed ${mediaType} job ${spaceId}/${fileId} (${fileEmbeddingStatus})`);
   } catch (err) {
@@ -684,7 +690,9 @@ async function processJob(
       // Logged rather than thrown for the same reason as the describe write: the job is already failing
       // permanently, and rethrowing would replace an honest terminal state with a retry loop.
       // `failed` for an unreadable file, not `skipped`: nothing was declined, the bytes could not be read.
-      await setFileProcessingState(spaceId, fileId, { embeddingStatus: unreadable ? 'failed' : 'skipped' }).catch((err: unknown) => {
+      await markFileProcessing(spaceId, claim, { embeddingStatus: unreadable ? 'failed' : 'skipped' }).catch((err: unknown) => {
+        // A claim that went in the meantime is an abandonment, which the end of this run must not write over.
+        if (isAbandonment(err)) { log.info(`Media worker: ${spaceId}/${fileId} failed permanently, but its claim was taken first — nothing is written for it`); return; }
         log.warn(`Media worker: ${spaceId}/${fileId} failed permanently but its status could not be written `
           + `— the record will read 'processing' while the failure counter has already moved: ${err}`);
       });
@@ -694,9 +702,11 @@ async function processJob(
     } else {
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
     }
-    await failJob(spaceId, fileId, permanent ? maxAttempts : attempts, maxAttempts, message).catch(innerErr =>
-      log.warn(`Media worker: failJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`),
-    );
+    await failJob(spaceId, claim, permanent ? maxAttempts : attempts, maxAttempts, message).catch(innerErr => {
+      // A claim taken while the run was failing is an abandonment: the job that holds the path now is not this run's to fail.
+      if (isAbandonment(innerErr)) { log.info(`Media worker: ${spaceId}/${fileId} failed, but its claim was taken first — the job is not this run's to fail`); return; }
+      log.warn(`Media worker: failJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`);
+    });
   } finally {
     // The scratch copy of an ENCRYPTED file is plaintext on disk, so it goes as soon as the job is done with it. The
     // boot sweep is the backstop for a kill, which runs no `finally` at all; this is the normal path.

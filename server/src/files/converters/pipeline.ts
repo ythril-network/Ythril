@@ -38,7 +38,7 @@ import { rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
 import { retireFileMeta } from '../file-meta.js';
 import { READ_CHUNK } from '../../db/read-by-id.js';
 import { embedConcurrency } from './embed-concurrency.js';
-import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
+import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fields.js';
@@ -484,7 +484,7 @@ export async function storeConversionResults(
     // reports here. A recovered job's old holder stops within a beat instead of embedding the same file
     // alongside its replacement.
     reportChunk();
-    if (opts.shouldStop?.()) throw new JobLeaseLostError(spaceId, originalId);
+    stopIfLeaseLost(spaceId, opts);
 
     chunkDocs[i] = {
       _id: chunkId,
@@ -505,13 +505,12 @@ export async function storeConversionResults(
 
   derivedDocs.push(...chunkDocs.filter(Boolean));
 
-  // The commit, through the one writer of a file's derived rows: it reads the PARENT first, so a conversion that
-  // finishes after the file was deleted stores nothing rather than leaving passages under a path that is gone. The
-  // claim fence around it is the earlier, cheaper stop; the row's flag is the authoritative one (see that module).
+  // The commit, through the one writer of a file's derived rows: it holds the claim and reads the PARENT in the same transaction, so
+  // a conversion that finishes after the file was deleted or moved stores nothing rather than leaving passages under a path that is
+  // gone. The claim is the earlier, cheaper stop; the row's flag is the authoritative one (see that module).
   let stored: DerivedWriteOutcome;
   try {
-    stored = await writeUnderClaim(spaceId, opts.claim, session =>
-      replaceDerivedFileRows(spaceId, originalId, derivedDocs, { session, batch: INSERT_BATCH }));
+    stored = await replaceDerivedFileRows(spaceId, opts.claim, originalId, derivedDocs, { batch: INSERT_BATCH });
   } catch (err) {
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a

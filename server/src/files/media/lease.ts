@@ -33,11 +33,20 @@
  * `writeUnderClaim` makes the burst itself conditional on the claim, decided by the database in the same
  * transaction as the writes: whoever takes the claim away (recovery, a move, a re-upload) either lands
  * first and the run writes nothing, or lands after and finds the run's records already there to act on.
+ *
+ * ## What it covers
+ *
+ * EVERY write a run makes about its file — the rows it derives, its processing state, its excerpt and description, and the end of its own
+ * job — not only the conversion's burst. A job's id is its file's path and a path is reused: a run that lost its claim to a delete and
+ * a re-upload would otherwise write into the file that replaced its own. And whoever removes or re-keys a file's rows revokes the claims
+ * FIRST ({@link revokingClaims}: a delete, a move, a directory delete, a space wipe), because the fence only orders a run against a
+ * revocation that is made before the removal it protects.
  */
 import type { ClientSession } from 'mongodb';
 import { col, asFilter } from '../../db/mongo.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
-import { writeTimeoutMs } from '../../db/write-bound.js';
+import { inHeldTransaction } from '../../brain/held-transaction.js';
+import { outsideWriteBound, withinWriteBoundOf, writeTimeoutMs } from '../../db/write-bound.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
@@ -90,6 +99,15 @@ export interface JobClaim {
   claimToken?: string | null;
 }
 
+/**
+ * Stop a run at a hop boundary once the lease flag says its claim is gone: throw `JobLeaseLostError`, so nothing after it spends a model
+ * budget on work another run is redoing and the worker ends the run as ABANDONED. The check every hop makes before its model call;
+ * `shouldStop` is the worker's flag, which a heartbeat that matched nothing sets (`MediaProgressOpts`).
+ */
+export function stopIfLeaseLost(spaceId: string, run: { claim: JobClaim; shouldStop?: () => boolean }): void {
+  if (run.shouldStop?.()) throw new JobLeaseLostError(spaceId, run.claim.jobId);
+}
+
 /** The filter that matches a job only while `claim` still holds it — the heartbeat's rule, in one place. */
 function heldBy(claim: JobClaim): Record<string, unknown> {
   return { _id: claim.jobId, status: 'processing', ...(claim.claimToken ? { claimToken: claim.claimToken } : {}) };
@@ -105,23 +123,33 @@ function heldBy(claim: JobClaim): Record<string, unknown> {
  * already gone. Writing the job makes the database serialise the two — a revocation that lands first leaves this
  * filter matching nothing; one that lands second waits for the commit, and then finds the results in place.
  *
+ * **A write that takes seqs holds the horizon** (`opts.seqHolder`, the holder's registered name): the transaction then runs through
+ * `inHeldTransaction` (`brain/held-transaction.ts`), the one way a transaction that takes seqs is run, so a seq-paged reader of the
+ * space does not pass a number whose row has not committed. Without it the transaction holds none: the fence is a counter on a job
+ * row, which no seq-paged reader waits for.
+ *
  * A write refused by a conflict is retried by `withTransaction` from the top, so `writes` must be safe to run twice:
  * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by a bound
  * (`db/bounded-transaction.ts`, at {@link leasedWriteBoundMs}) — a job row locked elsewhere is a `StoreTimeout`, not a two-minute
- * wait — and it holds no seq horizon of its own: the fence is a counter on a job row, which no seq-paged reader waits for.
+ * wait.
  */
 export async function writeUnderClaim<T>(
   spaceId: string,
   claim: JobClaim,
   writes: (session: ClientSession) => Promise<T>,
+  opts: { seqHolder?: string } = {},
 ): Promise<T> {
-  return inBoundedTransaction(async (session) => {
-    const fenced = await col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs')).updateOne(
+  const fenced = async (session: ClientSession): Promise<T> => {
+    const held = await col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs')).updateOne(
       asFilter<MediaJobDoc>(heldBy(claim)), { $inc: { fencedWrites: 1 } }, { session },
     );
-    if (fenced.matchedCount === 0) throw new JobLeaseLostError(spaceId, claim.jobId);
+    if (held.matchedCount === 0) throw new JobLeaseLostError(spaceId, claim.jobId);
     return await writes(session);
-  }, { boundMs: leasedWriteBoundMs() });
+  };
+  const bound = { boundMs: leasedWriteBoundMs() };
+  return opts.seqHolder === undefined
+    ? inBoundedTransaction(fenced, bound)
+    : inHeldTransaction(spaceId, opts.seqHolder, fenced, bound);
 }
 
 /**
@@ -133,7 +161,32 @@ export async function writeUnderClaim<T>(
  * own figure would refuse it and the job would be retried at the same size for ever. A hold that encloses the write still ends it sooner.
  */
 const LEASED_WRITE_BOUND_FACTOR = 2;
-const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
+export const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeoutMs();
+
+/**
+ * Run a write that TAKES A CLAIM AWAY from a run, or waits for one that holds it — a delete's job cancel, a move's hold, a space wipe's
+ * cancel, the heartbeat — bounded as the holder is.
+ *
+ * ## What it prevents
+ *
+ * A run's write is a transaction that writes its job document ({@link writeUnderClaim}), bounded at {@link leasedWriteBoundMs}. Every
+ * write that revokes or waits on a claim writes that same document, so it waits for the transaction — inside a request's own bound, which
+ * is the write bound: HALF the holder's. The waiter then gave up before the holder had to, and a delete, a move or a wipe failed with a
+ * store timeout for a write that was merely slow. The figure lives here, in the one module that revokes a claim, so no caller can
+ * leave it out and no caller adds a bound of its own.
+ *
+ * ## What it guarantees
+ *
+ * No fenced write holds a job document longer than `leasedWriteBoundMs()` (twice the write bound); a revocation or a heartbeat waits no
+ * longer than that, and is not ended sooner by an enclosing request's tighter scope. A store at its bound costs a media job that figure
+ * per derived row it writes, and ends the run with `StoreTimeout`, which the worker retries with backoff.
+ *
+ * `outsideWriteBound` is required: `withinWriteBoundOf` cannot raise an enclosing scope's lower deadline (`db/write-bound.ts`), and a
+ * request runs inside one. The write is therefore NOT under the request's hold: what bounds it is this figure.
+ */
+export function revokingClaims<T>(run: () => Promise<T>): Promise<T> {
+  return outsideWriteBound(() => withinWriteBoundOf(leasedWriteBoundMs(), run));
+}
 
 /**
  * Whether `claim` still holds its job — for a decision that follows from something the run OBSERVED, not a write.
