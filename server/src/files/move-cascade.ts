@@ -61,12 +61,13 @@ import { holdJobsForMove, releaseMoveHold, extendMoveHold, markSpaceMayHaveWork,
 import { kindAt, movedId, movedPairs, movedSidecars } from './moved-paths.js';
 import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresentAt } from './stored-bytes.js';
+import { bytesPresentAt, isOneNameUnderTwoSpellings } from './stored-bytes.js';
 import {
-  abandonMove, actUnderPendingTombstones, bytesIdentityAt, forgetFinishedMove, moveIsOwed, moveMarkerOf, pendingAmong, settleBegunMove, writePendingFileTombstones,
+  abandonMove, actUnderPendingTombstones, forgetFinishedMove, moveIsOwed, moveMarkerOf, pendingAmong, settleBegunMove, writePendingFileTombstones,
 } from './tombstones.js';
+import { bytesIdentityAt, pairOnDisk } from './move-marker-reads.js';
 import { DestinationExists, DestinationHeldAfterMove, MoveStillOwed } from './act-answers.js';
-import { assertDestinationFree, assertDestinationReachable, assertNotMovedIntoItself, destinationStateOf } from './destination.js';
+import { assertDestinationFree, assertDestinationReachable, assertNotMovedIntoItself } from './destination.js';
 import { batchesOf, holdsAtDestination, planMove, rebuiltFileRow, type MoveBatch, type MovePlan } from './move-plan.js';
 import { convergeLinks, retireLinks, type LinkMove } from './move-links.js';
 import { moveTiming } from './move-timing.js';
@@ -188,10 +189,8 @@ export async function cameBackAtSource(
   return new Set((await listFilesRecursive(spaceId, plan.src)).map(p => toDocId(String(p))));
 }
 
-/** Whether the plan's source and destination are one directory entry (`destinationStateOf`, asked as a move that has begun). */
-async function aliasOf(spaceId: string, plan: MovePlan): Promise<boolean> {
-  return await destinationStateOf(spaceId, plan.src, plan.dst, { begun: true }) === 'alias';
-}
+/** Whether the plan's source and destination are one directory entry, under whichever spelling it has now (`pairOnDisk`, the one reading of it). */
+const aliasOf = async (spaceId: string, plan: MovePlan): Promise<boolean> => await pairOnDisk(spaceId, plan.src, plan.dst) !== 'apart';
 
 /**
  * Everything that follows the bytes, in the order a retry can finish: the sidecars' bytes, the settle of the tombstones the move
@@ -236,6 +235,9 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
       started = true;
       await carryBatchReplanning(spaceId, plan, batch, held);
     }
+    // The records have been carried: the tombstones a case-only rename kept pending (its old spelling answers on the disk whether or not the
+    // rename happened, so only the records say) are published now. For any other move this finds nothing pending.
+    await settleBegunMove(spaceId, src, dst);
   } catch (err) {
     log.warn(`The move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} stopped after its bytes moved and is owed: ${peerText(why(err))}`);
     if (err instanceof DestinationHeldAfterMove) throw err;
@@ -302,9 +304,10 @@ export async function finishOwedMove(spaceId: string, src: string, dst: string, 
 
 /**
  * Begin a move that has a source: refuse a destination other files' rows hold, write the tombstones pending with the marker, hold the
- * jobs, remove the debris at the sidecar destinations (`debris`, from `assertDestinationFree`) and move the bytes under them. Returns
- * the jobs it holds. `begun` is whether a begun-move marker named this pair BEFORE this attempt wrote its own, handed on to the step that
- * places the bytes: it is what tells a half-made link of this move from an operator's hard link.
+ * jobs, decide AGAIN what stands at the destination — the debris at the sidecar destinations is removed only on that second reading, under
+ * the hold, since the hold can wait on a running conversion and a file may have appeared at the destination meanwhile — remove the debris and
+ * move the bytes under them. Returns the jobs it holds. `begun` is whether a begun-move marker named this pair BEFORE this attempt wrote its
+ * own, handed on to the step that places the bytes: it is what tells a half-made link of this move from an operator's hard link.
  *
  * The tombstones go BEFORE the bytes move, pending (`files/tombstones.ts`): a store failure here leaves the source where it was, so
  * the retry repeats the move — written after, the retry would find no source and the paths left behind would never be tombstoned.
@@ -312,7 +315,7 @@ export async function finishOwedMove(spaceId: string, src: string, dst: string, 
  * did not, since nobody asked for those paths to go. Pending, no peer is told of them meanwhile.
  */
 async function beginMove(
-  spaceId: string, src: string, dst: string, actor: WebhookActor | undefined, { begun, debris }: { begun: boolean; debris: readonly string[] },
+  spaceId: string, src: string, dst: string, actor: WebhookActor | undefined, { begun }: { begun: boolean },
 ): Promise<string[]> {
   const kind = await kindAt(spaceId, src);
   // A live thing's rows at an id the move takes refuse it, before anything is written (`before-the-bytes`).
@@ -325,15 +328,19 @@ async function beginMove(
   await actUnderPendingTombstones(pending, async () => {
     try {
       held = await holdJobsForMove(spaceId, src, kind);
-      // What stands at a sidecar destination is the debris of a file that is gone (`assertDestinationFree` decided it), and the sidecar
-      // about to take its place cannot be moved onto it: removed here, before the bytes, with the jobs held.
+      // What stands at a sidecar destination is the debris of a file that is gone, and the sidecar about to take its place cannot be moved
+      // onto it: removed here, before the bytes, with the jobs held. Decided now, immediately before it is removed: a file that appeared at
+      // the destination since the first reading makes it a live file's sidecar, and the move is refused with nothing removed.
+      const { debris } = await assertDestinationFree(spaceId, src, dst, { begun });
       for (const leftover of debris) await removeTree(await resolveSafePathChecked(spaceId, leftover));
       await moveFile(spaceId, src, dst, { begun });
     } catch (err) {
       await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
       throw err;
     }
-  }, pendingAmong(pending, moved));
+    // A case-only rename publishes nothing at this step: its old spelling answers on the disk whether or not the rename happened, so the
+    // tombstones of its old ids wait for the records to have been carried (`completeMove` settles them then: `whatBecameOfPath`).
+  }, pendingAmong(pending, isOneNameUnderTwoSpellings(src, dst) ? [] : moved));
   return held;
 }
 
@@ -351,8 +358,8 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
       await assertDestinationReachable(spaceId, dst);
       // Read BEFORE this attempt writes its own marker (`beginMove` does): a marker already naming this pair is evidence of a begun move.
       const begun = await moveMarkerOf(spaceId, src, dst) !== undefined;
-      const { debris } = await assertDestinationFree(spaceId, src, dst, { begun });
-      await completeMove(spaceId, src, dst, await beginMove(spaceId, src, dst, actor, { begun, debris }));
+      await assertDestinationFree(spaceId, src, dst, { begun });
+      await completeMove(spaceId, src, dst, await beginMove(spaceId, src, dst, actor, { begun }));
     }
     announceMove(spaceId, src, dst, actor);
   });

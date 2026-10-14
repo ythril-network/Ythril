@@ -128,7 +128,8 @@ export async function destinationStateOf(spaceId: string, src: string, dst: stri
  * What derives from nothing live is not an occupant but DEBRIS, and the move removes it: a sidecar of a file that has neither bytes nor a
  * live record, a derived row whose parent is absent or flagged. This returns the sidecar destinations that hold only debris, decided by
  * the same read that decides what refuses, so the two cannot disagree; the move removes them before its bytes (`removeTree`), and the
- * rows in its transaction.
+ * rows in its transaction. **The cascade asks again under the hold of the file's jobs, immediately before it removes**: this answer is a
+ * reading of one instant, and the hold can wait on a running conversion while a file appears at the destination.
  *
  * @throws DestinationExists (`standing`: `bytes`, `record` or `sidecar`), a `PathBlocked`/`FileSystemFault` for a path that cannot be looked at.
  * @returns the space-relative sidecar paths to remove before the bytes move.
@@ -149,8 +150,8 @@ export async function assertDestinationFree(spaceId: string, src: string, dst: s
   for (const { from, to } of await movedSidecars(spaceId, src, dst, kind)) {
     // Nothing to move, or a target that overlaps the sidecar being moved (removing it would remove the bytes about to move).
     if (!(await bytesPresentAt(spaceId, from)) || isAtOrUnder(to, from) || isAtOrUnder(from, to)) continue;
-    const state = await destinationStateOf(spaceId, from, to, { begun });
-    if (state === 'free' || state === 'alias') continue;
+    const sidecarState = await destinationStateOf(spaceId, from, to, { begun });
+    if (sidecarState === 'free' || sidecarState === 'alias') continue;
     if (!ownedAtDestination.has(to)) {
       // Not the destination's own sidecar: the one `sidecarsOwnedBy` leaves out is `_converted/<dst>.md` when a DIRECTORY stands there, the
       // converted tree of the directory `<dst>.md`, which is only debris when that directory is nothing.
