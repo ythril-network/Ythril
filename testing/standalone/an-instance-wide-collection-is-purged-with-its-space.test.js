@@ -75,6 +75,11 @@ const EXEMPT = {
     'keyed by NETWORK, never by space: every read and the prune filter on networkId and direction, and a '
     + 'note\'s `spaces` only labels what it is about. A deleted space leaves a note that names it, which is '
     + 'the true record of what was sent, and a space recreated with the same id is served nothing from it.',
+  _sync_history:
+    'keyed by NETWORK, never by space: every read and the prune filter on networkId, and a row is one CYCLE. Since R6-9 a row names, per '
+    + 'space, how many pulled documents were stored against its schema (`schemaViolations[].spaceId`, names and counts only) — a summary '
+    + 'of what the cycle did, never read BY SPACE. A deleted space leaves a row that names it, which is the true record of what the cycle '
+    + 'stored, and a space recreated with the same id is served nothing from it; the row ages out with the network\'s hundred.',
   _webhook_retry_queue:
     'a drain queue, never read BY SPACE: each job is deleted as it is attempted and abandoned after '
     + 'MAX_ATTEMPTS, so nothing outlives the space long enough to be served as another one answer. Its rows '

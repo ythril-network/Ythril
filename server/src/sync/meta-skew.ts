@@ -65,7 +65,10 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
  */
 function newKeysSet(proposal: SpaceMeta | undefined): Map<string, string[]> {
   const bySince = new Map<string, string[]>();
-  const add = (since: string, key: string) => bySince.set(since, [...(bySince.get(since) ?? []), key]);
+  const add = (since: string, key: string) => {
+    const keys = bySince.get(since);
+    if (keys) keys.push(key); else bySince.set(since, [key]);
+  };
   for (const [field, value] of Object.entries(proposal ?? {})) {
     if (value !== undefined && Object.hasOwn(NEW_META_KEYS, field)) add(NEW_META_KEYS[field]!, field);
   }
