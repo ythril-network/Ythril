@@ -12,9 +12,6 @@ import { formatSize } from './file-format';
 
 const LANGS = ['en', 'de', 'pl'] as const;
 
-/** The longest run of a sentence that is not a placeholder: what must survive into the rendered words. */
-const fixedWords = (sentence: string): string =>
-  sentence.split(/\{\{[^}]*\}\}/).map(s => s.trim()).sort((a, b) => b.length - a.length)[0] ?? '';
 
 /** A node of the tree sidebar's state, by path. */
 function findNode(page: MountedPage, path: string): any {

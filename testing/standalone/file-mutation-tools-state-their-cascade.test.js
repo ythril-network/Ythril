@@ -365,7 +365,9 @@ describe('create_dir says when you do not need it', () => {
 
   it('and they really do', () => {
     const bodyOfFile = (fn) => { const at = FILES.indexOf(`export async function ${fn}`); return FILES.slice(at, FILES.indexOf('\nexport ', at + 10)); };
-    assert.match(bodyOfFile('moveFile'), /mkdirPrivate\(path\.dirname\(/, 'moveFile no longer creates its parents');
+    // A move places its bytes through placeIfFree (the no-clobber placement a conflict resolution shares), which creates the parents.
+    assert.match(bodyOfFile('moveFile'), /placeIfFree\(/, 'moveFile no longer places through placeIfFree');
+    assert.match(bodyOfFile('placeIfFree'), /mkdirPrivate\(path\.dirname\(/, 'placeIfFree no longer creates the destination\'s parents');
     // writeFile hands its parents to the door, whose every write creates them unless the caller opts out.
     const write = bodyOfFile('writeFile');
     assert.match(write, /writeStored\(abs, content\)/, 'writeFile no longer writes through the file door');
