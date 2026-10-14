@@ -9,7 +9,7 @@
  * settle forgot it ten minutes on, the prune took its row a day on, a supersede or a drop removed the row that carried it.
  * Each looked right where it stood (a marker nobody will look for is clutter), and the move stranded all the same.
  *
- * `moveIsOwed` (`files/tombstones.ts`) is the one question — is this move still owed? — and a remover that does not consult it
+ * `moveIsOwed` (`files/move-markers.ts` since Q-462 split the marker block out of `files/tombstones.ts`) is the one question — is this move still owed? — and a remover that does not consult it
  * is the next copy. The rule is held HERE for every remover, not for the nine that exist: the sites are DERIVED from the source,
  * so a tenth remover written next year is caught by the file that holds the other nine.
  *
@@ -48,8 +48,13 @@ import { parseSource, lineOf, ts } from '../_shared/syntax-tree.mjs';
 
 /** The one question every remover asks. */
 const OWED_CHECK = 'moveIsOwed';
-/** Where the question lives. */
-const OWED_CHECK_HOME = 'server/src/files/tombstones.ts';
+/**
+ * Where the question lives: the move-marker module (Q-462). Re-pointed deliberately from `tombstones.ts`, which keeps the lifecycle
+ * and the space wipe (`EXEMPT` below) but no longer defines the question. The derivation's floor on this file (a remover found in
+ * it) is kept: the marker's own removers (`removeUnlessOwed`, `forgetFinishedMove`) live here now, and a derivation that found none
+ * in the module would be looking in the wrong place.
+ */
+const OWED_CHECK_HOME = 'server/src/files/move-markers.ts';
 
 /**
  * Removers that must NOT ask, by `<file>#<function>`, each with the reason. Not a place to put a remover that is inconvenient:
@@ -221,7 +226,7 @@ describe('every remover of a file tombstone or of its move marker asks whether t
   const sources = serverSources();
   const { sites, declared } = analyse(sources);
 
-  it('the question exists: files/tombstones.ts defines and exports moveIsOwed', () => {
+  it('the question exists: files/move-markers.ts defines and exports moveIsOwed', () => {
     const text = sources.find(s => s.file === OWED_CHECK_HOME)?.text;
     assert.ok(text, `${OWED_CHECK_HOME} is not among the tracked sources — re-anchor this gate`);
     const sf = parseSource(OWED_CHECK_HOME, text);
@@ -232,7 +237,7 @@ describe('every remover of a file tombstone or of its move marker asks whether t
 
   it('the derivation found the removers it is about (a floor, and the file that holds the marker)', () => {
     assert.ok(sites.length >= SITE_FLOOR, `only ${sites.length} remover(s) found: the derivation looked in the wrong place — ${JSON.stringify(sites.map(s => s.key))}`);
-    assert.ok(sites.some(s => s.file === OWED_CHECK_HOME), `no remover found in ${OWED_CHECK_HOME}, which holds the file tombstones`);
+    assert.ok(sites.some(s => s.file === OWED_CHECK_HOME), `no remover found in ${OWED_CHECK_HOME}, which holds the move's marker block`);
     assert.ok(sites.some(s => s.why === 'unsets the move marker'), 'no function that unsets the move marker was found: the marker\'s remover is the one this gate is for');
   });
 

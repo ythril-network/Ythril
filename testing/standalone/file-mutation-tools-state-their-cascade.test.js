@@ -30,7 +30,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { blockAfter } from './_structural-window.mjs';
+import { blockAfter, enclosingBlocksMatching, statementAround } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
 import { moveCascadeAsksDestinationFirst, guardPrecedesIrreversibleSteps, MOVE_CASCADE_STEPS } from './_cascade-order.mjs';
@@ -81,7 +81,7 @@ const handlerOf = (name) => {
 
 describe('delete_file describes the cascade it really performs', () => {
   it('names the derived things that go with the blob', () => {
-    for (const claim of [/tombstone/i, /job/i, /artifact/i, /webhook/i, /usage/i]) {
+    for (const claim of [/tombstone/i, /job/i, /artifact/i, /webhook/i, /usage/i, /\blinks?\b/i]) {
       assert.match(DELETE, claim, 'a caller deleting by other means needs to know what this cleans up');
     }
   });
@@ -91,7 +91,7 @@ describe('delete_file describes the cascade it really performs', () => {
     // Both halves are literal on purpose: the case exists to compare a description against an implementation.
     // Pinned to the implementation: prose about a cascade is worthless if the cascade changed underneath it.
     for (const fn of ['writePendingFileTombstones', 'actUnderPendingTombstones', 'cancelMediaJob', 'deleteConversionArtifacts',
-      'invalidateUsageCache', 'emitWebhookEvent']) {
+      'invalidateUsageCache', 'emitWebhookEvent', 'removeLinksOfDeletedFiles']) {
       assert.match(CASCADE, new RegExp(`${fn}\\(`), `${fn} left the cascade — the description now overclaims`);
     }
   });
@@ -136,6 +136,33 @@ describe('delete_file describes the cascade it really performs', () => {
       'the not-found refusal is no longer conditional on a LIVE file record at the path being absent too — an orphan would be refused, or a flagged one completed');
   });
 
+  it('removes the links of what it deleted after the bytes and before the row, calling the remover directly so its failure fails the delete (Q-464)', () => {
+    const body = (fn) => {
+      const at = CASCADE.indexOf(`export async function ${fn}`);
+      assert.ok(at > -1, `${fn} is no longer in delete-cascade.ts — re-anchor this gate`);
+      return CASCADE.slice(at, CASCADE.indexOf('\n}\n', at));
+    };
+    const file = body('deleteFileCascade');
+    const bytes = file.indexOf('deleteStoredIfPresent(');
+    const links = file.indexOf('removeLinksOfDeletedFiles(');
+    const row = file.indexOf('removeFileHere(');
+    assert.ok(bytes > -1 && links > -1 && row > -1, `a file's delete must remove the bytes, the links and the row (deleteStoredIfPresent ${bytes}, removeLinksOfDeletedFiles ${links}, removeFileHere ${row})`);
+    assert.ok(bytes < links && links < row, 'a file delete must run bytes, then links, then the row — the row is last because it is what tells a retry the delete is still owed');
+    const dir = body('deleteDirectoryCascade');
+    const tree = dir.indexOf('removeTree(');
+    const dirLinks = dir.indexOf('removeLinksOfDeletedFiles(');
+    const rows = dir.indexOf('retireRowsUnderDirectory(');
+    assert.ok(tree > -1 && dirLinks > -1 && rows > -1, `a directory delete must remove the tree, the links and the rows (removeTree ${tree}, removeLinksOfDeletedFiles ${dirLinks}, retireRowsUnderDirectory ${rows})`);
+    assert.ok(tree < dirLinks && dirLinks < rows, 'a directory delete must run tree, then links, then rows');
+    for (const [where, text, at] of [['deleteFileCascade', file, links], ['deleteDirectoryCascade', dir, dirLinks]]) {
+      // The statement the call sits in is the call itself, awaited: wrapped in a step that survives a failure it would be `unlessTheStoreFailed(…)` or `.catch(…)`.
+      const statement = statementAround(text, at, `${where}: the link remover's statement`);
+      assert.match(statement, /^await\s+removeLinksOfDeletedFiles\(/, `${where} does not await the link remover directly: a failure in it must fail the delete, never be logged and survived — ${statement.slice(0, 120)}`);
+      assert.deepEqual(enclosingBlocksMatching(text, at, /\b(?:try|catch)\b[^{]*\{$/, `${where}: blocks around the link remover`), [],
+        `${where} calls the link remover inside a try or a catch: the delete would answer done with the links left`);
+    }
+  });
+
   // The guarantees a caller picks the tool by, as sentences (never a mechanism): which path it removes and what stops it. Q-438: the
   // tool said "not the tool for removing a directory tree" while the REST route of the same capability removed one.
   it('states that it deletes one file or, with confirm: true, a whole directory tree, and what refuses', () => {
@@ -149,10 +176,30 @@ describe('delete_file describes the cascade it really performs', () => {
     assert.doesNotMatch(DELETE, /One FILE:/, 'the parameter list still says the path is one file');
   });
 
-  it('scopes the file.deleted webhook to a single file, because a directory delete emits none (Q-469)', () => {
-    const about = sentencesOf(DELETE).filter(s => /file\.deleted/.test(s) && /\bfires?\b/.test(s));
+  // Q-469: a directory delete announces each file it removed. The sentence that scoped the webhook to a single file, because a directory
+  // delete emitted none, was true until bundle-113 and is the claim this rewrites; each half is pinned to the code that makes it true.
+  it('says a directory delete fires one file.deleted per file it removed — not only for a single file (Q-469)', () => {
+    const about = sentencesOf(DELETE).filter(s => /file\.deleted/.test(s));
     assert.ok(about.length > 0, 'the description no longer says when the file.deleted webhook fires');
-    for (const s of about) assert.match(s, /single file|one file/i, `a sentence promises the webhook without saying it is for one file: ${s}`);
+    assert.ok(about.some(s => /directory/i.test(s) && /\b(?:each|every|per)\b|one `?file\.deleted`? per/i.test(s)),
+      `no sentence says a directory delete fires a file.deleted for each file it removed: ${about.join(' | ')}`);
+    assert.doesNotMatch(DELETE, /fires for a single file|webhook\s+fires\s+for\s+(?:a\s+)?single\s+file|directory delete[^.]*(?:emits|fires) no\b/i,
+      'the old claim that only a single file is announced is still in the description');
+  });
+
+  it('and that is what the code does: the directory delete is handed the actor and announces a file.deleted per row it retires, none without an actor (Q-469)', () => {
+    const at = CASCADE.indexOf('export async function deleteDirectoryCascade');
+    assert.ok(at > -1, 'deleteDirectoryCascade is no longer in delete-cascade.ts — re-anchor this gate');
+    const header = CASCADE.slice(at, CASCADE.indexOf('{', at));
+    assert.match(header, /actor\s*\??:\s*WebhookActor/, 'deleteDirectoryCascade takes no actor: it cannot announce what it removed');
+    const path = CASCADE.indexOf('export async function deletePath');
+    const pathBody = CASCADE.slice(path, CASCADE.indexOf('\n}\n', path));
+    assert.match(pathBody, /deleteDirectoryCascade\(\s*spaceId\s*,\s*filePath\s*,\s*actor\s*\)/,
+      'deletePath does not hand the actor to the directory delete: the doors announce nothing');
+    // The whole directory delete, the helpers it names included: the announcement is gated on the actor, and is a file.deleted per path.
+    const rest = CASCADE.slice(at);
+    assert.match(rest, /if\s*\(\s*actor\s*\)[^;]*emitWebhookEvent\(\s*\{\s*event:\s*'file\.deleted'|if\s*\(\s*actor\s*\)\s*\{[^}]*emitWebhookEvent\(\s*\{\s*event:\s*'file\.deleted'/,
+      'the directory delete does not announce a file.deleted gated on the actor (the brain family\'s one rule: no actor, no announcement)');
   });
 
   it('declares `confirm` as a described boolean parameter of the tool', () => {

@@ -38,7 +38,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
+import { argumentsOf, enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
 import { MOVE_CASCADE_STEPS, guardPrecedesIrreversibleSteps, moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
 
 const SRC = 'server/src';
@@ -50,7 +50,7 @@ const FREE_GUARD = 'assertDestinationFree';
  * path of `moveFile` or the cascade is here; a caller that replaces on purpose names its reason.
  */
 const REPLACING_MOVE_CALLERS = Object.freeze({
-  [`${SRC}/api/conflicts.ts`]: 'conflict resolution: keep-incoming means replace the local copy with the incoming one; keep-both with a rename and save-to-space can clobber a name and are Q-466, not a move',
+  [`${SRC}/api/conflicts.ts`]: 'conflict resolution, keep-incoming only: it replaces the local copy with the incoming one, which is its purpose; keep-both with a rename and save-to-space place through placeIfFree and never replace (held call by call below)',
 });
 const DESTINATION_MODULE = `${SRC}/files/destination.ts`;
 
@@ -80,12 +80,96 @@ const NOT_PLACING = Object.freeze({
  * granularity and why the reasons are about the whole file.
  */
 const EXEMPT = Object.freeze({
-  [`${SRC}/api/conflicts.ts`]: 'conflict resolution moves a conflict copy within the space between two paths the conflict record names; nothing there is a caller-chosen destination',
   [`${SRC}/api/spaces.ts`]: 'writes `_schema-backup-<timestamp>.json` at the space root, a name the instance builds, never a caller path',
   [`${SRC}/sync/file-sync.ts`]: 'a pulled arrival: a destination blocked by a local file is a sync conflict (decided there), not a refusal to a caller',
   [`${SRC}/extractor/conversation/write-extraction.ts`]: 'writes the extraction\'s own transcript paths, derived by the instance',
   [`${SRC}/spaces/_shared.ts`]: 'writes the schema snapshot at the space root, a name the instance builds',
 });
+
+/**
+ * Source files whose placing calls are held CALL BY CALL, not by the handler rule above: they place bytes at paths a caller chose, from a
+ * function that is not itself a handler (`executeResolve`, called by two handlers), so "the guard earlier in the same handler" is the wrong
+ * question for them. Each is checked by {@link conflictPlacementFindings}, over the source and again over source written in this test.
+ * (`api/conflicts.ts` was in {@link EXEMPT} until bundle-113: "nothing there is a caller-chosen destination" was false for `rename` and
+ * `targetSpaceId`, and the exemption hid a `moveStored` that replaced whatever stood there.)
+ */
+const CALL_LEVEL = Object.freeze({
+  [`${SRC}/api/conflicts.ts`]: 'conflict resolution places the incoming copy where the CALLER chose (`rename`, `targetSpaceId`); each placement is held call by call (the describe below)',
+});
+
+/** Where a call's destination is in its arguments: the second of a two-path placement, the first of a directory creation. */
+const DESTINATION_ARG = Object.freeze({ moveStored: 1, placeIfFree: 1, mkdir: 0, mkdirPrivate: 0 });
+
+/**
+ * Every placing call in `blanked` (comments already blanked): `{ name, at, line, dest }` where `dest` is the destination argument's text.
+ * `fs.mkdir(` and `fsp.mkdir(` are `mkdir`. A declaration of the same name is not a call, and `moveStoredIfFree(` is another function.
+ */
+function placementsIn(blanked) {
+  const out = [];
+  for (const m of blanked.matchAll(/(?<![\w$.])(?<!\bfunction\s+)(?:fsp?\.)?(moveStored|placeIfFree|mkdirPrivate|mkdir)\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const args = argumentsOf(blanked, open, `${m[1]} call`);
+    out.push({ name: m[1], at: m.index, line: lineOf(blanked, m.index), dest: args[DESTINATION_ARG[m[1]]] ?? '' });
+  }
+  return out;
+}
+
+/** The innermost `case '…': {` block `at` is in: its name and its text up to `at`, or null when it is in none. */
+function caseBefore(blanked, at) {
+  const block = enclosingBlockMatching(blanked, at, /\bcase\s+'[^']+'\s*:\s*\{$/, 'the case block of a placement');
+  if (block === null) return null;
+  const start = blanked.lastIndexOf(block, at);
+  return { name: /\bcase\s+'([^']+)'/.exec(block)?.[1], text: blanked.slice(start, at) };
+}
+
+/**
+ * What a placement can rely on having been done before it: the text of its own `case` up to it, and what its function did before its
+ * `switch` — never another case's, because every case names its paths alike (`dstAbs`) and a binding in the case above would vouch for it.
+ */
+function doneBefore(blanked, at) {
+  const head = blanked.slice(0, at);
+  let start = 0;
+  for (const m of head.matchAll(/^(?:export\s+)?(?:async\s+)?function\s|^\w+Router\.\w+\(|^(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?\(/gm)) start = m.index;
+  const fn = head.slice(start);
+  const sw = fn.search(/\bswitch\s*\(/);
+  return `${sw === -1 ? fn : fn.slice(0, sw)}\n${caseBefore(blanked, at)?.text ?? (sw === -1 ? '' : fn.slice(sw))}`;
+}
+
+/**
+ * What is wrong with the placements of a conflict-resolution source — one string per finding, none when it is right:
+ *
+ *  1. **every conflict path is the sandbox's, checked:** no bare `resolveSafePath(` anywhere (it is lexical: a link on the way out of the
+ *     space is followed), and each placing call's destination is a name bound earlier by `resolveSafePathChecked(` (a directory creation
+ *     may instead be of a `spaceRoot(`: the instance names that path);
+ *  2. **exactly one placement replaces:** `moveStored(` is called once, in `case 'keep-incoming'` — the one resolution whose purpose is to
+ *     replace the local file;
+ *  3. **every other placement is `placeIfFree`,** and EARLIER in its own case the destination was asked about twice:
+ *     `assertDestinationReachable(` (does a file stand where a directory is needed) and `assertNothingStandsAt(` (does anything stand AT it).
+ */
+function conflictPlacementFindings(src) {
+  const blanked = code(src);
+  const found = [];
+  for (const m of blanked.matchAll(/(?<![\w$.])resolveSafePath\s*\(/g)) found.push(`line ${lineOf(blanked, m.index)}: resolveSafePath( is lexical — a conflict path must go through resolveSafePathChecked(`);
+  const placements = placementsIn(blanked);
+  for (const p of placements) {
+    const before = doneBefore(blanked, p.at);
+    const named = [...new Set(p.dest.match(/[A-Za-z_$][\w$]*/g) ?? [])];
+    const checked = named.some(id => new RegExp(`\\b${id}\\s*=\\s*await\\s+resolveSafePathChecked\\s*\\(`).test(before)
+      || (p.name.startsWith('mkdir') && new RegExp(`\\b${id}\\s*=\\s*spaceRoot\\s*\\(`).test(before)));
+    if (!checked) found.push(`line ${p.line}: ${p.name}(${p.dest.slice(0, 40)}) — its destination is not a name bound earlier by resolveSafePathChecked(`);
+    if (p.name === 'moveStored' && caseBefore(blanked, p.at)?.name !== 'keep-incoming') {
+      found.push(`line ${p.line}: moveStored( replaces what stands at its destination, and is outside case 'keep-incoming'`);
+    }
+    if (p.name === 'placeIfFree') {
+      for (const guard of ['assertDestinationReachable', 'assertNothingStandsAt']) {
+        if (!new RegExp(`\\b${guard}\\s*\\(`).test(before)) found.push(`line ${p.line}: placeIfFree( with no ${guard}( earlier in its case`);
+      }
+    }
+  }
+  const replacing = placements.filter(p => p.name === 'moveStored').length;
+  if (replacing !== 1) found.push(`${replacing} calls of moveStored( (which replaces): exactly one is allowed, in keep-incoming`);
+  return found;
+}
 
 /** Strip comments keeping line numbers, so a reported line is the original's. */
 const code = (text) => blankComments(text);
@@ -176,7 +260,7 @@ describe('every door that places bytes or a directory checks its destination fir
 
   it('the scan finds the doors: a floor, and the three files that hold them by name', () => {
     const found = placingSites();
-    const doorSites = found.filter(f => !(f.file in EXEMPT)).flatMap(f => f.sites.map(s => ({ ...s, file: f.file })));
+    const doorSites = found.filter(f => !(f.file in EXEMPT) && !(f.file in CALL_LEVEL)).flatMap(f => f.sites.map(s => ({ ...s, file: f.file })));
     assert.ok(doorSites.length >= 6, `only ${doorSites.length} placing call site(s) outside the exempt files — the scan has stopped seeing the doors`);
     const files = new Set(doorSites.map(s => s.file));
     for (const door of [`${SRC}/api/files.ts`, `${SRC}/api/files-upload.ts`, `${SRC}/mcp/tools/file.ts`]) {
@@ -185,7 +269,7 @@ describe('every door that places bytes or a directory checks its destination fir
   });
 
   it('a placing function imported by a door and never called in it is a finding (passed by reference is not a check)', () => {
-    const unseen = placingSites().filter(f => !(f.file in EXEMPT) && f.sites.length === 0).map(f => `${f.file}: ${f.local}`);
+    const unseen = placingSites().filter(f => !(f.file in EXEMPT) && !(f.file in CALL_LEVEL) && f.sites.length === 0).map(f => `${f.file}: ${f.local}`);
     assert.deepEqual(unseen, [], `imported from a placement module and never called here, so no handler can have guarded it: ${unseen}`);
   });
 
@@ -193,7 +277,7 @@ describe('every door that places bytes or a directory checks its destination fir
     const cascade = cascadeGuardsItself(readFileSync(path.join(REPO_ROOT, `${SRC}/files/move-cascade.ts`), 'utf8'));
     const unguarded = [];
     for (const f of placingSites()) {
-      if (f.file in EXEMPT) continue;
+      if (f.file in EXEMPT || f.file in CALL_LEVEL) continue;
       for (const s of f.sites) {
         if (s.guarded) continue;
         if (f.name === 'moveFileCascade' && s.inHandler && cascade.guards) continue;
@@ -237,13 +321,104 @@ describe('every door that places bytes or a directory checks its destination fir
         assert.ok(callers.some(c => c.file === file), `${file} is named as a caller of moveStored and does not call it: delete the row`);
         assert.ok(why.length > 30, `${file}: a reason that is not one`);
       }
-      assert.match(REPLACING_MOVE_CALLERS[`${SRC}/api/conflicts.ts`] ?? '', /Q-466/, 'api/conflicts.ts replaces through moveStored on purpose (keep-incoming) and by accident (keep-both, save-to-space): the ticket that owns the second is named');
     });
 
     it('moveStoredIfFree is called from the one function that turns its refusal into the caller\'s answer', () => {
       const callers = callersOf('moveStoredIfFree').map(c => c.file);
       assert.ok(callers.length >= 1, 'no caller of moveStoredIfFree found: the move places its bytes some other way');
       assert.deepEqual([...new Set(callers)], [`${SRC}/files/files.ts`], 'moveStoredIfFree is called outside files/files.ts (moveFile): its refusal is not turned into destination_exists there');
+    });
+  });
+
+  describe('conflict resolution places the incoming copy only after the destination was checked, and replaces only in keep-incoming (Q-466)', () => {
+    const CONFLICTS = `${SRC}/api/conflicts.ts`;
+
+    it('api/conflicts.ts is held call by call, and no longer exempt as a file: its destinations are the caller\'s', () => {
+      assert.ok(CONFLICTS in CALL_LEVEL, `${CONFLICTS} is not held call by call`);
+      assert.equal(CONFLICTS in EXEMPT, false,
+        `${CONFLICTS} is exempt as a whole file: "nothing there is a caller-chosen destination" is false (rename, targetSpaceId), and the exemption hid a placement that replaced what stood there`);
+    });
+
+    it('the scan finds the placements: moveStored for keep-incoming, and the others it makes', () => {
+      const src = text(CONFLICTS);
+      assert.ok(src !== null, `${CONFLICTS} does not exist — re-anchor this gate`);
+      const names = placementsIn(code(src)).map(p => p.name);
+      assert.ok(names.length >= 3, `only ${names.length} placing call(s) found in ${CONFLICTS}: the scan has stopped seeing them`);
+      assert.ok(names.includes('moveStored'), 'keep-incoming no longer replaces through moveStored, or the scan cannot see it');
+    });
+
+    it('every placement\'s destination was resolved through the checked resolve and asked about first, and exactly one placement replaces', () => {
+      assert.deepEqual(conflictPlacementFindings(text(CONFLICTS) ?? ''), [],
+        'a conflict resolution places bytes at a path nobody checked, or replaces outside keep-incoming');
+    });
+
+    it('the one replacing caller is keep-incoming, and its row says so (the old row said keep-both and save-to-space could clobber a name)', () => {
+      const why = REPLACING_MOVE_CALLERS[CONFLICTS] ?? '';
+      assert.match(why, /keep-incoming/, 'the row for conflicts.ts does not name keep-incoming as the replacing resolution');
+      assert.doesNotMatch(why, /can clobber|Q-466/, 'the row still says another resolution can replace a name: that is the defect this gate holds shut');
+    });
+
+    describe('the scanner itself, over source written here', () => {
+      const INCOMING = [
+        '      const srcAbs = await resolveSafePathChecked(spaceId, doc.conflictPath);',
+        '      const dstAbs = await resolveSafePathChecked(spaceId, doc.originalPath);',
+        '      await mkdirPrivate(path.dirname(dstAbs));',
+        '      await moveStored(srcAbs, dstAbs);',
+      ].join('\n');
+      const BOTH = [
+        '      const srcAbs = await resolveSafePathChecked(spaceId, doc.conflictPath);',
+        '      const dstAbs = await resolveSafePathChecked(spaceId, rename);',
+        '      await assertDestinationReachable(spaceId, rename);',
+        '      await assertNothingStandsAt(spaceId, rename);',
+        '      await placeIfFree(srcAbs, dstAbs);',
+      ].join('\n');
+      const source = (both, incoming = INCOMING, pre = '') => `async function executeResolve(doc, spaceId, action, rename) {\n${pre}\n  switch (action) {\n`
+        + `    case 'keep-incoming': {\n${incoming}\n      break;\n    }\n    case 'keep-both': {\n${both}\n      break;\n    }\n  }\n}\n`;
+
+      it('the shape the design asks for has no finding', () => {
+        assert.deepEqual(conflictPlacementFindings(source(BOTH)), []);
+      });
+      it('a lexical resolve is a finding, wherever it is', () => {
+        const f = conflictPlacementFindings(source(BOTH.replace('resolveSafePathChecked', 'resolveSafePath')));
+        assert.ok(f.some(x => /lexical/.test(x)), f.join('\n'));
+      });
+      it('a placement whose destination is not a checked name is a finding', () => {
+        const f = conflictPlacementFindings(source(BOTH.replace('await resolveSafePathChecked(spaceId, rename)', 'path.join(root, rename)')));
+        assert.ok(f.some(x => /not a name bound earlier by resolveSafePathChecked/.test(x)), f.join('\n'));
+      });
+      it('a destination bound only in ANOTHER case does not vouch for this one (every case calls its paths alike)', () => {
+        const f = conflictPlacementFindings(source(BOTH.replace('const dstAbs = await resolveSafePathChecked(spaceId, rename);', 'const dstAbs = join(root, rename);')));
+        assert.ok(f.some(x => /not a name bound earlier by resolveSafePathChecked/.test(x)), `the binding in keep-incoming vouched for keep-both: ${f.join('\n')}`);
+      });
+      it('a binding made before the switch is read, by every case', () => {
+        const hoisted = 'const dstAbs = await resolveSafePathChecked(spaceId, rename);';
+        const f = conflictPlacementFindings(source(BOTH.replace(/.*const dstAbs = await resolveSafePathChecked\(spaceId, rename\);\n/, ''), INCOMING, `  ${hoisted}`));
+        assert.deepEqual(f, []);
+      });
+      it('moveStored outside keep-incoming is a finding, and so is a second one', () => {
+        const f = conflictPlacementFindings(source(BOTH.replace('placeIfFree(srcAbs, dstAbs)', 'moveStored(srcAbs, dstAbs)')));
+        assert.ok(f.some(x => /outside case 'keep-incoming'/.test(x)), f.join('\n'));
+        assert.ok(f.some(x => /exactly one is allowed/.test(x)), f.join('\n'));
+      });
+      it('placeIfFree without either question asked first is a finding, naming the one missing', () => {
+        const noFree = conflictPlacementFindings(source(BOTH.replace(/.*assertNothingStandsAt.*\n/, '')));
+        assert.ok(noFree.some(x => /no assertNothingStandsAt\(/.test(x)) && !noFree.some(x => /no assertDestinationReachable\(/.test(x)), noFree.join('\n'));
+        const noReach = conflictPlacementFindings(source(BOTH.replace(/.*assertDestinationReachable.*\n/, '')));
+        assert.ok(noReach.some(x => /no assertDestinationReachable\(/.test(x)), noReach.join('\n'));
+      });
+      it('a question asked in another case is not asked here', () => {
+        const asked = INCOMING.replace('await mkdirPrivate', 'await assertNothingStandsAt(spaceId, x);\n      await assertDestinationReachable(spaceId, x);\n      await mkdirPrivate');
+        const f = conflictPlacementFindings(source(BOTH.replace(/.*assert(?:NothingStandsAt|DestinationReachable).*\n/g, ''), asked));
+        assert.ok(f.some(x => /placeIfFree\( with no assert/.test(x)), `a guard in keep-incoming vouched for keep-both: ${f.join('\n')}`);
+      });
+      it('a directory creation of a space root is the instance\'s own path', () => {
+        const withRoot = INCOMING.replace('await mkdirPrivate(path.dirname(dstAbs));', 'const dstRoot = spaceRoot(spaceId);\n      await fs.mkdir(dstRoot, { recursive: true });\n      await mkdirPrivate(path.dirname(dstAbs));');
+        assert.deepEqual(conflictPlacementFindings(source(BOTH, withRoot)), []);
+      });
+      it('a call that is only mentioned in a comment is not a call', () => {
+        const commented = BOTH.replace('      await placeIfFree', '      // await moveStored(srcAbs, dstAbs) used to be here\n      /* resolveSafePath(a, b) */\n      await placeIfFree');
+        assert.deepEqual(conflictPlacementFindings(source(commented)), []);
+      });
     });
   });
 

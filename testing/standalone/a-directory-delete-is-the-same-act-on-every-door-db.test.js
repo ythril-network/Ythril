@@ -22,7 +22,10 @@
  *  - a `confirm` that is not a boolean is `400` and deletes nothing;
  *  - a path the file system refuses to look at is `500 file_system_fault` in words that name no path, and a path that cannot
  *    exist (a name too long, a loop of links) is `404`, not a refusal about creating it;
- *  - the audit entry of a directory delete carries `kind: directory`, once per call, on both audited doors.
+ *  - the audit entry of a directory delete carries `kind: directory`, once per call, on both audited doors;
+ *  - (Q-464) a delete removes the links THIS instance wrote from the file and from its derived ids, on every door and the TTL sweep, and
+ *    tells peers; a link another instance wrote stays; a removal that stopped part way keeps the links of the files still there; a
+ *    failure in the link step leaves the delete owed, and its retry completes it.
  *
  * The comparison between doors is by value over the same scenario, never by two doors each checked against a literal that
  * could be wrong the same way.
@@ -38,12 +41,13 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'dirdeldoors';
 const DOORS = ['REST', 'TOOL', 'MCP'];
-let acts;
+let acts, ttl, F, faults;
 const files = () => acts.door.coll(S, 'files');
 const abs = (p) => path.join(acts.root(), p);
 
@@ -98,11 +102,17 @@ function statFailsAt(target, code) {
 const EVERY_TOMBSTONE = ['_converted/d/c.pdf.md', 'd/a.txt', 'd/c.pdf', 'd/sub/b.txt'];
 
 describe('delete_file deletes a directory with confirm, as the same act on every door (Q-438)', { skip }, () => {
-  before(async () => { acts = await openFileActDoors({ suite: 'dirdeldoors', space: S }); });
-  after(async () => { await acts?.close(); });
+  before(async () => {
+    acts = await openFileActDoors({ suite: 'dirdeldoors', space: S });
+    F = await driverWriteFailures('ythril_harness_dirdeldoors');
+    ttl = await import('../../server/dist/brain/ttl-sweep.js');
+    faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
+  });
+  after(async () => { faults?.restore(); await acts?.close(); });
   beforeEach(async () => {
+    faults.clear();
     await acts.reset();
-    for (const part of ['links', 'media_jobs']) await acts.door.coll(S, part).deleteMany({});
+    for (const part of ['links', 'media_jobs', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
     await acts.door.mongo.getDb().collection('audit_log').deleteMany({ spaceId: S });
   });
 
@@ -125,6 +135,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
         assert.deepEqual(left.filter(p => !p.endsWith('/')), [], 'a file of the tree or of its sidecars outlived the delete');
         assert.ok(!left.includes('d/') && !left.includes('_converted/d/'), `the directory or its converted tree is still there: ${left}`);
         assert.deepEqual(await files().find({}).toArray(), [], 'a record of the tree, a derived row or a sidecar row outlived the delete');
+        assert.deepEqual(await acts.links.ids(), [], 'a link from a file of the tree (a row with no author is this instance\'s) outlived the delete');
         assert.deepEqual(await acts.published(), { served: EVERY_TOMBSTONE, pushed: EVERY_TOMBSTONE });
       });
 
@@ -207,7 +218,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
     /** What one door observes of the same four situations, for comparison with the others. */
     async function observe(via) {
       await acts.reset();
-      for (const part of ['links', 'media_jobs']) await acts.door.coll(S, part).deleteMany({});
+      for (const part of ['links', 'media_jobs', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
       await seedTree();
       await acts.seed('locked/x.txt');
       const view = (a) => ({ ...acts.answerOf(a), sentence: acts.failed(a) ? sentenceOf(a) : undefined });
@@ -220,7 +231,8 @@ describe('delete_file deletes a directory with confirm, as the same act on every
       const restore = statFailsAt(abs('locked'), 'EACCES');
       try { out.unreadable = view(await del(via, 'locked', true)); } finally { restore(); }
       const confirmed = await del(via, 'd', true);
-      out.confirmed = { failed: acts.failed(confirmed), published: await acts.published(), left: treeOf(acts.root()) };
+      out.confirmed = { failed: acts.failed(confirmed), published: await acts.published(), left: treeOf(acts.root()),
+        links: await acts.links.ids(), linkTombstones: await acts.links.tombstoned() };
       return out;
     }
 
@@ -229,7 +241,140 @@ describe('delete_file deletes a directory with confirm, as the same act on every
       for (const via of DOORS) seen[via] = await observe(via);
       assert.equal(seen.REST.withoutConfirm.code, 'confirm_required', 'the scenario did not reach the refusal it compares');
       assert.equal(seen.REST.confirmed.failed, false);
+      assert.deepEqual(seen.REST.confirmed.links, [], 'the links of the deleted files outlived the delete');
+      assert.deepEqual(seen.REST.confirmed.linkTombstones, ['l1'], 'the link of the deleted tree was removed without a tombstone');
       for (const via of ['TOOL', 'MCP']) assert.deepEqual(seen[via], seen.REST, `${via} answered differently from REST`);
+    });
+  });
+
+  // ── The links a delete removes (Q-464) ──────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * A delete removes the links THIS instance wrote from the file and from its derived ids (`path#chunk-0`), on every door that
+   * deletes — REST, `POST /api/delete_file`, MCP and the TTL sweep — and tells peers (a link tombstone per row removed). A link another
+   * instance wrote stays: the file's tombstone does not carry it, and removing it here would be one instance deciding for another (ADR 05).
+   * What is named in a case is derived from the doors, never from a count: a link row is judged by whose it is.
+   */
+  describe('a delete removes the links this instance wrote from the file and from its derived ids (Q-464)', () => {
+    /** A derived row of `p` — what a conversion leaves, and what a link can start from — with the bytes of nothing. */
+    const derivedOf = (p) => files().insertOne({ _id: `${p}#chunk-0`, spaceId: S, path: `${p}#chunk-0`, parentFileId: p, content: 'c', tags: [],
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', sizeBytes: 1 });
+
+    for (const via of [...DOORS, 'TTL sweep']) {
+      it(`${via}: a file's own links go, from the file and from its derived id; another instance's stay; one tombstone per link removed`, async () => {
+        await acts.seed('f/a.txt', via === 'TTL sweep' ? { _expireAt: new Date('2026-01-01T00:00:00Z') } : {});
+        await derivedOf('f/a.txt');
+        // Near names, which are other files: the selector is "this path and its derived ids", never a prefix of the text.
+        await acts.seed('f/a.txt.bak');
+        await acts.seed('f/b.txt');
+        const own = [await acts.links.put('f/a.txt', 'e1', 'self'), await acts.links.put('f/a.txt', 'e2', 'none'), await acts.links.put('f/a.txt#chunk-0', 'e1', 'self')];
+        const theirs = [await acts.links.put('f/a.txt', 'e3', 'peer'), await acts.links.put('f/a.txt#chunk-0', 'e3', 'peer')];
+        const others = [await acts.links.put('f/a.txt.bak', 'e1', 'self'), await acts.links.put('f/b.txt', 'e1', 'self')];
+
+        if (via === 'TTL sweep') await ttl.sweepExpired(new Date());
+        else { const a = await del(via, 'f/a.txt'); assert.ok(!acts.failed(a), JSON.stringify(a.body ?? a.sc ?? a.text)); }
+
+        assert.equal(acts.onDisk('f/a.txt'), false, 'fixture: the file was not deleted');
+        assert.deepEqual(await acts.links.idsUnder('f/a.txt'), [...theirs].sort(),
+          'the links this instance wrote are still held against a file that is gone (they would be inherited by whatever is uploaded at the path), or a link another instance wrote was removed');
+        assert.deepEqual(await acts.links.idsFrom('f/a.txt.bak', 'f/b.txt'), [...others].sort(), 'a link of ANOTHER file was removed: the selector is a prefix of text');
+        assert.deepEqual(await acts.links.tombstoned(), [...own].sort(), 'a link was removed without its tombstone (peers keep it), or a tombstone was written for a link that stayed');
+      });
+    }
+
+    for (const via of DOORS) {
+      it(`${via}: a directory delete removes the links of every file under it and of their derived ids, and only the ones this instance wrote`, async () => {
+        await seedTree();
+        await derivedOf('d/sub/b.txt');
+        // Near names: a sibling directory sharing the text, and a file named like the directory.
+        await acts.seed('dx/keep.txt');
+        await acts.seed('d.txt');
+        await acts.door.coll(S, 'links').deleteMany({});
+        const own = [await acts.links.put('d/a.txt', 'e1', 'self'), await acts.links.put('d/sub/b.txt', 'e1', 'self'), await acts.links.put('d/sub/b.txt', 'e2', 'none'),
+          await acts.links.put('d/a.txt#chunk-0', 'e1', 'self'), await acts.links.put('d/sub/b.txt#chunk-0', 'e1', 'self')];
+        const theirs = [await acts.links.put('d/sub/b.txt', 'e3', 'peer'), await acts.links.put('d/c.pdf', 'e3', 'peer')];
+        const others = [await acts.links.put('dx/keep.txt', 'e1', 'self'), await acts.links.put('d.txt', 'e1', 'self')];
+
+        const a = await del(via, 'd', true);
+        assert.ok(!acts.failed(a), JSON.stringify(a.body ?? a.sc ?? a.text));
+
+        assert.equal(acts.onDisk('d'), false, 'fixture: the directory was not deleted');
+        assert.deepEqual(await acts.links.idsUnder('d'), [...theirs].sort(),
+          'links this instance wrote are still held against files that are gone, or a link another instance wrote was removed');
+        assert.deepEqual(await acts.links.idsFrom('dx/keep.txt', 'd.txt'), [...others].sort(), 'a link of a file outside the directory was removed');
+        assert.deepEqual(await acts.links.tombstoned(), [...own].sort(), 'a removed link has no tombstone, or one was written for a link that stayed');
+      });
+    }
+
+    it('a directory delete a failure stopped part way keeps the links of the files still there; its retry removes every one this instance wrote', async () => {
+      await seedTree();
+      await acts.door.coll(S, 'links').deleteMany({});
+      const gone = await acts.links.put('d/a.txt', 'e1', 'self');
+      const stayed = [await acts.links.put('d/sub/b.txt', 'e1', 'self'), await acts.links.put('d/c.pdf', 'e1', 'self')];
+      const theirs = await acts.links.put('d/sub/b.txt', 'e3', 'peer');
+      // The tree removal stops after taking ONE file: `d/a.txt` is gone from disk, the other files of the directory are still there.
+      const real = fsp.rm;
+      fsp.rm = async function stopsPartWay(p, ...rest) {
+        if (String(p) === abs('d')) {
+          await real.call(this, abs('d/a.txt'), { force: true });
+          throw Object.assign(new Error('EACCES: permission denied, rmdir'), { code: 'EACCES' });
+        }
+        return real.call(this, p, ...rest);
+      };
+      let first;
+      try { first = await acts.rest('DELETE', { path: 'd' }, { confirm: true }); } finally { fsp.rm = real; }
+      assert.ok(acts.failed(first), 'fixture: the delete the removal stopped was answered as done');
+      assert.ok(acts.onDisk('d/sub/b.txt') && acts.onDisk('d/c.pdf') && !acts.onDisk('d/a.txt'), 'fixture: the removal did not stop part way');
+      const held = await acts.links.idsFrom('d/sub/b.txt', 'd/c.pdf');
+      assert.deepEqual(held, [...stayed, theirs].sort(), 'a link of a file that is still there was removed by a delete that did not remove the file');
+
+      const retry = await acts.rest('DELETE', { path: 'd' }, { confirm: true });
+      assert.ok(!acts.failed(retry), JSON.stringify(retry.body));
+      assert.deepEqual(await acts.links.idsUnder('d'), [theirs], 'the retry left a link this instance wrote (the file that went first included), or removed another instance\'s');
+      assert.deepEqual(await acts.links.tombstoned(), [gone, ...stayed].sort(), 'the links the two attempts removed are not all tombstoned');
+    });
+
+    describe('a failure in the link step leaves the delete owed: the row is what finds it, and the retry completes it', () => {
+      const LINKS = `${S}_links`;
+      for (const via of DOORS) {
+        it(`${via}: a file — 503 with the file's row kept, then the retry removes the links, the row and tells peers once`, async () => {
+          await acts.seed('r/one.txt');
+          const own = [await acts.links.put('r/one.txt', 'e1', 'self'), await acts.links.put('r/one.txt#chunk-0', 'e1', 'self')];
+          faults.fail('deleteMany', LINKS, F.storeGone.single);
+
+          const first = await del(via, 'r/one.txt');
+          assert.equal(faults.fired('deleteMany', LINKS), 1, 'the delete never removed a link row: the case did not reach the step it is about');
+          assert.equal(acts.statusOf(first), 503, `a delete whose link step failed was answered ${acts.statusOf(first)}: it must fail with the store's failure, never log and go on`);
+          assert.ok(await files().findOne({ _id: 'r/one.txt' }), 'the row of the file is gone: nothing finds the delete still owed (the retry answers not found)');
+          faults.clear();
+
+          const retry = await del(via, 'r/one.txt');
+          assert.ok(!acts.failed(retry), `the retry of a delete whose link step failed was refused (${acts.statusOf(retry)}): ${JSON.stringify(retry.body ?? retry.sc ?? retry.text)}`);
+          assert.deepEqual(await acts.links.idsUnder('r/one.txt'), []);
+          assert.deepEqual(await acts.links.tombstoned(), [...own].sort());
+          assert.equal(await files().findOne({ _id: 'r/one.txt' }), null, 'the row outlived the completed delete');
+          assert.deepEqual((await acts.published()).served, ['r/one.txt'], 'peers are not told of the file exactly once');
+        });
+
+        it(`${via}: a directory — 503 with the rows kept, then the retry completes it`, async () => {
+          await acts.seed('r/dir/a.txt');
+          await acts.seed('r/dir/b.txt');
+          const own = [await acts.links.put('r/dir/a.txt', 'e1', 'self'), await acts.links.put('r/dir/b.txt', 'e1', 'self')];
+          faults.fail('deleteMany', LINKS, F.storeGone.single);
+
+          const first = await del(via, 'r/dir', true);
+          assert.equal(faults.fired('deleteMany', LINKS), 1, 'the delete never removed a link row: the case did not reach the step it is about');
+          assert.equal(acts.statusOf(first), 503, `a directory delete whose link step failed was answered ${acts.statusOf(first)}`);
+          assert.equal(await files().countDocuments({ _id: /^r\/dir\// }), 2, 'the rows of the directory are gone: nothing finds the delete still owed');
+          faults.clear();
+
+          const retry = await del(via, 'r/dir', true);
+          assert.ok(!acts.failed(retry), `the retry was refused (${acts.statusOf(retry)}): ${JSON.stringify(retry.body ?? retry.sc ?? retry.text)}`);
+          assert.deepEqual(await acts.links.idsUnder('r/dir'), []);
+          assert.deepEqual(await acts.links.tombstoned(), [...own].sort());
+          assert.equal(await files().countDocuments({ _id: /^r\/dir\// }), 0);
+        });
+      }
     });
   });
 

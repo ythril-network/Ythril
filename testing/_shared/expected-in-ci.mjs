@@ -37,6 +37,11 @@ const CASE_SENSITIVE_WHY = 'CI runners\' file systems are case-sensitive, so `a.
   + 'and the rule they test is held on CI by the pure classifier test (a-destination-is-classified-by-inode-link-count-and-marker) and the '
   + 'settle seam test (a-case-only-settle-is-decided-by-the-move-not-the-disk-db)';
 
+const CONFLICT_CASE_WHY = 'a conflict copy renamed to another spelling of its own name (`doc.conflict-peer.txt` to `DOC.CONFLICT-PEER.TXT`) is one directory entry under two '
+  + 'spellings only where the file system is case-insensitive; on the case-sensitive file systems CI uses it is two entries, the alias the case exercises cannot exist, '
+  + 'and it runs for real in the local preflight on the NTFS development machine. The rule it holds (an alias is a placement to finish, never an occupant) is the '
+  + 'rule of a move, and is held on CI by the pure classifier test (a-destination-is-classified-by-inode-link-count-and-marker)';
+
 /** @type {Readonly<Record<string, { causes: string[], why: string }>>} */
 export const EXPECTED_IN_CI = Object.freeze({
   'testing/standalone/an-extraction-describes-the-conversation-it-names.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
@@ -47,6 +52,7 @@ export const EXPECTED_IN_CI = Object.freeze({
   'testing/standalone/a-case-only-rename-moves-its-record-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
   'testing/standalone/a-half-made-link-is-finished-or-undone-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
   'testing/standalone/a-peer-tombstone-for-an-old-spelling-keeps-the-bytes-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
+  'testing/standalone/a-conflict-resolution-never-replaces-an-unrelated-file-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CONFLICT_CASE_WHY },
 });
 
 /**
