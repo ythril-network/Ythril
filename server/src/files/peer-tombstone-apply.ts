@@ -40,7 +40,9 @@
  *     `rowSeq` keeps today's behaviour: the file at the path goes.
  *  6. **Removed completely** (`removeOneStoredFileHere`, `removeFileHere` after the unlink): the bytes, then the job, the conversion artefacts and chunk rows, the cached
  *     hash, the usage figure and the row — the steps of the local delete, so a peer's deletion leaves what the owner's does.
- *     No webhook: a peer's deletion is not an act of a user here.
+ *     No webhook: a peer's deletion is not an act of a user here. **The bytes of an entry another record names stay**: the old spelling of a
+ *     case-only rename, applied after the new one arrived on a case-insensitive host, names the same entry as a live record at the new id
+ *     (`liveRecordAtAnotherSpellingOfEntry`), so the tombstone removes the record it names and nothing of the entry.
  *  7. **Kept only to be passed on**: a relayed tombstone is stored — with its ISSUER (so the next hop judges it as that
  *     issuer's; an issuer-less one is stored with its deliverer), positioned by the RECEIVE time, and carrying the hash of the
  *     row it erased here — only when this instance serves the space to someone else. A leaf applies and does not keep the
@@ -71,6 +73,7 @@ import { servesOnward } from '../sync/served-watermark.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
 import { peerFileKey, PathNamesTheSpaceError } from './sandbox.js';
 import { removeOneStoredFileHere } from './remove-file-here.js';
+import { liveRecordAtAnotherSpellingOfEntry, removeOnlyTheRecordNamed } from './another-spelling-of-the-entry.js';
 import { countFileArrival } from './bytes-arrived.js';
 import { recreatedSince } from './tombstone-shadow.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
@@ -203,8 +206,11 @@ export async function applyPeerFileTombstones(
         keep.push(kept);
         continue;
       }
-      // The bytes when there are some and they are a FILE: a peer's tombstone is for ONE path and never takes a tree with it.
-      await removeOneStoredFileHere(localSpaceId, a.key, a.abs);
+      // The bytes when there are some and they are a FILE: a peer's tombstone is for ONE path and never takes a tree with it. Not when a live
+      // record at ANOTHER id names the same entry on this file system (the old spelling of a case-only rename, applied after the new one
+      // arrived): those bytes are that record's, so the tombstone removes the record it names and nothing of the entry.
+      if (await liveRecordAtAnotherSpellingOfEntry(localSpaceId, a.key, a.abs) !== null) await removeOnlyTheRecordNamed(localSpaceId, a.key);
+      else await removeOneStoredFileHere(localSpaceId, a.key, a.abs);
       rows.delete(a.key); // a second tombstone for the path in this page finds it gone
       removed[verdict.ground] += 1;
       syncTombstonesAppliedTotal.labels({ kind: 'file', ground: verdict.ground }).inc();

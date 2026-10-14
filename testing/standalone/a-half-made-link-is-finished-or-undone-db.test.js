@@ -39,7 +39,7 @@ const T0 = '2026-09-01T00:00:00.000Z';
 const DAY = 24 * 3_600_000;
 const LATER = () => new Date(Date.now() + DAY);
 
-let acts, stored, tombstones, finish, walk, seen;
+let acts, stored, tombstones, reads, finish, walk, seen;
 const files = () => acts.door.coll(S, 'files');
 const rowOf = (id) => files().findOne({ _id: id });
 const abs = (p) => path.join(acts.root(), p);
@@ -64,7 +64,7 @@ const jobFor = (p) => ({
 async function crashedBetweenLinkAndUnlink(from, to) {
   await acts.seed(from, { description: 'A' });
   fs.linkSync(abs(from), abs(to));
-  const identity = await tombstones.bytesIdentityAt(S, from);
+  const identity = await reads.bytesIdentityAt(S, from);
   assert.ok(identity, 'fixture: the source has no identity to record');
   await tombstones.writePendingFileTombstones(S, [from], { from, to, ...identity });
 }
@@ -82,6 +82,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
     acts = await openFileActDoors({ suite: 'halflink', space: S });
     stored = await import('../../server/dist/files/stored-bytes.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    reads = await import('../../server/dist/files/move-marker-reads.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
     seen = await import('../../server/dist/files/owed-moves-seen.js');
@@ -180,7 +181,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
   it('(e) one entry under two spellings and a marker is an ALIAS: the file is renamed, never unlinked (case-insensitive file systems only)', async (t) => {
     if (!caseInsensitiveAt(acts.root())) { t.skip('the file system under the files tree is case-sensitive: a name has no second spelling here; the classification is held by a-destination-is-classified-by-inode-link-count-and-marker (pure)'); return; }
     await acts.seed('case.txt', { description: 'A' });
-    const identity = await tombstones.bytesIdentityAt(S, 'case.txt');
+    const identity = await reads.bytesIdentityAt(S, 'case.txt');
     await tombstones.writePendingFileTombstones(S, ['case.txt'], { from: 'case.txt', to: 'Case.txt', ...identity });
 
     const answer = await acts.move('REST', 'case.txt', 'Case.txt');

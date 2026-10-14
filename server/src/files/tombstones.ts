@@ -101,7 +101,6 @@
  * who asked, how often housekeeping has tried), all of it inside `move` and off the wire.
  */
 
-import type { BigIntStats, Stats } from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
 import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
@@ -120,14 +119,13 @@ import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt, classifyDestination, destinationStateAt, lstatIfPresent } from './stored-bytes.js';
+import { bytesPresentAt } from './stored-bytes.js';
 import { removeConvergedLinks } from './move-links.js';
-import { resolveSafePathChecked } from './sandbox.js';
-import { hasLiveFileRecordAt } from './file-meta.js';
-import { linksStartingFrom, aFileUnderHoldsALink, fileLinkSourcesUnder } from '../brain/link-adjacency.js';
+import { isTheMovedBytes, movedBytesOf, somethingOfTheFileIsAt, whatBecameOfPath } from './move-marker-reads.js';
+import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { ActNotRecorded } from './act-answers.js';
-import { jobIdClausesOf, kindAt, moveKey, movedId, movedPairs, movedRoot, parentOfSidecar, type PathKind } from './moved-paths.js';
+import { kindAt, moveKey, movedPairs, parentOfSidecar } from './moved-paths.js';
 import {
   heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
@@ -877,31 +875,13 @@ interface Settled {
 const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1 } as const;
 
 /**
- * Whether a move's pending tombstone is for an id that is no longer THIS file's although bytes still answer at its spelling: the move
- * was a case-only rename (in any path component) on a case-insensitive file system, so the old id and the new one are one directory
- * entry under two spellings (`classifyDestination`: `alias`).
- *
- * ## What it prevents
- *
- * A record id is case-SENSITIVE and a peer may run on a case-sensitive host. "Do bytes answer at the old spelling" dropped the tombstone
- * of every sidecar of a case-only rename, so a peer kept `_converted/a.txt.md` and received `_converted/A.txt.md`: two files for ever.
- * The settle's question for a move is "is the old ID still this file's", which the alias answers no to. Anything that is not a move's
- * own tombstone, or whose new id has no bytes (the move did not happen), keeps the disk's answer.
- */
-async function isRenamedOntoItself(spaceId: string, t: Pick<ToPublish, 'path' | 'move'>): Promise<boolean> {
-  if (!t.move) return false;
-  const to = movedId(t.path, t.move.from, t.move.to);
-  if (to === null || to === t.path) return false;
-  return await destinationStateAt(await resolveSafePathChecked(spaceId, t.path), await resolveSafePathChecked(spaceId, to), { begun: true }) === 'alias';
-}
-
-/**
- * THE settle rule, one copy for every caller: the disk decides each pending tombstone. Its path still has bytes, so
- * the act did not remove it: dropped (unless it is a move's old id that is the same entry as its new one, {@link isRenamedOntoItself}).
- * It has none, so the act did: published ({@link publishOnePerPath} — one per
- * path, stamped now, never a caller's clock). A path that cannot be looked at is neither — it stays pending, served
- * to nobody, and is returned as `unresolved` for the caller to decide when to ask again. Only tombstones still
- * pending are dropped, and one an act published meanwhile is left as it is. A store failure is thrown.
+ * THE settle rule, one copy for every caller: the disk decides each pending tombstone (`whatBecameOfPath`). Its path still has bytes, so
+ * the act did not remove it: dropped. It has none, so the act did: published ({@link publishOnePerPath} — one per
+ * path, stamped now, never a caller's clock). **The old id of a case-only rename, whose old spelling answers whether or not the rename
+ * happened, is the move's to say**: published once its records have left the id, and while they have not it stays pending and is returned
+ * as `unresolved` for the caller to ask again, so a failed or stopped rename never tells a peer that a live file is gone. A path that cannot
+ * be looked at is neither — it stays pending, served to nobody, and is returned as `unresolved` for the caller to decide when to ask again.
+ * Only tombstones still pending are dropped, and one an act published meanwhile is left as it is. A store failure is thrown.
  */
 async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], generation: number): Promise<Settled> {
   const here: string[] = [];
@@ -909,7 +889,8 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], ge
   const unresolved: string[] = [];
   for (const t of rows) {
     try {
-      if (!(await bytesPresentAt(spaceId, t.path)) || await isRenamedOntoItself(spaceId, t)) gone.push(t); else here.push(t._id);
+      const after = await whatBecameOfPath(spaceId, t);
+      if (after === 'gone') gone.push(t); else if (after === 'here') here.push(t._id); else unresolved.push(t._id);
     } catch (err) {
       unresolved.push(t._id);
       log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
@@ -1047,46 +1028,8 @@ export async function moveMarkerOf(spaceId: string, from: string, to: string): P
 }
 
 /**
- * What the bytes at `rel` are, as a move's marker records them: their size and mtime on the disk (`lstat`, so nothing is read and
- * nothing is decrypted: a rename keeps both). `undefined` when nothing is there or what is there is a directory — a directory's
- * size and mtime move with every child, so a directory move records none and is judged on the rest. A path that cannot be looked
- * at is thrown, never read as "nothing".
- */
-export async function bytesIdentityAt(spaceId: string, rel: string): Promise<{ size: number; mtimeMs: number } | undefined> {
-  const st = await lstatAt(spaceId, rel);
-  return st && !st.isDirectory() ? { size: st.size, mtimeMs: st.mtimeMs } : undefined;
-}
-
-/** What is at `rel` on the disk, or `null` when the path does not exist — the one failure read as an answer; any other is thrown, as {@link bytesPresentAt} throws it. */
-async function lstatAt(spaceId: string, rel: string): Promise<Stats | null>;
-async function lstatAt(spaceId: string, rel: string, opts: { bigint: true }): Promise<BigIntStats | null>;
-async function lstatAt(spaceId: string, rel: string, opts?: { bigint: true }): Promise<Stats | BigIntStats | null> {
-  const abs = await resolveSafePathChecked(spaceId, rel);
-  return opts ? lstatIfPresent(abs, opts) : lstatIfPresent(abs);
-}
-
-/**
- * What is at a begun move's destination when its bytes HAVE moved — bytes at `to` and none at `from`, or at both only as a move's own
- * HALF-MADE LINK (the same inode, two names, and this marker: `classifyDestination`, `files/stored-bytes.ts`, the one decision the
- * step that placed them asks) — or `null` when they have not. The one spelling of "the bytes have moved", asked by {@link moveIsOwed}
- * (which then judges whether they are the moved ones) and by {@link abandonMove}. A path that cannot be looked at is thrown, as
- * {@link bytesPresentAt} throws it.
- *
- * **A marked half-link counts as moved**, so every remover of a marker ({@link movesStillOwed}) keeps the marker of a move whose last
- * step was an unlink that did not happen, and housekeeping can finish it. A case-only move is never read as owed by this: its two names
- * are one entry (`nlink` 1, an `alias`), so there are bytes at `from` and no half-link.
- */
-async function movedBytesOf(spaceId: string, marker: Pick<MoveMarker, 'from' | 'to'>): Promise<Stats | null> {
-  const atTo = await lstatAt(spaceId, marker.to);
-  if (atTo === null) return null;
-  const atFrom = await lstatAt(spaceId, marker.from, { bigint: true });
-  if (atFrom === null) return atTo;
-  const exactTo = await lstatAt(spaceId, marker.to, { bigint: true });
-  return exactTo !== null && classifyDestination(atFrom, exactTo, { begun: true }) === 'half-linked' ? atTo : null;
-}
-
-/**
- * Whether the move from `from` to `to` is OWED: begun here (its marker), its bytes at `to` and none at `from`, those bytes are
+ * Whether the move from `from` to `to` is OWED: begun here (its marker), its bytes at `to` (and none at `from`, bar a half-made link or one
+ * entry under two spellings, `movedBytesOf`), those bytes are
  * the ones it moved, and something of the file is still at `from` — a live record, a link row or a job. THE one answer to "is
  * this move still unfinished", asked by the retry of a move, by the housekeeping that finishes it, by the media worker before it
  * reconciles a "deleted source", and by every remover of a marker ({@link movesStillOwed}).
@@ -1111,20 +1054,8 @@ export async function moveIsOwed(spaceId: string, from: string, to: string): Pro
   if (!marker) return false;
   const atTo = await movedBytesOf(spaceId, marker);
   if (!atTo) return false;
-  if (marker.size !== undefined && marker.mtimeMs !== undefined && (atTo.isDirectory() || atTo.size !== marker.size || atTo.mtimeMs !== marker.mtimeMs)) return false;
-  return somethingOfTheFileIsAt(spaceId, marker.from, atTo.isDirectory() ? 'directory' : 'file');
-}
-
-/** Whether a live record, a link row or a job of the file (or, for a directory, of anything under it) is still at `at`. */
-async function somethingOfTheFileIsAt(spaceId: string, at: string, kind: PathKind): Promise<boolean> {
-  const root = movedRoot(at);
-  if (!root) return false;
-  if (await hasLiveFileRecordAt(spaceId, root)) return true;
-  const linked = kind === 'file'
-    ? (await linksStartingFrom(spaceId, [root], 1)).length > 0
-    : await aFileUnderHoldsALink(spaceId, root);
-  if (linked) return true;
-  return (await col(spaceCollection(spaceId, 'mediaJobs')).findOne(asFilter({ $or: jobIdClausesOf(root, kind) }), { projection: { _id: 1 } })) !== null;
+  if (!isTheMovedBytes(atTo, marker)) return false;
+  return somethingOfTheFileIsAt(spaceId, marker.from, atTo.isDirectory ? 'directory' : 'file');
 }
 
 /**
