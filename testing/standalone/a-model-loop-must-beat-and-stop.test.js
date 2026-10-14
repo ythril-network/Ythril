@@ -149,6 +149,8 @@ describe('a model loop beats and stops', () => {
     const stmt = worker.slice(at, worker.indexOf(';', at));
     assert.match(stmt, /onProgress:\s*heartbeat/, 'the video path must be given the same heartbeat the document path gets');
     assert.match(stmt, /shouldStop:\s*\(\)\s*=>\s*leaseLost/, 'and the same lease flag');
+    // The claim rides in the same opts bag (`MediaRunOpts`): every write the run makes about its file is under it (`writeUnderClaim`).
+    assert.match(stmt, /\bclaim\b/, 'and the run\'s claim: the embedders write nothing without it');
   });
 
   it('every step a beat names is one the bar can draw', () => {
@@ -220,5 +222,43 @@ describe('a model loop beats and stops', () => {
       }
     }
     assert.ok(crossings >= 1, 'no embedder-as-a-stage crossing found — the matcher has broken, not the code');
+  });
+
+  it('the image path beats at the entry of each hop and checks its lease before the next, on a route the bar can draw', () => {
+    /*
+     * An image run is two model hops in sequence (the caption, then the face provider, which beats once per face). Neither beat
+     * before, so a caption hop that outlasted the stall threshold left the job silent, stall recovery took it, and the run met
+     * its own fence at the first write after the recovery. The beat sits at the ENTRY of a hop — before the model call, never
+     * inside a try that a failing provider would skip — and each hop checks the lease before it spends a model budget.
+     */
+    const progress = stripComments(readFileSync('server/src/files/media/progress.ts', 'utf8'));
+    const route = /const IMAGE_STEPS = \[([^\]]*)\]/.exec(progress);
+    assert.ok(route, 'progress.ts defines no IMAGE_STEPS route: the image run has no route of its own to report against');
+    const steps = [...route[1].matchAll(/'([^']+)'/g)].map(s => s[1]);
+    for (const step of ['caption', 'faces']) assert.ok(steps.includes(step), `IMAGE_STEPS [${steps}] does not contain '${step}'`);
+
+    const image = stripComments(readFileSync('server/src/files/media/image-embedder.ts', 'utf8'));
+    const captionBeat = image.search(/step:\s*'caption'/);
+    const facesBeat = image.search(/step:\s*'faces'/);
+    assert.ok(captionBeat >= 0 && facesBeat >= 0, 'the image embedder must beat both hops: caption and faces');
+    assert.ok(captionBeat < image.search(/await\s+vision\.caption\s*\(/), 'the caption beat must come BEFORE the vision call');
+    assert.ok(facesBeat < image.search(/await\s+embedFaces\s*\(/), 'the faces beat must come BEFORE the face step');
+    assert.match(image, /shouldStop/, 'the image embedder never checks its lease');
+    assert.match(image, /IMAGE_STEPS/, 'the image embedder reports against no named route');
+
+    const face = stripComments(readFileSync('server/src/files/media/face-embedder.ts', 'utf8'));
+    const loop = enclosingBlockMatching(face, face.search(/await\s+gallerySearch\s*\(/), FOR_LOOP, 'the per-face loop');
+    assert.ok(loop, 'no per-face loop found — re-point this gate');
+    assert.match(loop, /onProgress|beat\(/, 'the per-face loop does not beat once per face');
+    assert.match(loop, /shouldStop/, 'the per-face loop does not check the lease');
+
+    const worker = stripComments(readFileSync('server/src/files/media/worker.ts', 'utf8'));
+    const at = worker.indexOf('embedImage(');
+    assert.notEqual(at, -1, 'no embedImage call in the worker — re-point this gate');
+    const stmt = worker.slice(at, worker.indexOf(';', at));
+    assert.match(stmt, /onProgress:\s*heartbeat/, 'the image path must be given the heartbeat');
+    assert.match(stmt, /shouldStop:\s*\(\)\s*=>\s*leaseLost/, 'and the lease flag');
+    assert.match(stmt, /steps:\s*IMAGE_STEPS/, 'and its own route');
+    assert.match(stmt, /\bclaim\b/, 'and the run\'s claim');
   });
 });

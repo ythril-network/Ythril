@@ -9,9 +9,9 @@
  * reporting while CLAIMED, and a terminal job is not claimed. So the file shows a spinner indefinitely, Retry is not
  * offered on a file that reads as in progress, and the job collection says the work is done.
  *
- * In the safe order a failure between the writes leaves the job CLAIMED, which stall recovery re-runs — an idempotent
- * re-run over the same chunk ids. That is the whole argument for the order, and why each case below asserts the job's
- * state after the row write failed, not the row's.
+ * The two writes are ONE transaction under the run's claim now (`writeUnderClaim`), so a failure of either leaves both
+ * undone: the job stays CLAIMED, which stall recovery re-runs — an idempotent re-run over the same chunk ids. That is the
+ * whole argument, and why each case below asserts the job's state after the row write failed, not the row's.
  *
  * ## How the failure is made
  *
@@ -34,6 +34,9 @@ const skip = await mongoSkipReason();
 const SPACE = 'jobend';
 const FILE = 'docs/report.pdf';
 const NOW = new Date().toISOString();
+
+/** The claim the run in `claimedJob` holds: the end of a job is written under it (`writeUnderClaim`), in one transaction with the row's state. */
+const CLAIM = { jobId: FILE, claimToken: 'this-run' };
 
 let mongo, queue;
 const jobs = () => mongo.col(`${SPACE}_media_jobs`);
@@ -66,13 +69,13 @@ describe('a media job is marked terminal only after its file row is (real MongoD
 
   it('control: with the row writable, completeJob ends the job complete', async () => {
     await claimedJob();
-    await queue.completeJob(SPACE, FILE, 'complete');
+    await queue.completeJob(SPACE, CLAIM, 'complete');
     assert.equal((await jobs().findOne({ _id: FILE })).status, 'complete');
   });
 
   it('completeJob: when the row cannot be written, the job is NOT marked complete', async () => {
     await claimedJob();
-    const thrown = await withRowWritesFailing(() => queue.completeJob(SPACE, FILE, 'partial'));
+    const thrown = await withRowWritesFailing(() => queue.completeJob(SPACE, CLAIM, 'partial'));
     // The fault must have fired, or this case proves nothing: a write that never failed passes it trivially.
     assert.ok(thrown, 'the row write was meant to fail and completeJob returned normally — the fault did not fire');
     const job = await jobs().findOne({ _id: FILE });
@@ -85,7 +88,7 @@ describe('a media job is marked terminal only after its file row is (real MongoD
     // The same two writes, in the branch that ends a job for good. A second copy of one order is the shape that
     // drifts, so it is held by the same assertion.
     await claimedJob(3);
-    const thrown = await withRowWritesFailing(() => queue.failJob(SPACE, FILE, 3, 3, 'the converter gave up'));
+    const thrown = await withRowWritesFailing(() => queue.failJob(SPACE, CLAIM, 3, 3, 'the converter gave up'));
     assert.ok(thrown, 'the row write was meant to fail and failJob returned normally — the fault did not fire');
     const job = await jobs().findOne({ _id: FILE });
     assert.notEqual(job.status, 'failed',
@@ -97,7 +100,7 @@ describe('a media job is marked terminal only after its file row is (real MongoD
     // Pending again is not terminal, and the row is not told anything until the job ends — so this branch must not be
     // made to depend on a row write it never needed.
     await claimedJob(1);
-    const thrown = await withRowWritesFailing(() => queue.failJob(SPACE, FILE, 1, 3, 'try again'));
+    const thrown = await withRowWritesFailing(() => queue.failJob(SPACE, CLAIM, 1, 3, 'try again'));
     assert.equal(thrown, null, `a retryable failure threw on the row write it should not make: ${thrown}`);
     assert.equal((await jobs().findOne({ _id: FILE })).status, 'pending');
   });

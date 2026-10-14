@@ -38,6 +38,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -284,7 +285,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
         // seq 0, so "a seq above the old one" is a statement about the stamp and not about where the counter happens to stand.
         const before = await seed(row('docs/a.md', { seq: 0, ...over }));
 
-        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), true);
+        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'Derived summary', 'generated'), true);
 
         const after = await stored('docs/a.md');
         assert.equal(after.description, 'Derived summary');
@@ -308,24 +309,24 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
       it(`declines ${reason}: returns false and the row is exactly as it was`, async () => {
         const before = await seed(row('docs/a.md', { descriptionSource: 'extracted', ...over }));
 
-        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Derived summary', 'generated'), false);
+        assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'Derived summary', 'generated'), false);
 
         assert.deepEqual(await stored('docs/a.md'), before);
       });
     }
 
     it('declines a path with no row at all: false, and no row is created', async () => {
-      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/none.md', 'Derived summary', 'generated'), false);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, await seedClaim(OPEN, 'docs/none.md'), 'docs/none.md', 'Derived summary', 'generated'), false);
       assert.equal(await files().countDocuments({}), 0);
     });
 
     it('both sources are written as given, and a missing source REMOVES the previous one', async () => {
       await seed(row('docs/a.md', { description: '', descriptionSource: 'generated' }));
-      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Extracted opening', 'extracted'), true);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'Extracted opening', 'extracted'), true);
       assert.equal((await stored('docs/a.md')).descriptionSource, 'extracted');
 
       await files().updateOne({ _id: 'docs/a.md' }, { $set: { description: '' } });
-      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, 'docs/a.md', 'Unknown provenance'), true);
+      assert.equal(await processing.setDerivedDescriptionIfUnset(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'Unknown provenance'), true);
       const after = await stored('docs/a.md');
       assert.equal(after.description, 'Unknown provenance');
       assert.ok(!('descriptionSource' in after), 'a description with no source inherited the previous one\'s label');
@@ -412,7 +413,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
     it('an excerpt is a LOCAL write: it sets the excerpt, stamps neither seq nor updatedAt, and queues one embed job', async () => {
       const before = await seed(row('docs/a.md'));
 
-      assert.equal(await processing.setDerivedExcerpt(OPEN, 'docs/a.md', 'the opening prose'), 'written');
+      assert.equal(await processing.setDerivedExcerpt(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'the opening prose'), 'written');
 
       const after = await stored('docs/a.md');
       assert.deepEqual(after, { ...before, excerpt: 'the opening prose' }, 'the excerpt write changed a field beyond the excerpt');
@@ -425,7 +426,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
     it('an AUTHORED write beside it still stamps: the two are separate calls now, and only one of them is the file\'s own half', async () => {
       const before = await seed(row('docs/a.md'));
 
-      await processing.setDerivedExcerpt(OPEN, 'docs/a.md', 'prose');
+      await processing.setDerivedExcerpt(OPEN, await seedClaim(OPEN, 'docs/a.md'), 'docs/a.md', 'prose');
       const between = await stored('docs/a.md');
       assert.equal(between.seq, before.seq, 'the derived write stamped a seq');
 

@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -111,7 +112,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     // written by the one writer of those, and `updateFileMeta` no longer takes one. The RULE this case is about is
     // unchanged — a local field stamps neither seq nor `updatedAt`, so a receiver cannot outrank its publisher.
     await peerAuthoredFile();
-    await processing.setDerivedExcerpt(SPACE, FILE, 'The opening prose of the guide.');
+    await processing.setDerivedExcerpt(SPACE, await seedClaim(SPACE, FILE), FILE, 'The opening prose of the guide.');
     const d = await stored();
     assert.equal(d.excerpt, 'The opening prose of the guide.');
     assert.equal(d.seq, PEER_STAMP.seq, `the excerpt stamped seq ${d.seq}: the publisher's next edit at seq 8 would be skipped`);
@@ -180,7 +181,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
 
   it('a derived description is not written on a file the publisher authored', async () => {
     await peerAuthoredFile();
-    const wrote = await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated');
+    const wrote = await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, FILE), FILE, 'Derived here', 'generated');
     const d = await stored();
     assert.equal(wrote, false, 'a receiver derived a description that cannot replicate, and would hash differently');
     assert.equal(d.description, undefined);
@@ -190,7 +191,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
   it('control: a derived description is still written on a file this instance authored', async () => {
     await meta.upsertFileMeta(SPACE, FILE, 12, { tags: ['local'] });
     const before = (await stored()).seq;
-    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'), true);
+    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, FILE), FILE, 'Derived here', 'generated'), true);
     const d = await stored();
     assert.equal(d.description, 'Derived here');
     assert.ok(d.seq > before, 'the author\'s derived description must page to its peers');
@@ -221,7 +222,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
   it('a derived description is not written on an unauthored row a peer DELIVERED, and the decline is said', async () => {
     await unauthoredFile({ deliveredBy: PEER.instanceId });
     const { result: wrote, lines } = await logsDuring(
-      () => processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'),
+      async () => processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, FILE), FILE, 'Derived here', 'generated'),
     );
     const d = await stored();
     assert.equal(wrote, false, 'an unauthored row a peer delivered is not this instance\'s to describe');
@@ -236,7 +237,7 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
   it('control: an unauthored row nothing delivered is still described, and stamps a seq', async () => {
     await unauthoredFile();
     const before = (await stored()).seq;
-    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, FILE, 'Derived here', 'generated'), true,
+    assert.equal(await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, FILE), FILE, 'Derived here', 'generated'), true,
       'a row with no author and no deliverer is this instance\'s own legacy row — narrowing it would lose every pre-authorship description');
     const d = await stored();
     assert.equal(d.description, 'Derived here');
@@ -256,9 +257,9 @@ describe('a receiver\'s own file writes do not outrank its publisher (real Mongo
     }
 
     const { lines } = await logsDuring(async () => {
-      await processing.setDerivedDescriptionIfUnset(SPACE, first, 'Derived here', 'generated');
-      await processing.setDerivedDescriptionIfUnset(SPACE, first, 'Derived again', 'generated');
-      await processing.setDerivedDescriptionIfUnset(SPACE, second, 'Derived here', 'generated');
+      await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, first), first, 'Derived here', 'generated');
+      await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, first), first, 'Derived again', 'generated');
+      await processing.setDerivedDescriptionIfUnset(SPACE, await seedClaim(SPACE, second), second, 'Derived here', 'generated');
     });
 
     // A retry of the same job must not add a line; a DIFFERENT file must. A once-only latch would mute the second.
