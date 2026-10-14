@@ -26,6 +26,7 @@
  * `drained` settles when the loop has stopped and every job it started has finished. Only a caller that must not
  * start a second pool awaits it; stopping stays synchronous for everyone else.
  */
+import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 
 export interface SlotPoolLimits {
   /** How many jobs may run at once. 0 (or less) runs none. */
@@ -73,8 +74,6 @@ export function runSlotPool<Job>(opts: SlotPoolOptions<Job>): { drained: Promise
     inFlight.add(slot);
   };
 
-  const yieldMacrotask = () => new Promise<void>(resolve => setImmediate(resolve));
-
   const loop = async (): Promise<void> => {
     let currentPollMs = opts.limits().pollMs;
     while (opts.isRunning()) {
@@ -115,7 +114,7 @@ export function runSlotPool<Job>(opts: SlotPoolOptions<Job>): { drained: Promise
         }
         currentPollMs = pollMs;
         startJob(job);
-        await yieldMacrotask();
+        await yieldToEventLoop();
         continue;
       }
 
@@ -124,7 +123,7 @@ export function runSlotPool<Job>(opts: SlotPoolOptions<Job>): { drained: Promise
       const woken = await opts.waitForWork(currentPollMs, epoch);
       // Real work arrived: drop straight back to the fast interval rather than carry the idle backoff into a busy queue.
       if (woken) currentPollMs = pollMs;
-      await yieldMacrotask();
+      await yieldToEventLoop();
     }
     while (inFlight.size > 0) await Promise.all([...inFlight]);
   };

@@ -28,6 +28,7 @@ import { log } from '../util/log.js';
 import { activeSecret, encryptInPlace, isStoredEncrypted } from './stored-bytes.js';
 import { seedFileHash } from './manifest.js';
 import { getFileMeta } from './file-meta.js';
+import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 
 /** What the last (or current) pass found. The security posture reads this. */
 export interface AtRestMigrationState {
@@ -90,7 +91,7 @@ export async function runAtRestMigration(): Promise<AtRestMigrationState> {
       if (visited % PROGRESS_EVERY === 0) log.info(`Files at rest: ${visited} files checked, ${state.encrypted} encrypted so far`);
       // An upload, a sync pull or a space rename may be waiting on the same event loop; one file at a time with a
       // yield between keeps the pass from starving them.
-      await new Promise(r => setImmediate(r));
+      await yieldToEventLoop();
       const rel = path.relative(spaceRoot, abs).replace(/\\/g, '/');
       if (!keyed) {
         if (await isStoredEncrypted(abs).catch(() => false)) state.encryptedWithoutSecret++;

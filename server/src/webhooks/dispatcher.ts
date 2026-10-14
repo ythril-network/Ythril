@@ -28,6 +28,7 @@ import { keyedLimiter } from '../util/keyed-limiter.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { warnOnce } from '../util/warn-once.js';
 import { drainedQueue } from '../util/drained-queue.js';
+import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -414,7 +415,7 @@ const pendingRetryRows = drainedQueue<{ job: RetryJob; overflow: boolean }>(
     }
   },
   {
-    beforeFirstBatch: () => new Promise<void>(resolve => setImmediate(resolve)), // the rest of the burst joins this batch
+    beforeFirstBatch: yieldToEventLoop, // the rest of the burst joins this batch
     onError: err => { sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue flush failed: ${peerText(err)}`); }); },
   },
 );
