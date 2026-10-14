@@ -1,6 +1,7 @@
 import { col } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { validateEdge } from './schema-validation.js';
+import { recordViewOf } from '../brain/record-view.js';
 import type { SpaceMeta } from '../config/types.js';
 import type { SchemaViolation } from './schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -116,7 +117,7 @@ export async function validateStoredEdges(
   for (const doc of docs) {
     const stale = staleGuardOf(doc);
     if (stale) staleGuards.push(stale);
-    const v = validateEdge(meta, doc, {
+    const v = validateEdge(meta, recordViewOf('edge', doc), {
       ...(doc.from && typeOf.has(doc.from) ? { fromType: typeOf.get(doc.from) } : {}),
       ...(doc.to && typeOf.has(doc.to) ? { toType: typeOf.get(doc.to) } : {}),
       // An edge is not its own duplicate: `others` excludes its own identity.

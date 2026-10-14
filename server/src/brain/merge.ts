@@ -32,6 +32,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
+import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
@@ -325,7 +326,7 @@ async function detectEndpointRuleBreaks(
     // `functional` counts the OTHER edges from the subject, so the edge being examined is excluded.
     if (isFrom) resolved.otherEdgesFromSubject = subjectEdges.others(afterRelink(e));
 
-    for (const v of validateEdge(meta ?? {}, { label: e.label, properties: e.properties ?? {} }, resolved)) {
+    for (const v of validateEdge(meta ?? {}, recordViewOf('edge', e), resolved)) {
       if (v.field !== 'fromType' && v.field !== 'toType' && v.field !== 'functional') continue;
       out.push({ edgeId: e._id, label: e.label, end, field: v.field, reason: v.reason });
     }
@@ -686,9 +687,7 @@ export async function executeMerge(
    * transaction: the check is pure, so a refusal writes nothing at all, where inside the transaction it rolled the
    * relinks back but had already spent their seqs.
    */
-  const violations = validateEntity(getSpaceMeta(spaceId) ?? {}, {
-    name: survivor.name, type: survivor.type, properties: mergedProperties,
-  });
+  const violations = validateEntity(getSpaceMeta(spaceId) ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
   const verdict = applyValidation(getSpaceMeta(spaceId), violations);
   if (verdict.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
   if (verdict.warnings.length > 0) {

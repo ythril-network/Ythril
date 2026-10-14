@@ -33,6 +33,7 @@
  * a patch that repairs the pre-existing violation passes. The error names exactly what to include.
  */
 import { validateEntity, validateEdge, validateChrono, validateFact, type SchemaViolation } from '../spaces/schema-validation.js';
+import { recordViewOf } from './record-view.js';
 import type { SpaceMeta } from '../config/types.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
@@ -358,13 +359,11 @@ export function classifyEntityUpsertAgainst(
   incoming: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] },
 ): UpdateValidation {
   const merged = mergeTagsAndProperties(existing, incoming);
-  const after = validateEntity(meta ?? {}, {
-    name: incoming.name, type: incoming.type, properties: merged.properties,
-  });
+  const after = validateEntity(meta ?? {}, recordViewOf('entity', {
+    name: incoming.name, type: incoming.type, tags: merged.tags, properties: merged.properties,
+  }));
   const before = existing
-    ? validateEntity(meta ?? {}, {
-      name: existing.name, type: existing.type, properties: existing.properties ?? {},
-    })
+    ? validateEntity(meta ?? {}, recordViewOf('entity', existing))
     : INSERT_HAS_NO_PRIOR;
   return classifyUpdateViolations(meta, before, after);
 }
@@ -389,11 +388,11 @@ export function classifyEdgeUpsertAgainst(
    */
   resolved: ResolvedEdgeEnds = {},
 ): UpdateValidation {
-  const after = validateEdge(meta ?? {}, {
+  const after = validateEdge(meta ?? {}, recordViewOf('edge', {
     label: incoming.label, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  }, resolved);
+  }), resolved);
   const before = existing
-    ? validateEdge(meta ?? {}, { label: existing.label, properties: existing.properties ?? {} }, resolved)
+    ? validateEdge(meta ?? {}, recordViewOf('edge', existing), resolved)
     : INSERT_HAS_NO_PRIOR;
   return classifyUpdateViolations(meta, before, after);
 }
@@ -416,12 +415,12 @@ export function classifyFactUpsertAgainst(
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
   incoming: { type?: string; properties?: Record<string, string | number | boolean> },
 ): UpdateValidation {
-  const after = validateFact(meta ?? {}, {
+  const after = validateFact(meta ?? {}, recordViewOf('fact', {
     type: incoming.type ?? existing?.type,
     properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  });
+  }));
   const before = existing
-    ? validateFact(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
+    ? validateFact(meta ?? {}, recordViewOf('fact', existing))
     : INSERT_HAS_NO_PRIOR;
   return classifyUpdateViolations(meta, before, after);
 }
@@ -432,11 +431,11 @@ export function classifyChronoUpsertAgainst(
   existing: { type: string; properties?: Record<string, string | number | boolean> } | null,
   incoming: { type: string; properties?: Record<string, string | number | boolean> },
 ): UpdateValidation {
-  const after = validateChrono(meta ?? {}, {
+  const after = validateChrono(meta ?? {}, recordViewOf('chrono', {
     type: incoming.type, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  });
+  }));
   const before = existing
-    ? validateChrono(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
+    ? validateChrono(meta ?? {}, recordViewOf('chrono', existing))
     : INSERT_HAS_NO_PRIOR;
   return classifyUpdateViolations(meta, before, after);
 }

@@ -46,6 +46,7 @@ export { MAX_FORK_DEPTH } from '../../sync/upsert-plan.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
+import { recordViewOf } from '../../brain/record-view.js';
 import { MAX_FACT_LENGTH, MAX_TAGS } from '../../util/request-bounds.js';
 
 export const AuthorRefSchema = z.object({
@@ -508,17 +509,17 @@ export function violationsAgainstLocalSchema(
 ): SchemaViolation[] {
   const meta = getSpaceMeta(spaceId);
   if (!meta) return [];
-  const properties = doc['properties'] as Record<string, unknown> | undefined;
-  const type = typeof doc['type'] === 'string' ? doc['type'] : undefined;
+  // The view of the record as it arrived (`brain/record-view.ts`): a validator reads a title, a description and tags, and a literal
+  // of the two fields this site used to need would have made a rule about any other silently not apply to what a peer sends.
   switch (kind) {
     case 'entity':
-      return validateEntity(meta, { name: doc['name'] as string, type, properties });
+      return validateEntity(meta, recordViewOf('entity', doc));
     case 'edge':
-      return validateEdge(meta, { label: doc['label'] as string, properties });
+      return validateEdge(meta, recordViewOf('edge', doc));
     case 'chrono':
-      return validateChrono(meta, { type, properties });
+      return validateChrono(meta, recordViewOf('chrono', doc));
     case 'fact':
-      return validateFact(meta, { type, properties });
+      return validateFact(meta, recordViewOf('fact', doc));
   }
 }
 

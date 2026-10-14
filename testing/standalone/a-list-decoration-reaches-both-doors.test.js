@@ -82,7 +82,9 @@ describe('nobody re-implements a decoration', () => {
     // case below reported an EMPTY holder list for a module that was sitting on disk.
     const offenders = trackedSources(['server/src'], {
       untracked: true,
-      exclude: ['server/src/brain/edge-endpoint-names.ts', 'server/src/brain/entity-refs.ts'],
+      // `record-view.ts` OWNS the per-kind field now (`NAME_FIELD`, `endpointNameField`): the view of a record the validators read titles itself
+      // from it, and `entity-refs.ts` re-exports it. It is the module that owns the map, which is what this exclusion has always meant.
+      exclude: ['server/src/brain/edge-endpoint-names.ts', 'server/src/brain/entity-refs.ts', 'server/src/brain/record-view.ts'],
     }).filter(f => src(f).includes('endpointNameField('));
     assert.deepEqual(offenders, [],
       `these resolve an endpoint's display name themselves instead of calling \`withEndpointNames\`, so `

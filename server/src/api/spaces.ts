@@ -698,6 +698,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
   // Import validation functions dynamically to avoid circular deps
   const { validateEntity, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
+  const { recordViewOf } = await import('../brain/record-view.js');
   const resolvedMeta = resolveMetaRefs(dryMeta);
 
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
@@ -724,7 +725,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     await note(mid, 'entities', entities.length);
     for (const ent of entities) {
       const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
-      const v = validateEntity(resolvedMeta, doc);
+      const v = validateEntity(resolvedMeta, recordViewOf('entity', doc));
       if (v.length) violations.push({ collection: 'entities', _id: String(doc._id), violations: v });
     }
 
@@ -740,7 +741,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     await note(mid, 'facts', facts.length);
     for (const mem of facts) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateFact(resolvedMeta, doc);
+      const v = validateFact(resolvedMeta, recordViewOf('fact', doc));
       if (v.length) violations.push({ collection: 'facts', _id: String(doc._id), violations: v });
     }
 
@@ -749,7 +750,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     await note(mid, 'chrono', chronoEntries.length);
     for (const ch of chronoEntries) {
       const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateChrono(resolvedMeta, doc);
+      const v = validateChrono(resolvedMeta, recordViewOf('chrono', doc));
       if (v.length) violations.push({ collection: 'chrono', _id: String(doc._id), violations: v });
     }
   }

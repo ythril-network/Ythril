@@ -16,6 +16,7 @@
 import type { SpaceMeta, PropertySchema, TypeSchema, KnowledgeType } from '../config/types.js';
 import { getSchemaLibrary, getConfig } from '../config/loader.js';
 import { hasReDoSRisk, MAX_PATTERN_LENGTH, REDOS_REFUSAL } from '../util/redos.js';
+import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
 
 // ── Violation type ─────────────────────────────────────────────────────────
 
@@ -115,12 +116,17 @@ export function inlineResolvableRefs<M extends Partial<SpaceMeta>>(meta: M): M {
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
+ * The view of the record, whatever the caller handed in. The compiler holds every TYPED caller to a `RecordView` (`brain/record-view.ts`,
+ * `a-validator-takes-only-a-record-view`); a caller the compiler cannot see — a script, a JavaScript fixture — can still pass a plain
+ * object, and it is turned into a view by the same function and never read as it is, so "the title is the entity's name" holds for it too.
+ */
+const viewOf = (kind: ViewKind, record: RecordView): RecordView => (isRecordView(record) ? record : recordViewOf(kind, record));
+
+/**
  * Validate an entity write against the space meta schema.
  */
-export function validateEntity(
-  meta: SpaceMeta,
-  entity: { name?: string; type?: string; properties?: Record<string, unknown> },
-): SchemaViolation[] {
+export function validateEntity(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+  const entity = viewOf('entity', record);
   const violations: SchemaViolation[] = [];
   if (!meta) return violations;
 
@@ -152,19 +158,19 @@ export function validateEntity(
    * "does not match naming pattern" — one rule, two implementations, and the weaker one wins silently for
    * whichever collection happens to use it.
    */
-  if (entity.name && entity.type && typeSchema?.namingPattern) {
-    const outcome = testPattern(typeSchema.namingPattern, entity.name);
+  if (entity.title && entity.type && typeSchema?.namingPattern) {
+    const outcome = testPattern(typeSchema.namingPattern, entity.title);
     if (outcome === 'not-evaluated') {
       violations.push({
         field: 'name',
-        value: entity.name,
+        value: entity.title,
         reason: `naming pattern for type '${entity.type}' not evaluated, so nothing was checked: `
           + `${typeSchema.namingPattern} — ${REDOS_REFUSAL}`,
       });
     } else if (outcome === 'no-match') {
       violations.push({
         field: 'name',
-        value: entity.name,
+        value: entity.title,
         reason: `does not match naming pattern for type '${entity.type}': ${typeSchema.namingPattern}`,
       });
     }
@@ -255,9 +261,10 @@ function endpointAllows(allowed: readonly string[], type: string | null): boolea
 
 export function validateEdge(
   meta: SpaceMeta,
-  edge: { label?: string; properties?: Record<string, unknown> },
+  record: RecordView,
   resolved: ResolvedEdgeEnds = {},
 ): SchemaViolation[] {
+  const edge = viewOf('edge', record);
   const violations: SchemaViolation[] = [];
   if (!meta) return violations;
 
@@ -342,10 +349,8 @@ export function validateEdge(
  * The same condition the other three use: **only when the space declares at least one fact type schema.** A
  * space with no `typeSchemas.fact` is untouched, and a space with one had already been promised this.
  */
-export function validateFact(
-  meta: SpaceMeta,
-  fact: { type?: string; properties?: Record<string, unknown> },
-): SchemaViolation[] {
+export function validateFact(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+  const fact = viewOf('fact', record);
   if (!meta) return [];
   const violations: SchemaViolation[] = [];
 
@@ -384,10 +389,8 @@ export function getAllowedChronoTypes(meta: SpaceMeta | undefined): Set<string> 
 /**
  * Validate a chrono write against the space meta schema.
  */
-export function validateChrono(
-  meta: SpaceMeta,
-  chrono: { type?: string; properties?: Record<string, unknown> },
-): SchemaViolation[] {
+export function validateChrono(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+  const chrono = viewOf('chrono', record);
   if (!meta) return [];
   const violations: SchemaViolation[] = [];
 

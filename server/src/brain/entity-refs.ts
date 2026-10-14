@@ -21,6 +21,11 @@ import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
 import { peerList } from '../util/log.js';
 
+// The field a reader calls each kind of record by is `brain/record-view.ts`'s: it is also what the view of a record titles it with, and
+// a map written beside each of its two readers was how the two came to differ. Re-exported, so a caller that resolves an endpoint's name
+// keeps asking here.
+export { endpointNameField } from './record-view.js';
+
 /** Canonical UUID v4 matcher. The only copy — import it, never re-declare it. */
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -202,30 +207,6 @@ export function edgeEndpointKindSchema(endpoint: 'from' | 'to'): Record<string, 
       + 'is the space-relative PATH, not a UUID; every other kind is a UUID v4. A kind that is stated and '
       + 'wrong is refused at the write rather than stored as a dead link.',
   };
-}
-
-/**
- * The human-readable field of each kind of record — what a reader would call it.
- *
- * `file` is absent because a file's `_id` IS its path, so there is nothing to look up. The type says so, which
- * is why every caller has to rule `file` out before asking.
- */
-const NAME_FIELD: Record<Exclude<RefKind, 'file'>, string> = {
-  entity: 'name',
-  fact: 'fact',
-  chrono: 'title',
-};
-
-/**
- * The field to project when resolving a reference to something a person can read.
- *
- * Here rather than beside its first caller because it has two: the edge embedder, which turns endpoints into
- * the text an edge is embedded from, and the edge list route, which turns them into what the Edges table
- * shows. The list route used to project `name` from the entities collection for both endpoints — correct
- * while every endpoint was an entity, and a bare UUID on screen once one could be a chrono entry.
- */
-export function endpointNameField(kind: Exclude<RefKind, 'file'>): string {
-  return NAME_FIELD[kind];
 }
 
 /**
