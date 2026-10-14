@@ -25,7 +25,7 @@ import { setFileProcessingState } from '../derived-fields.js';
 import { rekeyRows } from '../rekey-rows.js';
 import { moveTiming } from '../move-timing.js';
 import { moveIsRunningAt } from '../move-flight.js';
-import { moveCarriesRecordsAt } from '../tombstones.js';
+import { moveCarriesRecordsAt } from '../move-markers.js';
 
 const MAX_ATTEMPTS = 3;
 

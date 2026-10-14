@@ -39,7 +39,7 @@ const LATER = () => new Date(Date.now() + DAY);
 // on CI by a-case-only-settle-is-decided-by-the-move-not-the-disk-db and the classification by a-destination-is-classified-by-inode-link-count-and-marker.
 const SKIPPED = 'expected-in-ci: the file system is case-sensitive';
 
-let acts, stored, tombstones, finish, walk, insensitive;
+let acts, stored, tombstones, markerMod, finish, walk, insensitive;
 const files = () => acts.door.coll(S, 'files');
 const rowOf = (id) => files().findOne({ _id: id });
 const abs = (p) => path.join(acts.root(), p);
@@ -94,6 +94,7 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     acts = await openFileActDoors({ suite: 'caseowed', space: S });
     stored = await import('../../server/dist/files/stored-bytes.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
     insensitive = caseInsensitiveAt(acts.root());
@@ -146,7 +147,7 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     assert.deepEqual(await acts.published(), NOTHING, 'a move that never touched a byte told a peer the old id is gone');
     assert.deepEqual(await acts.raw(), [], 'a tombstone of a move that did not begin its bytes is still stored');
     assert.equal((await rowOf('case.txt'))?.description, 'C');
-    assert.equal(await tombstones.moveIsOwed(S, 'case.txt', 'Case.txt'), false, 'a move that did not begin is owed');
+    assert.equal(await markerMod.moveIsOwed(S, 'case.txt', 'Case.txt'), false, 'a move that did not begin is owed');
     assert.equal(read('case.txt'), 'content of case.txt');
   });
 
@@ -162,7 +163,7 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     assert.equal(acts.statusOf(stopped), 503, `a case-only move whose records did not follow was not answered 503: ${sentenceOf(stopped)}`);
     assert.equal(acts.answerOf(stopped).code, 'move_still_owed');
     assert.ok(names().includes('Case.txt'), 'fixture: the bytes are not under the new spelling');
-    assert.equal(await tombstones.moveIsOwed(S, 'case.txt', 'Case.txt'), true, 'the 503 promises the move will be completed, and nothing reads it as owed: housekeeping would never finish it');
+    assert.equal(await markerMod.moveIsOwed(S, 'case.txt', 'Case.txt'), true, 'the 503 promises the move will be completed, and nothing reads it as owed: housekeeping would never finish it');
     assert.equal((await rowOf('case.txt'))?.description, 'C', 'fixture: the record was carried');
     assert.deepEqual(await acts.published(), NOTHING, 'the old ids were told to peers before the records left them');
 
@@ -172,8 +173,8 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     assert.equal(done.outcome.finished, 1, 'housekeeping did not finish the owed case-only move');
     assert.equal((await rowOf('Case.txt'))?.description, 'C', 'the record did not follow');
     assert.equal(await rowOf('case.txt'), null, 'the record is still at the old id');
-    assert.equal(await tombstones.moveIsOwed(S, 'case.txt', 'Case.txt'), false);
-    assert.equal(await tombstones.moveMarkerOf(S, 'case.txt', 'Case.txt'), undefined, 'the finished move kept its marker');
+    assert.equal(await markerMod.moveIsOwed(S, 'case.txt', 'Case.txt'), false);
+    assert.equal(await markerMod.moveMarkerOf(S, 'case.txt', 'Case.txt'), undefined, 'the finished move kept its marker');
     assert.deepEqual((await acts.raw()).filter(r => r.pending), [], 'a tombstone is still pending after the move finished');
     assert.deepEqual(await acts.published(), { served: ['_converted/case.txt.md', 'case.txt'], pushed: ['_converted/case.txt.md', 'case.txt'] },
       'the finished move did not tell a peer the old ids are gone');
@@ -246,6 +247,6 @@ describe('a case-only rename is owed until its records carry (real MongoDB, case
     assert.equal(acts.statusOf(again), 200, `the repeat of a finished case-only rename failed: ${sentenceOf(again)}`);
     assert.equal((await rowOf('Again.txt'))?.description, 'A', 'the repeat disturbed the record');
     assert.equal(await rowOf('again.txt'), null);
-    assert.equal(await tombstones.moveIsOwed(S, 'again.txt', 'Again.txt'), false);
+    assert.equal(await markerMod.moveIsOwed(S, 'again.txt', 'Again.txt'), false);
   });
 });

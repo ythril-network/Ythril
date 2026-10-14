@@ -4,8 +4,8 @@
  *
  * ## The question it answers
  *
- * *"A move wrote a marker `from` to `to` and may have stopped anywhere: where is it?"* The reads here are the ones `files/tombstones.ts` (the
- * one module that opens the tombstone collection) asks of everything that is not a tombstone: the disk's `lstat`s and the file records, links
+ * *"A move wrote a marker `from` to `to` and may have stopped anywhere: where is it?"* The reads here are the ones `files/move-markers.ts` (the
+ * move's marker block; the collection itself is opened by `files/tombstone-store.ts`) asks of everything that is not a tombstone: the disk's `lstat`s and the file records, links
  * and jobs at the source. They live apart from it because none of them opens that collection, and because a module that holds every
  * rule about a tombstone and every rule about a move's bytes is a module nobody can read in one sitting.
  *

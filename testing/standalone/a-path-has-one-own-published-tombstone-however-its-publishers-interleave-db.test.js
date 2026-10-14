@@ -62,7 +62,7 @@ const TOMBSTONES = `${S}_file_tombstones`;
 const DAY = 24 * 3_600_000;
 const FAR = '9999-12-31T23:59:59.999Z';
 
-let acts, tombstones, F, faults, reads;
+let acts, tombstones, markerMod, F, faults, reads;
 const realLstat = fsp.lstat;
 let lstatRefusesLocked = false;
 const LOCKED = `${path.sep}locked${path.sep}`;
@@ -83,6 +83,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     acts = await openFileActDoors({ suite: 'tombrace', space: S });
     F = await driverWriteFailures('ythril_harness_tombrace');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteMany']);
     reads = parkReadsAfterAnswer(acts.door.mongo);
     fsp.lstat = function (p, ...rest) {
@@ -194,13 +195,13 @@ describe('a path ends with one own published tombstone, however its publishers i
   it('(d) a move\'s marker survives the row that carried it being superseded', async () => {
     const move = { from: 'mv/from.txt', to: 'mv/to.txt' };
     await tombstones.writePendingFileTombstones(S, ['mv/from.txt'], move);
-    assert.equal((await tombstones.moveMarkerOf(S, move.from, move.to)) !== undefined, true, 'the move\'s marker was not written — the case is not reached');
+    assert.equal((await markerMod.moveMarkerOf(S, move.from, move.to)) !== undefined, true, 'the move\'s marker was not written — the case is not reached');
     await sleep(5);
     // Another act on the source path (no marker of its own) publishes: the move's row is "another pending tombstone" of the path.
     const covering = await tombstones.writePendingFileTombstones(S, ['mv/from.txt']);
     await tombstones.confirmFileTombstones(covering);
     assert.equal((await publishedFor('mv/from.txt')).length, 1, 'the covering act did not publish — the case is not reached');
-    assert.equal((await tombstones.moveMarkerOf(S, move.from, move.to)) !== undefined, true,
+    assert.equal((await markerMod.moveMarkerOf(S, move.from, move.to)) !== undefined, true,
       'the move row was removed with its marker: a retry cannot tell the move it began from an orphan beside an unrelated destination');
   });
 
@@ -215,7 +216,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     fs.mkdirSync(path.dirname(path.join(acts.root(), owed.to)), { recursive: true });
     fs.renameSync(path.join(acts.root(), owed.from), path.join(acts.root(), owed.to));
     await tombstones.confirmFileTombstones(await tombstones.writePendingFileTombstones(S, [owed.from], owed));
-    assert.equal((await tombstones.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move\'s marker was not written — the case is not reached');
+    assert.equal((await markerMod.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move\'s marker was not written — the case is not reached');
     const longAgo = new Date(Date.now() - 3 * DAY).toISOString();
     // The age of a row, whichever of its stamps the code reads it by.
     await acts.door.coll(S, 'file_tombstones').updateMany({ path: { $in: [old.from, owed.from] } },
@@ -227,7 +228,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     assert.deepEqual(await publishedFor(old.from), [], 'a marker older than a day, whose move is not owed, kept its row for ever: no row is unprunable');
     assert.equal((await publishedFor(owed.from)).length, 1,
       'the prune took the marker of a move that is still OWED because it was a day old: the retry is taken for an orphan, and the record at the source is stranded');
-    assert.equal((await tombstones.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move is no longer known to have begun');
+    assert.equal((await markerMod.moveMarkerOf(S, owed.from, owed.to)) !== undefined, true, 'the owed move is no longer known to have begun');
 
     // The owed move is finished by its retry; nothing is owed then, so its row is prunable like any other.
     const retry = await acts.move('REST', owed.from, owed.to);
@@ -235,7 +236,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     await tombstones.pruneFileTombstonesUpTo(S, FAR);
     assert.deepEqual(await publishedFor(owed.from), [], 'a finished move\'s row is still kept after its day');
 
-    await tombstones.forgetFinishedMove(S, young.from, young.to);
+    await markerMod.forgetFinishedMove(S, young.from, young.to);
     await tombstones.pruneFileTombstonesUpTo(S, FAR);
     assert.deepEqual(await publishedFor(young.from), [], 'a finished move\'s row is still kept: the marker was not cleared where it is');
   });

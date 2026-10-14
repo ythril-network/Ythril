@@ -39,7 +39,7 @@ const T0 = '2026-09-01T00:00:00.000Z';
 const DAY = 24 * 3_600_000;
 const LATER = () => new Date(Date.now() + DAY);
 
-let acts, stored, tombstones, reads, finish, walk, seen;
+let acts, stored, tombstones, markerMod, reads, finish, walk, seen;
 const files = () => acts.door.coll(S, 'files');
 const rowOf = (id) => files().findOne({ _id: id });
 const abs = (p) => path.join(acts.root(), p);
@@ -82,6 +82,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
     acts = await openFileActDoors({ suite: 'halflink', space: S });
     stored = await import('../../server/dist/files/stored-bytes.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     reads = await import('../../server/dist/files/move-marker-reads.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
@@ -149,7 +150,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
   describe('a crash between the link and the removal of the source name', () => {
     it('(d) housekeeping finishes it: the source name goes, the records follow, the marker is cleared and the move is no longer owed', async () => {
       await crashedBetweenLinkAndUnlink('a.txt', 'b.txt');
-      assert.equal(await tombstones.moveIsOwed(S, 'a.txt', 'b.txt'), true, 'a marked half-made link is not read as an owed move, so nothing would ever finish it');
+      assert.equal(await markerMod.moveIsOwed(S, 'a.txt', 'b.txt'), true, 'a marked half-made link is not read as an owed move, so nothing would ever finish it');
 
       const done = await pass(LATER());
       const { outcome } = done;
@@ -160,7 +161,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
       assert.equal(read('b.txt'), 'content of a.txt');
       assert.equal((await rowOf('b.txt'))?.description, 'A', 'the record did not follow the file');
       assert.equal(await rowOf('a.txt'), null, 'the record is still at the source');
-      assert.equal(await tombstones.moveMarkerOf(S, 'a.txt', 'b.txt'), undefined, 'the finished move kept its marker');
+      assert.equal(await markerMod.moveMarkerOf(S, 'a.txt', 'b.txt'), undefined, 'the finished move kept its marker');
       assert.equal(seen.owedMoveCount(S), 0, 'the owed gauge still counts the move');
       assert.deepEqual((await acts.raw()).filter(t => !t.pending).map(t => t.path), ['a.txt'], 'the path the move left is not tombstoned exactly once');
     });
@@ -174,7 +175,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
       assert.equal(acts.onDisk('a.txt'), false, 'the source name is still there');
       assert.equal(read('b.txt'), 'content of a.txt');
       assert.equal((await rowOf('b.txt'))?.description, 'A');
-      assert.equal(await tombstones.moveMarkerOf(S, 'a.txt', 'b.txt'), undefined);
+      assert.equal(await markerMod.moveMarkerOf(S, 'a.txt', 'b.txt'), undefined);
     });
   });
 

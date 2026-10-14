@@ -3,7 +3,7 @@
  *
  * ## The defect
  *
- * A move that is still owed must keep its marker on at least one row (`removeUnlessOwed`, `files/tombstones.ts`): the marker is the
+ * A move that is still owed must keep its marker on at least one row (`removeUnlessOwed`, `files/move-markers.ts`): the marker is the
  * only record that tells a retry "this is a move I began". The function read whether another row of the move SURVIVED, and then deleted
  * its own, as two steps with nothing between them and the other removers. Two removers (the prune after an acknowledgement,
  * `supersedeFileTombstones`, a drop of pending rows) running at once could each read the OTHER's row as the survivor and each delete
@@ -32,7 +32,7 @@ const FILES = `${S}_files`;
 /** Long enough for the other remover to have read its survivor while this one's delete is still pending. */
 const DELETE_HELD_MS = 150;
 
-let acts, tombstones, F, faults, proto, realDeleteMany;
+let acts, tombstones, markerMod, F, faults, proto, realDeleteMany;
 
 const markerRows = () => acts.door.coll(S, 'file_tombstones').find({ 'move.from': 'dm' }).toArray();
 
@@ -43,7 +43,7 @@ async function owedDirectoryMove() {
   faults.fail('deleteMany', FILES, F.storeGone.single);
   const a = await acts.move('REST', 'dm', 'dn');
   assert.equal(acts.statusOf(a), 503, `the move was not stopped by the store: ${JSON.stringify(a.body)}`);
-  assert.equal((await tombstones.moveMarkerOf(S, 'dm', 'dn')) !== undefined, true, 'the move left no marker — the case is not reached');
+  assert.equal((await markerMod.moveMarkerOf(S, 'dm', 'dn')) !== undefined, true, 'the move left no marker — the case is not reached');
   // The rows are published at versions below the arrivals that supersede them.
   await acts.door.coll(S, 'file_tombstones').updateMany({ 'move.from': 'dm' }, { $set: { rowSeq: 1 }, $unset: { pending: '' } });
   const rows = await markerRows();
@@ -56,6 +56,7 @@ describe('two removers of marker rows never drop the last row of an owed move', 
     acts = await openFileActDoors({ suite: 'markerrace', space: S });
     F = await driverWriteFailures('ythril_harness_markerrace');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteMany']);
     proto = Object.getPrototypeOf(acts.door.mongo.col('probe'));
   });
@@ -85,7 +86,7 @@ describe('two removers of marker rows never drop the last row of an owed move', 
     proto.deleteMany = realDeleteMany; realDeleteMany = undefined;
     const left = await markerRows();
     assert.ok(left.length >= 1, 'both removers dropped the rows carrying the marker of a move that is still owed: nothing will ever finish it');
-    assert.equal((await tombstones.moveMarkerOf(S, 'dm', 'dn')) !== undefined, true, 'the owed move lost its marker');
+    assert.equal((await markerMod.moveMarkerOf(S, 'dm', 'dn')) !== undefined, true, 'the owed move lost its marker');
   });
 
   it('control: a move that is NOT owed loses every row', async () => {

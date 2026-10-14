@@ -44,7 +44,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'caseonly';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let acts, tombstones, insensitive;
+let acts, tombstones, markerMod, insensitive;
 const files = () => acts.door.coll(S, 'files');
 const rowOf = (id) => files().findOne({ _id: id });
 const abs = (p) => path.join(acts.root(), p);
@@ -58,6 +58,7 @@ describe('a case-only rename moves its record (real MongoDB, case-insensitive fi
   before(async () => {
     acts = await openFileActDoors({ suite: 'caseonly', space: S });
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     insensitive = caseInsensitiveAt(acts.root());
   });
   after(async () => { await acts?.close(); });
@@ -81,9 +82,9 @@ describe('a case-only rename moves its record (real MongoDB, case-insensitive fi
     assert.equal(await rowOf('case.txt'), null, 'the record is stranded at the old spelling');
     assert.equal((await rowOf('Case.txt#chunk-0'))?.parentFileId, 'Case.txt', 'the derived row did not follow');
     assert.equal(await rowOf('case.txt#chunk-0'), null);
-    assert.equal(await tombstones.moveIsOwed(S, 'case.txt', 'Case.txt'), false, 'a finished case-only move is read as owed');
+    assert.equal(await markerMod.moveIsOwed(S, 'case.txt', 'Case.txt'), false, 'a finished case-only move is read as owed');
     assert.deepEqual((await acts.raw()).filter(r => r.pending), [], 'a tombstone is left pending');
-    assert.equal(await tombstones.moveMarkerOf(S, 'case.txt', 'Case.txt'), undefined, 'the finished move kept its marker');
+    assert.equal(await markerMod.moveMarkerOf(S, 'case.txt', 'Case.txt'), undefined, 'the finished move kept its marker');
     assert.deepEqual(await acts.published(), { served: ['_converted/case.txt.md', 'case.txt'], pushed: ['_converted/case.txt.md', 'case.txt'] },
       'a peer is not told the old ids are gone (the sidecar tombstone was dropped because bytes still answer at the old spelling): on a case-sensitive peer both ids would stay');
 

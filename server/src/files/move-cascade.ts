@@ -19,7 +19,7 @@
  *     committed finds its claim gone and writes nothing; a run that did leaves rows where the batches below find them; a run that
  *     finds the file missing asks whether a move of that path is owed before it reconciles "a deleted source".
  *  3. **Write the tombstones PENDING, with the move's marker**, then move the bytes under them: each is published once ITS bytes
- *     have moved (`files/tombstones.ts`). The marker is what tells a retry "this is a move I began", as against an orphan source
+ *     have moved (`files/tombstones.ts`). The marker (`files/move-markers.ts`) is what tells a retry "this is a move I began", as against an orphan source
  *     beside an unrelated file at the destination, and it records what the bytes were (size and mtime, so the bytes at the
  *     destination can be told from a different file's) and who asked. An act that cannot record its removal does not begin.
  *  4. **Carry the records in BATCHES**, each one transaction under a byte budget (`files/move-timing.ts`): the file rows, every row
@@ -62,9 +62,8 @@ import { kindAt, movedId, movedPairs, movedSidecars } from './moved-paths.js';
 import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt, isOneNameUnderTwoSpellings } from './stored-bytes.js';
-import {
-  abandonMove, actUnderPendingTombstones, forgetFinishedMove, moveIsOwed, moveMarkerOf, pendingAmong, settleBegunMove, writePendingFileTombstones,
-} from './tombstones.js';
+import { actUnderPendingTombstones, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
+import { abandonMove, forgetFinishedMove, moveIsOwed, moveMarkerOf } from './move-markers.js';
 import { bytesIdentityAt, pairOnDisk } from './move-marker-reads.js';
 import { DestinationExists, DestinationHeldAfterMove, MoveStillOwed } from './act-answers.js';
 import { assertDestinationFree, assertDestinationReachable, assertNotMovedIntoItself } from './destination.js';

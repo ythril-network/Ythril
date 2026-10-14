@@ -345,7 +345,7 @@ export async function linksStartingFrom(
 
 /**
  * Whether any FILE under the directory `root` (a space-relative path, no trailing slash) is the `from` of a link row.
- * Asked by the move marker's owed check (`files/tombstones.ts`): a directory move whose records left but whose links have
+ * Asked by the move marker's owed check (`files/move-markers.ts`): a directory move whose records left but whose links have
  * not is still owed. One indexed prefix probe on `from`, escaped and anchored, limit 1; an empty root is refused rather
  * than read as "every file in the space".
  */

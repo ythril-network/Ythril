@@ -40,7 +40,7 @@ import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { removeFileHere } from '../remove-file-here.js';
 import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove } from './job-queue.js';
-import { moveCarriesRecordsAt } from '../tombstones.js';
+import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';

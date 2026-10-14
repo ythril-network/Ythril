@@ -28,16 +28,17 @@ const S = 'clearmarkers';
 const DAY = 24 * 3_600_000;
 const OLD = '2026-01-01T00:00:00.000Z';
 
-let acts, tombstones, walk;
+let acts, tombstones, markerMod, walk;
 
 const markers = () => acts.door.coll(S, 'file_tombstones');
 const marker = (id, from, to) => ({ _id: id, spaceId: S, path: from, deletedAt: OLD, move: { from, to } });
-const begun = (from, to) => tombstones.moveMarkerOf(S, from, to).then(m => m !== undefined);
+const begun = (from, to) => markerMod.moveMarkerOf(S, from, to).then(m => m !== undefined);
 
 describe('clearing the markers of finished moves is a guarded walk', { skip }, () => {
   before(async () => {
     acts = await openFileActDoors({ suite: 'clearmarkers', space: S });
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
   });
   after(async () => { await acts?.close(); });
@@ -45,7 +46,7 @@ describe('clearing the markers of finished moves is a guarded walk', { skip }, (
 
   it('a pager resumes after the last move it returned, and starts at the head once a call reached the end', async () => {
     await markers().insertMany(['a', 'b', 'c', 'd', 'e'].map(n => marker(`m-${n}`, `${n}.txt`, `${n}-to.txt`)));
-    const next = tombstones.createMoveMarkerPager();
+    const next = markerMod.createMoveMarkerPager();
     const page = async () => (await next(S, '2026-06-01T00:00:00.000Z', 2));
     const first = await page();
     const second = await page();

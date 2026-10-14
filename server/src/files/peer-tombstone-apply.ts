@@ -10,7 +10,7 @@
  * cached hash — and in the guard on the path (two hand copies of a normalisation that STRIPPED `../` and so turned an
  * escape into a delete inside the space). A tombstone also carried no version, so a file re-created at a deleted path was
  * deleted again on every later cycle and downloaded again by the next manifest pull, for as long as the tombstone was held.
- * It lives here, apart from `files/tombstones.ts` — which is the only module that opens the collection — because this one
+ * It lives here, apart from `files/tombstones.ts` — the lifecycle over the collection `files/tombstone-store.ts` opens — because this one
  * reaches into the arrival writer's shape rules (`sync/arrivals.ts`), which that module must not import (a runtime cycle).
  *
  * ## The rule, in order, per element

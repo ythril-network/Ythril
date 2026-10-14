@@ -25,7 +25,8 @@
  *   gives a tombstone stored before positions existed its local position.
  * - (bundle-71, Q-352) The settle's index is on `{ pending, settleAt }`, the clock the settle moves; the one it replaces
  *   (`{ pending, deletedAt }`) is dropped by the boot pass. The questions explained are the MODULE's own, read from its
- *   `FILE_TOMBSTONE_QUERIES` (settle, pending-by-path, capped page, prune page and whatever it adds), never copies written here.
+ *   `FILE_TOMBSTONE_QUERIES` (`files/tombstone-store.ts`: settle, pending-by-path, capped page, prune page and whatever it adds) and the
+ *   marker's `MOVE_MARKER_QUERIES` (`files/move-markers.ts`, Q-462), never copies written here.
  * - MongoDB's winning plan for each REAL query uses them — an index the planner does not choose is decoration — and the
  *   same queries scan without them, which is the control that makes the first assertion mean something.
  *
@@ -63,7 +64,7 @@ const REPLACED = 'pending,deletedAt';
  * The questions the MODULE asks, read from the module and not written here again (bundle-71, vet S6). A copy of a query in a
  * test is a copy of the question as its author imagined it, and a gate that explains the copy answers about the copy: the
  * settle's copy here scanned for the wrong reason the day the settle changed its clock, and the test said nothing about the
- * real query. `FILE_TOMBSTONE_QUERIES` is the one export that holds them: each value is a function of one sample bag
+ * real query. `FILE_TOMBSTONE_QUERIES` (and, for the marker, `MOVE_MARKER_QUERIES`) is the export that holds them: each value is a function of one sample bag
  * (`{ spaceId, now, before, paths, after, cap, upTo, limit }`) answering `{ filter, sort?, limit? }`, and the module runs
  * every one of its own reads through it.
  *
@@ -96,7 +97,11 @@ describe('file tombstones are indexed', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'tombidx', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
     coll = door.coll(S, 'file_tombstones');
-    builders = (await import('../../server/dist/files/tombstones.js')).FILE_TOMBSTONE_QUERIES ?? {};
+    // The collection's questions are the store's, the marker's are the marker module's (Q-462): one registry each, explained together.
+    builders = {
+      ...(await import('../../server/dist/files/tombstone-store.js')).FILE_TOMBSTONE_QUERIES,
+      ...(await import('../../server/dist/files/move-markers.js')).MOVE_MARKER_QUERIES,
+    };
     // Enough published rows that a scan and an index plan differ, and a few of each kind the queries look for.
     const now = Date.now();
     await coll.insertMany(Array.from({ length: 200 }, (_, i) => {
@@ -122,7 +127,7 @@ describe('file tombstones are indexed', { skip }, () => {
 
   it('the module exports the questions it asks of the collection, by the names the plan gives them, and nothing in them is a copy kept here', () => {
     assert.ok(builders && typeof builders === 'object' && Object.keys(builders).length > 0,
-      'files/tombstones.js exports no FILE_TOMBSTONE_QUERIES: this gate explains copies of its queries, and a copy that drifts answers about itself');
+      'files/tombstone-store.js exports no FILE_TOMBSTONE_QUERIES: this gate explains copies of its queries, and a copy that drifts answers about itself');
     for (const name of REQUIRED_QUERIES) assert.equal(typeof builders[name], 'function', `FILE_TOMBSTONE_QUERIES has no \`${name}\` builder`);
     for (const [name, b] of Object.entries(builders)) {
       assert.equal(typeof b, 'function', `FILE_TOMBSTONE_QUERIES.${name} is not a builder`);

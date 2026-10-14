@@ -1,7 +1,7 @@
 /**
  * Does a held file tombstone SHADOW an arriving file? — the pure half of the answer, with no store behind it.
  *
- * `files/tombstones.ts` is the one module that reads and writes the tombstone collection, and it reads the tombstones held for an
+ * `files/tombstones.ts` is the lifecycle over the tombstone collection (opened by `files/tombstone-store.ts`, the one module that names it), and it reads the tombstones held for an
  * arrival's paths and the live rows beside them. What those rows MEAN for an arrival — by version for metadata, by content for
  * bytes, a sidecar by its parent, which paths decide an arrival, what a door that cannot tell answers — is decided here, over
  * rows already read, so the rule can be read, tested and changed without the reads, and so the collection's module stays the

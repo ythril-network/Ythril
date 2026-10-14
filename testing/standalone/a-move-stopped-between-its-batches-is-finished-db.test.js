@@ -42,7 +42,7 @@ const T0 = '2026-09-01T00:00:00.000Z';
 const E1 = '11111111-1111-4111-8111-111111111111';
 const E2 = '22222222-2222-4222-8222-222222222222';
 
-let acts, F, tombstones, finish, walk, timing, queue, worker, meta, adjacency;
+let acts, F, tombstones, markerMod, finish, walk, timing, queue, worker, meta, adjacency;
 
 const files = () => acts.door.coll(S, 'files');
 const row = (id) => files().findOne({ _id: id });
@@ -85,6 +85,7 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
     acts = await openFileActDoors({ suite: 'batchstop', space: S });
     F = await driverWriteFailures('ythril_harness_batchstop');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
     timing = await import('../../server/dist/files/move-timing.js');
@@ -127,8 +128,8 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
     }
     assert.deepEqual(await linkTargets('moved/a.txt'), [`entity:${E1}`, `entity:${E2}`], 'the links of batch 1 did not follow it');
     assert.deepEqual(await linkTargets('dir/a.txt'), [], 'batch 1 left its links at the source');
-    assert.equal((await tombstones.moveMarkerOf(S, 'dir', 'moved')) !== undefined, true, 'the marker was not kept');
-    assert.equal(await tombstones.moveIsOwed(S, 'dir', 'moved'), true, 'the stopped move is not owed');
+    assert.equal((await markerMod.moveMarkerOf(S, 'dir', 'moved')) !== undefined, true, 'the marker was not kept');
+    assert.equal(await markerMod.moveIsOwed(S, 'dir', 'moved'), true, 'the stopped move is not owed');
 
     const done = await pass(LATER());
     assert.equal(done.outcome.finished, 1, `housekeeping did not finish the move: ${JSON.stringify(done)}`);
@@ -138,7 +139,7 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
       assert.deepEqual(await linkTargets(`moved/${n}.txt`), [`entity:${E1}`, `entity:${E2}`]);
       assert.deepEqual(await linkTargets(`dir/${n}.txt`), []);
     }
-    assert.equal((await tombstones.moveMarkerOf(S, 'dir', 'moved')) !== undefined, false, 'a finished move kept its marker');
+    assert.equal((await markerMod.moveMarkerOf(S, 'dir', 'moved')) !== undefined, false, 'a finished move kept its marker');
   });
 
   it('a commit that landed and whose reply was lost is a landed batch: the move succeeds and runs nothing twice', async () => {
@@ -155,7 +156,7 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
     assert.equal(await row('one.txt#chunk-0'), null);
     assert.deepEqual(await linkTargets('two.txt'), [`entity:${E1}`, `entity:${E2}`]);
     assert.deepEqual(await linkTargets('one.txt'), []);
-    assert.equal((await tombstones.moveMarkerOf(S, 'one.txt', 'two.txt')) !== undefined, false, 'the finished move kept its marker');
+    assert.equal((await markerMod.moveMarkerOf(S, 'one.txt', 'two.txt')) !== undefined, false, 'the finished move kept its marker');
   });
 
   it('a move whose process died after the bytes: the worker, finding no bytes at the old path after the hold ran out, removes nothing, and housekeeping finishes it', async () => {
@@ -179,7 +180,7 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
 
     assert.ok(await row('pics/from.png'), 'the worker removed the record of a move that was owed');
     assert.ok(await acts.door.coll(S, 'media_jobs').findOne({ _id: 'pics/from.png' }), 'the worker removed the job of a move that was owed');
-    assert.equal((await tombstones.moveMarkerOf(S, 'pics/from.png', 'pics/to.png')) !== undefined, true, 'the marker was forgotten');
+    assert.equal((await markerMod.moveMarkerOf(S, 'pics/from.png', 'pics/to.png')) !== undefined, true, 'the marker was forgotten');
 
     const done = await pass(LATER());
     assert.equal(done.outcome.finished, 1, `housekeeping did not finish the move: ${JSON.stringify(done)}`);
@@ -201,7 +202,7 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
     // An unrelated file replaces the moved bytes at the destination: another size.
     const unrelated = 'an entirely different and longer file that somebody wrote at the destination afterwards';
     fs.writeFileSync(path.join(acts.root(), 'to.txt'), unrelated);
-    assert.equal(await tombstones.moveIsOwed(S, 'from.txt', 'to.txt'), false, 'the bytes at the destination are not the moved ones, and the move is still owed');
+    assert.equal(await markerMod.moveIsOwed(S, 'from.txt', 'to.txt'), false, 'the bytes at the destination are not the moved ones, and the move is still owed');
 
     const retry = await acts.move('REST', 'from.txt', 'to.txt');
     assert.equal(status(retry), 404, `the retry of an abandoned move was not refused as a source that names nothing: ${body(retry)}`);
@@ -209,6 +210,6 @@ describe('a move stopped partway is finished, an abandoned one is not (real Mong
     assert.equal(await row('to.txt'), null, 'the move wrote a record over an unrelated file');
     assert.deepEqual(await linkTargets('to.txt'), [], 'the destination is still linked to what a file that is not there was linked to');
     assert.deepEqual(await linkTargets('from.txt'), [`entity:${E1}`, `entity:${E2}`], 'the abandoned move took the links off the source');
-    assert.equal((await tombstones.moveMarkerOf(S, 'from.txt', 'to.txt')) !== undefined, false, 'the marker of an abandoned move was not cleared');
+    assert.equal((await markerMod.moveMarkerOf(S, 'from.txt', 'to.txt')) !== undefined, false, 'the marker of an abandoned move was not cleared');
   });
 });

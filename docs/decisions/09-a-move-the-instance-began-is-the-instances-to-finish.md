@@ -78,10 +78,13 @@ receiver's **tree**, which can change.
 ## Where the detail lives
 
 - `server/src/files/finish-owed-moves.ts` — the completion, its budget, its backoff and what stranded means.
-- `server/src/files/tombstones.ts` — the marker, `moveIsOwed` and every remover that consults it.
+- `server/src/files/move-markers.ts` — the marker, `moveIsOwed`, the pager over the markers and the remover that consults it
+  (`removeUnlessOwed`); `server/src/files/tombstones.ts` — the tombstone lifecycle whose every remover asks `moveIsOwed`, and
+  `settleBegunMove`; `server/src/files/tombstone-store.ts` — the one module that opens the collection (the split is Q-462).
 - `server/src/files/act-answers.ts` and `server/src/files/destination.ts` — the one answer to a refused or failed file act,
   and the check every door runs on its destination.
 - `docs/integration-guide/05-files-api.md` — the contract: statuses, bodies and retry.
-- `testing/standalone/housekeeping-finishes-an-owed-move-db.test.js`, `testing/standalone/no-remover-drops-an-owed-move-marker.test.js`
+- `testing/standalone/housekeeping-finishes-an-owed-move-db.test.js`, `testing/standalone/no-remover-drops-an-owed-move-marker.test.js`,
+  `testing/standalone/move-marker-queries-are-read-through-the-pager.test.js`
   and `testing/standalone/a-destination-blocked-by-a-file-is-refused-alike-db.test.js` — the completion, the removers and
   the destination answer on every door.

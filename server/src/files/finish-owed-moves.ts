@@ -9,7 +9,7 @@
  * finished it depended on the caller retrying. A caller that does not retry — a sync peer's rename, a client that gave up, a script
  * that read the failure and went on — left the file listed where it no longer is and, once the media worker found no bytes at the old
  * path, deleted by the "deleted source" reconcile — which asks {@link moveIsOwed} first (`files/media/worker.ts`). The marker the
- * move wrote with its tombstones (`files/tombstones.ts`) is the record that it is owed, and this reads it.
+ * move wrote with its tombstones (`files/move-markers.ts`) is the record that it is owed, and this reads it.
  *
  * ## What it does
  *
@@ -52,9 +52,8 @@ import { logInternalAudit } from '../audit/audit.js';
 import { FILE_MOVE_FINISH_OPERATION } from '../audit/middleware.js';
 import { fileMovesFinishedByHousekeepingTotal } from '../metrics/registry.js';
 import { finishOwedMove } from './move-cascade.js';
-import {
-  MOVE_MARKER_KEEP_MS, createMoveMarkerPager, fileTombstoneStaleBefore, moveIsOwed, recordMoveAttempt, type MoveMarker,
-} from './tombstones.js';
+import { fileTombstoneStaleBefore } from './tombstones.js';
+import { MOVE_MARKER_KEEP_MS, createMoveMarkerPager, moveIsOwed, recordMoveAttempt, type MoveMarker } from './move-markers.js';
 import { publishOwedMoves } from './owed-moves-seen.js';
 
 /** How many attempts to finish a move housekeeping makes before it stops and keeps the marker (STRANDED). */

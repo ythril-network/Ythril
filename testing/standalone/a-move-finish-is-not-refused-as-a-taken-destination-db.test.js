@@ -38,7 +38,7 @@ const T0 = '2026-09-01T00:00:00.000Z';
 const DAY = 24 * 3_600_000;
 const LATER = (n = 1) => new Date(Date.now() + n * DAY);
 
-let acts, tombstones, finish, walk, timing, plan, registry, seen;
+let acts, tombstones, markerMod, finish, walk, timing, plan, registry, seen;
 const files = () => acts.door.coll(S, 'files');
 const row = (id) => files().findOne({ _id: id });
 const chunkRow = (parent, i, content) => ({
@@ -89,6 +89,7 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
   before(async () => {
     acts = await openFileActDoors({ suite: 'movefinish', space: S, monitorCommands: true });
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
     timing = await import('../../server/dist/files/move-timing.js');
@@ -105,7 +106,7 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
 
   it('a stopped move: the same request again finishes it (200), the rows are at the destination and the marker is gone', async () => {
     await directoryMoveStoppedAfterItsFirstBatch(1);
-    assert.equal(await tombstones.moveIsOwed(S, 'dir', 'moved'), true, 'fixture: the stopped move is not owed');
+    assert.equal(await markerMod.moveIsOwed(S, 'dir', 'moved'), true, 'fixture: the stopped move is not owed');
 
     const retry = await acts.move('REST', 'dir', 'moved');
 
@@ -115,7 +116,7 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
       assert.equal(await row(`dir/${n}.txt`), null, `dir/${n}.txt is still at the source`);
       assert.equal((await row(`moved/${n}.txt#chunk-0`))?.parentFileId, `moved/${n}.txt`);
     }
-    assert.equal(await tombstones.moveMarkerOf(S, 'dir', 'moved'), undefined, 'the finished move kept its marker');
+    assert.equal(await markerMod.moveMarkerOf(S, 'dir', 'moved'), undefined, 'the finished move kept its marker');
   });
 
   it('housekeeping finishes the same stopped move without a refusal', async () => {
@@ -187,8 +188,8 @@ describe('the finish of a move is not refused as a taken destination (real Mongo
     }
     assert.deepEqual(await row('two.txt'), foreign, 'the foreign record was replaced');
     assert.equal((await row('one.txt'))?.description, 'ONE', 'the moved file\'s record left its source although nothing could carry it');
-    assert.notEqual(await tombstones.moveMarkerOf(S, 'one.txt', 'two.txt'), undefined, 'the marker of a move that is still owed was cleared');
-    assert.equal(await tombstones.moveIsOwed(S, 'one.txt', 'two.txt'), true, 'the move is not owed any more');
+    assert.notEqual(await markerMod.moveMarkerOf(S, 'one.txt', 'two.txt'), undefined, 'the marker of a move that is still owed was cleared');
+    assert.equal(await markerMod.moveIsOwed(S, 'one.txt', 'two.txt'), true, 'the move is not owed any more');
 
     // Housekeeping: the one attempt is spent and the move is STRANDED, said through the walk, its marker kept.
     const limits = { attempts: 1, backoffBaseMs: 60 * 60_000 };
