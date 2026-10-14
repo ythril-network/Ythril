@@ -24,7 +24,7 @@ import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { log } from '../util/log.js';
-import { isMissingPath, openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
+import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
   listDir,
   type FileEntry,
@@ -33,12 +33,12 @@ import { fetchJobProgress } from '../files/media/job-queue.js';
 import {
   getUploadReceived,
 } from '../files/chunks.js';
-import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
+import { resolveSafePath, resolveSafePathChecked } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { NotFoundError } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
-import { deleteDirectoryCascade, deleteFileCascade, isUnfinishedDirectoryDelete } from '../files/delete-cascade.js';
+import { deletePath } from '../files/delete-cascade.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { contentDispositionOf } from '../util/content-disposition.js';
@@ -410,75 +410,19 @@ fileStoreRouter.post(
 );
 
 // ── DELETE /api/files/:spaceId ────────────────────────────────────────────────
-// Deletes a file. Deleting a directory requires { confirm: true } in the JSON body.
+// Deletes a file, or — with { confirm: true } in the JSON body — a directory tree. `deletePath` decides which, and
+// is what MCP `delete_file` and `POST /api/delete_file` call too.
 fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const request = requireWritePath(req, res);
   if (request === null) return;
   const { targetSpace, path: filePath } = request;
 
-  let absPath: string;
   try {
-    absPath = resolveSafePath(targetSpace, filePath);
-    // Symlink-aware boundary re-check before a recursive delete: the lexical
-    // path may stay under the root while a symlink component points outside it.
-    await assertNoSymlinkEscape(targetSpace, absPath);
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-    return;
-  }
-
-  let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
-  try {
-    stat = await fs.stat(absPath);
-  } catch (statErr: unknown) {
-    // No bytes at this path. A metadata record whose file went missing (an ORPHAN) is completed by the cascade below
-    // — tombstone, record, jobs, artifacts — and a path with neither is its NotFoundError, answered 404 there. This
-    // branch used to clean the orphan's record itself and write no tombstone, so a peer re-pushed the file
-    // (bundle-30 I13).
-    if (!isMissingPath(statErr)) {
-      res.status(404).json({ error: 'Path not found' });
-      return;
-    }
-  }
-
-  // A directory — or one whose tree a store failure left gone with its records still there, which only a delete the
-  // caller confirmed as a directory's may complete (bundle-30 I14).
-  const confirmed = req.body?.confirm === true;
-  let isDirectory = !!stat?.isDirectory();
-  if (!stat && confirmed) {
-    try {
-      isDirectory = await isUnfinishedDirectoryDelete(targetSpace, filePath);
-    } catch (err) {
-      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
-      return;
-    }
-  }
-  if (isDirectory) {
-    if (!confirmed) {
-      res.status(422).json({
-        error:
-          'Deleting a directory requires { "confirm": true } in the request body.',
-      });
-      return;
-    }
-    if (absPath === spaceRoot(targetSpace)) {
-      res.status(400).json({ error: 'Cannot delete the space root directory.' });
-      return;
-    }
-    try {
-      // Tombstones, tree, jobs, sidecars, metadata — in the order `files/delete-cascade.ts` explains.
-      await deleteDirectoryCascade(targetSpace, filePath);
-      res.status(204).end();
-    } catch (err) {
-      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
-    }
-    return;
-  }
-
-  try {
-    // Full cascade (blob + tombstone + meta + job + artifacts + usage + webhook) — shared with the MCP
-    // delete_file tool and the TTL sweep so every delete path cleans up identically.
-    await deleteFileCascade(targetSpace, filePath, webhookToken(req));
+    // Blob, tombstone, metadata, job, artifacts, usage and (for a file) the webhook, in the order `files/delete-cascade.ts`
+    // explains — shared with the MCP tool and the TTL sweep so every delete path cleans up identically.
+    const deleted = await deletePath(targetSpace, filePath, { confirm: req.body?.confirm, actor: webhookToken(req) });
+    // A directory delete is audited with what it was; a single file records nothing, as before.
+    if (deleted === 'directory') req.auditSnapshots = { before: {}, after: { kind: 'directory' } };
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {
@@ -489,7 +433,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       res.status(404).json({ error: 'Path not found' });
       return;
     }
-    sendCaughtFailure(res, `file delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
+    sendCaughtFailure(res, `delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete' });
   }
 });
 

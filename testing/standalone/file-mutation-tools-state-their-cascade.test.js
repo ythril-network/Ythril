@@ -124,7 +124,7 @@ describe('delete_file describes the cascade it really performs', () => {
     const at = CASCADE.indexOf('export async function deleteFileCascade');
     assert.ok(at > -1, 'deleteFileCascade is no longer in delete-cascade.ts — re-anchor this gate');
     const cascade = CASCADE.slice(at, CASCADE.indexOf('\nexport ', at + 10));
-    const notFound = cascade.indexOf('throw new NotFoundError(');
+    const notFound = cascade.indexOf('throw fileNotFound(');
     const tombstone = cascade.indexOf('writePendingFileTombstones(');
     // The unlink is `deleteStoredIfPresent` (bundle-51 round 4): the one deleter that reads a missing path as done and nothing
     // else as done, where the cascade used to spell that tolerance by hand around `deleteStored`.
@@ -150,8 +150,8 @@ describe('delete_file describes the cascade it really performs', () => {
   });
 
   it('scopes the file.deleted webhook to a single file, because a directory delete emits none (Q-469)', () => {
-    const about = sentencesOf(DELETE).filter(s => /file\.deleted/.test(s));
-    assert.ok(about.length > 0, 'the description no longer says anything about the file.deleted webhook');
+    const about = sentencesOf(DELETE).filter(s => /file\.deleted/.test(s) && /\bfires?\b/.test(s));
+    assert.ok(about.length > 0, 'the description no longer says when the file.deleted webhook fires');
     for (const s of about) assert.match(s, /single file|one file/i, `a sentence promises the webhook without saying it is for one file: ${s}`);
   });
 

@@ -6,7 +6,9 @@
  * (a stale job retries forever against the missing path), and delete conversion artifacts. This exact
  * sequence was duplicated in the REST `DELETE /api/files/:spaceId` handler and the MCP `delete_file` tool;
  * it lives here so both — and the TTL sweep (F12) — clean up identically and no path orphans bytes, jobs
- * or artifacts. A directory's delete is the same cascade over a tree (`deleteDirectoryCascade`), REST only.
+ * or artifacts. A directory's delete is the same cascade over a tree (`deleteDirectoryCascade`), and which of the two
+ * a path gets — or a refusal — is decided in one place, {@link deletePath}, for every door that takes a caller's path:
+ * `DELETE /api/files/:spaceId`, `POST /api/delete_file` and MCP `delete_file`.
  *
  * ## The order, and what each failure leaves (bundle-30 I13, I14, I15)
  *
@@ -39,8 +41,10 @@
 import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
-import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent, deleteStoredIfPresent } from './stored-bytes.js';
+import fs from 'fs/promises';
+import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { bytesPresent, deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
+import { ConfirmRequired, FileSystemFault, SpaceRootRefused } from './act-answers.js';
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetFileHashesByPrefix } from './manifest.js';
 import { cancelJobsOwnedBy } from './media/job-queue.js';
@@ -57,14 +61,15 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 
+/** The refusal of a path with nothing to delete, in one sentence for every way a delete reaches it (`404` on REST, an error result in MCP). */
+const fileNotFound = (spaceId: string, filePath: string): NotFoundError => new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
+
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
   const present = await bytesPresent(abs);
   // No bytes: a LIVE file record at the path is a delete a failure stopped, owed to completion. A flagged one (a soft
   // delete that finished) and a derived one (chunk, face) are not — the file is already gone, so the answer is not found.
-  if (!present && !(await hasLiveFileRecordExactlyAt(spaceId, filePath))) {
-    throw new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
-  }
+  if (!present && !(await hasLiveFileRecordExactlyAt(spaceId, filePath))) throw fileNotFound(spaceId, filePath);
   // BEFORE the bytes go, pending; published once they have: a peer's manifest re-pushes a file it has no tombstone
   // for, and a peer told of a file still here deletes it and tells us back. REQUIRED: a tombstone that cannot be written
   // refuses the delete (`ActNotRecorded`) before a byte goes.
@@ -92,6 +97,75 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
  */
 export async function isUnfinishedDirectoryDelete(spaceId: string, dirPath: string): Promise<boolean> {
   return hasLiveFileRecordUnder(spaceId, dirPath);
+}
+
+/** What a delete at a path did: removed one file, or removed a directory tree. */
+export type PathDeleted = 'file' | 'directory';
+
+/** `confirm` as a delete's caller gave it: absent, or a boolean — anything else is the caller's malformed request (`400`). */
+function confirmOf(confirm: unknown): boolean | undefined {
+  if (confirm === undefined || typeof confirm === 'boolean') return confirm;
+  throw new RangeError("'confirm' must be a boolean");
+}
+
+/**
+ * The filesystem's answers to "what is at this path" that mean nothing can be there: a name too long to exist, a loop of symbolic
+ * links. For a delete these are "not found", like a missing path; the move's destination check reads the same two as refusals about
+ * CREATING the name (`destination.ts`), which is the wrong sentence for a path being removed.
+ */
+const CANNOT_EXIST = new Set(['ENAMETOOLONG', 'ELOOP']);
+
+/**
+ * Delete what a caller's path names: one file, or — with `confirm: true` — a whole directory tree. The one decision, for
+ * `DELETE /api/files/:spaceId`, `POST /api/delete_file` and MCP `delete_file` alike.
+ *
+ * ## The question it answers
+ *
+ * "What stands at this path, and which delete does the caller's `confirm` allow?" Asked by every door, so a door cannot differ
+ * from another in what a path is. It used to be the REST route's own code (it stat'ed, found a directory, asked for `confirm`,
+ * refused the root) while the MCP tool deleted files only and told its caller a directory was another tool's job: one capability, a
+ * different act per client (Q-438).
+ *
+ * ## What it decides, in this order
+ *
+ * - `confirm` is absent or a boolean; anything else is a `RangeError` (`400`), whatever the door's own argument validation said.
+ * - A path outside the space is a `RangeError` (`400`); one that cannot exist (a name too long, a loop of links) is not found.
+ * - A path whose stat fails for any other reason is a `FileSystemFault`: `500` in words that name no path. It is never "not found",
+ *   which would tell a caller to stop looking at something that is there.
+ * - No bytes: a delete a store failure stopped after the tree went is completed — but only by a caller who said `confirm: true`, the
+ *   one who meant a directory; without it the path is a file's, and a file with neither bytes nor a live record is not found.
+ * - A directory without `confirm` is {@link ConfirmRequired} (`422`); the space root, with it, is {@link SpaceRootRefused} (`400`),
+ *   and is never deleted.
+ * - Everything else is {@link deleteFileCascade} or {@link deleteDirectoryCascade}.
+ *
+ * A directory delete takes no actor: it emits no `file.deleted` webhook, on any door (Q-469). Returns what was deleted, for the door
+ * that audits the act.
+ */
+export async function deletePath(spaceId: string, filePath: string, { confirm, actor }: { confirm?: unknown; actor?: WebhookActor } = {}): Promise<PathDeleted> {
+  const confirmed = confirmOf(confirm);
+  // Symlink-aware before a recursive delete: the lexical path may stay under the root while a link on the way points outside it.
+  const abs = await resolveSafePathChecked(spaceId, filePath);
+  let isDirectory = false;
+  let there = true;
+  try {
+    isDirectory = (await fs.stat(abs)).isDirectory();
+  } catch (err: unknown) {
+    if (isMissingPath(err)) there = false;
+    else if (CANNOT_EXIST.has((err as NodeJS.ErrnoException | null)?.code ?? '')) throw fileNotFound(spaceId, filePath);
+    else throw new FileSystemFault(err);
+  }
+  // No bytes: the tree of a directory delete a store failure stopped, whose records remain — completed only by the caller who confirmed
+  // a directory (bundle-30 I14). Anything else with no bytes is a file's, for `deleteFileCascade` to complete or to refuse as not found.
+  if (!there && confirmed === true) isDirectory = await isUnfinishedDirectoryDelete(spaceId, filePath);
+  if (!isDirectory) {
+    await deleteFileCascade(spaceId, filePath, actor);
+    return 'file';
+  }
+  if (confirmed !== true) throw new ConfirmRequired(filePath);
+  if (abs === spaceRoot(spaceId)) throw new SpaceRootRefused(filePath);
+  // Tombstones, tree, jobs, sidecars, metadata — in the order this module's header explains.
+  await deleteDirectoryCascade(spaceId, filePath);
+  return 'directory';
 }
 
 /**

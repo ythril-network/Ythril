@@ -7,7 +7,7 @@ import { createDir, listDir, readFileWindow } from '../../files/files.js';
 import { assertDestinationReachable } from '../../files/destination.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
-import { deleteFileCascade } from '../../files/delete-cascade.js';
+import { deletePath } from '../../files/delete-cascade.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
@@ -252,13 +252,17 @@ export const list_dirTool: ToolHandler = {
 
 export const delete_fileTool: ToolHandler = {
   name: 'delete_file',
-  description: 'Delete one file from the space file store, and everything the instance derived from it. '
-    + 'IRREVERSIBLE — there is no undelete and no trash.\n\n'
+  description: 'Delete one file from the space file store, or a whole directory tree when `confirm` is `true`, '
+    + 'and everything the instance derived from what it deleted. IRREVERSIBLE — there is no undelete and no trash.\n\n'
+    + 'A DIRECTORY NEEDS `confirm`. Without `confirm` a directory is refused with `422` and `code: "confirm_required"`, and nothing is deleted; '
+    + 'the space root is never deleted (`400`, `code: "space_root_refused"`). A directory delete removes every file under it and everything '
+    + 'derived from each, writes a tombstone per file, and is completed by repeating the call with `confirm: true` if it was interrupted. '
+    + '`confirm` has no effect on a file, and anything but a boolean is `400`.\n\n'
     + 'IT IS A CASCADE, not just an unlink. The blob goes, a sync tombstone is written, the metadata record is '
     + 'removed (or flagged deleted when the instance keeps them for audit), any queued media or text job is '
     + 'CANCELLED so it cannot outlive the file and retry for ever, conversion artifacts such as extracted text '
-    + 'and thumbnails are removed, the space\'s usage figure is invalidated, and a `file.deleted` webhook '
-    + 'fires. Deleting the blob by other means leaves all of that behind.\n\n'
+    + 'and thumbnails are removed, and the space\'s usage figure is invalidated. A `file.deleted` webhook '
+    + 'fires for a single file. Deleting the blob by other means leaves all of that behind.\n\n'
     + 'WHAT THE DELETE GUARANTEES: no peer restores the file or anything derived from it. Everything the instance '
     + 'derived from the file goes with it, however deep (a document\'s extracted text and images, and the captions '
     + 'and faces of those images), along with what a peer\'s copy of those left here; a peer that still holds a '
@@ -284,8 +288,8 @@ export const delete_fileTool: ToolHandler = {
     + 'it, while the other mesh peers (a club, closed or democratic network) keep it. The tombstone names the version '
     + 'that was deleted, so uploading a file to the same path again afterwards is a newer version that a peer keeps.\n\n'
     + 'PARAMETERS:\n'
-    + '- `path` — the file path relative to the space root, as `list_dir` reports it. One FILE: this is not '
-    + 'the tool for removing a directory tree.\n'
+    + '- `path` — the file or directory path relative to the space root, as `list_dir` reports it.\n'
+    + '- `confirm` — `true` to delete a directory; no effect on a file.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
     + 'RESPONSE: one line naming the path that was deleted, with `{ path, deleted: true }` as structured content.',
   mutating: true,
@@ -295,8 +299,10 @@ export const delete_fileTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
             path: filePathSchema('IRREVERSIBLE — the bytes, the metadata record and every chunk '
-              + 'embedding go together, and a tombstone under this path stops a peer restoring it. A path '
+              + 'embedding go together, and a tombstone under this path stops a peer restoring it. A directory '
+              + 'path deletes everything under it and needs `confirm: true`. A path '
               + 'that does not exist is an error, not a silent success.'),
+            confirm: { type: 'boolean', description: 'Required `true` to delete a directory. Ignored for a file.' },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
           required: ['space', 'path'],
@@ -308,9 +314,11 @@ export const delete_fileTool: ToolHandler = {
     if (!filePath.trim()) throw new Error('path must not be empty');
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
-    // Full cascade (blob + tombstone + meta + job + artifacts + usage + webhook) — shared with the REST
-    // DELETE route and the TTL sweep so every delete path cleans up identically.
-    await deleteFileCascade(wt.target, filePath, ctx.actor);
+    // What the path is, and which cascade it gets (a file's, a directory's, or a refusal), is `deletePath`'s one decision —
+    // shared with the REST DELETE route, so the doors cannot differ; the TTL sweep deletes through the file cascade itself.
+    const deleted = await deletePath(wt.target, filePath, { confirm: a['confirm'], actor: ctx.actor });
+    // The REST twin audits a directory delete with what it was; a single file records nothing, there as here.
+    if (deleted === 'directory') ctx.recordChanges?.({}, { kind: 'directory' });
     return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }],
       structuredContent: { path: filePath, deleted: true } };
   },
@@ -375,9 +383,10 @@ export const move_fileTool: ToolHandler = {
     + 'instance wrote keeps its old path on a mesh peer, which then holds both paths.\n\n'
     + 'THE DESTINATION IS CHECKED BEFORE ANYTHING MOVES. A name blocked by a file is REFUSED with `409` and '
     + 'nothing is changed: that is `a.txt/x` where `a.txt` is a file, and a directory '
-    + 'moved into itself or onto itself. A name that is TAKEN by a file is REPLACED: the moved file overwrites it '
-    + 'without asking, so read `list_dir` first if that would lose something. Missing parent directories of `dst` '
-    + 'ARE created for you.\n\n'
+    + 'moved into itself or onto itself. A move never replaces anything. If a file, a folder or a file\'s record already '
+    + 'stands at `dst`, the call is refused with `409` and `code: "destination_exists"` and nothing changes; to replace, delete '
+    + 'the destination first (`delete_file`; that deletes it on every instance it is replicated to). A name that only a deleted '
+    + 'file\'s audit record holds is free. Missing parent directories of `dst` ARE created for you.\n\n'
     + 'THE FILE IS NOT RE-READ. Moving does not re-extract text, re-run media analysis or re-embed: the '
     + 'content did not change, only where it lives. A file that failed extraction at the old path is still '
     + 'failed at the new one — use `retry_embed_file` for that, which is a different question from where the '
@@ -389,6 +398,9 @@ export const move_fileTool: ToolHandler = {
     + '`503` with `Retry-After`: it is not lost, the server completes it without being asked '
     + 'again, and repeating the call completes it too. Only a move begun with that same `src` and `dst` is '
     + 'completed: a `src` whose bytes are gone for any other reason is not found, and `dst` is left alone. '
+    + 'A finish that finds the records of another file at a name the moved records need is refused with `409` and '
+    + '`code: "destination_held_after_move"`: the bytes have moved and nothing is lost, and the move finishes once that '
+    + 'other file is deleted. '
     + 'However many attempts it took, peers are sent ONE tombstone per path the move left: the successful '
     + 'attempt\'s replaces any a failed one left behind.\n\n'
     + 'PARAMETERS:\n'
@@ -409,8 +421,9 @@ export const move_fileTool: ToolHandler = {
             src: filePathSchema('The existing file OR directory to move. Moving a directory carries '
               + 'everything under it, including each file\'s metadata record.'),
             dst: filePathSchema('Where it should end up. A name blocked by a file (`a.txt/x` where `a.txt` is a '
-              + 'file, or a path inside the directory being moved) is REFUSED with `409` before anything changes; a name '
-              + 'that is TAKEN by a file is REPLACED, with no warning. Missing parent directories are created. The file '
+              + 'file, or a path inside the directory being moved) is REFUSED with `409` before anything changes, and so is a '
+              + 'name where a file, a folder or a file\'s record already stands (`destination_exists`): a move never replaces '
+              + 'anything, so delete the destination first. Missing parent directories are created. The file '
               + 'is not re-read, so a failed extraction stays failed.'),
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
           },
