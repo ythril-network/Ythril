@@ -131,6 +131,8 @@ describe('a resolve that succeeded says where the copy went', () => {
     const said = m.toasts.filter(t => t.kind !== 'error');
     expect(said.length).toBe(1);
     expect(said[0]!.message).toMatch(/archive-space|Archive/);
+    // The page sends no rename, so the copy keeps its conflict-copy name in the target space: the toast names that path.
+    expect(said[0]!.message, 'the toast names a path the copy does not have').toContain('docs/report-1.conflict.txt');
     expect(m.c.conflicts().length).toBe(0);
   });
 

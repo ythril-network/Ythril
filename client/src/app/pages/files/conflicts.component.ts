@@ -263,7 +263,8 @@ export class ConflictsComponent implements OnInit {
         } else if (action === 'save-to-space') {
           const target = this.spaces().find(s => s.id === opts.targetSpaceId);
           this.toast.success(this.transloco.translate('conflicts.resolved.movedToSpace', {
-            space: target?.label || opts.targetSpaceId, path: c.originalPath,
+            // The page sends no rename, so the server places the copy under its own conflict-copy name, not the original's.
+            space: target?.label || opts.targetSpaceId, path: c.conflictPath,
           }));
         }
       },
