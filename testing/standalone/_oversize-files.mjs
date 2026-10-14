@@ -449,7 +449,9 @@ export const FROZEN = {
   // to `files/delete-cascade.ts` beside the one-file cascade whose order it shares, and with it eight imports.
   // 422 -> 394 (bundle-44, Q-351): the mkdir route moved to `api/files-mkdir.ts` (registered like the upload route), so
   // the destination guard it gained did not grow this file; a file act's refusals are answered once in send-failure.ts.
-  'server/src/api/files.ts': 394,
+  // 394 -> 316 (bundle-44, Q-438): the delete route's own decision — stat, directory or not, `confirm`, the root — became
+  // `deletePath` in `files/delete-cascade.ts`, the one function all three delete doors call.
+  'server/src/api/files.ts': 316,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs

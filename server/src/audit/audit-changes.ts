@@ -101,6 +101,9 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // A file links to all THREE other kinds, and losing track of what a file was linked to is exactly
   // the kind of change nobody notices until a traversal comes back empty.
   'file.meta.update': ['description', 'tags', 'linkEntities', 'linkFacts', 'linkChronos'],
+  // What a file delete deleted: `directory` for a tree, nothing for a single file. The path is already on the entry; a delete has no
+  // value to compare, and a tree going is what an operator reading the log needs to tell from one file.
+  'file.delete': ['kind'],
   // A merge is a deletion wearing an edit's clothes: the absorbed entity ceases to exist. The entry
   // already carries the survivor's id and the path carries the absorbed one, so the only fact that
   // becomes UNRECOVERABLE is the absorbed entity's name — an id alone means nothing once the record it

@@ -187,7 +187,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
         assert.equal(answer.code, 'file_system_fault');
         const said = JSON.stringify(a.body ?? a.sc) + sentenceOf(a);
         assert.ok(!said.includes(process.env['DATA_ROOT']), `the answer names the data root: ${said}`);
-        assert.ok(!/EACCES/.test(said), `the answer carries the file system's own words: ${said}`);
+        assert.ok(!said.includes('locked'), `the answer names the path it could not look at: ${said}`);
         assert.deepEqual(await snapshot(), before);
       });
 

@@ -176,9 +176,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // never discovered and never demanded a row. Editing that file elsewhere shifted the swallowed region and all
   // three appeared at once.
   //
-  // `DELETE` is `admin` to match `DELETE /api/brain/spaces/:spaceId/files`: deleting a directory takes the tree
-  // with it, and the metadata half of the same operation has always been the highest rung. `PATCH` (move/rename)
-  // and `retry_embed_file` (re-queues a file's embedding) are `write`.
+  // `DELETE` is `write`, for a file and for a directory alike (the row below): a directory delete takes the tree with it,
+  // and `confirm: true` is the guard that made that rung acceptable — on this route and on the `delete_file` tool, which takes the
+  // same `confirm`, so the two doors price the same act the same. `PATCH` (move/rename) and `retry_embed_file` (re-queues a
+  // file's embedding) are `write`.
   { route: '/api/files/:spaceId', method: 'DELETE', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId', method: 'PATCH', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId/retry_embedding', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
