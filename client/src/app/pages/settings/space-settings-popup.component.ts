@@ -49,7 +49,8 @@ import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { SpaceDuplicatesTabComponent } from './space-duplicates-tab.component';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
-import { refusalText } from '../../core/refusal-text';
+import { describeRefusal, refusalIssues } from '../../core/refusal-text';
+import { formatList } from '../../core/list-format';
 
 @Component({
   selector: 'app-space-settings-popup',
@@ -126,6 +127,11 @@ import { refusalText } from '../../core/refusal-text';
             <div class="sp-footer">
               @if (state.settingsError()) {
                 <div class="alert alert-error" style="flex:1;margin:0;padding:6px 12px;font-size:13px;">{{ state.settingsError() }}</div>
+              }
+              <!-- Somebody else changed the schema first (412): saving again would send the same stale version, so the only way on is to read
+                   the current one. -->
+              @if (state.settingsConflict()) {
+                <button class="btn btn-secondary" type="button" data-testid="reload-schema" (click)="reloadSchema()">{{ 'refusal.schemaChanged.reload' | transloco }}</button>
               }
               <!-- Hidden once a new edit lands: a stale "nothing to save" beside a form the
                    operator is actively editing says the opposite of the truth. -->
@@ -204,6 +210,8 @@ export class SpaceSettingsPopupComponent {
     this.state.settingsSaving.set(true);
     this.state.settingsError.set('');
     this.state.settingsNotice.set('');
+    this.state.settingsConflict.set(false);
+    this.state.ruleRefusal.set(null);
     /*
      * ONLY WHAT CHANGED. See `changedSettings()` for why, and for the two fields that are not a plain diff.
      *
@@ -225,7 +233,10 @@ export class SpaceSettingsPopupComponent {
     // An emptied label field means "unchanged", not "no name": the diff compares against what the dialog
     // opened with, so a blank simply does not appear in the body.
     if (body['label'] === '') delete body['label'];
-    this.spacesApi.updateSpace(target.id, body).subscribe({
+    // A schema save is conditional on the version of the meta the dialog read (If-Match): a save made on top of somebody else's
+    // change is refused (412) instead of overwriting it.
+    const ifMatch = 'meta' in body && this.state.schMetaVersion !== undefined ? { ifMatch: this.state.schMetaVersion } : {};
+    this.spacesApi.updateSpace(target.id, body, ifMatch).subscribe({
       next: (result) => {
         this.state.settingsSaving.set(false);
         // A networked space does not apply a meta change on the spot: the server opens a vote round per
@@ -242,6 +253,21 @@ export class SpaceSettingsPopupComponent {
         }
         this.store.applySpace(result.space);
         this.saved.emit(result.space);
+        // A space in more than one network can answer one outcome per network: applied in one, held for a vote in another. The
+        // applied half has happened, the pending half has not, and the dialog says both by name instead of closing on the first
+        // or reporting only the second.
+        const pending = (result.layers ?? []).filter(l => l.outcome === 'vote_pending');
+        if (pending.length > 0) {
+          const applied = (result.layers ?? []).filter(l => l.outcome === 'applied');
+          const lang = this.transloco.getActiveLang();
+          this.state.settingsNotice.set(this.transloco.translate('spaces.settings.layersMixed', {
+            applied: formatList(applied.map(l => l.networkLabel), lang),
+            pending: formatList(pending.map(l => l.networkLabel), lang),
+          }));
+          this.state.markPristine();
+          this.state.settingsSubmitted.set(true);
+          return;
+        }
         // Re-baseline BEFORE closing. The dirty snapshot was only ever taken when a space was opened, so
         // a successful save left it stale: the editor still compared against the pre-save values and
         // reported unsaved changes for edits that were already persisted. Closing here happened to hide
@@ -250,7 +276,30 @@ export class SpaceSettingsPopupComponent {
         this.state.markPristine();
         this.state.closeSettings();
       },
-      error: (err) => { this.state.settingsSaving.set(false); this.state.settingsError.set(refusalText(this.transloco, err, 'spaces.error.saveFailed')); },
+      error: (err) => {
+        this.state.settingsSaving.set(false);
+        const view = describeRefusal(this.transloco, '', err, 'spaces.error.saveFailed');
+        this.state.settingsError.set(view.text);
+        // 412: somebody changed the schema first - offer to read the current one. Anything else that names a rule opens that rule.
+        if (view.reload) this.state.settingsConflict.set(true);
+        else this.state.showRuleRefusal(refusalIssues(err), view.text);
+      },
+    });
+  }
+
+  /** Read the schema as it is now, after a 412. The staged edits are what is lost, so the usual discard question is asked first. */
+  async reloadSchema(): Promise<void> {
+    const id = this.state.settingsSpace()?.id;
+    if (!id || !(await this.state.confirmDiscardIfDirty())) return;
+    this.spacesApi.listSpaces().subscribe({
+      next: ({ spaces }) => {
+        const fresh = spaces.find(s => s.id === id);
+        if (!fresh) return;
+        this.store.applySpace(fresh);
+        this.state.openSettings(fresh);
+        this.state.settingsTab.set('schema');
+      },
+      error: (err) => this.state.settingsError.set(describeRefusal(this.transloco, '', err, 'spaces.error.saveFailed').text),
     });
   }
 }

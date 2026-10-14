@@ -10,6 +10,13 @@ export interface SchemaLayersView {
   layers: { networkId: string; networkLabel: string; meta: Record<string, unknown> }[];
   precedence: string[];
   clashes: { field?: string; kind?: string; type?: string; property?: string; typeField?: string; values: { networkId: string; value: unknown }[] }[];
+  /**
+   * Own values a higher-precedence layer is overriding (bundle-23, Q-67): an edit that was accepted and is NOT in effect. Derived on read, so
+   * it follows a precedence reorder, a layer arriving or a rename for free. `networkId` is the layer whose value wins.
+   */
+  hidden?: { path: string; own: unknown; networkId: string }[];
+  /** Rounds still open on this space, so closing the dialog does not lose them. */
+  rounds?: { id: string; networkId: string; status: 'pending'; paths: string[] }[];
 }
 
 /** Instance-level schema library and external schema catalogs. */
