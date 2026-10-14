@@ -63,7 +63,10 @@ before(async () => {
   const { NETWORK_REFUSAL_CODES } = await import('../../server/dist/networks/refusal-codes.js');
   // And the `code` a refused merge carries (bundle-30, Q-107 part 3a), from its one list.
   const { MERGE_REFUSAL_CODES } = await import('../../server/dist/brain/merge.js');
-  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES];
+  // And the `code` a file act's refusal carries (`destination_exists`, `confirm_required`, ...), from the tally that holds one
+  // entry per code of the answer's own union (`fileActAnswerCounts`).
+  const { fileActAnswerCounts } = await import('../../server/dist/files/act-answers.js');
+  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts())];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 
