@@ -74,7 +74,8 @@ describe('a top-level file named a#b.txt is not a derived row of a (real MongoDB
 
     const answer = await acts.del('REST', 'a');
 
-    assert.equal(acts.statusOf(answer), 200, `the delete of a failed: ${JSON.stringify(answer.body)}`);
+    const status = acts.statusOf(answer);   // a delete's success is 204 on REST
+    assert.ok(status >= 200 && status < 300, `the delete of a failed (${status}): ${JSON.stringify(answer.body)}`);
     assert.ok(await rowOf(OWN), 'the file named a#b.txt lost its record to the delete of a');
     assert.ok(acts.onDisk(OWN), 'the bytes of the file named a#b.txt went with a');
     assert.equal((await acts.links.idsFrom(OWN)).length, 1, 'the delete of a took the link of the file named a#b.txt');
