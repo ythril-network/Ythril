@@ -606,7 +606,9 @@ sent on connect and every 30 s as a keep-alive.
 - **Bounds:** at most **200** streams of this kind are open at once, instance-wide; the next is a `503` with
   `Retry-After`. A reader more than **256 KiB** behind is disconnected rather than buffered for. Reconnect with a
   FRESH ticket (the old one is spent) and re-read — every message means "something changed, re-read", so the
-  re-read restores anything the gap missed. The Brain page does exactly this.
+  re-read restores anything the gap missed. The Brain page does exactly this. A directory delete is one event
+  per file it removed (`file.deleted`, as for a single file), so a directory of many files is a burst a slow reader
+  can fall behind: reconnect and re-read.
 
 ```js
 // Browser: mint a single-use ticket (token stays in the header), then open the stream with it.

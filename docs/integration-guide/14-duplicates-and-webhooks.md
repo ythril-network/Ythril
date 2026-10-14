@@ -414,7 +414,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `chrono.deleted` | A chrono entry is deleted |
 | `file.created` | A file is written (new or overwrite) by a person or a token on this instance. **A file a peer delivers — its bytes pushed to this instance's upload door, or pulled by the sync engine — fires nothing** (it used to fire for a push, with the peer's token as the actor) |
 | `file.updated` | A file is moved/renamed. A move whose records did not all follow its bytes is finished by a retry or by housekeeping (`TTL sweep: finishing interrupted file moves`), and the event fires when it is finished, once, with `previousPath` — from whichever of the two finishes it, to the token that asked for the move |
-| `file.deleted` | A file is deleted |
+| `file.deleted` | A file is deleted. **A directory delete fires one for each live file it removed**, with that file's path: never one for a conversion sidecar, a derived record (a chunk or a face) or a file an earlier delete had already flagged, and none when no user made the delete. Each file is announced at most once, and a large directory is a burst (see [Delivery Guarantees](#delivery-guarantees)) |
 | `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |
 | `change_note.received` | A change note arrived from the instance above this one in a network (see [Sync API → A sync can carry a change note](09-sync-api.md#a-sync-can-carry-a-change-note)). Fired once per space the note concerns, or per space the network carries here for a note about the whole network. Payload `entry` = `{ id, networkId, networkLabel, from, author, generated, note, spaces }` |
@@ -424,6 +424,9 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 > brain/file functions, so an agent creating a fact or entity delivers the same events a REST
 > client would. Internal writes (sync replication, file bytes included, and space import) do not emit, and the
 > same rule decides the live-view stream: a write no user made emits neither a webhook nor a stream event.
+> **A burst reaches the live view as well as the webhooks.** A directory delete publishes one stream event per file it removed
+> ([Brain API → live updates](04-brain-api.md#live-change-stream-server-sent-events)), so a reader that falls more than 256 KiB behind
+> is disconnected and must reconnect and re-read, as for any other burst.
 
 ### Create Subscription
 

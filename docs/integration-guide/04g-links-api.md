@@ -26,6 +26,15 @@ ordinary `PATCH` of a fact cannot drop a link somebody else made.
 An entity is only ever the **to** end. Nothing hangs off an entity, which is why there is no `entity.…`
 class — the way to say something about two entities is an edge.
 
+**A link belongs to the record it starts from, and goes with it.** Deleting a fact or a chrono entry removes the links it
+holds. **Deleting a file removes the links this instance wrote from it** — from the file and from the records derived from it
+(`<path>#chunk…`) — and writes a tombstone for each, so a peer does not restore them. A link **another instance wrote stays
+with it**: the file's deletion does not carry it, and removing it here would be one instance deciding for another, so a file
+uploaded at the path later is linked to what that instance linked until that instance removes the link. A link that points *at* a
+record from another record is that record's own and is left alone. The delete of a file is the
+[files API](05-files-api.md#delete-a-file); what a peer's copy of the deletion does to links is in the
+[sync protocol](../sync-protocol.md).
+
 **Those labels are FROZEN tokens, and they read like fields because they were.** Each names the 4.x array
 the class replaced. A link's `_id` is a UUIDv5 over the pair, the two kinds and the label, so renaming one
 would re-key every link record on every instance — the same connection would have two ids and neither door

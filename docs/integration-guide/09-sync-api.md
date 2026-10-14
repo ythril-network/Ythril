@@ -674,6 +674,10 @@ answer is lost is read back while the hold is still held. On the serving instanc
   the peer that delivered the bytes), and the file's origin deleting it is applied, not declined. A row anybody authored
   (metadata at a seq above 0) is protected from another peer's tombstone as before. An element without `issuer` (an older
   peer's) is read as issued by the peer that sent it. An id the receiver already holds is not applied again.
+  **A file tombstone does not remove links.** The links a deleted file held are removed by the instance that wrote them, in its
+  own delete, and reach a peer as **link tombstones** through `POST /api/sync/tombstones` (type `link`), applied under the same
+  [deletion authority](../sync-protocol.md#tombstone-deletion-authorisation) as any link's. A link another instance wrote stays
+  with it, so a receiver can hold links from a path whose file it has deleted until their authors remove them.
   **Your `200` is an acknowledgement, and no more than that.** The sender records the newest position in the pages
   you answered `200` to and eventually drops its own copies below the minimum across all members — so answer `200` only
   once the tombstones are handled, applied or judged: a declined one (a file row somebody authored, never the placeholder

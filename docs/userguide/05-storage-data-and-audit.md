@@ -606,7 +606,7 @@ All endpoints must be HTTPS and are SSRF-checked (private/reserved addresses are
 
 ### Event types
 
-Beyond the per-collection write events (`fact.created`, `entity.updated`, `file.deleted`, … across fact, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created`, `duplicate.detected`, and `test.ping`.
+Beyond the per-collection write events (`fact.created`, `entity.updated`, `file.deleted`, … across fact, entity, edge, chrono, and file), the following are also emitted: `entity.merged`, `link_violation.created`, `duplicate.detected`, and `test.ping`. Deleting a file emits one `file.deleted`; deleting a folder emits one for each file that was in it, so a large folder is a burst of events, which the server delivers a few at a time per webhook and queues for retry when the endpoint cannot keep up.
 
 ---
 

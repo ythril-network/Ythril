@@ -46,7 +46,10 @@ receiver's **tree**, which can change.
   the bytes moved is `409` `destination_held_after_move`, and the move stays owed.
 - **An act that removes bytes records its tombstone first or does not begin.** A move and both delete doors (and the
   retention sweep's delete, which goes through the same cascade) refuse before any byte goes when the tombstone cannot be
-  written: a store failure is `503`, anything else is `500` with `code: "act_not_recorded"`.
+  written: a store failure is `503`, anything else is `500` with `code: "act_not_recorded"`. **A delete's link tombstones follow its
+  bytes**: the links this instance wrote from the file and from its derived ids are removed after the bytes and before the row, each
+  with a tombstone, and the file's own tombstone is published once they are gone, so a delete that failed in that step has told
+  no peer and its retry tells them once. Links another instance wrote stay with it (ADR 05).
 - **A destination a file blocks, or where something already stands, is `409`** (`code: "path_blocked"` or
   `"destination_exists"`, `path` relative to the space), the same on every door, and refused before anything is
   written. Not `400`/`422`, for the sync reason above; not `404`, which says the **source** names nothing; and the error
