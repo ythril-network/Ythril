@@ -26,6 +26,16 @@ import { boundedJson, boundedErrorText } from './bounded-read.js';
 import { chatUrlFor, claudeBaseFor, claudeModelsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { postWithBackoff } from '../extractor/model-post.js';
 import { peerText } from './log.js';
+import { backoffDelayMs } from './backoff.js';
+
+/**
+ * The Claude wire's own retry of a retryable status (`429`, `529`, `5xx`): at most this many retries after the first call, waiting
+ * `backoffDelayMs` between them (the one jittered backoff, so callers that fail together do not retry together). The cap is what
+ * the last allowed retry waits at its longest, so the schedule is the base then double the base, scattered.
+ */
+const CLAUDE_RETRIES = 2;
+const CLAUDE_BACKOFF_BASE_MS = 1_000;
+const CLAUDE_BACKOFF_CAP_MS = 2_000;
 
 /** How much of a model server's own error text a failure quotes. */
 const MODEL_ERROR_MAX = 200;
@@ -161,7 +171,7 @@ async function claude(endpoint: ChatEndpoint, req: ChatRequest, transport: ChatT
       if (err instanceof Anthropic.APIConnectionError) throw fail(`unreachable (${endpoint.baseUrl}): ${err.message}`);
       if (err instanceof Anthropic.APIError) {
         const retryable = err.status === 429 || err.status === 529 || (err.status ?? 0) >= 500;
-        if (transport.sleep && retryable && attempt < 2) { await transport.sleep(1_000 * 2 ** attempt); continue; }
+        if (transport.sleep && retryable && attempt < CLAUDE_RETRIES) { await transport.sleep(backoffDelayMs(attempt, CLAUDE_BACKOFF_BASE_MS, CLAUDE_BACKOFF_CAP_MS)); continue; }
         throw fail(`HTTP ${err.status}: ${err.message}`, err.status);
       }
       throw err;
