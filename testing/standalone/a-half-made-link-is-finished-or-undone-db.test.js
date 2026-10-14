@@ -179,7 +179,8 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
   });
 
   it('(e) one entry under two spellings and a marker is an ALIAS: the file is renamed, never unlinked (case-insensitive file systems only)', async (t) => {
-    if (!caseInsensitiveAt(acts.root())) { t.skip('the file system under the files tree is case-sensitive: a name has no second spelling here; the classification is held by a-destination-is-classified-by-inode-link-count-and-marker (pure)'); return; }
+    // A name has no second spelling on a case-sensitive file system; the classification is held there by a-destination-is-classified-by-inode-link-count-and-marker (pure).
+    if (!caseInsensitiveAt(acts.root())) { t.skip('expected-in-ci: the file system is case-sensitive'); return; }
     await acts.seed('case.txt', { description: 'A' });
     const identity = await reads.bytesIdentityAt(S, 'case.txt');
     await tombstones.writePendingFileTombstones(S, ['case.txt'], { from: 'case.txt', to: 'Case.txt', ...identity });

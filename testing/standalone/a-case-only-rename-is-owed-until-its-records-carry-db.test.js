@@ -4,7 +4,7 @@
  *
  * ## The rules
  *
- * On a case-insensitive file system (this development machine is NTFS; the cases skip and say why on a case-sensitive runner, where
+ * On a case-insensitive file system (this development machine is NTFS; the cases that need the alias skip, `expected-in-ci:`, on a case-sensitive runner, where
  * `a-case-only-settle-is-decided-by-the-move-not-the-disk-db` holds the settle's rule through a seam):
  *
  *  1. **A failed rename publishes nothing.** The rename step failing (`EBUSY`), or the hold of the file's jobs failing before it, leaves
@@ -34,7 +34,10 @@ const S = 'caseowed';
 const T0 = '2026-09-01T00:00:00.000Z';
 const DAY = 24 * 3_600_000;
 const LATER = () => new Date(Date.now() + DAY);
-const SKIPPED = 'the file system under the files tree is case-sensitive: `a` and `A` are different entries, so there is no alias to settle; the settle\'s rule is held by a-case-only-settle-is-decided-by-the-move-not-the-disk-db and the classification by a-destination-is-classified-by-inode-link-count-and-marker';
+// On a case-sensitive file system `a` and `A` are different entries, so there is no alias to settle. CI runners' file systems are
+// case-sensitive and the cases that need the alias skip there (listed in testing/_shared/expected-in-ci.mjs); the settle's rule is held
+// on CI by a-case-only-settle-is-decided-by-the-move-not-the-disk-db and the classification by a-destination-is-classified-by-inode-link-count-and-marker.
+const SKIPPED = 'expected-in-ci: the file system is case-sensitive';
 
 let acts, stored, tombstones, finish, walk, insensitive;
 const files = () => acts.door.coll(S, 'files');
