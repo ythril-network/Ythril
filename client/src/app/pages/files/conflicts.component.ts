@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, inject, signal, viewChild, OnInit } from '@angular/core';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { ConflictRecord } from '../../core/api.types';
@@ -13,6 +13,8 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
 import { refusalText } from '../../core/refusal-text';
+import { LiveAnnouncement } from '../../core/live-announcement';
+import { FILE_REFUSAL_PREFIX } from './file-listing.store';
 
 type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-space';
 
@@ -31,11 +33,25 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
   'save-to-space': 'conflicts.action.saveToSpace',
 };
 
+/**
+ * What the polite status says of an outcome that has no element of its own: the row only disappears. A move to a space and a copy
+ * that was already gone are told by a toast, which is a live region itself, so they have no row here.
+ */
+const STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
+  'keep-local': 'conflicts.status.keepLocal',
+  'keep-incoming': 'conflicts.status.keepIncoming',
+  'keep-both': 'conflicts.status.keepBoth',
+};
+
 @Component({
   selector: 'app-conflicts',
   standalone: true,
   imports: [InstantComponent, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
   template: `
+    <!-- What a screen reader hears of a resolution: the row just leaves the table. Always in the DOM, because a live region that
+         appears together with its text is not announced. -->
+    <div class="sr-only" role="status" aria-live="polite">{{ announcement.text() }}</div>
+
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
       <!-- The Files tab of the Brain: there is no /files route any more, and the old link led to a page that no longer shows the files. -->
       <a routerLink="/brain" [queryParams]="{ tab: 'files' }" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> {{ 'conflicts.backToFiles' | transloco }}</a>
@@ -50,7 +66,8 @@ const ACTION_LABEL_KEYS: Record<ResolveAction, string> = {
     } @else if (conflicts().length === 0) {
       <div class="empty-state">
         <div class="empty-state-icon"><ph-icon name="check-circle" [size]="48"/></div>
-          <h3>{{ 'conflicts.empty.title' | transloco }}</h3>
+          <!-- Where the focus goes when the last conflict is resolved: a visible heading that says what the page now holds. -->
+          <h3 #emptyTitle tabindex="-1">{{ 'conflicts.empty.title' | transloco }}</h3>
           <p>{{ 'conflicts.empty.body' | transloco }}</p>
       </div>
     } @else {
@@ -158,6 +175,11 @@ export class ConflictsComponent implements OnInit {
   private transloco = inject(TranslocoService);
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private injector = inject(Injector);
+  private emptyTitle = viewChild<ElementRef<HTMLElement>>('emptyTitle');
+  /** The polite status: what a screen reader hears of a resolution, whose only trace on screen is a row leaving. */
+  protected readonly announcement = new LiveAnnouncement();
 
   loading = signal(true);
   /** Null until the last load failed — checked before the empty state, so a failure never reads as "All clear". */
@@ -242,22 +264,15 @@ export class ConflictsComponent implements OnInit {
         return;
       }
     }
-    // Keep-incoming replaces the local file with the other copy and nothing brings it back: asked about, like a delete.
-    if (action === 'keep-incoming') {
-      const ok = await this.confirmDialog.confirm({
-        title: this.transloco.translate('conflicts.confirm.keepIncomingTitle'),
-        message: this.transloco.translate('conflicts.confirm.keepIncoming', { path: c.originalPath }),
-        confirmLabel: this.transloco.translate(ACTION_LABEL_KEYS[action]),
-        danger: true,
-      });
-      if (!ok) return;
-    }
+    if (action === 'keep-incoming' && !await this.askBeforeReplacing(this.transloco.translate('conflicts.confirm.keepIncoming', { path: c.originalPath }))) return;
     this.resolving.set(c.id);
     this.filesApi.resolveConflict(c.id, action, opts).subscribe({
       next: (answer) => {
+        const index = this.conflicts().findIndex(x => x.id === c.id);
         this.conflicts.update(list => list.filter(x => x.id !== c.id));
         this.selectedIds.update(ids => ids.filter(x => x !== c.id));
         this.resolving.set(null);
+        this.focusAfterResolve(index);
         if (answer.resolved === 'nothing-to-place') {
           this.toast.info(this.transloco.translate('conflicts.resolved.gone'));
         } else if (action === 'save-to-space') {
@@ -266,27 +281,72 @@ export class ConflictsComponent implements OnInit {
             // The page sends no rename, so the server places the copy under its own conflict-copy name, not the original's.
             space: target?.label || opts.targetSpaceId, path: c.conflictPath,
           }));
+        } else {
+          const key = STATUS_KEYS[action];
+          if (key) this.announcement.say(this.transloco.translate(key, { path: c.originalPath, copy: c.conflictPath }));
         }
       },
       // A refusal says why and stays: it tells the operator what to do, and a toast that expires takes that with it. The record
       // stays in the list, because nothing was resolved.
       error: (err) => {
         this.resolving.set(null);
-        this.toast.error(refusalText(this.transloco, err, 'conflicts.error.resolveFailed', CONFLICT_REFUSAL_PREFIX), 0);
+        this.toast.error(this.refusalSentence(err), 0);
       },
     });
+  }
+
+  /**
+   * The ask before a resolution REPLACES the local file with the other copy, which nothing brings back: a danger confirm, like a
+   * delete. One place, so the single and the bulk resolution cannot ask it differently.
+   */
+  private askBeforeReplacing(message: string): Promise<boolean> {
+    return this.confirmDialog.confirm({
+      title: this.transloco.translate('conflicts.confirm.keepIncomingTitle'),
+      message,
+      confirmLabel: this.transloco.translate(ACTION_LABEL_KEYS['keep-incoming']),
+      danger: true,
+    });
+  }
+
+  /**
+   * The sentence for a refused resolution. A code this page has words for is said in them. A file-act code the client knows (it
+   * has a `files.refusal` sentence) but this page has none for says the localized generic sentence: the server's own sentence for
+   * such a code is English, and an operator who reads another language must never be handed it. A code nobody has words for still
+   * shows the server's sentence, which is all there is.
+   */
+  private refusalSentence(err: Parameters<typeof refusalText>[1]): string {
+    const code = err?.error?.code;
+    const worded = (prefix: string): boolean => !!code && this.transloco.translate(`${prefix}.${code}`) !== `${prefix}.${code}`;
+    if (worded(FILE_REFUSAL_PREFIX) && !worded(CONFLICT_REFUSAL_PREFIX)) {
+      return refusalText(this.transloco, { ...err, error: { ...err?.error, error: undefined } }, 'conflicts.error.resolveUnfinished', CONFLICT_REFUSAL_PREFIX);
+    }
+    return refusalText(this.transloco, err, 'conflicts.error.resolveFailed', CONFLICT_REFUSAL_PREFIX);
+  }
+
+  /**
+   * Once the list without the resolved row is drawn: the first control of the row that took its place (the last row when the
+   * resolved one was last), else the empty-state heading. The row that held the focus is gone, and a keyboard user would be
+   * left on the page body.
+   */
+  private focusAfterResolve(index: number): void {
+    afterNextRender(() => {
+      const rows = Array.from(this.host.nativeElement.querySelectorAll<HTMLElement>('tbody tr'));
+      const control = rows[Math.min(Math.max(index, 0), rows.length - 1)]?.querySelector<HTMLElement>('input, select, button');
+      (control ?? this.emptyTitle()?.nativeElement)?.focus();
+    }, { injector: this.injector });
   }
 
   async bulkResolve(): Promise<void> {
     const ids = this.selectedIds();
     if (ids.length === 0) return;
-    const ok = await this.confirmDialog.confirm({
-      title: this.transloco.translate('conflicts.confirm.bulkResolveTitle'),
-      message: this.transloco.translate('conflicts.confirm.bulkResolve', {
-        count: ids.length,
-        action: this.transloco.translate(ACTION_LABEL_KEYS[this.bulkAction]),
-      }),
-    });
+    const label = this.transloco.translate(ACTION_LABEL_KEYS[this.bulkAction]);
+    const params = { count: ids.length, action: label };
+    const ok = this.bulkAction === 'keep-incoming'
+      ? await this.askBeforeReplacing(this.transloco.translate('conflicts.confirm.bulkResolveIrreversible', params))
+      : await this.confirmDialog.confirm({
+        title: this.transloco.translate('conflicts.confirm.bulkResolveTitle'),
+        message: this.transloco.translate('conflicts.confirm.bulkResolve', params),
+      });
     if (!ok) return;
     this.bulkResolving.set(true);
     this.filesApi.bulkResolveConflicts(ids, this.bulkAction).subscribe({
@@ -295,12 +355,15 @@ export class ConflictsComponent implements OnInit {
         // (the answer's own, else the conflict's), because an operator knows files and never a uuid.
         const details = r.failed.map(f => {
           const path = f.path ?? this.conflicts().find(c => c.id === f.id)?.originalPath ?? f.id;
-          return `${path}: ${refusalText(this.transloco, { error: f }, 'conflicts.error.resolveFailed', CONFLICT_REFUSAL_PREFIX)}`;
+          return `${path}: ${this.refusalSentence({ error: f })}`;
         }).join('\n');
         const resolvedSet = new Set(ids.filter(id => !r.failed.some(f => f.id === id)));
+        const firstGone = this.conflicts().findIndex(x => resolvedSet.has(x.id));
         this.conflicts.update(list => list.filter(x => !resolvedSet.has(x.id)));
         this.selectedIds.update(sel => sel.filter(x => !resolvedSet.has(x)));
         this.bulkResolving.set(false);
+        this.focusAfterResolve(firstGone);
+        if (r.resolved > 0) this.announcement.say(this.transloco.translate('conflicts.status.bulkResolved', { count: r.resolved, action: label }));
         if (r.failed.length > 0) {
           const summary = this.transloco.translate('conflicts.error.bulkResolveFailedSummary', {
             resolved: r.resolved,

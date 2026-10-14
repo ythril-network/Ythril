@@ -253,7 +253,9 @@ was moved.
 
 **You do not have to do them one at a time.** Tick the conflicts you want — or use **Select all** — pick
 an action, and **Resolve N selected** applies it to every one. You are asked to confirm, with the count
-and the action named, before anything happens.
+and the action named, before anything happens. For **Keep incoming** the confirmation is a warning one and says that each local
+file is replaced and that this cannot be undone. After a resolution the focus moves to the next conflict's first control (or to the
+"No conflicts" heading when none is left), and a status line spoken to screen readers says what happened.
 
 This matters after a sync that went wrong: a hundred conflicts is otherwise a hundred clicks, which is
 the point at which people start leaving them unresolved. If some of the batch cannot be resolved, the

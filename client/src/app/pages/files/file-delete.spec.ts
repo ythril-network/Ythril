@@ -157,7 +157,7 @@ describe('while a delete runs, and after it', () => {
     await vi.waitFor(() => { page.fixture.detectChanges(); expect(announced()).toContain('docs'); }, { timeout: 1500 });
   });
 
-  it('focus moves to the next row after a delete, and to the table caption when there is no next row', async () => {
+  it('focus moves to the next row after a delete, and to something on screen when there is no next row', async () => {
     const page = await mountFilesPage({ '/a.txt': 1, '/b.txt': 2, '/c.txt': 3 });
     await page.clickDelete('b.txt');
     await vi.waitFor(() => {
@@ -169,9 +169,12 @@ describe('while a delete runs, and after it', () => {
     await page.clickDelete('c.txt');
     await vi.waitFor(() => {
       page.fixture.detectChanges();
-      const caption = page.el.querySelector('table caption') as HTMLElement | null;
-      expect(caption, 'the table has a caption to land on').toBeTruthy();
-      expect(document.activeElement === caption || caption!.contains(document.activeElement)).toBe(true);
+      // The caption is read by a screen reader only: a focus there is invisible to everyone else (the sweep's A2).
+      const active = document.activeElement as HTMLElement | null;
+      expect(active, 'the focus is somewhere').toBeTruthy();
+      expect(active, 'not the page body').not.toBe(document.body);
+      expect(active!.closest('caption, .sr-only'), 'not on an element only a screen reader can see').toBeNull();
+      expect(page.el.contains(active), 'on the page').toBe(true);
     }, { timeout: 1500 });
   });
 });

@@ -189,9 +189,13 @@ export const FILE_DETAIL_PANE_STYLES = `
   }
   .detail-header .file-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Segmented [Preview & description | File meta | Extract] toggle */
-  .seg-toggle { display: inline-flex; flex: 1; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  /*
+   * Wraps, and never clips: at 320px the third tab sat outside a strip that was overflow:hidden, with no way to reach it. A tab keeps
+   * its label on one line; it is the strip that goes on to a second row when the three do not fit.
+   */
+  .seg-toggle { display: inline-flex; flex-wrap: wrap; flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; }
   .seg-toggle button {
-    flex: 1; background: none; border: none; padding: 5px 10px; cursor: pointer;
+    flex: 1 1 auto; background: none; border: none; padding: 5px 10px; cursor: pointer; border-radius: 5px;
     font-size: 0.82em; color: var(--text-muted); white-space: nowrap;
   }
   .seg-toggle button.active { background: var(--bg-muted); color: var(--text); font-weight: 600; }
@@ -374,13 +378,13 @@ export const FILE_LISTING_STYLES = `
    * so a long name can never be the reason the table is wider than the window (Q-471). width:100% with max-width:0 is the
    * table-cell form of "fill the rest and shrink": the other columns size to their content, and this one is the slack.
    */
-  .name-cell { width: 100%; max-width: 0; min-width: 100px; }
+  .name-cell { width: 100%; max-width: 0; min-width: 80px; }
   .name-cell .file-name-btn { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Seven columns in German: the shell's 14px of side padding per cell is what no longer fits, so this table runs at 10px. */
   th, td { padding-left: 10px; padding-right: 10px; }
 
   /* The actions are a flex row INSIDE the cell: a cell that is itself display:flex is no longer a table cell. */
-  .row-actions { display: flex; gap: 6px; align-items: center; }
+  .row-actions { display: flex; gap: 4px; align-items: center; }
   /*
    * The last column stays reachable wherever the table has to scroll sideways (a narrow window, the detail pane open, a
    * long name): every action is on screen without scrolling to find it. Opaque, or the cells that scroll under it show

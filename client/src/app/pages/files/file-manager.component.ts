@@ -12,6 +12,7 @@ import { FileTreeComponent, type TreeNode } from './file-tree.component';
 import { FileToolbarComponent, type BreadcrumbSegment } from './file-toolbar.component';
 import { FileDetailPaneComponent, type DetailMode } from './file-detail-pane.component';
 import { FileTreeStore } from './file-tree.store';
+import { LiveAnnouncement } from '../../core/live-announcement';
 import { FileListingStore, FILE_REFUSAL_PREFIX, FILE_REFUSALS_WITH_REMEDY, listingFailureKey } from './file-listing.store';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -148,7 +149,7 @@ import { ModalDirective } from '../../shared/modal.directive';
   template: `
     <!-- What just happened that a screen reader would otherwise never hear: a deleted row is simply gone. Always in the DOM,
          because a live region that appears together with its text is not announced. -->
-    <div class="sr-only" role="status" aria-live="polite">{{ announcement() }}</div>
+    <div class="sr-only" role="status" aria-live="polite">{{ announcement.text() }}</div>
 
     @if (loadingSpaces()) {
       <div class="loading-overlay"><span class="spinner"></span></div>
@@ -367,7 +368,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
         const shown = this.preview.file() ? this.previewPath : '';
         if (shown === change.path || shown.startsWith(`${change.path}/`)) this.closePreview();
         this.endDelete(change.path);
-        this.announcement.set(this.transloco.translate(change.isDirectory ? 'files.deleted.folder' : 'files.deleted.file', { name: baseName(change.path) }));
+        this.announcement.say(this.transloco.translate(change.isDirectory ? 'files.deleted.folder' : 'files.deleted.file', { name: baseName(change.path) }));
         this.filesChanged.emit();
       }
     });
@@ -538,11 +539,11 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   readonly deleting = signal<ReadonlySet<string>>(new Set());
 
   /** What the polite live region says; set when something happened that has no element of its own to be heard from. */
-  readonly announcement = signal('');
+  readonly announcement = new LiveAnnouncement();
 
   /**
    * Where the focus goes once the listing that follows a delete has landed: the name of the row that was below the deleted one,
-   * or `{ name: null }` for the table's caption when there was none. `null` is "no delete is waiting for its listing". A deleted
+   * or `{ name: null }` for the empty-folder heading when there was none. `null` is "no delete is waiting for its listing". A deleted
    * row takes the focus with it, and without this a keyboard user is left on the page body.
    */
   private focusAfterDelete: { name: string | null } | null = null;
@@ -883,7 +884,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     this.deleting.update(paths => { const next = new Set(paths); next.delete(path); return next; });
   }
 
-  /** After the listing that follows a delete has landed AND been drawn: focus the row below the deleted one, else the caption. */
+  /** After the listing that follows a delete has landed AND been drawn: focus the row below the deleted one, else the empty-folder heading. */
   private settleFocusAfterDelete(): void {
     const pending = this.focusAfterDelete;
     if (!pending) return;
