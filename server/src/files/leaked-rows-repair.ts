@@ -45,6 +45,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
+import { idKeysetPage } from '../db/id-keyset-page.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { authorRef } from '../config/author.js';
@@ -162,11 +163,13 @@ async function removeLeakedRows(spaceId: string, leaked: readonly Leaked[], stam
 
 /** One page of the derived rows by `_id`: decide each row, remove the leaked ones, count what was kept. */
 async function derivedRowsPage(spaceId: string, after: string | undefined, stamp: string, size: number, outcome: RepairOutcome): Promise<Page> {
-  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
-    asFilter<FileMetaDoc>({ ...NOT_A_FLAGGED_ROW, parentFileId: { $type: 'string' }, ...(after !== undefined ? { _id: { $gt: after } } : {}) }),
+  const { rows, last, end } = await idKeysetPage<{ _id: string; parentFileId: string; createdAt?: string; updatedAt?: string }>({
+    collection: spaceCollection(spaceId, 'files'),
+    filter: { ...NOT_A_FLAGGED_ROW, parentFileId: { $type: 'string' } },
+    projection: { _id: 1, parentFileId: 1, createdAt: 1, updatedAt: 1 }, size,
     // By `_id` and no other index: the cursor is the id, and the planner left to choose could read every derived row to sort a page.
-    { projection: { _id: 1, parentFileId: 1, createdAt: 1, updatedAt: 1 }, sort: { _id: 1 }, limit: size, hint: { _id: 1 } },
-  ).toArray() as unknown as Array<{ _id: string; parentFileId: string; createdAt?: string; updatedAt?: string }>;
+    hint: { _id: 1 },
+  }, after);
 
   const settled = rows.filter(r => !writtenAfter(r, stamp));
   outcome.kept.recent += rows.length - settled.length;
@@ -180,7 +183,7 @@ async function derivedRowsPage(spaceId: string, after: string | undefined, stamp
     else outcome.kept.live++;
   }
   outcome.derivedRemoved += await removeLeakedRows(spaceId, leaked, stamp);
-  return { ...(rows.length > 0 ? { last: rows[rows.length - 1]!._id } : {}), end: rows.length < size };
+  return { ...(last !== undefined ? { last } : {}), end };
 }
 
 /**

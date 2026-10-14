@@ -17,6 +17,7 @@ import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { readRowsById, READ_CHUNK } from '../db/read-by-id.js';
+import { eachIdPage } from '../db/id-keyset-page.js';
 import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
@@ -500,21 +501,14 @@ export interface RetireUnderOptions {
 async function retireLiveRowsInPages(
   spaceId: string, prefix: string, retirePage: (ids: string[]) => Promise<unknown>, onRetired?: (paths: readonly string[]) => void,
 ): Promise<void> {
-  const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  const under = `^${escapeRegex(prefix)}`;
-  let after: string | undefined;
-  for (;;) {
-    const page = await coll.find(
-      asFilter<FileMetaDoc>({ _id: after === undefined ? { $regex: under } : { $regex: under, $gt: after }, ...LIVE_FILE_ROW } as never),
-      { projection: { _id: 1 }, sort: { _id: 1 }, limit: READ_CHUNK },
-    ).toArray();
-    if (page.length === 0) return;
-    const ids = page.map(r => String(r._id));
-    await retirePage(ids);
-    onRetired?.(ids);
-    if (ids.length < READ_CHUNK) return;
-    after = ids[ids.length - 1];
-  }
+  await eachIdPage<{ _id: string }>(
+    { collection: spaceCollection(spaceId, 'files'), filter: { _id: { $regex: `^${escapeRegex(prefix)}` }, ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: READ_CHUNK },
+    async rows => {
+      const ids = rows.map(r => String(r._id));
+      await retirePage(ids);
+      onRetired?.(ids);
+    },
+  );
 }
 
 /**
