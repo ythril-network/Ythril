@@ -42,7 +42,7 @@ import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
 import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
-import { DestinationTakenByOther } from './act-answers.js';
+import { DestinationExists } from './act-answers.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
 import { idAfterMove, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
@@ -129,7 +129,7 @@ async function anythingUnderDestination(spaceId: string, dst: string): Promise<b
  * prefix first, so the common case (nothing there) reads no ids at all. Also asked again for ONE batch whose plan went stale.
  */
 export async function holdsAtDestination(
-  spaceId: string, rows: readonly PlannedRow[], from: string, to: string, kind: PathKind,
+  spaceId: string, rows: readonly PlannedRow[], to: string, kind: PathKind,
 ): Promise<{ flagged: Set<string>; replaced: Set<string> }> {
   const flagged = new Set<string>();
   const replaced = new Set<string>();
@@ -144,8 +144,7 @@ export async function holdsAtDestination(
     if (hit.deletedAt !== undefined) flagged.add(r.to);
     else if (hit.parentFileId === undefined || takes.has(hit.parentFileId)) replaced.add(r.to);
     else {
-      throw new DestinationTakenByOther(r.to,
-        `'${r.to}' is held by the records of another file ('${hit.parentFileId}'), so '${from}' cannot be moved onto '${to}' without overwriting them. Nothing was moved.`);
+      throw new DestinationExists(to, 'rows');
     }
   }
   return { flagged, replaced };
@@ -180,7 +179,7 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
     from: r._id, to: idAfterMove(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
 
-  const { flagged, replaced } = await holdsAtDestination(spaceId, rows, from, to, kind);
+  const { flagged, replaced } = await holdsAtDestination(spaceId, rows, to, kind);
 
   // Links follow every file row carried, and every file under the source that holds links (a deleted file leaves its links behind).
   const linkFiles = new Set<string>(rows.filter(r => r.top).map(r => r.from));
