@@ -4,10 +4,16 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
-import { openStoredRead, writeStored, statStored, moveStored } from './stored-bytes.js';
+import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied } from './stored-bytes.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
+import { DestinationExists } from './act-answers.js';
+import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
+import { getDataRoot } from '../config/loader.js';
+import { toDocId } from '../util/paths.js';
+import { warnOnce } from '../util/warn-once.js';
+import { log, peerText } from '../util/log.js';
 
 export interface FileEntry {
   name: string;
@@ -137,17 +143,45 @@ export async function createDir(spaceId: string, dirPath: string): Promise<void>
   await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
 }
 
-/** Move/rename a file or directory */
+/**
+ * A move onto a file system that refuses a hard link is said ONCE per data root: the no-overwrite guarantee of a move needs hard-link
+ * support, and what a move does without it (a rename, with a foreign writer's window) is the operator's to know, not every move's to repeat.
+ * Operator log only; no door answer carries it.
+ */
+const saidLinkFallback = warnOnce<string>({ max: 16, every: 60 * 60_000 });
+
+/** A move fell back to a rename: counted every time, said once. */
+function linkFellBack(err: unknown): void {
+  fileMoveLinkFallbackTotal.inc();
+  const root = getDataRoot();
+  saidLinkFallback(root, () => log.warn(`The file system under ${peerText(root)} refused a hard link (${peerText((err as NodeJS.ErrnoException | null)?.code ?? err)}), so file moves there fall back to a rename: `
+    + 'a move still refuses a destination that exists when it looks, but a foreign process writing at the destination in that instant can be overwritten. '
+    + 'Counted by ythril_file_move_link_fallback_total; a data volume that supports hard links closes the window.'));
+}
+
+/**
+ * Move/rename a file or directory — and NEVER replace what stands at the destination: something there is {@link DestinationExists}
+ * (`409 destination_exists`, answered by every door through `fileActAnswer`), whether it was there when the move was asked
+ * (`assertDestinationFree`) or appeared in the instant between that check and the bytes being placed (`moveStoredIfFree`).
+ *
+ * `begun` is the cascade's reading, taken before its own marker was written, of whether a begun-move marker names this very pair: it is
+ * what tells a half-made link of this move from an operator's hard link. An explicit argument at every call.
+ */
 export async function moveFile(
   spaceId: string,
   srcPath: string,
   dstPath: string,
+  { begun }: { begun: boolean },
 ): Promise<void> {
   const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
   const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
   await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [srcPath, dstPath]); });
-  // Under both paths' locks (F-43).
-  await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [srcPath, dstPath]); });
+  // Under both paths' locks (F-43). The occupied destination is the move's own refusal and is answered BEFORE `fsRefusalOf` sees it:
+  // the kernel's ENOTEMPTY or EISDIR of a rename is a name that is taken, not a path that cannot be created.
+  await moveStoredIfFree(srcAbs, dstAbs, { begun, onLinkFallback: linkFellBack }).catch((err: unknown) => {
+    if (err instanceof DestinationOccupied) throw new DestinationExists(toDocId(dstPath), 'bytes');
+    throw fsRefusalOf(err, [srcPath, dstPath]);
+  });
   // A rename carries the source's mode with it, so moving a file that predates this hardening would silently
   // reintroduce an 0644 file into a tightened tree.
   //
@@ -155,6 +189,18 @@ export async function moveFile(
   // removes the execute bit that makes it openable at all. Getting that wrong took the server down — see the note
   // on `hardenPath`.
   await hardenPath(dstAbs);
+}
+
+/**
+ * Finish the bytes of a begun move whose two names a crash left: remove the source's name when the pair is the half-made link of that
+ * move (`finishInterruptedLink`). Housekeeping and the finishing branch of the cascade ask it before they carry the records, so a move
+ * that stopped between its link and the removal is finished and not refused as an occupied destination. A pair that is anything else
+ * is left as it is. Asked only of a move whose begun-move marker exists: that is the evidence.
+ *
+ * @returns whether a name was removed.
+ */
+export async function finishHalfLinkedMove(spaceId: string, srcPath: string, dstPath: string): Promise<boolean> {
+  return finishInterruptedLink(await resolveSafePathChecked(spaceId, srcPath), await resolveSafePathChecked(spaceId, dstPath));
 }
 
 /** Recursively sum file sizes under a directory. Returns 0 if dir doesn't exist. */

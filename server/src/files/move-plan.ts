@@ -15,15 +15,16 @@
  * rows AND every parent a derived row under it names, so a chunk whose file row is gone is carried, not left at a path that no
  * longer exists.
  *
- * ## What the destination holds decides the outcome (the truth table)
+ * ## What the destination holds decides the outcome (the truth table is {@link holdsAtDestination}'s)
  *
  *  - **nothing**: the rows move;
  *  - **a flagged row** (the audit record a soft delete leaves): it is removed, in the transaction of the batch that carries the
  *    file, and the moved record is the live row there — writing a path clears its flag;
- *  - **a live file's rows at the ids the moved set takes** (a rename onto an existing file replaces it): replaced, in the same
- *    transaction. Rows of the replaced file at ids the moved set does not take are left, as ever;
- *  - **rows of ANOTHER file at an id the moved set takes**: refused, `DestinationTakenByOther`, with nothing written. A derived row
- *    at a moved id belongs to the occupant when its parent is itself an id the moved set takes; otherwise it belongs to someone else.
+ *  - **debris** (a derived row whose parent is gone or flagged): removed in the same transaction, since nothing live owns it;
+ *  - **a live thing's rows** at an id the moved set takes: before the bytes, REFUSED (`DestinationExists`, nothing written): a move
+ *    never replaces anything. After them (the finish of an owed move) the moved set's OWN rows at those ids are replaced (a late write at
+ *    an id its batch already moved), and rows of ANY OTHER live file refuse the finish (`DestinationHeldAfterMove`), which strands
+ *    nothing: the move stays owed until that file is gone.
  *
  * ## Batches
  *
@@ -42,10 +43,9 @@ import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
 import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
-import { DestinationExists } from './act-answers.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
-import { idAfterMove, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
+import { idAfterMove, movedId, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
 
 /** One row a move carries. */
 export interface PlannedRow {
@@ -76,8 +76,10 @@ export interface MovePlan {
   dst: string;
   kind: PathKind;
   rows: PlannedRow[];
+  /** The ids of the plan's new ids that hold a flagged audit row, those the batch's transaction deletes to take them, and those another file's record holds. */
   flaggedAtDestination: ReadonlySet<string>;
   replacedAtDestination: ReadonlySet<string>;
+  refusedAtDestination: readonly HeldId[];
   /** File ids at `src` whose links follow: every file row carried, and every file under `src` that is the `from` of a link row. */
   linkFiles: string[];
   jobIds: string[];
@@ -123,39 +125,99 @@ async function anythingUnderDestination(spaceId: string, dst: string): Promise<b
   return false;
 }
 
+/** When a plan is read, relative to the move's bytes: before them a refusal costs nothing; after them it strands a move whose bytes have gone. */
+export type PlanPhase = 'before-the-bytes' | 'after-the-bytes';
+
+/** An id the moved set takes, which another file's record holds: `heldBy` is the top of its chain, the file whose record it is. */
+export interface HeldId { id: string; heldBy: string }
+
+/** What stands at the ids a move takes, as {@link holdsAtDestination} classifies it. */
+export interface DestinationHolds {
+  /** Ids holding a flagged audit row: removed in the batch's transaction. */
+  flagged: Set<string>;
+  /** Ids the batch's transaction deletes to take them: debris, and (after the bytes) the move's own rows. */
+  replaced: Set<string>;
+  /** Ids the phase refuses on. */
+  refused: HeldId[];
+}
+
+/** Whether `id` is `root`, or anything that belongs to it: under it, a chunk of it, or its sidecar (`movedId` answers it for every spelling). */
+const belongsTo = (id: string, root: string): boolean => movedId(id, root, root) !== null;
+
 /**
- * What stands at the ids `rows` take, classified by the truth table in the module docblock: the flagged audit rows to remove and the
- * live occupant's rows to replace. Throws `DestinationTakenByOther` for rows of another file. A directory's destination is probed by
- * prefix first, so the common case (nothing there) reads no ids at all. Also asked again for ONE batch whose plan went stale.
+ * What stands at the ids `rows` take, and what the PHASE does about it — the one classification, asked before the bytes (a refusal that
+ * costs nothing), after them (the finish of an owed move) and for ONE batch whose plan went stale. Nothing throws from here: the callers
+ * say what a refusal is (`DestinationExists` before the bytes, `DestinationHeldAfterMove` after).
+ *
+ * ## The truth table
+ *
+ * For each planned row whose new id is not itself moving, the stored row there is:
+ *
+ *  - a **flagged** audit row (a soft delete's record): `flagged`, removed by the batch's transaction; writing a path clears its flag;
+ *  - a row with **no parent** (a file's own row): `foreign` — a live file's record at an id the move takes. A row of the moved file
+ *    cannot be here: its id is no longer in the plan once its batch moved it;
+ *  - a row **derived** from another (its `parentFileId` chain followed to its end, at most `MAX_ANCESTRY` levels):
+ *      - the chain ends at a row that is absent or flagged: **debris**, the rows a deleted file left, removed by the transaction;
+ *      - it ends at a live row inside the DESTINATION's own subtree (`belongsTo(top, dst)`): **own** — a row this move's earlier batch
+ *        carried and re-rooted under the destination (`rebuiltFileRow`), or a late write at an old id whose same id was carried;
+ *      - it ends at a live row elsewhere, or does not end within the levels read (a cycle): **foreign**, refused. A chain that cannot
+ *        be followed is never read as debris: debris is deleted, and what cannot be explained is not.
+ *
+ * ## What the phase does with it
+ *
+ *  - `before-the-bytes`: `refused` = foreign and own (a live thing's rows are at the destination before anything moved: nothing there
+ *    is the move's); `replaced` = debris.
+ *  - `after-the-bytes`: `refused` = foreign; `replaced` = debris and own. A straggler (a late writer's row at an OLD id whose chunk id
+ *    the batch already moved: the same id at both ids) classifies own and is replaced: the straggler's row moves and wins.
+ *
+ * ## Cost
+ *
+ * One `$in` read of the rows at the new ids, then one per level of ancestry over the DISTINCT parent ids, never one per row; a
+ * directory's destination is probed by prefix first, so the common case (nothing there) reads no ids at all.
  */
 export async function holdsAtDestination(
-  spaceId: string, rows: readonly PlannedRow[], to: string, kind: PathKind,
-): Promise<{ flagged: Set<string>; replaced: Set<string> }> {
-  const flagged = new Set<string>();
-  const replaced = new Set<string>();
-  if (rows.length === 0 || (kind === 'directory' && !await anythingUnderDestination(spaceId, to))) return { flagged, replaced };
+  spaceId: string, rows: readonly PlannedRow[], to: string, kind: PathKind, phase: PlanPhase,
+): Promise<DestinationHolds> {
+  const holds: DestinationHolds = { flagged: new Set(), replaced: new Set(), refused: [] };
+  if (rows.length === 0 || (kind === 'directory' && !await anythingUnderDestination(spaceId, to))) return holds;
   const moving = new Set(rows.map(r => r.from));
-  const takes = new Set(rows.map(r => r.to));
-  const held = await readStoredById<{ _id: string; parentFileId?: string; deletedAt?: string }>(
-    spaceCollection(spaceId, 'files'), rows.map(r => r.to).filter(id => !moving.has(id)), { parentFileId: 1, deletedAt: 1 });
-  for (const r of rows) {
-    const hit = held.get(r.to);
-    if (!hit) continue;
-    if (hit.deletedAt !== undefined) flagged.add(r.to);
-    else if (hit.parentFileId === undefined || takes.has(hit.parentFileId)) replaced.add(r.to);
-    else {
-      throw new DestinationExists(to, 'rows');
-    }
+  const filesColl = spaceCollection(spaceId, 'files');
+  type Held = { _id: string; parentFileId?: string; deletedAt?: string };
+  const fields = { parentFileId: 1, deletedAt: 1 } as const;
+  const atDestination = await readStoredById<Held>(filesColl, rows.map(r => r.to).filter(id => !moving.has(id)), fields);
+
+  // Each derived row's chain, one level per read. `looking` maps a row at the destination to the id of the parent now being read.
+  let looking = new Map<string, string>();
+  const refuse = (id: string, heldBy: string): void => { holds.refused.push({ id, heldBy }); };
+  for (const [id, hit] of atDestination) {
+    if (hit.deletedAt !== undefined) holds.flagged.add(id);
+    else if (hit.parentFileId === undefined) refuse(id, id);
+    else looking.set(id, hit.parentFileId);
   }
-  return { flagged, replaced };
+  for (let level = 0; level < MAX_ANCESTRY && looking.size > 0; level++) {
+    const parents = await readStoredById<Held>(filesColl, [...looking.values()], fields);
+    const next = new Map<string, string>();
+    for (const [id, at] of looking) {
+      const parent = parents.get(at);
+      if (parent === undefined || parent.deletedAt !== undefined) holds.replaced.add(id);
+      else if (parent.parentFileId !== undefined) next.set(id, parent.parentFileId);
+      else if (!belongsTo(at, to)) refuse(id, at);
+      else if (phase === 'after-the-bytes') holds.replaced.add(id);
+      else refuse(id, at);
+    }
+    looking = next;
+  }
+  for (const [id, at] of looking) refuse(id, at);
+  return holds;
 }
 
 /**
  * Decide what moves where, and what the destination holds — reads only. `kind` is what `src` IS (read from the disk by the caller).
- * Throws `DestinationTakenByOther` when rows of another file stand at an id the moved set takes. Run once before the bytes (so the
- * refusal costs nothing) and once after them (so the rows carried are those there are NOW, not those before a late conversion).
+ * Run once before the bytes (so a refusal costs nothing) and once after them (so the rows carried are those there are NOW, not those
+ * before a late conversion); `phase` says which, and what the destination's holds mean for it ({@link holdsAtDestination}). It does not
+ * throw for rows that stand at the destination: it hands them back in `refusedAtDestination`, and its callers refuse.
  */
-export async function planMove(spaceId: string, src: string, dst: string, kind: PathKind): Promise<MovePlan> {
+export async function planMove(spaceId: string, src: string, dst: string, kind: PathKind, phase: PlanPhase): Promise<MovePlan> {
   const from = movedRoot(src);
   const to = movedRoot(dst);
   if (!from || !to) throw new RangeError('A move needs two paths below the space root');
@@ -179,14 +241,14 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
     from: r._id, to: idAfterMove(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
 
-  const { flagged, replaced } = await holdsAtDestination(spaceId, rows, to, kind);
+  const { flagged, replaced, refused } = await holdsAtDestination(spaceId, rows, to, kind, phase);
 
   // Links follow every file row carried, and every file under the source that holds links (a deleted file leaves its links behind).
   const linkFiles = new Set<string>(rows.filter(r => r.top).map(r => r.from));
   if (kind === 'file') linkFiles.add(from);
   else for (const f of await fileLinkSourcesUnder(spaceId, from)) linkFiles.add(f);
 
-  return { src: from, dst: to, kind, rows, flaggedAtDestination: flagged, replacedAtDestination: replaced, linkFiles: [...linkFiles].sort(), jobIds: await jobIdsOwnedBy(spaceId, from, kind) };
+  return { src: from, dst: to, kind, rows, flaggedAtDestination: flagged, replacedAtDestination: replaced, refusedAtDestination: refused, linkFiles: [...linkFiles].sort(), jobIds: await jobIdsOwnedBy(spaceId, from, kind) };
 }
 
 /**
