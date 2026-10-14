@@ -35,6 +35,26 @@ describe('refusalText', () => {
     expect(refusalText(t, err, 'join.error.generic')).toBe('server sentence');
   });
 
+  it('offers the answer\'s heldBy to the sentence beside the path', () => {
+    const words: Record<string, string> = { 'files.refusal.held': '{{path}} is held by {{heldBy}}' };
+    const t = {
+      translate: (key: string, p?: { path?: string; heldBy?: string }) =>
+        (words[key] ?? key).replace('{{path}}', p?.path ?? '').replace('{{heldBy}}', p?.heldBy ?? ''),
+    } as Parameters<typeof refusalText>[0];
+    const err = { error: { code: 'held', path: 'b.txt', heldBy: 'o/c.txt', error: 'server sentence' } };
+    expect(refusalText(t, err, 'join.error.generic', 'files.refusal')).toBe('b.txt is held by o/c.txt');
+  });
+
+  it('appends the request id to a server fault, whichever sentence was chosen, and to nothing the caller caused', () => {
+    const headers = { get: (n: string) => (n === 'X-Request-Id' ? 'req-9' : null) };
+    const fault = { status: 500, headers, error: { code: 'some_future_code', error: 'The server says why.' } };
+    expect(refusalText(transloco, fault, 'join.error.generic')).toBe('The server says why. (request req-9)');
+    const known500 = { status: 500, headers, error: { code: 'join_mapping_collision' } };
+    expect(refusalText(transloco, known500, 'join.error.generic')).toBe('Two spaces would land in one. (request req-9)');
+    const refused = { status: 409, headers, error: { code: 'join_mapping_collision' } };
+    expect(refusalText(transloco, refused, 'join.error.generic')).toBe('Two spaces would land in one.');
+  });
+
   it('uses the fallback key only when the answer carried neither', () => {
     expect(refusalText(transloco, { error: null }, 'join.error.generic')).toBe('Joining failed.');
     expect(refusalText(transloco, undefined, 'join.error.generic')).toBe('Joining failed.');
