@@ -264,8 +264,8 @@ published and no job is held. The body is `{ "error", "code": "destination_exist
 destination as requested, and it is the same on `PATCH`, `POST /api/move_file` and MCP `move_file`. **To replace, delete
 the destination first** (`DELETE` or `delete_file`; a folder needs `confirm: true`): that deletes it on every instance it
 is replicated to. A file record whose bytes are not here yet (its content may still be arriving from a peer, or an
-earlier delete was interrupted) blocks a move the same way, is removed by the same delete, and appears with its bytes
-once they have arrived. What does not block a move: a name that only a deleted file's audit record holds (see below), and
+earlier delete was interrupted) blocks a move the same way and is removed by the same delete; a file whose content is
+still arriving from a peer appears once it has. What does not block a move: a name that only a deleted file's audit record holds (see below), and
 what a file that no longer exists left behind (a conversion sidecar or a derived record whose file has neither bytes nor
 a live record), which the move removes. A **case-only rename** (`a.txt` to `A.txt`, or `Docs/a.txt` to `docs/a.txt`) on
 a case-insensitive file system is one file under a new spelling and succeeds, record included. **Only a move is
