@@ -18,7 +18,14 @@
         "work"
       ]
     },
-    "propertySchemas": {},
+    "propertySchemas": {
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
     "suppressEmbeddings": true
   }
 }

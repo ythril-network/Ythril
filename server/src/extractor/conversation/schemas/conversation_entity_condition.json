@@ -9,6 +9,9 @@
     "propertySchemas": {
       "kind": {
         "type": "string"
+      },
+      "aliases": {
+        "type": "string"
       }
     }
   }

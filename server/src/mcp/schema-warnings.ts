@@ -26,6 +26,15 @@
 import type { UpdateValidation } from '../brain/write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 
+/**
+ * The sentence every write tool's `properties` description ends with, said once so the eleven places that carry it cannot
+ * say it differently. It states what a caller needs — which of its keys are judged and what each validation mode does with
+ * one — and nothing of how the check runs.
+ */
+export const UNDECLARED_KEY_RULE = 'A key the record\'s type does not declare is judged by the space\'s validation mode: '
+  + '`off` stores it quietly, `warn` stores it and names it in `warnings`, `strict` refuses a key this write newly adds '
+  + '(one already stored is left alone). Declare a key you mean to keep in the type\'s schema.';
+
 export interface SchemaWarningAnswer {
   /** Lines for the text answer, one per violation, without a leading newline. Empty when there is nothing to say. */
   lines: string[];
@@ -33,14 +42,20 @@ export interface SchemaWarningAnswer {
   structured: { warnings?: SchemaViolation[] };
 }
 
-/** The schema-warning part of a write tool's answer, from the space's resolved meta and the writer's classification. */
+/**
+ * The schema-warning part of a write tool's answer, from the space's resolved meta and the writer's classification — and, when the
+ * write also made inline edges, theirs (`inlineEdges`, each row already naming its edge: `applyConnections` says them). Create AND
+ * update say the same thing: an `update_*` tool used to print nothing under `warn` and return no structured warnings, so an agent
+ * that edited a record into breaking the schema was told "updated".
+ */
 export function schemaWarningAnswer(
   meta: { validationMode?: string } | undefined,
   check: UpdateValidation | undefined,
+  inlineEdges: readonly SchemaViolation[] = [],
 ): SchemaWarningAnswer {
   const lines = meta?.validationMode === 'warn'
-    ? (check?.all ?? []).map(v => `⚠️ Schema: ${v.field} — ${v.reason}`)
+    ? [...(check?.all ?? []), ...inlineEdges].map(v => `⚠️ Schema: ${v.field} — ${v.reason}`)
     : [];
-  const warnings = check?.warnings ?? [];
+  const warnings = [...(check?.warnings ?? []), ...inlineEdges];
   return { lines, structured: warnings.length > 0 ? { warnings } : {} };
 }

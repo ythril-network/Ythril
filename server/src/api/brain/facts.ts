@@ -26,6 +26,7 @@ import {
   preconditionFailedBody,
 } from './_shared.js';
 import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { MAX_FACT_LENGTH } from '../../util/request-bounds.js';
@@ -106,6 +107,8 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // its refusal is answered below as every record door answers it.
   const safeFactType: string | undefined = typeof memoryType === 'string' ? memoryType : undefined;
   let createCheck: UpdateValidation | undefined;
+  /** The warnings of the inline edges that landed beside the record (`applyConnections`). */
+  let connectionWarnings: SchemaViolation[] = [];
 
   // Persist through the shared saveFact() so REST and MCP produce identical records: the same
   // embed-text derivation (properties folded as `key value` via propsEmbedText, entity names
@@ -167,7 +170,7 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
      * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
      * restate them and no two doors can disagree about them.
      */
-    await applyConnections(targetSpace, doc._id, 'fact', req.body, doc.author, webhookToken(req));
+    connectionWarnings = (await applyConnections(targetSpace, doc._id, 'fact', req.body, doc.author, webhookToken(req))).warnings;
   } catch (err) {
     const refused = connectionRefusalAnswer(err, 'create');
     if (refused) { res.status(refused.status).json(refused.body); return; }
@@ -177,7 +180,7 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   if (quotaResult?.softBreached) body['storageWarning'] = true;
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...(createCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
+  const warnings = [...(createCheck?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
   if (warnings.length > 0) body['warnings'] = warnings;
   res.status(201).json(body);
 });
@@ -358,8 +361,8 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
        * AFTER the record write, exactly as the create does: links REPLACE per class and edges UPSERT,
        * and both semantics live in `applyConnections` so no door has to restate them.
        */
-      await applyConnections(updated.spaceId, updated._id, 'fact', req.body, updated.author, webhookToken(req));
-      const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
+      const connected = await applyConnections(updated.spaceId, updated._id, 'fact', req.body, updated.author, webhookToken(req));
+      const warnings = [...(check?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
       res.json(warnings.length > 0 ? { ...updated, warnings } : updated);
       return;
     }

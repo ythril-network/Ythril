@@ -6,7 +6,7 @@ import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrenc
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 
 /**
  * What a passed due moment means — ONE sentence, quoted everywhere that used to state it.
@@ -31,7 +31,7 @@ import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
 import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { getAllowedChronoTypes, resolveMetaRefs } from '../../spaces/schema-validation.js';
+import { getAllowedChronoTypes, getSpaceMeta, resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -98,7 +98,7 @@ export const save_chronoTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Optional structured key-value metadata for this entry.',
+              description: 'Optional structured key-value metadata for this entry. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('Optional recurrence rule,'),
@@ -202,7 +202,7 @@ export const save_chronoTool: ToolHandler = {
     }
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
     // exists — a relationship needs both ends, and the `from` is what was just minted.
-    await applyConnections(wt.target, entry._id, 'chrono', a, entry.author, ctx.actor);
+    const connected = await applyConnections(wt.target, entry._id, 'chrono', a, entry.author, ctx.actor);
 
     let text = `Chrono entry '${entry.title}' (${entry.type}) created (ID ${entry._id}, seq ${entry.seq}).`
       + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
@@ -218,7 +218,7 @@ export const save_chronoTool: ToolHandler = {
     }
     // From the classification the writer handed back, not re-derived — a second call would be a second
     // lookup per write and the second copy of the rule.
-    const schemaWarnings = schemaWarningAnswer(chronoMeta, chronoCheck as UpdateValidation | undefined);
+    const schemaWarnings = schemaWarningAnswer(chronoMeta, chronoCheck as UpdateValidation | undefined, connected.warnings);
     for (const line of schemaWarnings.lines) text += `\n${line}`;
     return { content: [{ type: 'text' as const, text }], structuredContent: { ...entry, ...schemaWarnings.structured } };
   },
@@ -341,7 +341,7 @@ export const update_chronoTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Key-value properties to merge into the stored map — keys you do not name are kept.',
+              description: 'Key-value properties to merge into the stored map — keys you do not name are kept. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('The repeat rule, replaced wholesale when sent,'),
@@ -452,15 +452,17 @@ export const update_chronoTool: ToolHandler = {
     }
     // Through the members, as REST's PATCH and every other update tool do: a write target may itself be a proxy, and the
     // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
-    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a)));
+    let updCheck: UpdateValidation | undefined;
+    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `entry.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
-    await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
-    return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }],
-      structuredContent: { ...entry } };
+    const connected = await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
+    const schemaWarnings = schemaWarningAnswer(getSpaceMeta(entry.spaceId), updCheck, connected.warnings);
+    return { content: [{ type: 'text' as const, text: [`Chrono entry '${entry.title}' updated (seq ${entry.seq}).`, ...schemaWarnings.lines].join('\n') }],
+      structuredContent: { ...entry, ...schemaWarnings.structured } };
   },
 };
 

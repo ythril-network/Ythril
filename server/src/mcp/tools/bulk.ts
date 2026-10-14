@@ -16,6 +16,7 @@ import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { refDeclareSchema } from '../../brain/batch-refs.js';
 import { connectionSchemas } from '../../brain/write-connections.js';
+import { UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 import { MAX_TAGS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 
 /** What this door accepts at the top level: the arrays, plus the space it is addressed to. */
@@ -116,7 +117,7 @@ export const save_bulkTool: ToolHandler = {
                     type: 'object',
                     description: 'Key-value metadata. String, number or boolean values only — a nested '
                       + 'object or array is not accepted. Validated against the per-type schema when `type` '
-                      + 'is set, and a failure REJECTS this item alone rather than the batch.',
+                      + 'is set, and a failure REJECTS this item alone rather than the batch. ' + UNDECLARED_KEY_RULE,
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
@@ -152,7 +153,7 @@ export const save_bulkTool: ToolHandler = {
                     description: 'Key-value metadata (string, number or boolean values only). MERGED key by '
                       + 'key when `id` names an existing entity, and validated in its MERGED form — which is '
                       + 'why a partial item can be accepted where the fragment alone would fail a '
-                      + 'required-property rule.',
+                      + 'required-property rule. ' + UNDECLARED_KEY_RULE,
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
@@ -212,7 +213,7 @@ export const save_bulkTool: ToolHandler = {
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only). MERGED key by '
-                      + 'key over an existing edge and validated in its merged form.',
+                      + 'key over an existing edge and validated in its merged form. ' + UNDECLARED_KEY_RULE,
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
@@ -264,7 +265,7 @@ export const save_bulkTool: ToolHandler = {
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '
-                      + 'against the space\'s schema for this chrono type.',
+                      + 'against the space\'s schema for this chrono type. ' + UNDECLARED_KEY_RULE,
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,

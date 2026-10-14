@@ -17,6 +17,7 @@ import type { SpaceMeta, PropertySchema, TypeSchema, KnowledgeType } from '../co
 import { getSchemaLibrary, getConfig } from '../config/loader.js';
 import { hasReDoSRisk, MAX_PATTERN_LENGTH, REDOS_REFUSAL } from '../util/redos.js';
 import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
+import { NAME_QUOTED, peerText } from '../util/log.js';
 
 // ── Violation type ─────────────────────────────────────────────────────────
 
@@ -24,7 +25,41 @@ export interface SchemaViolation {
   field: string;
   value: unknown;
   reason: string;
+  /**
+   * Only on a row that says a property KEY is not declared (`Q-93`): the keys the type does declare, sorted, so the caller can see
+   * what it should have sent. Bounded in count and in the length of a name — a type can declare hundreds, and a row is repeated per key.
+   */
+  declared?: string[];
 }
+
+/**
+ * The property keys the INSTANCE ITSELF writes onto records it makes, per kind — the one exemption from the undeclared-key rule (`Q-93`).
+ *
+ * A type that declares at least one property is a closed list, and a strict space refuses a write that adds a key outside it. The
+ * conversation extractor writes keys of its own onto every record it produces (an entity's `aliases`, an edge's `since` and `until`, a
+ * claim's `speaker`, `statedOn` and `attributed`). The shipped `conversation` types declare them, but a space owner may narrow or
+ * replace those types, and an `ingest` into such a space must not start failing on request 340 of a conversation because the
+ * extractor's own vocabulary became "undeclared" — which is also why the shipped declarations alone are not the answer: a library that
+ * already holds the old entries is never given the new ones (seeding is additive by name).
+ *
+ * **Handed to the validator as a FUNCTION ARGUMENT (`instanceWrittenKeys`), by the extractor's writer alone, and never as anything a
+ * request can carry**: an exemption a caller can ask for turns "refused in strict" into "refused unless you ask".
+ * `no-rest-or-mcp-door-can-pass-the-instance-written-keys-exemption.test.js` holds that, and holds this table to the keys the extractor's
+ * sources really write. The extractor writes no property on a chrono entry, so there is no row for it. The list lives here, beside
+ * `SERVER_WRITTEN_EDGE_LABELS` (the other thing the validator exempts because the instance wrote it), and not in the extractor: a value
+ * that decides what a schema permits should not be reachable only through the module that happens to write it.
+ */
+export const INSTANCE_WRITTEN_PROPERTY_KEYS = {
+  entity: ['aliases'],
+  edge: ['since', 'until'],
+  fact: ['speaker', 'statedOn', 'attributed'],
+} as const;
+
+/** The exemption as a validator takes it for one kind, or for a batch: a list of property keys per kind. */
+export type InstanceWrittenKeys = Partial<Record<'entity' | 'edge' | 'fact' | 'chrono', readonly string[]>>;
+
+/** The most declared names one row carries: a type can declare hundreds, and every undeclared key of a record repeats the list. */
+const MAX_DECLARED_NAMES = 50;
 
 // ── Library ref resolution ─────────────────────────────────────────────────
 
@@ -125,7 +160,7 @@ const viewOf = (kind: ViewKind, record: RecordView): RecordView => (isRecordView
 /**
  * Validate an entity write against the space meta schema.
  */
-export function validateEntity(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrittenKeys: readonly string[] = []): SchemaViolation[] {
   const entity = viewOf('entity', record);
   const violations: SchemaViolation[] = [];
   if (!meta) return violations;
@@ -177,7 +212,7 @@ export function validateEntity(meta: SpaceMeta, record: RecordView): SchemaViola
   }
 
   // Required properties + property schemas
-  violations.push(...validatePropertiesAgainstSchema(typeSchema, entity.properties));
+  violations.push(...validatePropertiesAgainstSchema(meta, typeSchema, entity.properties, instanceWrittenKeys));
 
   return violations;
 }
@@ -263,6 +298,7 @@ export function validateEdge(
   meta: SpaceMeta,
   record: RecordView,
   resolved: ResolvedEdgeEnds = {},
+  instanceWrittenKeys: readonly string[] = [],
 ): SchemaViolation[] {
   const edge = viewOf('edge', record);
   const violations: SchemaViolation[] = [];
@@ -320,7 +356,7 @@ export function validateEdge(
   const typeSchema = edge.label ? edgeSchemas?.[edge.label] : undefined;
   violations.push(...checkUnresolvedRef(typeSchema));
   if (!typeSchema?._unresolvedRef) {
-    violations.push(...validatePropertiesAgainstSchema(typeSchema, edge.properties));
+    violations.push(...validatePropertiesAgainstSchema(meta, typeSchema, edge.properties, instanceWrittenKeys));
   }
 
   return violations;
@@ -349,7 +385,7 @@ export function validateEdge(
  * The same condition the other three use: **only when the space declares at least one fact type schema.** A
  * space with no `typeSchemas.fact` is untouched, and a space with one had already been promised this.
  */
-export function validateFact(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+export function validateFact(meta: SpaceMeta, record: RecordView, instanceWrittenKeys: readonly string[] = []): SchemaViolation[] {
   const fact = viewOf('fact', record);
   if (!meta) return [];
   const violations: SchemaViolation[] = [];
@@ -370,7 +406,7 @@ export function validateFact(meta: SpaceMeta, record: RecordView): SchemaViolati
   const typeSchema = fact.type ? factSchemas?.[fact.type] : undefined;
   const refViolations = checkUnresolvedRef(typeSchema);
   if (refViolations.length) return [...violations, ...refViolations];
-  return [...violations, ...validatePropertiesAgainstSchema(typeSchema, fact.properties)];
+  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, fact.properties, instanceWrittenKeys)];
 }
 
 /**
@@ -389,7 +425,7 @@ export function getAllowedChronoTypes(meta: SpaceMeta | undefined): Set<string> 
 /**
  * Validate a chrono write against the space meta schema.
  */
-export function validateChrono(meta: SpaceMeta, record: RecordView): SchemaViolation[] {
+export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrittenKeys: readonly string[] = []): SchemaViolation[] {
   const chrono = viewOf('chrono', record);
   if (!meta) return [];
   const violations: SchemaViolation[] = [];
@@ -410,7 +446,7 @@ export function validateChrono(meta: SpaceMeta, record: RecordView): SchemaViola
   const typeSchema = chrono.type ? chronoSchemas?.[chrono.type] : undefined;
   const refViolations = checkUnresolvedRef(typeSchema);
   if (refViolations.length) return [...violations, ...refViolations];
-  return [...violations, ...validatePropertiesAgainstSchema(typeSchema, chrono.properties)];
+  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, chrono.properties, instanceWrittenKeys)];
 }
 
 /**
@@ -506,16 +542,28 @@ export function applyPropertyDefaults(
   return filled ? withDefaults : properties;
 }
 
+/**
+ * Whether this space judges a record at all: `warn` and `strict` do, `off` (and a space that never said) evaluates nothing the
+ * undeclared-key rule asks (R6-1). The value rules run in every mode and the MODE decides what is surfaced (`applyValidation`); a rule
+ * that is new has no history to keep, so it is held to the stricter reading.
+ */
+const judgesKeys = (meta: SpaceMeta | undefined): boolean => meta?.validationMode === 'warn' || meta?.validationMode === 'strict';
+
+/** An own property's value, or `undefined`: a key named like something on `Object.prototype` is not on a record because the prototype has it. */
+const ownValue = (props: Readonly<Record<string, unknown>>, key: string): unknown => (Object.hasOwn(props, key) ? props[key] : undefined);
+
 function validatePropertiesAgainstSchema(
+  meta: SpaceMeta | undefined,
   typeSchema: TypeSchema | undefined,
-  properties?: Record<string, unknown>,
+  properties: Readonly<Record<string, unknown>> | undefined,
+  instanceWrittenKeys: readonly string[],
 ): SchemaViolation[] {
   if (!typeSchema?.propertySchemas) return [];
   const violations: SchemaViolation[] = [];
   const props = properties ?? {};
 
   for (const [key, schema] of Object.entries(typeSchema.propertySchemas)) {
-    const val = props[key];
+    const val = ownValue(props, key);
 
     // Required check (inline flag on PropertySchema)
     if (schema.required) {
@@ -532,6 +580,34 @@ function validatePropertiesAgainstSchema(
     if (val === undefined || val === null) continue; // not present, no further checks
 
     violations.push(...validateValue(`properties.${key}`, val, schema));
+  }
+
+  /*
+   * A key the type does not declare (`Q-93`). A type that declares AT LEAST ONE property is a closed list: until this rule the loop
+   * above judged the DECLARED keys' values and nothing else, so a strict space refused a wrong value for `status` and stored
+   * `statuz: 'x'` beside it without a word — while the schema editor promised the opposite. A type that declares none (absent
+   * `propertySchemas`, or `{}`) is OPEN, on both doors: an empty list is not a closed one, or every type created from the editor
+   * would refuse every property.
+   *
+   * **Own keys, both ways.** The declared list is `Object.keys` and a record's keys are its own: a key named `constructor` is
+   * undeclared on a type that does not own that property, however the prototype answers. A null or absent value is an absent key.
+   * One row per key, whatever its value holds — a nested value is the key's, not a row per leaf. Whether the write ADDED the key is not
+   * decided here: the classifier asks (P-6), and a key already stored is never the write's fault.
+   */
+  const declared = Object.keys(typeSchema.propertySchemas);
+  if (judgesKeys(meta) && declared.length > 0) {
+    const declaredSet = new Set(declared);
+    const exempt = new Set(instanceWrittenKeys);
+    let shown: string[] | undefined;
+    for (const key of Object.keys(props)) {
+      if (declaredSet.has(key) || exempt.has(key)) continue;
+      const value = props[key];
+      if (value === undefined || value === null) continue;
+      // A key the caller chose is quoted through the one bounded renderer, as every other name a refusal says (R6-11).
+      const named = peerText(key, { max: NAME_QUOTED });
+      shown ??= declared.slice().sort().slice(0, MAX_DECLARED_NAMES).map(n => peerText(n, { max: NAME_QUOTED }));
+      violations.push({ field: `properties.${named}`, value, reason: `property '${named}' is not declared on this type`, declared: shown });
+    }
   }
 
   return violations;

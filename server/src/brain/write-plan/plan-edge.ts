@@ -55,6 +55,11 @@ export interface EdgeInput {
     fromKind?: RefKind;
     toKind?: RefKind;
   };
+  /**
+   * The property keys the instance itself writes on an edge, exempt from the undeclared-key rule (`Q-93`). Set by the one writer that
+   * owns them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
+   */
+  instanceWrittenKeys?: readonly string[];
 }
 
 // Declared in `write-validation.ts`, beside the `SchemaViolationError` it extends; re-exported because this is where the
@@ -247,7 +252,7 @@ export function edgeRefusal(
   const functional = isFunctionalLabel(spaceId, label);
   const passed = sameBody.map(e => ({ from: e.from, to: e.to, label: e.label, fromKind: e.opts?.fromKind, toKind: e.opts?.toKind }));
   const ends = resolvedEnds(view, input, functional, subject, passed);
-  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, ends);
+  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, ends, input.instanceWrittenKeys);
   if (check.blocked) throw new EdgeSchemaViolation(check);
   return { existing, withDefaults, check };
 }

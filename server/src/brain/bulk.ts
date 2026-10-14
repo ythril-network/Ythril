@@ -15,11 +15,11 @@ import { primitivePropertyError } from './property-values.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
 import { getConfig } from '../config/loader.js';
-import { resolveMetaRefs, getAllowedChronoTypes } from '../spaces/schema-validation.js';
+import { resolveMetaRefs, getAllowedChronoTypes, type InstanceWrittenKeys } from '../spaces/schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { BatchRefs, resolveRef, refKeyDeclared, refKeyUsed, isRefUse, type ResolvedRef } from './batch-refs.js';
-import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom } from './write-connections.js';
+import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom, inlineEdgeWarnings } from './write-connections.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import { parseRecordFlags, type RecordFlags } from './record-flag.js';
 import type { ChronoType, ChronoStatus } from '../config/types.js';
@@ -66,6 +66,19 @@ interface Counts { facts: number; entities: number; edges: number; chrono: numbe
 export const BULK_BODY_KEYS = ['facts', 'entities', 'edges', 'chrono'] as const;
 
 export type BulkInput = Partial<Record<typeof BULK_BODY_KEYS[number], unknown>>;
+
+/**
+ * What a TRUSTED in-process caller of `bulkWrite` hands it that a request never can — a third argument and never a field of the body,
+ * which is read from a caller and refused when it names something `BULK_BODY_KEYS` does not.
+ *
+ * `instanceWrittenKeys` is the property keys the instance itself writes, per kind, exempt from the undeclared-key rule (`Q-93`): the
+ * conversation extractor's, taken from `INSTANCE_WRITTEN_PROPERTY_KEYS`. A REST or MCP door builds its `BulkInput` from a request and
+ * calls `bulkWrite(space, input)` with nothing here, so it cannot claim the exemption — and
+ * `no-rest-or-mcp-door-can-pass-the-instance-written-keys-exemption.test.js` holds it that way.
+ */
+export interface BulkWriteTrust {
+  instanceWrittenKeys?: InstanceWrittenKeys;
+}
 
 /**
  * One item's error row.
@@ -234,7 +247,7 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * is the one that leaves it stored, and its row carries `written` (`BulkError`), because a failed item is the one a
  * caller sends again.
  */
-export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
+export async function bulkWrite(spaceId: string, input: BulkInput, trusted: BulkWriteTrust = {}): Promise<BulkResult> {
   const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
   if (tooLarge) throw new Error(tooLarge);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
@@ -265,11 +278,11 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
   };
 
-  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn);
+  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn, trusted.instanceWrittenKeys);
   const view = new ReadSet(spaceId);
   await view.load(mergeWants([...prepared.map(p => p.want), ...slice(input.edges).map(e => topLevelEdgeWant(spaceId, e))]));
 
-  const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors });
+  const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors }, trusted.instanceWrittenKeys);
   for (const p of prepared) await run.planRecord(p);
   for (const [i, item] of slice(input.edges).entries()) await run.planTopLevelEdge(i, item, strict);
   await run.flush();
@@ -321,6 +334,7 @@ type Warn = (type: string, index: number) => (check: UpdateValidation) => void;
  */
 function prepareItems(
   spaceId: string, input: BulkInput, meta: SpaceMeta | undefined, strict: boolean, reject: Reject, warn: Warn,
+  instanceWrittenKeys: InstanceWrittenKeys | undefined,
 ): PreparedRecord[] {
   const out: PreparedRecord[] = [];
   const common = (kind: 'fact' | 'entity' | 'chrono', item: Record<string, unknown>, i: number): {
@@ -354,6 +368,7 @@ function prepareItems(
       properties: optProps(item['properties']),
       type: typeof item['type'] === 'string' && item['type'].trim() ? item['type'] : undefined,
       opts: { ...c.flags, onValidation: warn('fact', i) }, ttlDays: c.ttlDays, id: c.rawId,
+      ...(instanceWrittenKeys?.fact ? { instanceWrittenKeys: instanceWrittenKeys.fact } : {}),
     };
     out.push({
       kind: 'fact', index: i, item, desired: c.desired, addresses: c.rawId,
@@ -376,6 +391,7 @@ function prepareItems(
       name, type, tags: strArray(item['tags']), properties: optProps(item['properties']) ?? {},
       description: typeof item['description'] === 'string' ? item['description'] : undefined,
       id: c.rawId, opts: c.flags, ttlDays: c.ttlDays, onValidation: warn('entity', i),
+      ...(instanceWrittenKeys?.entity ? { instanceWrittenKeys: instanceWrittenKeys.entity } : {}),
     };
     out.push({
       kind: 'entity', index: i, item, desired: c.desired, addresses: c.rawId,
@@ -497,6 +513,7 @@ function batchRun(
   reject: Reject,
   warn: Warn,
   out: { inserted: Counts; updated: Counts; connections: { links: number; edges: number }; errors: BulkResult['errors'] },
+  instanceWrittenKeys: InstanceWrittenKeys | undefined,
 ) {
   let pending: Pending[] = [];
   const inlines: InlineEdges[] = [];
@@ -552,8 +569,10 @@ function batchRun(
       entry.inline = { kind: p.kind, id: entry.plan.id, landed: [], failed: [] };
       inlines.push(entry.inline);
     }
-    for (const e of inlineEdges) {
-      await planEdgeItem(e, type, p.index, p.item, null, entry);
+    for (const [i, e] of inlineEdges.entries()) {
+      // A `warn` space reports what a `strict` one would refuse, for the item's own edges too — the row names the edge (`edges[1].properties.k`).
+      const reported: EdgeInput = { ...e, opts: { ...e.opts, onValidation: check => warn(type, p.index)({ ...check, warnings: inlineEdgeWarnings(i, check) }) } };
+      await planEdgeItem(reported, type, p.index, p.item, null, entry);
     }
   }
 
@@ -602,6 +621,7 @@ function batchRun(
       // The RESOLVED kinds, always (`Q-193`): a `$ref` to a fact is stored as a fact end even when the
       // caller stated no kind. Passing them only when typed stored such an end as an entity.
       opts: { ...edgeFlags.flags, fromKind, toKind, onValidation: warn('edge', i) },
+      ...(instanceWrittenKeys?.edge ? { instanceWrittenKeys: instanceWrittenKeys.edge } : {}),
     };
     /*
      * What the edge asks of the read set, read now if the batch's one read did not (a `$ref` to a record addressed by

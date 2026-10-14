@@ -17,6 +17,12 @@
     "propertySchemas": {
       "role": {
         "type": "string"
+      },
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
       }
     },
     "suppressEmbeddings": true

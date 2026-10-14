@@ -12,6 +12,9 @@
       },
       "brand": {
         "type": "string"
+      },
+      "aliases": {
+        "type": "string"
       }
     }
   }

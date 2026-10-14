@@ -32,7 +32,9 @@
  * `sourceTurns`: returned keyed by record id, stored in no record — every property is folded into the embedded
  * text, and a turn id is noise in every vector of the space.
  */
-import { bulkWrite, BULK_MAX_PER_TYPE, type BulkInput, type BulkResult } from '../../brain/bulk.js';
+import { bulkWrite, BULK_MAX_PER_TYPE, type BulkInput, type BulkResult, type BulkWriteTrust } from '../../brain/bulk.js';
+import { INSTANCE_WRITTEN_PROPERTY_KEYS } from '../../spaces/schema-validation.js';
+import type { ValidationMode } from '../../config/types.js';
 import { storeFile } from '../../files/store-file.js';
 import { updateFileMeta } from '../../files/file-meta.js';
 import { assertWritable, type SchemaEntry } from '../validate-extraction.js';
@@ -40,7 +42,7 @@ import type { Extraction } from './assemble.js';
 import { inChunks } from '../../util/chunks.js';
 
 export interface ExtractionWriters {
-  bulk: (spaceId: string, input: BulkInput) => Promise<Pick<BulkResult, 'errors' | 'refs'>>;
+  bulk: (spaceId: string, input: BulkInput, trusted?: BulkWriteTrust) => Promise<Pick<BulkResult, 'errors' | 'refs'>>;
   storeFile: (spaceId: string, path: string, bytes: Buffer, opts: { meta: { tags: string[] }; actor: TranscriptActor }) => Promise<unknown>;
   linkFile: (spaceId: string, path: string, links: { linkEntities?: string[]; linkFacts?: string[] }) => Promise<unknown>;
 }
@@ -81,11 +83,12 @@ export async function writeExtraction(
   spaceId: string,
   extraction: Extraction,
   /** `transcripts: false` writes the records and no files — for a caller that may not write files. */
-  opts: { schemaEntries: SchemaEntry[]; claimType: string; transcripts: boolean },
+  opts: { schemaEntries: SchemaEntry[]; claimType: string; transcripts: boolean; validationMode?: ValidationMode },
   writers: ExtractionWriters = DOOR,
 ): Promise<WriteOutcome> {
-  // Refused before a single record is written — a half-written conversation is worse than none.
-  assertWritable(extraction, opts.schemaEntries);
+  // Refused before a single record is written — a half-written conversation is worse than none. The space's own mode says which of the
+  // checks refuse: a key its type does not declare refuses in `strict` only (`warn` writes it and the batch door says so, `off` says nothing).
+  assertWritable(extraction, opts.schemaEntries, opts.validationMode);
 
   const ids: Record<string, string> = Object.fromEntries((extraction.existingEntities ?? []).map(e => [e.key, e.id]));
   const sourceTurns: Record<string, string[]> = {};
@@ -97,7 +100,9 @@ export async function writeExtraction(
   const step = async (phase: WriteError['phase'], collection: keyof BulkInput, items: Item[], keyOf: (i: number) => string | undefined) => {
     for (const [k, chunk] of inChunks(items, BULK_MAX_PER_TYPE).entries()) {
       const at = k * BULK_MAX_PER_TYPE;
-      const r = await writers.bulk(spaceId, { [collection]: chunk });
+      // The keys this extractor itself writes are exempt from the undeclared-key rule, and ONLY here: it is the writer that owns them,
+      // and it hands the door the table as the door's trusted argument (`BulkWriteTrust`) — a caller's request has no way to.
+      const r = await writers.bulk(spaceId, { [collection]: chunk }, { instanceWrittenKeys: INSTANCE_WRITTEN_PROPERTY_KEYS });
       for (const [key, ref] of Object.entries(r.refs ?? {})) ids[key] = ref.id;
       for (const e of r.errors) {
         const key = keyOf(at + e.index);

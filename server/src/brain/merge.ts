@@ -32,6 +32,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
+import { classifyMergedEntity } from './write-validation.js';
 import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
@@ -687,9 +688,18 @@ export async function executeMerge(
    * transaction: the check is pure, so a refusal writes nothing at all, where inside the transaction it rolled the
    * relinks back but had already spent their seqs.
    */
-  const violations = validateEntity(getSpaceMeta(spaceId) ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
-  const verdict = applyValidation(getSpaceMeta(spaceId), violations);
-  if (verdict.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
+  /*
+   * Judged as the write it is: what the merge INTRODUCES, against the survivor as stored (`classifyMergedEntity`). A key the survivor
+   * already stores is not blamed, whether its type declares it or not; a key the absorbed brings in that the survivor lacks is.
+   */
+  const meta = getSpaceMeta(spaceId);
+  const afterRows = validateEntity(meta ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
+  const beforeRows = validateEntity(meta ?? {}, recordViewOf('entity', survivor));
+  const check = classifyMergedEntity(meta, survivor, mergedProperties, beforeRows, afterRows);
+  // What the refusal and the warning name: the violations THIS merge introduced, never the survivor's own stored ones.
+  const violations = check.introduced;
+  if (check.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
+  const verdict = applyValidation(meta, violations);
   if (verdict.warnings.length > 0) {
     log.warn(
       `merge: the survivor '${peerText(survivor._id)}' in space '${peerText(spaceId)}' violates its own schema after merging `

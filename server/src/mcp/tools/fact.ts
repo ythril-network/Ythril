@@ -16,9 +16,9 @@ import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
 import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { resolveMetaRefs } from '../../spaces/schema-validation.js';
+import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, DELETION_REACH } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -62,7 +62,7 @@ export const save_factTool: ToolHandler = {
             type: { type: 'string', description: 'Optional fact type (e.g. "note", "decision"). Selects the per-type schema used to validate `properties` — see the space\'s typeSchemas.fact.' },
             properties: {
               type: 'object',
-              description: 'Optional structured key-value metadata (filterable via query).',
+              description: 'Optional structured key-value metadata (filterable via query). ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
@@ -163,7 +163,7 @@ export const save_factTool: ToolHandler = {
      * every entity and says nothing about the facts, and links are never add-only the way tags are.
      */
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`.
-    await applyConnections(ts, mem._id, 'fact', a, mem.author, ctx.actor);
+    const connected = await applyConnections(ts, mem._id, 'fact', a, mem.author, ctx.actor);
     const warnings: string[] = [];
     if (mem.similar && mem.similar.length > 0) {
       warnings.push(`⚠️ Possible duplicate — ${mem.similar.length} existing memor${mem.similar.length === 1 ? 'y is' : 'ies are'} highly similar: ${mem.similar.map(s => `"${s.summary}" (ID ${s._id}, ${s.score.toFixed(2)})`).join('; ')}. This fact was still stored; pass checkDuplicates:false to skip this check, or update the existing one instead.`);
@@ -178,7 +178,7 @@ export const save_factTool: ToolHandler = {
     // (An unresolved or ambiguous reference is now a hard error above, not a warning on a write
     // that already happened.)
     // Schema warnings (reuse violations from pre-write check)
-    const schemaWarnings = schemaWarningAnswer(remMeta, remCheck as UpdateValidation | undefined);
+    const schemaWarnings = schemaWarningAnswer(remMeta, remCheck as UpdateValidation | undefined, connected.warnings);
     warnings.push(...schemaWarnings.lines);
     const remText = `Stored fact (seq ${mem.seq}, ID ${mem._id}).`
       + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '')
@@ -268,7 +268,7 @@ export const update_factTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Key-value properties to merge into the stored map (e.g. {"source": "manual"}) — keys you do not name are kept. Use deleteFields to remove one. Values must be string, number, or boolean.',
+              description: 'Key-value properties to merge into the stored map (e.g. {"source": "manual"}) — keys you do not name are kept. Use deleteFields to remove one. Values must be string, number, or boolean. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
@@ -356,16 +356,18 @@ export const update_factTool: ToolHandler = {
     if (audit.prior) {
       await assertConnections(audit.home!, 'fact', await connectionSubject(audit.home!, 'fact', a, { stored: audit.prior as { _id: string; type?: string } }), a);
     }
-    const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    let updCheck: UpdateValidation | undefined;
+    const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updated) { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
     if (!updated) throw new Error(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
-    await applyConnections(updated.spaceId, updated._id, 'fact', a, updated.author, ctx.actor);
+    const connected = await applyConnections(updated.spaceId, updated._id, 'fact', a, updated.author, ctx.actor);
+    const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updated.spaceId), updCheck, connected.warnings);
     return {
-      content: [{ type: 'text' as const, text: `Fact updated (ID ${updated._id}, seq ${updated.seq}).` }],
-      structuredContent: { ...updated },
+      content: [{ type: 'text' as const, text: [`Fact updated (ID ${updated._id}, seq ${updated.seq}).`, ...schemaWarnings.lines].join('\n') }],
+      structuredContent: { ...updated, ...schemaWarnings.structured },
     };
   },
 };
