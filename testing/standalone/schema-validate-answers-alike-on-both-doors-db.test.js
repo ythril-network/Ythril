@@ -20,8 +20,9 @@
  *    view of the schema — and every row that would carry a STORED value arrives without it. Today the route returns
  *    `value` to a `schema: read` token, which is a way to read knowledge through a schema door. With `knowledge: read` the value
  *    is there. The same on both doors. (A sample's own record is the caller's, not stored data: no right is asked for it.)
- * 3. **Paged.** Seven violating records at a limit of three come back in pages that together hold each exactly once, whichever
- *    continuation the answer names (`nextCursor`, or the `nextSkip` the list pages already use), and a page never holds more
+ * 3. **Paged.** Seven violating records at a limit of three come back in pages that together hold each exactly once; pages
+ *    continue by `after` / `nextAfter` — the server's `_id`-keyset spelling, the same the REST dry run pages with, so the two
+ *    doors take one parameter set — and a page never holds more
  *    than the limit. A scan that stops at a bound says so (`complete: false`) and never `true`.
  * 4. **`schema_validate` never echoes the meta it was sent**, in either mode: a tool answer lands in an agent's context, and a
  *    meta is up to a megabyte of what the agent already holds.
@@ -205,7 +206,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
           const ids = (body.violations ?? []).map(v => v._id ?? v.id).filter(Boolean);
           assert.ok(ids.length <= 3, `${door}: a page of limit 3 holds ${ids.length}`);
           seen.push(...ids);
-          const next = body.nextCursor !== undefined ? { cursor: body.nextCursor } : body.nextSkip !== undefined ? { skip: body.nextSkip } : null;
+          const next = body.nextAfter !== undefined ? { after: body.nextAfter } : null;
           if (!next) break;
           continuation = next;
         }
