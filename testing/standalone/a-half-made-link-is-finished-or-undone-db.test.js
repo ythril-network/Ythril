@@ -30,7 +30,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
-import { caseInsensitiveAt, stateOf, sentenceOf } from './_move-destination.mjs';
+import { caseInsensitiveAt, stateOf, sentenceOf, withJobsHandedBack } from './_move-destination.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -110,8 +110,11 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
     assert.equal(read('a.txt'), 'content of a.txt', 'the source lost its bytes');
     assert.equal((await rowOf('a.txt'))?.description, 'A');
     await tombstones.whenPendingFileTombstoneDropsSettle();
+    const after = await stateOf(acts, S);
+    assert.equal(after.jobs[0]?.claimableAfter, null, 'the job the move held was not handed back');
+    assert.deepEqual(withJobsHandedBack(after), withJobsHandedBack(before), 'the move that failed at its last step changed something');
+    // Read last: a sync cycle that asks what a peer would be told writes its own bookkeeping on the records.
     assert.deepEqual(await acts.published(), { served: [], pushed: [] }, 'a move whose last step failed published a tombstone');
-    assert.deepEqual(await stateOf(acts, S), before, 'the move that failed at its last step changed something');
   });
 
   it('(b) the removal of the source name finds it already gone: that is a success, not a failure', async () => {
@@ -147,9 +150,10 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
       await crashedBetweenLinkAndUnlink('a.txt', 'b.txt');
       assert.equal(await tombstones.moveIsOwed(S, 'a.txt', 'b.txt'), true, 'a marked half-made link is not read as an owed move, so nothing would ever finish it');
 
-      const { outcome, failed } = await pass(LATER());
+      const done = await pass(LATER());
+      const { outcome } = done;
 
-      assert.deepEqual(failed, [], `housekeeping failed on a half-made link: ${JSON.stringify(failed)}`);
+      assert.deepEqual(done.failed, [], `housekeeping failed on a half-made link: ${JSON.stringify(done.failed)}`);
       assert.equal(outcome.finished, 1, 'housekeeping did not finish the half-made link');
       assert.equal(acts.onDisk('a.txt'), false, 'the source name is still there: the file has two names');
       assert.equal(read('b.txt'), 'content of a.txt');

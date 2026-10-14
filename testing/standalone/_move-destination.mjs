@@ -49,6 +49,15 @@ export async function stateOf(acts, space) {
   };
 }
 
+/**
+ * {@link stateOf} with what a HOLD of a job leaves behind taken out of it: a move holds the jobs of the path for its duration and hands
+ * them back (`claimableAfter` null again), and doing so stamps `updatedAt` and clears the claim token. For a refusal that came after the
+ * hold (a move that lost a race at its bytes), "handed back" is the claim fields being what they were, not those bookkeeping stamps.
+ */
+export function withJobsHandedBack(state) {
+  return { ...state, jobs: state.jobs.map(({ claimToken: _t, updatedAt: _u, ...job }) => job) };
+}
+
 /** What a door said, as one string: REST's body, a tool's `data` and MCP's text and structured content — for "the remedy is in the sentence". */
 export function sentenceOf(answer) {
   return JSON.stringify({ body: answer.body, text: answer.text, sc: answer.sc });
