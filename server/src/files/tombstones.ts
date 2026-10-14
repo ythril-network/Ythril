@@ -1,7 +1,10 @@
 /**
- * File sync tombstones — and the one module that reads or writes them.
+ * File sync tombstones — the lifecycle, and the one door every reader of them goes through.
  *
- * A `FileTombstoneDoc` in the per-space `<spaceId>_file_tombstones` collection records that a file was deleted locally.
+ * The collection itself is opened by `files/tombstone-store.ts` (Q-462), and a move's marker is `files/move-markers.ts`; this module
+ * keeps what happens to a tombstone — written pending, confirmed, settled, published, pruned, applied against arrivals — and imports both.
+ *
+ * A `FileTombstoneDoc` in the per-space `<spaceId>_file_tombstones` collection (`tombstone-store.ts`) records that a file was deleted locally.
  * The sync engine pushes these to peers, which then unlink the file and drop its metadata — without them, a peer's
  * manifest still advertises the file and pushes it straight back (resurrection). Every code path that deletes a file
  * (API, folder delete, move, MCP, TTL sweep) must write one.
@@ -21,8 +24,8 @@
  *
  * - **Written pending** ({@link writePendingFileTombstones}), before the irreversible step — and REQUIRED: an act that cannot
  *   record its removal does not begin ({@link ActNotRecorded}). **Nothing that serves,
- *   replicates, prunes or counts tombstones sees a pending one**: every reader of the collection is in this module
- *   (`a-file-tombstone-is-read-through-its-one-module.test.js`) and reads only {@link PUBLISHED} ones — with ONE
+ *   replicates, prunes or counts tombstones sees a pending one**: every reader of the collection reads it through the store
+ *   (`a-file-tombstone-is-read-through-its-one-module.test.js`), by way of this module, and reads only {@link PUBLISHED} ones — with ONE
  *   exception, which is a question and not a service: what an ARRIVING file is compared with also takes a pending tombstone
  *   whose act has already removed the path's bytes ({@link decideArrivals}, Q-348), because that delete has happened.
  * - **Confirmed** ({@link confirmFileTombstones}) once ITS OWN path's bytes are gone or moved, and stamped with that
@@ -89,21 +92,15 @@
  *
  * ## A move's marker
  *
- * A move's tombstones also name the move (`move: { from, to }`). With no bytes at `from` and bytes at `to`, that is the
- * only thing that tells a move a store failure stopped after its bytes from an orphan `from` beside an unrelated `to`
- * — which the retry used to "complete", overwriting `to`'s derived records (preship-3 P3-2). Cleared once the move is
- * finished.
- *
- * **Whether a move is still OWED is one question, {@link moveIsOwed}, and every remover of a marker row or of the marker asks it**
- * (the settle's clearing, the prune, a supersede, a drop, a publish that removes a pending row, {@link forgetFinishedMove}) — the
- * space wipe alone does not, because the space no longer holds what a move would carry. A remover that cannot tell keeps the
- * row. The marker also holds what finishing the move needs without the request that began it (`MoveMarker`: what the bytes were,
- * who asked, how often housekeeping has tried), all of it inside `move` and off the wire.
+ * A move's tombstones also name the move (`move: { from, to }`), and **whether a move is still OWED is one question, `moveIsOwed`**,
+ * asked by every remover of a marker row or of the marker (`move-markers.ts`, which holds the marker's block and says why). What stays
+ * here is the one marker-keyed act that must PUBLISH a tombstone, {@link settleBegunMove}, and the walk that clears the markers of moves
+ * that are over ({@link settleStalePendingFileTombstones}, through the marker module's pager).
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
-import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
+import { asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
 import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
@@ -111,21 +108,24 @@ import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { dropIndexesIfPresent } from '../db/index-names.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
-import { encodeIsoCursor, isoKeysetFilters, isoKeysetSort, tieThenRange, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
+import { encodeIsoCursor, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
 import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { bytesPresentAt } from './stored-bytes.js';
-import { removeConvergedLinks } from './move-links.js';
-import { isTheMovedBytes, movedBytesOf, somethingOfTheFileIsAt, whatBecameOfPath } from './move-marker-reads.js';
-import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import { whatBecameOfPath } from './move-marker-reads.js';
 import { ActNotRecorded } from './act-answers.js';
-import { kindAt, moveKey, movedPairs, parentOfSidecar } from './moved-paths.js';
+import { moveKey, parentOfSidecar } from './moved-paths.js';
+import {
+  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
+  type MoveMarker, type PrunableRow, type StoredFileTombstone,
+} from './tombstone-store.js';
+import {
+  abandonMove, createMoveMarkerPager, markerDocOf, moveMarker, MOVE_MARKER_KEEP_MS, movesStillOwed, removeUnlessOwed,
+} from './move-markers.js';
 import {
   heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
@@ -135,66 +135,16 @@ import {
 export { shadowDecision, type HeldFileTombstone, type MetaArrival, type FileArrival, type ArrivalVerdicts } from './tombstone-shadow.js';
 
 /**
- * What a move writes on its tombstones: the two paths, and what housekeeping needs to finish the move should the request that
- * began it not. Everything past `from` and `to` lives INSIDE `move`, so the one `$unset` of the marker clears it all, and none
- * of it is on the wire ({@link WIRE} names the fields a peer is sent).
- */
-export interface MoveMarker {
-  from: string;
-  to: string;
-  /** The size and mtime of the file's bytes as the move began (a rename keeps both): what tells the bytes at `to` are the moved ones. Absent for a directory, and on a marker written before they were recorded. */
-  size?: number;
-  mtimeMs?: number;
-  /** Who asked for the move, so the completion tells subscribers once, as the request would have. */
-  actor?: WebhookActor;
-  /** How many times housekeeping has tried to finish the move, and the instant before which it does not try again. */
-  attempts?: number;
-  nextAttemptAt?: string;
-}
-
-/** A file tombstone as stored HERE: the replicated shape, plus what never leaves this instance. */
-interface StoredFileTombstone extends FileTombstoneDoc {
-  /** Set until the act the tombstone records has happened. Never served, pushed, pruned or counted. */
-  pending?: true;
-  /** The move that wrote it, when one did: what tells a retried move it is owed. */
-  move?: MoveMarker;
-  /** The hash of the file row's content when the act (or the apply) removed it, as THIS instance held it — what a
-   *  later byte arrival is compared with (`shadowDecision`). Never on the wire: a deletion carries no fingerprint of
-   *  the erased content. */
-  contentHash?: string;
-  /** The upstream that delivered a RELAYED tombstone, so a later version from that same upstream is not refused by it. */
-  storedVia?: string;
-  /** This instance's own position for the tombstone, for paging, acknowledgement and pruning: the publish time of an
-   *  own one, the RECEIVE time of a relayed one — a foreign clock never enters a local position. */
-  positionAt?: string;
-  /** When the act that wrote it PUT it: a stamp of this instance's monotonic clock ({@link PositionClock}), so any two rows
-   *  of one space order by it. What the one-per-path rule compares; `deletedAt` is the same instant while pending and the
-   *  publish time after, and a foreign or settled clock never decides. Absent on a row stored before it existed. */
-  writtenAt?: string;
-  /** What the settle selects and orders by, while pending: the WALL clock when the act wrote it (a timer, never a position), then
-   *  the settle's own `now` once it cannot look at the path — never `deletedAt` or `writtenAt`, which the one-per-path rule reads. */
-  settleAt?: string;
-  /** Who made the published row: `own` (this instance published it) or `relayed` (a peer's, kept to be passed on). A row
-   *  with neither stamp is never taken for one this instance published, so it never suppresses an own tombstone. */
-  origin?: 'own' | 'relayed';
-}
-
-/**
  * The fields a file tombstone has on the wire. Every serving reader projects to these and nothing else. Exported so a
  * gate can derive the wire shape from it instead of keeping a list that goes stale the day a field joins (`issuer` and
  * `rowSeq` did).
  */
 export const WIRE = { _id: 1, spaceId: 1, path: 1, deletedAt: 1, issuer: 1, rowSeq: 1 } as const;
-/** A tombstone whose act has happened: the only kind any reader outside the act's own bookkeeping may see. */
-const PUBLISHED = { pending: { $exists: false } } as const;
+
 /** How long a pending tombstone may wait for its act before the TTL sweep settles it from the disk. */
 const STALE_AFTER_MS = 10 * 60_000;
 /** The instant before which a tombstone (or a move's marker) written is past its act at `now`: the settle's threshold, which housekeeping's completion of an owed move shares. */
 export const fileTombstoneStaleBefore = (now: Date): string => new Date(now.getTime() - STALE_AFTER_MS).toISOString();
-/** How many stale pending tombstones one space settles per sweep cycle, oldest first; the rest wait for the next. */
-export const FILE_TOMBSTONE_SETTLE_BATCH = 500;
-
-const tombstonesOf = (spaceId: string) => col<StoredFileTombstone>(spaceCollection(spaceId, 'fileTombstones'));
 
 /**
  * The indexes the routine questions asked of a space's file tombstones need (bundle-30 I16, preship-4 P4-6). Each
@@ -225,14 +175,14 @@ export const FILE_TOMBSTONE_INDEXES = [
 
 /**
  * Create {@link FILE_TOMBSTONE_INDEXES} for one space. Idempotent, so `initSpace` runs it for a new space and the boot
- * pass (`ensureQueryIndexes`) for every space initialisation does not revisit — here, because this module is the one
- * that opens the collection.
+ * pass (`ensureQueryIndexes`) for every space initialisation does not revisit — here, because the lifecycle is what
+ * knows which questions it asks the collection (the marker's own are `move-markers.ts`'s, and the indexes serve both).
  */
 export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void> {
   for (const ix of FILE_TOMBSTONE_INDEXES) await tombstonesOf(spaceId).createIndex(ix.keys, ix.options);
   // Local state, so there is nothing to migrate but the index: the one a question no longer asks is maintained on every
   // pending write for nothing. Dropped only when listed (`dropIndexesIfPresent`, the one way a replaced index goes).
-  await dropIndexesIfPresent(spaceCollection(spaceId, 'fileTombstones'), REPLACED_FILE_TOMBSTONE_INDEXES);
+  await dropFileTombstoneIndexesIfPresent(spaceId, REPLACED_FILE_TOMBSTONE_INDEXES);
 }
 
 /** The indexes a later release replaced, by name: dropped by {@link ensureFileTombstoneIndexes}. */
@@ -382,125 +332,24 @@ export async function settledPositionCap(spaceId: string): Promise<string> {
   return positionHolds.lowest(spaceId) ?? new Date(nextInstant(clock)).toISOString();
 }
 
-/** The cap as an `extra` for the iso keyset: the rows strictly below it. */
-const belowCap = (cap: string) => ({ positionAt: { $lt: cap } });
-/** The prune's bound: acknowledged (at or below `upTo`) and settled (below the cap). */
-const prunable = (upTo: string, cap: string) => ({ ...PUBLISHED, positionAt: { $lte: upTo, $lt: cap } });
-
-// ── The questions asked of the collection ──────────────────────────────────────────────────────────────────────────
-
-/** What a builder of {@link FILE_TOMBSTONE_QUERIES} is asked with; each reads the parts it needs. */
-export interface FileTombstoneQuerySample {
-  spaceId: string; now: Date; before: string; paths: readonly string[]; after: IsoPosition; cap: string; upTo: string; limit?: number | undefined;
-  /** Where {@link movesBegunBefore} resumes: strictly after this move. Absent at the start. */
-  afterMove?: { from: string; to: string } | undefined;
-}
-/**
- * A question as the store is asked it. A keyset page is two reads, and `tie` is the first of them (the rest of a run of equal
- * positions, after a cursor's id) where `filter` is the second (strictly later positions): {@link ask} runs them as one.
- */
-export interface FileTombstoneQuery { filter: Record<string, unknown>; tie?: Record<string, unknown> | null; sort?: Record<string, 1>; limit?: number | undefined }
-
-/** A page in `(positionAt, _id)` order over the two halves of a position keyset, `base` narrowing both. */
-const positionPage = (
-  base: Record<string, unknown>, { tie, range }: { tie: Record<string, unknown> | null; range: Record<string, unknown> }, limit: number | undefined,
-): FileTombstoneQuery =>
-  ({ filter: { ...base, ...range }, tie: tie && { ...base, ...tie }, sort: { ...isoKeysetSort('positionAt') }, limit });
-
-/**
- * THE questions the module asks of its collection that an index must answer, each a function of one sample bag. The module runs
- * every one of its own reads through its entry (the settle, the by-path reader, the pages, the prune), and
- * `file-tombstones-are-indexed-db` explains these same objects, so the plan it checks is the plan the module runs and not a copy
- * of it. The two page questions carry both halves of a keyset read (`filter` is the range, `tie` the same shape one instant
- * narrower) and {@link ask} runs them as one: the page read and the prune are THESE questions, so an index gate that explains them
- * explains what is run.
- */
-export const FILE_TOMBSTONE_QUERIES = {
-  /** The settle's batch: pending rows written (or last looked at) before `before`, oldest first. */
-  settle: ({ before, limit }: Pick<FileTombstoneQuerySample, 'before' | 'limit'>): FileTombstoneQuery =>
-    ({ filter: { pending: true, settleAt: { $lte: before } }, sort: { settleAt: 1 }, limit }),
-  /** The same for a pending row written before `settleAt` existed, which the first never meets. Served by the null end of the same index. */
-  settleLegacy: ({ before, limit }: Pick<FileTombstoneQuerySample, 'before' | 'limit'>): FileTombstoneQuery =>
-    ({ filter: { pending: true, settleAt: { $exists: false }, deletedAt: { $lte: before } }, sort: { deletedAt: 1 }, limit }),
-  /** The pending rows among some paths: what a prune must not leave a path without, and what an act's leftovers are. */
-  pendingByPath: ({ paths }: Pick<FileTombstoneQuerySample, 'paths'>): FileTombstoneQuery =>
-    ({ filter: { path: { $in: [...paths] }, pending: true } }),
-  /** A page of published tombstones after `after`, below the cap, in `(positionAt, _id)` order. */
-  cappedPage: ({ spaceId, after, cap, limit }: Pick<FileTombstoneQuerySample, 'spaceId' | 'after' | 'cap' | 'limit'>): FileTombstoneQuery =>
-    positionPage({ spaceId, ...PUBLISHED }, isoKeysetFilters('positionAt', after, belowCap(cap)), limit),
-  /** A page of the tombstones the prune may take: published, acknowledged, settled. */
-  prunePage: ({ after, cap, upTo, limit }: Pick<FileTombstoneQuerySample, 'after' | 'cap' | 'upTo' | 'limit'>): FileTombstoneQuery =>
-    positionPage({}, isoKeysetFilters('positionAt', after, prunable(upTo, cap)), limit),
-  /**
-   * The rows that carry a move's marker and were written before `before`, in `(move.from, move.to)` order, resuming after `afterMove`:
-   * a keyset over the MOVE, not the row, so the many rows of one big move are passed in one step (the cursor skips them all) and
-   * cannot pin the head of the window. Two reads as the page questions are — the rest of a run at the cursor's own `from`, then
-   * the later `from`s — each bounded by the marker's index.
-   */
-  moveMarkers: ({ before, afterMove, limit }: Pick<FileTombstoneQuerySample, 'before' | 'afterMove' | 'limit'>): FileTombstoneQuery => {
-    const settled = { deletedAt: { $lte: before } };
-    return {
-      filter: { ...settled, 'move.from': { $gt: afterMove?.from ?? '' } },
-      tie: afterMove ? { ...settled, 'move.from': afterMove.from, 'move.to': { $gt: afterMove.to } } : null,
-      sort: { 'move.from': 1, 'move.to': 1 }, limit,
-    };
-  },
-  /** The rows whose move wrote them with one of `paths` as its source: what a media job at that path asks. */
-  movesFrom: ({ paths }: Pick<FileTombstoneQuerySample, 'paths'>): FileTombstoneQuery =>
-    ({ filter: { 'move.from': { $in: [...paths] } } }),
-  /** The rows whose move carried a file to one of `paths`: what the delete of a path asks of the moves that ended there. */
-  movesInto: ({ paths }: Pick<FileTombstoneQuerySample, 'paths'>): FileTombstoneQuery =>
-    ({ filter: { 'move.to': { $in: [...paths] } } }),
-} as const;
-
-/** Run one of {@link FILE_TOMBSTONE_QUERIES}' questions — a keyset page as its tie half, then its range half, up to the limit. */
-async function ask<T>(spaceId: string, q: FileTombstoneQuery, projection: Record<string, 1>): Promise<T[]> {
-  const read = async (filter: Record<string, unknown>, limit: number | undefined): Promise<T[]> => {
-    let cursor = tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(filter as never), { projection });
-    if (q.sort) cursor = cursor.sort(q.sort);
-    if (limit !== undefined) cursor = cursor.limit(limit);
-    return await cursor.toArray() as unknown as T[];
-  };
-  return tieThenRange(read, q.tie ?? null, q.filter, q.limit);
-}
-
-/**
- * The tombstones of some paths — one `$in` per chunk, by the `path` index — narrowed by `filterFor`, with the fields the
- * caller needs. THE chunked by-path read: the published ones an arriving file is compared with ({@link heldFileTombstones}),
- * the rows a publish decides over, the pending ones a prune must not leave a path without.
- */
-async function tombstonesAtPaths<T>(
-  spaceId: string, paths: readonly string[], filterFor: (chunk: string[]) => Record<string, unknown>, projection: Record<string, 1>,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (const chunk of inChunks([...new Set(paths)], READ_CHUNK)) {
-    out.push(...await tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>(filterFor(chunk) as never), { projection }).toArray() as unknown as T[]);
-  }
-  return out;
-}
-
 // ── A wipe is not undone by a publish in flight (Q-406) ────────────────────────────────────────────────────────────
 
-/**
- * How many times each space's file tombstones have been wiped in this process. A pending handle carries the generation it was
- * written under, and a publish or a settle that read its rows under another one drops instead of upserting: its upsert exists to
- * write again a row a stale settle dropped, and after a wipe it would re-create a tombstone in a space that was just emptied —
- * published, served, and applied by every peer to a path of the NEW space.
+/*
+ * The wipe generation itself (how many times each space has been wiped in this process, and what a publish or settle that read its rows
+ * under another one does) is the store's: `wipeGenerationOf` and `bumpWipeGeneration` in `tombstone-store.ts`.
  */
-const wipeGenerations = new Map<string, number>();
-const wipeGenerationOf = (spaceId: string): number => wipeGenerations.get(spaceId) ?? 0;
 
 /**
  * Forget every file tombstone of a space (`wipeSpace` with `files`), and mark the wipe: under the space's publish lock, so a
  * publish that is running finishes first and one that starts after sees the new generation. The wipe's delete and the generation
  * are one step on purpose — the delete alone is what a publish in flight undoes.
  *
- * It does not ask {@link moveIsOwed}, by design: the wipe removes the space's files and records with the tombstones, so no move
+ * It does not ask `moveIsOwed` (`move-markers.ts`), by design: the wipe removes the space's files and records with the tombstones, so no move
  * can be owed in a space that holds nothing for it to carry.
  */
 export async function forgetFileTombstonesOf(spaceId: string): Promise<void> {
   await publishLock.run(spaceId, () => withinWriteBound(async () => {
-    wipeGenerations.set(spaceId, wipeGenerationOf(spaceId) + 1);
+    bumpWipeGeneration(spaceId);
     await tombstonesOf(spaceId).deleteMany({});
   }));
 }
@@ -687,8 +536,7 @@ async function publishSlice(
 async function dropPendingById(spaceId: string, ids: readonly string[]): Promise<void> {
   for (const chunk of inChunks([...ids], READ_CHUNK)) {
     await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, pending: true, 'move.from': { $exists: false } }));
-    const marked = await readStoredById<StoredFileTombstone>(spaceCollection(spaceId, 'fileTombstones'), chunk, { move: 1 },
-      { filter: { pending: true, 'move.from': { $exists: true } } });
+    const marked = await readTombstonesById<StoredFileTombstone>(spaceId, chunk, { move: 1 }, { pending: true, 'move.from': { $exists: true } });
     await removeUnlessOwed(spaceId, [...marked.values()], { pending: true });
   }
 }
@@ -710,17 +558,6 @@ async function readFileRows(spaceId: string, ids: readonly string[]): Promise<Ma
     return new Map();
   }
 }
-
-/** The marker a move writes on its tombstones, as a filter. */
-const moveMarker = (from: string, to: string) => ({ 'move.from': toDocId(from), 'move.to': toDocId(to) });
-
-/** A marker as it is stored: its paths as the stores key them, and no field the caller left undefined (a stored `null` is a value). */
-const markerDocOf = (m: MoveMarker): MoveMarker => ({
-  // `fromEntries` types its result as a bare record, so the cast restores the marker's type; the fields are NOT listed here instead, because
-  // a listed marker silently drops the next field it gains.
-  ...(Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined)) as unknown as MoveMarker),
-  from: toDocId(m.from), to: toDocId(m.to),
-});
 
 /** Drops still running, so a test (and nothing else) can wait for them: `whenPendingFileTombstoneDropsSettle`. */
 const drops = new DetachedWork('dropPendingFileTombstones');
@@ -965,12 +802,12 @@ const pageOfMoves = createMoveMarkerPager();
 
 /**
  * Forget the marker of a move whose act is over — its bytes are at `to` and none at `from`, and nothing of the file is still at
- * `from` ({@link forgetFinishedMove} asks {@link moveIsOwed}, so a move that is still OWED is never forgotten here) — on any row
+ * `from` (`forgetFinishedMove` asks `moveIsOwed`, both in `move-markers.ts`, so a move that is still OWED is never forgotten here) — on any row
  * old enough to be past its act. The move that finished clears its own; this is for the one whose clearing failed, or that a
  * restart came between, so that no row is kept for ever on the strength of a marker nobody will look for. Best effort, and a
  * path it cannot look at is left alone: a marker kept is only ever a delay.
  *
- * Walks the MOVES, not the rows ({@link movesBegunBefore}): a directory move writes a marker on every file under it, and a window
+ * Walks the MOVES, not the rows (the marker module's pager, `createMoveMarkerPager`): a directory move writes a marker on every file under it, and a window
  * of rows read from the head was one move's rows for ever. **A pass resumes after the last move it looked at** (`pageOfMoves`), so a
  * move it cannot clear does not hold the head of the window, and **each move is a unit of the space** (`eachUnitOfSpace`): a move
  * whose path cannot be looked at is reported through the shared reporter, once per window, with its paths, and the moves after it
@@ -983,26 +820,6 @@ async function clearFinishedMoveMarkers(spaceId: string, before: string): Promis
   await eachUnitOfSpace(spaceId, 'file tombstone move markers', markers, m => abandonMove(spaceId, m.from, m.to), m => `${m.from} → ${m.to}`);
 }
 
-// ── The move's marker ─────────────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * Forget a move that is not owed, and take back the links it converged onto its destination. Called by the retry (a source with no
- * bytes and a move not owed) and by the settle sweep, so neither can forget a marker and leave the links a batch put at `to` behind
- * (a file arriving at that path later would inherit them). An owed move is left alone: `forgetFinishedMove` refuses it.
- * A move whose bytes are not at `to`, or are still at `from`, is not touched — it was not abandoned, it did not happen.
- *
- * Here and not in the cascade because the settle cannot import the cascade (the cascade imports this module).
- */
-export async function abandonMove(spaceId: string, from: string, to: string): Promise<void> {
-  const marker = await moveMarkerOf(spaceId, from, to);
-  if (!marker || !(await movedBytesOf(spaceId, marker))) return;
-  if (await moveIsOwed(spaceId, from, to)) return;
-  const kind = await kindAt(spaceId, marker.to);
-  const froms = kind === 'file' ? [toDocId(from)] : await fileLinkSourcesUnder(spaceId, toDocId(from));
-  await removeConvergedLinks(spaceId, movedPairs(froms, from, to));
-  await forgetFinishedMove(spaceId, from, to);
-}
-
 /**
  * Settle every tombstone a move from `from` to `to` left pending, from the disk, by its marker — once the move has
  * done all it will to its bytes (the file's, then its sidecars'). A path whose bytes went is published, one whose
@@ -1010,6 +827,9 @@ export async function abandonMove(spaceId: string, from: string, to: string): Pr
  * no handle on what its first attempt wrote — and one per path ({@link publishOnePerPath}), because an earlier
  * attempt's tombstone carries the same marker as the retry's, and both used to be published (verify-drive-5 F1).
  * Fails as {@link confirmFileTombstones} fails.
+ *
+ * Here, with the marker's other readers in `move-markers.ts`, because it ENDS IN A PUBLISH: the marker module imports the store and never
+ * this module, so an act that must publish cannot live there (`the-move-marker-block-is-its-own-module.test.js`).
  */
 export async function settleBegunMove(spaceId: string, from: string, to: string): Promise<void> {
   await unlessTheStoreFailed(`settleBegunMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}`, async () => {
@@ -1019,209 +839,6 @@ export async function settleBegunMove(spaceId: string, from: string, to: string)
       .find(asFilter<StoredFileTombstone>({ ...moveMarker(from, to), pending: true }), { projection: TO_PUBLISH }).toArray();
     await settleFromTheDisk(spaceId, left, generation);
   });
-}
-
-/** The marker of the move from `from` to `to` as stored — its extras included — or `undefined` when none was written or it was cleared. */
-export async function moveMarkerOf(spaceId: string, from: string, to: string): Promise<MoveMarker | undefined> {
-  const row = await tombstonesOf(spaceId).findOne(asFilter<StoredFileTombstone>(moveMarker(from, to)), { projection: { move: 1 } });
-  return row?.move;
-}
-
-/**
- * Whether the move from `from` to `to` is OWED: begun here (its marker), its bytes at `to` (and none at `from`, bar a half-made link or one
- * entry under two spellings, `movedBytesOf`), those bytes are
- * the ones it moved, and something of the file is still at `from` — a live record, a link row or a job. THE one answer to "is
- * this move still unfinished", asked by the retry of a move, by the housekeeping that finishes it, by the media worker before it
- * reconciles a "deleted source", and by every remover of a marker ({@link movesStillOwed}).
- *
- * ## What it prevents
- *
- * A remover of a marker that decided for itself whether the marker was clutter, without asking whether the record is still at the
- * source, would strand the move's records for ever: the settle forgetting it ten minutes on, the prune taking its row a day on, a
- * supersede or a drop removing the row that carries it, the worker — finding no bytes at the old path — removing the record itself.
- * Each looks right where it stands (`no-remover-drops-an-owed-move-marker` derives the sites).
- *
- * ## The two ways it fails, and they run opposite ways
- *
- * - **The bytes at `to` are not shown to be the moved ones** (a size or mtime that differs from the marker's) is NOT owed: the
- *   move would be finished over an unrelated file, replacing its derived records, which is what the marker exists to prevent.
- *   A marker written before the identity was recorded carries neither and is judged on the other facts.
- * - **A path that cannot be looked at throws.** A caller that is about to REMOVE something reads that as "keep"
- *   ({@link movesStillOwed}); the one that is about to complete the move reads it as "not now".
- */
-export async function moveIsOwed(spaceId: string, from: string, to: string): Promise<boolean> {
-  const marker = await moveMarkerOf(spaceId, from, to);
-  if (!marker) return false;
-  const atTo = await movedBytesOf(spaceId, marker);
-  if (!atTo) return false;
-  if (!isTheMovedBytes(atTo, marker)) return false;
-  return somethingOfTheFileIsAt(spaceId, marker.from, atTo.isDirectory ? 'directory' : 'file');
-}
-
-/**
- * Which of the moves the `rows` name are STILL OWED ({@link moveIsOwed}), by key — for a REMOVER, so it fails the other way: a move
- * whose paths cannot be looked at counts as owed, and its row is kept. A row with no marker names no move.
- */
-async function movesStillOwed(spaceId: string, rows: ReadonlyArray<{ move?: MoveMarker | undefined }>): Promise<Set<string>> {
-  const owed = new Set<string>();
-  const asked = new Set<string>();
-  for (const { move } of rows) {
-    if (!move || asked.has(moveKey(move))) continue;
-    asked.add(moveKey(move));
-    try {
-      if (await moveIsOwed(spaceId, move.from, move.to)) owed.add(moveKey(move));
-    } catch (err) {
-      owed.add(moveKey(move));
-      log.warn(`File tombstone move ${peerText(move.from)} → ${peerText(move.to)} of ${peerText(spaceId)} could not be judged owed or finished, so its marker is kept: ${peerText(err)}`);
-    }
-  }
-  return owed;
-}
-
-/**
- * Delete the rows `rows` (by id, narrowed by `where`) — the one way a row that MAY carry a move's marker is removed. A move that
- * is still OWED needs its marker on at least one row, so its rows go while another row of the move stays, and when none would the
- * first of them is kept. A row of a move that is not owed, or of none, goes. Returns how many went.
- *
- * Not "keep every row of an owed move": a move writes the marker on every file it takes (and every sidecar), and the rows of a
- * sidecar that stayed behind are dropped by the move itself while it is still owed, with the file's own row carrying the marker on.
- *
- * ## One remover at a time per space, and the lock is here so no caller can leave it out
- *
- * "Does another row of the move survive?" and the delete are two steps, and two removers (the prune after an acknowledgement, a
- * supersede, a drop of pending rows) running together could each read the OTHER's row as the survivor and each delete its own: the
- * move lost its marker with its records still at the source. A remover takes its space's turn (`markerRemovalLock`) from its read of
- * the survivor to its delete, so a second one reads what the first left. The lock is in-process, like every hold in this module: one
- * server process owns a data root.
- */
-function removeUnlessOwed(
-  spaceId: string, rows: ReadonlyArray<{ _id: string; move?: MoveMarker | undefined }>, where: Record<string, unknown>,
-): Promise<number> {
-  return markerRemovalLock.run(spaceId, () => removeUnlessOwedUnlocked(spaceId, rows, where));
-}
-
-/** One remover of marker rows per space at a time ({@link removeUnlessOwed}). */
-const markerRemovalLock = keyedLock();
-
-async function removeUnlessOwedUnlocked(
-  spaceId: string, rows: ReadonlyArray<{ _id: string; move?: MoveMarker | undefined }>, where: Record<string, unknown>,
-): Promise<number> {
-  const owed = await movesStillOwed(spaceId, rows);
-  const kept = new Set<string>();
-  for (const key of owed) {
-    const ofTheMove = rows.filter(r => r.move && moveKey(r.move) === key);
-    const marker = ofTheMove[0]!.move!;
-    const survives = await tombstonesOf(spaceId).findOne(
-      asFilter<StoredFileTombstone>({ ...moveMarker(marker.from, marker.to), _id: { $nin: ofTheMove.map(r => r._id) } }), { projection: { _id: 1 } });
-    if (survives === null) kept.add(ofTheMove[0]!._id);
-  }
-  let removed = 0;
-  for (const chunk of inChunks(rows.filter(r => !kept.has(r._id)).map(r => r._id), READ_CHUNK)) {
-    removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, ...where }))).deletedCount ?? 0;
-  }
-  return removed;
-}
-
-/**
- * Every move with a marker written before `before`, one entry per move (never per row), in `(from, to)` order — the moves that are
- * past their act, as the settle reads them. Each step is one indexed read of the next move after the last, so a directory move
- * with thousands of rows costs one step, and the caller stops when it has had enough.
- */
-export async function* movesBegunBefore(spaceId: string, before: string, after?: { from: string; to: string }): AsyncGenerator<MoveMarker & { markedAt: string }> {
-  let at = after;
-  for (;;) {
-    const [row] = await ask<{ move?: MoveMarker; deletedAt: string }>(spaceId, FILE_TOMBSTONE_QUERIES.moveMarkers({ before, afterMove: at, limit: 1 }), { move: 1, deletedAt: 1 });
-    if (!row?.move) return;
-    at = { from: row.move.from, to: row.move.to };
-    yield { ...row.move, markedAt: row.deletedAt };
-  }
-}
-
-/**
- * A cursor over each space's begun moves for a REPEATING pass: `next(spaceId, before, limit)` returns at most `limit` moves
- * ({@link movesBegunBefore}) beginning after the last move the previous call returned for that space, and `reachedTheEnd` says the
- * pass has seen them all — the cursor is then cleared and the next call starts at the head.
- *
- * ## What it prevents
- *
- * A pass that capped its batch and began at the head every time looked at the same first moves for ever once they could not be
- * cleared or finished (a stranded one, a path it cannot look at), and the moves behind them never got a look. Each pass over the
- * markers (the settle's clearing of the finished ones, housekeeping's finishing of the owed ones) keeps its OWN pager, so one
- * pass's cursor never moves another's. State is per pager and in memory: a restart begins at the head, which is only a delay.
- */
-export function createMoveMarkerPager(): (spaceId: string, before: string, limit: number) => Promise<{ markers: Array<MoveMarker & { markedAt: string }>; reachedTheEnd: boolean }> {
-  const resume = new Map<string, { from: string; to: string }>();
-  return async (spaceId, before, limit) => {
-    const markers: Array<MoveMarker & { markedAt: string }> = [];
-    let reachedTheEnd = true;
-    for await (const marker of movesBegunBefore(spaceId, before, resume.get(spaceId))) {
-      if (markers.length >= limit) { reachedTheEnd = false; break; }
-      markers.push(marker);
-      resume.set(spaceId, { from: marker.from, to: marker.to });
-    }
-    if (reachedTheEnd) resume.delete(spaceId);
-    return { markers, reachedTheEnd };
-  };
-}
-
-/** The moves whose marker names any of `paths` as the SOURCE: the begun moves that were carrying a file from one of them. */
-async function movesBegunFrom(spaceId: string, paths: readonly string[]): Promise<MoveMarker[]> {
-  return distinctMoves(await tombstonesAtPaths<{ move?: MoveMarker }>(spaceId, paths.map(toDocId),
-    chunk => FILE_TOMBSTONE_QUERIES.movesFrom({ paths: chunk }).filter, { move: 1 }));
-}
-
-/** The moves whose marker names `to` as the DESTINATION: the begun moves that carried a file to that path. */
-export async function movesBegunInto(spaceId: string, to: string): Promise<MoveMarker[]> {
-  return distinctMoves(await tombstonesAtPaths<{ move?: MoveMarker }>(spaceId, [toDocId(to)],
-    chunk => FILE_TOMBSTONE_QUERIES.movesInto({ paths: chunk }).filter, { move: 1 }));
-}
-
-/** One marker per move among rows that carry one. */
-function distinctMoves(rows: ReadonlyArray<{ move?: MoveMarker }>): MoveMarker[] {
-  const byKey = new Map<string, MoveMarker>();
-  for (const { move } of rows) if (move && !byKey.has(moveKey(move))) byKey.set(moveKey(move), move);
-  return [...byKey.values()];
-}
-
-/**
- * Whether a move that began here is carrying the records at `path` — a file moved from it, a file under a directory moved from an
- * ancestor of it, or a sidecar of either — and is not known to be over: owed, or a move whose paths cannot be looked at. What the
- * media worker asks before it takes a path with no bytes for a DELETED source: a moved file's bytes are not at its old path
- * either, and what the worker would remove is the record the move still has to carry.
- */
-export async function moveCarriesRecordsAt(spaceId: string, path: string): Promise<boolean> {
-  const at = toDocId(path);
-  const parent = parentOfSidecar(at)?.parent;
-  const from = [at, ...(parent ? [parent] : [])].flatMap(p => p.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/')));
-  const owed = await movesStillOwed(spaceId, (await movesBegunFrom(spaceId, [...new Set(from)])).map(move => ({ move })));
-  return owed.size > 0;
-}
-
-/**
- * Record that housekeeping is trying to finish the move now: `attempts` (counted BEFORE the try, so a try a restart ended is
- * counted) and the instant before which it is not tried again. On every row of the move, inside the marker, so forgetting the
- * marker forgets them.
- */
-export async function recordMoveAttempt(spaceId: string, from: string, to: string, attempts: number, nextAttemptAt: string): Promise<void> {
-  await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(moveMarker(from, to)),
-    asUpdate<StoredFileTombstone>({ $set: { 'move.attempts': attempts, 'move.nextAttemptAt': nextAttemptAt } }));
-}
-
-/**
- * Forget a finished move's marker, so a later orphan at `from` beside a file at `to` is not taken for it — and, a move that is
- * still OWED is not forgotten ({@link moveIsOwed}): the marker is all that lets the retry, or housekeeping, finish it. Returns
- * whether the marker was cleared. Best effort: a marker left behind matters only to that history, and failing a finished move
- * over it would answer a failure for an act that happened; a move that cannot be judged keeps its marker.
- */
-export async function forgetFinishedMove(spaceId: string, from: string, to: string): Promise<boolean> {
-  try {
-    if (await moveIsOwed(spaceId, from, to)) return false;
-    await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(moveMarker(from, to)), asUpdate<StoredFileTombstone>({ $unset: { move: '' } }));
-    return true;
-  } catch (err) {
-    log.warn(`forgetFinishedMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}: ${peerText(err)}`);
-    return false;
-  }
 }
 
 // ── The readers: published tombstones only ────────────────────────────────────────────────────────────────────────
@@ -1360,12 +977,9 @@ async function readHeldFor(spaceId: string, paths: readonly string[]): Promise<H
 
 /** Which of `ids` are published tombstones already held here: an id held is never applied a second time. */
 export async function heldFileTombstoneIds(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
-  const rows = await readStoredById<object>(spaceCollection(spaceId, 'fileTombstones'), ids, { _id: 1 }, { filter: PUBLISHED });
+  const rows = await readTombstonesById<object>(spaceId, ids, { _id: 1 }, PUBLISHED);
   return new Set(rows.keys());
 }
-
-/** How long a published tombstone that carries a move's marker is kept whatever was acknowledged: the marker is the only record that the move is owed. */
-export const MOVE_MARKER_KEEP_MS = 24 * 3_600_000;
 
 /**
  * Remove the published tombstones at or below an acknowledged push position (`brain/tombstone-prune.ts` decides it), and
@@ -1403,8 +1017,6 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   return removed;
 }
 
-/** What the prune reads of a row. */
-interface PrunableRow { _id: string; path: string; positionAt?: string; move?: MoveMarker }
 const PRUNABLE = { _id: 1, path: 1, positionAt: 1, move: 1 } as const;
 
 /** Remove the rows of one prune page that may go, by id, and count them. */

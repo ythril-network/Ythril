@@ -52,7 +52,7 @@ const DAY = 24 * 3_600_000;
 /** Past the settle's staleness window: every marker is old enough to be "past its act". */
 const PAST = () => new Date(Date.now() + DAY);
 
-let acts, tombstones, F, faults, worker, queue;
+let acts, tombstones, markerMod, F, faults, worker, queue;
 
 const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
 /** A row a reader would list: there, and not flagged by a soft delete. */
@@ -77,7 +77,7 @@ async function moveStoppedAfterItsBytes(from, to, via = 'REST') {
   assert.equal(status(a), 503, `the move was not stopped by the store: ${body(a)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');
   assert.ok(await row(from), 'the record is not at the source — the case is not the one a stopped move leaves');
-  assert.equal((await tombstones.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
+  assert.equal((await markerMod.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
 }
 
 describe('a stopped move is finished, not forgotten, and an act that cannot be recorded does not begin', { skip }, () => {
@@ -85,6 +85,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     acts = await openFileActDoors({ suite: 'owedmove', space: S });
     F = await driverWriteFailures('ythril_harness_owedmove');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     worker = await import('../../server/dist/files/media/worker.js');
     queue = await import('../../server/dist/files/media/job-queue.js');
     // What the worker needs to run and, for a file it cannot find, do nothing with a provider: no endpoint is called.
@@ -113,7 +114,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     it(`${via}: the TTL settle keeps the marker of a move that is still owed — the record is at the source`, async () => {
       await moveStoppedAfterItsBytes('from.txt', 'to.txt', via);
       await tombstones.settleStalePendingFileTombstones(S, PAST());
-      assert.equal((await tombstones.moveMarkerOf(S, 'from.txt', 'to.txt')) !== undefined, true,
+      assert.equal((await markerMod.moveMarkerOf(S, 'from.txt', 'to.txt')) !== undefined, true,
         'the settle forgot the marker of a move whose record is still at the source: the retry is taken for an orphan and answers 404, and the record is stranded');
     });
 
@@ -136,7 +137,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     await files.deleteOne({ _id: 'done-from.txt' });
     await files.insertOne({ ...r, _id: 'done-to.txt', path: 'done-to.txt' });
     await tombstones.settleStalePendingFileTombstones(S, PAST());
-    assert.equal((await tombstones.moveMarkerOf(S, 'done-from.txt', 'done-to.txt')) !== undefined, false,
+    assert.equal((await markerMod.moveMarkerOf(S, 'done-from.txt', 'done-to.txt')) !== undefined, false,
       'a finished move\'s marker was kept: a later orphan at the source would be taken for this move');
   });
 
@@ -169,7 +170,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
     assert.ok(await liveRow('pics/from.png'),
       'the worker reconciled "a deleted source" and removed the record of a file that was MOVED: the move can no longer be completed');
     assert.ok(await jobOf('pics/from.png'), 'the worker removed the job of an owed move');
-    assert.equal((await tombstones.moveMarkerOf(S, 'pics/from.png', 'pics/to.png')) !== undefined, true, 'the move was forgotten');
+    assert.equal((await markerMod.moveMarkerOf(S, 'pics/from.png', 'pics/to.png')) !== undefined, true, 'the move was forgotten');
 
     const retry = await acts.move('REST', 'pics/from.png', 'pics/to.png');
     assert.ok(!acts.failed(retry), `the retried move was refused (${status(retry)}): ${body(retry)}`);
@@ -250,7 +251,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
       assert.equal(status(stopped), 503, `the move was not stopped by the store: ${body(stopped)}`);
       faults.clear();
       assert.ok(acts.onDisk('lk-to.txt') && !acts.onDisk('lk-from.txt'), 'fixture: the bytes did not move');
-      assert.equal((await tombstones.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt')) !== undefined, true, 'fixture: the move left no marker');
+      assert.equal((await markerMod.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt')) !== undefined, true, 'fixture: the move left no marker');
 
       const del = await acts.del(via, 'lk-to.txt');
       assert.ok(!acts.failed(del), `the delete of the file where the move put it was refused: ${body(del)}`);
@@ -258,7 +259,7 @@ describe('a stopped move is finished, not forgotten, and an act that cannot be r
       assert.deepEqual(await acts.links.idsUnder('lk-from.txt'), [], 'a link this instance wrote still names the source of the deleted file');
       assert.deepEqual(await acts.links.idsUnder('lk-to.txt'), [], 'a link this instance wrote still names the file at the destination, which is gone');
       assert.deepEqual((await acts.links.tombstoned()).filter(id => own.includes(id)), [...own].sort(), 'a link was removed without its tombstone');
-      assert.equal(await tombstones.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt'), undefined,
+      assert.equal(await markerMod.moveMarkerOf(S, 'lk-from.txt', 'lk-to.txt'), undefined,
         'the marker of the move outlived the delete: a link kept the move owed, so the next file at the source path is taken for the rest of it');
     });
   }

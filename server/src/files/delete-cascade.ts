@@ -53,10 +53,8 @@ import { removeFileHere } from './remove-file-here.js';
 import { sidecarsOf, type PathKind } from './moved-paths.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import {
-  actUnderPendingTombstones, forgetFinishedMove, moveIsOwed, movesBegunInto, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones,
-  type MoveMarker,
-} from './tombstones.js';
+import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
+import { forgetFinishedMove, moveIsOwed, movesBegunInto, type MoveMarker } from './move-markers.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';

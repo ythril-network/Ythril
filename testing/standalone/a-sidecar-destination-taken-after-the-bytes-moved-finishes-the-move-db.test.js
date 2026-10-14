@@ -56,7 +56,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'sidecartaken';
 const OCCUPANT = 'THE OCCUPANT: another file\'s converted text';
 
-let acts, stored, tombstones, pipeline;
+let acts, stored, tombstones, markerMod, pipeline;
 const files = () => acts.door.coll(S, 'files');
 const abs = (p) => path.join(acts.root(), p);
 const read = (p) => fs.readFileSync(abs(p), 'utf8');
@@ -92,6 +92,7 @@ describe('a sidecar destination taken after the bytes moved finishes the move (r
     acts = await openFileActDoors({ suite: 'sidecartaken', space: S });
     stored = await import('../../server/dist/files/stored-bytes.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     pipeline = await import('../../server/dist/files/converters/pipeline.js');
   });
   after(async () => { stored?.setMoveStepsForTest?.(null); await acts?.close(); });
@@ -123,7 +124,7 @@ describe('a sidecar destination taken after the bytes moved finishes the move (r
       assert.equal(await files().findOne({ _id: `${a}#chunk0` }), null);
       assert.equal(row && 'convertedFileId' in row, false, 'the moved row still points at a converted copy: the extract view would show the occupant\'s text as the file\'s own');
 
-      assert.equal(await tombstones.moveIsOwed(S, a, b), false, 'the move is still owed');
+      assert.equal(await markerMod.moveIsOwed(S, a, b), false, 'the move is still owed');
       assert.deepEqual((await acts.raw()).filter(t => t.pending || t.move), [], 'a marker or a pending tombstone was left by a move that finished');
       assert.equal(await finishedWithoutSidecar(), counted + 1, 'the move that finished without its sidecar was not counted exactly once');
       const said = lines.filter(l => l.includes(b) && /sidecar/i.test(l));
@@ -151,7 +152,7 @@ describe('a sidecar destination taken after the bytes moved finishes the move (r
     const row = await files().findOne({ _id: 'd2/f.txt' });
     assert.equal(row?.description, 'F', 'the records were not carried');
     assert.equal(row && 'convertedFileId' in row, false, 'the moved row still points at a converted copy that is the occupant\'s');
-    assert.equal(await tombstones.moveIsOwed(S, 'd1', 'd2'), false);
+    assert.equal(await markerMod.moveIsOwed(S, 'd1', 'd2'), false);
     assert.equal(await finishedWithoutSidecar(), counted + 1);
   });
 
@@ -168,7 +169,7 @@ describe('a sidecar destination taken after the bytes moved finishes the move (r
     assert.equal(acts.statusOf(answer), 503, `the move: ${sentenceOf(answer)}`);
     assert.equal(acts.answerOf(answer).code, 'move_still_owed', 'a sidecar that failed for a reason other than an occupant was read as one');
     assert.ok(acts.onDisk('_converted/eio-a.txt.md'), 'the sidecar was removed although it was not an occupant that stopped it');
-    assert.equal(await tombstones.moveIsOwed(S, 'eio-a.txt', 'eio-b.txt'), true, 'the move is not owed after a failure that is not an occupied destination');
+    assert.equal(await markerMod.moveIsOwed(S, 'eio-a.txt', 'eio-b.txt'), true, 'the move is not owed after a failure that is not an occupied destination');
     assert.equal(await finishedWithoutSidecarOrZero(), counted, 'a failed sidecar was counted as a move finished without one');
   });
 

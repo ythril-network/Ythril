@@ -37,7 +37,7 @@ const DAY = 24 * 3_600_000;
 /** Past the settle threshold and every wait: `n` days on. */
 const LATER = (n = 1) => new Date(Date.now() + n * DAY);
 
-let acts, tombstones, finish, walk, flight, registry, seen, sweep, F, faults;
+let acts, tombstones, markerMod, finish, walk, flight, registry, seen, sweep, F, faults;
 
 const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
 const liveRow = async (p) => { const r = await row(p); return r && !r.deletedAt ? r : null; };
@@ -51,7 +51,7 @@ async function moveStoppedAfterItsBytes(from, to) {
   const a = await acts.move('REST', from, to);
   assert.equal(status(a), 503, `the move was not stopped by the store: ${JSON.stringify(a.body ?? a.text)}`);
   assert.ok(acts.onDisk(to) && !acts.onDisk(from), 'the bytes did not move — the case is not the one a stopped move leaves');
-  assert.equal((await tombstones.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
+  assert.equal((await markerMod.moveMarkerOf(S, from, to)) !== undefined, true, 'the move left no marker — the case is not reached');
 }
 
 /**
@@ -76,6 +76,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     acts = await openFileActDoors({ suite: 'owedhk', space: S });
     F = await driverWriteFailures('ythril_harness_owedhk');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     finish = await import('../../server/dist/files/finish-owed-moves.js');
     walk = await import('../../server/dist/util/housekeeping-walk.js');
     flight = await import('../../server/dist/files/move-flight.js');
@@ -94,12 +95,12 @@ describe('housekeeping finishes an owed move', { skip }, () => {
 
     await sweep.sweepExpired(new Date());
     assert.ok(await liveRow('hk/from.txt'), 'the sweep finished a move whose request may still be running');
-    assert.equal((await tombstones.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, true, 'the marker of a move still inside its window was cleared');
+    assert.equal((await markerMod.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, true, 'the marker of a move still inside its window was cleared');
 
     await sweep.sweepExpired(LATER());
     assert.ok(await liveRow('hk/to.txt'), 'the record did not follow the file to its destination: nothing finished the move');
     assert.equal(await row('hk/from.txt'), null, 'the record is still at the source');
-    assert.equal((await tombstones.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, false, 'a finished move kept its marker');
+    assert.equal((await markerMod.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, false, 'a finished move kept its marker');
     assert.deepEqual((await acts.raw()).filter(t => !t.pending).map(t => t.path).sort(), ['hk/from.txt'], 'the path the move left is not tombstoned, once');
     assert.equal(await finishedCount(), before + 1, 'the finished move was not counted');
     // The audit entry is written after the act and not awaited by it (audit.ts logAuditEntry), so it is waited FOR, not read once.
@@ -119,22 +120,22 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     const first = await pass(LATER(1), limits);
     assert.equal(first.outcome.finished, 0, 'the move finished with the store failing');
     assert.equal(first.failed.length, 1, 'the failed attempt was not reported through the walk');
-    let marker = await tombstones.moveMarkerOf(S, 'st/from.txt', 'st/to.txt');
+    let marker = await markerMod.moveMarkerOf(S, 'st/from.txt', 'st/to.txt');
     assert.equal(marker.attempts, 1, 'the attempt was not counted on the marker');
     assert.ok(typeof marker.nextAttemptAt === 'string' && marker.nextAttemptAt > LATER(1).toISOString(), 'the marker names no wait before the next attempt');
 
     const waiting = await pass(LATER(1), limits);
     assert.equal(waiting.outcome.waiting, 1, 'a move inside its wait was not left waiting');
-    assert.equal((await tombstones.moveMarkerOf(S, 'st/from.txt', 'st/to.txt')).attempts, 1, 'a move inside its wait was tried again');
+    assert.equal((await markerMod.moveMarkerOf(S, 'st/from.txt', 'st/to.txt')).attempts, 1, 'a move inside its wait was tried again');
 
     const second = await pass(LATER(2), limits);
-    assert.equal((await tombstones.moveMarkerOf(S, 'st/from.txt', 'st/to.txt')).attempts, 2, 'the second attempt was not made once its wait was over');
+    assert.equal((await markerMod.moveMarkerOf(S, 'st/from.txt', 'st/to.txt')).attempts, 2, 'the second attempt was not made once its wait was over');
     assert.equal(second.outcome.finished, 0);
 
     const stranded = await pass(LATER(3), limits);
     assert.equal(stranded.outcome.stranded, 1, 'a move whose attempts are spent was not counted stranded');
     assert.equal(stranded.failed.length, 1, 'a stranded move was not said through the walk');
-    marker = await tombstones.moveMarkerOf(S, 'st/from.txt', 'st/to.txt');
+    marker = await markerMod.moveMarkerOf(S, 'st/from.txt', 'st/to.txt');
     assert.equal(marker.attempts, 2, 'a stranded move was tried again');
     assert.equal(seen.strandedMoveCount(S), 1, 'the stranded gauge does not count it');
     assert.equal(seen.owedMoveCount(S), 1, 'a stranded move is owed still');
@@ -165,14 +166,14 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     const holder = flight.runMoveOnce(S, 'rq/from.txt', 'rq/to.txt', () => held);
     const waiting = pass(LATER(1));
     // The attempt is counted before the turn is asked for, so the marker says housekeeping is in line.
-    await waitFor(async () => (await tombstones.moveMarkerOf(S, 'rq/from.txt', 'rq/to.txt'))?.attempts === 1, 5000, 20,
+    await waitFor(async () => (await markerMod.moveMarkerOf(S, 'rq/from.txt', 'rq/to.txt'))?.attempts === 1, 5000, 20,
       async () => 'housekeeping never reached the move it found owed');
     // The request finishes the move: what a retry that ran first leaves behind (the record at the destination, the marker forgotten).
     const records = acts.door.coll(S, 'files');
     const r = await records.findOne({ _id: 'rq/from.txt' });
     await records.deleteOne({ _id: 'rq/from.txt' });
     await records.insertOne({ ...r, _id: 'rq/to.txt', path: 'rq/to.txt' });
-    await tombstones.forgetFinishedMove(S, 'rq/from.txt', 'rq/to.txt');
+    await markerMod.forgetFinishedMove(S, 'rq/from.txt', 'rq/to.txt');
     release();
     await holder;
     const { outcome, failed } = await waiting;
@@ -197,7 +198,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     assert.equal(outcome.finished + outcome.waiting, 2);
     assert.equal(outcome.finished, 1, `the pass finished ${outcome.finished} moves with its time spent after the first`);
     assert.equal(outcome.waiting, 1, 'the move behind the first was started past the pass\'s time, or was not left waiting');
-    const markers = await Promise.all(['a', 'b'].map(n => tombstones.moveMarkerOf(S, `bt/${n}-from.txt`, `bt/${n}-to.txt`)));
+    const markers = await Promise.all(['a', 'b'].map(n => markerMod.moveMarkerOf(S, `bt/${n}-from.txt`, `bt/${n}-to.txt`)));
     assert.equal(markers.filter(m => m !== undefined && (m.attempts ?? 0) > 0).length, 0, 'a move not started was counted an attempt');
     assert.equal(markers.filter(m => m !== undefined).length, 1, 'exactly one move should still be owed');
     // The next pass, with its time, finishes the one left.

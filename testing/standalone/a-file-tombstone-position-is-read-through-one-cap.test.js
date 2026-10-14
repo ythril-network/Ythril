@@ -18,6 +18,12 @@
  * `settledPositionCap(`, and the module must define and export it. The floor is two readers (the page and the prune), because an
  * empty derivation passes every loop written over it.
  *
+ * **The position's QUESTIONS moved with Q-462, and this gate stays on the readers.** `FILE_TOMBSTONE_QUERIES.cappedPage` / `.prunePage`
+ * are now the store's (`files/tombstone-store.ts`), built from `belowCap(cap)` and `prunable(upTo, cap)` — a cap handed in, never taken —
+ * so the READERS that run them are still the functions of `tombstones.ts` this derives, and the store is held by a second check below:
+ * every comparison of `positionAt` it spells is inside one of those two cap-taking builders, so no reader can be born there that orders
+ * by a position with no cap in its hands.
+ *
  * The rule is the call, not a site: a reader added to the module is held to it the day it is written, and one that bounds
  * itself by a hand-written clock read is exactly what this refuses. The scanner is itself shown to see both outcomes on a
  * fixture below, so a scan that finds nothing to refuse is told apart from one that was never able to.
@@ -33,6 +39,10 @@ import { blankComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 
 const OWNER = 'server/src/files/tombstones.ts';
+/** The store: where the position's comparisons are built from a cap the caller hands in (Q-462). */
+const STORE = 'server/src/files/tombstone-store.ts';
+/** The two builders of the store a position comparison may sit in: each takes the cap as a parameter. */
+const CAP_BUILDERS = ['belowCap', 'prunable'];
 const CAP = 'settledPositionCap';
 /**
  * A comparison of the position in a query: a range operator on it, the shared keyset over it, or asking one of the module's two
@@ -67,6 +77,20 @@ describe('every ordering read of a file tombstone position is capped by one func
     assert.deepEqual(uncapped, [],
       `these functions in ${OWNER} compare positionAt and never call ${CAP}(): ${uncapped.join(', ')} — a page or a prune that reads straight `
       + 'through an open position hold can acknowledge, and then remove, a tombstone whose write has not yet landed');
+  });
+
+  it('the store spells a comparison of positionAt only inside a builder that takes the cap', () => {
+    const lines = blankComments(readFileSync(join(REPO_ROOT, STORE), 'utf8')).split(/\r?\n/);
+    const builderLines = new Set(CAP_BUILDERS.map(name => lines.findIndex(l => new RegExp(`^(?:export\\s+)?const\\s+${name}\\s*=\\s*\\([^)]*\\bcap\\b`).test(l))));
+    assert.ok(![...builderLines].includes(-1), `${STORE} no longer defines ${CAP_BUILDERS.join(' and ')} with a cap parameter — re-anchor this check`);
+    const compares = lines.map((l, i) => [i, l]).filter(([, l]) => /positionAt['"]?\s*:\s*\{\s*\$(?:lt|lte|gt|gte)\b/.test(l));
+    assert.ok(compares.length >= 2, `only ${compares.length} comparison(s) of positionAt found in ${STORE}: the scan looks at the wrong thing`);
+    assert.deepEqual(compares.filter(([i]) => !builderLines.has(i)).map(([i, l]) => `${i + 1}: ${l.trim()}`), [],
+      `these compare positionAt in ${STORE} outside ${CAP_BUILDERS.join(' / ')}: a reader there orders by a position with no cap handed to it`);
+    const keysets = lines.map((l, i) => [i, l]).filter(([, l]) => /isoKeysetFilters\s*\(\s*['"]positionAt['"]/.test(l));
+    assert.ok(keysets.length >= 2, `only ${keysets.length} keyset read(s) over positionAt in ${STORE}`);
+    assert.deepEqual(keysets.filter(([, l]) => !new RegExp(`\\b(?:${CAP_BUILDERS.join('|')})\\s*\\(`).test(l)).map(([i, l]) => `${i + 1}: ${l.trim()}`), [],
+      `these read a keyset over positionAt in ${STORE} without a cap built by ${CAP_BUILDERS.join(' / ')}`);
   });
 
   it('the scan tells a capped module from an uncapped one (it can see both outcomes)', () => {

@@ -39,7 +39,7 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'settleall';
 
-let acts, tombstones;
+let acts, tombstones, storeMod;
 const RealDate = Date;
 /** How far the module's clock (`new Date()`, `Date.now()`) is moved while a pending row is written. */
 let skewMs = 0;
@@ -55,6 +55,7 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
   before(async () => {
     acts = await openFileActDoors({ suite: 'settleall', space: S });
     tombstones = await import('../../server/dist/files/tombstones.js');
+    storeMod = await import('../../server/dist/files/tombstone-store.js');
     globalThis.Date = SkewedDate;
     fsp.lstat = function (p, ...rest) {
       if (String(p).includes(LOCKED)) {
@@ -73,7 +74,7 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
   it('a batch of paths it cannot look at delays the rest by one cycle, and is tried again once stale again', async () => {
     await acts.reset();
     // The batch as the code counts it — read from the module, not written here again.
-    const batch = tombstones.FILE_TOMBSTONE_SETTLE_BATCH ?? 500;
+    const batch = storeMod.FILE_TOMBSTONE_SETTLE_BATCH ?? 500;
     const now = Date.now();
     // Every pending row is WRITTEN by the module (`writePendingFileTombstones`), at a clock of the test's choosing — never
     // inserted by hand (bundle-71, vet S7): a hand-built row carries only the fields its author remembered, and the settle
@@ -108,6 +109,6 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
     looked.length = 0;
     await tombstones.settleStalePendingFileTombstones(S, new Date(now + 24 * 3_600_000));
     assert.equal(new Set(looked).size, batch, 'once stale again, the paths it could not look at were not tried again');
-    assert.equal(typeof tombstones.FILE_TOMBSTONE_SETTLE_BATCH, 'number', 'the settle\'s batch is not exported to size this case by');
+    assert.equal(typeof storeMod.FILE_TOMBSTONE_SETTLE_BATCH, 'number', 'the settle\'s batch is not exported to size this case by');
   });
 });

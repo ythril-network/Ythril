@@ -36,7 +36,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'dirowedmove';
 const FILES = `${S}_files`;
 
-let acts, F, faults, tombstones, READ_CHUNK;
+let acts, F, faults, tombstones, markerMod, READ_CHUNK;
 
 const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
 const body = (a) => JSON.stringify(a.body ?? a.text);
@@ -63,6 +63,7 @@ describe('a directory deleted where a stopped move put it', { skip }, () => {
     acts = await openFileActDoors({ suite: 'dirowedmove', space: S, monitorCommands: true });
     F = await driverWriteFailures('ythril_harness_dirowedmove');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    markerMod = await import('../../server/dist/files/move-markers.js');
     ({ READ_CHUNK } = await import('../../server/dist/db/read-by-id.js'));
     faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
   });
@@ -92,7 +93,7 @@ describe('a directory deleted where a stopped move put it', { skip }, () => {
       for (const f of names(to, n)) assert.equal(await row(f), null, `the record of ${f} is still at the destination`);
       assert.equal(acts.onDisk(to), false, 'the directory is still on disk');
       assert.deepEqual([await acts.links.idsUnder(from), await acts.links.idsUnder(to)], [[], []], `a link of the ${n} files is still held, at the source or the destination`);
-      assert.equal(await tombstones.moveMarkerOf(S, from, to), undefined, 'the marker of the stopped move outlived the delete');
+      assert.equal(await markerMod.moveMarkerOf(S, from, to), undefined, 'the marker of the stopped move outlived the delete');
     }
     const [few, , many] = counts;
     assert.ok(many.commands - few.commands <= 2,

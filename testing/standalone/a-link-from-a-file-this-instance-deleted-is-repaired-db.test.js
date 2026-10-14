@@ -108,8 +108,8 @@ describe('a link from a file this instance deleted is repaired (real MongoDB)', 
   it('fixture: this instance has an id, a peer\'s is another, and the owed move is owed', async () => {
     assert.ok(SELF && SELF !== PEER, `the instance id is '${SELF}'`);
     await seed();
-    const tombstones = await import('../../server/dist/files/tombstones.js');
-    assert.equal(await tombstones.moveIsOwed(S, 'move-src.txt', 'move-dst.txt'), true, 'the owed move the fifth row stands for is not owed: its row proves nothing');
+    const markers = await import('../../server/dist/files/move-markers.js');
+    assert.equal(await markers.moveIsOwed(S, 'move-src.txt', 'move-dst.txt'), true, 'the owed move the fifth row stands for is not owed: its row proves nothing');
   });
 
   it('removes the links of a path whose tombstone this instance issued, written by this instance, with nothing at the path, and no other', async () => {
