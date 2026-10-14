@@ -39,10 +39,19 @@ import path from 'node:path';
 import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
-import { MOVE_CASCADE_STEPS, moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
+import { MOVE_CASCADE_STEPS, guardPrecedesIrreversibleSteps, moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
 
 const SRC = 'server/src';
 const GUARD = 'assertDestinationReachable';
+/** The second guard of the move cascade: something already stands at the destination (`files/destination.ts`). */
+const FREE_GUARD = 'assertDestinationFree';
+/**
+ * The callers of `moveStored`, which REPLACES what stands at its destination, each with why. A move never replaces anything, so no
+ * path of `moveFile` or the cascade is here; a caller that replaces on purpose names its reason.
+ */
+const REPLACING_MOVE_CALLERS = Object.freeze({
+  [`${SRC}/api/conflicts.ts`]: 'conflict resolution: keep-incoming means replace the local copy with the incoming one; keep-both with a rename and save-to-space can clobber a name and are Q-466, not a move',
+});
 const DESTINATION_MODULE = `${SRC}/files/destination.ts`;
 
 /** The modules whose exports can put bytes or a directory somewhere. A module in `files/` holding a placing primitive and absent here fails. */
@@ -199,6 +208,45 @@ describe('every door that places bytes or a directory checks its destination fir
     assert.ok(r.guards, `files/move-cascade.ts: ${r.why} — a refused destination must not leave a tombstone or a held job behind it`);
   });
 
+  it('the move cascade also asks assertDestinationFree before its first irreversible step: a destination something stands at is refused before a tombstone, a hold or a byte', () => {
+    const r = guardPrecedesIrreversibleSteps(readFileSync(path.join(REPO_ROOT, `${SRC}/files/move-cascade.ts`), 'utf8'),
+      { entry: 'moveFileCascade', guard: FREE_GUARD, steps: MOVE_CASCADE_STEPS });
+    assert.ok(r.guards, `files/move-cascade.ts: ${r.why} — a move onto an occupied destination must be refused before it writes anything`);
+  });
+
+  it('the guard on an occupied destination is exported by the destination module, beside the one on an unreachable one', () => {
+    assert.match(code(text(DESTINATION_MODULE) ?? ''), new RegExp(`export\\s+(?:async\\s+)?function\\s+${FREE_GUARD}\\b`), `${DESTINATION_MODULE} does not export ${FREE_GUARD}`);
+  });
+
+  describe('a move places bytes by the step that never replaces; the one that replaces has named callers', () => {
+    /** Every call of `name` in the tracked sources, not its declaration and not a comment: `{ file, line }`. */
+    const callersOf = (name) => all.flatMap(f => {
+      const blanked = code(f.text);
+      return [...blanked.matchAll(new RegExp(`(?<![.\\w$])(?<!\\bfunction\\s+)${name}\\s*\\(`, 'g'))].map(m => ({ file: f.file, line: lineOf(blanked, m.index) }));
+    });
+
+    it('every caller of moveStored (which REPLACES) is named with its reason, and none is a move\'s own path', () => {
+      const callers = callersOf('moveStored');
+      assert.ok(callers.length >= 1, 'no caller of moveStored found: the scan has stopped seeing it, or the function is dead');
+      const unnamed = callers.filter(c => !(c.file in REPLACING_MOVE_CALLERS)).map(c => `${c.file}:${c.line}`);
+      assert.deepEqual(unnamed, [], `these call moveStored, which replaces whatever is at the destination. A move never replaces: use moveFile (moveStoredIfFree), or name the caller and its reason in REPLACING_MOVE_CALLERS:\n  ${unnamed.join('\n  ')}`);
+      for (const f of ['files/files.ts', 'files/move-cascade.ts']) {
+        assert.equal(callers.some(c => c.file === `${SRC}/${f}`), false, `${f} calls moveStored: a move would replace its destination`);
+      }
+      for (const [file, why] of Object.entries(REPLACING_MOVE_CALLERS)) {
+        assert.ok(callers.some(c => c.file === file), `${file} is named as a caller of moveStored and does not call it: delete the row`);
+        assert.ok(why.length > 30, `${file}: a reason that is not one`);
+      }
+      assert.match(REPLACING_MOVE_CALLERS[`${SRC}/api/conflicts.ts`] ?? '', /Q-466/, 'api/conflicts.ts replaces through moveStored on purpose (keep-incoming) and by accident (keep-both, save-to-space): the ticket that owns the second is named');
+    });
+
+    it('moveStoredIfFree is called from the one function that turns its refusal into the caller\'s answer', () => {
+      const callers = callersOf('moveStoredIfFree').map(c => c.file);
+      assert.ok(callers.length >= 1, 'no caller of moveStoredIfFree found: the move places its bytes some other way');
+      assert.deepEqual([...new Set(callers)], [`${SRC}/files/files.ts`], 'moveStoredIfFree is called outside files/files.ts (moveFile): its refusal is not turned into destination_exists there');
+    });
+  });
+
   it('every NOT_PLACING row still names something a door imports (a stale row is a decision nobody re-reads)', () => {
     const imported = new Set();
     for (const { file, text: src } of nonFiles) {
@@ -278,6 +326,13 @@ describe('every door that places bytes or a directory checks its destination fir
     });
     it('a cascade that never asks the guard fails', () => {
       assert.equal(cascadeGuardsItself(cascade(begin)).guards, false);
+    });
+    it('the second guard is held the same way: before the call that holds the steps it passes, after it or absent it fails', () => {
+      const free = '    await ' + FREE_GUARD + '(a, b, c);\n';
+      const ask = (src) => guardPrecedesIrreversibleSteps(src, { entry: 'moveFileCascade', guard: FREE_GUARD, steps: MOVE_CASCADE_STEPS });
+      assert.equal(ask(cascade(guard + free + begin)).guards, true);
+      assert.equal(ask(cascade(guard + begin + '\n' + free)).guards, false, 'assertDestinationFree after the call that holds the steps was read as ordered');
+      assert.equal(ask(cascade(guard + begin)).guards, false, 'a cascade that never asks assertDestinationFree passed');
     });
   });
 });

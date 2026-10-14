@@ -1,19 +1,19 @@
 /**
- * A file move is all or nothing, and a destination that is already taken never costs the moved file its record
- * (bundle-44, Q-342, Q-212; plan rev 3 D1, D3).
+ * A file move is all or nothing, and a destination that something already stands at is refused before anything is written
+ * (bundle-44, Q-342, Q-212, Q-437; plan rev 3 D1, D3; D-29).
  *
  * ## The rule
  *
  * Moving a file or a directory leaves each moved thing wholly at its old path or wholly at its new one — the file's row,
- * the rows derived from it, its jobs and its links — and a destination another file's rows already hold refuses the move
- * BEFORE anything is written. What the destination holds decides the outcome (the D3 truth table), the same on every door:
+ * the rows derived from it, its jobs and its links — and a destination something already stands at refuses the move
+ * BEFORE anything is written. What the destination holds decides the outcome, the same on every door:
  *
  *  - nothing there: the move happens;
  *  - only a FLAGGED row there (the audit record a soft delete leaves, local state): the move happens, the moved record is
  *    the live row at the destination and the flagged one is gone — writing a path clears its flag;
- *  - a LIVE file there (a rename onto an existing file replaces it): the moved record replaces the occupant's row, with its
- *    own description, tags, properties and links, and the occupant's links do not survive;
- *  - rows of ANOTHER file at an id the move would take: `409 destination_taken_by_other`, bytes still at the source, no
+ *  - a LIVE file there: `409 destination_exists` — a move never replaces anything, so the occupant's bytes, record, derived rows
+ *    and links are untouched and the source is whole;
+ *  - rows of ANOTHER file at an id the move would take: the same `409 destination_exists`, bytes still at the source, no
  *    tombstone, nothing overwritten.
  *
  * ## What it was
@@ -153,28 +153,36 @@ describe('a file move is all or nothing (real MongoDB)', { skip }, () => {
     }
   });
 
-  describe('the destination holds a LIVE file: the moved record replaces its record, and nothing of the occupant is kept but what the moved set does not take', () => {
+  describe('the destination holds a LIVE file: the move is refused, and nothing of either file changes', () => {
     for (const via of ['cascade', 'REST', 'MCP']) {
-      it(`${via}: the moved description, tags, properties and links survive; the occupant's links do not`, async () => {
+      it(`${via}: 409 destination_exists; the occupant's bytes, record, derived row and links and the source's are exactly as they were`, async () => {
         await seedFile('a.txt', { entities: [E1], facts: [F1] });
         await seedFile('b.txt', { entities: [E2, E3], facts: [] });
         assert.deepEqual(await linkTargets('b.txt'), [`entity:${E2}`, `entity:${E3}`], 'fixture: the occupant is not linked');
+        const before = {
+          a: await rowOf('a.txt'), aChunk: await rowOf('a.txt#chunk-0'), b: await rowOf('b.txt'), bChunk: await rowOf('b.txt#chunk-0'),
+          aLinks: await linkTargets('a.txt'), bLinks: await linkTargets('b.txt'),
+        };
 
         const r = await moveVia(via, 'a.txt', 'b.txt');
 
-        assert.equal(r.status, 200, `the move was refused or failed: ${r.error?.message ?? JSON.stringify(bodyOf(r))}`);
-        assert.equal(onDisk('a.txt'), false);
-        assert.equal(fs.readFileSync(path.join(acts.root(), 'b.txt'), 'utf8'), 'content of a.txt', 'the bytes at the destination are not the moved ones');
-        const moved = await rowOf('b.txt');
-        assert.ok(moved, 'the destination has no record: the occupant\'s row made the re-key fail after the source row was deleted (E11000), and the file that was moved lost its own');
-        assert.equal(moved.description, 'description of a.txt', 'the occupant\'s record survived the replacement of its bytes — or a mix of the two');
-        assert.deepEqual(moved.tags, ['tag-of-a.txt']);
-        assert.deepEqual(moved.properties, { owner: 'a.txt' });
-        assert.equal(await rowOf('a.txt'), null, 'the source row is still there');
-        assert.equal((await rowOf('b.txt#chunk-0'))?.content, 'chunk of a.txt', 'the occupant\'s chunk row survived at an id the moved set takes');
-        assert.deepEqual(await linkTargets('b.txt'), [`entity:${E1}`, `fact:${F1}`],
-          'the destination\'s links are not exactly the moved file\'s: a previous occupant\'s links must not survive, and the moved file\'s must arrive');
-        assert.deepEqual(await linkTargets('a.txt'), []);
+        if (via === 'cascade') {
+          assert.equal(r.error?.name, 'DestinationExists', `the cascade did not refuse a move onto an existing file: ${r.error?.message ?? r.status}`);
+          assert.equal(r.error.path, 'b.txt');
+        } else {
+          assert.equal(r.status, 409, `answered ${r.status}: ${JSON.stringify(bodyOf(r))} — a move onto an existing file must be refused`);
+          assert.equal(bodyOf(r).code, 'destination_exists', JSON.stringify(bodyOf(r)));
+          assert.equal(bodyOf(r).path, 'b.txt');
+        }
+        assert.equal(fs.readFileSync(path.join(acts.root(), 'b.txt'), 'utf8'), 'content of b.txt', 'the occupant\'s bytes were replaced');
+        assert.equal(fs.readFileSync(path.join(acts.root(), 'a.txt'), 'utf8'), 'content of a.txt', 'the source\'s bytes changed');
+        assert.deepEqual(await rowOf('a.txt'), before.a, 'the source\'s record changed');
+        assert.deepEqual(await rowOf('a.txt#chunk-0'), before.aChunk, 'the source\'s chunk row changed');
+        assert.deepEqual(await rowOf('b.txt'), before.b, 'the occupant\'s record changed');
+        assert.deepEqual(await rowOf('b.txt#chunk-0'), before.bChunk, 'the occupant\'s chunk row was replaced');
+        assert.deepEqual(await linkTargets('a.txt'), before.aLinks, 'the source lost its links to a refused move');
+        assert.deepEqual(await linkTargets('b.txt'), before.bLinks, 'the occupant\'s links changed');
+        assert.deepEqual(await acts.raw(), [], 'a refused move left a tombstone');
       });
     }
   });
@@ -200,7 +208,7 @@ describe('a file move is all or nothing (real MongoDB)', { skip }, () => {
         if (via === 'cascade') assert.ok(r.error, 'the cascade completed a move onto rows of another file');
         else {
           assert.equal(r.status, 409, `answered ${r.status}: ${JSON.stringify(bodyOf(r))} — a move that overwrites another file's derived row must be refused`);
-          assert.equal(bodyOf(r).code, 'destination_taken_by_other', JSON.stringify(bodyOf(r)));
+          assert.equal(bodyOf(r).code, 'destination_exists', JSON.stringify(bodyOf(r)));
         }
         assert.ok(onDisk('a.txt') && !onDisk('b.txt'), 'the bytes moved although the move was refused');
         assert.deepEqual(await acts.raw(), [], 'a refused move left a tombstone for a path that did not go');
@@ -227,7 +235,7 @@ describe('a file move is all or nothing (real MongoDB)', { skip }, () => {
       const r = await moveVia('REST', 'src', 'moved');
 
       assert.equal(r.status, 409, `answered ${r.status}: ${JSON.stringify(bodyOf(r))}`);
-      assert.equal(bodyOf(r).code, 'destination_taken_by_other');
+      assert.equal(bodyOf(r).code, 'destination_exists');
       assert.ok(onDisk('src/c1.txt') && onDisk('src/c2.txt') && !onDisk('moved/c1.txt'), 'a child moved although the directory move was refused');
       assert.deepEqual(await acts.raw(), [], 'a refused directory move left tombstones');
       assert.deepEqual(await rowsAmong(['src/c1.txt', 'src/c2.txt', 'src/c1.txt#chunk-0', 'src/c2.txt#chunk-0']),

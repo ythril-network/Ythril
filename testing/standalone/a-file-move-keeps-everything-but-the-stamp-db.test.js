@@ -13,8 +13,8 @@
  * **What the move does now that the private re-keys did not, and which cases say so:**
  *   - the rows derived from the file move WITH it (they used to be left for a second step): the chunk, with its parent re-rooted;
  *   - the file's `convertedFileId` names the moved converted Markdown (it named the old path);
- *   - a destination that is already taken no longer costs the moved file its record (it used to fail the insert AFTER the delete —
- *     the "known limit" two cases pinned): the moved record is the one at the destination;
+ *   - a destination that is already taken is refused (it used to fail the insert AFTER the delete — the "known limit" two cases
+ *     pinned — and then replaced the occupant): a move never replaces anything, and neither file's record changes;
  *   - a move onto itself, a source with no bytes and an empty path are refused and change nothing (they used to be silent no-ops of
  *     the row step); a move needs the file's bytes, which is what the doors always required.
  *
@@ -220,17 +220,16 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       assert.deepEqual(carried[0].author, PEER);
     });
 
-    it('a destination that is already taken costs the moved file nothing: its record is the one at the destination, the occupant\'s is replaced (the stated limit of delete-then-insert is gone)', async () => {
+    it('a destination that is already taken is refused and costs NEITHER file anything: both records are as they were (the stated limit of delete-then-insert is gone, and so is the replace)', async () => {
       const mine = await put('docs/old.md');
-      await put('docs/taken.md', { description: 'already here' });
+      const theirs = await put('docs/taken.md', { description: 'already here' });
 
-      await move('docs/old.md', 'docs/taken.md');
+      await assert.rejects(move('docs/old.md', 'docs/taken.md'), (err) => err.name === 'DestinationExists' && err.path === 'docs/taken.md',
+        'a move onto an existing file was not refused as an existing destination');
 
-      assert.equal(await files().findOne({ _id: 'docs/old.md' }), null, 'the source row is still there');
-      const at = await files().findOne({ _id: 'docs/taken.md' });
-      assert.ok(at, 'the destination has no record: the moved file lost its own');
-      assert.equal(at.description, mine.description, 'the destination holds the occupant\'s record, not the moved file\'s');
-      assert.equal(await files().countDocuments({}), 1);
+      assert.deepEqual(await files().findOne({ _id: 'docs/old.md' }), mine, 'the source\'s record changed');
+      assert.deepEqual(await files().findOne({ _id: 'docs/taken.md' }), theirs, 'the occupant\'s record changed');
+      assert.equal(await files().countDocuments({}), 2);
     });
   });
 
