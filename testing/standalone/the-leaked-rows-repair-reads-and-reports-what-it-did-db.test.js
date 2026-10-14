@@ -31,6 +31,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedClaim, jobOf } from './_media-claim.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 import { NOW, METRICS, fileRow, derivedRow, runPass, metricValue, repairSteps, spaceEntry, addedKeys, fileTombstoneRow, repairCountersOrZero, repairCounters, counterDelta } from './_leaked-rows-repair.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -155,7 +156,7 @@ describe('the leaked-rows repair reads and reports what it did (real MongoDB)', 
 
   it('O4: a pass that removed rows writes one audit entry for the space, and a pass that removed nothing writes none', async () => {
     await runPass();     // nothing to remove
-    await new Promise(r => setTimeout(r, 300));
+    await sleep(300);   // an absence: the audit write is not awaited by the pass, so its window has to elapse in full
     assert.deepEqual(await auditRows(), [], 'a pass that removed nothing was audited');
 
     await files().insertMany([derivedRow(S, 'gone.pdf#chunk0', 'gone.pdf'), derivedRow(S, 'gone2.pdf#chunk0', 'gone2.pdf')]);
