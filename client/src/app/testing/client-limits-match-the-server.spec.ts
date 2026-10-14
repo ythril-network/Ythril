@@ -75,7 +75,7 @@ function patternSource(literal: string): string {
 function clientLimits(src: string): Record<string, string> {
   const m = /export\s+const\s+RULE_LIMITS\b[^=]*=\s*\{/.exec(src);
   if (!m) throw new Error(`no \`export const RULE_LIMITS = { ... }\` found in ${CLIENT_LIMITS}`);
-  // The object's end is found by scanning with string literals skipped: a pattern value holds `{0,63}` itself.
+  // The object's end is found by scanning with string literals skipped: a pattern value holds a brace quantifier itself.
   let i = m.index + m[0].length;
   const from = i;
   for (let depth = 1, quote = ''; i < src.length && depth > 0; i++) {
@@ -137,7 +137,7 @@ describe('RULE_LIMITS (client/src/app/shared/rule-limits.ts) equals the server c
     const client = clientLimits(readClientSource(CLIENT_LIMITS));
     const pattern = patternSource(server['RULE_NAME_PATTERN'] ?? '');
     expect(pattern, 'RULE_NAME_PATTERN not found on the server').not.toBe('');
-    // `^[a-z][a-zA-Z0-9_-]{0,63}$`: one leading character plus up to 63 more.
+    // The name pattern is one leading letter plus a bounded tail; the tail's upper bound is read from its brace quantifier.
     const tail = /\{0,(\d+)\}\$?$/.exec(pattern);
     expect(tail, `RULE_NAME_PATTERN does not end in a {0,N} tail: ${pattern}`).not.toBeNull();
     expect(asNumber(client['nameMax'] ?? '')).toBe(Number(tail![1]) + 1);

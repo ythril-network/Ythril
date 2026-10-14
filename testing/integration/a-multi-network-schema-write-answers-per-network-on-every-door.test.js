@@ -17,9 +17,11 @@
  *
  * ## The doors
  *
- * PATCH /api/spaces/:id, PUT /schema, the per-type upsert and delete, the schema library's group apply (REST); schema_update and
- * update_space (MCP). Each is one case over the same fixture: A organises a club (its own yes passes at once) and a closed network
- * with one member it can never hear from (no round can pass on A's yes alone), both carrying the space.
+ * Every route and tool that reaches `applySpaceMetaUpdate`, each one case titled with its door label, over the same fixture: A
+ * organises a club (its own yes passes at once) and a closed network with one member it can never hear from (no round can pass
+ * on A's yes alone), both carrying the space. The doors are not this file's to choose:
+ * `testing/standalone/every-schema-write-door-answers-its-layers.test.js` derives them from the call graph and fails when a
+ * door has no case here, so a schema-write door added later cannot go unasked.
  *
  * ## Stack-run
  *
@@ -127,25 +129,25 @@ describe('a space in a closed network and a club: pending in one, applied in the
     assertLayers(r.body, mixed(), 'PATCH');
   });
 
-  it('PUT /schema', async () => {
+  it('PUT /api/spaces/:id/schema', async () => {
     const r = await put(INSTANCES.a, admin, `/api/spaces/${BOTH}/schema`, { typeSchemas: { entity: { replaced: {} } } });
     assert.equal(r.status, 202, JSON.stringify(r.body));
     assertLayers(r.body, mixed(), 'PUT /schema');
   });
 
-  it('the per-type upsert', async () => {
+  it('PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName', async () => {
     const r = await put(INSTANCES.a, admin, `/api/spaces/${BOTH}/meta/typeSchemas/entity/added`, {});
     assert.equal(r.status, 202, JSON.stringify(r.body));
     assertLayers(r.body, mixed(), 'type upsert');
   });
 
-  it('the per-type delete', async () => {
+  it('DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName', async () => {
     const r = await del(INSTANCES.a, admin, `/api/spaces/${BOTH}/meta/typeSchemas/entity/seed`);
     assert.equal(r.status, 202, JSON.stringify(r.body));
     assertLayers(r.body, mixed(), 'type delete');
   });
 
-  it('the schema library\'s group apply', async () => {
+  it('POST /api/schema-library/groups/:group/apply', async () => {
     const r = await post(INSTANCES.a, admin, `/api/schema-library/groups/${encodeURIComponent(GROUP)}/apply`, { spaceId: BOTH });
     assert.equal(r.status, 202, JSON.stringify(r.body));
     assertLayers(r.body, mixed(), 'library group apply');
