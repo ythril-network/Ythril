@@ -882,6 +882,17 @@ export interface ConflictRecord {
   peerInstanceLabel: string;
 }
 
+/** One conflict a bulk resolve could not resolve: the record, and the answer a single resolve would have given for it. */
+export interface BulkConflictFailure {
+  id: string;
+  /** The server's own sentence: shown only for a `code` this client has no words for. */
+  error: string;
+  code?: string;
+  status?: number;
+  /** The path the answer is about (the conflict's own path unless the refusal names another). */
+  path?: string;
+}
+
 export interface DupeActionRule {
   minScore: number;
   action: 'flag' | 'automerge' | 'notify';

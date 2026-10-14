@@ -43,7 +43,8 @@ import { ToastService } from '../core/toast.service';
     .toast.success .icon { color: var(--success); }
     .toast.error   .icon { color: var(--error); }
     .toast.info    .icon { color: var(--info); }
-    .message { flex: 1 1 auto; word-break: break-word; }
+    /* pre-line: a toast that lists several things (one failed conflict per line) keeps its line breaks. */
+    .message { flex: 1 1 auto; word-break: break-word; white-space: pre-line; }
     .dismiss {
       flex: 0 0 auto;
       background: none; border: none; cursor: pointer;

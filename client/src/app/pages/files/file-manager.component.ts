@@ -2,17 +2,17 @@ import { FileExtractStore } from './file-extract.store';
 import { FileMetaStore } from './file-meta.store';
 import { FileUploadStore } from './file-upload.store';
 import { FilePreviewStore } from './file-preview.store';
-import { ChangeDetectionStrategy, Component, inject, signal, computed, effect, untracked, OnInit, OnDestroy, HostListener, viewChild, Input, Output, EventEmitter } from '@angular/core';
+import { ChangeDetectionStrategy, Component, Injector, afterNextRender, inject, signal, computed, effect, untracked, OnInit, OnDestroy, HostListener, viewChild, Input, Output, EventEmitter } from '@angular/core';
 import { FilePreviewComponent } from './file-preview.component';
 import { UploadQueueComponent, type UploadItem } from './upload-queue.component';
 import type { FileMetaModel } from './file-meta-editor.component';
 import { FileListingComponent, type FileRow } from './file-listing.component';
-import { joinPath } from './file-format';
+import { baseName, formatSize, joinPath, parentPath } from './file-format';
 import { FileTreeComponent, type TreeNode } from './file-tree.component';
 import { FileToolbarComponent, type BreadcrumbSegment } from './file-toolbar.component';
 import { FileDetailPaneComponent, type DetailMode } from './file-detail-pane.component';
 import { FileTreeStore } from './file-tree.store';
-import { FileListingStore, FILE_REFUSAL_PREFIX, FILE_REFUSALS_WITH_REMEDY, LISTING_FAILURE_KEYS } from './file-listing.store';
+import { FileListingStore, FILE_REFUSAL_PREFIX, FILE_REFUSALS_WITH_REMEDY, listingFailureKey } from './file-listing.store';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -128,10 +128,28 @@ import { ModalDirective } from '../../shared/modal.directive';
       gap: 0;
     }
     .fm-main { flex: 1; min-width: 0; }
+    /* A window too narrow for three columns (Q-471): the detail pane drops BELOW the tree and the list, at full width. At 1024px
+       with the pane open the list was left 90px, and no column can be reached inside a box that small. */
+    @media (max-width: 1100px) {
+      .fm-layout { flex-wrap: wrap; }
+      /* A basis for the list: at 0 it and a pane of 100% "fit" one line together, and the list is left with no width at all. */
+      .fm-main { flex: 1 1 320px; }
+      app-file-detail-pane { flex: 0 0 100%; }
+    }
+    /* A phone (320px reflow): the tree, the list and the pane stack at full width. Side by side, the list was left 68px. */
+    @media (max-width: 720px) {
+      .fm-layout { flex-direction: column; flex-wrap: nowrap; }
+      .fm-main { flex: 1 1 auto; }
+      app-file-detail-pane { flex: none; }
+    }
 
 
   `],
   template: `
+    <!-- What just happened that a screen reader would otherwise never hear: a deleted row is simply gone. Always in the DOM,
+         because a live region that appears together with its text is not announced. -->
+    <div class="sr-only" role="status" aria-live="polite">{{ announcement() }}</div>
+
     @if (loadingSpaces()) {
       <div class="loading-overlay"><span class="spinner"></span></div>
     } @else if (spacesError() !== null) {
@@ -177,7 +195,8 @@ import { ModalDirective } from '../../shared/modal.directive';
               [nodes]="tree.treeRoot()"
               [currentPath]="currentPath()"
               [rootError]="tree.rootError()"
-              (nodeClick)="onTreeClick($event)" />
+              (nodeClick)="onTreeClick($event)"
+              (toggleNode)="tree.toggle($event, activeSpaceId())" />
           }
 
           <!-- Main file listing -->
@@ -260,7 +279,9 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private transloco = inject(TranslocoService);
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
+  private injector = inject(Injector);
   private detailPaneRef = viewChild(FileDetailPaneComponent);
+  private listingRef = viewChild(FileListingComponent);
   // Brain-provided (only present when embedded in the Brain). Optional so the standalone /files route,
   // where the Brain injector isn't in the tree, still constructs — there the meta edit mode is hidden.
   private picker = inject(EntityRefPicker, { optional: true });
@@ -305,33 +326,63 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     this.listing.listed.pipe(takeUntilDestroyed()).subscribe(({ path, entries }) => {
       this.tree.fillFrom(path, entries);
       this.syncProgressPolling();
+      this.settleFocusAfterDelete();
     });
     this.listing.listingFailed.pipe(takeUntilDestroyed()).subscribe(({ path, reason }) => {
       this.tree.failFrom(path, reason);
+      // The rows the focus was promised to are not coming: a later listing must not take the focus from wherever it is by then.
+      this.focusAfterDelete = null;
     });
 
     /*
-     * And what a WRITE means beyond the reload the store has already done. A new folder changes the tree's
-     * root; a delete changes the file set the host is counting. Neither is something a listing store could
-     * decide for the page.
+     * And what a WRITE means beyond the reload the store has already done. A new, moved or deleted folder
+     * changes the parents it names in the tree (one request each, never a rebuild that collapses the rest); a
+     * delete changes the file set the host is counting, and may take away the file the pane is showing. None of
+     * that is something a listing store could decide for the page.
      */
-    this.listing.mutated.pipe(takeUntilDestroyed()).subscribe(kind => {
-      if (kind === 'created') {
+    this.listing.mutated.pipe(takeUntilDestroyed()).subscribe(change => {
+      const space = this.activeSpaceId();
+      if (change.kind === 'created') {
         // The form closes on the ANSWER, not on the attempt: a refused create keeps what was typed, so the
         // name can be corrected rather than retyped. Same for the rename below.
         this.newFolderName.set('');
         this.showNewFolder.set(false);
-        this.tree.loadRoot(this.activeSpaceId());
+        // One folder changed, so one parent of the tree is re-listed and merged: reloading the root rebuilt every node
+        // collapsed, and a new folder closed everything the operator had open.
+        this.tree.reloadParent(space, parentPath(change.path));
       }
-      if (kind === 'moved') this.renamingEntry.set('');
-      if (kind === 'removed') this.filesChanged.emit();
+      if (change.kind === 'moved') {
+        this.renamingEntry.set('');
+        // A moved folder leaves one parent and arrives in another (the same one for a rename in place).
+        if (change.isDirectory) {
+          const from = parentPath(change.from);
+          const to = parentPath(change.to);
+          this.tree.reloadParent(space, from);
+          if (to !== from) this.tree.reloadParent(space, to);
+        }
+      }
+      if (change.kind === 'removed') {
+        if (change.isDirectory) this.tree.removeByPath(change.path);
+        // The pane must not go on showing a file that is gone: the file itself, or any folder above it.
+        const shown = this.preview.file() ? this.previewPath : '';
+        if (shown === change.path || shown.startsWith(`${change.path}/`)) this.closePreview();
+        this.endDelete(change.path);
+        this.announcement.set(this.transloco.translate(change.isDirectory ? 'files.deleted.folder' : 'files.deleted.file', { name: baseName(change.path) }));
+        this.filesChanged.emit();
+      }
     });
-    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(({ kind, error, bytesMoved }) => {
+    this.listing.mutationFailed.pipe(takeUntilDestroyed()).subscribe(failure => {
+      const { kind, error, bytesMoved } = failure;
+      if (kind === 'remove') {
+        this.endDelete(failure.path);
+        // No listing is coming to give the focus to: a later one (the progress poll) must not take it from wherever it is by then.
+        this.focusAfterDelete = null;
+      }
       // The server's answer says WHY (`path_blocked`, `destination_exists`, ...): its code has words, and
       // an answer without one still says the server's own sentence before the generic line. A refusal that
       // tells the operator what to do stays until dismissed.
       const remedy = FILE_REFUSALS_WITH_REMEDY.has(error?.error?.code ?? '');
-      this.toast.error(refusalText(this.transloco, error, LISTING_FAILURE_KEYS[kind], FILE_REFUSAL_PREFIX), remedy ? 0 : undefined);
+      this.toast.error(refusalText(this.transloco, error, listingFailureKey(failure), FILE_REFUSAL_PREFIX), remedy ? 0 : undefined);
       // A refused move whose file DID move (its records are held back) is not being edited any more; the store reloads once.
       if (bytesMoved) this.renamingEntry.set('');
     });
@@ -429,11 +480,13 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   fileRows = computed<FileRow[]>(() => {
     const renaming = this.renamingEntry();
     const requeueing = this.metaStore.requeueingPath();
+    const deleting = this.deleting();
     return this.sortedEntries().map(entry => ({
       entry,
       renaming: renaming === entry.name,
       requeueing: requeueing === this.relPath(entry),
       canRequeue: this.canRequeue(entry),
+      deleting: deleting.has(this.join(this.currentPath(), entry.name)),
     }));
   });
 
@@ -480,6 +533,22 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   renamingEntry = signal('');
   renameValue = '';
+
+  /** The paths whose delete is in flight: their rows say so and cannot be deleted twice. */
+  readonly deleting = signal<ReadonlySet<string>>(new Set());
+
+  /** What the polite live region says; set when something happened that has no element of its own to be heard from. */
+  readonly announcement = signal('');
+
+  /**
+   * Where the focus goes once the listing that follows a delete has landed: the name of the row that was below the deleted one,
+   * or `{ name: null }` for the table's caption when there was none. `null` is "no delete is waiting for its listing". A deleted
+   * row takes the focus with it, and without this a keyboard user is left on the page body.
+   */
+  private focusAfterDelete: { name: string | null } | null = null;
+
+  /** The space-relative path of the file in the docked pane, so a delete knows whether it took that file away. */
+  private previewPath = '';
 
   breadcrumbs = signal<BreadcrumbSegment[]>([{ label: 'root', path: '/' }]);
 
@@ -783,19 +852,43 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     const from = this.join(this.currentPath(), entry.name);
     const parentDir = this.currentPath();
     const to = this.join(parentDir, this.renameValue.trim());
-    this.listing.move(this.activeSpaceId(), from, to, parentDir);
+    this.listing.move(this.activeSpaceId(), from, to, parentDir, entry.isDirectory);
   }
 
+  /**
+   * Delete a row. A folder is asked about differently from a file (it names the folder, says its contents go and shows what it
+   * holds), and the request says `confirm` for a folder only, from what the row WAS when it was clicked: a row that became a
+   * folder meanwhile is refused by the server and the list reloads (see `settleUnsuccessfulWrite`).
+   */
   async deleteEntry(entry: FileEntry): Promise<void> {
+    const folder = entry.isDirectory;
     const ok = await this.confirmDialog.confirm({
-      title: this.transloco.translate('files.confirm.deleteFileTitle'),
-      message: this.transloco.translate('files.confirm.deleteFile', { name: entry.name }),
+      title: this.transloco.translate(folder ? 'files.confirm.deleteFolderTitle' : 'files.confirm.deleteFileTitle'),
+      message: folder
+        ? this.transloco.translate('files.confirm.deleteFolder', { name: entry.name, size: formatSize(entry.size) })
+        : this.transloco.translate('files.confirm.deleteFile', { name: entry.name }),
       confirmLabel: this.transloco.translate('common.delete'),
       danger: true,
     });
     if (!ok) return;
     const path = this.join(this.currentPath(), entry.name);
-    this.listing.remove(this.activeSpaceId(), path, this.currentPath());
+    const rows = this.sortedEntries();
+    this.focusAfterDelete = { name: rows[rows.findIndex(row => row.name === entry.name) + 1]?.name ?? null };
+    this.deleting.update(paths => new Set(paths).add(path));
+    this.listing.remove(this.activeSpaceId(), path, this.currentPath(), folder);
+  }
+
+  /** A delete is over, however it ended: the row is no longer pending. */
+  private endDelete(path: string): void {
+    this.deleting.update(paths => { const next = new Set(paths); next.delete(path); return next; });
+  }
+
+  /** After the listing that follows a delete has landed AND been drawn: focus the row below the deleted one, else the caption. */
+  private settleFocusAfterDelete(): void {
+    const pending = this.focusAfterDelete;
+    if (!pending) return;
+    this.focusAfterDelete = null;
+    afterNextRender(() => this.listingRef()?.focusRow(pending.name), { injector: this.injector });
   }
 
   /** The file GET URL (no token — auth goes in the fetch header, never the URL). */
@@ -882,6 +975,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     this.extractStore.clear();
     this.loadSelectedMeta(entry);
     this.preview.open(entry, this.fileApiUrl(entry));
+    this.previewPath = this.join(this.currentPath(), entry.name);
 
     document.addEventListener('keydown', this._keyHandler);
     // WHEN to focus is part of what opening means, so it stays here; the element is in the pane.
@@ -952,6 +1046,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   closePreview(): void {
     this.preview.close();
+    this.previewPath = '';
     document.removeEventListener('keydown', this._keyHandler);
   }
 

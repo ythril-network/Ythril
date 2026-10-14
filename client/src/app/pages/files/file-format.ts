@@ -57,3 +57,20 @@ export function msRange(offsetMs: number | null, durationMs: number | null): str
 export function joinPath(base: string, name: string): string {
   return base.endsWith('/') ? `${base}${name}` : `${base}/${name}`;
 }
+
+/**
+ * The directory a space-relative path lives in: `/docs/a.txt` is in `/docs`, `/docs` is in `/`, and root has no parent but
+ * answers `/` too, so a caller walking upward stops rather than falls off.
+ *
+ * The inverse of `joinPath`, and shared for the same reason: the tree store, the tree component and the page each need "the
+ * parent of this path" (a removal reloads it, focus goes to it, a move reloads two of them), and three spellings of one
+ * regex is how one of them ends up treating a trailing slash differently.
+ */
+export function parentPath(path: string): string {
+  return path.replace(/\/+$/, '').replace(/\/[^/]*$/, '') || '/';
+}
+
+/** The last segment of a path: the name an operator knows an entry by. */
+export function baseName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}

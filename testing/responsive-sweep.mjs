@@ -67,29 +67,71 @@
  * half. Run it when touching layout, and after any change to the shell.
  *
  * Exit code is 1 when anything is found, so CI could adopt it later if the stack is up.
+ *
+ * ## The Files tab (Q-471), and the three options it added
+ *
+ * The Files table is the widest table in the app in German, and the one every other table's reasoning was
+ * wrong about: "reachable by scrolling" is not enough for a column of ACTIONS. It is measured here on its own,
+ * at the widths the owner's windows have: 1400x900, 1024 and 320.
+ *
+ *   - `LOCALE=en,de` runs the whole sweep once per locale (the app reads its language from `localStorage.lang`,
+ *     which this sets before the first script runs). Unset, it runs once, as before.
+ *   - `SEED=1` creates the files the Files table needs to be measured honestly (long names, tags, a folder) in the
+ *     first space the token can see, through the REST API, using the token in `STATE`. A table of three short
+ *     names fits everywhere, which is how the German overflow went unseen. It overwrites its own files; it never
+ *     deletes anything. Point it only at an instance you may write to.
+ *   - The Files tab is `/brain?tab=files`: there is no `/files` route (it redirects to the Brain), so a sweep of
+ *     `/files` measured the Brain's first tab and reported on a page that was not the one named.
+ *
+ * What is asserted on the Files table, and what is only measured:
+ *
+ *   - ASSERTED at >= 1024px with the detail pane closed: the table does not scroll sideways (`scrollWidth <=
+ *     clientWidth`). With the folder tree open that is only expected at >= 1400px, where the window has the room
+ *     for the tree, the page's own sidebar and seven columns; at 1024 it is asserted with the tree closed.
+ *   - ASSERTED at EVERY width, pane open or closed: the actions column is reachable without scrolling (the last
+ *     column is sticky), and a long name is ellipsized rather than widening the table.
+ *   - MEASURED, not asserted, below 1024px or with the pane open: the table may scroll, and the top scroll
+ *     control (rule 3) must show.
+ *
+ * It needs a running instance and a browser, so it is not held in CI; the unit specs hold the markup, and this
+ * holds what only a layout engine can say.
  */
 import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
 
 const BASE = process.env.BASE ?? 'http://localhost:4260';
 const STATE = process.env.STATE;          // storageState json from an authenticated session
 const SHOTS = process.env.SHOTS;          // optional dir for screenshots of offending pages
 
+/**
+ * `LOCALE=en,de` (a comma list) runs the sweep once per locale; unset is one run in the browser's own language.
+ * The empty string stands for "no override", so the default path is byte-for-byte what it was.
+ */
+const LOCALES = (process.env.LOCALE ?? '').split(',').map(l => l.trim());
+
+/** The Files tab: there is no `/files` route, the file manager is a tab of the Brain. */
+const FILES_TAB = '/brain?tab=files';
+
 const ROUTES = (process.env.ROUTES ?? [
-  '/brain', '/graph', '/files', '/files/conflicts', '/schema-library',
+  '/brain', '/graph', FILES_TAB, '/files/conflicts', '/schema-library',
   '/settings/tokens', '/settings/spaces', '/settings/storage', '/settings/networks',
   '/settings/preferences', '/settings/audit-log', '/settings/data', '/settings/webhooks',
   '/settings/about', '/settings/help', '/settings/media-processing',
 ].join(',')).split(',');
 
-/** Widths worth checking: a narrow desktop window, and a phone. */
-const VIEWPORTS = [[600, 900], [420, 900]];
+/** Widths worth checking: a desktop window, a narrow one, a narrow desktop window, a phone, and a phone at its narrowest (reflow). */
+const VIEWPORTS = [[1400, 900], [1024, 900], [600, 900], [420, 900], [320, 700]];
 
 /** Every tab-strip flavour in the app: Brain's `.tabs`, and anything using the ARIA role. */
 const TAB_SELECTOR = '.tabs .tab, [role="tab"]';
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msedge' });
-const ctx = await browser.newContext(STATE ? { storageState: STATE } : {});
-const page = await ctx.newPage();
+
+/** The page being swept: one per locale, because the language is fixed before the app's first script runs. */
+let page;
+
+/** Which locale the findings below belong to, for the label. */
+let localeLabel = '';
 
 let findings = 0;
 
@@ -194,6 +236,117 @@ const measure = () => page.evaluate(() => {
   return out.sort((a, b) => b.over - a.over).slice(0, 6);
 });
 
+/**
+ * The names and tags the Files table is measured with: long enough that the German table cannot fit by accident.
+ * `.md` so the server accepts them as text. One folder with a long name, so a long DIRECTORY name is measured too.
+ */
+const SEED_FILES = [
+  { path: '/Jahresabschlussbericht-Entwurf-2026-ueberarbeitet-final-v3.md', tags: ['finanzen', 'quartalsbericht', 'vertraulich'] },
+  { path: '/Protokoll-der-Sitzung-des-Lenkungsausschusses-vom-dreizehnten-Oktober.md', tags: ['protokoll'] },
+  { path: '/kurz.md', tags: [] },
+  { path: '/Sicherheitskonzept-Zugriffsrechte/Berechtigungsmatrix-fuer-alle-Mitarbeitenden.md', tags: ['sicherheit', 'zugriff'] },
+];
+
+/** The token the STATE file carries: the app keeps its session token in `localStorage.ythril_token`. */
+const sessionToken = () => {
+  if (!STATE) throw new Error('SEED=1 needs STATE: the seed writes through the REST API with the session token');
+  const state = JSON.parse(readFileSync(STATE, 'utf8'));
+  const token = state.origins?.flatMap(o => o.localStorage ?? []).find(item => item.name === 'ythril_token')?.value;
+  if (!token) throw new Error(`no ythril_token in ${STATE}`);
+  return token;
+};
+
+/**
+ * Put the Files table's fixture in the first space. Idempotent (a write replaces) and additive (nothing is deleted).
+ * Returns the space it wrote to, so the run can say where.
+ */
+async function seedFilesTab() {
+  const headers = { Authorization: `Bearer ${sessionToken()}`, 'Content-Type': 'application/json' };
+  const listed = await (await fetch(`${BASE}/api/spaces`, { headers })).json();
+  const space = (listed.spaces ?? [])[0]?.id;
+  if (!space) throw new Error('SEED=1 found no space to write into');
+  for (const { path, tags } of SEED_FILES) {
+    const url = `${BASE}/api/files/${space}?path=${encodeURIComponent(path)}`;
+    const answer = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ content: `# ${path}\n\nA seeded file for the responsive sweep.\n`, tags }) });
+    if (!answer.ok) throw new Error(`seeding ${path} answered ${answer.status}: ${await answer.text()}`);
+  }
+  console.log(`seeded ${SEED_FILES.length} files in space "${space}"`);
+  return space;
+}
+
+/**
+ * Measure the Files table. Runs in page context.
+ *
+ * `treeOpen` and `paneOpen` say what state the page is in, so the one assertion that depends on them is
+ * made only where it is expected to hold (see the docblock at the top).
+ */
+const measureFilesTable = ({ width, treeOpen, paneOpen }) => page.evaluate(({ width, treeOpen, paneOpen }) => {
+  const out = [];
+  const table = document.querySelector('app-file-listing table');
+  const wrapper = document.querySelector('app-file-listing .table-wrapper');
+  if (!table || !wrapper) return [{ what: 'app-file-listing', why: 'NO FILES TABLE ON THE PAGE', over: 0, box: 0 }];
+  const rows = [...table.querySelectorAll('tbody tr')];
+  if (rows.length < 2) return [{ what: 'app-file-listing', why: `ONLY ${rows.length} ROW(S): the fixture is not there (SEED=1?)`, over: 0, box: 0 }];
+
+  // The table must not scroll sideways where the window has the room for it.
+  const fitsExpected = !paneOpen && (width >= 1400 || (width >= 1024 && !treeOpen));
+  const over = wrapper.scrollWidth - wrapper.clientWidth;
+  if (fitsExpected && over > 1) {
+    out.push({ what: 'files table', why: `SCROLLS SIDEWAYS at ${width}px with the tree ${treeOpen ? 'open' : 'closed'} and the pane closed`, over, box: wrapper.clientWidth });
+  }
+
+  // The actions column must be reachable WITHOUT scrolling: inside the wrapper's visible box, every button whole.
+  const box = wrapper.getBoundingClientRect();
+  const cells = [...table.querySelectorAll('td.actions-cell')];
+  if (!cells.length) out.push({ what: 'files table', why: 'NO td.actions-cell: the actions column is not marked', over: 0, box: 0 });
+  for (const cell of cells) {
+    for (const button of cell.querySelectorAll('button')) {
+      const r = button.getBoundingClientRect();
+      if (r.width === 0) continue;
+      if (r.right > box.right + 1 || r.left < box.left - 1) {
+        out.push({ what: `button ${button.getAttribute('aria-label') ?? ''}`.trim(), why: 'ACTION NOT VISIBLE without scrolling the table', over: Math.round(Math.max(r.right - box.right, box.left - r.left)), box: Math.round(box.width) });
+      }
+    }
+  }
+
+  // A long name ellipsizes (title carries the whole of it) rather than widening the table.
+  for (const name of table.querySelectorAll('.name-cell .file-name-btn')) {
+    if (name.scrollWidth > name.clientWidth + 1 && getComputedStyle(name).textOverflow !== 'ellipsis') {
+      out.push({ what: 'file-name-btn', why: 'LONG NAME CLIPPED WITHOUT AN ELLIPSIS', over: name.scrollWidth - name.clientWidth, box: name.clientWidth });
+    }
+    if (!name.getAttribute('title')) out.push({ what: 'file-name-btn', why: 'NAME HAS NO TITLE for the part an ellipsis hides', over: 0, box: 0 });
+  }
+  return out;
+}, { width, treeOpen, paneOpen });
+
+/**
+ * The Files tab in the states the matrix names: tree open, tree closed, then the detail pane open on a file.
+ * Called after the route has loaded. The tree toggle's state is remembered by the app in `localStorage`, so it is
+ * set, and the page reloaded, rather than clicked (the toolbar's own label is a translation).
+ */
+async function sweepFilesTab(routeLabel, w) {
+  for (const treeOpen of [true, false]) {
+    await page.evaluate(open => localStorage.setItem('ythril.sidebar', open ? 'open' : 'closed'), treeOpen);
+    await page.goto(BASE + FILES_TAB, { waitUntil: 'networkidle', timeout: 25_000 });
+    await page.waitForSelector('app-file-listing table tbody tr', { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    const state = { width: w, treeOpen, paneOpen: false };
+    const label = `${routeLabel} [files table, tree ${treeOpen ? 'open' : 'closed'}]`;
+    if (report(label, await measureFilesTable(state))) await shoot(label, w);
+
+    // The pane open on a file: the table may scroll now, and its actions must still be reachable.
+    const file = page.locator('app-file-listing tbody .file-name-btn:not(.dir)').first();
+    if (await file.count()) {
+      await file.click().catch(() => {});
+      await page.waitForTimeout(500);
+      const paneLabel = `${routeLabel} [files table, tree ${treeOpen ? 'open' : 'closed'}, pane open]`;
+      if (report(paneLabel, await measureFilesTable({ ...state, paneOpen: true }))) await shoot(paneLabel, w);
+    }
+  }
+  // Back to the app's default (the tree open), so the routes after this one are swept in the state a first visit sees.
+  await page.evaluate(() => localStorage.setItem('ythril.sidebar', 'open'));
+}
+
 const report = (label, hits) => {
   if (!hits.length) return false;
   findings += hits.length;
@@ -204,7 +357,7 @@ const report = (label, hits) => {
 
 const shoot = async (label, w) => {
   if (!SHOTS) return;
-  await page.screenshot({ path: `${SHOTS}/sweep-${label.replace(/[^a-z0-9]+/gi, '_')}-${w}.png` });
+  await page.screenshot({ path: `${SHOTS}/sweep-${localeLabel}${label.replace(/[^a-z0-9]+/gi, '_')}-${w}.png` });
 };
 
 /**
@@ -240,22 +393,36 @@ async function sweepTabs(routeLabel, w, depth = 0) {
   }
 }
 
-for (const [w, h] of VIEWPORTS) {
-  await page.setViewportSize({ width: w, height: h });
-  console.log(`\n===== ${w}x${h} =====`);
+if (process.env.SEED) await seedFilesTab();
 
-  for (const route of ROUTES) {
-    try {
-      await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: 25_000 });
-    } catch {
-      console.log(`${route}  — load timed out, skipped`);
-      continue;
+for (const locale of LOCALES) {
+  const ctx = await browser.newContext({ ...(STATE ? { storageState: STATE } : {}), ...(locale ? { locale } : {}) });
+  // The app reads its language from localStorage before it renders: set it before the first script of every page.
+  if (locale) await ctx.addInitScript(l => { try { localStorage.setItem('lang', l); } catch { /* storage is a convenience */ } }, locale);
+  page = await ctx.newPage();
+  localeLabel = locale ? `${locale}-` : '';
+  if (locale) console.log(`\n########## locale ${locale} ##########`);
+
+  for (const [w, h] of VIEWPORTS) {
+    await page.setViewportSize({ width: w, height: h });
+    console.log(`\n===== ${w}x${h} =====`);
+
+    for (const route of ROUTES) {
+      try {
+        await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: 25_000 });
+      } catch {
+        console.log(`${route}  — load timed out, skipped`);
+        continue;
+      }
+      await page.waitForTimeout(700);   // let deferred blocks and async data settle
+
+      if (report(route, await measure())) await shoot(route, w);
+      if (route === FILES_TAB) await sweepFilesTab(route, w);
+      else await sweepTabs(route, w);
     }
-    await page.waitForTimeout(700);   // let deferred blocks and async data settle
-
-    if (report(route, await measure())) await shoot(route, w);
-    await sweepTabs(route, w);
   }
+
+  await ctx.close();
 }
 
 await browser.close();

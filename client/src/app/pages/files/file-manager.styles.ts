@@ -175,6 +175,10 @@ export const FILE_DETAIL_PANE_STYLES = `
     overflow: hidden;
     max-height: calc(100vh - 180px);
   }
+  /* Narrow window: the pane goes BELOW the list at full width (the page wraps its layout at the same width). */
+  @media (max-width: 1100px) {
+    .fm-detail { width: auto; border-left: none; border-top: 1px solid var(--border); }
+  }
   .detail-header {
     display: flex;
     align-items: center;
@@ -365,6 +369,27 @@ export const FILE_LISTING_STYLES = `
   }
   .file-name-btn.dir { color: var(--info); font-weight: 500; }
   .file-name-btn:hover { text-decoration: underline; }
+  /*
+   * The name column takes whatever width the other columns leave and ellipsizes inside it (its title carries the whole name),
+   * so a long name can never be the reason the table is wider than the window (Q-471). width:100% with max-width:0 is the
+   * table-cell form of "fill the rest and shrink": the other columns size to their content, and this one is the slack.
+   */
+  .name-cell { width: 100%; max-width: 0; min-width: 100px; }
+  .name-cell .file-name-btn { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Seven columns in German: the shell's 14px of side padding per cell is what no longer fits, so this table runs at 10px. */
+  th, td { padding-left: 10px; padding-right: 10px; }
+
+  /* The actions are a flex row INSIDE the cell: a cell that is itself display:flex is no longer a table cell. */
+  .row-actions { display: flex; gap: 6px; align-items: center; }
+  /*
+   * The last column stays reachable wherever the table has to scroll sideways (a narrow window, the detail pane open, a
+   * long name): every action is on screen without scrolling to find it. Opaque, or the cells that scroll under it show
+   * through. Where the table fits it changes nothing.
+   */
+  th.actions-cell, td.actions-cell { position: sticky; right: 0; box-shadow: -1px 0 0 var(--border-muted); }
+  th.actions-cell { background: var(--bg-elevated); }
+  td.actions-cell { background: var(--bg-primary); }
+  tbody tr:hover td.actions-cell { background: var(--bg-elevated); }
 
   /* Merged metadata columns: embedding-status pill + tag chips (joined from the file's FileMeta). */
   .emb-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
