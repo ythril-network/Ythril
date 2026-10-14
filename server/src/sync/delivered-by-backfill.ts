@@ -40,7 +40,8 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
-import { getConfig, saveConfig } from '../config/loader.js';
+import { getConfig } from '../config/loader.js';
+import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { log, peerText } from '../util/log.js';
@@ -82,12 +83,8 @@ export async function stampDeliveriesOnce(spaceId: string): Promise<void> {
     let total = 0;
     const { failed } = await eachUnit([...BRAIN_COLLECTIONS], async (part) => { total += await stampCollection(spaceId, part); });
     if (failed.length > 0) return;   // a collection is still owed: the marker waits, and the next cycle finishes it
-    // The live config, read after the awaits above: a copy taken before them can be a reload behind.
-    const cfg = getConfig();
-    const space = cfg.spaces.find(s => s.id === spaceId);
-    if (!space) return;
-    space.deliveredByBackfilled = true;
-    saveConfig(cfg);
+    // On the live entry, read after the awaits above (`changeSpaceEntries`); a space deleted meanwhile has none, and nothing is said.
+    if (!changeSpaceEntries([spaceId], space => { space.deliveredByBackfilled = true; return true; })) return;
     if (total > 0) {
       log.info(`Stamped ${total} record(s) of space '${peerText(spaceId)}' with who delivered them (one time, after upgrading); `
         + 'a record written from now on carries its own stamp.');

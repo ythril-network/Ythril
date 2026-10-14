@@ -125,28 +125,52 @@ export function parentOfSidecar(key: string): { parent: string; role: Sidecar['r
 }
 
 /**
+ * Whether `id` is a DERIVED ROW of the file `fileId` — `<fileId>#…`, the chunk, caption and face rows a conversion and the media worker
+ * leave under it — and not ANOTHER file whose own name happens to hold a `#`. The one reading of that `#`, asked by the move's id rule
+ * ({@link movedId}), by the selection of a file's links (`fileLinkSourcesOf`) and by the delete's "is this link's source a derived row of a
+ * file that survives" (`removeLinksOfDeletedFiles`).
+ *
+ * ## What it prevents
+ *
+ * `a#b.txt` spells a derived row of `a` AND a file uploaded with that name. Read as text alone, the move of `a` re-keyed the other file's
+ * id, a delete of `a` took the other file's links and one of `a`'s surviving files kept them; read by each caller in its own words, only one
+ * of three had the guard. **The guard is the data it is handed:** `topLevelFiles` are ids known to be top-level file rows (no
+ * `parentFileId`), and a row that is one is a file of its own, never a derived row of anything. Required here (the rule cannot be asked without it): a caller that
+ * does not hold the rows reads them with `topLevelFilesAmong` (`files/derived-rows.ts`); {@link NO_TOP_LEVEL_FILES} says out loud, at the call,
+ * that the ids asked about are known derived (a row with a parent) or that the caller is purely textual.
+ */
+export function isDerivedRowOf(id: string, fileId: string, topLevelFiles: ReadonlySet<string>): boolean {
+  return id.startsWith(`${fileId}#`) && !topLevelFiles.has(id);
+}
+
+/** For a caller whose ids cannot be a top-level file's — a row that has a `parentFileId` — or that has no rows in hand to ask. */
+export const NO_TOP_LEVEL_FILES: ReadonlySet<string> = new Set();
+
+/**
  * The id `id` has after `src` moves to `dst`, or `null` when `id` does not belong to `src`.
  *
- * Belonging is: `src` itself, anything under `src/`, a chunk of `src` (`src#chunk<n>`), and the same three under
- * either sidecar root — plus the converted sidecar of `src` itself, `_converted/<src>.md`.
+ * Belonging is: `src` itself, anything under `src/`, a derived row of `src` ({@link isDerivedRowOf}: `src#chunk<n>`), and the same three
+ * under either sidecar root — plus the converted sidecar of `src` itself, `_converted/<src>.md`. `topLevelFiles` are the ids among those asked
+ * about that are top-level file rows, which are never `src`'s derived rows (a row the caller read; absent means the ids are not known to be any).
  */
-export function movedId(id: string, src: string, dst: string): string | null {
+export function movedId(id: string, src: string, dst: string, topLevelFiles: ReadonlySet<string> = NO_TOP_LEVEL_FILES): string | null {
   const from = movedRoot(src);
   const to = movedRoot(dst);
   if (!from || !to) return null;   // an empty root would claim the whole space
   const root = SIDECAR_ROOTS.find(r => id.startsWith(r)) ?? '';
   const tail = id.slice(root.length);
-  if (isAtOrUnder(tail, from) || tail.startsWith(`${from}#`)) return root + to + tail.slice(from.length);
+  if (isAtOrUnder(tail, from) || isDerivedRowOf(id, `${root}${from}`, topLevelFiles)) return root + to + tail.slice(from.length);
   if (root === CONVERTED_ROOT && tail === `${from}.md`) return `${root}${to}.md`;
   return null;
 }
 
 /**
- * Whether `id` is `root`, or anything that belongs to it: under it, a chunk of it, or its sidecar ({@link movedId} answers it for every
+ * Whether `id` is `root`, or anything that belongs to it: under it, a derived row of it, or its sidecar ({@link movedId} answers it for every
  * spelling). Asked by the move plan (is the file at the end of a chain inside the destination?) and by the leaked-rows repair (is the
  * file at the end of a row's chain the file the row's own id names?), so both mean the same by "belongs".
  */
-export const belongsTo = (id: string, root: string): boolean => movedId(id, root, root) !== null;
+export const belongsTo = (id: string, root: string, topLevelFiles: ReadonlySet<string> = NO_TOP_LEVEL_FILES): boolean =>
+  movedId(id, root, root, topLevelFiles) !== null;
 
 /**
  * Whether `p` is `root` itself or lies under `root/` — on whole path segments, so `a` does not take `ab`. The one spelling of "at or
@@ -155,7 +179,8 @@ export const belongsTo = (id: string, root: string): boolean => movedId(id, root
 export const isAtOrUnder = (p: string, root: string): boolean => p === root || p.startsWith(`${root}/`);
 
 /** The id `id` has after `src` moves to `dst`, or `id` itself when it does not belong to `src` ({@link movedId}). */
-export const idAfterMove = (id: string, src: string, dst: string): string => movedId(id, src, dst) ?? id;
+export const idAfterMove = (id: string, src: string, dst: string, topLevelFiles: ReadonlySet<string> = NO_TOP_LEVEL_FILES): string =>
+  movedId(id, src, dst, topLevelFiles) ?? id;
 
 /**
  * The ids among `ids` that change when `src` moves to `dst`, each with the id it takes — the one spelling of "which of these ids does

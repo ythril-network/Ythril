@@ -140,12 +140,10 @@ export async function assertDestinationFree(spaceId: string, src: string, dst: s
   const requested = toDocId(dst);
   const kind = await kindAt(spaceId, src);
   const state = await destinationStateOf(spaceId, src, dst, { begun });
-  if (state === 'occupied') throw new DestinationExists(requested, 'bytes');
   // An alias IS the source under another spelling, so a record at that spelling is the file's own (the repeat of a case-only rename that
   // already finished), or a second record of one file, which the plan refuses by its rows (`holdsAtDestination`).
-  if (state !== 'alias' && (kind === 'file' ? await hasLiveFileRecordExactlyAt(spaceId, requested) : await hasLiveFileRecordAt(spaceId, requested))) {
-    throw new DestinationExists(requested, 'record');
-  }
+  await assertNeitherBytesNorRecord(state, requested, 'move',
+    () => kind === 'file' ? hasLiveFileRecordExactlyAt(spaceId, requested) : hasLiveFileRecordAt(spaceId, requested));
 
   const ownedAtDestination = new Set((await sidecarsOwnedBy(spaceId, dst, kind)).map(s => s.path));
   const debris: string[] = [];
@@ -195,10 +193,29 @@ export async function assertNothingStandsAt(spaceId: string, dst: string, { plac
   const state: DestinationState = placing === undefined
     ? ((await lstatIfPresent(dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); })) === null ? 'free' : 'occupied')
     : await destinationStateAt(placing, dstAbs, { begun: true }).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); });
-  if (state === 'occupied') throw new DestinationExists(requested, 'bytes', undefined, 'resolution');
   // An alias is the placed file itself under another spelling of its name: its record, if any, is its own. A half-made link is not, so its
   // destination's record is asked like any other.
-  if (state !== 'alias' && await hasLiveFileRecordExactlyAt(spaceId, requested)) throw new DestinationExists(requested, 'record', undefined, 'resolution');
+  await assertNeitherBytesNorRecord(state, requested, 'resolution', () => hasLiveFileRecordExactlyAt(spaceId, requested));
+}
+
+/**
+ * The two steps every question about a destination ends in, written once: occupied bytes are `DestinationExists('bytes')`, and — unless the
+ * state says the bytes are the source's own under another spelling (`alias`) — a live record exactly where the caller says is
+ * `DestinationExists('record')`. `state` is what the disk said ({@link destinationStateOf} for a move, a placing's own read for a
+ * resolution); `hasRecord` is the caller's reading of the record, because a move of a directory asks at or under the path and a file or a
+ * placing asks exactly at it; `act` is whose sentence the refusal speaks (`DestinationExists`).
+ *
+ * ## What it prevents
+ *
+ * `assertDestinationFree` and `assertNothingStandsAt` each wrote the pair, and a copy that drops the `alias` exemption refuses the repeat of a
+ * finished case-only rename, while one that drops the record step lets a peer's file whose bytes have not arrived be replaced. Each caller
+ * keeps its own question (what to read, which sidecars to weigh); the verdict on what it read is here.
+ */
+async function assertNeitherBytesNorRecord(
+  state: DestinationState, requested: string, act: 'move' | 'resolution', hasRecord: () => Promise<boolean>,
+): Promise<void> {
+  if (state === 'occupied') throw new DestinationExists(requested, 'bytes', undefined, act);
+  if (state !== 'alias' && await hasRecord()) throw new DestinationExists(requested, 'record', undefined, act);
 }
 
 /**

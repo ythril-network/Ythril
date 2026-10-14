@@ -231,8 +231,10 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
     async ids => new Map(ids.flatMap((id): Array<[string, (typeof facts)[number]]> => (byId.has(id) ? [[id, byId.get(id)!]] : []))),
   );
   const groupOf = (id: string): string => chains.get(id)?.ancestors.at(-1)?._id ?? id;
+  // A row with no parent is a file of its own: `a#b.txt` beside `a` is not re-keyed with `a` (`isDerivedRowOf`).
+  const topLevel = new Set(facts.filter(r => r.parentFileId === undefined).map(r => r._id));
   const rows: PlannedRow[] = facts.map(r => ({
-    from: r._id, to: idAfterMove(r._id, from, to), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
+    from: r._id, to: idAfterMove(r._id, from, to, topLevel), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
 
   const { flagged, replaced, refused } = await holdsAtDestination(spaceId, rows, to, kind, phase);

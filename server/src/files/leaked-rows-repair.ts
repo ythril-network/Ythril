@@ -21,7 +21,9 @@
  * tombstone, written by THIS instance. Each condition is the proof of one thing: the tombstone that the file was deleted (a link with
  * none is an early arrival, whose file's bytes have not landed), that it was deleted here and by us (a peer's tombstone proves nothing
  * about what this instance wrote, and each peer repairs its own leaks), that the file has not come back, and that a move is not still
- * carrying the links. The removal goes through the link writer, so it tombstones each link and peers drop theirs. A link another instance
+ * carrying the links. The removal is the delete's own (`removeFileLinksThisInstanceWrote`, `brain/links.ts`): "written by this
+ * instance" is the one reading the delete uses, so a link with no author (written here before authorship was stamped) is ours to remove
+ * here as it is there, and each link is tombstoned so peers drop theirs. A link another instance
  * wrote stays with its author (ADR 05; whether it should go is the owner's, D-31).
  *
  * It removes nothing a person can still reach and nothing authored: rows derived from a file that is already deleted, and links from one.
@@ -44,9 +46,10 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { getConfig, saveConfig } from '../config/loader.js';
+import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { authorRef } from '../config/author.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { removeLinksWrittenBy } from '../brain/links.js';
+import { removeFileLinksThisInstanceWrote } from '../brain/links.js';
 import { fileLinkSourcesAfter } from '../brain/link-adjacency.js';
 import { leakedRowsKeptTotal, leakedRowsRemovedTotal, leakedRowsRepairPendingSpaces } from '../metrics/registry.js';
 import { inChunks } from '../util/chunks.js';
@@ -116,16 +119,12 @@ const persistScan = (): void => { saveConfig(getConfig()); };
  * sweep scans. A space with no scan state costs nothing.
  */
 export function restartLeakedRowScans(spaceIds: readonly string[]): void {
-  const cfg = getConfig();
-  let changed = false;
-  for (const id of spaceIds) {
-    generations.set(id, generationOf(id) + 1);
-    const entry = cfg.spaces.find(s => s.id === id);
-    if (entry?.leakedRowScan === undefined) continue;
+  for (const id of spaceIds) generations.set(id, generationOf(id) + 1);
+  changeSpaceEntries(spaceIds, entry => {
+    if (entry.leakedRowScan === undefined) return false;
     delete entry.leakedRowScan;
-    changed = true;
-  }
-  if (changed) saveConfig(cfg);
+    return true;
+  });
 }
 
 /** Write the gauge: how many concrete spaces still owe a scan at `now`. Every pass writes it, so a pass that did not is visible. */
@@ -208,7 +207,7 @@ async function deletedFileLinksPage(spaceId: string, after: string | undefined, 
   const { froms, last, rows } = await fileLinkSourcesAfter(spaceId, after, size);
   const { sources, unlooked } = await leakedLinkSources(spaceId, froms);
   // Written before the stamp only: a link a re-upload's author saved since is not one this page decided on.
-  if (sources.length > 0) outcome.linksRemoved += await removeLinksWrittenBy(spaceId, sources, 'file', authorRef().instanceId, { createdUntil: stamp });
+  outcome.linksRemoved += await removeFileLinksThisInstanceWrote(spaceId, sources, { createdUntil: stamp });
   return {
     ...(last !== undefined ? { last } : {}), end: rows < size,
     ...(unlooked.length > 0 ? { failure: new Error(`${unlooked.length} link source path(s) could not be looked at, so their links were kept (first: ${peerText(unlooked[0]!.path)}: ${peerText(unlooked[0]!.err)})`) } : {}),

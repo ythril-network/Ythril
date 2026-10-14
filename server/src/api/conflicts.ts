@@ -10,6 +10,7 @@ import { deleteStoredIfPresent, lstatIfPresent, moveStored } from '../files/stor
 import { placeIfFree } from '../files/files.js';
 import { assertDestinationReachable, assertNothingStandsAt, fsRefusalOf } from '../files/destination.js';
 import { FileSystemFault, fileActAnswer } from '../files/act-answers.js';
+import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { mkdirPrivate } from '../util/fs-modes.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { isProxySpace } from '../spaces/proxy.js';
@@ -175,9 +176,8 @@ interface FailedResolution { id: string; error: string; code?: string; status?: 
  * store's, a `400` for a path outside the space, and otherwise the file-system-fault sentence (its code, no path); the cause is logged.
  */
 function failedResolution(id: string, err: unknown, where: string): FailedResolution {
-  const act = fileActAnswer(err);
+  const act = answerFileActFailure(err, where);
   if (act) {
-    if (act.status >= 500) reportServerFailure(where, err);
     return { id, error: act.body.error, code: act.body.code, status: act.status, ...(act.body.path !== undefined ? { path: act.body.path } : {}) };
   }
   if (err instanceof RangeError) return { id, error: err.message, status: 400 };
