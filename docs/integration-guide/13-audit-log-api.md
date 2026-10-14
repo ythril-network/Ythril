@@ -62,7 +62,7 @@ Consequences worth knowing when reading the log:
   both (Q-50).
 
 Allowlisted today: space and schema updates, network settings and space additions, token renames and rights,
-media levels, backup settings, and the brain record edits (fact, entity, edge, chrono, file metadata, and the
+media levels, backup settings, and the brain record edits (fact, entity, edge, chrono, file metadata, whether a file delete took a directory tree (`file.delete` records `kind: "directory"`; a single file records nothing), and the
 name an entity merge makes unrecoverable). Token creation and webhook operations are excluded by design, since
 the interesting value in those payloads is the secret itself.
 

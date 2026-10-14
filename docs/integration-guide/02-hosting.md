@@ -147,6 +147,13 @@ All persistent data lives in named Docker volumes:
 | `ythril-mongo-data` | Brain data: facts, entities, edges, tombstones |
 | `ythril-mongo-configdb` | MongoDB replica set keyfile |
 
+**The data volume should support hard links.** A file move gives the file its new name by a hard
+link before it removes the old one, which is what makes a move unable to overwrite a file that appears at the destination
+in that instant. A volume that refuses hard links (some network and FUSE file systems) still works: the move falls back
+to a rename, `ythril_file_move_link_fallback_total` counts every such move and the log says so once, and a process outside
+Ythril that writes at the destination in that same instant can be overwritten. A local volume of Docker, Kubernetes or a
+host disk needs nothing.
+
 The `config/` directory is a host bind mount — `config.json`, `secrets.json`, and `schema-library.json` are plain files that survive any container lifecycle event.
 
 > **Backup note:** All three files are required for a complete restore. `schema-library.json` holds the instance-level schema library; spaces using `$ref: "library:<name>"` will have broken validation if this file is missing after a restore.
