@@ -790,19 +790,46 @@ export const fileMoveLinkFallbackTotal = new Counter({
 fileMoveLinkFallbackTotal.inc(0);
 
 /**
+ * A counter whose value is a tally some other module keeps, read back at scrape time: what is the tally now, as a counter?
+ *
+ * The tally lives in the module that counts (it cannot import this one: this one is imported by everything that emits, so the
+ * call back would be a runtime cycle), and the counter here is rebuilt from it on every scrape. Rebuilt means `reset()` then
+ * one `inc` per series the tally holds, and the two halves are what a hand-written collector drops: without the reset a scrape
+ * ADDS the tally to the last scrape's, so the counter climbs by its own value every fifteen seconds; without the inc of a
+ * zero the series is absent until the first event, which is the gap the declared-at-zero gates exist to close. Both are in
+ * here, so a caller cannot leave either out.
+ *
+ * `read` answers synchronously (nothing to await on a scrape). Unlabelled: it returns the count. Labelled by `labelName`: it
+ * returns the count per label value, and every value the tally knows is on the scrape, at 0 until it happens.
+ */
+function counterMirroringTally(spec: { name: string; help: string; read: () => number }): Counter<string>;
+function counterMirroringTally<L extends string>(spec: { name: string; help: string; labelName: L; read: () => Readonly<Record<string, number>> }): Counter<L>;
+function counterMirroringTally(
+  spec: { name: string; help: string; labelName?: string; read: () => number | Readonly<Record<string, number>> },
+): Counter<string> {
+  const { name, help, labelName, read } = spec;
+  return new Counter({
+    name, help, ...(labelName === undefined ? {} : { labelNames: [labelName] as const }), registers: [register],
+    collect() {
+      this.reset();
+      const tally = read();
+      if (typeof tally === 'number') { this.inc(tally); return; }
+      if (labelName === undefined) throw new Error(`${name}: a tally per label value needs a labelName`);
+      for (const [value, count] of Object.entries(tally)) this.inc({ [labelName]: value }, count);
+    },
+  });
+}
+
+/**
  * File acts answered with a refusal or a failure, by `code`: counted where the answer is built (`fileActAnswer`), so both doors and
  * every code are in it. The tally is kept by `files/act-answers.ts` and mirrored here at scrape time (that module is imported below
  * this one, so it cannot call into the registry), and it holds every code, so every series is scrapable at 0.
  */
-export const fileActAnswersTotal = new Counter({
+export const fileActAnswersTotal = counterMirroringTally({
   name: 'ythril_file_act_answers_total',
   help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
-  labelNames: ['code'] as const,
-  registers: [register],
-  collect() {
-    this.reset();
-    for (const [code, count] of Object.entries(fileActAnswerCounts())) this.inc({ code }, count);
-  },
+  labelName: 'code',
+  read: fileActAnswerCounts,
 });
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
@@ -820,25 +847,17 @@ fileMoveBatchReplansTotal.labels({ space: '' }).inc(0);
  * by the dispatcher and mirrored here at scrape time (as the file act answers are), so every series is on the scrape at 0 from the
  * start, and the dispatcher never imports this module back (that would be a runtime cycle through everything that emits).
  */
-export const webhookFirstDeliveriesQueuedTotal = new Counter({
+export const webhookFirstDeliveriesQueuedTotal = counterMirroringTally({
   name: 'ythril_webhook_first_deliveries_queued_total',
   help: 'Webhook first deliveries that waited in the in-memory queue behind their subscription\'s deliveries already in flight',
-  registers: [register],
-  collect() {
-    this.reset();
-    this.inc(webhookFirstDeliveryCounts().queued);
-  },
+  read: () => webhookFirstDeliveryCounts().queued,
 });
 
 /** First deliveries that found their subscription's queue full and were written straight to the retry queue instead, counted by the rows persisted. */
-export const webhookFirstDeliveriesOverflowedTotal = new Counter({
+export const webhookFirstDeliveriesOverflowedTotal = counterMirroringTally({
   name: 'ythril_webhook_first_deliveries_overflowed_total',
   help: 'Webhook first deliveries persisted straight to the retry queue because their subscription already had its bound in flight and queued',
-  registers: [register],
-  collect() {
-    this.reset();
-    this.inc(webhookFirstDeliveryCounts().overflowed);
-  },
+  read: () => webhookFirstDeliveryCounts().overflowed,
 });
 
 export const embedWaitSeconds = new Histogram({
