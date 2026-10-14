@@ -119,6 +119,8 @@ import type { RecordView } from '${spec('brain/record-view.ts')}';
       extends: path.join(REPO_ROOT, 'tsconfig.base.json').split(path.sep).join('/'),
       compilerOptions: {
         noEmit: true, declaration: false, declarationMap: false, sourceMap: false,
+        // Every snippet imports all four validators and uses some: an unused import is not what these cases judge.
+        noUnusedLocals: false, noUnusedParameters: false,
         // The scratch folder is outside the repository: say where the node typings are, or every server file fails for want of `process`.
         typeRoots: [path.join(REPO_ROOT, 'node_modules', '@types').split(path.sep).join('/')], types: ['node'],
       },

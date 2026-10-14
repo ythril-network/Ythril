@@ -143,7 +143,7 @@ describe('every SpaceMeta key is accepted by the body or owned by the server', (
       const space = inst.loader.getConfig().spaces.find(s => s.id === 'sch');
       const stampSkew = { warnMinutes: 5, properties: ['stampedAt'] };
       const decision = planSpaceMetaUpdate({ spaceId: 'sch', space, body: { meta: { stampSkew } }, ifMatch: undefined });
-      assert.equal(decision.ok, true, `PATCH refused meta.stampSkew: ${JSON.stringify(decision.refusal?.body).slice(0, 300)}`);
+      assert.equal(decision.ok, true, `PATCH refused meta.stampSkew: ${String(JSON.stringify(decision.refusal?.body)).slice(0, 300)}`);
       assert.deepEqual(decision.plan.mergedMeta.stampSkew, stampSkew, 'the merged meta dropped stampSkew');
     });
   });
