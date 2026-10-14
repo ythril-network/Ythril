@@ -151,21 +151,50 @@ POST /api/conflicts/:id/resolve
 | Field | Required | Description |
 |-------|----------|-------------|
 | `action` | yes | One of: `keep-local`, `keep-incoming`, `keep-both`, `save-to-space` |
-| `rename` | no | New filename for `keep-both`, or destination path for `save-to-space` |
-| `targetSpaceId` | when `save-to-space` | Space to copy the incoming file into |
+| `rename` | no | New path for the conflict copy under `keep-both`, or the destination path in the target space for `save-to-space`. A string; an empty one is no rename |
+| `targetSpaceId` | when `save-to-space` | Space the incoming file is **moved** into. A string naming a concrete space (a proxy space is `400`) |
 
 | Action | Result |
 |--------|--------|
 | `keep-local` | Deletes the conflict copy, keeps your file |
-| `keep-incoming` | Replaces your file with the conflict copy |
-| `keep-both` | Keeps both files; optionally renames the conflict copy |
-| `save-to-space` | Copies the conflict file to another space, removes the conflict |
+| `keep-incoming` | Replaces your file with the conflict copy. The one action that replaces a file: your local one |
+| `keep-both` | Keeps both files; with `rename`, moves the conflict copy to that path |
+| `save-to-space` | **Moves** the conflict copy to another space (it leaves this one), removes the conflict |
+
+`keep-both` with a `rename` and `save-to-space` put the copy where **you** chose, and they never replace what stands there:
+a file, a directory, a symbolic link or a file record with no bytes yet (a peer's file whose content has not arrived) at
+the destination is `409` with `code: "destination_exists"` and the destination's `path`. Nothing moves, and the conflict
+stays open, so you can choose another name or space and resolve it again. A `rename` that goes through a file
+(`a.txt/inside.txt`) is `409` with `code: "path_blocked"`. A `rename` that leaves the space, or goes through a link that does, is
+`400`, and so is a `rename` into a path this instance keeps for itself (the conversion trees `_converted/` and `_extracted/`, a
+schema snapshot, a conflict copy's own name). Every path of the conflict, the copy's and the original's, is resolved the same
+checked way, so a conflict path that goes through a link out of the space is `400` for every action. `rename` and
+`targetSpaceId` that are not strings are `400`, before any `403`.
+
+`save-to-space` is a write of a file in the target space, so it needs `files:write` **there**, besides the data-quality
+area that lets a token resolve conflicts. Without it the answer is `403`, the same whether or not anything stands at the
+destination, so a token that may not write in a space cannot learn what the space holds.
+
+A placement is one hard link and the removal of the copy's old name, and a crash between the two leaves the copy under
+both names. Resolving the same conflict again finishes it (the old name is removed) and does not refuse the file as an
+occupant of its own destination. A foreign process writing at the destination in the very instant of the placement is
+the one window left, on a file system that cannot make a hard link; it is the same limit as a move's (`05-files-api`).
 
 **Response** `200`:
 
 ```json
 { "status": "resolved" }
 ```
+
+When there is nothing to place, the answer says so and still closes the record:
+
+```json
+{ "status": "resolved", "resolved": "nothing-to-place" }
+```
+
+That is: the conflict copy is already gone (an earlier resolution placed it and failed to close the record), `save-to-space`
+into the conflict's own space at the same path, or a `keep-both` `rename` equal to the conflict path. Nothing was placed or
+replaced, and a client must not report that something was.
 
 ---
 
@@ -182,7 +211,10 @@ POST /api/conflicts/bulk-resolve
 }
 ```
 
-Accepts the same `action`, `rename`, and `targetSpaceId` fields as single resolve. Applies the action to all listed conflicts.
+Accepts the same `action`, `rename`, and `targetSpaceId` fields as single resolve, under the same rules. Applies the action to all listed conflicts.
+A `rename` shared by several ids is one destination, so the first conflict is placed there and the others are refused as occupied.
+A malformed body, a `save-to-space` target the token may not write files in, and a proxy target are one `400` or `403` for the whole request;
+a refusal about one conflict is that conflict's failure, and the rest are resolved.
 
 `ids` holds at most **2 000** — the most the conflict list returns — and every entry must be a non-empty string.
 More, or anything else, is a `400` naming `ids`: each id is looked up across every space you can write, one at a
@@ -192,10 +224,18 @@ time, so the count is the cost.
 
 ```json
 {
-  "resolved": 2,
-  "failed": []
+  "resolved": 1,
+  "failed": [
+    { "id": "conflict-id-2", "error": "'taken.txt' already exists where the copy would be placed, ...", "code": "destination_exists", "status": 409, "path": "taken.txt" }
+  ]
 }
 ```
+
+A `failed[]` element is `{ id, error, code?, status?, path? }`. `error` is a sentence of the server's, never the file system's own
+words (which name the server's data directory). A refusal of a file act carries its `code` (the same codes
+[Files](05-files-api.md) lists, such as `destination_exists`), its HTTP `status` and, when it names one, the `path`; a conflict that does not exist is `{ id, error, status: 404 }`;
+a path outside the space is `status: 400`. `code` is present only for a file act's answer. A copy that was already gone counts in `resolved`
+(it closed the record), not in `failed`.
 
 ---
 
