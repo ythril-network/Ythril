@@ -18,19 +18,21 @@
  *   directory must be?
  * - {@link assertNotMovedIntoItself}: is this move onto itself, or into its own subtree? Decided on whole path segments, so `a`
  *   to `ab` is a move.
+ * - {@link assertDestinationFree}: does anything already stand where a MOVE would put its file? A move never replaces anything.
  * - {@link fsRefusalOf}: what a failed filesystem call means for the caller, asked AFTER it failed: a refusal about the path the
  *   checks above could not see (a name held by a directory, a race), and any other failure, which becomes a fault in words that
  *   carry no path.
  *
- * What none of them asks is whether the NAME is taken by a file: a destination file is replaced, and that is the guarantee
- * the move and write tools state.
+ * What the first two do not ask is whether the NAME is taken by a file: an upload or a `write_file` onto an existing file replaces
+ * it, and that is the guarantee those tools state. A move is the one act that never does.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
+import { DestinationExists, FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
-import { isAtOrUnder } from './moved-paths.js';
-import { isMissingPath } from './stored-bytes.js';
+import { CONVERTED_ROOT, isAtOrUnder, kindAt, movedSidecars, sidecarsOwnedBy } from './moved-paths.js';
+import { bytesPresentAt, destinationStateAt, isMissingPath, type DestinationState } from './stored-bytes.js';
+import { hasLiveFileRecordAt, hasLiveFileRecordExactlyAt } from './file-meta.js';
 import { toDocId } from '../util/paths.js';
 
 /**
@@ -82,6 +84,83 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
   const to = fileKeyOf(spaceId, dst).key;
   if (from === to) throw new PathBlocked(to, `'${from}' cannot be moved onto itself.`);
   if (isAtOrUnder(to, from)) throw new PathBlocked(from, `'${from}' cannot be moved into itself: '${to}' lies under it.`);
+}
+
+/**
+ * What stands at `dst` for a move of `src` — `free`, `alias` (the same entry under another spelling), `half-linked` (this move's own
+ * link, when `begun`) or `occupied` — read from the disk through the one decision (`classifyDestination`, `files/stored-bytes.ts`) that
+ * the step placing the bytes asks again under the locks. Both paths are resolved through the sandbox first; a failure to look is the
+ * one a door answers (`fsRefusalOf`), never the file system's own words, which name the data path.
+ *
+ * `begun` is whether a begun-move marker names this pair, read by the caller BEFORE it writes its own: this module does not import the
+ * tombstones, which import it.
+ */
+export async function destinationStateOf(spaceId: string, src: string, dst: string, { begun }: { begun: boolean }): Promise<DestinationState> {
+  const srcAbs = await resolveSafePathChecked(spaceId, src);
+  const dstAbs = await resolveSafePathChecked(spaceId, dst);
+  return destinationStateAt(srcAbs, dstAbs, { begun }).catch((err: unknown) => { throw fsRefusalOf(err, [src, dst]); });
+}
+
+/**
+ * Refuse a move whose destination something stands at — before a tombstone is written, a job held or a byte moved — and say which of the
+ * debris at it the move will remove.
+ *
+ * ## What it prevents
+ *
+ * A move REPLACED what stood at its destination: the bytes by the rename, the record by the re-key, the links by their convergence, and
+ * nothing said so. A script that moved a file onto a name it believed free destroyed another file, and a replicated one: the loss
+ * travelled to every instance the file was on.
+ *
+ * ## What an occupant is: only what a caller can NAME and REMOVE
+ *
+ * Each is removable by `delete_file` on the destination path, and the refusal says so (`DestinationExists`, `destination_exists`):
+ *
+ *  1. **Bytes** at `dst`: a file, or a directory (empty or not), of any kind. Not when the pair is an `alias` (a case-only rename) or the
+ *     move's own `half-linked` pair — those are the move itself.
+ *  2. **A live record** at `dst`, asked on its own and never only through the rows the move carries: a peer's file whose bytes have not
+ *     arrived, or a record a delete stopped before it finished. For a file source, a record AT `dst`; for a directory, at or under it.
+ *     (Not for an `alias`: that spelling names the source itself.)
+ *  3. **A sidecar destination** a live thing stands at: the converted Markdown of a file goes to `_converted/<dst>.md`, which is also
+ *     where the converted TREE of a directory `<dst>.md` stands. That directory, if it has bytes or a live record, is somebody's.
+ *
+ * (The live rows of ANOTHER file at an id the move would take are refused by the plan, `holdsAtDestination`, which reads the rows.)
+ *
+ * What derives from nothing live is not an occupant but DEBRIS, and the move removes it: a sidecar of a file that has neither bytes nor a
+ * live record, a derived row whose parent is absent or flagged. This returns the sidecar destinations that hold only debris, decided by
+ * the same read that decides what refuses, so the two cannot disagree; the move removes them before its bytes (`removeTree`), and the
+ * rows in its transaction.
+ *
+ * @throws DestinationExists (`standing`: `bytes`, `record` or `sidecar`), a `PathBlocked`/`FileSystemFault` for a path that cannot be looked at.
+ * @returns the space-relative sidecar paths to remove before the bytes move.
+ */
+export async function assertDestinationFree(spaceId: string, src: string, dst: string, { begun }: { begun: boolean }): Promise<{ debris: string[] }> {
+  const requested = toDocId(dst);
+  const kind = await kindAt(spaceId, src);
+  const state = await destinationStateOf(spaceId, src, dst, { begun });
+  if (state === 'occupied') throw new DestinationExists(requested, 'bytes');
+  // An alias IS the source under another spelling, so a record at that spelling is the file's own (the repeat of a case-only rename that
+  // already finished), or a second record of one file, which the plan refuses by its rows (`holdsAtDestination`).
+  if (state !== 'alias' && (kind === 'file' ? await hasLiveFileRecordExactlyAt(spaceId, requested) : await hasLiveFileRecordAt(spaceId, requested))) {
+    throw new DestinationExists(requested, 'record');
+  }
+
+  const ownedAtDestination = new Set((await sidecarsOwnedBy(spaceId, dst, kind)).map(s => s.path));
+  const debris: string[] = [];
+  for (const { from, to } of await movedSidecars(spaceId, src, dst, kind)) {
+    // Nothing to move, or a target that overlaps the sidecar being moved (removing it would remove the bytes about to move).
+    if (!(await bytesPresentAt(spaceId, from)) || isAtOrUnder(to, from) || isAtOrUnder(from, to)) continue;
+    const state = await destinationStateOf(spaceId, from, to, { begun });
+    if (state === 'free' || state === 'alias') continue;
+    if (!ownedAtDestination.has(to)) {
+      // Not the destination's own sidecar: the one `sidecarsOwnedBy` leaves out is `_converted/<dst>.md` when a DIRECTORY stands there, the
+      // converted tree of the directory `<dst>.md`, which is only debris when that directory is nothing.
+      const directory = to.slice(CONVERTED_ROOT.length);
+      if (await bytesPresentAt(spaceId, directory) || await hasLiveFileRecordAt(spaceId, directory)) throw new DestinationExists(requested, 'sidecar', to);
+    }
+    // The destination's own sidecar, whose owner has neither bytes nor a live record (checks 1 and 2), or the tree of a directory that is nothing.
+    debris.push(to);
+  }
+  return { debris };
 }
 
 /**
