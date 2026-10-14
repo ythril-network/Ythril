@@ -24,7 +24,7 @@ import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
-import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
+import { cancelEveryJobOfSpace, ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { ensureFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
@@ -921,6 +921,17 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     types && types.length > 0 ? types : WIPE_COLLECTION_TYPES,
   );
   const isFullWipe = WIPE_COLLECTION_TYPES.every(t => targets.has(t));
+
+  /*
+   * THE JOBS GO FIRST WHEN THE FILE ROWS DO, and this is the guard a hand-written wipe drops.
+   *
+   * A media run writes the rows it derives from a file under its claim (`files/media/lease.ts`), and that only orders the run against
+   * a removal that revokes the claims BEFORE it removes. A wipe removes every file row of the space, so it takes every job first: a run
+   * that has not yet written finds its claim gone and writes nothing, and one that is writing is waited for, so the removal below finds
+   * what it wrote. Without it a run that read its parent live wrote a derived row after the wipe had removed the parent, under files
+   * that no longer existed.
+   */
+  if (targets.has('files')) await cancelEveryJobOfSpace(spaceId);
 
   // Run all applicable deletes in parallel.
   const zero = Promise.resolve({ deletedCount: 0 });

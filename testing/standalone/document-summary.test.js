@@ -161,8 +161,9 @@ describe('the worker wires it to the parent record', () => {
     //
     // The RULE is unchanged; where it lives has moved. It used to be `operatorWrote`, computed from a read and then acted
     // on — a read-modify-write that lost anything landing in between. It is now a condition in the update FILTER, so the
-    // database arbitrates. Asserting the old three lines would demand the defect back.
-    assert.match(w, /setDerivedDescriptionIfUnset\(spaceId, filePath, derivedDescription, derivedSource\)/,
+    // database arbitrates. Asserting the old three lines would demand the defect back. The call carries the run's claim
+    // (bundle-44 D-29, Q-436): the write is made under it, so a run whose claim went describes nothing.
+    assert.match(w, /setDerivedDescriptionIfUnset\(spaceId, claim, filePath, derivedDescription, derivedSource\)/,
       'the description must go through the conditional writer, not a plain update');
     assert.ok(!/operatorWrote/.test(w),
       'a read-then-decide guard is back; the condition belongs in the write, not in a snapshot');

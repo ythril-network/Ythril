@@ -73,6 +73,7 @@ import { inChunks } from '../util/chunks.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import type { ClientSession } from 'mongodb';
 import type { FileMetaDoc } from '../config/types.js';
+import { writeUnderClaim, type JobClaim } from './media/lease.js';
 
 /**
  * The processing state of a top-level file row. Every field is local: derived from this instance's copy of the bytes.
@@ -211,21 +212,28 @@ function requireParent(parentFileId: string | undefined): string {
 }
 
 /**
- * Is the file a DERIVED row belongs to still here? Read once per write, by the parent's id.
+ * Is the file a DERIVED row belongs to still here? Read once per write, by the parent's id, in the session of the write it decides.
  *
  * A chunk, caption or face row carries no `deletedAt` of its own, so this is the only form of the question that means
  * anything for one. A parent that is absent (the delete removed it outright) and a parent that is flagged (the delete
  * kept its audit record) answer the same: no.
  *
- * **The window it leaves, stated:** it is a read, then the write, and the check cannot move into the write's filter —
- * the derived row is a different document from its parent. A delete removes a file's derived rows first and flags or
- * removes the file after (`removeWhatSidecarsLeft`), so a write whose read came before the flag and whose write came
- * after the children went leaves one derived row behind a parent that is gone. No default read reaches it (its parent
- * is flagged or absent), and nothing removes it yet: Q-436.
+ * **What makes the answer hold until the row lands, and what it does not cover.** The check cannot move into the write's filter —
+ * the derived row is a different document from its parent — so the guarantee is the claim fence's (`media/lease.ts`): **a derived row is
+ * only written by the run that holds the file's claim, in the same transaction that reads the parent; whoever removes or re-keys a
+ * file takes the claims first** (a delete, a move, a directory delete, a space wipe). A write either lands before the revocation and the
+ * removal then finds its row, or finds its claim gone and writes nothing.
+ *
+ * - **Rows a previous release already leaked stay** until the repair that is filed for them (Q-465): their parent is flagged or absent, so
+ *   no default read reaches them, but a leaked FACE row is matched by the gallery search, and a file re-uploaded at the same path inherits
+ *   them.
+ * - **The face auto-label is not under the claim** (`media/face-embedder.ts`): it links an entity to the file through `updateFileMeta`, an
+ *   authored write that cannot join a session. It is guarded by a `holdsClaim` read just before it and by rethrowing abandonment, which
+ *   narrows the window a path reused in that instant could reach and does not close it.
  */
-async function parentIsLive(spaceId: string, parentFileId: string): Promise<boolean> {
+async function parentIsLive(spaceId: string, parentFileId: string, session?: ClientSession): Promise<boolean> {
   const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
-    asFilter<FileMetaDoc>({ _id: parentFileId, ...NOT_A_FLAGGED_ROW }), { projection: { _id: 1 } },
+    asFilter<FileMetaDoc>({ _id: parentFileId, ...NOT_A_FLAGGED_ROW }), { projection: { _id: 1 }, ...(session ? { session } : {}) },
   );
   return parent !== null;
 }
@@ -279,8 +287,10 @@ export async function writeDerivedFields(o: {
   parentFileId?: string | undefined;
   set?: Record<string, unknown>;
   unset?: Record<string, unknown>;
+  /** The transaction of a write made under a claim (`setDerivedExcerpt`): the parent is read, and the row written, in it. */
+  session?: ClientSession;
 }): Promise<DerivedWriteOutcome> {
-  const { spaceId, collectionSuffix, tier, filter, parentFileId, set, unset } = o;
+  const { spaceId, collectionSuffix, tier, filter, parentFileId, set, unset, session } = o;
   refuseHashed('writeDerivedFields', [...Object.keys(set ?? {}), ...Object.keys(unset ?? {})]);
   /*
    * A FILE THAT IS GONE DROPS WHAT A WRITE WOULD ADD AND KEEPS WHAT IT WOULD REMOVE.
@@ -291,7 +301,7 @@ export async function writeDerivedFields(o: {
    * searchable — which is how the first version of this guard turned the suppressed branch of the embed job, whose
    * whole purpose is to remove a stale vector, into a no-op.
    */
-  const live = tier !== 'derived' || await parentIsLive(spaceId, requireParent(parentFileId));
+  const live = tier !== 'derived' || await parentIsLive(spaceId, requireParent(parentFileId), session);
   const adds = set && Object.keys(set).length > 0 ? set : undefined;
   const removes = unset && Object.keys(unset).length > 0 ? unset : undefined;
   if (!live && removes === undefined) return 'gone';
@@ -301,6 +311,7 @@ export async function writeDerivedFields(o: {
       ...(live && adds ? { $set: adds } : {}),
       ...(removes ? { $unset: removes } : {}),
     }),
+    session ? { session } : {},
   );
   return r.matchedCount === 0 ? 'superseded' : 'written';
 }
@@ -309,19 +320,26 @@ export async function writeDerivedFields(o: {
  * Store a row DERIVED from a file — a conversion chunk, an image caption, a transcript segment, a face — as a whole
  * document, upserted so a retry after a partial failure re-runs cleanly.
  *
+ * **Under the run's claim** (`claim`, `media/lease.ts`): the fence, the parent's read and the row's write are one transaction, so the row
+ * is written only by the run that still holds the file's claim, and a delete or a move that takes the claim first either finds the row
+ * in place or leaves the run nothing to write. A run that lost its claim gets `JobLeaseLostError`, never `gone`: it is an abandonment,
+ * not a file that was deleted.
+ *
  * The parent's liveness is the precondition, and `gone` means the file was deleted while the job ran: the row is not
  * created, which is what the delete had already decided. The upsert is why the check cannot be a predicate in the
  * filter — a non-matching filter on `replaceOne(upsert: true)` INSERTS rather than skipping, which is how a guard put
  * there would have created exactly the row it meant to refuse.
  */
-export async function upsertDerivedFileRow(spaceId: string, doc: FileMetaDoc): Promise<DerivedWriteOutcome> {
+export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc: FileMetaDoc): Promise<DerivedWriteOutcome> {
   const parentFileId = doc.parentFileId;
   if (parentFileId === undefined) throw new Error('upsertDerivedFileRow: a derived row names the file it came from');
-  if (!await parentIsLive(spaceId, parentFileId)) return 'gone';
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-    asFilter<FileMetaDoc>({ _id: doc._id }), asDoc<FileMetaDoc>(doc), { upsert: true },
-  );
-  return 'written';
+  return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
+    if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
+      asFilter<FileMetaDoc>({ _id: doc._id }), asDoc<FileMetaDoc>(doc), { upsert: true, session },
+    );
+    return 'written';
+  });
 }
 
 /**
@@ -332,28 +350,32 @@ export async function upsertDerivedFileRow(spaceId: string, doc: FileMetaDoc): P
  * duplicate key (the old `ordered: false` tolerance cannot exist inside one), and a write conflict makes
  * `withTransaction` run its callback again from the top.
  *
- * **The caller holds the LEASE and this reads the FLAG, and the two are not the same question.** The lease
- * (`writeUnderClaim`) is coordination: it stops a job whose claim another worker has taken, early and cheaply. The flag
- * is the DATA's own answer to "is this file still here", and it is the authoritative one — a row flagged by a delete
- * that never touched the lease (an operator's own write, a peer's tombstone applied) is invisible to the claim and
- * decisive here. Where both are in force the lease usually fires first, which costs nothing; where only one can, this
- * is the one that must.
+ * **It holds the LEASE itself and reads the FLAG, and the two are not the same question.** The lease (`writeUnderClaim`, here, so a caller
+ * cannot drop it) is coordination: it stops a job whose claim another worker has taken, and orders the run against a delete or a move
+ * that took the claim. The flag is the DATA's own answer to "is this file still here", and it is the authoritative one — a row flagged by
+ * a delete that never touched the lease (an operator's own write, a peer's tombstone applied) is invisible to the claim and decisive
+ * here. Both are read in the one transaction.
+ *
+ * The delete-then-insert of a slice is the writer's own replacement of its previous run's rows, inside its claim: it is a holder of the
+ * claim, not a remover of the file's rows.
  */
 export async function replaceDerivedFileRows(
   spaceId: string,
+  claim: JobClaim,
   parentFileId: string,
   docs: readonly FileMetaDoc[],
-  opts: { session?: ClientSession; batch: number } ,
+  opts: { batch: number },
 ): Promise<DerivedWriteOutcome> {
-  if (docs.length === 0) return 'written';
-  if (!await parentIsLive(spaceId, parentFileId)) return 'gone';
-  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  const { session } = opts;
-  for (const slice of inChunks(docs, opts.batch)) {
-    await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: slice.map(d => d._id) } }), { session });
-    await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(d)), { session });
-  }
-  return 'written';
+  return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
+    if (docs.length === 0) return 'written';
+    if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
+    const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+    for (const slice of inChunks(docs, opts.batch)) {
+      await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: slice.map(d => d._id) } }), { session });
+      await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(d)), { session });
+    }
+    return 'written';
+  });
 }
 
 /**
@@ -361,13 +383,14 @@ export async function replaceDerivedFileRows(
  *
  * It is local (the hash does not see it), so it stamps neither `seq` nor `updatedAt`, and it goes in even where a person
  * has written their own description: it is the document's own text rather than a competing summary, and it is what makes
- * a remembered phrase find the record. The embed job is re-queued because the excerpt is part of the file's embed text.
+ * a remembered phrase find the record. The embed job is re-queued because the excerpt is part of the file's embed text — after the
+ * transaction, which is the run's claim fence: a run that lost its claim writes no excerpt and queues nothing.
  */
-export async function setDerivedExcerpt(spaceId: string, filePath: string, excerpt: string): Promise<DerivedWriteOutcome> {
+export async function setDerivedExcerpt(spaceId: string, claim: JobClaim, filePath: string, excerpt: string): Promise<DerivedWriteOutcome> {
   const _id = toDocId(filePath);
-  const outcome = await writeDerivedFields({
-    spaceId, collectionSuffix: 'files', tier: 'top-level', filter: { _id }, set: { excerpt },
-  });
+  const outcome = await writeUnderClaim(spaceId, claim, session => writeDerivedFields({
+    spaceId, collectionSuffix: 'files', tier: 'top-level', filter: { _id }, set: { excerpt }, session,
+  }));
   if (outcome === 'written') await enqueueEmbedJob(spaceId, 'file', _id, { priority: EMBED_PRIORITY.write });
   return outcome;
 }
@@ -380,13 +403,15 @@ export async function setDerivedExcerpt(spaceId: string, filePath: string, excer
  * authored half, and its `updatedAt` is a local note of when the pipeline last touched it.
  */
 export async function updateDerivedFileRow(
-  spaceId: string, rowId: string, parentFileId: string, set: Record<string, unknown>,
+  spaceId: string, claim: JobClaim, rowId: string, parentFileId: string, set: Record<string, unknown>,
 ): Promise<DerivedWriteOutcome> {
-  if (!await parentIsLive(spaceId, parentFileId)) return 'gone';
-  const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: rowId }), asUpdate<FileMetaDoc>({ $set: set }),
-  );
-  return r.matchedCount === 0 ? 'superseded' : 'written';
+  return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
+    if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
+    const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter<FileMetaDoc>({ _id: rowId }), asUpdate<FileMetaDoc>({ $set: set }), { session },
+    );
+    return r.matchedCount === 0 ? 'superseded' : 'written';
+  });
 }
 
 /**
@@ -400,12 +425,17 @@ export async function updateDerivedFileRow(
  *
  * Several ids are one `updateMany`, so a bulk retry stays one round trip.
  *
+ * **This is the operator-side and enqueue-side writer** (a queued job's `pending`, a dispatch's `skipped`, a retry's reset): it asks
+ * nothing of any claim. A media RUN marks its file through {@link markFileProcessing}, which writes the same state under the run's
+ * claim; `session` is how that one reaches this writer's body.
+ *
  * @throws when `state` names a field that is not a processing field, or is empty
  */
 export async function setFileProcessingState(
   spaceId: string,
   target: string | readonly string[],
   state: FileProcessingState,
+  opts: { session?: ClientSession } = {},
 ): Promise<void> {
   const $set: Record<string, unknown> = {};
   const $unset: Record<string, ''> = {};
@@ -428,7 +458,17 @@ export async function setFileProcessingState(
       ...(Object.keys($set).length > 0 ? { $set } : {}),
       ...(Object.keys($unset).length > 0 ? { $unset } : {}),
     }),
+    opts.session ? { session: opts.session } : {},
   );
+}
+
+/**
+ * Record what a media RUN did with the bytes of its file, under the run's claim: {@link setFileProcessingState} for the one row the job
+ * is about, in the transaction that is the claim fence. A run that lost its claim marks nothing and gets `JobLeaseLostError` — a path
+ * is reused, and the mark would land on the file that replaced its own.
+ */
+export async function markFileProcessing(spaceId: string, claim: JobClaim, state: FileProcessingState): Promise<void> {
+  await writeUnderClaim(spaceId, claim, session => setFileProcessingState(spaceId, claim.jobId, state, { session }));
 }
 
 /**
@@ -466,9 +506,18 @@ const saidPeerDelivered = warnOnce<string>();
  * A description is hashed and replicates by `seq`. Derived on a RECEIVER it either stamps a seq that outranks the
  * publisher's next edit, or — unstamped — can never replicate and reports a divergence for ever. The publisher derives
  * its own from the same bytes, and that one travels.
+ *
+ * ## Under the run's claim, and what that costs
+ *
+ * The write is the run's, so it is made in the transaction that is the claim fence (`media/lease.ts`): a run that lost its claim to a delete
+ * and a re-upload of the path describes nothing and gets `JobLeaseLostError`. The transaction takes a seq, so it runs through
+ * `inHeldTransaction` with the holder `file.describe` (`seqHolder`): the horizon stays held until the commit. The allocation's own
+ * `$inc` is outside the session, so a transaction that rolls back or is retried burns a number — a gap, which nothing pages over
+ * wrongly; only a REUSED number would.
  */
 export async function setDerivedDescriptionIfUnset(
   spaceId: string,
+  claim: JobClaim,
   filePath: string,
   description: string,
   /**
@@ -524,37 +573,39 @@ export async function setDerivedDescriptionIfUnset(
    * The read asks whether a number is worth taking; the WRITE asks the same filter again, which is what decides the
    * race a person's description can win in between.
    */
-  const r = await withSeqWhen(
-    spaceId,
-    async () => {
-      const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-      if (await files.findOne(writable, { projection: { _id: 1 } }) !== null) return true;
-      /*
-       * One decline is SAID, the one the narrowing above introduced: an author-less row a peer delivered. Every other
-       * decline existed before and is routine; this one turns an old peer-delivered file into one that stays
-       * description-less on this instance with nothing to read, so an operator wondering why needs the line. Asked
-       * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
-       */
-      const peerDelivered = asFilter<FileMetaDoc>(
-        { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
-      );
-      // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
-      const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 } }) as { deliveredBy?: unknown } | null;
-      if (theirs) {
-        saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
-          `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
-          + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `
-          + `publisher's own description arrives by sync; a person can still write one here.`,
-        ));
-      }
-      return false;
-    },
-    (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(writable, asUpdate<FileMetaDoc>({
-      // `P-32`: an authored write, so it advances the space counter and pages to a peer.
-      $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
-      ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
-    })),
-    'file.describe',
-  );
-  return (r?.modifiedCount ?? 0) > 0;
+  return writeUnderClaim(spaceId, claim, async (session) => {
+    const r = await withSeqWhen(
+      spaceId,
+      async () => {
+        const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+        if (await files.findOne(writable, { projection: { _id: 1 }, session }) !== null) return true;
+        /*
+         * One decline is SAID, the one the narrowing above introduced: an author-less row a peer delivered. Every other
+         * decline existed before and is routine; this one turns an old peer-delivered file into one that stays
+         * description-less on this instance with nothing to read, so an operator wondering why needs the line. Asked
+         * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
+         */
+        const peerDelivered = asFilter<FileMetaDoc>(
+          { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
+        );
+        // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
+        const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 }, session }) as { deliveredBy?: unknown } | null;
+        if (theirs) {
+          saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
+            `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
+            + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `
+            + `publisher's own description arrives by sync; a person can still write one here.`,
+          ));
+        }
+        return false;
+      },
+      (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(writable, asUpdate<FileMetaDoc>({
+        // `P-32`: an authored write, so it advances the space counter and pages to a peer.
+        $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
+        ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
+      }), { session }),
+      'file.describe',
+    );
+    return (r?.modifiedCount ?? 0) > 0;
+  }, { seqHolder: 'file.describe' });
 }

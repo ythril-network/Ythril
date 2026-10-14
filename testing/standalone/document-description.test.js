@@ -180,9 +180,10 @@ describe('provenance is recorded, not assumed', () => {
     // now written on its own, unconditionally, which is STRICTLY STRONGER than "even when an operator owns the
     // description". So the assertion is the property: an excerpt write that no description condition can reach.
     // Re-anchored for bundle-89: the excerpt goes through `setDerivedExcerpt` (the one writer of a field derived from a
-    // file's bytes, which also asks whether the file is still there). Still its OWN call, which is the property.
+    // file's bytes, which also asks whether the file is still there). Still its OWN call, which is the property — and it now
+    // carries the run's claim, because every write a media job makes about its file is made under it (bundle-44 D-29, Q-436).
     const workerSrc = src('server/src/files/media/worker.ts');
-    assert.match(workerSrc, /setDerivedExcerpt\(spaceId, filePath, derivedExcerpt\)/,
+    assert.match(workerSrc, /setDerivedExcerpt\(spaceId, claim, filePath, derivedExcerpt\)/,
       'the excerpt must be written by itself, not inside a description-conditional object');
     assert.ok(!/operatorWrote/.test(workerSrc),
       'the read-modify-write guard is gone — if it is back, the excerpt may be gated on it again');

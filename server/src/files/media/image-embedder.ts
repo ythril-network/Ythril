@@ -14,6 +14,8 @@ import type { FileMetaDoc } from '../../config/types.js';
 import type { VisionProvider } from './providers.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import type { PlaintextFile } from '../plaintext-file.js';
+import { isAbandonment, stopIfLeaseLost } from './lease.js';
+import { IMAGE_STEPS, type MediaRunOpts } from './progress.js';
 
 
 /**
@@ -39,6 +41,11 @@ export function facesAreWithheldFor(arrival: boolean): boolean {
  *
  * `opts.arrival` is the job's {@link MediaJobDoc.arrival}: the caption is made either way, the face analysis follows
  * {@link facesAreWithheldFor}.
+ *
+ * **Every hop beats at its entry and checks the lease before it spends a model budget**: a caption hop that outlasts the stall
+ * threshold used to leave the job silent, stall recovery took it, and the run met its own fence at the first write after the recovery.
+ * **Abandonment is never absorbed**: a write that found the claim gone (or the space not writable) ends the run as abandoned, whatever
+ * hop it is made in — the face catch below absorbs a face FAILURE, never the loss of the claim.
  */
 export async function embedImage(
   spaceId: string,
@@ -53,11 +60,14 @@ export async function embedImage(
   image: PlaintextFile,
   mimeType: string,
   vision: VisionProvider,
-  opts: { arrival?: boolean } = {},
+  opts: MediaRunOpts & { arrival?: boolean },
 ): Promise<string> {
+  const beat = (step: typeof IMAGE_STEPS[number]): void => opts.onProgress?.({ step, steps: [...(opts.steps ?? IMAGE_STEPS)] });
   // Asked ONCE for the job, at its entry. A suppressed file (or an image extracted from a suppressed document) keeps its
   // caption as text and holds no vector; the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
+  beat('caption');
+  stopIfLeaseLost(spaceId, opts);
   const caption = await vision.caption({ path: image.path, size: image.size }, mimeType);
 
   // Hard guard: embedding input MUST be a string — never a raw vector
@@ -89,18 +99,21 @@ export async function embedImage(
   // Upsert: a retry may re-run this after a partial failure. Through the one writer of a derived row, which reads the
   // PARENT first: a caption written after the file was deleted is an orphan row nothing removes, and the upsert is why
   // the check cannot be a predicate in the filter — a non-matching filter on an upsert inserts.
-  await upsertDerivedFileRow(spaceId, chunkDoc);
+  await upsertDerivedFileRow(spaceId, opts.claim, chunkDoc);
 
   // Face recognition — run after the caption chunk is stored so the job can
   // still complete if face detection fails. Non-fatal.
   const mediaCfg = getMediaEmbeddingConfig();
   if (mediaCfg.faceRecognition?.enabled && !facesAreWithheldFor(opts.arrival === true)) {
     const { embedFaces, GalleryIncompleteError } = await import('./face-embedder.js');
-    await embedFaces(spaceId, fileId, image).catch((err: unknown) => {
-      // The one failure that must NOT be absorbed: the gallery could not answer, and absorbing it writes the
-      // face unlabelled for good. Rethrown, the job retries like any other transient failure; the caption chunk
-      // above is an upsert, so the retry rewrites it rather than duplicating it.
-      if (err instanceof GalleryIncompleteError) throw err;
+    beat('faces');
+    stopIfLeaseLost(spaceId, opts);
+    await embedFaces(spaceId, fileId, image, opts).catch((err: unknown) => {
+      // Two failures must NOT be absorbed. The gallery could not answer: absorbing it writes the face unlabelled for
+      // good, so it is rethrown and the job retries like any other transient failure (the caption chunk above is an upsert,
+      // so the retry rewrites it rather than duplicating it). And an ABANDONMENT — the claim is gone or the space is no
+      // longer writable: it is not a face that failed, and absorbing it let the run go on writing for a file that is not its.
+      if (err instanceof GalleryIncompleteError || isAbandonment(err)) throw err;
       log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
     });
   }

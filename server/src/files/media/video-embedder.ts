@@ -18,7 +18,8 @@ import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { log } from '../../util/log.js';
-import { VIDEO_STEPS, type MediaProgressOpts } from './progress.js';
+import { VIDEO_STEPS, type MediaRunOpts } from './progress.js';
+import { isAbandonment } from './lease.js';
 import { updateDerivedFileRow } from '../derived-fields.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
@@ -125,7 +126,7 @@ export async function embedVideo(
   doKeyframes = true,
   overlapMs = 5000,
   keyframeIntervalS = DEFAULT_KEYFRAME_INTERVAL_S,
-  opts?: MediaProgressOpts,
+  opts: MediaRunOpts,
 ): Promise<{ audioFailed: number; audioTotal: number }> {
   // Asked ONCE for the job, at its entry, for the keyframe re-embed below; the audio stage asks for its own chunks. A
   // suppressed file's chunks are stored with their text and no vector, and the embedder is asked nothing (Q-255).
@@ -139,7 +140,7 @@ export async function embedVideo(
 
   try {
     // Step 1: Extract audio + embed audio chunks
-    await extractAudioTrack(videoPath, audioPath, opts?.signal);
+    await extractAudioTrack(videoPath, audioPath, opts.signal);
     // Handed on as a PATH, with its own size: the wav was read whole here only to be written straight back to disk by
     // the audio stage, which is two copies of a file that can be twenty minutes of PCM.
     const audioStat = await fs.stat(audioPath);
@@ -151,7 +152,7 @@ export async function embedVideo(
     const audioResult = await embedAudio(spaceId, fileId, audio, 'audio/wav', stt, overlapMs,
       // The video's route, not the audio one: `embedAudio` is a STAGE of this job, and a bar that swapped
       // its segment list halfway through would redraw mid-file.
-      { ...opts, steps: opts?.steps ?? VIDEO_STEPS });
+      { ...opts, steps: opts.steps ?? VIDEO_STEPS });
     const audioChunks: AudioChunkRecord[] = audioResult.records;
     // Carried up so the worker can mark the job `partial`. A video whose audio partly failed to
     // transcribe is not a complete video: its keyframes may be fine while the spoken content is missing,
@@ -174,7 +175,7 @@ export async function embedVideo(
     // Step 2: Extract keyframes
     const keyframesDir = path.join(tmpDir, 'keyframes');
     await fs.mkdir(keyframesDir, { recursive: true });
-    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS, opts?.signal);
+    const keyframes = await extractKeyframes(videoPath, keyframesDir, keyframeIntervalS, opts.signal);
 
     if (keyframes.length === 0) {
       log.debug(`Video embedder: no keyframes extracted for ${fileId}`);
@@ -188,12 +189,12 @@ export async function embedVideo(
     // stage bar can show it; `done`/`total` fill the bar as frames land.
     const captionedFrames: Array<{ timestampS: number; caption: string }> = [];
     const beat = (done: number): void =>
-      opts?.onProgress?.({ step: 'caption', steps: [...(opts.steps ?? VIDEO_STEPS)], done, total: keyframes.length });
+      opts.onProgress?.({ step: 'caption', steps: [...(opts.steps ?? VIDEO_STEPS)], done, total: keyframes.length });
     beat(0);
     for (const [i, { timestampS, jpegBytes }] of keyframes.entries()) {
       // Checked BEFORE the call, not after: stall recovery has already handed this file to another worker, so
       // spending another vision budget on it produces a caption that the other run will overwrite anyway.
-      if (opts?.shouldStop?.()) {
+      if (opts.shouldStop?.()) {
         log.warn(`Video embedder: lease lost after ${i}/${keyframes.length} keyframes for ${fileId} — stopping `
           + 'rather than competing with the run that recovered this job');
         break;
@@ -234,15 +235,17 @@ export async function embedVideo(
       try {
         // A suppressed file's chunk takes the combined TEXT (the lexical channel searches it) and no vector.
         const vectorFields = await vectors.fieldsFor(combined);
-        // Through the one writer of a derived row, which reads the PARENT first: this rewrite lands minutes after the
-        // transcript was stored, and a file deleted in between must not get its segments re-embedded.
-        await updateDerivedFileRow(spaceId, chunk.chunkId, fileId, {
+        // Through the one writer of a derived row, which holds the claim and reads the PARENT in the same transaction: this rewrite lands
+        // minutes after the transcript was stored, and a file deleted in between must not get its segments re-embedded.
+        await updateDerivedFileRow(spaceId, opts.claim, chunk.chunkId, fileId, {
           content: combined,
           matchedText: combined,
           ...vectorFields,
           updatedAt: now,
         });
       } catch (err) {
+        // The loss of the claim is not a chunk that failed to re-embed: it ends the run as abandoned.
+        if (isAbandonment(err)) throw err;
         log.warn(`Video embedder: re-embed failed for chunk ${chunk.chunkId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
