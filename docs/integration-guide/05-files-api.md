@@ -329,7 +329,7 @@ guarantee above you do not have to re-assert it after every write.
 DELETE /api/files/:spaceId?path=reports/q1.pdf
 ```
 
-**Response** `204`.
+**Response** `204`. A failure that none of the answers below describes is `500 { "error": "Failed to delete" }`, for a file and a directory alike.
 
 **A directory.** Deleting a directory needs `{ "confirm": true }` in the request body (a boolean: any other value is
 `400`). Without it the answer is `422` with `{ "error", "code": "confirm_required", "path" }` and nothing is deleted. The
@@ -359,7 +359,9 @@ per removed file so peers delete their copies too (otherwise the next sync would
 when it is deleted, moved or wiped with its space cannot write a derived record afterwards: every write it makes about
 its file is made under its claim on the job, and a delete, a move, a directory delete and a space wipe revoke the claims
 first. A run that lost its claim ends without completing or failing, and writes nothing about a file re-uploaded at the
-same path. **Records a previous version already leaked** (a derived record written after the delete by a job that was
+same path. **The one exception is a face run's auto-label:** linking the recognised person to the file is an authored write
+that cannot join the claim, so it is made just after a check that the run still holds it, and a file deleted and uploaded
+again at the same path in that instant can receive the link. **Records a previous version already leaked** (a derived record written after the delete by a job that was
 running) are not removed by this version; they stay until a later repair, are invisible to the file listing, but a
 leaked face record is still matched by gallery search, and one can attach to a file re-uploaded at the same path.
 
@@ -469,17 +471,17 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   one is refused `destination_exists` and both names stay.
 - **A finish that meets another file's records answers `409` with `code: "destination_held_after_move"`.** If, after
   the bytes moved, the record of ANOTHER file (a peer's file arriving at that id, say) holds an id the moved records
-  need, the finish is refused with `path` the held id, and the sentence says the bytes already moved. Nothing of the
-  other file is touched; the mark is kept and the move stays owed (`ythril_file_moves_owed`, then
-  `ythril_file_moves_stranded` once the sweep gives up). Delete the other file and the move finishes on its own, or
-  repeat it. The file's own late writes at its old or new ids and the leftovers of a file that no longer exists are not
+  need, the finish is refused with `path` the held id and `heldBy` the other file's space-relative path, and the
+  sentence says the bytes already moved. Nothing of the other file is touched; the mark is kept and the move stays owed
+  (`ythril_file_moves_owed`, then `ythril_file_moves_stranded` once the sweep gives up). The sweep keeps retrying the
+  move; deleting the file that holds the name and repeating the move finishes it. The file's own late writes at its old or new ids and the leftovers of a file that no longer exists are not
   another file's: the finish replaces them (`ythril_file_move_rows_replaced_total`).
 - **What a move leaves is whole.** Each record of a moved file is wholly at its old path or wholly at its new one,
   whatever fails, and the file's links are at one path or the other and never at neither. A move replaces no live file,
   so a moved file keeps its own links and never inherits the people, facts or chrono entries linked to another.
 - **The no-overwrite guarantee needs hard-link support on the data volume** (see
   [Hosting](02-hosting.md#data-persistence)). On a file system that refuses a hard link a move falls back to a rename,
-  counted in `ythril_file_move_link_fallback_total` and logged once, and a process outside Ythril that writes at the
+  counted in `ythril_file_move_link_fallback_total` and logged once an hour while it recurs, and a process outside Ythril that writes at the
   destination in that instant can be overwritten.
 - **A delete or a move whose deletion cannot be recorded answers `500` with `code: "act_not_recorded"`.** The tombstone
   is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and

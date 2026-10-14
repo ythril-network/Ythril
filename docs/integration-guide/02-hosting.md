@@ -150,7 +150,7 @@ All persistent data lives in named Docker volumes:
 **The data volume should support hard links.** A file move gives the file its new name by a hard
 link before it removes the old one, which is what makes a move unable to overwrite a file that appears at the destination
 in that instant. A volume that refuses hard links (some network and FUSE file systems) still works: the move falls back
-to a rename, `ythril_file_move_link_fallback_total` counts every such move and the log says so once, and a process outside
+to a rename, `ythril_file_move_link_fallback_total` counts every such move and the log says so once an hour while it recurs, and a process outside
 Ythril that writes at the destination in that same instant can be overwritten. A local volume of Docker, Kubernetes or a
 host disk needs nothing.
 
