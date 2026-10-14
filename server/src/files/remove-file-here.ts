@@ -28,9 +28,19 @@
  *   every failure is logged and the next step still runs.
  *
  * It does NOT remove the bytes (the callers hold them under their own locks and their own tombstone ordering) and it does
- * NOT touch tombstones (a tombstone is the act's, written before and published after it).
+ * NOT touch tombstones (a tombstone is the act's, written before and published after it). **And it does not remove the file's links,
+ * on purpose**: a link is a record of whoever wrote it, so only a delete THIS instance makes takes the links this instance wrote
+ * ({@link removeLinksOfDeletedFiles}, below, called by the local cascade around this one). The media worker's reconcile and a
+ * peer's file tombstone come through here too, and a peer deleting its copy of a file is not this instance deciding that the people,
+ * facts and chrono entries its links name are no longer the file's (ADR 05).
  */
 import { log, peerText } from '../util/log.js';
+import { toDocId } from '../util/paths.js';
+import { inChunks } from '../util/chunks.js';
+import { READ_CHUNK } from '../db/read-by-id.js';
+import { fileLinkSourcesOf, fileLinksThisInstanceWrote } from '../brain/link-adjacency.js';
+import { removeWithTombstones } from '../brain/tombstones.js';
+import type { PathKind } from './moved-paths.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { cancelMediaJob } from './media/job-queue.js';
@@ -74,4 +84,49 @@ export async function removeFileHere(spaceId: string, rel: string, { failure }: 
 export async function removeOneStoredFileHere(spaceId: string, rel: string, abs: string): Promise<void> {
   await deleteStoredIfPresent(abs, { skipDirectory: true });
   await removeFileHere(spaceId, rel, { failure: 'throw' });
+}
+
+/**
+ * Remove the links THIS instance wrote from the files a delete took, from each file and from its derived ids, and write their
+ * tombstones, so no peer restores them. The delete's own step, written ONCE for a file, a directory and the source a moved file left.
+ *
+ * ## What it prevents
+ *
+ * A link hangs off a path. A delete that left its links behind gave them to whatever was uploaded at the path next (a face
+ * auto-labelling reads them), kept a stopped move owed for ever (a link at the source is something of the file still there) and let
+ * the links of every file in a deleted directory outlive it. They are removed in the cascade's order: the bytes, then THIS, then the
+ * row. The row is last because it is what tells a retry (REST, MCP, the TTL sweep, a peer's re-sent tombstone) the delete is still
+ * owed, so a failure here leaves the act owed and is THROWN: callers call this directly and never through a step that logs and
+ * survives a failure (`file-mutation-tools-state-their-cascade.test.js` holds both the order and the direct call).
+ *
+ * ## What it removes, and what it leaves
+ *
+ * The links `fileLinkSourcesOf` names for `path` as a `kind`, written by this instance or by nobody who signed them. A link
+ * ANOTHER instance wrote stays with it: its file's tombstone does not carry it, and removing it here would be one instance deciding
+ * for another (ADR 05; the wider rule is the owner's decision D-31). A link that points AT a file from a fact or a chrono entry is not
+ * file-sourced and is not touched. `surviving` are file ids still on disk under `path` (a directory delete that stopped part way,
+ * or a file written into it meanwhile): their links, and those of their derived ids, stay. `createdUntil` ends the read at an
+ * instant: the second pass, made once the row is gone, asks with the instant it went, so it catches a link written while the row was
+ * still live and never the new link of a file uploaded at the path since.
+ *
+ * Batched: a command per `READ_CHUNK` sources however many files there are, never one per file. Returns how many links it removed.
+ */
+export async function removeLinksOfDeletedFiles(
+  spaceId: string, path: string, kind: PathKind,
+  { surviving = [], createdUntil }: { surviving?: readonly string[]; createdUntil?: string } = {},
+): Promise<number> {
+  let sources = await fileLinkSourcesOf(spaceId, path, kind);
+  if (surviving.length > 0) {
+    const alive = new Set(surviving.map(toDocId));
+    const parentOf = (id: string): string => id.slice(0, Math.max(id.lastIndexOf('#'), 0));
+    sources = sources.filter(s => !alive.has(s) && !alive.has(parentOf(s)));
+  }
+  let removed = 0;
+  for (const part of inChunks(sources, READ_CHUNK)) {
+    const rows = await fileLinksThisInstanceWrote(spaceId, part, createdUntil === undefined ? {} : { createdUntil });
+    await removeWithTombstones(spaceId, 'links', rows.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })));
+    removed += rows.length;
+  }
+  if (kind === 'directory' && removed > 0) log.info(`Removed ${removed} link(s) of the files of directory ${peerText(path)} (space: ${peerText(spaceId)})`);
+  return removed;
 }

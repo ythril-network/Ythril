@@ -16,7 +16,7 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { readRowsById } from '../db/read-by-id.js';
+import { readRowsById, READ_CHUNK } from '../db/read-by-id.js';
 import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
@@ -459,20 +459,62 @@ export async function deleteFileMeta(
 /**
  * Remove all metadata records whose path starts with `dirPath/`.
  * Used when an entire directory is deleted recursively.
+ *
+ * What hangs off the files goes first (the derived rows and the audit rows an earlier soft delete flagged); the live file rows go LAST,
+ * a page at a time ({@link retireLiveRowsInPages}), because they are what tells a retry the delete is still owed.
  */
 export async function deleteFileMetaByPrefix(
   spaceId: string,
   dirPath: string,
+  { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
-  const prefix = norm + '/';
   // Escape regex special characters in the prefix so a path like "my.dir/"
   // doesn't accidentally match "myXdir/" etc.
-  const escaped = escapeRegex(prefix);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteMany(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` } }),
+  const escaped = escapeRegex(norm + '/');
+  const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  await coll.deleteMany(
+    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }),
   );
+  await retireLiveRowsInPages(spaceId, norm + '/', ids => coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids } })), onRetired);
+}
+
+/** What a retire of the rows under a directory tells its caller. */
+export interface RetireUnderOptions {
+  /**
+   * Called with the paths of each page of live file rows once that page has been retired (removed or flagged), in `_id` order: the
+   * paths a directory delete announces. Never called for a derived row, an audit row an earlier delete flagged or a row that was
+   * not live when the page was read, so a path is told once however the act is retried: a retry finds the rows already gone.
+   */
+  onRetired?: (paths: readonly string[]) => void;
+}
+
+/**
+ * Retire the LIVE file rows under `prefix` (a directory's id and a slash) a page at a time: each page is read, retired by `retirePage`
+ * and handed to `onRetired`, in that order, then the next is read after the last id. A page, and never the whole subtree at once, so a
+ * directory of a million files is not one command nor one list in memory; read BEFORE its retire, because afterwards the rows are gone
+ * or flagged and nothing says which were live. The announcement follows the retire, so a retire that fails announces nothing for its
+ * page and the retry (which finds those rows still live) announces them once: at-most-once, as the single-file delete is.
+ */
+async function retireLiveRowsInPages(
+  spaceId: string, prefix: string, retirePage: (ids: string[]) => Promise<unknown>, onRetired?: (paths: readonly string[]) => void,
+): Promise<void> {
+  const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const under = `^${escapeRegex(prefix)}`;
+  let after: string | undefined;
+  for (;;) {
+    const page = await coll.find(
+      asFilter<FileMetaDoc>({ _id: after === undefined ? { $regex: under } : { $regex: under, $gt: after }, ...LIVE_FILE_ROW } as never),
+      { projection: { _id: 1 }, sort: { _id: 1 }, limit: READ_CHUNK },
+    ).toArray();
+    if (page.length === 0) return;
+    const ids = page.map(r => String(r._id));
+    await retirePage(ids);
+    onRetired?.(ids);
+    if (ids.length < READ_CHUNK) return;
+    after = ids[ids.length - 1];
+  }
 }
 
 /**
@@ -604,9 +646,9 @@ export async function retireFileMeta(spaceId: string, filePath: string): Promise
  * or remove them all. The same configured answer as for one row, asked once for the whole subtree, so a directory's delete cannot
  * spell the soft-or-hard choice a second way from a file's.
  */
-export async function retireFileMetaUnder(spaceId: string, dirPath: string): Promise<void> {
-  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeletedByPrefix(spaceId, dirPath);
-  else await deleteFileMetaByPrefix(spaceId, dirPath);
+export async function retireFileMetaUnder(spaceId: string, dirPath: string, options: RetireUnderOptions = {}): Promise<void> {
+  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeletedByPrefix(spaceId, dirPath, options);
+  else await deleteFileMetaByPrefix(spaceId, dirPath, options);
 }
 
 /**
@@ -619,20 +661,19 @@ export async function retireFileMetaUnder(spaceId: string, dirPath: string): Pro
 export async function markFileMetaDeletedByPrefix(
   spaceId: string,
   dirPath: string,
+  { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
-  // for one file, from the one place that states it. A directory delete reaches here and never through
-  // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
-  await coll.updateMany(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, ...LIVE_FILE_ROW }),
-    flagAndStrip() as never,
-  );
-  // Remove derived chunk records outright.
+  // Remove derived chunk records outright, first: the LIVE file rows are what tell a retry the delete is still owed, so they go last.
   await coll.deleteMany(
     asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: true } }),
   );
+  // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
+  // for one file, from the one place that states it. A directory delete reaches here and never through
+  // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
+  await retireLiveRowsInPages(spaceId, norm + '/',
+    ids => coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...LIVE_FILE_ROW }), flagAndStrip() as never), onRetired);
 }

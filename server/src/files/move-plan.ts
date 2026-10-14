@@ -40,7 +40,7 @@ import { inChunks } from '../util/chunks.js';
 import { inOneCommandChunks } from '../db/one-command.js';
 import { escapeRegex } from '../util/redos.js';
 import { MAX_ANCESTRY } from '../brain/suppress-embeddings.js';
-import { fileLinkSourcesUnder } from '../brain/link-adjacency.js';
+import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
@@ -245,8 +245,8 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
 
   // Links follow every file row carried, and every file under the source that holds links (a deleted file leaves its links behind).
   const linkFiles = new Set<string>(rows.filter(r => r.top).map(r => r.from));
-  if (kind === 'file') linkFiles.add(from);
-  else for (const f of await fileLinkSourcesUnder(spaceId, from)) linkFiles.add(f);
+  if (kind === 'file') linkFiles.add(from);   // the file itself even without a link: a previous occupant's links at the new path go
+  for (const f of await fileLinkSourcesOf(spaceId, from, kind)) linkFiles.add(f);
 
   return { src: from, dst: to, kind, rows, flaggedAtDestination: flagged, replacedAtDestination: replaced, refusedAtDestination: refused, linkFiles: [...linkFiles].sort(), jobIds: await jobIdsOwnedBy(spaceId, from, kind) };
 }

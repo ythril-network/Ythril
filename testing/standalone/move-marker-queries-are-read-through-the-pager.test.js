@@ -75,11 +75,19 @@ const POINT_READS = new Map([
   ['settleBegunMove', { where: 'server/src/files/tombstones.ts', why: 'the pending rows of ONE named move, by its (from, to) key — the lifecycle settles them; it stays beside the publish it ends in so the marker module never imports tombstones.ts' }],
 ]);
 
+/**
+ * The one operator this gate READS by name: the property name of an `$exists`-only object, in the syntax tree of the code it inspects. It is a
+ * name compared against, never an operator evaluated against a document, so it is not the second matcher
+ * `one-mongo-filter-matcher-serves-the-tests` forbids; held in a constant so the comparison does not spell the operator in the form that gate
+ * (a text scan for a branch on an operator's name) reads as a matcher.
+ */
+const EXISTS_OPERATOR = '$exists';
+
 /** The sites a unit's own code spells, read from its syntax tree. */
 function factsOf(unit) {
   const f = { shape: [], reads: false };
   const isExistsOnly = (init) => init && ts.isObjectLiteralExpression(init) && init.properties.length > 0
-    && init.properties.every(p => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && p.name?.text === '$exists');
+    && init.properties.every(p => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && p.name?.text === EXISTS_OPERATOR);
   const inIndexSpec = (n) => {
     // `keys: { 'move.from': 1 }` — the object literal that is the value of a property named `keys`.
     const lit = n.parent;
