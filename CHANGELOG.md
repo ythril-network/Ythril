@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A `strict` space refuses a write that adds a property key its type does not declare (a type with any property is a closed list); `warn` returns it, `off` ignores it; stored keys are never refused | Find them with `validate-schema` |
 | A schema refusal's `truncated` is a count (was `true`); a refused merge answers the standard refusal body, still `400`; an invalid body answers `{ "error", "issues" }` without received values | Match `issues[].code` |
 | `validate-schema` pages by `nextAfter` and stops at a full page (`skip`, `count`, `total`, `nextSkip`, `totalViolations` gone; `truncated` = size budget cut; `progress.checked` per call); a value needs `knowledge: read`; MCP `save_edge` answers `warnings` | Page by `nextAfter`; sum `checked` |
-| `meta.rules` and a type's rules need `schema: admin` (the single-type `PUT` too); `meta.stampSkew` is accepted (was `400`); a library entry cannot change kind while a space uses it (`409`) | Grant admin to tokens that edit rules |
+| `meta.rules` and a type's rules need `schema: admin` (single-type `PUT`, and a `validate-schema` proposing rules: `403`); `meta.stampSkew` is accepted (was `400`); a library entry cannot change kind while used (`409`) | Grant admin to tokens that edit rules |
 | A member on 5.6.x refuses a schema carrying `rules` or `stampSkew` whole; a write setting one warns, naming them | Upgrade every instance of a network first |
 
 ### Added
