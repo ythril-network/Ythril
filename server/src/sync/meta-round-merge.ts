@@ -235,9 +235,13 @@ export type MetaRoundParse =
  */
 export function parseMetaRound(current: SpaceMeta | undefined, round: MetaRoundProposal): MetaRoundParse {
   const applied = applyMetaRound(current, round);
-  const parsed = parseSpaceMeta(applied.meta, { against: current ?? {} });
+  // Tolerant, as a peer's layer is read (`readKnownMeta`, R6-7): a key a later release added inside a type, a property schema or the
+  // kinds is named and left out, not a reason to refuse the round — a member that refused it would cast no yes. A KNOWN field that is
+  // wrong still refuses the whole round.
+  const parsed = parseSpaceMeta(applied.meta, { against: current ?? {}, tolerant: true });
   if (!parsed.ok) return { ok: false, reason: parsed.failed.join('; ') };
-  return { ok: true, meta: parsed.meta, conflicts: applied.conflicts, wholesale: applied.wholesale, unknownFields: applied.unknownFields };
+  const unknownFields = parsed.unknown.length > 0 ? [...new Set([...applied.unknownFields, ...parsed.unknown])] : applied.unknownFields;
+  return { ok: true, meta: parsed.meta, conflicts: applied.conflicts, wholesale: applied.wholesale, unknownFields };
 }
 
 /**
