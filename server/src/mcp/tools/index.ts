@@ -18,6 +18,7 @@ import { network_member_admitTool, network_member_signing_keyTool, network_repar
 import { network_join_remoteTool, network_join_by_keyTool, network_member_addTool, network_member_removeTool, network_introduction_acceptTool } from './network-join.js';
 import { network_getTool, network_createTool, network_updateTool, network_leaveTool, network_add_spaceTool, network_pending_spaceTool, network_votesTool, network_voteTool, network_vote_outcomesTool, network_sync_historyTool, network_change_notesTool, network_inviteTool, network_forkTool } from './networks.js';
 import { file_stamp_reportTool } from './file-stamp-report.js';
+import { schema_validateTool } from './schema-validate.js';
 import { helpTool } from './help.js';
 import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
 
@@ -72,6 +73,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   update_spaceTool,
   space_renameTool,
   schema_updateTool,
+  schema_validateTool,
   save_spaceTool,
   space_reindexTool,
   space_reembedTool,

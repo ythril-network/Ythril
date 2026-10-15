@@ -38,8 +38,8 @@ import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import {
-  TypeSchemasZ, SpaceMetaBody,
-  stripServerOwnedMeta, findBrokenLibraryRefs, findWrongKindLibraryRefs, wrongKindRefsError,
+  TypeSchemasZ,
+  findBrokenLibraryRefs, findWrongKindLibraryRefs, wrongKindRefsError,
   parseTypeSchema, withTypeSchemas,
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
@@ -47,10 +47,8 @@ import { requireSettingsFields } from '../auth/require-settings-fields.js';
 import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
-import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { pageList } from '../brain/list-page.js';
-import { defaultBudgetChars } from '../brain/result-budget.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure } from './send-failure.js';
 
 export const spacesRouter = Router();
@@ -676,99 +674,24 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
  */
 spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
-  const cfg = getConfig();
-  const space = cfg.spaces.find(s => s.id === id);
-  if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
-    return;
-  }
-
-  // Use the provided meta for dry-run, or fall back to the space's current meta.
-  //
-  // This endpoint has stripped the server-owned housekeeping fields since it was written — which is why it
-  // accepted a round-tripped `GET` body while the PATCH above rejected it. Now both use the one helper, so
-  // the two cannot drift apart again: a future field added to SERVER_OWNED_META_FIELDS reaches both, where
-  // this inline destructure would have needed remembering.
-  const parsedMeta = SpaceMetaBody.safeParse(stripServerOwnedMeta(req.body?.meta ?? space.meta ?? {}));
-  if (!parsedMeta.success) {
-    res.status(400).json({ error: parsedMeta.error.message });
-    return;
-  }
-  const dryMeta = parsedMeta.data as SpaceMeta;
-
-  // Import validation functions dynamically to avoid circular deps
-  const { validateEntity, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
-  const { recordViewOf } = await import('../brain/record-view.js');
-  const resolvedMeta = resolveMetaRefs(dryMeta);
-
-  const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
-  const memberIds = memberSpacesForRequest(req, id);
-  // Edges whose write guard names another subject than the one they are under: not violations, so not in `totalViolations`.
-  const staleGuards: Array<{ _id: string; label: string }> = [];
-  const SCAN_LIMIT = 10_000;
   /*
-   * Q-129: how much of each collection was actually checked. The scan reads at most SCAN_LIMIT records per collection,
-   * and a clean dry-run over a larger space used to be a dry-run of its first ten thousand records with nothing saying
-   * so. Now every answer says what was checked against what exists, and `complete` is true only when that is all.
+   * F-46 (R6-12): the one sequence both doors run (`spaces/schema-validate-door.ts`) — `sample` mode, the stored-data walk paged by
+   * `after` / `nextAfter` with a fixed projection, values only for a caller who may read the space's knowledge, the heavy-call rail
+   * and the single flight. This door adds what it has always answered in stored mode: the meta it checked (the MCP tool never echoes
+   * it). The dynamic import keeps the validators out of this module's load, as the inline scan's import did.
    */
-  const checked: Record<string, { checked: number; total: number }> = {};
-  const note = async (mid: string, collection: Parameters<typeof spaceCollection>[1], read: number) => {
-    const total = await col(spaceCollection(mid, collection)).countDocuments();
-    const c = (checked[collection] ??= { checked: 0, total: 0 });
-    c.checked += Math.min(read, total);
-    c.total += total;
-  };
-
-  for (const mid of memberIds) {
-    // Entities
-    const entities = await col(spaceCollection(mid, 'entities')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'entities', entities.length);
-    for (const ent of entities) {
-      const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
-      const v = validateEntity(resolvedMeta, recordViewOf('entity', doc));
-      if (v.length) violations.push({ collection: 'entities', _id: String(doc._id), violations: v });
-    }
-
-    // Edges need two lookups the document cannot supply — see `validateStoredEdges`, which also
-    // explains why they live in a module of their own rather than here.
-    const storedEdges = await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT);
-    violations.push(...storedEdges.violations);
-    staleGuards.push(...storedEdges.staleGuards);
-    await note(mid, 'edges', SCAN_LIMIT);
-
-    // Facts
-    const facts = await col(spaceCollection(mid, 'facts')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'facts', facts.length);
-    for (const mem of facts) {
-      const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateFact(resolvedMeta, recordViewOf('fact', doc));
-      if (v.length) violations.push({ collection: 'facts', _id: String(doc._id), violations: v });
-    }
-
-    // Chrono
-    const chronoEntries = await col(spaceCollection(mid, 'chrono')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'chrono', chronoEntries.length);
-    for (const ch of chronoEntries) {
-      const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateChrono(resolvedMeta, recordViewOf('chrono', doc));
-      if (v.length) violations.push({ collection: 'chrono', _id: String(doc._id), violations: v });
-    }
-  }
-
-  // The violation list through the shared page rule (Q-129): it was `slice(0, 500)` with no way to reach the rest.
-  const page = pageList(violations, { limit: req.body?.limit ?? req.query['limit'], skip: req.body?.skip ?? req.query['skip'] },
-    { defaultLimit: 500, maxLimit: 500, budgetChars: defaultBudgetChars('rest') });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-  res.json({
+  const { beginSchemaValidate, mayReadStoredValues } = await import('../spaces/schema-validate-door.js');
+  const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
+  const outcome = await beginSchemaValidate({
     spaceId: id,
-    meta: dryMeta,
-    checked,
-    complete: Object.values(checked).every(c => c.checked >= c.total),
-    totalViolations: violations.length,
-    violations: page.rows,
-    staleGuards,
-    ...page.fields,
+    memberIds: memberSpacesForRequest(req, id),
+    body: req.body ?? {},
+    canReadValues: mayReadStoredValues(rights, id),
+    callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',
   });
+  if (outcome.status !== 200) { res.status(outcome.status).json({ error: outcome.error }); return; }
+  const { spaceId, ...answer } = outcome.answer;
+  res.json(outcome.mode === 'stored' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
 });
 
 // DELETE /api/spaces/:id

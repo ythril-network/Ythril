@@ -33,6 +33,25 @@ the browser bundle all the same.
 NOTICE. `devDependencies` are deliberately out of scope: they are build-time only and are not
 redistributed, so listing them would make NOTICE less accurate, not more.
 
+### The schema-rule engine and what it ships
+
+Custom schema rules (F-46) are evaluated by `@bufbuild/cel`, a CEL evaluator, pinned to an **exact** version
+(`0.6.1`): the engine decides what a stored rule means, and a caret range would let a patch release change the
+verdict on a record that was accepted the day before. Its licence obligations are carried by its **children** as
+much as by itself, so `a-notice-names-every-package-the-rule-engine-ships.test.js` reads its whole production
+closure out of `package-lock.json` (dependencies, optional dependencies and peers, never a hand-written list) and
+holds NOTICE to naming each package by its full scoped name:
+
+| package | licence | why it is there |
+|---|---|---|
+| `@bufbuild/cel` | Apache-2.0 | the evaluator; ships no licence file of its own |
+| `@bufbuild/cel-spec` | Apache-2.0 | the language definitions and conformance data (about 6 MB, test data included, in the image); generated from Google's `cel-spec` and `cel-go` |
+| `@bufbuild/protobuf` | `Apache-2.0 AND BSD-3-Clause` — **conjunctive**: both apply | the protobuf runtime the syntax trees are read with; a direct server dependency, pinned exactly (`2.16.0`), its licence expression to be rechecked on every bump. The BSD part is Google's (2008) varint code, reproduced in NOTICE in its own wording |
+| `@bufbuild/re2` | MIT | the regex engine behind `matches()`: linear, so no rule can stall a write on a backtracking pattern; a port of RE2JS / RE2J (Go's `regexp`) |
+
+Because three of these are Apache-2.0 and ship no licence file, NOTICE carries the **full** text of the Apache License
+2.0 (it carried only the appendix's boilerplate before), which covers every Apache-2.0 component it lists.
+
 ---
 
 ## Vendored client assets

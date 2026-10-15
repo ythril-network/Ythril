@@ -34,6 +34,7 @@ import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKin
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
+import { ruleEngineStats, onRuleEvaluated } from '../spaces/schema-rules.js';
 
 export const register = new Registry();
 
@@ -882,6 +883,45 @@ export const webhookRetriesDroppedTotal = counterMirroringTally({
   labelName: 'reason',
   read: webhookRetriesDroppedCounts,
 });
+
+/**
+ * F-46: the stored schema rules that no longer compile, or read a property their type no longer declares, and are therefore SKIPPED
+ * (not enforced), counted by the boot check (`checkStoredRules`). Declared at 0 so an alert has something to read before the first rule
+ * goes bad. The engine's state and its program cache are read from `spaces/schema-rules.ts` at scrape time: that module is imported by
+ * the schema bodies, so it cannot import this one.
+ */
+export const schemaRulesInvalid = new Gauge({
+  name: 'ythril_schema_rules_invalid',
+  help: 'Stored schema rules that no longer compile (or read a property their type no longer declares) and are skipped, not enforced',
+  registers: [register],
+  collect() { this.set(ruleEngineStats().invalidRules); },
+});
+schemaRulesInvalid.set(0);
+
+/** 1 while the rule engine is loaded and passed its self-test; 0 means every rule reports "could not be evaluated" (fail closed). */
+export const schemaRuleEngineAvailable = new Gauge({
+  name: 'ythril_schema_rule_engine_available',
+  help: '1 if the schema rule engine loaded and passed its self-test, 0 if every rule reports "could not be evaluated"',
+  registers: [register],
+  collect() { this.set(ruleEngineStats().engineAvailable ? 1 : 0); },
+});
+
+/** The compiled-rule cache: a lookup that found a program, one that compiled one, and a program dropped to make room. */
+export const schemaRuleProgramCacheTotal = counterMirroringTally({
+  name: 'ythril_schema_rule_program_cache_total',
+  help: 'Compiled schema-rule cache lookups by outcome: hit, miss (compiled), eviction',
+  labelName: 'outcome',
+  read: () => { const s = ruleEngineStats(); return { hit: s.compileHits, miss: s.compileMisses, eviction: s.compileEvictions }; },
+});
+
+/** How long one rule took to evaluate on one record. Bucketed for the budget: a rule at the input caps is still milliseconds. */
+export const schemaRuleEvaluationSeconds = new Histogram({
+  name: 'ythril_schema_rule_evaluation_seconds',
+  help: 'Time one schema rule took to evaluate on one record',
+  buckets: [0.00001, 0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5],
+  registers: [register],
+});
+onRuleEvaluated(seconds => schemaRuleEvaluationSeconds.observe(seconds));
 
 export const embedWaitSeconds = new Histogram({
   name: 'ythril_embed_wait_seconds',

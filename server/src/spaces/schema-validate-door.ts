@@ -1,0 +1,278 @@
+/**
+ * The live check of a schema — `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` — from a request to an answer, so the two
+ * doors cannot differ in which meta they check, which records they read, what they show whom, what they cost or when they refuse. Each
+ * door only shapes the answer: REST as a status code (and, in stored mode, its published echo of the meta it checked), MCP as a tool
+ * result that never echoes the meta (F-46, ruling R6-12).
+ *
+ * ## The two modes
+ *
+ * - **sample** (`sample: { kind, record }`): the meta (the caller's proposed one, or the stored one) run over ONE record the caller
+ *   typed, in the stored shape `recordViewOf` takes. Nothing stored is read, so it costs one evaluation and asks no right beyond the
+ *   route's: the record is the caller's own.
+ * - **stored data** (no `sample`): the meta run over the space's stored records, a page at a time.
+ *
+ * ## What it prevents
+ *
+ * - **A schema door that reads the data.** The stored-data check answers the stored value of the property that broke a schema. Only a
+ *   caller who may read the space's knowledge sees it (`canReadValues`); every other caller gets the rows with their field and reason
+ *   and NO `value` key. A rule's row carries no value for anybody: its reason is the rule's message.
+ * - **A read that takes the vectors with it.** Each collection is read with a FIXED projection — the fields a view is built from — and
+ *   never one a caller names; a body key the check does not take is dropped, never followed.
+ * - **A scan with no way past its end.** It pages by `_id` (`db/id-keyset-page.ts`), spelled `after` / `nextAfter` as every keyset page
+ *   on this server is; at most {@link SCHEMA_VALIDATE_SCAN_BOUND} records are read per call, `totalViolations` counts what the call read,
+ *   and `complete` is true only when nothing is left after it. A page never holds more than `limit` records.
+ * - **A check that stalls the server.** The stored-data check is priced like the ingest (`consumeHeavyToolCall`, one count per token
+ *   across both doors) and runs once per space at a time; it yields to the event loop after every page. A refusal costs no slot.
+ */
+import { z } from 'zod';
+import { getConfig } from '../config/loader.js';
+import type { SpaceMeta } from '../config/types.js';
+import type { TokenRights } from '../config/rights-shape.js';
+import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
+import { idKeysetPage } from '../db/id-keyset-page.js';
+import { col } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { effectiveRung } from '../auth/mint-cap.js';
+import { RUNGS } from '../auth/space-rights.js';
+import { recordViewOf, type ViewKind } from '../brain/record-view.js';
+import { SpaceMetaBody, stripServerOwnedMeta } from './body-schemas.js';
+import { readingStoredRules } from './schema-rules.js';
+import { validateEntity, validateEdge, validateFact, validateChrono, resolveMetaRefs, type SchemaViolation } from './schema-validation.js';
+import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
+
+/** The most violating records one page holds, and the default. */
+export const SCHEMA_VALIDATE_MAX_LIMIT = 500;
+/** The most records one call reads before it stops and hands back a cursor. */
+export const SCHEMA_VALIDATE_SCAN_BOUND = 10_000;
+/** The longest `after` a caller can send back: a cursor this check made is far shorter. */
+export const SCHEMA_VALIDATE_CURSOR_MAX = 2048;
+/** Records read per database round trip. */
+const READ_PAGE = 500;
+
+const SAMPLE_KINDS = ['entity', 'edge', 'fact', 'chrono'] as const satisfies readonly ViewKind[];
+
+/**
+ * The body, and the tool's arguments once `space` is taken off. NOT `.strict()`, unlike the space bodies: a key this check does not
+ * take is dropped, never followed — `projection` or `fields` in the body must change nothing about what is read, and a refusal would be
+ * a second way of honouring them. The keys it does take are bounded as the tool's schema states.
+ */
+export const SchemaValidateBody = z.object({
+  /** The meta to check: a proposed schema, parsed as a save would parse it. Absent: the space's stored meta. */
+  meta: z.unknown().optional(),
+  /** One record the caller typed, in the stored shape; with it nothing stored is read. */
+  sample: z.object({
+    kind: z.enum(SAMPLE_KINDS),
+    record: z.record(z.string(), z.unknown()),
+  }).strict().optional(),
+  limit: z.number().int().min(1).max(SCHEMA_VALIDATE_MAX_LIMIT).optional(),
+  after: z.string().min(1).max(SCHEMA_VALIDATE_CURSOR_MAX).optional(),
+});
+
+/** One record's rows. */
+export interface RecordViolations { collection: string; _id?: string; violations: SchemaViolation[] }
+
+/** What both doors answer (REST adds `meta` in stored mode, as it always has). */
+export interface SchemaValidateAnswer {
+  spaceId: string;
+  /** Per collection: the records this call read, and how many the collection holds. */
+  checked: Record<string, { checked: number; total: number }>;
+  /** True when nothing is left after this answer: no `nextAfter`. */
+  complete: boolean;
+  /** The violating records this call found — every one it read, not only the page's. */
+  totalViolations: number;
+  violations: RecordViolations[];
+  /** Edges whose write guard names another subject: not violations, so not counted in `totalViolations`. Stored mode only. */
+  staleGuards?: StaleGuard[];
+  /** Pass as `after` to continue. Present only while records are left. */
+  nextAfter?: string;
+}
+
+export type SchemaValidateOutcome =
+  | { status: 200; answer: SchemaValidateAnswer; mode: 'sample' | 'stored'; meta: SpaceMeta }
+  | { status: 400 | 404 | 409 | 429; error: string };
+
+/** The refusal a caller over the rail gets, the same words on both doors. */
+export const SCHEMA_VALIDATE_RATE_LIMITED = `the stored-data schema check is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
+  + 'counted across the REST route and the tool; try again shortly (a sample check is not limited)';
+
+/** Whether `rights` may see the stored values of `spaceId`'s records: `knowledge: read`, or an instance administrator. */
+export function mayReadStoredValues(rights: TokenRights | null | undefined, spaceId: string): boolean {
+  if (!rights) return false;
+  if (rights.instanceAdmin) return true;
+  return RUNGS.indexOf(effectiveRung(rights, spaceId, 'knowledge')) >= RUNGS.indexOf('read');
+}
+
+/** Why a body was refused, naming the parameter — the sentence both doors send. */
+function bodyRefusal(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return 'Invalid body';
+  const where = issue.path.join('.');
+  return where ? `${where}: ${issue.message}` : issue.message;
+}
+
+/** The spaces a stored-data check is running for. Module state, so a second door finds the first one's run. */
+const running = new Set<string>();
+
+/** The collections in the order they are walked, with the fixed projection each is read with. */
+const WALK: ReadonlyArray<{ collection: 'entities' | 'edges' | 'facts' | 'chrono'; kind: ViewKind; projection: Readonly<Record<string, 1>> }> = [
+  { collection: 'entities', kind: 'entity', projection: { _id: 1, name: 1, type: 1, description: 1, tags: 1, properties: 1 } },
+  { collection: 'edges', kind: 'edge', projection: STORED_EDGE_PROJECTION },
+  { collection: 'facts', kind: 'fact', projection: { _id: 1, fact: 1, type: 1, description: 1, tags: 1, properties: 1 } },
+  { collection: 'chrono', kind: 'chrono', projection: { _id: 1, title: 1, type: 1, description: 1, tags: 1, properties: 1 } },
+];
+
+/** A position in the walk: a member space, a collection, the last `_id` read. Opaque to the caller. */
+interface Cursor { space: string; collection: string; last: string }
+const encodeCursor = (c: Cursor): string => Buffer.from(JSON.stringify([c.space, c.collection, c.last]), 'utf8').toString('base64url');
+function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null {
+  try {
+    const v: unknown = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
+    if (!Array.isArray(v) || v.length !== 3 || !v.every(x => typeof x === 'string')) return null;
+    const [space, collection, last] = v as [string, string, string];
+    if (!memberIds.includes(space) || !WALK.some(w => w.collection === collection)) return null;
+    return { space, collection, last };
+  } catch {
+    return null;
+  }
+}
+
+/** A row without its `value`, for a caller who may not read the stored data. */
+const withoutValue = (v: SchemaViolation): SchemaViolation => { const { value: _value, ...rest } = v; return rest as SchemaViolation; };
+
+/** The rows `meta` gives one record of `kind` (an edge with no resolved ends: the sample has none). */
+function rowsOf(meta: SpaceMeta, kind: ViewKind, record: object): SchemaViolation[] {
+  const view = recordViewOf(kind, record);
+  switch (kind) {
+    case 'entity': return validateEntity(meta, view);
+    case 'edge': return validateEdge(meta, view);
+    case 'fact': return validateFact(meta, view);
+    case 'chrono': return validateChrono(meta, view);
+  }
+}
+
+/**
+ * Run the live check for `spaceId`.
+ *
+ * @param memberIds      the spaces to read, as each door narrows a proxy (REST by request, MCP by the connection's reach)
+ * @param body           the caller's arguments — any value; refused here when it is not that shape
+ * @param canReadValues  whether the caller may see stored values ({@link mayReadStoredValues})
+ * @param callerKey      who the rail counts against: the calling token's id, or its address when it has none
+ */
+export async function beginSchemaValidate(input: {
+  spaceId: string; memberIds: string[]; body: unknown; canReadValues: boolean; callerKey: string;
+}): Promise<SchemaValidateOutcome> {
+  const { spaceId, memberIds, canReadValues, callerKey } = input;
+  const space = getConfig().spaces.find(s => s.id === spaceId);
+  if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
+  const parsed = SchemaValidateBody.safeParse(input.body ?? {});
+  if (!parsed.success) return { status: 400, error: bodyRefusal(parsed.error) };
+  const { sample, after } = parsed.data;
+  const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
+
+  // A proposed meta is parsed as a save would parse it, so a rule the save would refuse is refused here in the same words. The stored
+  // meta was checked when it was stored: a rule in it that no longer compiles is skipped and reported, not a reason to refuse the check.
+  const proposed = parsed.data.meta !== undefined;
+  const metaParse = proposed
+    ? SpaceMetaBody.safeParse(stripServerOwnedMeta(parsed.data.meta))
+    : readingStoredRules(() => SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {})));
+  if (!metaParse.success) return { status: 400, error: metaParse.error.message };
+  const meta = metaParse.data as SpaceMeta;
+  const resolved = resolveMetaRefs(meta);
+
+  if (sample) {
+    // The caller's own record: its values are the caller's, so they stay in the rows whatever the caller may read.
+    const rows = rowsOf(resolved, sample.kind, sample.record);
+    return {
+      status: 200, mode: 'sample', meta,
+      answer: {
+        spaceId, checked: {}, complete: true, totalViolations: rows.length > 0 ? 1 : 0,
+        violations: rows.length > 0 ? [{ collection: WALK.find(w => w.kind === sample.kind)!.collection, violations: rows }] : [],
+      },
+    };
+  }
+
+  const cursor = after === undefined ? null : decodeCursor(after, memberIds);
+  if (after !== undefined && !cursor) return { status: 400, error: 'after: not a cursor this check gave (pass the nextAfter of the previous page)' };
+  // Before the rail, so a call that finds the space busy costs the caller no slot. No `await` between this check, the rail and the
+  // claim: two calls cannot both pass it.
+  if (running.has(spaceId)) return { status: 409, error: `A stored-data schema check of '${spaceId}' is already running — try again when it ends` };
+  if (!consumeHeavyToolCall(callerKey)) return { status: 429, error: SCHEMA_VALIDATE_RATE_LIMITED };
+  running.add(spaceId);
+  try {
+    const answer = await walkStored(spaceId, memberIds, resolved, { limit, cursor, canReadValues });
+    return { status: 200, mode: 'stored', meta, answer };
+  } finally {
+    running.delete(spaceId);
+  }
+}
+
+/** The stored-data walk: every member's four collections in turn, by `_id`, from `cursor`. */
+async function walkStored(
+  spaceId: string, memberIds: readonly string[], meta: SpaceMeta,
+  opts: { limit: number; cursor: Cursor | null; canReadValues: boolean },
+): Promise<SchemaValidateAnswer> {
+  const { limit, cursor, canReadValues } = opts;
+  const checked: Record<string, { checked: number; total: number }> = {};
+  const page: RecordViolations[] = [];
+  const staleGuards: StaleGuard[] = [];
+  let total = 0;
+  let read = 0;
+  let lastReturned: Cursor | undefined;
+  let stoppedAt: Cursor | undefined;
+
+  // Where to start: the cursor's member and collection, after its id; everything before it was answered by an earlier page.
+  const startMember = cursor ? memberIds.indexOf(cursor.space) : 0;
+  walk: for (let m = startMember; m < memberIds.length; m++) {
+    const mid = memberIds[m]!;
+    const startCollection = cursor && m === startMember ? WALK.findIndex(w => w.collection === cursor.collection) : 0;
+    for (let c = 0; c < WALK.length; c++) {
+      const { collection, kind, projection } = WALK[c]!;
+      const name = spaceCollection(mid, collection);
+      const tally = (checked[collection] ??= { checked: 0, total: 0 });
+      tally.total += await col(name).countDocuments();
+      if (c < startCollection) continue;
+      let afterId = cursor && m === startMember && c === startCollection ? cursor.last : undefined;
+      for (;;) {
+        if (read >= SCHEMA_VALIDATE_SCAN_BOUND) {
+          stoppedAt = { space: mid, collection, last: afterId ?? '' };
+          break walk;
+        }
+        const docs = await idKeysetPage<{ _id: string } & Record<string, unknown>>(
+          { collection: name, filter: {}, projection, size: Math.min(READ_PAGE, SCHEMA_VALIDATE_SCAN_BOUND - read) }, afterId);
+        read += docs.rows.length;
+        tally.checked += docs.rows.length;
+        let found: RecordViolations[];
+        if (kind === 'edge') {
+          const edges = await validateStoredEdges(mid, meta, docs.rows as unknown as StoredEdge[]);
+          found = edges.violations;
+          staleGuards.push(...edges.staleGuards);
+        } else {
+          found = [];
+          for (const doc of docs.rows) {
+            const rows = rowsOf(meta, kind, doc);
+            if (rows.length > 0) found.push({ collection, _id: String(doc._id), violations: rows });
+          }
+        }
+        for (const f of found) {
+          total++;
+          if (page.length < limit) {
+            page.push(canReadValues ? f : { ...f, violations: f.violations.map(withoutValue) });
+            lastReturned = { space: mid, collection, last: f._id ?? '' };
+          }
+        }
+        await yieldToEventLoop();
+        if (docs.end || docs.last === undefined) break;
+        afterId = docs.last;
+      }
+    }
+  }
+
+  // More violating records than the page holds: continue right after the last one returned. Stopped at the bound with every violation
+  // it found returned: continue where it stopped. Neither: the walk reached the end.
+  const next = total > page.length ? lastReturned : stoppedAt;
+  return {
+    spaceId, checked, complete: next === undefined, totalViolations: total, violations: page, staleGuards,
+    ...(next !== undefined ? { nextAfter: encodeCursor(next) } : {}),
+  };
+}

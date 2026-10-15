@@ -136,6 +136,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   recall: 'brain.recall',
   graph_traverse: 'brain.traverse',
   space_stats: 'brain.stats',
+  // F-46: the live check, under the operation its REST twin records — a stored-data check reads the space's records.
+  schema_validate: 'space.schema.validate',
   ingest_status: 'brain.ingest.status',
   // Audited for the same reason `space_stats` is: it reports what a space CONTAINS — type names, edge labels
   // and counts. The REST route was not audited while `stats` was, which was an asymmetry rather than a
