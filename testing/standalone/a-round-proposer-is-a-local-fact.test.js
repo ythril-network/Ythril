@@ -166,7 +166,12 @@ describe('this instance\'s round state never crosses the wire', () => {
   it('names every local field — a list that lost one would pass every loop above', () => {
     // How a round ended here (outcome, concludedAt) is this instance's own reading, like whether it applied the round. So is why this
     // member did not read the schema a meta_change round carries (`refusedHere`, R6-6): what one member cannot parse says nothing of another.
-    assert.deepEqual([...localState.LOCAL_ROUND_FIELDS].sort(), ['appliedHere', 'concludedAt', 'outcome', 'proposedHere', 'refusedHere']);
+    // A FLOOR, not a pin (bundle-106 X1/X8, design v5 section 2.1): the loops above derive their subjects from the constant, so a field added to it is
+    // held without being named here. The floor is what a list that lost a field would fail; `actLocalId` and `peersConcluded` are this instance's own act
+    // state and must never travel. `actAttempts`/`actRetryAt` (the retry clock is on the act's entry) and `skippedHere` (nothing skips a wipe) are void.
+    const fields = [...localState.LOCAL_ROUND_FIELDS];
+    for (const f of ['appliedHere', 'concludedAt', 'outcome', 'proposedHere', 'refusedHere', 'actLocalId', 'peersConcluded']) assert.ok(fields.includes(f), `LOCAL_ROUND_FIELDS lacks ${f}`);
+    for (const f of ['actAttempts', 'actRetryAt', 'skippedHere']) assert.ok(!fields.includes(f), `${f} is a retired spelling`);
   });
 });
 

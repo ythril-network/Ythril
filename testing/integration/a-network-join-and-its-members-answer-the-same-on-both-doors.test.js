@@ -131,14 +131,22 @@ describe('a network\'s members through MCP and through REST', () => {
     assert.equal((await tool(mcpA, 'network_member_add', { id: club, ...member('mcp') })).text, `Error (409): ${dup.body.error}`);
   });
 
-  it('on a closed network both doors open a vote rather than adding', async () => {
-    const closed = await network('closed');
-    const rest = await post(INSTANCES.a, adminA, `/api/networks/${closed}/members`, member('vrest'));
-    const viaMcp = await tool(mcpA, 'network_member_add', { id: closed, ...member('vmcp') });
-    assert.equal(rest.status, 202, JSON.stringify(rest.body));
+  it('on a closed network with no other member both doors admit at once (D-36: the proposer's yes is the quorum); with a member both open a vote', async () => {
+    // Two solo networks, so each door meets a network whose only voter is this instance.
+    const [forRest, forMcp] = [await network('closed'), await network('closed')];
+    const rest = await post(INSTANCES.a, adminA, `/api/networks/${forRest}/members`, member('vrest'));
+    const viaMcp = await tool(mcpA, 'network_member_add', { id: forMcp, ...member('vmcp') });
+    assert.equal(rest.status, 201, `REST: ${JSON.stringify(rest.body)} — a solo closed network admits at open`);
     assert.equal(viaMcp.isError, false, viaMcp.text);
-    assert.equal(viaMcp.body.status, 'vote_pending');
-    assert.equal(viaMcp.body.status, rest.body.status);
+    assert.equal(viaMcp.body.instanceId, member('vmcp').instanceId, 'MCP answers the admitted member, not a pending vote');
+    assert.notEqual(viaMcp.body.status, 'vote_pending');
+    // Now each network HAS a member: the same call opens a vote on both doors, alike.
+    const restVote = await post(INSTANCES.a, adminA, `/api/networks/${forRest}/members`, member('vrest2'));
+    const mcpVote = await tool(mcpA, 'network_member_add', { id: forMcp, ...member('vmcp2') });
+    assert.equal(restVote.status, 202, JSON.stringify(restVote.body));
+    assert.equal(mcpVote.isError, false, mcpVote.text);
+    assert.equal(mcpVote.body.status, 'vote_pending');
+    assert.equal(mcpVote.body.status, restVote.body.status);
   });
 
   it('network_member_remove removes as DELETE /members/:instanceId does, and an unknown member answers alike', async () => {

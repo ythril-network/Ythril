@@ -42,7 +42,7 @@ describe('a library reference travels resolved', () => {
 
 describe('a voted network carries the schema on the round', () => {
   it('adding a space puts its schema on the space_addition round', () => {
-    const add = body(read('server/src/networks/network-acts.ts'), 'export function addNetworkSpaceAct');
+    const add = body(read('server/src/networks/network-acts.ts'), 'export async function addNetworkSpaceAct');
     assert.match(add, /layerOnAdd/);
     assert.match(add, /pendingMeta: layerOnAdd/);
   });

@@ -592,18 +592,15 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
       assert.equal(r.status, 201);
       networkId = r.body.id;
 
-      // Admit B as the first member (closed admin-add opens a round; A's local
-      // yes concludes it — no other members exist yet).
+      // Admit B as the first member. D-36 (bundle-106): the proposer counts as a yes on every join, and with no other member that yes is the whole
+      // quorum, so the admin add passes AT OPEN and admits in the request: 201 with the member, no round to cast on (it was 202 and a second call).
       const addBR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
         instanceId: instanceIdB,
         label: 'Instance B',
         url: 'http://ythril-b:3200',
         token: peerTokenForA,
       });
-      assert.equal(addBR.status, 202, `Add B: ${JSON.stringify(addBR.body)}`);
-      const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${addBR.body.roundId}`, { vote: 'yes' });
-      assert.equal(voteR.status, 200);
-      assert.equal(voteR.body.concluded, true, 'sole-proposer closed round should conclude on own yes');
+      assert.equal(addBR.status, 201, `Add B: ${JSON.stringify(addBR.body)}`);
 
       const cfg = readContainerConfig('ythril-a');
       const net = cfg.networks.find(n => n.id === networkId);
@@ -648,9 +645,9 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
       assert.equal(r.status, 201);
       networkId = r.body.id;
 
-      // Seed ONE dummy member: A's yes concludes that round while A is the only voter. A second seed cannot be added
-      // on A's yes alone any more — with A and one seed, that is 1 of 2, not a majority (Q-77) — and one seed is
-      // already enough for the joiner below to face a 1-of-2 vote.
+      // Seed ONE dummy member: A's yes is the whole quorum while A is the only voter, so the add passes at open (D-36) and answers 201. A second seed
+      // could not be added on A's yes alone — with A and one seed, that is 1 of 2, not a majority (Q-77) — and one seed is already enough for the
+      // joiner below to face a 1-of-2 vote.
       for (const n of [1]) {
         const addR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
           instanceId: `s9-dem-seed-${n}-${Date.now()}`,
@@ -658,9 +655,7 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
           url: 'http://ythril-c:3200',
           token: `ythril_${crypto.randomBytes(24).toString('base64url')}`,
         });
-        assert.equal(addR.status, 202, `Seed add ${n}: ${JSON.stringify(addR.body)}`);
-        const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${addR.body.roundId}`, { vote: 'yes' });
-        assert.equal(voteR.status, 200, `Seed vote ${n}: ${JSON.stringify(voteR.body)}`);
+        assert.equal(addR.status, 201, `Seed add ${n}: ${JSON.stringify(addR.body)}`);
       }
       const cfg = readContainerConfig('ythril-a');
       const net = cfg.networks.find(n => n.id === networkId);
