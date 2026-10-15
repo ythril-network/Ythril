@@ -367,15 +367,13 @@ describe('Leave and removal flows', () => {
       // Create democratic network on A and B; B is being removed by A
       removalNetworkId = await setupDemocraticNetwork();
 
-      // A opens a remove round for B (democratic: voters = [A], so A voting yes passes it)
+      // A removes B on a democratic network of A and B. D-36 (bundle-106): the proposer counts as a yes on every removal, and with A as the only
+      // voter that yes is the majority, so the removal passes AT OPEN and acts in the request: 204, no round left to vote on. (It was 202 and a
+      // second call casting `yes`; a cast on a decided round is refused 404 and there is no round id to cast on.)
       const removeR = await del(INSTANCES.a, tokenA, `/api/networks/${removalNetworkId}/members/${instanceIdB}`);
-      assert.equal(removeR.status, 202, `Expected 202 vote_pending: ${JSON.stringify(removeR.body)}`);
-      const { roundId } = removeR.body;
-
-      // A votes yes → concludes immediately (A is only non-subject voter in democratic)
-      const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${removalNetworkId}/votes/${roundId}`, { vote: 'yes' });
-      assert.equal(voteR.status, 200, `Vote yes: ${JSON.stringify(voteR.body)}`);
-      assert.equal(voteR.body.concluded, true, 'Round should conclude immediately');
+      assert.equal(removeR.status, 204, `Expected 204 (D-36: removed at open): ${JSON.stringify(removeR.body)}`);
+      const rounds = await get(INSTANCES.a, tokenA, `/api/networks/${removalNetworkId}/votes`);
+      assert.deepEqual((rounds.body.rounds ?? []).filter(r => r.type === 'remove' && !r.concluded), [], 'a removal the proposer alone decides left an open round behind');
 
       // Wait until B's config shows ejection (member_removed processed)
       await waitFor(async () => {

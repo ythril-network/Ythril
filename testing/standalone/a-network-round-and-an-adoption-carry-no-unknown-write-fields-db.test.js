@@ -87,7 +87,7 @@ describe('a network round, a meta pull and an adoption carry no unknownWriteFiel
     const loader = await boot();
     const { addNetworkSpaceAct } = await import('../../server/dist/networks/network-acts.js');
     const { roundForPeer } = await import('../../server/dist/networks/round-local-state.js');
-    const result = addNetworkSpaceAct({ rights: { instanceAdmin: true } }, NET_ID, { spaceId: 'extra' });
+    const result = await addNetworkSpaceAct({ rights: { instanceAdmin: true } }, NET_ID, { spaceId: 'extra' }); // async since bundle-106
     assert.ok([200, 202].includes(result.status), `the space was not added: ${JSON.stringify(result)}`);
     assert.equal(loader.getConfig().spaces.find(s => s.id === 'extra')[KEY], 'refuse', 'control: the added space refuses');
     const net = loader.getConfig().networks.find(n => n.id === NET_ID);

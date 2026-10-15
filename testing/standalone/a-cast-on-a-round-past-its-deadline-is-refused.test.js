@@ -187,14 +187,14 @@ describe('a proposal to add a space is blocked only by a round that can still be
   it('an open round for the same space blocks it (409 already open)', async () => {
     await boot([round('adding', { type: 'space_addition', spaceId: 'extra' })]);
     const { addNetworkSpaceAct } = await import('../../server/dist/networks/network-acts.js');
-    const res = addNetworkSpaceAct(admin, 'n', { spaceId: 'extra' });
+    const res = await addNetworkSpaceAct(admin, 'n', { spaceId: 'extra' }); // async since bundle-106: it awaits the act the settle started
     assert.equal(res.status, 409, JSON.stringify(res));
     assert.match(res.error, /already open/);
   });
   it('a round past its deadline does not: the proposal opens a fresh round', async () => {
     const loader = await boot([round('adding', { type: 'space_addition', spaceId: 'extra', deadline: PAST })]);
     const { addNetworkSpaceAct } = await import('../../server/dist/networks/network-acts.js');
-    const res = addNetworkSpaceAct(admin, 'n', { spaceId: 'extra' });
+    const res = await addNetworkSpaceAct(admin, 'n', { spaceId: 'extra' }); // async since bundle-106: it awaits the act the settle started
     assert.equal(res.status, 202, `a round nobody can vote on blocked a new proposal: ${JSON.stringify(res)}`);
     assert.ok(loader.getConfig().networks[0].pendingRounds.some(r => r.type === 'space_addition' && r.roundId !== 'adding'));
   });

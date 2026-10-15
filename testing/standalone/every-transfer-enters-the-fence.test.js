@@ -1,0 +1,178 @@
+/**
+ * Every transfer of a space enters the fence, ends at its next unit when an act registers, and leaves it on every path (bundle-106, §3.3a, W4, X5, X9).
+ *
+ * ## The rule, in three halves
+ *
+ * A wipe or a deletion of a space registers, then waits for the transfers ADMITTED before it to end (`awaitSpaceTransfersDrained`), then
+ * deletes. For the wait to be short and the delete to be safe, three things hold for every transfer, and each is derived here from the code:
+ *
+ * 1. **The outbound turn is cancellable.** Every loop in the transfer modules that fetches from a peer asks `mayContinue(` inside its body
+ *    (between pages, between files), and the fetch is handed the transfer's `signal` so the unit in flight is cut at once. A loop that
+ *    never asks runs a whole turn (minutes to hours on a first sync) past a registered act.
+ * 2. **Every inbound peer door enters and leaves.** The doors are derived: every route block under `server/src/api` that calls
+ *    `refusePeerSpace(`, `pushAllowed(`, `refuseHeldPeer(` or — before those exist — `spaceAllowed(`, `requireSpaceAuthScoped`. Each must
+ *    reach `enterSpaceTransfer(` in its own block or in the one helper it calls (one level: the helper is the module-level function of that
+ *    name), and every function that enters releases in a `finally` and on the response's `close`. A door that enters and releases only on
+ *    the happy path leaks a count, and a leaked count blocks an act's drain for ever (REL F11).
+ * 3. **The fence is the ONE module.** Nobody but `sync/space-transfer-fence.ts` keeps a count of transfers of a space.
+ *
+ * ## Why derived, and why the floor
+ *
+ * v4 named three inbound askers by hand and the gate passed while a fourth door (`GET /api/sync/manifest`) entered nothing. The doors are
+ * read out of the route registrations; `FLOOR` is the push doors alone (`pushAllowed` has seven callers at a638e702) — the read doors
+ * only add to it once `refusePeerSpace` replaces their hand-written `spaceAllowed` pair.
+ *
+ * ## Seen red (by hand)
+ *
+ * At a638e702 neither the fence nor `sync/space-exchange.ts` exists: every case fails for that. After the fix: take `mayContinue(` out of
+ * the file loop's body -> half 1 names the loop; move one door's `release()` out of its `finally` -> half 2 names the door; enter one
+ * hand-named inbound door only -> half 2 names the rest (the v4 shape).
+ *
+ * Run: node --test testing/standalone/every-transfer-enters-the-fence.test.js
+ */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, existsSync } from 'node:fs';
+import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, ts } from '../_shared/syntax-tree.mjs';
+
+const FENCE = 'server/src/sync/space-transfer-fence.ts';
+const EXCHANGE = 'server/src/sync/space-exchange.ts';
+/** The outbound modules whose loops move pages and files. */
+const TRANSFER_MODULES = ['pull-family.ts', 'push-family.ts', 'file-sync.ts', 'tombstone-transfer.ts'].map(f => `server/src/sync/${f}`);
+/** The push doors alone, at a638e702: `pushAllowed` callers (docs.ts: five, tombstones.ts: two). */
+const FLOOR = 7;
+const DOOR_ASKS = ['refusePeerSpace', 'pushAllowed', 'refuseHeldPeer'];
+const text = (f) => readFileSync(`${REPO_ROOT}/${f}`, 'utf8');
+const callsNamed = (sf, name) => { const out = []; walkEveryNode(sf, (n) => { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) out.push(n); }); return out; };
+
+/** Route registrations (`xRouter.get(...)`, `app.post(...)`) in a parsed file, each with its argument list text. */
+function routeBlocks(sf) {
+  const out = [];
+  walkEveryNode(sf, (n) => {
+    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression)) return;
+    if (!/^(get|post|put|patch|delete)$/.test(n.expression.name.text)) return;
+    const target = n.expression.expression.getText(sf);
+    if (!/(?:^|\.)(?:\w*[rR]outer|app)$/.test(target)) return;
+    if (!ts.isStringLiteralLike(n.arguments[0] ?? n)) return;
+    out.push({ node: n, route: `${n.expression.name.text.toUpperCase()} ${n.arguments[0].text}`, line: lineOf(sf, n) });
+  });
+  return out;
+}
+
+describe('the outbound turn is cancellable', () => {
+  it('the fence and the turn module exist', () => {
+    assert.ok(existsSync(`${REPO_ROOT}/${FENCE}`), `${FENCE} does not exist: no transfer is counted, so an act cannot know what to wait for`);
+    assert.ok(existsSync(`${REPO_ROOT}/${EXCHANGE}`), `${EXCHANGE} does not exist: the per-space turn that enters the fence has no home (engine.ts is frozen and cannot hold it)`);
+    assert.match(text(EXCHANGE), /\benterSpaceTransfer\(/, 'the turn never enters the fence');
+  });
+
+  it('every loop that fetches from a peer asks mayContinue between units, and its fetch carries the transfer signal', () => {
+    const loops = [];
+    for (const file of TRANSFER_MODULES) {
+      const sf = parseSource(file, text(file));
+      walkEveryNode(sf, (n) => {
+        if (!(ts.isForStatement(n) || ts.isForOfStatement(n) || ts.isWhileStatement(n) || ts.isDoStatement(n))) return;
+        const body = n.statement.getText(sf);
+        if (!/\bpeerSafeFetch\(|\bpullFamily\(|\bfetchPage\(|\bsyncOneFile\(/.test(body)) return;
+        // Only the OUTERMOST loop that fetches is a unit boundary of the turn; an inner retry loop is inside its unit.
+        let outer = n.parent; let nested = false;
+        for (; outer && !ts.isFunctionLike(outer); outer = outer.parent) {
+          if ((ts.isForStatement(outer) || ts.isForOfStatement(outer) || ts.isWhileStatement(outer)) && /\bpeerSafeFetch\(/.test(outer.statement.getText(sf))) nested = true;
+        }
+        if (!nested) loops.push({ file, line: lineOf(sf, n), body });
+      });
+    }
+    assert.ok(loops.length >= 3, `the derivation found ${loops.length} fetching loop(s) across the transfer modules: an empty set passes every check below`);
+    const blind = loops.filter(l => !/\bmayContinue\(/.test(l.body)).map(l => `${l.file}:${l.line}`);
+    assert.deepEqual(blind, [], `these loops move units from a peer and never ask transfer.mayContinue(): an act registered meanwhile waits for the whole turn:\n  ${blind.join('\n  ')}`);
+    for (const file of TRANSFER_MODULES) {
+      assert.match(text(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''), /\bsignal\b/,
+        `${file} never mentions the transfer's signal: the unit in flight cannot be cut when an act registers`);
+    }
+  });
+
+  it('the turn releases its transfer in a finally', () => {
+    assert.ok(existsSync(`${REPO_ROOT}/${EXCHANGE}`), `${EXCHANGE} does not exist: there is no turn to release`);
+    const sf = parseSource(EXCHANGE, text(EXCHANGE));
+    const enters = callsNamed(sf, 'enterSpaceTransfer');
+    assert.ok(enters.length >= 1, 'the turn module never calls enterSpaceTransfer(');
+    for (const call of enters) {
+      const fn = outermostFunctionOf(call);
+      let released = false;
+      walkEveryNode(fn, (n) => { if (ts.isTryStatement(n) && n.finallyBlock && /\brelease\(/.test(n.finallyBlock.getText(sf))) released = true; });
+      assert.ok(released, `${EXCHANGE}:${lineOf(sf, call)} enters the fence and does not release in a finally: a turn that throws (engine.ts throws on incomplete) leaks its count`);
+    }
+  });
+});
+
+describe('every inbound peer door enters the fence and leaves it on every path', () => {
+  const apiFiles = () => trackedSources(['server/src/api', 'server/src/auth'], { untracked: true, floor: 30 });
+
+  /** Module-level helpers (by name) across the api and auth trees, with their text: what a door's one call level may enter through. */
+  function helperBodies() {
+    const map = new Map();
+    for (const file of [...apiFiles(), 'server/src/sync/space-exchange.ts'].filter(f => existsSync(`${REPO_ROOT}/${f}`))) {
+      const sf = parseSource(file, text(file));
+      walkEveryNode(sf, (n) => { if (ts.isFunctionDeclaration(n) && n.name) map.set(n.name.text, `${map.get(n.name.text) ?? ''}\n${n.getText(sf)}`); });
+    }
+    return map;
+  }
+
+  it('the doors, derived from what they ask, number at least the push doors', () => {
+    let found = 0;
+    for (const file of apiFiles()) {
+      const sf = parseSource(file, text(file));
+      for (const b of routeBlocks(sf)) if (DOOR_ASKS.some(a => new RegExp(`\\b${a}\\(`).test(b.node.getText(sf)))) found++;
+    }
+    assert.ok(found >= FLOOR, `only ${found} route block(s) ask pushAllowed/refusePeerSpace/refuseHeldPeer (floor ${FLOOR}): the derivation is broken`);
+  });
+
+  it('each door reaches enterSpaceTransfer, in its block or in the helper it asks', () => {
+    const helpers = helperBodies();
+    const asked = new Set(DOOR_ASKS);
+    const missing = [];
+    for (const file of apiFiles()) {
+      const sf = parseSource(file, text(file));
+      for (const b of routeBlocks(sf)) {
+        const block = b.node.getText(sf);
+        const asks = DOOR_ASKS.filter(a => new RegExp(`\\b${a}\\(`).test(block));
+        if (asks.length === 0) continue;
+        const enters = /\benterSpaceTransfer\(/.test(block) || asks.some(a => /\benterSpaceTransfer\(/.test(helpers.get(a) ?? ''));
+        if (!enters) missing.push(`${file}:${b.line} ${b.route}`);
+      }
+    }
+    assert.equal(asked.size, DOOR_ASKS.length);
+    assert.deepEqual(missing, [], `these inbound peer doors never enter the fence, so a wipe's drain cannot see their transfer:\n  ${missing.join('\n  ')}`);
+  });
+
+  it('every function that enters releases in a finally AND on the response close', () => {
+    const offenders = [];
+    let enterers = 0;
+    for (const file of trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f !== FENCE)) {
+      const sf = parseSource(file, text(file));
+      for (const call of callsNamed(sf, 'enterSpaceTransfer')) {
+        enterers++;
+        const fn = outermostFunctionOf(call);
+        const body = fn ? fn.getText(sf) : '';
+        let inFinally = false;
+        walkEveryNode(fn ?? sf, (n) => { if (ts.isTryStatement(n) && n.finallyBlock && /\brelease\(/.test(n.finallyBlock.getText(sf))) inFinally = true; });
+        // Inbound doors answer a response, so a client that drops mid-request must release too; the outbound turn has no response.
+        const inbound = /\bres\b/.test(body) && /\breq\b/.test(body);
+        const onClose = !inbound || /\.(?:once|on)\(\s*['"]close['"]/.test(body);
+        if (!inFinally || !onClose) offenders.push(`${file}:${lineOf(sf, call)} (${inFinally ? '' : 'no release in a finally'}${!inFinally && !onClose ? '; ' : ''}${onClose ? '' : "no release on the response's close"})`);
+      }
+    }
+    assert.ok(enterers >= 1, 'no module outside the fence calls enterSpaceTransfer(: nothing is counted');
+    assert.deepEqual(offenders, [], `a transfer that does not release on every path leaks a count that blocks every later act's drain:\n  ${offenders.join('\n  ')}`);
+  });
+
+  it('no module but the fence keeps a count of a space\'s transfers', () => {
+    const owners = new Set([FENCE]);
+    const offenders = trackedSources(['server/src'], { untracked: true, floor: 100 })
+      .filter(f => !owners.has(f))
+      .filter(f => /\b(?:transfersRunning|transferCounts?|inFlightTransfers)\b\s*(?:=|\.set\()/.test(text(f)));
+    assert.deepEqual(offenders, [], 'a second counter of transfers is a second answer to "may the act begin"');
+    assert.ok(existsSync(`${REPO_ROOT}/${FENCE}`), `${FENCE} does not exist: there is no counter at all`);
+  });
+});
