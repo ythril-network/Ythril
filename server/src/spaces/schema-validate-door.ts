@@ -38,8 +38,7 @@ import { refusalOfParse } from '../util/log.js';
 import { effectiveRung } from '../auth/mint-cap.js';
 import { RUNGS } from '../auth/space-rights.js';
 import { recordViewOf, type ViewKind } from '../brain/record-view.js';
-import { SpaceMetaBody, stripServerOwnedMeta } from './body-schemas.js';
-import { readingStoredRules } from './schema-rules.js';
+import { parseSpaceMeta, readStoredMeta } from './body-schemas.js';
 import { validateEntity, validateEdge, validateFact, validateChrono, resolveMetaRefs, type SchemaViolation } from './schema-validation.js';
 import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
 
@@ -165,22 +164,17 @@ export async function beginSchemaValidate(input: {
   const { sample, after } = parsed.data;
   const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
 
-  // A proposed meta is parsed as a save would parse it, so a rule the save would refuse is refused here in the same words. The stored
-  // meta was checked when it was stored: a rule in it that no longer compiles is skipped and reported, not a reason to refuse the check.
+  // A proposed meta is parsed by the one parse a save runs (`parseSpaceMeta`), so a meta the save would refuse is refused here in the
+  // same words. The stored meta is read as every store reads what it holds (`readStoredMeta`): it was checked when it was stored, so a
+  // key from a newer build, a part that no longer parses or a rule that no longer compiles is left out and reported elsewhere — never a
+  // reason to refuse the check of the space's own schema.
   let meta: SpaceMeta;
   if (parsed.data.meta !== undefined) {
-    const proposedParse = SpaceMetaBody.safeParse(stripServerOwnedMeta(parsed.data.meta));
-    if (!proposedParse.success) return { status: 400, error: refusalOfParse(proposedParse.error).error };
-    meta = proposedParse.data as SpaceMeta;
+    const proposed = parseSpaceMeta(parsed.data.meta);
+    if (!proposed.ok) return { status: 400, error: proposed.message };
+    meta = proposed.meta as SpaceMeta;
   } else {
-    const stored = readingStoredRules(() => {
-      const storedParse = SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {}));
-      return storedParse.success
-        ? { ok: true as const, meta: storedParse.data as SpaceMeta }
-        : { ok: false as const, error: refusalOfParse(storedParse.error).error };
-    });
-    if (!stored.ok) return { status: 400, error: stored.error };
-    meta = stored.meta;
+    meta = readStoredMeta(space.meta ?? {}).meta as SpaceMeta;
   }
   const resolved = resolveMetaRefs(meta);
 
