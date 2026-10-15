@@ -126,6 +126,12 @@ names nothing — answers `422` with the `schema_violation` body and changes not
 that names nothing answers `400` `{ "error" }`. A chrono entry that does not exist is `404` first, and the refusal
 comes before an `If-Match` `412`.
 
+**Changing a chrono entry's `type` is judged against the type it leaves and the type it lands on.** In a `strict`
+space a property key the new type does not declare is *introduced* by the retype, so it refuses the write unless the
+same request names it in `deleteFields` (`properties.<key>`); see
+[Property keys a type does not declare](06a-schema-api.md#property-keys-a-type-does-not-declare). A chrono type's
+[rules](06a-schema-api.md#rules) judge the entry too, and a rule's `self.title` is the entry's title.
+
 > **`deleteFields` arrived in 3.1, and it is the only way to remove anything.** `properties` MERGE — patching
 > one key keeps the others — and an omitted field means *leave it alone*, so before 3.1 there was no request
 > that could unset a chrono field at all: a key written once was permanent. Send dot-notation paths, applied

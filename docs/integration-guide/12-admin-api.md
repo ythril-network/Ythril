@@ -187,26 +187,34 @@ Per family, alongside the counts, and each present only when it has something to
 | `keysRemoved` | files only: how many authored keys (a description, its source, the properties, the tags, a suppression mark) the restored rows lost because their export row lacks them. It counts the keys the replaced rows held, so a key a row never had is not counted. Present only when any were removed |
 | `counterBehind` | `true` when the family's records were stored and this instance's seq counter could not be moved past them: the next local write may take a seq below a restored record. What was stored is still counted in `inserted`/`updated`. **Run the import again** — a restore replaces, so it is safe, and the re-run moves the counter |
 | `restoredOverTombstone` | ids of records restored over a deletion this instance holds **and that deletion would still apply to** (judged by the same [deletion rule](../sync-protocol.md#tombstone-deletion-authorisation) sync uses: the issuer wrote the record, or this instance's upstream delivered it) — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
-| `schemaViolations` | documents stored despite breaking the space's schema (below) |
+| `schemaViolations` | documents stored carrying something the space's schema does not accept that the copy they replaced lacked (below); `schemaViolationsTotal` and, past 50, `schemaViolationsTruncated: true` |
 
 **A document that breaks the space's schema is STORED, and reported.** It is not refused: a backup taken before
 a schema change would be rejected by the instance's own current rules, which would make backups unrestorable —
 the very thing an import exists for. This is the same answer sync gives on the same kind of payload, and for the
-same reason.
+same reason, and the two ask the same module ([What arrivals record](06a-schema-api.md#what-arrivals-record)): a
+document is reported only when it was stored, only for what the copy it replaced did not already carry, and not at all
+in a space whose `validationMode` is `off`. An undeclared property key is one of the things reported.
 
-Each affected collection carries a `schemaViolations` array naming the documents and what was wrong with each:
+Each affected collection carries a `schemaViolations` array naming the documents and what was wrong with each —
+**by `field` and `reason`, never a value**, a restore's answer being no place for a backup's data:
 
 ```json
 "entities": {
   "inserted": 3, "updated": 1, "errors": 0,
   "schemaViolations": [
-    { "_id": "e1b2c3d4-...", "violations": [ { "field": "owner", "value": null, "reason": "required property missing" } ] }
-  ]
+    { "_id": "e1b2c3d4-...", "violations": [ { "field": "properties.owner", "reason": "required property 'owner' is missing or empty" } ] }
+  ],
+  "schemaViolationsTotal": 120,
+  "schemaViolationsTruncated": true
 }
 ```
 
 Per record rather than a count, deliberately: a number tells you something in a 50 000-record restore is wrong
-and nothing about which one. The array is absent when there is nothing to report.
+and nothing about which one — and bounded, because a list of names is not: **the first 50 documents are named**, each
+with at most 20 rows; `schemaViolationsTotal` is how many documents there were, and `schemaViolationsTruncated` is
+present only when it is more than were named. The array is absent when there is nothing to report. The restore also
+says it once in the log and counts the documents in `ythril_schema_violations_recorded_total{source="import"}`.
 
 **Imported records are queued for embedding.** Until 3.7 they were not — a restored backup was stored and
 invisible to meaning-ranked search until somebody ran a reindex they were never told they needed. The import

@@ -147,10 +147,14 @@ graph_traverse walks the entity graph structurally (no semantics).`;
 const SCHEMA_GUIDE = `Call space_meta(space) to see a space's purpose, typeSchemas, validation mode,
 and entry counts — do this before writing into an unfamiliar space. A schema
 declares entity/record types and their expected properties. Validation modes:
-**off** (anything goes), **warn** (violations logged, write succeeds), **strict**
-(violations rejected). With **strict linkage**, every reference must name a record
-that exists: an edge's ends, whichever kind they are (entity, fact, chrono entry or
-file) and the far end of an inline edges entry on a record write, and a link id.
+**off** (anything goes), **warn** (the write succeeds and its violations come back
+as warnings), **strict** (a write that introduces a violation is rejected; one the
+record already had does not block an unrelated edit). A type that declares at least
+one property is a closed list: a write that ADDS a property key the type does not
+declare is rejected in strict and named in warnings in warn. With **strict
+linkage**, every reference must name a record that exists: an edge's ends,
+whichever kind they are (entity, fact, chrono entry or file) and the far end of
+an inline edges entry on a record write, and a link id.
 A refused connection stores nothing, the record included. Schema-declared property
 paths also unlock the fast filtered-recall path
 (see retrieval guide above).
@@ -161,7 +165,12 @@ breaking write is told. A type's own rules sit in its typeSchemas entry and the
 space's in its meta rules; writing either needs the schema admin rung.
 A rule the instance could not apply is refused when saved; a property the rule
 reads that a record lacks makes it not apply. Try a schema on one record you type,
-or over the stored records, with schema_validate before saving it.`;
+or over the stored records, with schema_validate before saving it.
+
+A space in a network runs on its own definitions with each network's laid under
+them, and the network first in the order wins a clash: an edit of something a
+network supplies is stored and may not take effect. space_schema_layers says which
+of your edits a network outranks (fields, hidden) and which network wins.`;
 
 const REST_SUMMARY = `EVERY TOOL ON THIS LIST IS ALSO "POST /api/<tool-name>", with the token you are
 using now as a Bearer header. The body is the tool's arguments exactly — the same

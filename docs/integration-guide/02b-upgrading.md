@@ -200,7 +200,52 @@ After the row is gone, the file TOMBSTONE is what stops a stale copy of the dele
 
 **Mixed versions.** A peer on an older build still serves an expired round as open and still adopts one; the older build concludes it as a failure the first time anything touches it. A member on this version never adopts an expired round and refuses a cast on one, so the two ends agree on the result and differ only in how long the round shows as open on the older one.
 
+**Upgrading past 5.6.x changes what a `strict` space refuses, how a schema is saved and what a schema refusal looks like.**
+The contract is in the [schema guide](06a-schema-api.md); what an integrator or operator will see:
+
+- **A property key the type does not declare is refused in a `strict` space when a write ADDS it** (flagged in `warn`,
+  ignored in `off`), for a type that declares at least one property. Records already carrying such keys are not touched
+  and stay editable: only an edit that adds another is refused. **Find them first:** `POST /api/spaces/:id/validate-schema`
+  on the upgraded instance lists each (`field: "properties.<key>"`, with `declared`), or run the space in `warn` and read
+  `warnings`; declare the keys you mean to keep. A client that sent a key a type never declared starts seeing `schema_violation`.
+- **Rules are new** (`typeSchemas.<kind>.<type>.rules`, `meta.rules`). A space with none is unchanged; one that sets
+  them needs `schema` `admin`, and a rule this instance could not apply is refused when saved.
+- **A schema refusal's `truncated` is a number** (rows left out), was `true`; a refused merge answers the standard
+  refusal body (`introduced`, `preExisting`, …), was `{ error, violations }`, still `400`; a bulk row carries `violation`.
+- **A body that fails validation answers `{ "error", "issues" }`** and never reflects a received value; `error` is bounded
+  prose, no longer a JSON document. Match on `issues[].code` and `path`, not on the old sentence.
+- **`POST /api/spaces/:id/validate-schema` pages by `after` / `nextAfter`**: `skip`, `count`, `total`, `truncated` and `nextSkip`
+  are gone, `limit` and `after` are body parameters, one call reads at most 10,000 records, and a stored `value` is shown only to a
+  caller who may read the space's knowledge. It also takes `sample` (one record) and is MCP `schema_validate`.
+- **MCP write tools answer `warnings`** where `save_edge` answered `violations` on success, `save_entity`, `save_fact` and
+  `save_chrono` gain it, and `save_chrono` answers its entry as structured content. A refused write tool call is a row in
+  the audit trail whatever refused it.
+- **`PUT /api/spaces/:id/meta/typeSchemas/:kind/:type` needs `schema` `admin` when the type's rules differ from the stored
+  ones**; `meta.stampSkew`, documented for some time and refused by the body, is now accepted (`schema` `write`).
+- **A schema-library entry takes every field an inline type takes**, is checked against the collection it is filed under, a
+  `PATCH` merges every key the body accepts (three were accepted and dropped), `deleteFields` takes any schema path, and
+  an entry cannot change kind while a space references it as another.
+- **On a space in networks**, a write is merged and priced against the space's own definitions and proposes only what it
+  changed; a write reaching several networks answers `layers`; `GET /api/spaces/:id/schema-layers` answers `fields`
+  (own against effective, `winner`, `hidden`), `unknownFields` and `refusedRounds`.
+
+**Mixed versions: a network is upgraded together, because the schema a network sends is read whole by the release before
+this one.** A member on 5.6.x refuses a layer or a round carrying `rules` or `stampSkew` whole — it knows no such key — once
+per cycle, and nothing the writer sees says so. A write that sets one therefore answers success **plus a `warnings` row
+naming the members whose recorded version is older or unknown** (labels only for a caller who holds `networks: read`).
+Upgrade every instance of the network, then set rules. From this release a receiver is a tolerant reader: the next key a
+release adds is named on `space_schema_layers` (`unknownFields`) instead of refusing the layer.
+
 ## Rolling Back
+
+**A rollback to 5.6.x does not enforce the rules this release stored, and drops a layer that carries them.** `rules` and
+`stampSkew` stay in `config.json` (and `schema-library.json`), and the older build neither reads nor evaluates them: a `strict`
+space accepts what its rules would have refused. A type written through the older build's `PATCH` or `PUT` replaces the
+definition, and a type's rules go with it (that build refuses a body that carries `rules`, so the type is sent without them).
+An older member refuses a network layer carrying `rules` whole each cycle, as the
+mixed-version note above says, and keeps the layer it had. Records written with a property key their type does not
+declare are intact: the older build never judged keys. The local fields this release added to a network or a round
+(`schemaLayerUnread`, `metaBase`, `refusedHere`) are read by nothing older and are never sent to a peer.
 
 **A rollback to 5.6.x rebuilds `{ seq: 1 }` before it listens, and leaves the new indexes behind.** An older build creates
 `{ seq: 1 }` (tombstones: `{ type: 1, seq: 1 }`) at every boot, before it accepts a request, on each collection that no

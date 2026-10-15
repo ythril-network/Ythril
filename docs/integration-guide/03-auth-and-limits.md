@@ -80,6 +80,26 @@ Extended errors may include:
 { "error": "Storage limit exceeded", "storageExceeded": true }
 ```
 
+**A request body that fails validation answers `400` with its failing fields named, as `{ "error", "issues" }`:**
+
+```json
+{ "error": "meta.typeSchemas.entity.person.rules.adult: rule 'adult' reads self.properties.age, which this type does not declare (a type rule reads only the properties its type declares)",
+  "issues": [ { "code": "custom", "path": ["meta", "typeSchemas", "entity", "person", "rules", "adult"] } ] }
+```
+
+`error` is bounded prose naming the path of each failing field and what was wrong with it, never a JSON document;
+`issues` is `[{ code, path, keys? }]` and nothing more — **no received value is reflected back**, because a value is the
+caller's and possibly a credential. At most **10** issues are shown (the prose says how many more there were); a name a
+caller chose is cut at **256** characters and escaped, so one oversized or line-breaking key neither floods the answer
+nor forges a log line. For an unknown key `code` is `unrecognized_keys` and `keys` lists the first 10. Branch on `code`
+and `path`, not on the prose. Every route that parses a body with a schema answers this way — the record routes, the
+space, schema, library, network, invite and sync routes, admin settings — so an old client that reads only `error`
+keeps reading a sentence; it used to be zod's own message, a JSON document of the whole issue array.
+
+**A schema refusal on a record write is a different body**, `{ "error": "schema_violation", "message", "introduced",
+"preExisting", "violations", "truncated"? }`, because it is about the *record* and not the request
+([Schema Validation](06a-schema-api.md#schema-validation)): `400` on a create, `422` on an update, `400` on a refused merge.
+
 ### A failure of the STORE is a 503, and says so in a field
 
 **The brain read routes — `POST …/recall`, `POST …/find-similar` and `POST …/query` — distinguish a failure
@@ -168,14 +188,14 @@ to correct. The information is identical; only the envelope differs.
 
 | Code | Meaning |
 |---|---|
-| 400 | Bad request / validation failure — **your request, and retrying it unchanged will fail identically**. On a file act, deleting the space's root directory is `code: "space_root_refused"`, and a `confirm` that is not a boolean is refused too |
+| 400 | Bad request / validation failure — **your request, and retrying it unchanged will fail identically**. On a file act, deleting the space's root directory is `code: "space_root_refused"`, and a `confirm` that is not a boolean is refused too. A body that fails validation is `{ "error", "issues" }` (above); a record write a `strict` space refuses is `schema_violation` (`400` on a create and on a refused merge) |
 | 401 | Missing or invalid token |
 | 403 | Token lacks access to this resource. **On a search naming spaces, one space you cannot read refuses the whole call** and the message names which — a partial answer would be indistinguishable from a small one. Omit `space` instead and the search silently covers only what you can read. |
 | 404 | Resource not found |
-| 409 | Conflict (duplicate ID). On a file act, a destination the tree refuses: `code: "path_blocked"` (a regular file where a directory must be, or a directory moved into itself), or `code: "destination_exists"`: a file, a folder or a file's record already stands at a move's destination, and **a move never replaces anything**, so delete what stands there first (that deletes it on every instance it is replicated to) or choose another name. `code: "destination_held_after_move"` is a move whose bytes moved but whose records could not follow because the records of another file hold an id they need; delete that file and the move finishes. It is about the receiver's tree and can change, so a sync sender keeps retrying; see [Files](05-files-api.md#move--rename) |
+| 409 | Conflict (duplicate ID). A stored-data schema check of a space that is already running one; a schema-library entry that would change kind while a space references it as another. On a file act, a destination the tree refuses: `code: "path_blocked"` (a regular file where a directory must be, or a directory moved into itself), or `code: "destination_exists"`: a file, a folder or a file's record already stands at a move's destination, and **a move never replaces anything**, so delete what stands there first (that deletes it on every instance it is replicated to) or choose another name. `code: "destination_held_after_move"` is a move whose bytes moved but whose records could not follow because the records of another file hold an id they need; delete that file and the move finishes. It is about the receiver's tree and can change, so a sync sender keeps retrying; see [Files](05-files-api.md#move--rename) |
 | 413 | Payload too large (Express body limit: 10 MB for JSON) |
-| 422 | On a file act, `code: "confirm_required"`: deleting a directory needs `confirm: true`, and nothing was deleted. Other `422`s are about the request body, so retrying the same request fails identically; see [Files](05-files-api.md#delete-a-file) |
-| 429 | Rate limited — check `Retry-After` header |
+| 422 | On a file act, `code: "confirm_required"`: deleting a directory needs `confirm: true`, and nothing was deleted. Other `422`s are about the request body, so retrying the same request fails identically; see [Files](05-files-api.md#delete-a-file). On a record update, a `schema_violation` the `strict` space refuses; on a merge, `merge_too_large` |
+| 429 | Rate limited — check `Retry-After` header. A stored-data schema check (`POST /api/spaces/:id/validate-schema`, `schema_validate`) is also held to five runs a minute per token, counted across both doors |
 | 500 | A server fault, in words that name no path. A file delete or move whose deletion cannot be recorded is `code: "act_not_recorded"`: nothing was moved or deleted. A file act the server's storage refuses is `code: "file_system_fault"` |
 | 503 | **The store could not answer. Not your request — retry it.** See below. Also a file move whose bytes moved and whose records follow on their own: `code: "move_still_owed"`, with `Retry-After`; see [Files](05-files-api.md) |
 | 507 | Storage quota hard limit exceeded |

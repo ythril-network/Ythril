@@ -90,7 +90,10 @@ When a **type** is selected and the space has a schema defined for that type, th
 
 - **Required properties** — shown with a `*` badge; must be filled in before the record can be saved (strict mode) or will generate a warning (warn mode).
 - **Optional properties** — shown with a remove (×) button; any field left blank when you click Save is silently omitted from the stored record.
-- Switching the type dropdown **immediately rebuilds** the properties form for the newly selected type; values you have already filled in are preserved where the field name matches.
+- Switching the type dropdown **immediately rebuilds** the properties form for the newly selected type: what the old type only pre-filled, and you did not touch, is dropped; the new type's fields are added; **everything you typed or the record already stored stays**, even when the new type does not declare it.
+- **A property the type does not declare is marked *not declared*.** A type that declares properties is a closed list, so a property you type under another name (or that a record carries from before) shows the marker, with a remove button, rather than disappearing silently — and a stored one is never removed for you. In a **strict** space, *adding* such a property is refused; in a **warn** space it is saved and named in a notice.
+- **A refusal is shown where you are looking.** The editor lists what does not match the schema under the form (*This change does not match the schema*), and marks the refused property; each row says whether *this change* caused it or it was *already the case before this change* — only the first kind stops a save. A rule that is broken reads as the rule's own message. **A save that goes through in a warn space keeps a notice** (*Saved, with warnings: this record does not match the schema*), and *Some warnings were left out of this answer* when there were more than fit.
+- **Changing the type of a record in a strict space can leave properties the new type does not declare.** The save is then refused, and the app asks instead of failing: **Remove properties the new type does not declare?** lists each property and its value (at most 20, then *and N more*) and says **This cannot be undone**; **Remove N properties** saves the change with those properties taken off, and cancelling puts the old type back. Nothing is removed in a warn or off space.
 
 **Searching:** The top search bar is a **semantic entity finder** — type to see meaning-ranked matches in a dropdown, then click one to narrow the list to it (it fills the Name column filter). For an **exact / partial name** lookup (e.g. a specific ID like `ADR002`), use the **freetext box under the Name column** — semantic recall is poor at exact IDs, so the column filter is the reliable path. Column filters and sorting work as on Facts.
 
@@ -114,7 +117,10 @@ the absorbed one has, and says what would fit: delete at least as many of its re
 over — a relationship cannot be moved to another record, only deleted — or, when the message says so, keep the
 other record instead. On the Review page the record that is kept follows the space's **Merge survivor** setting
 (Settings → the space → **Duplicates**). A space set to **strict** likewise refuses a merge whose result would
-break its own rules, and says which.
+break its own rules, and says which: a property the record you keep already carries is never blamed, but one it takes
+over from the other record that its type does not declare is, and so is a rule the merge newly breaks. **On the Review
+page a refused merge stays on the list** (*Not merged: "A" and "B"*, with a dismiss button) instead of flashing and
+vanishing, because it lists what you have to fix.
 
 **Deleting:** Each row has an inline **✕ → confirm** flow.
 

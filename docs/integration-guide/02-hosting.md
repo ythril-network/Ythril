@@ -156,6 +156,8 @@ host disk needs nothing.
 
 The `config/` directory is a host bind mount — `config.json`, `secrets.json`, and `schema-library.json` are plain files that survive any container lifecycle event.
 
+> **`schema-library.json` has no file watcher.** It is read when the instance starts, so an entry edited by hand takes a restart; a rule in it that no longer compiles is skipped and named by `invalidRules` until it is fixed ([Schema Library](06b-schema-library-api.md)).
+>
 > **Backup note:** All three files are required for a complete restore. `schema-library.json` holds the instance-level schema library; spaces using `$ref: "library:<name>"` will have broken validation if this file is missing after a restore.
 
 ### Config File Permissions
@@ -236,7 +238,10 @@ documents are failing, that is the first thing to check. Conversation extraction
 ### Security Posture Check
 
 At boot Ythril prints an aggregated **security posture** — one `✓`/`⚠`/`✗` line per check across transport
-(TLS enforcement, peer scheme, `trustProxy`), encryption at rest, and MongoDB auth — so a weak setting is
+(TLS enforcement, peer scheme, `trustProxy`), encryption at rest, MongoDB auth, and the schema rules (`schema.rules.engine`
+is a `fail` when the rule engine could not load — every rule then reports it could not be evaluated, so a `strict` space
+refuses the writes its rules govern; `schema.rules.invalid` is a `warn` while stored rules no longer compile and are
+skipped, named by `invalidRules` on `space_meta`) — so a weak setting is
 visible in the logs instead of silently accepted. Admins can also fetch it live:
 
 ```http

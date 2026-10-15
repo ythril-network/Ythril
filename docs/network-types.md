@@ -520,6 +520,16 @@ The instance keeps how each of its recent rounds ended — outcome, tally and da
 **Recent decisions** on the network card; it is that instance's own reading and is never sent to a peer. A member that
 was offline past a deadline never learns of a round that ended without it.
 
+**A schema-change round is applied whole or not at all, member by member.** It carries only the types and fields its
+proposal changed. A member that cannot read what it carries — a rule it could not apply, a value it refuses — casts no
+yes on it (a veto is always its own to cast), applies none of it and records why on the round; the round otherwise
+concludes by the votes that were cast. A schema a network sends is kept as that network's *layer* beside the member's
+own definitions, and where two networks define the same thing the network first in the member's order wins — an edit
+of something a layer supplies is stored and can be outranked, which `GET /api/spaces/:id/schema-layers` shows
+([Schema API](integration-guide/06a-schema-api.md#network-schema-layers)). A member on the release before 5.7.0 refuses a
+layer that carries a key it does not know (`rules`, `stampSkew`) whole until it is upgraded: upgrade every instance of
+a network.
+
 ---
 
 ## Data sovereignty

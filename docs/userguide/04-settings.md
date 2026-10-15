@@ -97,9 +97,19 @@ To settle a clash for good, **Propose** beside a network that holds the other de
 applies here: that network's members vote, and once it passes it becomes that network's definition on every
 member. Your own definitions are not changed. It needs the Networks right at write.
 
+**The editor below the panel shows this space's own definitions, not what the networks supply** — what a network
+sends applies beneath them. A property a network supplies is marked with that network's name (*The definition from …
+applies*), with a **Propose** beside it. **An edit a network outranks is stored but does not take effect**, and the panel
+says so: *"… is saved here but not in effect: <network> overrides your value."* A change you proposed that is still
+waiting for a vote is listed too (*A change to … is waiting for a vote in <network>*), even after the dialog that proposed
+it was closed. If the panel cannot load it says so and offers **Try again**. Saving a change to a space in more than one
+network says what happened in each by name (*Saved in …; waiting for a vote in …*) and keeps the dialog open.
+If someone else changed the schema after you opened it, the save is refused with *Someone else changed this schema after
+you opened it* and a **Reload the schema** button; reloading drops your unsaved edits, so you are asked first.
+
 **Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 
-- **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely, and an edge saved together with its record counts: a refused edge stops the record too.
+- **Validation mode** — *Off — writes are not checked*; *Warn — writes are stored and their violations are returned to the caller*; *Strict — writes with an undeclared property or an unsatisfied rule are refused*. In `strict` an edge saved together with its record counts: a refused edge stops the record too. **A type that declares at least one property is a closed list**: a write that *adds* a property the type does not declare is refused in `strict` and named in the warnings in `warn`; a property the record already carries is never refused, so tightening a schema does not lock the records written before it. A type that declares no property accepts any.
   > **Editing is checked too.** The record **as it will be** — yours plus the existing fields — is checked
   > before it saves, so an edit cannot save a value the same space would reject on create.
   >
@@ -113,6 +123,7 @@ member. Your own definitions are not changed. It needs the Networks right at wri
   > non-compliant before your change…"* — so you are not sent looking at the wrong field. Validation is of
   > the result, so fixing the named field in any later save repairs the record.
 - **Strict linkage** — when on, references between items must be valid IDs of items that exist, and deletion of referenced items is blocked. That covers every link and every edge, including the far end of an edge saved together with its record, whether it points at an entity, a fact, a chrono entry or a file.
+- **Space rules** — under the validation bar, rules that apply to **every** type (*Apply to every type, or to the kinds a rule names*). Each has the same two boxes as a type's rule and **Applies to** checkboxes for the kinds it governs (entity, fact, edge, chrono); *with no kind ticked, the rule applies to every kind* whose record has what the rule reads (`self.title` reaches entities, facts and chrono entries, not edges). A space rule is a rule a record breaks in any type, so saving one needs the Schema right at **admin** — the right that **Validation mode** needs — and a token with only **write** sees them read-only. In a space in a network a space's rules travel with its schema, and **a member on an earlier release refuses a schema that carries rules** until it is upgraded: the save warns which members are behind.
 - **Type schemas** — define per-type rules under each knowledge type (entity, fact, edge, chrono). For each named type you can set:
   - **Naming pattern** — a regex the name must match. Refused on save if it could run exponentially
     (typically a repeated group like `(,abc)*`); the message names what to change.
@@ -128,12 +139,29 @@ member. Your own definitions are not changed. It needs the Networks right at wri
     pickable choice in both lists, for entities carrying no type. Breaking a rule is reported or refused
     according to the space's **Validation mode**, like every other rule here — see the Files & Schemas guide
     for what happens to links that already exist.
-  - **Property schemas** — rules for each property field (type, allowed values, min/max, pattern, required, default).
+  - **Property schemas** — rules for each property field (type, allowed values, min/max, pattern, required, default). A property row opens as a disclosure (*Details of property …*), reachable and operable from the keyboard.
+  - **Rules** — expressions a record of this type must satisfy, each with the message a record that breaks it is told
+    (*Rules: N* on the type in the list, *N of M rules* in the section). **Add rule** takes a name (a lowercase letter, then
+    letters, digits, `-` and `_`, at most 64 characters, not a reserved word) and gives it two boxes: **Rule (an expression
+    over the record)** in a monospace box and **Message shown when the rule is broken**. A rule is an expression in CEL
+    that must answer true or false. It reads the record as `self` — `self.title`, `self.type`, `self.description`,
+    `self.tags` and `self.properties.NAME`, and on an edge `self.label` instead of a title — for example
+    `self.properties.age >= 0` or `size(self.title) > 3`. **A rule that reads a property the record does not have does not
+    apply to that record**, and dates are compared as ISO text (the box's *Field reference and examples* says the same). A
+    write that breaks a rule is refused in `strict` and warned about in `warn`, with your message; a type may carry up to 50
+    rules, a rule is at most 1000 characters and a message 300. **A rule the instance could not apply is refused when you
+    save**, the footer names it, and the tab opens that type and row and puts the cursor in it. A type linked to the library
+    shows the library entry's rules read-only (*From the library entry; unlink the type to edit them*), and a token without
+    the Schema right at **admin** sees every rule read-only with the reason (*Changing rules needs schema admin rights on
+    this space, which this token does not hold*). The space's own rules that apply to the type are listed under *Space rules
+    that apply here*, read-only.
 - **From Lib** — import a schema from the Schema Library. The type row shows a badge and stays in sync with the library automatically. While linked, the type's properties are shown **read-only** so you can see what it enforces; click **Unlink** to copy the library schema inline (breaking the link) and then customise it for this space.
 - **From File** — import a schema from a previously exported JSON file.
 - **Save to Lib** — save the current type schema to the Schema Library for reuse in other spaces.
 
 The toolbar at the top of the tab has **four** whole-space actions. **Export JSON** / **Import JSON** download or load the entire space's type schemas as one file. **Import library** pulls type definitions in from the instance's Schema Library — the reverse of the button beside it. **Export to library** copies the *whole* space schema into the Schema Library in one step — one reusable entry per type, grouped under a name you choose (defaulting to the space's), so you can later apply the whole set to another space. Types already linked to the library (`From Lib`) are skipped. Save any pending edits first — it exports the last saved version.
+
+**Check the schema** (the **Validate** section of the Schema tab) asks the server how the schema *as it stands, including edits you have not saved*, judges a record or the data already stored — so a rule can be tried before it is saved. **One pasted record** takes a sample as JSON (*Sample record as JSON*, with `kind`, `type`, `properties`, …) and answers on the spot; **Stored data** checks the records the space holds, a page at a time: *Checked N of M records*, then **Check the next page** until it is finished. Each row carries an outcome word — **Violated**, **Could not be evaluated**, **Too large to check**, **Not declared** (a property key the type does not declare) — or **Matches**, and *All good: every record checked satisfies the schema* appears only when the check is complete: while it is not, *nothing found so far does not mean nothing is wrong*. The stored value of a property that broke the schema is shown only if your token may read the space's records (the Knowledge right at read); without it the rows say what broke and not the value. The same check is on the API (`POST /api/spaces/:id/validate-schema`) and to an assistant as `schema_validate`.
 
 **Duplicates tab:** The fourth tab. It decides what this space does when the background scanner finds two records that look like the same thing.
 
@@ -719,6 +747,12 @@ Each member row in the expanded card also shows its **last successful sync** (or
 afternoon.** *Failing* means the peer was called and did not answer. *Version too old* means it was never
 called: nothing was attempted, so there is no failure to count and no timestamp to show — which is also
 what a brand-new member looks like. See *The version a peer has to be running* below.
+
+**Records that arrived carrying what your schema does not accept are stored, never refused.** Another brain validated them
+against its own schema. In a space whose validation is **warn** or **strict**, the cycle notes — per space, by field
+name and count, never a value — how many it stored that carried something the copy they replaced did not (an undeclared
+property, a wrong value). This history panel does not list it; it is `schemaViolations` on the sync-history API and the
+`network_sync_history` tool, and a count in the server log. To see them, run **Validate → Stored data** on the Schema tab.
 
 ### The version a peer has to be running
 

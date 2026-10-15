@@ -91,6 +91,16 @@ strict linkage and the record flags apply exactly as they do to any other write.
 stored unranked; a claim a later one overtook is `superseded`, with a `supersedes` edge from the new one. An entity
 the space already held is linked, not written again.
 
+**The keys the extractor writes are never refused as undeclared.** It writes `aliases` on entities, `since` and `until`
+on edges, and `speaker`, `statedOn` and `attributed` on claims; the shipped `conversation` types declare them, and the
+extraction's own writer is exempt for them even in a space that narrowed or replaced those types (an instance whose
+library already held the older entries never received the new declarations, because seeding adds by name). Any **other**
+property a type does not declare is judged as on every door ([Property keys a type does not declare](06a-schema-api.md#property-keys-a-type-does-not-declare)):
+what the extractor produced is checked **before a single record of it is written**, and a key a `strict` space would
+refuse fails that write whole, saying which key and what the type declares, rather than failing on request 340 of a
+conversation after half of it was stored (in a `warn` space it is written and reported, in `off` nothing is said). The
+exemption is an argument of the extractor's writer, not a parameter of this route or of any other.
+
 **Transcripts are files**, so they are written only when the token also holds `files: write` in the space. Without
 it the records are still written, and the run's `transcripts` field says what was left out.
 

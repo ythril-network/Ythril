@@ -194,6 +194,48 @@ Absent on a server that predates the field. Read that as an empty list, never as
 
 ---
 
+### What each field of the space update body requires
+
+`PATCH /api/spaces/:id`, MCP `update_space` and MCP `schema_update` answer to the area that owns each field, not to the
+route. A token needs **one** of: the instance administrator, the space's administrator (`admin` on all four areas), or
+the rung named here on that space. A refusal is a `403` naming each field and its requirement, so one save produces one
+conversation with whoever grants rights rather than one per field. A body mixing a field you may set with one you
+may not is refused whole.
+
+| field | requires |
+|---|---|
+| `label`, `meta.purpose`, `meta.usageNotes` | space administrator — the space's own description of itself, which no data area owns |
+| `maxGiB` | **instance administrator** — it is the space's share of the host's disk, not a setting of the space |
+| `faceDescriptorDims` | `files` **admin** — changing the width invalidates every stored face descriptor |
+| `documentExtraction`, `imageAnalysis`, `audioAnalysis`, `videoAnalysis`, `textAnalysis` | `files` write |
+| `meta.typeSchemas`, `typeSchemasMode`, `meta.whenDuePasses`, `meta.stampSkew` | `schema` write — a type whose `rules` change is the next row |
+| `meta.typeSchemas.<kind>.<type>.rules` (a type's rules, when the body changes them) | `schema` **admin**, the row of `meta.rules` |
+| `meta.rules` | `schema` **admin** — a rule can start refusing writes that used to succeed, at either level |
+| `targetNetwork` | `networks` write — it proposes the meta to one network as that network's definition; see [Network Schema Layers](06a-schema-api.md#settling-a-clash-propose-a-definition-to-one-network) |
+| `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
+| `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
+| `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
+| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation — except on a proxy made before 5.0, which the conversion never walks because it holds no records, so it never carries the marker and needs none; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
+| `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
+| `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
+
+**A type's rules are priced as `meta.rules`, on every route that can carry one.** The single-type
+`PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` is `schema` write, **and `schema` admin when the type's
+rules differ from the stored ones**, with the same `403` text as `PATCH` (`Not allowed to change
+meta.typeSchemas.<kind>.<type>.rules (admin on schema)`); a read-only token is refused first. A type sent back with the
+rules the store already holds is not an edit of them, so a schema writer can still change the rest of a type that
+carries rules. The comparison is against the definitions the write is merged over: this instance's own, or the
+targeted network's layer.
+
+**The live check reads the schema.** `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` need `schema`
+`read` — the route is in `routes` of the rights catalog, the tool in the MCP tool rights, and both are audited as
+`space.schema.validate` when the instance logs reads. A stored-data check shows the stored **value** of a violating
+property only to a caller who also holds `knowledge` `read` on the space (or an instance administrator); otherwise each
+row comes without its `value`. `GET /api/spaces/:id/schema-layers` and MCP `space_schema_layers` need `schema` `read`,
+and reordering the networks needs `schema` `admin`.
+
+---
+
 ### List Tokens
 
 ```http
