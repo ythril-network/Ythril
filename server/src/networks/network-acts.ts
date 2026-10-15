@@ -33,7 +33,7 @@ import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { introductionView } from './member-introductions.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
@@ -123,7 +123,7 @@ export function readNetworkAct(caller: Caller, id: string): NetworkActResult {
 /** Create a network carrying `spaces`; the membership is recorded as the caller's. */
 export function createNetworkAct(caller: Caller, input: unknown): NetworkActResult {
   const parsed = CreateNetworkBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { id: presetId, label, type, spaces, votingDeadlineHours, syncSchedule, merkle, requireSignedVotes, myParentInstanceId } = parsed.data;
   const cfg = getConfig();
 
@@ -171,7 +171,7 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
   audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
 } {
   const parsed = UpdateNetworkBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   // Before the lookup: a schedule the scheduler cannot run is a bad request whichever network it names.
   const scheduleRefusal = syncScheduleRefusal(parsed.data.syncSchedule);
   if (scheduleRefusal) return { status: 400, error: scheduleRefusal };
@@ -228,7 +228,7 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
 } {
   const parsed = AddNetworkSpaceBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { spaceId } = parsed.data;
   const cfg = getConfig();
   const net = visibleNetworks(caller, cfg.networks).find(n => n.id === id);
@@ -312,7 +312,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
 }> {
   const parsed = ResolvePendingSpaceBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { spaceId, action, mapTo } = parsed.data;
   const cfg = getConfig();
   const net = visibleNetworks(caller, cfg.networks).find(n => n.id === id);
@@ -474,7 +474,7 @@ export const ForkNetworkBody = z.object({
  */
 export function forkNetworkAct(sourceId: string, input: unknown): NetworkActResult {
   const parsed = ForkNetworkBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const cfg = getConfig();
   const sourceNet = cfg.networks.find(n => n.id === sourceId);
   const isEjected = cfg.ejectedFromNetworks?.includes(sourceId) ?? false;

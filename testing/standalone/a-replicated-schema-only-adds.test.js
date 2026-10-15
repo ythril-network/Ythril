@@ -77,10 +77,20 @@ describe('the rest of the meta', () => {
 describe('an arriving meta is untrusted', () => {
   it('a body the local API would refuse is refused whole, and nothing is merged', () => {
     const local = { purpose: 'kept' };
-    for (const bad of [{ purpose: 'x', validationMdoe: 'strict' }, { validationMode: 'sometimes' }, 'text', [1]]) {
+    for (const bad of [{ validationMode: 'sometimes' }, { purpose: 'x', validationMode: 'sometimes' }, 'text', [1]]) {
       const r = mergeReplicatedMeta(local, bad);
       assert.equal(r.changed, false, JSON.stringify(bad));
       assert.deepEqual(r.meta, local);
     }
+  });
+  it('a key this release has never heard of is NOT a refusal (R6-7, the tolerant reader): what it knows is merged, the stranger is named', () => {
+    // This case used to sit in the list above as `validationMdoe`: an unknown key refused the whole meta, which is exactly what cost a
+    // member the schema of a newer peer for one new key. A KNOWN field with a wrong value still refuses whole (above).
+    // `the-meta-reader-tolerates-what-a-newer-build-sends.test.js` holds the rest of the rule.
+    const r = mergeReplicatedMeta({ purpose: 'kept' }, { purpose: 'x', validationMdoe: 'strict' });
+    assert.equal(r.invalid, undefined);
+    assert.equal(r.meta.purpose, 'x');
+    assert.equal(Object.hasOwn(r.meta, 'validationMdoe'), false);
+    assert.deepEqual(r.unknownFields, ['validationMdoe']);
   });
 });

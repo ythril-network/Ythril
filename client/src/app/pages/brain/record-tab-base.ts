@@ -6,6 +6,8 @@ import { RecordListState } from './record-list-state.service';
 import type { ListSort } from '../../core/brain-api.service';
 import { LatestWins } from '../../core/latest-wins';
 import { httpErrorReason } from '../../core/http-error';
+import type { WireRow } from '../../core/refusal-text';
+import { splitWriteWarnings } from '../../core/write-warnings';
 
 /** How long a typed column filter waits for typing to pause before the list reloads. */
 const FILTER_DEBOUNCE_MS = 250;
@@ -68,6 +70,15 @@ export abstract class RecordTabBase {
   readonly recordList = inject(RecordListState);
 
   readonly spaceId = input.required<string>();
+
+  /**
+   * The `warnings` of the last successful write made from this tab (its create form or an inline row): under `warn` mode the
+   * server stores the record and says what is wrong with it, and the tab keeps that on screen until the next write replaces it
+   * or the reader dismisses it (bundle-23, R6-14). A toast would be gone in seconds, and the record stays wrong.
+   */
+  readonly writeWarnings = signal<WireRow[]>([]);
+  /** The last write's warnings were cut by the server (`warningsTruncated`): the notice says rows were left out. */
+  readonly writeWarningsTruncated = signal(false);
   readonly pageSize = 20;
 
   skip = signal(0);
@@ -109,6 +120,20 @@ export abstract class RecordTabBase {
   protected readonly rows = new LatestWins(inject(DestroyRef));
   /** The pause before a typed column filter reloads — one wait for every filter, since `load()` reads them all. */
   private readonly typing = new LatestWins(inject(DestroyRef));
+
+  /** Take a successful write's answer apart: its warnings replace the notice's (an empty list removes it), the record is returned. */
+  protected takeWarnings<T extends object>(answer: T): T {
+    const { record, warnings, truncated } = splitWriteWarnings(answer);
+    this.writeWarnings.set(warnings);
+    this.writeWarningsTruncated.set(truncated);
+    return record;
+  }
+
+  /** The reader closed the warnings notice. */
+  dismissWriteWarnings(): void {
+    this.writeWarnings.set([]);
+    this.writeWarningsTruncated.set(false);
+  }
 
   /**
    * Load the rows through the tab's slot, with the list's loading and failure state handled HERE — the part each

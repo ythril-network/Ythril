@@ -15,9 +15,17 @@ separately: `method` is `MCP` and `path` is `http:<tool>`. Entries written befor
 `sse:<tool>` — the SSE transport was removed in that release, so `sse:` is a fact about when an entry was
 written, not a transport a client can still use.
 
-A tool that refuses the call (a schema violation, a scope rejection) is recorded with status **422**. MCP
-answers 200 at the transport layer even when the tool errors, so a status taken from the HTTP response
-would log every rejected write as a success.
+A tool that refuses the call is recorded with the status the refusal answers — **422** for a schema refusal of an
+edit, **400** for a refused merge or a call refused for its arguments, **403** for a token that may not, **404**, **409**,
+**429**, **503** as REST would answer. MCP answers 200 at the transport layer even when the tool errors, so a status
+taken from the HTTP response would log every rejected write as a success.
+
+**Every refusal of a WRITE tool is a row**, whichever way it is refused, as the REST middleware records every response of
+a mutating route: a schema or merge refusal, a record the call names and cannot find, a conflict, a store failure, and a
+call turned away before the handler ran (bad arguments, the token's rights, the rate limit). Before 5.7.0 only a
+refusal the handler itself returned was a row, so the same refused write left a row or not by how the refusal happened
+to be said. A refusal carries **no change list** — a refused edit changed nothing, and its intended values would claim
+that it had.
 
 Read tools (`query`, `recall`, `traverse`, `list_*`, `read_file`, …) follow the same rule as REST reads —
 recorded only when `audit.logReads` is on. Three tools record nothing at all and say why in
@@ -347,17 +355,23 @@ from every rule because its keys are user-chosen and could hold a pasted credent
 Recorded values are **scalars or primitive lists only**. An allowlisted object would silently ship every
 child it later gained.
 
-**Schema changes are summarised, as names.** `space.schema.update` and `schema_library.update` change
+**Schema changes are summarised, as names.** `space.schema.update`, `space.update` and `schema_library.update` change
 nested objects, so the scalars-only rule dropped them entirely and no amount of adding field names could
 have recorded them. They are recorded as name-set deltas instead:
 
 ```jsonc
 { "field": "typeSchemas.entity", "added": ["adr"], "removed": ["runbook"] }
 { "field": "typeSchemas.entity.service.propertySchemas", "added": ["sla"], "removed": ["tier"] }
+{ "field": "typeSchemas.entity.service.rules", "added": ["adult"], "removed": [] }
+{ "field": "rules", "added": ["tagged"], "removed": [] }
 ```
 
-Type names and property **keys** only — never a property's schema, default, enum or naming pattern, any
-of which can be example data lifted from real records. A type that was added or removed outright is not
+Type names, property **keys** and **rule names** only — never a property's schema, default, enum or naming pattern, nor a
+rule's expression or message (an expression names the properties it reads, and a message is whatever its author wrote),
+any of which can be example data lifted from real records. **`space.update` says it on every door that edits a schema**
+(`PATCH /api/spaces/:id`, `schema_update`, `update_space`), as the `PUT` routes always did; the *after* side is the merged
+result, so a type the body did not mention is not recorded as removed. A scalar setting is recorded beside it:
+`stampSkew.warnMinutes` (`0` switches the stamp check off) is one of the audited fields of `space.update`. A type that was added or removed outright is not
 also itemised property-by-property, and the key list is capped at 25 per field. A schema replacement that
 recorded nothing was the gap this closes: the schema decides what the space accepts from then on.
 

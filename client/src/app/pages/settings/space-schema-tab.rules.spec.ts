@@ -1,0 +1,1016 @@
+/**
+ * The Schema tab's rules editor, the live check and the layer marker — what the operator SEES and can DO.
+ *
+ * ## How it is mounted
+ *
+ * Through the whole settings pop-up, over the REAL `SpacesApi` / `SchemaApi` / `AuthApi` on a fake HTTP backend. Three
+ * things the plan puts on this tab are decided across components (a refused save in the pop-up opens a row in the tab,
+ * the layers answer is read beside it, the token's rights decide what is editable), and a spec that mounted the tab
+ * alone would have to guess which component fetches what. Over the wire the only thing fixed is the request and the
+ * screen, which is what the plan fixes too.
+ *
+ * ## The test ids this spec asks for (the contract names three; the rest are chosen here and listed in the hand-off)
+ *
+ * Contract: `validate-schema`, `propose-to-network`, `reload-schema`.
+ * Chosen: `rules-section` / `rule-row` / `rule-toggle` / `rule-text` / `rule-message` / `rule-text-counter` /
+ * `rule-message-counter` / `rules-count` / `applicable-rules` / `space-rules-section` / `space-rule-row` /
+ * `space-rule-kind` / `rules-readonly-reason` / `layer-marker` / `validate-mode-sample` / `validate-mode-stored` /
+ * `validate-sample` / `validate-progress` / `validate-continue` / `validate-all-good`, plus the role `alert` inside the
+ * row a refusal names. A counter carries its numbers as `data-used` / `data-limit`: the words around them are
+ * translated (and the spec's translations echo keys), so a number inside a sentence cannot be asserted but a number
+ * the element declares can.
+ */
+import { isSignal } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { ToastService } from '../../core/toast.service';
+import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { KNOWLEDGE_TYPES, type Space } from '../../core/api.types';
+import { getTranslocoModule } from '../../testing/transloco-testing';
+import { declaredNearest, declaredValue } from '../../testing/declared-style';
+import { SpaceSchemaTabComponent } from './space-schema-tab.component';
+import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
+import { SpaceSettingsState } from './space-settings-state.service';
+import { SpacesStore } from './spaces-store.service';
+
+// ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const AGE = { rule: 'self.properties.age >= 0', message: 'An age cannot be negative' };
+const TITLE = { rule: 'size(self.title) > 3', message: 'A title needs more than three characters' };
+const FOLLOW_A = { rule: 'self.label != ""', message: 'A label is needed' };
+const FOLLOW_B = { rule: 'size(self.properties) < 5', message: 'At most four properties' };
+
+/** Four space rules: one for two kinds, one for every kind, one for edges only, one for chrono only. */
+const SPACE_RULES = {
+  'no-future': { rule: 'self.properties.at <= now', message: 'Not in the future', kinds: ['chrono', 'fact'] },
+  'few-tags': { rule: 'size(self.tags) <= 10', message: 'At most ten tags' },
+  'edges-only': { rule: 'self.label != ""', message: 'Edges need a label', kinds: ['edge'] },
+};
+
+function ruledSpace(): Space {
+  return {
+    id: 'work', label: 'Work', maxGiB: 10, networks: [],
+    meta: {
+      version: 7,
+      validationMode: 'strict',
+      typeSchemas: {
+        entity: {
+          person: { propertySchemas: { age: { type: 'number' }, name: { type: 'string' } }, rules: { 'age-positive': AGE, 'title-long': TITLE } },
+          plain: {},
+          linked: { $ref: 'library:shared-person' },
+        },
+        fact: {},
+        edge: { follows: { rules: { 'first-rule': FOLLOW_A, 'second-rule': FOLLOW_B } } },
+        chrono: { event: {} },
+      },
+      rules: SPACE_RULES,
+    },
+  } as unknown as Space;
+}
+
+const LIBRARY_ENTRY = {
+  name: 'shared-person', knowledgeType: 'entity', typeName: 'person',
+  schema: { propertySchemas: { age: { type: 'number' } }, rules: { 'library-rule': { rule: 'self.title != ""', message: 'From the library' } } },
+  createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+};
+
+const rights = (schema: 'admin' | 'write') => ({
+  floor: { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none' },
+  perSpace: { work: { knowledge: 'admin', files: 'admin', schema, dataQuality: 'admin' } },
+});
+
+/** An age that two networks define differently; the first-listed network (Alpha) is the one that applies. */
+const LAYERS = {
+  spaceId: 'work',
+  own: { typeSchemas: { entity: { person: { propertySchemas: { age: { type: 'string' }, name: { type: 'string' } } } } } },
+  layers: [
+    { networkId: 'net-a', networkLabel: 'Alpha Federation', meta: { typeSchemas: { entity: { person: { propertySchemas: { age: { type: 'number' } } } } } } },
+    { networkId: 'net-b', networkLabel: 'Beta Operations', meta: { typeSchemas: { entity: { person: { propertySchemas: { age: { type: 'string' } } } } } } },
+  ],
+  precedence: ['net-a', 'net-b'],
+  clashes: [{ kind: 'entity', type: 'person', property: 'age', values: [{ networkId: 'net-a', value: { type: 'number' } }, { networkId: 'net-b', value: { type: 'string' } }] }],
+};
+const NO_LAYERS = { spaceId: 'work', own: {}, layers: [], precedence: [], clashes: [] };
+
+// ── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+interface MountOptions { schemaRights?: 'admin' | 'write'; layers?: unknown; library?: unknown[] }
+
+async function mount(opts: MountOptions = {}) {
+  TestBed.resetTestingModule();
+  TestBed.configureTestingModule({
+    imports: [SpaceSettingsPopupComponent, getTranslocoModule()],
+    providers: [
+      provideHttpClient(), provideHttpClientTesting(),
+      SpaceSettingsState, SpacesStore,
+      { provide: ToastService, useValue: { show: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() } },
+      { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
+    ],
+  });
+  const http = TestBed.inject(HttpTestingController);
+  const fixture = TestBed.createComponent(SpaceSettingsPopupComponent);
+  // Attached to the document: `document.activeElement` is meaningless for a detached tree.
+  document.body.appendChild(fixture.nativeElement);
+  const state = fixture.componentInstance.state;
+
+  /** Answers the reads the tab and its neighbours make; leaves every write (and any read it does not know) for the test. */
+  const answers: Record<string, unknown> = {
+    '/api/tokens/me': { id: 't1', name: 'token', rights: rights(opts.schemaRights ?? 'admin') },
+    '/api/spaces/work/schema-layers': opts.layers ?? NO_LAYERS,
+    '/api/schema-library': { entries: opts.library ?? [] },
+    '/api/brain/spaces/work/stats': { spaceId: 'work', facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 },
+  };
+  const flushReads = () => {
+    for (const req of http.match(r => r.method === 'GET' && r.url.split('?')[0]! in answers)) req.flush(answers[req.request.url.split('?')[0]!] as never);
+  };
+  /** Let change detection, deferred blocks and the reads they issued run to rest. */
+  const settle = async (until?: () => boolean): Promise<void> => {
+    for (let i = 0; i < 300; i++) {
+      fixture.detectChanges();
+      flushReads();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      if (!until || until()) return;
+      await new Promise<void>(r => setTimeout(r, 10));
+    }
+  };
+
+  state.openSettings(ruledSpace());
+  state.settingsTab.set('schema');
+  const el = fixture.nativeElement as HTMLElement;
+  // The tab sits in a deferred block with a minimum loading time, so wait for IT rather than for a fixed moment.
+  await settle(() => !!el.querySelector('.sch-validation-bar'));
+  // Once more, so what the reads issued by the first pass answered (the token's rights, the layers) has rendered.
+  await settle();
+  return { fixture, state, http, el, settle };
+}
+
+type Harness = Awaited<ReturnType<typeof mount>>;
+
+const $ = (root: ParentNode, sel: string): HTMLElement | null => root.querySelector<HTMLElement>(sel);
+const $$ = (root: ParentNode, sel: string): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(sel));
+const INTERACTIVE = 'button, input, select, textarea, a[href]';
+
+/** The type pane (`.sch-detail`) with one type selected. */
+async function selectType(h: Harness, kt: (typeof KNOWLEDGE_TYPES)[number], name: string): Promise<HTMLElement> {
+  h.state.schemaCollTab.set(kt);
+  await h.settle();
+  // Clicked, as an operator does: the selection is a plain field of the state, and the tab is OnPush, so only an event
+  // handler tells it to look again.
+  const item = $$(h.el, '.sch-type-item').find(i => $(i, '.nm')?.textContent?.trim() === name);
+  expect(item, `the type list has no "${name}"`).toBeDefined();
+  item!.click();
+  await h.settle();
+  const pane = $(h.el, '.sch-detail');
+  expect(pane, 'the type pane did not render').not.toBeNull();
+  return pane!;
+}
+
+/** The rule row whose disclosure names `name`, in `root`. */
+function ruleRow(root: ParentNode, name: string, testid = 'rule-row'): HTMLElement | null {
+  return $$(root, `[data-testid="${testid}"]`).find(r => $(r, '[data-testid="rule-toggle"]')?.textContent?.includes(name)) ?? null;
+}
+
+/** Opens a disclosure if it is closed, and lets the tab render what it reveals. */
+async function expand(h: Harness, row: HTMLElement | null): Promise<void> {
+  expect(row, 'there is no rule row to open').not.toBeNull();
+  const toggle = $(row!, '[data-testid="rule-toggle"]');
+  expect(toggle, 'the rule row has no disclosure button').not.toBeNull();
+  if (toggle!.getAttribute('aria-expanded') !== 'true') toggle!.click();
+  await h.settle();
+}
+
+function type(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+afterEach(() => { document.body.innerHTML = ''; });
+
+// ── the type pane ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('the type pane shows a type\'s rules after its property table', () => {
+  it('the rules section comes after the property table, and lists each rule by name', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const table = $(pane, '.prop-table');
+    const section = $(pane, '[data-testid="rules-section"]');
+    expect(table, 'the property table did not render').not.toBeNull();
+    expect(section, 'the type pane has no rules section').not.toBeNull();
+    expect(table!.compareDocumentPosition(section!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the rules come BEFORE the property table').toBeTruthy();
+    expect($$(section!, '[data-testid="rule-row"]').map(r => $(r, '[data-testid="rule-toggle"]')!.textContent))
+      .toEqual([expect.stringContaining('age-positive'), expect.stringContaining('title-long')]);
+  });
+
+  it('the type list carries a count badge for a type with rules, and none for a type without', async () => {
+    const h = await mount();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    const item = (name: string) => $$(h.el, '.sch-type-item').find(i => $(i, '.nm')?.textContent?.trim() === name)!;
+    expect(item('person'), 'the type list did not render').toBeDefined();
+    const badge = $(item('person'), '[data-testid="rules-count"]');
+    expect(badge, 'no rules count badge on a type with two rules').not.toBeNull();
+    expect(badge!.textContent).toContain('2');
+    expect($(item('plain'), '[data-testid="rules-count"]')).toBeNull();
+  });
+});
+
+describe('each rule is a disclosure, and its text is a monospace textarea', () => {
+  it('the row\'s toggle is a button with aria-expanded that opens and closes the row, holding nothing interactive', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const row = ruleRow(pane, 'age-positive');
+    expect(row, 'no row for the rule').not.toBeNull();
+    const toggle = $(row!, '[data-testid="rule-toggle"]')!;
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.querySelector(INTERACTIVE), 'a control nested inside a button is not reachable by keyboard').toBeNull();
+    toggle.click();
+    await h.settle();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect($(row!, '[data-testid="rule-text"]')).not.toBeNull();
+    toggle.click();
+    await h.settle();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('the rule text is a <textarea> that edits the state, and the message is a control of its own', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const row = ruleRow(pane, 'age-positive')!;
+    await expand(h, row);
+    const text = $(row, '[data-testid="rule-text"]') as HTMLTextAreaElement | null;
+    expect(text, 'no rule text control').not.toBeNull();
+    expect(text!.tagName, 'a rule is a multi-line expression: it must not be a single-line input').toBe('TEXTAREA');
+    expect(text!.value).toBe(AGE.rule);
+    const message = $(row, '[data-testid="rule-message"]') as HTMLInputElement | HTMLTextAreaElement | null;
+    expect(message, 'no message control').not.toBeNull();
+    expect(message!.value).toBe(AGE.message);
+
+    type(text!, 'self.properties.age >= 18');
+    await h.settle();
+    const rules = (h.state.typeState('entity', 'person') as unknown as { rules: { name: string; rule: string }[] }).rules;
+    expect(rules.find(r => r.name === 'age-positive')?.rule).toBe('self.properties.age >= 18');
+  });
+
+  it('declares a monospace font for the rule text', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const row = ruleRow(pane, 'age-positive')!;
+    await expand(h, row);
+    const text = $(row, '[data-testid="rule-text"]');
+    expect(text, 'no rule text control').not.toBeNull();
+    // Read from the rules and the style attribute the way the other layout specs do: jsdom computes no cascade.
+    expect(declaredNearest(text!, 'font-family', h.el), 'no font-family declared for the rule text').toMatch(/mono/i);
+  });
+
+  it('shows how much of each limit is used, for the rule and for the message, and keeps it current as you type', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const row = ruleRow(pane, 'age-positive')!;
+    await expand(h, row);
+    const ruleCounter = $(row, '[data-testid="rule-text-counter"]');
+    const messageCounter = $(row, '[data-testid="rule-message-counter"]');
+    expect(ruleCounter, 'no counter on the rule text').not.toBeNull();
+    expect(messageCounter, 'no counter on the message').not.toBeNull();
+    // 1000 and 300 are the server's MAX_RULE_LENGTH and MAX_MESSAGE_LENGTH; `client-limits-match-the-server.spec.ts` holds them.
+    expect(ruleCounter!.getAttribute('data-limit')).toBe('1000');
+    expect(messageCounter!.getAttribute('data-limit')).toBe('300');
+    expect(ruleCounter!.getAttribute('data-used')).toBe(String(AGE.rule.length));
+    expect(messageCounter!.getAttribute('data-used')).toBe(String(AGE.message.length));
+
+    type($(row, '[data-testid="rule-text"]') as HTMLTextAreaElement, 'abc');
+    type($(row, '[data-testid="rule-message"]') as HTMLInputElement, 'hello');
+    await h.settle();
+    expect(ruleCounter!.getAttribute('data-used')).toBe('3');
+    expect(messageCounter!.getAttribute('data-used')).toBe('5');
+  });
+});
+
+describe('the space rules that apply to the selected type are shown read-only in its pane', () => {
+  const names = (list: HTMLElement) => ['no-future', 'few-tags', 'edges-only'].filter(n => (list.textContent ?? '').includes(n));
+
+  it('an entity type sees the all-kinds rule and none of the rules for other kinds', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const list = $(pane, '[data-testid="applicable-rules"]');
+    expect(list, 'the type pane lists no applicable space rules').not.toBeNull();
+    expect(names(list!)).toEqual(['few-tags']);
+  });
+
+  it('a chrono type sees the rule for its kind and the all-kinds rule, and not the edge rule', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'chrono', 'event');
+    const list = $(pane, '[data-testid="applicable-rules"]');
+    expect(list, 'the type pane lists no applicable space rules').not.toBeNull();
+    expect(names(list!)).toEqual(['no-future', 'few-tags']);
+  });
+
+  // b23 verify U5: the rule's name ran into its message (the space between the two spans is a whitespace-only node Angular drops).
+  it('a rule\'s name is spaced from its message by the stylesheet, not by a space character', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'chrono', 'event');
+    const row = $(pane, '[data-testid="applicable-rules"] li');
+    expect(row, 'no applicable rule row').not.toBeNull();
+    // The control: the stylesheet is visible to the reader at all (the rule name's font is declared).
+    expect(declaredNearest($(row!, '.rule-name')!, 'font-family', h.el)).toMatch(/mono/i);
+    // On the row itself: a gap an ancestor declares spaces the rows, not the two spans inside one.
+    expect(declaredValue(row!, 'gap') ?? '', 'nothing separates a rule\'s name from its message').toMatch(/^[1-9]/);
+  });
+
+  it('are read-only: no control inside the list can edit a space rule from the type pane', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'chrono', 'event');
+    const list = $(pane, '[data-testid="applicable-rules"]');
+    expect(list, 'the type pane lists no applicable space rules').not.toBeNull();
+    expect(list!.querySelector('input, textarea, select')).toBeNull();
+  });
+});
+
+describe('a linked ($ref) type shows the library entry\'s rules, read-only', () => {
+  it('lists them by name, and offers no control that edits them', async () => {
+    const h = await mount({ library: [LIBRARY_ENTRY] });
+    const pane = await selectType(h, 'entity', 'linked');
+    const section = $(pane, '[data-testid="rules-section"]');
+    expect(section, 'a linked type shows no rules section').not.toBeNull();
+    expect(section!.textContent).toContain('library-rule');
+    expect(section!.querySelector('textarea, input, select')).toBeNull();
+  });
+});
+
+// ── property rows ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('property rows are keyboard disclosures like the rules rows', () => {
+  it('every property row has exactly one disclosure button, closed to start, that opens its detail', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'entity', 'person');
+    const rows = $$(pane, '.prop-row');
+    // Floor: the fixture declares two properties. An empty derivation would pass every loop below.
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    for (const row of rows) {
+      const toggles = $$(row, 'button[aria-expanded]');
+      expect(toggles.length, `property row "${row.textContent?.trim().slice(0, 20)}" is a mouse-only <tr (click)>`).toBe(1);
+      const toggle = toggles[0]!;
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle.querySelector(INTERACTIVE), 'the Required checkbox and the remove button must not sit inside the disclosure').toBeNull();
+      expect(toggle.tabIndex).toBeGreaterThanOrEqual(0);
+    }
+    const first = $(rows[0]!, 'button[aria-expanded]')!;
+    first.click();
+    await h.settle();
+    expect(first.getAttribute('aria-expanded')).toBe('true');
+    expect($(pane, '.prop-expand-row'), 'the detail did not open').not.toBeNull();
+    first.click();
+    await h.settle();
+    expect(first.getAttribute('aria-expanded')).toBe('false');
+    expect($(pane, '.prop-expand-row')).toBeNull();
+  });
+});
+
+// ── space rules ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('the space rules section sits under the validation bar', () => {
+  it('follows the validation bar and lists the rules by name', async () => {
+    const h = await mount();
+    const bar = $(h.el, '.sch-validation-bar');
+    const section = $(h.el, '[data-testid="space-rules-section"]');
+    expect(bar, 'the validation bar did not render').not.toBeNull();
+    expect(section, 'no space rules section on the Schema tab').not.toBeNull();
+    expect(bar!.compareDocumentPosition(section!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the space rules come BEFORE the validation bar').toBeTruthy();
+    expect($$(section!, '[data-testid="space-rule-row"]').length).toBe(Object.keys(SPACE_RULES).length);
+  });
+
+  it('a rule\'s kinds are checkboxes, one per knowledge kind, ticked for the kinds it names and editing the state', async () => {
+    const h = await mount();
+    const section = $(h.el, '[data-testid="space-rules-section"]');
+    expect(section, 'no space rules section on the Schema tab').not.toBeNull();
+    const row = ruleRow(section!, 'no-future', 'space-rule-row');
+    expect(row, 'no row for the no-future rule').not.toBeNull();
+    await expand(h, row!);
+    const boxes = $$(row!, '[data-testid="space-rule-kind"]') as HTMLInputElement[];
+    expect(boxes.map(b => b.type)).toEqual(KNOWLEDGE_TYPES.map(() => 'checkbox'));
+    expect(boxes.filter(b => b.checked).map(b => b.value).sort()).toEqual(['chrono', 'fact']);
+
+    boxes.find(b => b.value === 'edge')!.click();
+    await h.settle();
+    const kinds = (h.state as unknown as { schRules: { name: string; kinds: string[] }[] }).schRules.find(r => r.name === 'no-future')?.kinds;
+    expect([...(kinds ?? [])].sort()).toEqual(['chrono', 'edge', 'fact']);
+  });
+
+  it('is editable for a token with schema admin, with no reason shown', async () => {
+    const h = await mount({ schemaRights: 'admin' });
+    const section = $(h.el, '[data-testid="space-rules-section"]');
+    expect(section, 'no space rules section on the Schema tab').not.toBeNull();
+    await expand(h, ruleRow(section!, 'few-tags', 'space-rule-row')!);
+    const text = $(section!, '[data-testid="rule-text"]') as HTMLTextAreaElement | null;
+    expect(text, 'no rule text control').not.toBeNull();
+    expect(text!.readOnly || text!.disabled).toBe(false);
+    expect($(section!, '[data-testid="rules-readonly-reason"]')).toBeNull();
+  });
+
+  it('is read-only for a token without schema admin, and says why where it can be read', async () => {
+    const h = await mount({ schemaRights: 'write' });
+    const section = $(h.el, '[data-testid="space-rules-section"]');
+    expect(section, 'no space rules section on the Schema tab').not.toBeNull();
+    const reason = $(section!, '[data-testid="rules-readonly-reason"]');
+    expect(reason, 'a read-only section with no visible reason is a dead form').not.toBeNull();
+    expect((reason!.textContent ?? '').trim().length).toBeGreaterThan(0);
+    expect(reason!.hidden).toBe(false);
+    await expand(h, ruleRow(section!, 'no-future', 'space-rule-row')!);
+    const controls = $$(section!, 'textarea, [data-testid="rule-message"], [data-testid="space-rule-kind"]') as HTMLInputElement[];
+    expect(controls.length).toBeGreaterThan(0);
+    for (const c of controls) expect(c.readOnly || c.disabled, `${c.tagName}${c.dataset['testid'] ? '[' + c.dataset['testid'] + ']' : ''} is still editable`).toBe(true);
+  });
+});
+
+// ── a refused save opens the failing row and puts focus there ────────────────────────────────────────────────────────
+
+describe('a refused schema save opens the failing rule and moves focus to it', () => {
+  /** The zod-body refusal the server answers: bounded prose, and issues with their path. */
+  const refusal = (path: string[]) => ({ error: 'The schema was refused', issues: [{ code: 'custom', path }] });
+
+  async function save(h: Harness, status: number, body: unknown) {
+    // A changed field of the settings form, so the footer Save has something to send whichever tab is open.
+    h.state.stForm.purpose = 'changed purpose';
+    h.fixture.componentInstance.saveSettings();
+    h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/work').flush(body as never, { status, statusText: 'refused' });
+    await h.settle();
+  }
+
+  it.each([[422], [400]])('a %i naming a type rule opens its collection, its type and its row, and focuses it', async (status) => {
+    const h = await mount();
+    // Start somewhere else entirely, so each step of the navigation is observable.
+    await selectType(h, 'entity', 'person');
+    await save(h, status, refusal(['meta', 'typeSchemas', 'edge', 'follows', 'rules', 'second-rule', 'rule']));
+
+    const activeTab = $$(h.el, '[role="tab"][aria-selected="true"]').map(t => t.textContent ?? '').join(' ');
+    expect(activeTab, 'the collection tab of the failing rule is not open').toContain('spaces.schema.tab.edges');
+    expect($$(h.el, '.sch-type-item.sel').map(i => i.textContent).join(' '), 'the failing type is not selected').toContain('follows');
+    const pane = $(h.el, '.sch-detail')!;
+    const row = ruleRow(pane, 'second-rule');
+    expect(row, 'the failing rule has no row').not.toBeNull();
+    expect($(row!, '[data-testid="rule-toggle"]')!.getAttribute('aria-expanded'), 'the failing rule is not open').toBe('true');
+
+    const alert = $(row!, '[role="alert"]');
+    expect(alert, 'no inline error with role=alert on the failing row').not.toBeNull();
+    expect((alert!.textContent ?? '').trim().length).toBeGreaterThan(0);
+    expect($$(pane, '[data-testid="rule-row"] [role="alert"]').length, 'an error on a row the server did not name').toBe(1);
+
+    const text = $(row!, '[data-testid="rule-text"]')!;
+    expect(text.getAttribute('aria-invalid')).toBe('true');
+    expect(alert!.id, 'the error has no id to point at').not.toBe('');
+    expect(text.getAttribute('aria-describedby') ?? '').toContain(alert!.id);
+
+    await h.settle(() => row!.contains(document.activeElement));
+    expect(row!.contains(document.activeElement), 'focus did not move to the failing row').toBe(true);
+    expect(h.state.settingsError(), 'the footer says nothing about the refusal').not.toBe('');
+  });
+
+  it('an issue on the message puts focus in the message control of that row', async () => {
+    const h = await mount();
+    await save(h, 422, refusal(['meta', 'typeSchemas', 'entity', 'person', 'rules', 'title-long', 'message']));
+    const row = ruleRow($(h.el, '.sch-detail')!, 'title-long');
+    expect(row, 'the failing rule has no row').not.toBeNull();
+    const message = $(row!, '[data-testid="rule-message"]');
+    expect(message, 'the failing row is not open').not.toBeNull();
+    await h.settle(() => document.activeElement === message);
+    expect(document.activeElement).toBe(message);
+  });
+
+  it('an issue on a space rule opens that row in the space rules section and focuses it', async () => {
+    const h = await mount();
+    await selectType(h, 'entity', 'person');
+    await save(h, 422, refusal(['meta', 'rules', 'few-tags', 'rule']));
+    const section = $(h.el, '[data-testid="space-rules-section"]');
+    expect(section, 'no space rules section on the Schema tab').not.toBeNull();
+    const row = ruleRow(section!, 'few-tags', 'space-rule-row');
+    expect(row, 'the failing space rule has no row').not.toBeNull();
+    expect($(row!, '[data-testid="rule-toggle"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect($(row!, '[role="alert"]'), 'no inline error on the failing space rule').not.toBeNull();
+    await h.settle(() => row!.contains(document.activeElement));
+    expect(row!.contains(document.activeElement), 'focus did not move to the failing space rule').toBe(true);
+  });
+});
+
+// ── layer-supplied fields ────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('a field a network layer supplies is marked with that network and can be proposed', () => {
+  it('marks the clashing property with the NAME of the network whose definition applies, and no other property', async () => {
+    const h = await mount({ layers: LAYERS });
+    const pane = await selectType(h, 'entity', 'person');
+    const rows = $$(pane, '.prop-row');
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const rowOf = (key: string) => rows.find(r => $(r, '.prop-name-key')?.textContent?.trim() === key)!;
+    const marker = $(rowOf('age'), '[data-testid="layer-marker"]');
+    expect(marker, 'the property a network supplies carries no marker').not.toBeNull();
+    expect(marker!.textContent).toContain('Alpha Federation');
+    expect($(rowOf('name'), '[data-testid="layer-marker"]'), 'a property no network touches must not be marked').toBeNull();
+  });
+
+  it('carries a keyboard-reachable Propose button that proposes to a network on the clash', async () => {
+    const h = await mount({ layers: LAYERS });
+    const pane = await selectType(h, 'entity', 'person');
+    const row = $$(pane, '.prop-row').find(r => $(r, '.prop-name-key')?.textContent?.trim() === 'age')!;
+    const propose = $(row, '[data-testid="propose-to-network"]') as HTMLButtonElement | null;
+    expect(propose, 'no Propose control on the marked property').not.toBeNull();
+    expect(propose!.tagName).toBe('BUTTON');
+    expect(propose!.disabled).toBe(false);
+    expect(propose!.tabIndex).toBeGreaterThanOrEqual(0);
+    expect(propose!.closest('[aria-hidden="true"]')).toBeNull();
+
+    propose!.click();
+    await h.settle();
+    const req = h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/work');
+    expect(['net-a', 'net-b']).toContain((req.request.body as { targetNetwork?: string }).targetNetwork);
+    expect((req.request.body as { meta?: unknown }).meta).toBeDefined();
+    req.flush({});
+  });
+});
+
+// ── focus after a rule row is removed (b23 W6d X1) ───────────────────────────────────────────────────────────────────
+
+describe('removing a rule row moves focus to a neighbour instead of dropping it', () => {
+  const spaceRows = (h: Harness) => $$(h.el, '[data-testid="space-rule-row"]');
+  const nameOf = (el: Element | null) => (el as HTMLElement | null)?.closest('[data-rule-name]')?.getAttribute('data-rule-name') ?? null;
+  const active = () => document.activeElement as HTMLElement | null;
+  async function remove(h: Harness, name: string) {
+    const row = ruleRow(h.el, name, 'space-rule-row');
+    expect(row, `no space rule named ${name}`).not.toBeNull();
+    ($(row!, '.rule-head .icon-btn.danger') as HTMLButtonElement).click();
+    await h.settle();
+  }
+
+  it('removing a middle row focuses the disclosure of the row that took its place', async () => {
+    const h = await mount();
+    expect(spaceRows(h).map(r => r.getAttribute('data-rule-name'))).toEqual(['no-future', 'few-tags', 'edges-only']);
+    await remove(h, 'few-tags');
+    expect(active()?.getAttribute('data-testid'), 'focus is not on a disclosure').toBe('rule-toggle');
+    expect(nameOf(active())).toBe('edges-only');
+  });
+
+  it('removing the last row focuses the disclosure of the previous one', async () => {
+    const h = await mount();
+    await remove(h, 'edges-only');
+    expect(active()?.getAttribute('data-testid')).toBe('rule-toggle');
+    expect(nameOf(active())).toBe('few-tags');
+  });
+
+  it('removing the only row focuses the field that adds one', async () => {
+    const h = await mount();
+    await remove(h, 'no-future');
+    await remove(h, 'few-tags');
+    await remove(h, 'edges-only');
+    expect(spaceRows(h).length).toBe(0);
+    expect(active()?.getAttribute('data-testid'), 'focus fell to the page').toBe('rule-add-name');
+  });
+});
+
+// ── the live check ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('Validate runs the live check, in sample mode and in stored-data mode', () => {
+  const URL = '/api/spaces/work/validate-schema';
+  const post = (h: Harness) => h.http.expectOne(r => r.method === 'POST' && r.url === URL);
+  // The stored-data answer's contract (b23 W6b): `progress.checked` is what THIS call read, `complete` says the walk reached the end, and
+  // nothing counts violations past the page.
+  const answer = (over: Record<string, unknown> = {}) => ({
+    spaceId: 'work', checked: { entities: { checked: 1, total: 1 } }, progress: { checked: 1, total: 1 }, complete: true, violations: [], staleGuards: [], ...over,
+  });
+  const button = (h: Harness) => $(h.el, '[data-testid="validate-schema"]') as HTMLButtonElement | null;
+
+  async function chooseMode(h: Harness, mode: 'sample' | 'stored') {
+    const radio = $(h.el, `[data-testid="validate-mode-${mode}"]`);
+    expect(radio, `no ${mode} mode control`).not.toBeNull();
+    radio!.click();
+    await h.settle();
+  }
+
+  it('the Schema tab has a Validate button', async () => {
+    const h = await mount();
+    expect(button(h), 'no Validate button on the Schema tab').not.toBeNull();
+    expect(button(h)!.tagName).toBe('BUTTON');
+  });
+
+  // b23 verify U5: "One pasted record" and "Stored data" ran together (the whitespace between the labels is dropped by Angular).
+  it('the two mode labels are spaced apart by the stylesheet', async () => {
+    const h = await mount();
+    const group = $(h.el, '.val-modes');
+    expect(group, 'no mode group').not.toBeNull();
+    expect(declaredValue(group!, 'gap') ?? '', 'nothing separates the two mode labels').toMatch(/^[1-9]/);
+  });
+
+  it('sample mode sends the pasted record as `sample`, with no cursor, and scans nothing', async () => {
+    const h = await mount();
+    await chooseMode(h, 'sample');
+    const record = { kind: 'entity', record: { name: 'Ada', type: 'person', properties: { age: -1 } } };
+    const box = $(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement | null;
+    expect(box, 'no field to paste a sample into').not.toBeNull();
+    type(box!, JSON.stringify(record));
+    await h.settle();
+    button(h)!.click();
+    const req = post(h);
+    const body = req.request.body as { sample?: unknown; after?: unknown };
+    expect(body.sample).toEqual(record);
+    expect(body.after).toBeUndefined();
+    req.flush(answer());
+  });
+
+  it('a sample that is not JSON sends nothing and says so as an alert', async () => {
+    const h = await mount();
+    await chooseMode(h, 'sample');
+    const box = $(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement | null;
+    expect(box, 'no field to paste a sample into').not.toBeNull();
+    type(box!, '{ not json');
+    await h.settle();
+    button(h)!.click();
+    await h.settle();
+    h.http.expectNone(r => r.method === 'POST' && r.url === URL);
+    // An alert that belongs to no rule row: the pasted text, not a rule, is what is wrong.
+    const alerts = $$(h.el, '[role="alert"]').filter(a => !a.closest('[data-testid="rule-row"], [data-testid="space-rule-row"]'));
+    expect(alerts.length, 'no alert for an unreadable sample').toBeGreaterThan(0);
+  });
+
+  it('the all-good word appears only when the check is COMPLETE and found nothing', async () => {
+    const cases: [string, Record<string, unknown>, boolean][] = [
+      ['complete and clean', answer(), true],
+      ['clean so far but not complete', answer({ complete: false, checked: { entities: { checked: 5, total: 9 } }, progress: { checked: 5, total: 9 } }), false],
+      ['complete with a violation', answer({ violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }), false],
+    ];
+    for (const [label, body, allGood] of cases) {
+      const h = await mount();
+      await chooseMode(h, 'sample');
+      type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","type":"person","properties":{}}');
+      await h.settle();
+      button(h)!.click();
+      post(h).flush(body);
+      await h.settle();
+      expect(!!$(h.el, '[data-testid="validate-all-good"]'), label).toBe(allGood);
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('stored-data mode pages: the second request carries the cursor the first answer gave, until it is complete', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+
+    const first = post(h);
+    const firstBody = first.request.body as { sample?: unknown; after?: unknown };
+    expect(firstBody.sample, 'stored-data mode sent a sample').toBeUndefined();
+    expect(firstBody.after, 'the first page carries no after').toBeUndefined();
+    // The server pages by `_id` keyset: the answer's `nextAfter` is sent back as `after` (one spelling on REST, MCP and here).
+    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, progress: { checked: 100, total: 250 }, complete: false, nextAfter: 'cur-1' }));
+    await h.settle();
+
+    const progress = $(h.el, '[data-testid="validate-progress"]');
+    expect(progress, 'no checked/total readout').not.toBeNull();
+    expect(progress!.getAttribute('data-checked')).toBe('100');
+    expect(progress!.getAttribute('data-total')).toBe('250');
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good shown for an incomplete check').toBeNull();
+
+    // The next page is fetched either by itself or by a Continue control; both are legitimate designs for a heavy,
+    // rate-limited scan, so the spec presses Continue only if there is one.
+    const next = $(h.el, '[data-testid="validate-continue"]');
+    if (next) { next.click(); await h.settle(); }
+    const second = post(h);
+    expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
+    // The second call read the other 150: the readout is the SUM of what each call read.
+    second.flush(answer({ checked: { entities: { checked: 150, total: 250 } }, progress: { checked: 150, total: 250 }, complete: true }));
+    await h.settle();
+
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('250');
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good missing after a complete check').not.toBeNull();
+    // Complete means done: no third request.
+    await h.settle();
+    h.http.expectNone(r => r.method === 'POST' && r.url === URL);
+  });
+
+  // b23 verify U4: the rows shown were the first 50 of every page together, so continuing showed nothing new. The rows are the CURRENT
+  // page's. (b23 W6b: `progress.checked` is per CALL, so the readout is summed over the pages: see the progress tests below.)
+  it('stored-data mode shows the whole check\'s progress, never going down, and the CURRENT page\'s rows', async () => {
+    const row = (i: number) => ({ collection: 'entities', _id: `e${i}`, violations: [{ field: 'rules.age-positive', reason: `broken ${i}` }] });
+    const rows = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_v, k) => row(from + k));
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+
+    const first = post(h);
+    expect((first.request.body as { limit?: number }).limit, 'a page larger than the rows shown hides the rest for good').toBe(50);
+    first.flush(answer({
+      checked: { entities: { checked: 600, total: 1040 } }, progress: { checked: 600, total: 1040 },
+      complete: false, nextAfter: 'cur-1', violations: rows(1, 50),
+    }));
+    await h.settle();
+    const progress = () => $(h.el, '[data-testid="validate-progress"]')!;
+    expect(progress().getAttribute('data-checked')).toBe('600');
+    // The record each shown row names (its `collection _id` label), one per row.
+    const shown = () => $$(h.el, '.val-violations > li').map(li => (li.querySelector('code')?.textContent ?? '').trim().split(/\s+/).at(-1) ?? '');
+    expect(shown().length).toBe(50);
+    expect(shown()).toContain('e1');
+    // The server no longer counts violations past the page, so the page says nothing about a total it does not have.
+    expect($(h.el, '[data-testid="validate-more"]'), 'a count of violations the server no longer gives').toBeNull();
+
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    await h.settle();
+    const second = post(h);
+    expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
+    second.flush(answer({
+      checked: { entities: { checked: 440, total: 1040 } }, progress: { checked: 440, total: 1040 },
+      complete: true, violations: rows(51, 80),
+    }));
+    await h.settle();
+    expect(progress().getAttribute('data-checked'), 'the readout is the sum of what each call read').toBe('1040');
+    expect(progress().getAttribute('data-total')).toBe('1040');
+    expect(shown().length, 'the next page\'s rows are not the ones shown').toBe(30);
+    expect(shown(), 'continuing showed nothing new').toContain('e51');
+    expect(shown(), 'the previous page\'s rows are still shown').not.toContain('e1');
+  });
+
+  // b23 W6d P1 (client side). `progress.checked` is what ONE call read; the tab sums it over the pages and never shows a page's own count
+  // as the whole check's.
+  it('the readout sums `progress.checked` over every page, and takes the total from the latest answer', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = () => $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout().getAttribute('data-checked')).toBe('300');
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 250, total: 900 }, complete: false, nextAfter: 'c2' }));
+    await h.settle();
+    expect(readout().getAttribute('data-checked'), 'the second call\'s own count was shown as the whole check\'s').toBe('550');
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 350, total: 900 }, complete: true }));
+    await h.settle();
+    expect(readout().getAttribute('data-checked')).toBe('900');
+    expect(readout().getAttribute('data-total')).toBe('900');
+  });
+
+  // Q-488: page 1 read "Checked 1041 of 1041 records" beside "Not finished". A check that is not done never says it has checked the whole.
+  it('a check that is not finished does not say it has checked every record', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 1041, total: 1041 }, complete: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout.textContent ?? '', 'the "N of N" sentence is said beside "not finished"').not.toMatch(/validate\.progress(?![A-Za-z])/);
+    expect(readout.textContent ?? '').toContain('validate.progressOpen');
+    expect(readout.textContent ?? '').toContain('validate.incomplete');
+    expect($(h.el, '[data-testid="validate-all-good"]')).toBeNull();
+  });
+
+  it('a check that is not finished and has read less than the whole says "of N"', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 600, total: 1041 }, complete: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout.textContent ?? '').toMatch(/validate\.progress(?![A-Za-z])/);
+    expect(readout.textContent ?? '').toContain('validate.incomplete');
+  });
+
+  // A page that fills `limit` exactly on the last violating record returns `nextAfter`, and the next page comes back empty and complete:
+  // that is the end of the walk, not an error, and it is said as finished.
+  it('an empty final page with `complete` after a page that found rows is a finished check, with no error', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({
+      progress: { checked: 500, total: 900 }, complete: false, nextAfter: 'c1',
+      violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }],
+    }));
+    await h.settle();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 400, total: 900 }, complete: true, violations: [] }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-continue"]'), 'Continue offered after the walk ended').toBeNull();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
+    expect($(h.el, '[data-testid="validate-progress"]')!.textContent ?? '').not.toContain('validate.incomplete');
+    expect($$(h.el, '.sch-validate [role="alert"]').length, 'an empty last page was shown as an error').toBe(0);
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said although an earlier page found a violation').toBeNull();
+  });
+
+  // The size budget may cut a page (`truncated: true`): the check goes on from `nextAfter` exactly as after any other page.
+  it('a page the size budget cut is continued from nextAfter like any other', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 40, total: 900 }, complete: false, nextAfter: 'c1', truncated: true }));
+    await h.settle();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    const next = post(h);
+    expect((next.request.body as { after?: unknown }).after).toBe('c1');
+    next.flush(answer({ progress: { checked: 860, total: 900 }, complete: true }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
+  });
+
+  // The heavy rail answers 429 once the caller is over it. The page already read stays, the server's own sentence is shown, and Continue
+  // is still there to press once the wait is over: it asks for the same page again.
+  it('a 429 on Continue shows the server\'s message and leaves Continue usable for the same page', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1' }));
+    await h.settle();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush({ error: 'Too many heavy checks: retry in 12 seconds.' }, { status: 429, statusText: 'Too Many Requests' });
+    await h.settle();
+    const alert = $$(h.el, '.sch-validate [role="alert"]');
+    expect(alert.map(a => a.textContent ?? '').join(' '), 'the server\'s message is not shown').toContain('Too many heavy checks: retry in 12 seconds.');
+    const next = $(h.el, '[data-testid="validate-continue"]') as HTMLButtonElement | null;
+    expect(next, 'Continue is gone after a 429').not.toBeNull();
+    expect(next!.disabled).toBe(false);
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked'), 'a refused call changed the count').toBe('300');
+    next!.click();
+    const again = post(h);
+    expect((again.request.body as { after?: unknown }).after, 'Continue did not ask for the same page').toBe('c1');
+    again.flush(answer({ progress: { checked: 600, total: 900 }, complete: true }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
+    expect($$(h.el, '.sch-validate [role="alert"]').length, 'the refusal stays after a later success').toBe(0);
+  });
+
+  // b23 W6d Q1: every page's rows were kept for the life of the check only to be asked whether there were any. A check over a large space
+  // pages for a long time; what it keeps is whether it has found anything, and the page it shows.
+  it('keeps no more rows than the current page across a long check, and still says nothing was clean once one page found something', async () => {
+    const row = (i: number) => ({ collection: 'entities', _id: `e${i}`, violations: [{ field: 'rules.age-positive', reason: `broken ${i}` }] });
+    const page = (page: number) => Array.from({ length: 50 }, (_v, k) => row(page * 50 + k));
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 100, total: 400 }, complete: false, nextAfter: 'c0', violations: page(0) }));
+    await h.settle();
+    for (let p = 1; p < 4; p++) {
+      $(h.el, '[data-testid="validate-continue"]')!.click();
+      // The last page finds nothing: the earlier pages' rows must still stop the all-good word.
+      post(h).flush(answer({ progress: { checked: 100, total: 400 }, complete: p === 3, nextAfter: p === 3 ? undefined : `c${p}`, violations: p === 3 ? [] : page(p) }));
+      await h.settle();
+    }
+    const tab = h.fixture.debugElement.query(By.directive(SpaceSchemaTabComponent)).componentInstance as Record<string, unknown>;
+    const held: number[] = [];
+    for (const value of Object.values(tab)) {
+      if (!isSignal(value)) continue;
+      const v = (value as () => unknown)();
+      if (Array.isArray(v)) held.push(v.length);
+    }
+    expect(Math.max(0, ...held), 'a signal still holds the rows of several pages').toBeLessThanOrEqual(50);
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said after pages that found violations').toBeNull();
+  });
+
+  // b23 W6d X1: the readout, the all-good word and the stale note appeared in the page without being announced. The live region has to
+  // exist BEFORE its words do (a region inserted together with its content is not reliably read), so it is there from the start.
+  it('the summary lives in a polite live region that exists before the check runs and holds the readout, all-good and stale note', async () => {
+    const h = await mount();
+    const region = () => $(h.el, '[data-testid="validate-status"]');
+    expect(region(), 'no live region before the check runs').not.toBeNull();
+    expect(region()!.getAttribute('role')).toBe('status');
+    expect(region()!.getAttribute('aria-live') ?? 'polite', 'a status region must stay polite').toBe('polite');
+    const before = region();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 900, total: 900 }, complete: true }));
+    await h.settle();
+    expect(region(), 'the region was replaced by the result, so nothing was announced').toBe(before);
+    expect($(region()!, '[data-testid="validate-progress"]'), 'the readout is outside the live region').not.toBeNull();
+    expect($(region()!, '[data-testid="validate-all-good"]'), 'the all-good word is outside the live region').not.toBeNull();
+    const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+    await expand(h, row);
+    type($(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement, 'size(self.tags) <= 3');
+    await h.settle();
+    expect($(region()!, '[data-testid="validate-stale"]'), 'the stale note is outside the live region').not.toBeNull();
+    // The refusal of a call that could not run is an alert of its own, not a status.
+    expect($$(h.el, '.sch-validate [role="status"]').length, 'more than one status region in the check').toBe(1);
+  });
+
+  // b23 W6d U1: a result describes the schema the check ran against. Editing a rule or a property afterwards left "All good" on screen
+  // (the reset ran only from the mode switch and Run), and Continue paged on under the schema as it had become, so pages were judged
+  // under different schemas.
+  describe('a result goes stale when the schema is edited after the check', () => {
+    const STALE = '[data-testid="validate-stale"]';
+    const RESULT_PARTS = ['[data-testid="validate-progress"]', '[data-testid="validate-continue"]', '.val-violations'];
+
+    /** An edit as an operator makes it: typed into a rule's text in the space rules section. */
+    async function editARule(h: Harness) {
+      const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+      await expand(h, row);
+      const text = $(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement;
+      type(text, 'size(self.tags) <= 3');
+      await h.settle();
+    }
+
+    async function storedPageOne(h: Harness) {
+      await chooseMode(h, 'stored');
+      button(h)!.click();
+      post(h).flush(answer({
+        progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1',
+        violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }],
+      }));
+      await h.settle();
+    }
+
+    it('a rule edited after a stored check hides the readout, its rows and Continue, and says why', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      for (const part of RESULT_PARTS) expect($(h.el, part), `${part} before the edit`).not.toBeNull();
+      expect($(h.el, STALE), 'stale before any edit').toBeNull();
+      await editARule(h);
+      expect($(h.el, STALE), 'the result is not marked stale after a rule edit').not.toBeNull();
+      for (const part of RESULT_PARTS) expect($(h.el, part), `${part} still shown for a schema it did not check`).toBeNull();
+    });
+
+    it('a sample result goes stale too, and a property-free setting edit (the validation mode) counts as an edit', async () => {
+      const h = await mount();
+      await chooseMode(h, 'sample');
+      type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","record":{"name":"x","type":"person","properties":{}}}');
+      await h.settle();
+      button(h)!.click();
+      post(h).flush(answer());
+      await h.settle();
+      expect($(h.el, '[data-testid="validate-all-good"]')).not.toBeNull();
+      const select = $(h.el, '.val-select') as HTMLSelectElement;
+      select.value = 'off';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await h.settle();
+      expect($(h.el, STALE), 'a changed validation mode left the result standing').not.toBeNull();
+      expect($(h.el, '[data-testid="validate-all-good"]')).toBeNull();
+    });
+
+    it('Continue asks under the schema the run started with, and a fresh run after an edit asks under the edited one and clears the note', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      const firstMeta = JSON.stringify(h.state.buildMeta());
+      $(h.el, '[data-testid="validate-continue"]')!.click();
+      const second = post(h);
+      expect(JSON.stringify((second.request.body as { meta?: unknown }).meta), 'Continue sent a different schema than the run started with').toBe(firstMeta);
+      second.flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c2' }));
+      await h.settle();
+
+      await editARule(h);
+      expect($(h.el, '[data-testid="validate-continue"]'), 'Continue offered for a run whose schema was edited').toBeNull();
+      button(h)!.click();
+      const fresh = post(h);
+      const body = fresh.request.body as { meta?: unknown; after?: unknown };
+      expect(body.after, 'a fresh run continued the old cursor').toBeUndefined();
+      expect(JSON.stringify(body.meta), 'the fresh run did not ask under the edited schema').toBe(JSON.stringify(h.state.buildMeta()));
+      expect(JSON.stringify(body.meta)).not.toBe(firstMeta);
+      fresh.flush(answer({ progress: { checked: 900, total: 900 }, complete: true }));
+      await h.settle();
+      expect($(h.el, STALE), 'the note stays after a fresh run').toBeNull();
+      expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked'), 'the fresh run added to the old run\'s count').toBe('900');
+    });
+
+    it('an edit that is undone before anything else leaves the result standing (the schema is the one the check judged)', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+      await expand(h, row);
+      const text = $(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement;
+      const original = text.value;
+      type(text, 'size(self.tags) <= 3');
+      await h.settle();
+      expect($(h.el, STALE)).not.toBeNull();
+      type(text, original);
+      await h.settle();
+      expect($(h.el, STALE)).toBeNull();
+      expect($(h.el, '[data-testid="validate-continue"]')).not.toBeNull();
+    });
+  });
+
+  // b23 verify U1: the placeholder showed `{"kind":"entity","type":"person","properties":{}}`, a shape the server refuses; a person who
+  // copies the example must be sending what the check takes: `{ kind, record }`, the record in the stored shape.
+  it('the sample placeholder is, in every language, the shape the check takes', () => {
+    for (const lang of ['en', 'de', 'pl']) {
+      const dict = JSON.parse(readFileSync(`public/assets/i18n/${lang}.json`, 'utf8')) as Record<string, string>;
+      const text = dict['validate.sample.placeholder'];
+      expect(text, `${lang}: no sample placeholder`).toBeTruthy();
+      const sample = JSON.parse(text) as Record<string, unknown>;
+      expect(Object.keys(sample).sort(), `${lang}: the placeholder is not { kind, record }`).toEqual(['kind', 'record']);
+      expect(KNOWLEDGE_TYPES as readonly unknown[], `${lang}: the placeholder's kind is not a kind`).toContain(sample['kind']);
+      expect(typeof sample['record'] === 'object' && sample['record'] !== null && !Array.isArray(sample['record']),
+        `${lang}: the placeholder's record is not an object`).toBe(true);
+    }
+  });
+
+  // b23 verify U2: a sample has no stored id and nothing is scanned, so "Checked 0 of 0 records" and "entities undefined" were noise.
+  it('sample mode shows no checked counter and labels its row as the sample', async () => {
+    const h = await mount();
+    await chooseMode(h, 'sample');
+    type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","record":{"name":"x","type":"person","properties":{}}}');
+    await h.settle();
+    button(h)!.click();
+    post(h).flush(answer({ checked: {}, violations: [{ collection: 'entities', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]'), 'a sample check shows a records counter').toBeNull();
+    const items = $$(h.el, '.val-violations > li');
+    expect(items.length).toBe(1);
+    expect(items[0].textContent ?? '').not.toContain('undefined');
+    expect($(items[0], '[data-testid="validate-sample-row"]'), 'the row is not labelled as the sample').not.toBeNull();
+  });
+});

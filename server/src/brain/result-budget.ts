@@ -7,6 +7,7 @@
  * Size is the only limit. It already prices a dense subtree above a sparse one, and a second limit (records,
  * nodes) would let two rules disagree about the same response.
  */
+import { z } from 'zod';
 import { log, peerText } from '../util/log.js';
 
 /**
@@ -136,8 +137,18 @@ export type BudgetResolution =
   | ({ ok: true } & ResolvedBudget)
   | { ok: false; error: string };
 
+/**
+ * The least a size ceiling (`maxChars`, `maxBytes`, `maxTokens`) can be stated as: a positive integer. The ONE place the floor
+ * is written — {@link posInt} refuses below it, a tool's input schema declares it (`budgetSizeSchema`) and a REST body that takes
+ * the ceilings declares it ({@link budgetCeilingZ}), so the two doors cannot state different bounds for one parameter.
+ */
+export const BUDGET_CEILING_MIN = 1;
+
+/** A size ceiling in a REST body, bounded as the tools declare it (a function, not an exported schema: a bare exported number is a quantity of its own to the bound gate, and the ruling for budgets is over the field it sits in): a whole number from the floor up. NOT `.int()`, which declares the safe-integer range as a maximum the tools do not state. A resolver still refuses what reaches it another way. */
+export const budgetCeilingZ = () => z.number().min(BUDGET_CEILING_MIN).multipleOf(1);
+
 const posInt = (v: unknown): number | null =>
-  typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : null;
+  typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= BUDGET_CEILING_MIN ? v : null;
 
 /**
  * Resolve `maxChars` / `maxBytes` / `maxTokens` into TWO ceilings; when several are set, the lower wins.

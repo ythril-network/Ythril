@@ -127,4 +127,18 @@ describe('a documented interface block lists what the real interface declares', 
         + 'code and changes nothing, so the integrator is told it worked.');
     });
   }
+
+  // SpaceMeta has no code block in the docs: its keys are documented in prose and tables across the spaces and schema
+  // pages, and a second copy of the interface would be one more enumeration to rot. So the question is the other half
+  // only — every key the interface declares is NAMED there — which is what a reader searching for a key needs.
+  it('SpaceMeta — every key the interface declares is named in the spaces or schema docs', () => {
+    const body = interfaceBody(withoutComments(read('server/src/config/types-knowledge.ts')), 'SpaceMeta');
+    assert.ok(body !== null, 'interface SpaceMeta was not found in server/src/config/types-knowledge.ts — re-point this case');
+    const keys = fieldNames(body);
+    assert.ok(keys.length >= 8, `only parsed ${keys.length} SpaceMeta key(s); the parse broke, not the docs`);
+    const docs = ['docs/integration-guide/06-spaces-api.md', 'docs/integration-guide/06a-schema-api.md'].map(read).join('\n');
+    const unnamed = keys.filter(k => !docs.includes(`\`${k}\``) && !docs.includes(`\`meta.${k}`));
+    assert.deepEqual(unnamed, [], `SpaceMeta declares ${unnamed.join(', ')}, which neither 06-spaces-api nor 06a-schema-api names: `
+      + 'a meta key a caller can set and no page mentions is a capability nobody knows about.');
+  });
 });

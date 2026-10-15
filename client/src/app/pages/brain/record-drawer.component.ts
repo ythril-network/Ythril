@@ -2,13 +2,16 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ModalDirective } from '../../shared/modal.directive';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
 import { FactRefFieldComponent } from './fact-ref-field.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
+import { WriteWarningsComponent } from '../../shared/write-warnings.component';
+import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
@@ -28,7 +31,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
   selector: 'app-record-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES],
   template: `
       @if (state.drawerRecord(); as dr) {
@@ -54,9 +57,8 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 <button class="icon-btn" [attr.title]="'common.close' | transloco" [attr.aria-label]="'brain.drawer.closeDetailsAriaLabel' | transloco" (click)="state.close()"><ph-icon name="x" [size]="16"/></button>
               </div>
             </div>
-            @if (state.drawerError()) {
-              <div class="alert alert-error" style="margin-bottom:16px; font-size:13px;">{{ state.drawerError() }}</div>
-            }
+            <app-refusal-alert [view]="refusal()" idPrefix="drw-refusal" />
+            <app-write-warnings [warnings]="state.drawerWarnings()" [truncated]="state.drawerWarningsTruncated()" (dismissed)="state.dismissWarnings()" />
 
             <form>
               <!-- ── MEMORY ── -->
@@ -77,12 +79,12 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                        shape this whole item was about. -->
                   <div class="drawer-label">{{ 'common.form.type' | transloco }}</div>
                   @if (store.memoryTypesAreRestricted()) {
-                    <select [(ngModel)]="state.drawerEditMemory.type" name="drwMemType">
+                    <select [ngModel]="state.drawerEditMemory.type" (ngModelChange)="state.onMemoryTypeChange($event)" name="drwMemType">
                       <option value=""></option>
                       @for (t of store.memoryAllowedTypes(); track t) { <option [value]="t">{{ t }}</option> }
                     </select>
                   } @else {
-                    <input type="text" [(ngModel)]="state.drawerEditMemory.type" name="drwMemType" list="drwMemTypeOptions" />
+                    <input type="text" [ngModel]="state.drawerEditMemory.type" (ngModelChange)="state.onMemoryTypeChange($event)" name="drwMemType" list="drwMemTypeOptions" />
                     <datalist id="drwMemTypeOptions">
                       @for (t of store.memoryTypeOptions(); track t) { <option [value]="t"></option> }
                     </datalist>
@@ -98,7 +100,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
-                  <app-properties-editor [schema]="store.memorySchema()" [required]="store.requiredProps(store.memorySchema())" [(value)]="state.drawerEditMemory.properties" />
+                  <app-properties-editor [schema]="store.memorySchema(state.drawerEditMemory.type)" [required]="store.requiredProps(store.memorySchema(state.drawerEditMemory.type))" [errors]="propertyErrors()" [(value)]="state.drawerEditMemory.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -130,13 +132,13 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.type' | transloco }} @if (store.entityTypeNames().length) { <span style="color:var(--error)">*</span> }</div>
                   @if (store.entityTypeNames().length) {
-                    <select [(ngModel)]="state.drawerEditEntity.type" name="drwEntType" (ngModelChange)="state.onEntityTypeChange($event)">
+                    <select [ngModel]="state.drawerEditEntity.type" name="drwEntType" (ngModelChange)="state.onEntityTypeChange($event)">
                       @for (t of store.entityTypeNames(); track t) {
                         <option [value]="t">{{ t }}</option>
                       }
                     </select>
                   } @else {
-                    <input type="text" [(ngModel)]="state.drawerEditEntity.type" name="drwEntType" />
+                    <input type="text" [ngModel]="state.drawerEditEntity.type" (ngModelChange)="state.onEntityTypeChange($event)" name="drwEntType" />
                   }
                 </div>
                 <div class="drawer-field">
@@ -149,7 +151,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
-                  <app-properties-editor [schema]="store.entitySchema(state.drawerEditEntity.type)" [required]="store.requiredProps(store.entitySchema(state.drawerEditEntity.type))" [(value)]="state.drawerEditEntity.properties" />
+                  <app-properties-editor [schema]="store.entitySchema(state.drawerEditEntity.type)" [required]="store.requiredProps(store.entitySchema(state.drawerEditEntity.type))" [errors]="propertyErrors()" [(value)]="state.drawerEditEntity.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -171,13 +173,13 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'brain.edges.table.relation' | transloco }} <span style="color:var(--error)">*</span></div>
                   @if (store.edgeLabelNames().length) {
-                    <select [(ngModel)]="state.drawerEditEdge.label" name="drwEdgeLabel">
+                    <select [ngModel]="state.drawerEditEdge.label" (ngModelChange)="state.onEdgeLabelChange($event)" name="drwEdgeLabel">
                       @for (l of store.edgeLabelNames(); track l) {
                         <option [value]="l">{{ l }}</option>
                       }
                     </select>
                   } @else {
-                    <input type="text" [(ngModel)]="state.drawerEditEdge.label" name="drwEdgeLabel" />
+                    <input type="text" [ngModel]="state.drawerEditEdge.label" (ngModelChange)="state.onEdgeLabelChange($event)" name="drwEdgeLabel" />
                   }
                 </div>
                 <div class="drawer-field">
@@ -202,7 +204,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.properties' | transloco }}</div>
-                  <app-properties-editor [schema]="store.edgeSchema(state.drawerEditEdge.label)" [required]="store.requiredProps(store.edgeSchema(state.drawerEditEdge.label))" [(value)]="state.drawerEditEdge.properties" />
+                  <app-properties-editor [schema]="store.edgeSchema(state.drawerEditEdge.label)" [required]="store.requiredProps(store.edgeSchema(state.drawerEditEdge.label))" [errors]="propertyErrors()" [(value)]="state.drawerEditEdge.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -223,7 +225,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.form.type' | transloco }} <span style="color:var(--error)">*</span></div>
-                  <select [(ngModel)]="state.drawerEditChrono.kind" name="drwChronoKind" (ngModelChange)="state.onDrawerChronoKindChange()">
+                  <select [ngModel]="state.drawerEditChrono.kind" name="drwChronoKind" (ngModelChange)="state.onChronoKindChange($event)">
                     @for (k of store.chronoTypeOptions(); track k) { <option [value]="k">{{ k }}</option> }
                   </select>
                 </div>
@@ -263,7 +265,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'brain.chrono.table.properties' | transloco }}</div>
-                  <app-properties-editor [schema]="store.chronoSchema(state.drawerChronoKind())" [required]="store.requiredProps(store.chronoSchema(state.drawerChronoKind()))" [(value)]="state.drawerEditChrono.properties" />
+                  <app-properties-editor [schema]="store.chronoSchema(state.drawerChronoKind())" [required]="store.requiredProps(store.chronoSchema(state.drawerChronoKind()))" [errors]="propertyErrors()" [(value)]="state.drawerEditChrono.properties" />
                 </div>
                 <hr class="drawer-hr">
                 <div class="drawer-field">
@@ -276,10 +278,12 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                     <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record.recurrence | json }}</div>
                   </div>
                 }
-                <div class="drawer-field">
-                  <div class="drawer-label">{{ 'common.author' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.author.instanceLabel }} ({{ dr.record.author.instanceId }})</div>
-                </div>
+                @if (dr.record.author; as author) {
+                  <div class="drawer-field">
+                    <div class="drawer-label">{{ 'common.author' | transloco }}</div>
+                    <div class="drawer-readonly-value">{{ authorLabel(author) }} ({{ author.instanceId }})</div>
+                  </div>
+                }
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
@@ -308,4 +312,14 @@ export class RecordDrawerComponent {
   readonly state = inject(RecordDrawerState);
   readonly store = inject(BrainStore);
   readonly picker = inject(EntityRefPicker);
+  private readonly transloco = inject(TranslocoService);
+
+  /** The last refused save, in words and rows; the properties editors mark the rows it names. */
+  readonly refusal = refusalViewOf(this.transloco, this.state.drawerFailure, 'refusal.failed.save');
+  readonly propertyErrors = propertyErrorsOf(this.refusal);
+
+  /** The instance an author wrote from, by the label it carries (an author that predates labels has the id only). */
+  authorLabel(author: { instanceId: string; instanceLabel?: string }): string {
+    return author.instanceLabel ?? author.instanceId;
+  }
 }

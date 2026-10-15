@@ -62,11 +62,19 @@ describe('a space that waits as pending keeps the schema its round carried', () 
 
 describe('the proposer sees its own passed change', () => {
   it('a proposer holding a layer for the network updates it too', () => {
+    // Since Q-216 the passed round is PLANNED (every store it writes is parsed first, so it is applied whole or not at all) and then
+    // written: the plan names the layer for a proposer that holds one, and the application writes the own definitions and that layer.
     const gov = read('server/src/sync/governance.ts');
-    const at = gov.indexOf('if (round.proposedHere && !round.proposesLayer) {');
-    assert.ok(at > -1, 'the proposer branch is gone — re-anchor this gate');
-    const branch = gov.slice(at, gov.indexOf('} else {', at));
-    assert.match(branch, /commitOwnMetaEdit\(/);
-    assert.match(branch, /storeNetworkLayer\(net\.id, localSpace, applyMetaRound\(layer,/);
+    const plan = gov.indexOf('export function planPassedMetaChange');
+    assert.ok(plan > -1, 'the passed-round plan is gone — re-anchor this gate');
+    const planned = gov.slice(plan, gov.indexOf('\nexport ', plan + 1));
+    assert.match(planned, /const ownEdit = round\.proposedHere === true && round\.proposesLayer !== true;/, 'the proposer branch is gone — re-anchor this gate');
+    assert.match(planned, /const layer = !ownEdit \|\| layerBase \? parseMetaRound\(layerBase \?\? \{\}, proposal\) : undefined;/,
+      'a proposer holding a layer for the network no longer plans an update of it');
+    const at = gov.indexOf('apply(net: NetworkConfig, round: VoteRound): void {');
+    assert.ok(at > -1, 'the application of a passed round is gone — re-anchor this gate');
+    const branch = gov.slice(at, gov.indexOf('\n  },', at));
+    assert.match(branch, /commitOwnMetaEdit\(plan\.localSpace, \(\) => plan\.own!\)/);
+    assert.match(branch, /storeNetworkLayer\(net\.id, plan\.localSpace, plan\.layer\)/);
   });
 });

@@ -27,6 +27,7 @@
  */
 import type { AuditChange } from './audit-changes.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
+import { isPlainObject } from '../util/plain-object.js';
 
 /** The four knowledge collections a space's `typeSchemas` can describe. */
 // Imported rather than listed: a fifth kind must appear in an audit summary without anyone remembering to
@@ -36,9 +37,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
  *  writing thousands of names into a retained store; the count still tells the reader it happened. */
 export const MAX_KEYS_PER_FIELD = 25;
 
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
-}
+const asRecord = (v: unknown): Record<string, unknown> | null => (isPlainObject(v) ? v : null);
 
 /** Set difference over object keys, capped. Returns null when nothing changed. */
 function keyDelta(before: unknown, after: unknown): { added: string[]; removed: string[] } | null {
@@ -70,6 +69,9 @@ function push(out: AuditChange[], field: string, delta: { added: string[]; remov
  *     type that exists on **both** sides. A type that was just added or removed is not also reported
  *     property-by-property: the first line already said the whole type arrived or left, and repeating
  *     its fields would bury the change that matters under the change that is implied by it.
+ *   - `typeSchemas.<kind>.<type>.rules` — which RULE names appeared or disappeared (F-46, R6-13), on the same terms as the property keys. A
+ *     rule is text an author wrote: its name is recorded, its expression and its message never (an expression names the properties it
+ *     reads, and a message is whatever its author wrote).
  */
 export function summariseTypeSchemas(before: unknown, after: unknown): AuditChange[] {
   const out: AuditChange[] = [];
@@ -89,9 +91,27 @@ export function summariseTypeSchemas(before: unknown, after: unknown): AuditChan
       const bProps = asRecord(bKind[typeName])?.['propertySchemas'];
       const aProps = asRecord((aKind ?? {})[typeName])?.['propertySchemas'];
       push(out, `typeSchemas.${kind}.${typeName}.propertySchemas`, keyDelta(bProps, aProps));
+      push(out, `typeSchemas.${kind}.${typeName}.rules`, keyDelta(asRecord(bKind[typeName])?.['rules'], asRecord((aKind ?? {})[typeName])?.['rules']));
     }
   }
 
+  return out;
+}
+
+/** Whether `snapshot` carries `key` at all: a snapshot that does not carry a part says nothing about it, which is not the part being gone. */
+const carries = (snapshot: unknown, key: string): boolean => asRecord(snapshot) !== null && Object.hasOwn(asRecord(snapshot)!, key);
+
+/**
+ * Summarise the schema parts of a space edit that carries them as fields of its snapshot — a PATCH, `schema_update`, `update_space` — and of
+ * the PUT routes: the type, property and rule NAMES under `typeSchemas`, and the names of the space's own `rules`.
+ *
+ * Only a part the AFTER snapshot carries is compared. A write that did not touch the schema hands over a snapshot without it, and reading
+ * that as "every type was removed" would put a deletion in the log that nobody made.
+ */
+export function summariseSchemaEdit(before: unknown, after: unknown): AuditChange[] {
+  const out: AuditChange[] = [];
+  if (carries(after, 'typeSchemas')) out.push(...summariseTypeSchemas(asRecord(before)?.['typeSchemas'], asRecord(after)?.['typeSchemas']));
+  if (carries(after, 'rules')) push(out, 'rules', keyDelta(asRecord(before)?.['rules'], asRecord(after)?.['rules']));
   return out;
 }
 
@@ -119,5 +139,8 @@ export function summariseLibraryEntry(before: unknown, after: unknown): AuditCha
 export const AUDIT_SCHEMA_SUMMARY: Readonly<Record<string, (before: unknown, after: unknown) => AuditChange[]>> = {
   'space.schema.update': (before, after) =>
     summariseTypeSchemas(asRecord(before)?.['typeSchemas'], asRecord(after)?.['typeSchemas']),
+  // PATCH /api/spaces/:id, `schema_update` and `update_space` all record `space.update`, and each can change a type, a property or a rule
+  // as well as a scalar setting, so the three doors say so in one place (R6-13).
+  'space.update': summariseSchemaEdit,
   'schema_library.update': summariseLibraryEntry,
 };

@@ -329,6 +329,157 @@ export function peerList(values: Iterable<unknown>, sep = ', ', { count, each }:
 }
 
 /**
+ * How many names or issues of one refusal are shown before the rest are counted: the issues of a failed parse (`refusalOfParse`), the
+ * unknown keys a write body is told about (`unknownFieldWarnings`), and the fields a schema refusal's sentence names
+ * (`describeUpdateViolations`, a refused merge). One number, so they read alike.
+ */
+export const REFUSAL_NAMES_MAX = 10;
+
+/** One issue of a failed parse as a refusal carries it: what failed and where, and nothing the caller sent as a VALUE. */
+export interface ParseRefusalIssue {
+  /** zod's code for the failure (`invalid_type`, `unrecognized_keys`, `too_big`, `custom`, …): a fixed vocabulary, never a caller's text. */
+  code: string;
+  /** Where it failed, each segment a name or an index rendered by `peerText` at `NAME_QUOTED` (an index as its digits). */
+  path: string[];
+  /** Only for `unrecognized_keys`: the unknown keys, at most {@link REFUSAL_NAMES_MAX}, each rendered at `NAME_QUOTED`. */
+  keys?: string[];
+}
+
+/** A failed parse answered: prose for a person, structure for a program. */
+export interface ParseRefusal {
+  /** Bounded prose (at most `LOG_VALUE_MAX` characters, never a JSON document) naming the path of each failing field. */
+  error: string;
+  /** The first ten issues, then nothing: `error` says how many were left out. */
+  issues: ParseRefusalIssue[];
+  /**
+   * What was wrong at each of `issues`, one bounded sentence apiece and parallel to it, for a caller that words its own lines (`kind:Type — reason`).
+   * NOT enumerable, so it is not part of the body: a reason is text a refinement or a compiler wrote, bounded and escaped but not value-free,
+   * and `error` already says it. A door answers the refusal itself — `res.status(400).json(refusalOfParse(error))` is `{ error, issues }`.
+   */
+  reasons: string[];
+}
+
+/** How a caller shapes what `refusalOfParse` reads. */
+export interface ParseRefusalOptions {
+  /** Show more than the default ten issues, up to twenty (a caller whose own answer is a list of failing parts). Never fewer than one. */
+  maxIssues?: number;
+  /**
+   * For an `invalid_union` issue, the branch (its issues) that is ABOUT the field, so the refusal names what is wrong inside it and not
+   * zod's `Invalid input`. Which branch that is belongs to the schema that built the union.
+   */
+  unionBranch?: (branches: readonly ParseIssueLike[][]) => readonly ParseIssueLike[] | undefined;
+  /**
+   * The path the caller's body was parsed UNDER, when a door wraps it to give the schema context the body cannot carry (the single-type
+   * PUT parses its definition as `{ <kind>: { <type>: body } }`). It is taken off every issue path that goes below it, so the refusal names
+   * the fields the caller sent; an issue AT the wrapper (its type name refused) keeps its path, since it is about the URL, not the body.
+   */
+  under?: readonly string[];
+}
+
+/** The structural part of a zod issue `refusalOfParse` reads. Not zod's own type: this module is imported by everything and imports nothing. */
+export interface ParseIssueLike {
+  code?: unknown;
+  path?: unknown;
+  message?: unknown;
+  keys?: unknown;
+}
+
+/**
+ * A failed zod parse as an ANSWER or a LOG LINE: bounded prose and a structured, value-free issue list (`Q-362`, R5-4, R6-11).
+ *
+ * zod's own `error.message` is the whole issue array as JSON, and an issue for an unknown key quotes the key whole: a caller's
+ * megabyte key came back as a two-megabyte 400, and through the MCP twin as a megabyte log line, while the MCP dispatcher's own
+ * validator had bounded the very same mistake. Fifty-odd doors each answered it their own way; this is the one way.
+ *
+ *  - **`error` is prose**, never a JSON document, naming the path of each failing field and what was wrong with it, at most
+ *    `LOG_VALUE_MAX` characters. The `unrecognized_keys` sentence is REBUILT from `issue.keys` (zod's own copies the key unbounded).
+ *  - **`issues` is `[{ code, path, keys? }]` and nothing else**: no received value, no expectation, no message. A value is the one
+ *    thing a refusal must not reflect back — it is the caller's, possibly a credential, and the caller has it already.
+ *  - **At most ten issues are shown** and the rest are counted in the prose, so a body that fails on a thousand fields is one answer.
+ *  - **Every name a caller chose is rendered by `peerText` at `NAME_QUOTED`**: a path segment, an unknown key, and — because it is
+ *    text a caller can steer — the message a refinement or a compiler wrote. One oversized or line-breaking name neither floods
+ *    the answer nor forges a line.
+ *
+ * Takes whatever a parse failure is: a `ZodError`, the error a throwing `parse` raised in a `catch`, or (answered as its bounded text, with
+ * no issues) anything else that was thrown there. The log line a refusal wants is `log.warn(`… ${refusal.error}`)`, so the one text is
+ * the answer's and the line's.
+ */
+export function refusalOfParse(error: unknown, options: ParseRefusalOptions = {}): ParseRefusal {
+  try {
+    const raw = (error as { issues?: unknown } | null | undefined)?.issues;
+    if (!Array.isArray(raw)) return parseRefusal(peerText(error), [], []);
+    const all = raw as ParseIssueLike[];
+    const most = typeof options.maxIssues === 'number' && Number.isInteger(options.maxIssues) && options.maxIssues > 0
+      ? Math.min(options.maxIssues, REFUSAL_ISSUES_CEILING) : REFUSAL_NAMES_MAX;
+    const shown = all.slice(0, most);
+    const issues: ParseRefusalIssue[] = [];
+    const reasons: string[] = [];
+    const sentences: string[] = [];
+    for (const issue of shown) {
+      const { path: fullPath, issue: leaf } = descendUnion(issue, [], options.unionBranch);
+      const under = options.under ?? [];
+      const rawPath = under.length > 0 && fullPath.length > under.length && under.every((seg, i) => fullPath[i] === seg)
+        ? fullPath.slice(under.length) : fullPath;
+      const path = rawPath.map(segment => peerText(typeof segment === 'symbol' ? segment.toString() : segment, { max: NAME_QUOTED }));
+      const code = typeof leaf.code === 'string' ? leaf.code : 'invalid';
+      const where = path.length > 0 ? `${path.join('.')}: ` : '';
+      let reason: string;
+      if (code === 'unrecognized_keys' && Array.isArray(leaf.keys)) {
+        issues.push({ code, path, keys: (leaf.keys as unknown[]).slice(0, REFUSAL_NAMES_MAX).map(k => peerText(k, { max: NAME_QUOTED })) });
+        reason = `unrecognized key${leaf.keys.length === 1 ? '' : 's'}: ${peerList(leaf.keys, ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}`;
+      } else {
+        issues.push({ code, path });
+        reason = peerText(typeof leaf.message === 'string' ? leaf.message : code, { max: NAME_QUOTED });
+      }
+      reasons.push(reason);
+      sentences.push(`${where}${reason}`);
+    }
+    if (all.length > shown.length) sentences.push(`…(+${all.length - shown.length} more)`);
+    return parseRefusal(peerText(sentences.join('; ') || 'Invalid input'), issues, reasons);
+  } catch {
+    return parseRefusal(UNRENDERABLE, [], []);
+  }
+}
+
+/**
+ * A {@link ParseRefusal}, whose `reasons` are NOT enumerable: a door answers the refusal itself (`res.status(400).json(refusalOfParse(error))`,
+ * or spreads it) and the body is `{ error, issues }` — the two the caller is owed — while a caller that words its own lines still reads
+ * `.reasons`. A body that carried the reasons as well would say everything twice, and say a refinement's text in a second place.
+ */
+function parseRefusal(error: string, issues: ParseRefusalIssue[], reasons: string[]): ParseRefusal {
+  const refusal = { error, issues } as ParseRefusal;
+  Object.defineProperty(refusal, 'reasons', { value: reasons, enumerable: false });
+  return refusal;
+}
+
+/** How many issues a caller that asks for more than the default (`maxIssues`) can be shown at most. */
+const REFUSAL_ISSUES_CEILING = 20;
+
+/**
+ * An `invalid_union` issue, replaced by the first issue of the branch that says what is wrong — zod's own text for a union is
+ * `Invalid input`, which names nothing, and a refusal that names nothing sends a caller hunting through a body for the key. The branch is
+ * the caller's `unionBranch` when it has an opinion, else the CLOSEST one: the branch that failed on the fewest issues, the first of those
+ * on a tie (a body that is one unknown key away from an inline definition fails that branch once and the other twice). The branch's path
+ * continues the union's. Bounded in depth: a union of unions is followed a few levels, never until it ends.
+ */
+function descendUnion(
+  issue: ParseIssueLike, prefix: readonly unknown[], choose: ParseRefusalOptions['unionBranch'], depth = 0,
+): { path: unknown[]; issue: ParseIssueLike } {
+  const path = [...prefix, ...(Array.isArray(issue.path) ? issue.path : [])];
+  const branches = (issue as { errors?: unknown }).errors;
+  if (issue.code !== 'invalid_union' || depth >= 4 || !Array.isArray(branches)) return { path, issue };
+  const picked = (choose?.(branches as ParseIssueLike[][]) ?? closestBranch(branches as ParseIssueLike[][]))?.[0];
+  return picked ? descendUnion(picked, path, choose, depth + 1) : { path, issue };
+}
+
+/** The branch of a failed union that failed on the fewest issues (the first on a tie): the one the body was closest to. */
+function closestBranch(branches: readonly ParseIssueLike[][]): readonly ParseIssueLike[] | undefined {
+  let best: readonly ParseIssueLike[] | undefined;
+  for (const b of branches) if (Array.isArray(b) && b.length > 0 && (best === undefined || b.length < best.length)) best = b;
+  return best;
+}
+
+/**
  * An Error for the line `fmt` writes when it is the meta argument (bundle-30 `B4`): its stack is KEPT — the frames
  * are this server's own code, and `reportServerFailure` exists to leave them behind — while its message goes through
  * the same rule as any outside value (a driver's message can carry a peer's `_id`), bounded to half the budget so the

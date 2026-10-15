@@ -78,7 +78,8 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const withDefaults = existing
     ? fields.properties
     : applyPropertyDefaults(meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
-  const check = classifyChronoUpsertAgainst(meta, existing, { type: fields.type, properties: withDefaults });
+  const check = classifyChronoUpsertAgainst(meta, existing,
+    { title: fields.title, type: fields.type, description: fields.description, tags: fields.tags, properties: withDefaults });
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
   fields = { ...fields, properties: withDefaults };

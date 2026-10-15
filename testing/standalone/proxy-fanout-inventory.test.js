@@ -167,8 +167,11 @@ const RECLASSIFIED = 1;
  * 48 -> 49 (`Q-109`): `list_embed_jobs` reads a proxy space's members. It read only the named space, so a proxy
  * listed nothing of its members while its REST twin summed and paged them all; both now answer through
  * `brain/embed-jobs-page.ts`, and the tool narrows with `memberSpacesWithin` — BORN narrowed.
+ *
+ * 49 -> 50 (F-46): `schema_validate`, the MCP twin of `POST /api/spaces/:id/validate-schema`, reads a proxy space's members;
+ * the tool narrows with `memberSpacesWithin` as the route does with `memberSpacesForRequest` — BORN narrowed.
  */
-const TOTAL = 49;
+const TOTAL = 50;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.

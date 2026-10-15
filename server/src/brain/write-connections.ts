@@ -51,7 +51,8 @@ import {
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
-import { resultingEntityType, EdgeSchemaViolation } from './write-validation.js';
+import { resultingEntityType, EdgeSchemaViolation, type UpdateValidation } from './write-validation.js';
+import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { ReadSet, mergeWants } from './write-plan/read-set.js';
 import { edgeWant, edgeRefusal, type EdgeSubject } from './write-plan/plan-edge.js';
 import { primitivePropertyError } from './property-values.js';
@@ -566,23 +567,38 @@ export async function applyConnections(
   body: unknown,
   author: AuthorRef,
   actor?: WebhookActor,
-): Promise<{ links: number; edges: number }> {
+): Promise<{ links: number; edges: number; warnings: SchemaViolation[] }> {
   const asked = connectionsOf(body, from, fromKind);
   const landed: string[] = [];
+  // What a `warn` space says about the inline edges that landed — each row naming its edge (`edges[1].properties.k`) — so a door can
+  // answer it beside the record's own warnings. A space that refuses never gets here with one (the edge was refused before the record).
+  const warnings: SchemaViolation[] = [];
   try {
     const links = asked.desired ? (await reconcileLinks(spaceId, from, fromKind, asked.desired, author)).added : 0;
 
-    for (const e of asked.edges) {
+    for (const [i, e] of asked.edges.entries()) {
       const stored = await upsertEdge(
         spaceId, e.from, e.to, e.label, e.weight, e.type, e.description, e.properties, e.tags,
-        actor, undefined, e.opts,
+        actor, undefined, { ...e.opts, onValidation: check => { warnings.push(...inlineEdgeWarnings(i, check)); } },
       );
       landed.push(stored._id);
     }
-    return { links, edges: landed.length };
+    return { links, edges: landed.length, warnings };
   } catch (err) {
     throw new ConnectionsNotWritten(writtenRecord(fromKind, from, landed), err);
   }
+}
+
+/**
+ * The warnings one inline edge's classification carries, each row naming the edge it is about (`edges[1].properties.k`): the one
+ * spelling of that name, for the single-record doors (`applyConnections`) and the batch (`bulkWrite`), as `EdgeSchemaViolation.named`
+ * says it for a refusal.
+ */
+export function inlineEdgeWarnings(index: number, check: UpdateValidation): SchemaViolation[] {
+  // Only the rows about a property KEY the edge's type does not declare (`declared` is the validator's mark of them): an inline edge has
+  // never reported its other warnings (a label outside the allowlist, say) in the answer of the record it hangs off, and this rule is
+  // about the keys — widening the answer to every row would turn a clean bulk write on a warn space into a batch with `errors` rows.
+  return check.warnings.filter(w => Array.isArray(w.declared)).map(w => ({ ...w, field: `edges[${index}].${w.field}` }));
 }
 
 /**

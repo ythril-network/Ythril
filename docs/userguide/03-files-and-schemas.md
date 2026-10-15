@@ -365,9 +365,15 @@ reference it (for example **3 links**); the counts arrive with the list, so a la
   group such as `(,abc)*` is the usual cause, and a character class normally does the same job. Ythril
   will not store a rule it cannot apply, because a rule that is never applied silently rejects every
   record instead of checking them.
-- **Property schemas** — click **+ Add property** to define properties with optional type, constraints, and whether they are required.
+- **Property schemas** — click **+ Add property** to define properties with optional type, constraints, and whether they are required. A property row opens as a disclosure, operable from the keyboard.
+- **Rules** — expressions a record of this type must satisfy, each with the message a breaking write is told: the same
+  section, boxes and limits as on a space's Schema tab (see [Settings → Spaces → Schema](04-settings.md)). A rule here reads
+  **only the properties the entry declares**, and every space that links the entry applies it, so a rule that cannot be applied is refused when you save
+  the entry, naming the rule. A linked type shows the entry's rules read-only; unlink the type to edit them.
 
-Click anywhere on a card to open and edit it. Changes save and close automatically.
+Click anywhere on a card to open and edit it. Changes save and close automatically. **An entry is checked against the kind
+it is filed under**: permitted ends on an entity entry are refused, and an entry cannot be filed under another kind while a
+space still uses it as its own (the message names the spaces; move their links first).
 
 **Importing from a file:** Use **Import from file** to load a `.json` file. It accepts either a single library entry (or an array of them) *or* a whole space's exported schema (a `{ typeSchemas: … }` file from a space's Schema tab **Export JSON**) — in the latter case every type is auto-grouped into the library under a group named after the file's space, mirroring **Export to library**. Types linked to the library are skipped.
 
@@ -375,7 +381,9 @@ Click anywhere on a card to open and edit it. Changes save and close automatical
 rather than one, and they are the pair most people want after setting a space up:
 
 - **Export space schema** — takes every type defined inline in a space and adds it to the library,
-  tagged with a group name you choose. The result says how many were created and how many updated.
+  tagged with a group name you choose. The result says how many were created and how many updated. **It never copies
+  something the library would refuse**: a type holding a pattern, rule or permitted end the library's checks reject is left out
+  and named with the reason, and a retention window is taken off the entries it was exported with, and said so.
 - **Apply group to space** — the other direction: every library entry in a group is applied to a target
   space as a link, so the space follows the library rather than holding its own copy.
 

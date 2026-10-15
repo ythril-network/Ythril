@@ -160,7 +160,9 @@ leaf under a braintree **root** — still conclude immediately and return `"join
 open the joiner's provisioned peer token is refused on `/api/sync/*`; sync starts automatically once
 the vote passes. If the round is vetoed or expires, the provisioned credentials are revoked.
 
-**Errors:** `401` for an invalid or expired handshake, `400` if `/apply` has not run for the session,
+**Errors:** `401` for an invalid or expired handshake, `400` if `/apply` has not run for the session, and `400`
+`{ "error", "issues": [{ "code", "path" }] }` for a body that fails validation on any route of this page (the failing
+fields named, never a received value; [Error Format](03-auth-and-limits.md#error-format)),
 and `409` **`Network was removed while the handshake was in flight`** if the target network is deleted
 between `/apply` and `/finalize`. The finalize commit re-reads the live config immediately before
 writing, so a network removed mid-handshake fails cleanly rather than being silently recreated from a

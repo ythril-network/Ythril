@@ -1,5 +1,6 @@
 ﻿import { Router } from 'express';
 import type { Request, Response } from 'express';
+import { refusalOfParse } from '../util/log.js';
 import { requireAuth, requireAdminOrSpaceAdmin, requireAdminOrSpaceAdminMfa, isInstanceAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { rateLimitRefusal } from '../rate-limit/per-token.js';
@@ -345,7 +346,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
   }
   const parsed = CreateTokenBody.safeParse(stripServerOwnedToken(req.body));
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const { name, expiresAt, peerInstanceId, schemaLibrary, mfa, rights, rateLimitPerMinute } = parsed.data;
@@ -566,7 +567,7 @@ export const RenameTokenBody = z.object({
 tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
   const parsed = RenameTokenBody.safeParse(stripServerOwnedToken(req.body));
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const id = req.params['id'] as string;

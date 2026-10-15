@@ -7,6 +7,8 @@ import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { UsageBarComponent, usageLevel } from '../../shared/usage-bar.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
+import { refusalText } from '../../core/refusal-text';
+import { TranslocoService } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-about',
@@ -150,6 +152,7 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 })
 export class AboutComponent implements OnInit {
   private adminApi = inject(AdminApi);
+  private transloco = inject(TranslocoService);
 
   loading = signal(true);
   error = signal('');
@@ -215,7 +218,7 @@ export class AboutComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        this.error.set(err?.error?.error ?? 'Failed to load about info');
+        this.error.set(refusalText(this.transloco, err, 'about.error.load'));
         this.loading.set(false);
       },
     });

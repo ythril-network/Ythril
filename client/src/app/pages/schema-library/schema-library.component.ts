@@ -14,7 +14,7 @@ import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { finalize, forkJoin } from 'rxjs';
 import {
-  SchemaLibraryEntry, SchemaCatalog, ForeignCatalogEntry, KnowledgeType, PropertySchema, TypeSchema, Space,
+  SchemaLibraryEntry, SchemaCatalog, ForeignCatalogEntry, KnowledgeType, TypeSchema, Space,
   KNOWLEDGE_TYPES,
 } from '../../core/api.types';
 import { AuthApi } from '../../core/auth-api.service';
@@ -30,16 +30,21 @@ import { httpErrorReason } from '../../core/http-error';
 import { saveBlob } from '../../core/authenticated-download';
 import { ModalDirective } from '../../shared/modal.directive';
 import { CHIP_STYLES } from '../../shared/chip.styles';
+import { refusalText } from '../../core/refusal-text';
+import { emptyTypeSchemaState, typeSchemaFromState, typeStateFromSchema, type TypeSchemaState } from '../settings/space-settings-state.service';
+import { RuleRowsComponent } from '../../shared/rule-rows.component';
+import { RULE_LIMITS } from '../../shared/rule-limits';
 
 // ── Local form state ────────────────────────────────────────────────────────
 
-interface TypeSchemaState {
-  namingPattern:   string;
-  propertySchemas: { key: string; s: PropertySchema; _enumInput: string }[];
-  _newPropInput:   string;
-  _newTagInput:    string;
-}
-
+/**
+ * The editor state of an entry's schema IS the settings dialog's `TypeSchemaState`, read and written by the same two functions
+ * (`typeStateFromSchema` / `typeSchemaFromState`). This page used to fork both: its own state held two fields and its own serialiser
+ * wrote two, so every other field of an entry - its rules, its description, a property's description - was DELETED the next time anybody
+ * saved the entry (the library save is a PUT of the whole schema). A rule is an enforced constraint on every space that links the entry,
+ * so that save widened what those spaces accept, silently. One reader and one writer means a field added to the type schema reaches this
+ * editor by being added once.
+ */
 interface LibraryFormState {
   name:          string;
   description:   string;
@@ -49,49 +54,20 @@ interface LibraryFormState {
   schemaState:   TypeSchemaState;
 }
 
-function emptySchemaState(): TypeSchemaState {
-  return { namingPattern: '', propertySchemas: [], _newPropInput: '', _newTagInput: '' };
-}
-
 function entryToFormState(e: SchemaLibraryEntry): LibraryFormState {
-  const s = e.schema;
   return {
     name:          e.name,
     description:   e.description ?? '',
     knowledgeType: e.knowledgeType,
     typeName:      e.typeName,
     schemaGroup:   e.schemaGroup ?? '',
-    schemaState: {
-      namingPattern:   s.namingPattern   ?? '',
-      propertySchemas: Object.entries(s.propertySchemas ?? {}).map(([k, ps]) => ({ key: k, s: { ...ps }, _enumInput: '' })),
-      _newPropInput:   '',
-      _newTagInput:    '',
-    },
+    schemaState:   typeStateFromSchema(e.schema),
   };
 }
 
+/** A library entry's schema is an inline type schema without its retention window (a window belongs to a type IN a space; the entry's schema refuses it). */
 function formStateToSchema(f: LibraryFormState): Omit<TypeSchema, '$ref'> {
-  const schema: Omit<TypeSchema, '$ref'> = {};
-  if (f.knowledgeType === 'entity' && f.schemaState.namingPattern.trim()) {
-    schema.namingPattern = f.schemaState.namingPattern.trim();
-  }
-  if (f.schemaState.propertySchemas.length) {
-    const ps: Record<string, PropertySchema> = {};
-    for (const { key, s } of f.schemaState.propertySchemas) {
-      const entry: PropertySchema = {};
-      if (s.type)            entry.type     = s.type;
-      if (s.enum?.length)    entry.enum     = [...s.enum];
-      if (s.minimum != null) entry.minimum  = s.minimum;
-      if (s.maximum != null) entry.maximum  = s.maximum;
-      if (s.pattern?.trim()) entry.pattern  = s.pattern.trim();
-      if (s.mergeFn)         entry.mergeFn  = s.mergeFn;
-      if (s.required)        entry.required = s.required;
-      if (s.default != null) entry.default  = s.default;
-      ps[key] = entry;
-    }
-    schema.propertySchemas = ps;
-  }
-  return schema;
+  return typeSchemaFromState(f.knowledgeType, f.schemaState, { withRetention: false });
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -145,7 +121,7 @@ export function entriesFromTypeSchemas(
 @Component({
   selector: 'app-schema-library',
   standalone: true,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, ErrorStateComponent, ModalDirective],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, RuleRowsComponent, ErrorStateComponent, ModalDirective],
   styles: [CHIP_STYLES, `
     /* chip inputs — same as spaces.component.ts */
     /* create / edit dialog */
@@ -601,6 +577,12 @@ export function entriesFromTypeSchemas(
             <app-prop-schema-table [rows]="form.schemaState.propertySchemas" />
           </div>
 
+          <!-- The entry's rules (F-46): enforced on every space that links the entry, so they are shown here and travel with every save of it. -->
+          <div>
+            <div class="sch-sub">{{ 'rules.title' | transloco }}</div>
+            <app-rule-rows [rules]="form.schemaState.rules" [max]="limits.perType" idPrefix="library-rules" />
+          </div>
+
           <div class="dialog-footer">
             @if (dialogError()) { <span style="font-size:12px;color:var(--danger);flex:1;">{{ dialogError() }}</span> }
             <button class="btn btn-primary" type="button" (click)="saveEntry()" [disabled]="saving()">
@@ -658,6 +640,7 @@ export class SchemaLibraryComponent implements OnInit {
   readonly knowledgeTypes = KNOWLEDGE_TYPES;
 
   private authApi   = inject(AuthApi);
+  protected readonly limits = RULE_LIMITS;
   private schemaApi = inject(SchemaApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
@@ -783,7 +766,7 @@ export class SchemaLibraryComponent implements OnInit {
       knowledgeType: 'entity',
       typeName:      '',
       schemaGroup:   '',
-      schemaState:   emptySchemaState(),
+      schemaState:   emptyTypeSchemaState(),
     };
   }
 
@@ -878,7 +861,7 @@ export class SchemaLibraryComponent implements OnInit {
     forkJoin(unlinks$.length ? unlinks$ : [Promise.resolve()]).subscribe({
       next: () => this._doDelete(d.entryName),
       error: (err) => {
-        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: err?.error?.error ?? 'Failed to unlink one or more spaces.' } : s);
+        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: refusalText(this.transloco, err, 'refusal.failed.unlinkSpaces') } : s);
       },
     });
   }
@@ -891,7 +874,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.deleteDialog.set(null);
       },
       error: (err) => {
-        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: err?.error?.error ?? this.transloco.translate('schemaLib.error.deleteFailed') } : s);
+        this.deleteDialog.update(s => s ? { ...s, unlinking: false, error: refusalText(this.transloco, err, 'schemaLib.error.deleteFailed') } : s);
       },
     });
   }
@@ -953,7 +936,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.closeDialog();
       },
       error: (err) => {
-        this.dialogError.set(err?.error?.error ?? this.transloco.translate('schemaLib.error.saveFailed'));
+        this.dialogError.set(refusalText(this.transloco, err, 'schemaLib.error.saveFailed'));
       },
     });
   }
@@ -1020,7 +1003,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.showAddCatalog.set(false);
       },
       error: (err) => {
-        this.catalogError.set(err?.error?.error ?? this.transloco.translate('schemaLib.catalog.saveError'));
+        this.catalogError.set(refusalText(this.transloco, err, 'schemaLib.catalog.saveError'));
       },
     });
   }
@@ -1056,7 +1039,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.libTokenRevealed.set(plaintext);
       },
       error: (err) => {
-        this.libTokenError.set(err?.error?.error ?? this.transloco.translate('tokens.error.createFailed'));
+        this.libTokenError.set(refusalText(this.transloco, err, 'tokens.error.createFailed'));
       },
     });
   }
@@ -1078,7 +1061,7 @@ export class SchemaLibraryComponent implements OnInit {
     this.schemaApi.browseCatalog(catalogName).subscribe({
       next: ({ entries }) => this.browsing.update(b => b ? { ...b, entries, loading: false } : b),
       error: (err) => {
-        const msg = err?.error?.error ?? this.transloco.translate('schemaLib.catalog.fetchFailed');
+        const msg = refusalText(this.transloco, err, 'schemaLib.catalog.fetchFailed');
         this.browsing.update(b => b ? { ...b, loading: false, error: msg } : b);
       },
     });
@@ -1226,7 +1209,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.exportSpaceDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {
-        this.exportSpaceDialog.update(s => s ? { ...s, error: err?.error?.error ?? this.transloco.translate('schemaLib.exportSpace.errorFailed') } : s);
+        this.exportSpaceDialog.update(s => s ? { ...s, error: refusalText(this.transloco, err, 'schemaLib.exportSpace.errorFailed') } : s);
       },
     });
   }
@@ -1257,7 +1240,7 @@ export class SchemaLibraryComponent implements OnInit {
         this.applyGroupDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {
-        this.applyGroupDialog.update(s => s ? { ...s, error: err?.error?.error ?? this.transloco.translate('schemaLib.applyGroup.errorFailed') } : s);
+        this.applyGroupDialog.update(s => s ? { ...s, error: refusalText(this.transloco, err, 'schemaLib.applyGroup.errorFailed') } : s);
       },
     });
   }

@@ -9,9 +9,10 @@
  *
  * The validation half READ as a decision, and was filed as one. The tension is real: an import is how you
  * restore a backup, and a backup taken before a schema change would be refused by its own instance, so
- * refusing the import makes backups unrestorable. `api/sync/_shared.ts` meets the identical problem on the
- * identical kind of payload and resolves it by RECORDING rather than refusing — the document is stored and the
- * violations are reported back. So the question was withdrawn rather than answered.
+ * refusing the import makes backups unrestorable. Sync meets the identical problem on the identical kind of
+ * payload and resolves it by RECORDING rather than refusing — the document is stored and what it carries is
+ * reported back — through one module, `sync/arrival-recording.ts`, which the page accept and this restore both
+ * ask. So the question was withdrawn rather than answered.
  *
  * ## Why the write goes through `writeArrivals` (`Q-205`)
  *
@@ -56,11 +57,13 @@
  * **Files are not schema-validated.** A file has no `type` and therefore no type schema — the same asymmetry
  * `embeddingSuppressedFor` encodes by skipping the middle tier for files.
  */
-import { KNOWLEDGE_TYPES, TOMBSTONE_TYPE_OF } from '../config/types.js';
-import type { BrainCollection, KnowledgeType } from '../config/types.js';
+import { TOMBSTONE_TYPE_OF } from '../config/types.js';
+import type { BrainCollection } from '../config/types.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
-import { violationsAgainstLocalSchema } from './sync/_shared.js';
+import { boundedRows } from '../brain/write-validation.js';
+import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from '../sync/arrival-recording.js';
+import { isNewerCopy } from '../sync/upsert-plan.js';
 import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
 import { PageStoppedError } from '../sync/page-stopped.js';
 import { CounterBehindError } from '../sync/counter-after-page.js';
@@ -75,11 +78,17 @@ import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 const IMPORT_TYPES: readonly BrainCollection[] = REPLICATED_FAMILIES.map(f => f.collection);
 export type ImportType = BrainCollection;
 
-/** One document that was stored despite breaking the space's schema. */
+/**
+ * One document that was stored carrying something the schema does not accept and the copy it replaced lacked. A row is the field and the
+ * reason, NEVER the value: the restore's answer is not where a backup's data goes (`R6-9`, names and counts only).
+ */
 export interface ImportViolation {
   _id: string;
-  violations: SchemaViolation[];
+  violations: Array<Pick<SchemaViolation, 'field' | 'reason'>>;
 }
+
+/** How many documents a restore's answer names; `schemaViolationsTotal` says how many there were. */
+export const IMPORT_VIOLATIONS_NAMED = 50;
 
 /** One document that was NOT stored, and why. */
 export interface ImportRefusal {
@@ -123,12 +132,17 @@ export interface ImportTypeResult {
   restoredOverTombstone?: string[];
   restoredOverTombstoneTotal?: number;
   /**
-   * Documents stored WITH violations, named so an operator can find them.
+   * Documents stored carrying something the schema does not accept that the copy they replaced lacked, named so an operator can find them: the
+   * first {@link IMPORT_VIOLATIONS_NAMED} of them, each with its fields and reasons and no value. An `off` space reports none.
    *
    * Reported rather than refused, and reported per record rather than counted: a number would tell an operator
-   * that something in a 50 000-record restore is wrong and nothing about which one.
+   * that something in a 50 000-record restore is wrong and nothing about which one — and bounded, because a number of names is not.
    */
   schemaViolations?: ImportViolation[];
+  /** How many documents there were in all, when `schemaViolations` names fewer. Present with `schemaViolations`. */
+  schemaViolationsTotal?: number;
+  /** `schemaViolations` stopped at {@link IMPORT_VIOLATIONS_NAMED} of {@link schemaViolationsTotal}. Present only then. */
+  schemaViolationsTruncated?: true;
 }
 
 export interface ImportResult {
@@ -159,6 +173,8 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
   const results = Object.fromEntries(
     IMPORT_TYPES.map(t => [t, { inserted: 0, updated: 0, errors: 0 } as ImportTypeResult]),
   ) as Record<ImportType, ImportTypeResult>;
+  /** What each family recorded, for the one line, counter and summary a restore says (`sayRecorded`). */
+  const recordedByFamily = new Map<string, Map<string, readonly SchemaViolation[]>>();
 
   for (const t of IMPORT_TYPES) {
     const docs: unknown[] = Array.isArray(payload[t]) ? payload[t] as unknown[] : [];
@@ -166,23 +182,21 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
     const result = results[t];
 
     /*
-     * Recorded, never refused — see the docblock. Only where there is a type SCHEMA to check against, which is
-     * membership in `KNOWLEDGE_TYPES`: a file HAS a record type (`file`) and has no type schema, and a link has
-     * neither.
+     * Recorded, never refused — see the docblock, and `sync/arrival-recording.ts` for what recording is: only a document that was STORED,
+     * only what the copy it replaced lacked, nothing in an `off` space, names and counts and never a value. Looked at BEFORE the write —
+     * the copy a restore replaces is gone afterwards — and only where there is a type SCHEMA to check against (a file has none, a link
+     * neither: `watchArrivals` answers nothing for them).
+     *
+     * A repeated id stores its highest seq (the writer's rule), so that is the version judged; what the writer will refuse (`arrivalRefusal`)
+     * is not stored and has nothing to report.
      */
-    const kind = RECORD_TYPE_OF[t];
-    const violations: ImportViolation[] = [];
-    if (kind !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(kind)) {
-      for (const doc of docs) {
-        // What the writer will refuse is not stored, so it has no violations to report — the same shape rule.
-        if (arrivalRefusal(doc, { seqOptional: false }) !== null) continue;
-        const id = arrivalId(doc);
-        // The document as it arrived: the schema check reads its type and properties, never its `spaceId`, and the
-        // retag to this space is the writer's (`retagToLocalSpace`, in `writeArrivals`) — not a second one here.
-        const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, doc as Record<string, unknown>);
-        if (found.length > 0) violations.push({ _id: peerText(id), violations: found });
-      }
+    const winners = new Map<string, Record<string, unknown> & { _id: string }>();
+    for (const doc of docs) {
+      if (arrivalRefusal(doc, { seqOptional: false }) !== null) continue;
+      const held = winners.get(arrivalId(doc));
+      if (held === undefined || isNewerCopy((doc as { seq: number }).seq, held['seq'] as number)) winners.set(arrivalId(doc), doc as Record<string, unknown> & { _id: string });
     }
+    const watch = await watchArrivals(spaceId, t, [...winners.values()], 'import');
 
     let out: ArrivalOutcome;
     try {
@@ -222,7 +236,21 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
     if (out.derived.length > 0) result.derived = out.derived.length;
     if (out.flagKept.length > 0) result.flagsKept = out.flagKept.length;
     if (out.keysRemoved > 0) result.keysRemoved = out.keysRemoved;
-    if (violations.length > 0) result.schemaViolations = violations;
+    // What the documents that LANDED carry that the copies they replaced did not. The answer names the first `IMPORT_VIOLATIONS_NAMED`
+    // of them, by id and by field and reason — never a value — and says how many there were in all and that it stopped short.
+    const stored = new Set([...out.inserted, ...out.updated]);
+    const recorded = recordedOf(watch, [...winners.values()].filter(d => stored.has(d._id)), 'import');
+    if (recorded.size > 0) {
+      const rows = [...recorded];
+      result.schemaViolations = rows.slice(0, IMPORT_VIOLATIONS_NAMED).map(([doc, found]) => ({
+        _id: peerText(doc._id),
+        // The one bounded renderer, without values (an import's report never carries one), then the report's own two fields.
+        violations: boundedRows(found, { value: false }).map(({ field, reason }) => ({ field, reason })),
+      }));
+      result.schemaViolationsTotal = rows.length;
+      if (rows.length > IMPORT_VIOLATIONS_NAMED) result.schemaViolationsTruncated = true;
+      recordedByFamily.set(t, new Map(rows.map(([doc, found]) => [doc._id, found])));
+    }
 
     // A deletion this instance holds for a record the restore just brought back — named, never silently undone.
     const tombType = TOMBSTONE_TYPE_OF[t];
@@ -237,11 +265,14 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
     }
   }
 
+  // Said once for the restore, names and counts only. Never throws, so it cannot turn a restore that landed into one that failed.
+  sayRecorded({ spaceId, source: 'import', peer: 'import', families: recordedByFamily as RecordedFamilies });
+
   log.info(
     `Import into space '${peerText(spaceId)}': `
     + peerList(IMPORT_TYPES.map(t => {
       const r = results[t];
-      const v = r.schemaViolations?.length ?? 0;
+      const v = r.schemaViolationsTotal ?? 0;
       const tomb = r.restoredOverTombstoneTotal ?? 0;
       return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}${tomb > 0 ? ` over-tombstone ${tomb}` : ''}${r.flagsKept ? ` flagged ${r.flagsKept}` : ''}${r.keysRemoved ? ` keys-removed ${r.keysRemoved}` : ''}`;
     }), ', '),

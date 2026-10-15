@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfa } from '../auth/middleware.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { isLoopbackHost, LOCAL_AGENT_DEFAULT_URL } from './local-agent-url.js';
 import { envInt } from '../config/env-num.js';
 import { resolveEntry, type EntryCommand } from '../util/entry-path.js';
@@ -215,7 +215,7 @@ function tryStartLocalConnector(): void {
 localAgentRouter.post('/bootstrap', globalRateLimit, requireAdminMfa, async (req, res) => {
   const parsed = BootstrapLocalAgentBody.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -345,7 +345,7 @@ localAgentRouter.post('/enable-networks/execute', globalRateLimit, requireAdminM
 
   const parsed = ExecuteEnableNetworksBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

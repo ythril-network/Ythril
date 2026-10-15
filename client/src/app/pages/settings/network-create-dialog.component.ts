@@ -7,6 +7,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * Create-network dialog, extracted from the (large) NetworksComponent as the first slice of taming that
@@ -172,7 +173,7 @@ export class NetworkCreateDialogComponent {
       },
       error: (err) => {
         this.creating.set(false);
-        this.createError.set(err.error?.error ?? this.transloco.translate('networks.error.createFailed'));
+        this.createError.set(refusalText(this.transloco, err, 'networks.error.createFailed'));
       },
     });
   }

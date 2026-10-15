@@ -64,6 +64,7 @@ import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
+import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 
 /** The step a failed sweep is reported and counted under (`ythril_housekeeping_space_failures_total{step}`). */
 const STEP = declareStep('Suppression sweep');
@@ -274,7 +275,7 @@ async function sweepLatestMeta(id: string): Promise<HandedFailure | undefined> {
   const run: SweepRun = { walkAwaits: false };
   inFlight.set(id, run);
   try {
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await yieldToEventLoop();
     const meta = nextSweep.get(id);
     // A rerun the runner queued for a write this sweep already covered: nothing newer to sweep.
     if (meta === undefined) return undefined;

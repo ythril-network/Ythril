@@ -15,6 +15,7 @@ import { httpErrorReason } from '../../core/http-error';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { describeRefusal, refusalText, type RefusalSource, type RefusalView } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-review-tab',
@@ -42,6 +43,12 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
     .conf-fill.low  { background: var(--text-muted); }
     .conf-pct { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 
+    .dup-refusal { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 0; font-size: 13px; }
+    .dup-refusal-body { flex: 1; min-width: 0; }
+    .dup-refusal p { margin: 0; overflow-wrap: anywhere; }
+    .dup-refusal-head { font-weight: 600; }
+    .dup-refusal ul { margin: 4px 0 0; padding-inline-start: 18px; }
+    .dup-refusal-close { background: none; border: none; color: inherit; cursor: pointer; padding: 2px; line-height: 1; flex-shrink: 0; }
     .dup-ab { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: stretch; }
     .dup-rec { border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 9px; background: var(--bg-primary); min-width: 0; }
     .dup-rec-l { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
@@ -490,6 +497,27 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
               </div>
             </div>
 
+            @if (mergeRefusals()[d.id]; as refusal) {
+              <!-- A refused merge is about ONE pair in a list the reviewer is working down, and what it says (which keys the merge
+                   would bring in) is what they have to act on: so it is a row that stays until dismissed, not a toast. -->
+              <div class="alert alert-error dup-refusal" role="alert" data-testid="merge-refusal">
+                <div class="dup-refusal-body">
+                  <p class="dup-refusal-head">{{ 'duplicates.mergeRefused' | transloco: { a: d.aSummary, b: d.bSummary } }}</p>
+                  @if (refusal.rows.length) {
+                    <ul>
+                      @for (row of refusal.rows; track $index) { <li> {{ row.text }} </li> }
+                    </ul>
+                    @if (refusal.more) { <p class="dup-refusal-more"> {{ refusal.more }} </p> }
+                  } @else {
+                    <p>{{ refusal.text }}</p>
+                  }
+                </div>
+                <button type="button" class="dup-refusal-close" data-testid="merge-refusal-dismiss"
+                  [attr.aria-label]="'duplicates.mergeRefusedDismiss' | transloco" [attr.title]="'duplicates.mergeRefusedDismiss' | transloco"
+                  (click)="dismissMergeRefusal(d)"><ph-icon name="x" [size]="14"/></button>
+              </div>
+            }
+
             @if (d.status === 'resolved') {
               @if (d.resolution) {
                 <div class="dup-resolved">{{ ('duplicates.resolution.' + d.resolution) | transloco }}</div>
@@ -672,6 +700,23 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   error = signal(false);
   scanning = signal(false);
   busy = signal<string | null>(null);
+
+  /** The refusals of merges, by duplicate pair id: held as the answers they were, so they stay until dismissed or the merge goes through. */
+  private readonly mergeFailures = signal<Record<string, RefusalSource>>({});
+  /** The same, in words and rows, in the viewer's language. */
+  readonly mergeRefusals = computed<Record<string, RefusalView>>(() =>
+    Object.fromEntries(Object.entries(this.mergeFailures()).map(([id, failure]) => [id, describeRefusal(this.transloco, '', failure, 'duplicates.mergeError')])));
+
+  dismissMergeRefusal(d: DuplicateRecord): void {
+    this.setMergeFailure(d.id, null);
+  }
+
+  private setMergeFailure(id: string, failure: RefusalSource | null): void {
+    this.mergeFailures.update(all => {
+      const { [id]: _gone, ...rest } = all;
+      return failure ? { ...rest, [id]: failure } : rest;
+    });
+  }
   rows = signal<DuplicateRecord[]>([]);
   statusFilter: 'open' | 'dismissed' | 'all' = 'open';
   /** Free-text filter over the loaded list — a dismissed pile can grow large, so it is searchable. */
@@ -927,7 +972,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     this.busy.set(d.id);
     this.duplicatesApi.dismissDuplicate(d.id).subscribe({
       next: () => { this.rows.update(list => this.statusFilter === 'open' ? list.filter(x => x.id !== d.id) : list.map(x => x.id === d.id ? { ...x, status: 'dismissed' } : x)); this.busy.set(null); },
-      error: (e) => { this.busy.set(null); this.toast.error(e?.error?.error || this.transloco.translate('duplicates.dismissError')); },
+      error: (e) => { this.busy.set(null); this.toast.error(refusalText(this.transloco, e, 'duplicates.dismissError')); },
     });
   }
 
@@ -944,7 +989,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
         this.busy.set(null);
         this.toast.success(this.transloco.translate('duplicates.reRateDone'));
       },
-      error: (e) => { this.busy.set(null); this.toast.error(e?.error?.error || this.transloco.translate('duplicates.reRateError')); },
+      error: (e) => { this.busy.set(null); this.toast.error(refusalText(this.transloco, e, 'duplicates.reRateError')); },
     });
   }
 
@@ -956,9 +1001,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     });
     if (!ok) return;
     this.busy.set(d.id);
+    this.setMergeFailure(d.id, null);
     this.duplicatesApi.mergeDuplicate(d.id).subscribe({
       next: () => { this.rows.update(list => list.filter(x => x.id !== d.id)); this.busy.set(null); },
-      error: (e) => { this.busy.set(null); this.toast.error(e?.error?.error || this.transloco.translate('duplicates.mergeError')); },
+      error: (e) => { this.busy.set(null); this.setMergeFailure(d.id, e); },
     });
   }
 }

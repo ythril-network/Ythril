@@ -142,6 +142,10 @@ file bytes) — and the import puts them back. What to expect from a restore:
 - **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
   restored over a deletion this instance remembers is listed too, because a synced peer that remembers the same
   deletion will remove it again.
+- **A record that breaks this space's schema is restored anyway, and reported.** A backup taken before a schema was
+  tightened must still restore. In a space whose validation is **warn** or **strict**, the answer lists the first 50
+  such records by id with the field and reason (never the value) and says how many there were in all; **off** reports
+  none.
 - **A family marked `counterBehind` was restored, and needs the import run once more.** It means the records were
   stored but the space's sequence counter could not be moved past them, so the next edit made here could be taken
   for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
@@ -311,6 +315,24 @@ field, from, to. Two things are worth reading carefully:
   a secret into a log that admins can read and that is retained for months. When you need to know exactly
   what a request contained, the resource's own history or your reverse proxy's logs are the place to look;
   the audit log deliberately does not keep it.
+
+**A change to a space's schema is listed by name.** An edit of a space (operation `space.update`, whichever way it was
+made — the settings dialog, the API or an assistant) shows which **types, properties and rules** were added or removed
+(*typeSchemas.entity.service.rules* — *added: adult*), and a change to the space's own rules as *rules*. Names only: a
+rule's expression and message are never recorded, because an expression names the properties it reads and a message is
+whatever its author wrote. A type the edit did not mention is not shown as removed. Setting the stamp check to `0`
+minutes (`stampSkew.warnMinutes`) is a recorded field of the same row. **A write an assistant tried and was refused is a
+row too** (with the status of the refusal and no change list, because nothing changed), so a refused attempt is as visible
+here as one made through the API. A **schema check** (`space.schema.validate`) is recorded only when the audit log is set to record reads.
+
+**Metrics to alert on for schemas.** `ythril_schema_rules_invalid` above `0` means a stored rule no longer compiles
+and is *skipped, not enforced* (`space_meta` names it): fix or remove it. `ythril_schema_rule_engine_available` at
+`0` means no rule can be evaluated, so strict spaces refuse the writes their rules govern, and the security posture says so.
+`ythril_schema_refusals_total` counts refused writes by door and outcome; a rising `undeclared` is a client sending a
+property the schema does not declare. `ythril_schema_violations_recorded_total` counts documents from peers or a restore that
+were stored carrying what this space's schema does not accept, and `ythril_schema_recorder_failures_total` counts the times that
+recording itself failed (the write still landed). The full list is in
+[Prometheus metrics](../integration-guide/11-setup-api.md#prometheus-metrics).
 
 **Old saved search results removed from spaces.** Versions before 5.6.0 kept a search's cut-off results as a
 file inside the space, under a hidden `_tmp` folder, and those files travelled to every other instance in a

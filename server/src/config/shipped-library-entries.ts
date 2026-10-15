@@ -16,7 +16,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SchemaLibraryEntry } from './types.js';
-import { getSchemaLibrary, saveSchemaLibrary } from './loader.js';
+import { entriesAsHeld, getSchemaLibrary, saveSchemaLibrary } from './loader.js';
 
 const SHIPPED_DIRS = [join(dirname(fileURLToPath(import.meta.url)), '..', 'extractor', 'conversation', 'schemas')];
 
@@ -41,6 +41,7 @@ export function entriesMissingFrom(library: SchemaLibraryEntry[]): SchemaLibrary
 export function seedShippedLibraryEntries(): number {
   const library = getSchemaLibrary();
   const missing = entriesMissingFrom(library);
-  if (missing.length) saveSchemaLibrary([...library, ...missing]);
+  // The shipped entries are the named trusted source beside the library file itself (`entriesAsHeld`): they are the product's own.
+  if (missing.length) saveSchemaLibrary([...library, ...entriesAsHeld(missing)]);
   return missing.length;
 }

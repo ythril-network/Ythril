@@ -126,17 +126,21 @@ describe('both write surfaces accept it', () => {
     // Two files now: the field is declared with the space request bodies, and the merge guard is in the planner
     // both write surfaces call. Read together, because the pair IS the guarantee — a field the body accepts and
     // the merge drops is the same silent failure as one the body rejects.
-    const spaces = ['server/src/spaces/body-schemas.ts', 'server/src/spaces/meta-update.ts']
-      .map(p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')).join('\n');
-    assert.match(spaces, /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
-    // Guarded on `!== undefined`: `false` is how suppression is turned back OFF, and a truthy guard would drop
-    // that patch while answering 200.
-    assert.match(spaces, /if \(incoming\.suppressEmbeddings !== undefined\)/);
+    const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
+    assert.match(read('server/src/spaces/body-schemas.ts'), /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
+    // The merge is table-driven now (`spaces/meta-fields.ts`, Q-217): the key's KIND is `scalar`, and the one loop that merges
+    // (`mergeMetaFields`) replaces a stated value on `!== undefined` — `false` is how suppression is turned back OFF, and a truthy
+    // guard would drop that patch while answering 200. `a-meta-field-keeps-its-merge-kind-through-every-merge.test.js` runs it.
+    assert.match(read('server/src/spaces/meta-fields.ts'), /suppressEmbeddings:\s*'scalar'/);
+    assert.match(read('server/src/spaces/meta-fields.ts'), /if \(value === undefined\) continue;/);
+    // The merge a write makes lives with the base it is merged over (`meta-write-base.ts`), read by the planner and the rights check alike.
+    assert.match(read('server/src/spaces/meta-write-base.ts'), /mergeMetaFields\(/);
   });
 
   it('the schema LIBRARY accepts it too, so the two surfaces do not drift', () => {
-    // A library entry that cannot express a field the inline schema can is a surface that silently drops it.
+    // A library entry that cannot express a field the inline schema can is a surface that silently drops it. The library's body is built
+    // from the inline body's own shape (Q-215), so the field cannot be missing from it unless the inline body lacks it.
     const lib = readFileSync(new URL('../../server/src/api/schema-library.ts', import.meta.url), 'utf8');
-    assert.match(lib, /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
+    assert.match(lib, /\.\.\.InlineTypeSchemaZ\.shape/);
   });
 });

@@ -23,6 +23,8 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Config, SpaceConfig, SpaceMeta } from '../config/types.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { effectiveMeta, replicatedMetaOf, type MetaLayer } from '../sync/replicated-meta.js';
+import { PER_TYPE_META_FIELD } from './meta-fields.js';
+import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from './body-schemas.js';
 import { updateSpace } from './spaces.js';
 
 /** The layers that apply to `spaceId`, highest precedence first: the operator's order, then the order joined. */
@@ -65,14 +67,31 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
   // A layer may have turned suppression on (bundle-30 `R5`): `updateSpace` sweeps what the new meta suppresses — every
   // way a network changes the meta ends here, and swept nothing, so the space reported its records suppressed and
   // went on ranking them by meaning.
-  updateSpace(spaceId, { meta: next });
+  //
+  // The effective meta is DERIVED: the own definitions laid under each layer, every one of which was parsed when it was stored
+  // (`derivedFromStored`, the named trusted source). Nothing arrives here from outside.
+  updateSpace(spaceId, { meta: derivedFromStored(next) });
   return true;
 }
 
-/** Record what network `networkId` sends for `spaceId`, then recompute. @returns whether the effective meta changed. */
-export function storeNetworkLayer(networkId: string, spaceId: string, meta: SpaceMeta): boolean {
+/**
+ * Record what network `networkId` sends for `spaceId`, then recompute. @returns whether the effective meta changed.
+ *
+ * Takes a `ParsedSpaceMeta` only (`Q-216`): a layer that arrived without being parsed was stored here, and `effectiveMeta` then
+ * dropped it when it no longer parsed — silently, so a member held a layer it did not run. `unread` names what this release left
+ * out of the layer as the network sent it (R6-7), bounded; it is local state, kept so `space_schema_layers` can say a layer is
+ * partly unread and why.
+ */
+export function storeNetworkLayer(networkId: string, spaceId: string, meta: ParsedSpaceMeta, unread: readonly string[] = []): boolean {
   const net = getConfig().networks.find(n => n.id === networkId);
   if (!net) return false;
+  // What was left out of the layer is kept beside it, and only written when it changes.
+  if (!isDeepStrictEqual(net.schemaLayerUnread?.[spaceId] ?? [], unread)) {
+    const kept = { ...(net.schemaLayerUnread ?? {}) };
+    if (unread.length > 0) kept[spaceId] = [...unread]; else delete kept[spaceId];
+    net.schemaLayerUnread = Object.keys(kept).length > 0 ? kept : undefined;
+    saveConfig(getConfig());
+  }
   // The same layer again — every cycle, for a network whose schema did not change — is nothing to do and nothing to write.
   if (isDeepStrictEqual(net.schemaLayers?.[spaceId], meta)) return false;
   (net.schemaLayers ??= {})[spaceId] = meta;
@@ -82,8 +101,11 @@ export function storeNetworkLayer(networkId: string, spaceId: string, meta: Spac
 /**
  * Apply an edit of this instance's own definitions. Before any layer exists this is a plain write of `meta`; after,
  * it edits `ownMeta` and recomputes, so the edit survives the next layer arriving.
+ *
+ * The edit answers a `ParsedSpaceMeta` (`Q-216`): what it returns is what is stored, so it is either parsed by the call that made it
+ * or made of what this store already holds (`withType`, `withoutType`).
  */
-export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => SpaceMeta): SpaceConfig | null {
+export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => ParsedSpaceMeta): SpaceConfig | null {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return null;
   if (!space.ownMeta) return updateSpace(spaceId, { meta: edit(space.meta ?? {}) });
@@ -92,15 +114,18 @@ export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => Sp
   return getConfig().spaces.find(s => s.id === spaceId) ?? null;
 }
 
-/** `meta` with type `name` of kind `kind` set to `def` — the single-type upsert, as an own-definitions edit. */
-export function withType(meta: SpaceMeta, kind: string, name: string, def: unknown): SpaceMeta {
-  const types = meta.typeSchemas as Record<string, Record<string, unknown>> | undefined;
-  return { ...meta, typeSchemas: { ...types, [kind]: { ...(types?.[kind] ?? {}), [name]: def } } as SpaceMeta['typeSchemas'] };
+/**
+ * `meta` with type `name` of kind `kind` set to `def` — the single-type upsert, as an own-definitions edit. `def` is parsed
+ * (`parseTypeSchema`) and the rest is `meta` as it is stored, so the result is a parsed meta.
+ */
+export function withType(meta: SpaceMeta, kind: string, name: string, def: ParsedTypeSchema): ParsedSpaceMeta {
+  const types = meta[PER_TYPE_META_FIELD as 'typeSchemas'] as Record<string, Record<string, unknown>> | undefined;
+  return derivedFromStored({ ...meta, [PER_TYPE_META_FIELD]: { ...types, [kind]: { ...(types?.[kind] ?? {}), [name]: def } } } as SpaceMeta);
 }
 
 /** `meta` without type `name` of kind `kind`. A type a network layer defines returns at the next recompute. */
-export function withoutType(meta: SpaceMeta, kind: string, name: string): SpaceMeta {
-  const types = meta.typeSchemas as Record<string, Record<string, unknown>> | undefined;
+export function withoutType(meta: SpaceMeta, kind: string, name: string): ParsedSpaceMeta {
+  const types = meta[PER_TYPE_META_FIELD as 'typeSchemas'] as Record<string, Record<string, unknown>> | undefined;
   const { [name]: _gone, ...kept } = types?.[kind] ?? {};
-  return { ...meta, typeSchemas: { ...types, [kind]: kept } as SpaceMeta['typeSchemas'] };
+  return derivedFromStored({ ...meta, [PER_TYPE_META_FIELD]: { ...types, [kind]: kept } } as SpaceMeta);
 }

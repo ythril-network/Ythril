@@ -6,6 +6,7 @@
  * `space_set_network_precedence`. Rights come from `ROUTE_RIGHTS`: `schema: read` to see, `schema: admin` to reorder.
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../util/log.js';
 import { denyReadOnly, requireSpaceAuthMfaScoped, requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { NetworkPrecedenceBody, schemaLayersAct, setNetworkPrecedenceAct, type SchemaLayersActResult } from '../spaces/schema-layers-acts.js';
@@ -26,6 +27,6 @@ spaceSchemaLayersRouter.get('/:id/schema-layers', globalRateLimit, requireSpaceA
 spaceSchemaLayersRouter.put('/:id/network-precedence', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, (req, res) => {
   // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
   const parsed = NetworkPrecedenceBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   send(res, setNetworkPrecedenceAct(req.params['id'] as string, parsed.data));
 });

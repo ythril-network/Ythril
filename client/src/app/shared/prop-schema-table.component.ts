@@ -36,6 +36,10 @@ export interface PropSchemaRow {
             <tr class="prop-row" [class.prow-open]="expandedKey() === p.key" (click)="toggleExpand(p.key)">
               <td>
                 <div class="prop-name">
+                  <!-- The row's click toggles it for the mouse; this BUTTON is how a keyboard reaches it. -->
+                  <button type="button" class="prop-caret prop-toggle" [attr.aria-expanded]="expandedKey() === p.key"
+                    [attr.aria-label]="'spaces.schema.propDetail.toggle' | transloco: { key: p.key }"
+                    (click)="$event.stopPropagation(); toggleExpand(p.key)"><ph-icon [name]="expandedKey() === p.key ? 'caret-up' : 'caret-down'" [size]="13"/></button>
                   <span class="prop-name-key">{{ p.key }}</span>
                   <label class="req-toggle" [class.is-req]="p.s.required" (click)="$event.stopPropagation()">
                     <input type="checkbox" [checked]="p.s.required" (change)="p.s.required = !p.s.required; changed.emit()" />
@@ -45,11 +49,11 @@ export interface PropSchemaRow {
               </td>
               <td><span class="badge badge-gray">{{ p.s.type ?? 'any' }}</span></td>
               <td style="font-size:11px;color:var(--text-muted);">
-                @if (p.s.enum?.length) { <span class="badge badge-gray" style="margin-right:3px">enum {{ p.s.enum!.length }}</span> }
-                @if (p.s.minimum !== undefined) { <span style="margin-right:4px;">min:{{ p.s.minimum }}</span> }
-                @if (p.s.maximum !== undefined) { <span style="margin-right:4px;">max:{{ p.s.maximum }}</span> }
-                @if (p.s.pattern) { <span style="margin-right:4px;">pattern</span> }
-                @if (p.s.default !== undefined) { <span style="margin-right:4px;">default:{{ p.s.default }}</span> }
+                @if (p.s.enum?.length) { <span class="badge badge-gray" style="margin-inline-end:3px">{{ 'spaces.schema.summary.enum' | transloco: { count: p.s.enum!.length } }}</span> }
+                @if (p.s.minimum !== undefined) { <span style="margin-inline-end:4px;">{{ 'spaces.schema.summary.min' | transloco: { value: p.s.minimum } }}</span> }
+                @if (p.s.maximum !== undefined) { <span style="margin-inline-end:4px;">{{ 'spaces.schema.summary.max' | transloco: { value: p.s.maximum } }}</span> }
+                @if (p.s.pattern) { <span style="margin-inline-end:4px;">{{ 'spaces.schema.summary.pattern' | transloco }}</span> }
+                @if (p.s.default !== undefined) { <span style="margin-inline-end:4px;">{{ 'spaces.schema.summary.default' | transloco: { value: p.s.default } }}</span> }
                 @if (p.s.mergeFn) { <span class="badge badge-blue">{{ p.s.mergeFn }}</span> }
               </td>
               <td>
@@ -66,7 +70,7 @@ export interface PropSchemaRow {
                       <div class="field" style="margin:0;">
                         <label>{{ 'spaces.schema.propDetail.type' | transloco }}</label>
                         <select [(ngModel)]="p.s.type" (ngModelChange)="onTypeChange(p)">
-                          <option [ngValue]="undefined">any</option>
+                          <option [ngValue]="undefined">{{ 'spaces.schema.summary.any' | transloco }}</option>
                           <option value="string">string</option>
                           <option value="number">number</option>
                           <option value="boolean">boolean</option>

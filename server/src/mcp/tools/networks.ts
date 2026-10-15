@@ -268,7 +268,11 @@ export const network_sync_historyTool: ToolHandler = {
     + 'records moved each way, and what stopped. Same answer as `GET /api/networks/:id/sync-history`. Requires '
     + 'instance-admin rights.\n\n'
     + 'A CYCLE THAT FAILED says which space and direction did not complete; a network that fails every cycle is not '
-    + 'syncing at all.',
+    + 'syncing at all.\n\n'
+    + 'A cycle whose pulled records carried something the receiving space\'s schema does not accept (an undeclared property key, a '
+    + 'value of the wrong type — only in a space whose validationMode is `warn` or `strict`) has `schemaViolations`: per space, how '
+    + 'many documents were stored carrying it that the copy they replaced did not, and the field names most of them carried with '
+    + 'how many each. Names and counts only; the records are stored as sent, never refused.',
   admin: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',

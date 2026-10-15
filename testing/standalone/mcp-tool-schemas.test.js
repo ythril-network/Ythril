@@ -125,7 +125,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // 74 -> 75: `network_vote_outcomes` (Q-429), the door onto `voteOutcomesAct` like `GET /api/networks/:id/vote-outcomes`:
     // `admin: true` as the route's `requireAdmin`, not mutating, an audit-map entry (null), a `NOT_AREA_SCOPED` row, a
     // capability-map row, and `16-mcp.md` rows.
-    assert.equal(ALL_TOOLS.length, 75);
+    // 75 -> 76: `schema_validate` (F-46), the door onto `spaces/schema-validate-door.ts` like
+    // `POST /api/spaces/:id/validate-schema`: not mutating, `spaceRequired`, a TOOL_RIGHTS row at the route's `schema: read`,
+    // an audit-map entry under `space.schema.validate`. (`16-mcp.md` rows are wave 3's docs.)
+    assert.equal(ALL_TOOLS.length, 76);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

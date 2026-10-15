@@ -14,7 +14,7 @@ import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
@@ -183,11 +183,7 @@ export async function updateFact(
    * a classifier for one.
    */
   {
-    const finalType = ('type' in $set ? $set['type'] : existing.type) as string | undefined;
-    const finalProps = ('properties' in $unset ? {}
-      : ('properties' in $set ? $set['properties'] : existing.properties)) as Record<string, string | number | boolean> | undefined;
-    const check = classifyFactUpsertAgainst(getSpaceMeta(spaceId), existing,
-      { type: finalType, properties: finalProps });
+    const check = classifyFactUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
   }

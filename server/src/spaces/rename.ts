@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getDb, col, asDoc, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
@@ -228,6 +228,10 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
         net.schemaLayers[newId] = net.schemaLayers[oldId]!;
         delete net.schemaLayers[oldId];
       }
+      if (net.schemaLayerUnread?.[oldId] !== undefined && net.schemaLayerUnread[newId] === undefined) {
+        net.schemaLayerUnread[newId] = net.schemaLayerUnread[oldId]!;
+        delete net.schemaLayerUnread[oldId];
+      }
       if (net.spaceOrigins?.[oldId] !== undefined && net.spaceOrigins[newId] === undefined) {
         net.spaceOrigins[newId] = net.spaceOrigins[oldId]!;
         delete net.spaceOrigins[oldId];
@@ -343,7 +347,7 @@ export type RenameSpaceResult =
  */
 export async function renameSpaceAct(oldId: string, body: unknown): Promise<RenameSpaceResult> {
   const parsed = RenameSpaceBody.safeParse(body);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   try {
     return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
   } catch (err) {

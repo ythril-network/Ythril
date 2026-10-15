@@ -13,12 +13,12 @@ import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
+import { getAllowedChronoTypes, type SchemaViolation } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
-import { connectionRefusalAnswer, type UpdateValidation } from '../../brain/write-validation.js';
+import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
@@ -122,6 +122,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   // The check moved into `createChrono`, so no caller can reach the collection around it — three copies of
   // this rule existed for create and two for update. The response shape is preserved by catching the refusal.
   let check: UpdateValidation | undefined;
+  /** The warnings of the inline edges that landed beside the record (`applyConnections`). */
+  let connectionWarnings: SchemaViolation[] = [];
 
   const ttlErr = ttlDaysError(req.body);
   if (ttlErr) { res.status(400).json({ error: ttlErr }); return; }
@@ -163,7 +165,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
      * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
      * restate them and no two doors can disagree about them.
      */
-    await applyConnections(wt.target, entry._id, 'chrono', req.body, entry.author, webhookToken(req));
+    connectionWarnings = (await applyConnections(wt.target, entry._id, 'chrono', req.body, entry.author, webhookToken(req))).warnings;
   } catch (err) {
     const refused = connectionRefusalAnswer(err, 'create');
     if (refused) { res.status(refused.status).json(refused.body); return; }
@@ -173,8 +175,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   const result: Record<string, unknown> = { ...entry };
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, CHRONO_CREATE_BODY_KEYS)];
-  if (warnings.length > 0) result['warnings'] = warnings;
+  const warnings = [...(check?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, CHRONO_CREATE_BODY_KEYS)];
+  Object.assign(result, writeWarningFields(warnings));
   res.status(201).json(result);
 });
 
@@ -350,9 +352,9 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
      * Keyed on `updated.spaceId` rather than a loop variable: the record says which member space it
      * lives in, and a proxy write must land where the record is rather than where the search began.
      */
-    await applyConnections(updated.spaceId, updated._id, 'chrono', req.body, updated.author, webhookToken(req));
-    const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
-    res.json(updateWarnings.length > 0 ? { ...updated, warnings: updateWarnings } : updated);
+    const connected = await applyConnections(updated.spaceId, updated._id, 'chrono', req.body, updated.author, webhookToken(req));
+    const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
+    res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
     return;
   }
   // `prior` proves the entry was there when this handler read it, so a write that matched nothing was

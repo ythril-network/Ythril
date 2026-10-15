@@ -7,6 +7,9 @@
  * The original header follows.
  */
 import { UUID_V4_RE } from '../brain/entity-refs.js';
+import { recordViewOf } from '../brain/record-view.js';
+import { validateEntity, validateEdge, validationRefuses, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
+import type { KnowledgeType, SpaceMeta, ValidationMode } from '../config/types.js';
 
 /** A Schema Library entry, as `schemas/` and `benchmarks/space/schema.json` hold them. */
 export interface SchemaEntry { knowledgeType: string; typeName: string; schema: any; [k: string]: unknown }
@@ -128,11 +131,34 @@ const ASSISTANT_SPEAKER = /^\s*(assistant|ai|bot|chatbot|agent|model|system)\s*$
  */
 export const SUPERSEDES = 'supersedes';
 
-export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]): string[] {
+export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[], validationMode: ValidationMode = 'strict'): string[] {
   const problems: string[] = [];
   const say = (m: string) => problems.push(m);
 
   if (!extraction || typeof extraction !== 'object') return ['the extraction is not an object'];
+
+  /*
+   * The properties are judged by the INSTANCE's validator (`spaces/schema-validation.ts`), against the space's own declarations — not by a
+   * list kept here. This file checked one thing about them (an edge property's enum) and so the rest was found on request 340: a key the
+   * type does not declare (`Q-93`), a wrong type, a required property missing. The meta is built from the entries as a `strict` one so
+   * every rule is evaluated; what is REFUSED is then decided by `validationMode`, the space's: a key the type does not declare refuses only
+   * where the space refuses (strict) — in `warn` the write lands and the batch door says so, in `off` nothing does — and every other rule
+   * is held in every mode, as the enum check always was. The keys the extractor itself writes are exempt, as they are at the write
+   * (`INSTANCE_WRITTEN_PROPERTY_KEYS`).
+   */
+  const propertyMeta: SpaceMeta = { validationMode: 'strict', typeSchemas: {} };
+  for (const e of schemaEntries) {
+    const kind = e.knowledgeType as KnowledgeType;
+    ((propertyMeta.typeSchemas ??= {})[kind] ??= {})[e.typeName] = e.schema;
+  }
+  const sayProperties = (at: string, who: string, rows: SchemaViolation[]) => {
+    for (const row of rows) {
+      if (!row.field.startsWith('properties.')) continue;
+      // What `strict` means is asked of the one predicate every write door asks (`validationRefuses`), never spelled here.
+      if (Array.isArray(row.declared) && !validationRefuses({ validationMode })) continue;
+      problems.push(`${at} (${who}) ${row.field}: ${row.reason}${row.declared ? ` — it declares ${row.declared.join(', ') || 'nothing'}` : ''}`);
+    }
+  };
 
   const typesOf = (kind: string) => new Set(schemaEntries.filter(e => e.knowledgeType === kind).map(e => e.typeName));
   const entityTypes = typesOf('entity');
@@ -140,16 +166,6 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
   const claimTypes = typesOf('fact');
   const edgeDefs = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
     .map(e => [e.typeName, e.schema.endpoints]));
-  /*
-   * The ENUMS a label's properties declare, which the instance enforces and this did not.
-   *
-   * Found 2026-09-21 by a gate asserting that an undeclared `knows.kind` is refused: it was not. The
-   * instance answers 400 for it, on request 340 of several hundred, which is the exact failure this whole
-   * module exists to move forward — and until then the only symptom was a space missing one edge.
-   */
-  const edgeProps = new Map(schemaEntries.filter(e => e.knowledgeType === 'edge')
-    .map(e => [e.typeName, e.schema.propertySchemas ?? {}]));
-
   // The floor. A schema that loaded as nothing would make every check below vacuous and the file would
   // "validate" into a space that declares nothing and therefore validates nothing itself.
   if (entityTypes.size === 0 || edgeDefs.size === 0 || claimTypes.size === 0) {
@@ -203,6 +219,9 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     if (!String(e.description ?? '').trim()) {
       say(`${at} ('${e.key}') has no description. A bare name is a tag, not something a question can match.`);
     }
+    // The properties against the type's declarations, by the instance's own validator — so a key the type does not declare (and the
+    // extractor does not own) is found here and not on request 340.
+    sayProperties(at, `'${e.key}'`, validateEntity(propertyMeta, recordViewOf('entity', e), INSTANCE_WRITTEN_PROPERTY_KEYS.entity));
     entityType.set(e.key, e.type);
   }
 
@@ -342,14 +361,10 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
       if ((k === 'since' || k === 'until') && !ISO_DATE.test(String(v))) {
         say(`${at} ('${e.label}') has ${k} '${v}', which is not YYYY-MM-DD`);
       }
-      const allowedValues = edgeProps.get(e.label)?.[k]?.enum;
-      if (Array.isArray(allowedValues) && !allowedValues.includes(v)) {
-        say(`${at} ('${e.label}') has ${k} '${v}', which the schema does not declare. It allows: `
-          + `${allowedValues.join(', ')}. A value outside the enum is a 400 from the instance, and a `
-          + 'relationship the vocabulary cannot express belongs in a claim rather than in a label it does '
-          + 'not fit.');
-      }
     }
+    // The properties against the label's declarations, by the instance's own validator (below) — the enum, the type, the required and the
+    // undeclared key, so the answer here is the answer the write would have given on request 340.
+    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', e), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
   }
 
   /* ── claims ────────────────────────────────────────────────────────────────────────────────────────── */
@@ -522,8 +537,8 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
  *
  * Every problem in the message, not the first — see the note at the top of this file.
  */
-export function assertWritable(extraction: any, schemaEntries: SchemaEntry[]): void {
-  const problems = validateExtraction(extraction, schemaEntries);
+export function assertWritable(extraction: any, schemaEntries: SchemaEntry[], validationMode: ValidationMode = 'strict'): void {
+  const problems = validateExtraction(extraction, schemaEntries, validationMode);
   if (problems.length > 0) {
     throw new Error(`the extraction for '${extraction?.conversationId ?? '(unnamed)'}' cannot be written, `
       + `${problems.length} problem(s):\n  - ${problems.join('\n  - ')}`);

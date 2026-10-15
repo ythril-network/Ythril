@@ -31,6 +31,7 @@
  */
 import { RECORD_SUPPRESS_FIELD, RECORD_SUPERSEDED_FIELD } from '../../brain/record-flag.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
+import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText } from '../../util/log.js';
 
 /**
  * Body keys every brain WRITE accepts, whichever record type it is — read by shared helpers rather than by
@@ -62,31 +63,50 @@ export const SHARED_WRITE_BODY_KEYS: readonly string[] = [
  * A non-object body yields nothing: `req.body` can be `undefined`, a string, a number or an array depending on
  * what was posted and what the parser made of it, and none of those is a bag of keys. Inventing warnings from
  * one would report on something that was never a field.
+ *
+ * **Bounded, because the keys are the caller's** (`Q-362`, R6-11). At most {@link REFUSAL_NAMES_MAX} unknown keys get a row, in the
+ * order the body carries them, and one last row says how many were left out: a ten-megabyte body of unknown keys was hundreds of
+ * thousands of rows, each carrying the same accepted list. A key is named at `NAME_QUOTED` and a string value by `peerText`, the
+ * renderer every refusal quotes a caller's choices with; the accepted list is built ONCE. This is the BOUND only — whether an
+ * unknown key is warned or refused is another question (`Q-320`) and is not decided here.
  */
 export function unknownFieldWarnings(body: unknown, known: readonly string[]): SchemaViolation[] {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return [];
   const accepted = new Set([...known, ...SHARED_WRITE_BODY_KEYS]);
+  const bag = body as Record<string, unknown>;
   const out: SchemaViolation[] = [];
-  for (const key of Object.keys(body as Record<string, unknown>)) {
+  let unknown = 0;
+  let reason: string | undefined;
+  for (const key of Object.keys(bag)) {
     if (accepted.has(key)) continue;
+    unknown++;
+    if (out.length >= REFUSAL_NAMES_MAX) continue;
+    // What it accepts, not just what it did not: "unknown field" alone tells a caller their write was
+    // wrong without telling them what right looks like, which is the refusal shape this repo keeps fixing.
+    reason ??= `unknown field — ignored. This route accepts: ${[...accepted].sort().join(', ')}`;
     out.push({
-      field: key,
+      field: peerText(key, { max: NAME_QUOTED }),
       // The caller's own value, echoed so they can see WHICH of several sends produced this. Objects and
       // arrays are named by type rather than inlined: a warning is not a place to reflect a payload back.
-      value: summarise((body as Record<string, unknown>)[key]),
-      // What it accepts, not just what it did not: "unknown field" alone tells a caller their write was
-      // wrong without telling them what right looks like, which is the refusal shape this repo keeps fixing.
-      reason: `unknown field — ignored. This route accepts: ${[...accepted].sort().join(', ')}`,
+      value: summarise(bag[key]),
+      reason,
     });
+  }
+  if (unknown > out.length) {
+    const left = unknown - out.length;
+    out.push({ field: `…(+${left} more)`, value: left, reason: `${left} more unknown field(s) — ignored; the first ${REFUSAL_NAMES_MAX} are named above` });
   }
   return out;
 }
 
-/** A value small enough to put in a warning: primitives as they are, everything else named by its type. */
+/** A value small enough to put in a warning: primitives as they are, a string through the bounded renderer, everything else named by its type. */
 function summarise(v: unknown): unknown {
   if (v === null) return null;
   if (Array.isArray(v)) return `[array of ${v.length}]`;
   if (typeof v === 'object') return '[object]';
-  if (typeof v === 'string' && v.length > 80) return `${v.slice(0, 80)}…`;
+  if (typeof v === 'string') return peerText(v, { max: SUMMARISED_STRING_MAX });
   return v;
 }
+
+/** How much of a string value a warning row echoes: enough to tell which of several sends produced it. */
+const SUMMARISED_STRING_MAX = 80;

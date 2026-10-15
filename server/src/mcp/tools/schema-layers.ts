@@ -20,7 +20,15 @@ export const space_schema_layersTool: ToolHandler = {
     + 'networks define differently, with each network\'s value. Same answer as `GET /api/spaces/:id/schema-layers`.\n\n'
     + 'WHICH ONE WINS: the network first in `precedence`, which is the order the networks were joined until someone '
     + 'reorders it. In each clash the winning network is the first listed. A clash never stops either network\'s '
-    + 'records from syncing.',
+    + 'records from syncing.\n\n'
+    + 'AN EDIT A NETWORK OUTRANKS: a network\'s layer outranks this instance\'s own definitions, so an own edit of something a '
+    + 'layer supplies is stored and the space does not run on it. `fields` lists every place a layer supplies (a top-level '
+    + 'field such as `purpose`, a type\'s own field, or one of its properties): `own` is what this instance\'s own definitions '
+    + 'hold there (absent when nothing), `effective` what the space runs on, `winner` the network whose layer supplies it, and '
+    + '`hidden: true` when `own` is set and differs from `effective`. It is read fresh each time from the own definitions and '
+    + 'the layers, so a reorder or a layer arriving changes it with no round; a write that proposed the edit says only '
+    + '`applied` or `vote_pending` per network, and this is where to find out the edit did not take effect. `unknownFields` on a '
+    + 'layer names what this release did not read of it; `refusedRounds` lists rounds this instance could not read.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object', properties: { space: s.requiredSpace }, required: ['space'], additionalProperties: false,

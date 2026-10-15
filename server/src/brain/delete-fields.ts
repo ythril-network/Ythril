@@ -9,6 +9,7 @@
 // ── System fields that cannot be deleted ────────────────────────────────────
 
 import { MAX_DELETE_FIELDS, countError } from '../util/request-bounds.js';
+import { isObjectInternalKey } from '../util/object-internal-keys.js';
 
 const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
@@ -22,9 +23,6 @@ const SYSTEM_FIELDS = new Set([
   // `startsAt` to remove.
   'title', 'startsAt', 'status',
 ]);
-
-/** Dangerous prototype keys that must never be traversed or deleted. */
-const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -56,7 +54,7 @@ export function validateDeleteFields(
     }
     // Reject any segment that could cause prototype pollution
     for (const seg of segments) {
-      if (PROTO_KEYS.has(seg)) {
+      if (isObjectInternalKey(seg)) {
         return { ok: false, error: `Invalid deleteFields path segment '${seg}'` };
       }
     }
@@ -163,7 +161,7 @@ function applyDeletePath(
   if (current == null || typeof current !== 'object') return;
 
   const seg = segments[depth] ?? '';
-  if (PROTO_KEYS.has(seg)) return;
+  if (isObjectInternalKey(seg)) return;
 
   const isLeaf = depth === segments.length - 1;
 

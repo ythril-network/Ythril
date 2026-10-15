@@ -220,6 +220,13 @@ export interface VoteRound {
    */
   baseMetaVersion?: number;
   /**
+   * What the changed fields held when the proposal was computed (meta_change rounds, R6-8): each named field's value and, for the types the
+   * round changes, their definitions. It travels with the round, which no merkle hash covers and no wire schema strips, so every member
+   * judges "was this field changed since the proposal" against the same base. Absent on a round from a peer before this release, which is
+   * judged by `baseMetaVersion` and the version history. See `sync/meta-round-merge.ts`.
+   */
+  metaBase?: SpaceMeta;
+  /**
    * A proposal for ONE network's layer rather than an edit of the proposer's own definitions (meta_change rounds,
    * `F-39.5`). Passed, it lands in that network's layer on every member — the proposer included, which is the only
    * instance it changes anything for: everyone else stores a passed meta_change as the network's layer anyway.
@@ -243,6 +250,13 @@ export interface VoteRound {
   outcome?: RoundOutcomeKind;
   /** LOCAL: when this instance concluded the round (ISO8601), read from the request's own `now`. Never taken from or served to a peer. */
   concludedAt?: string;
+  /**
+   * LOCAL: why THIS instance did not read the schema this `meta_change` round carries (R6-6) — the failing types and what is wrong
+   * with each, bounded. Set when the member refused to cast yes on it, or when it passed and the member applied NONE of it: a
+   * round whose changed parts a member cannot parse is applied whole or not at all, and an operator is shown which. Never taken
+   * from or served to a peer.
+   */
+  refusedHere?: string;
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 
@@ -333,6 +347,13 @@ export interface NetworkConfig {
    * apart, apply them in precedence, and send each network only its own. See `spaces/effective-meta.ts`.
    */
   schemaLayers?: Record<string, SpaceMeta>;
+  /**
+   * R6-7: what this release left out of each layer as the network sent it, per LOCAL space id — the meta keys and type fields it has
+   * never heard of (a newer peer's, or a rolled-back build's), by name, bounded in count and in the length of a name. A tolerant
+   * reader keeps what it knows and says so here instead of refusing the layer; `space_schema_layers` shows it. Local state, never
+   * sent to a peer, and it follows its layer: a rename moves it, leaving the network removes it.
+   */
+  schemaLayerUnread?: Record<string, string[]>;
   votingDeadlineHours: number;
   merkle?: boolean;
   /** When true, governance vote casts must carry a valid Ed25519 signature from

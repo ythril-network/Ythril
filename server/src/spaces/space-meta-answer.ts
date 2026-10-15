@@ -23,6 +23,7 @@ import type { SpaceConfig } from '../config/types.js';
 import { reindexStateFor } from '../brain/reindex.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
+import { invalidRulesOf } from './schema-rules.js';
 
 /** What `resolve` is when the caller does not say — the same on both doors: library types carry their definition. */
 export const META_RESOLVE_DEFAULT = true;
@@ -63,6 +64,9 @@ export async function spaceMetaAnswer(input: {
     // starting a run. One function with `GET /reindex-status`, so the two report the same numbers.
     needsReindex: reindexState.needsReindex,
     reindexRun: reindexState.reindexRun,
+    // F-46 (R6-4): the stored rules that no longer compile and are skipped — names only, never a rule's text or message — read from the
+    // meta with its library definitions, so a linked type's rules are judged as they are evaluated.
+    invalidRules: invalidRulesOf(withLibraryDefinitions(rawMeta)),
     /*
      * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares, in the declared schema's own format so a type the
      * space really holds can be promoted into it. Per member on a proxy, never merged: two types sharing a name

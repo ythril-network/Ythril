@@ -6,12 +6,13 @@ import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } fr
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { resolveMetaRefs } from '../../spaces/schema-validation.js';
+import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
@@ -21,6 +22,7 @@ import { defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_EDGE_LABELS } from '../../util/request-bounds.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -65,7 +67,7 @@ export const save_edgeTool: ToolHandler = {
             description: { type: 'string', description: 'Optional prose description of why this relationship exists.' },
             properties: {
               type: 'object',
-              description: 'Optional structured key-value metadata for this edge.',
+              description: 'Optional structured key-value metadata for this edge. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
@@ -142,14 +144,12 @@ export const save_edgeTool: ToolHandler = {
         ...(a['toKind'] !== undefined ? { toKind } : {}),
         onValidation: c => { edgeCheck = c; },
       });
-    const edgeSchemaViolations = edgeCheck?.all ?? [];
+    const schemaWarnings = schemaWarningAnswer(edgeMeta, edgeCheck as UpdateValidation | undefined);
     let edgeMsg = `Edge '${label}' (${from} → ${to}) upserted (ID ${edge._id}).`;
-    if (edgeMeta?.validationMode === 'warn') {
-      for (const v of edgeSchemaViolations) edgeMsg += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
+    for (const line of schemaWarnings.lines) edgeMsg += `\n${line}`;
     return {
       content: [{ type: 'text' as const, text: edgeMsg }],
-      structuredContent: { ...edge, ...(edgeSchemaViolations.length > 0 ? { violations: edgeSchemaViolations } : {}) },
+      structuredContent: { ...edge, ...schemaWarnings.structured },
     };
   },
 };
@@ -236,7 +236,7 @@ export const update_edgeTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Key-value properties to merge with existing. Values must be string, number, or boolean.',
+              description: 'Key-value properties to merge with existing. Values must be string, number, or boolean. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             fromKind: edgeEndpointKindSchema('from'),
@@ -300,12 +300,14 @@ export const update_edgeTool: ToolHandler = {
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     const audit = await readEditAudit(wt.target, mid => getEdgeById(mid, id), id, a);
-    const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    let updCheck: UpdateValidation | undefined;
+    const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEdge) { const s = audit.snapshots(updatedEdge); ctx.recordChanges?.(s.before, s.after); }
-    if (!updatedEdge) throw new Error(`Edge '${id}' not found`);
+    if (!updatedEdge) throw new NotFoundError(`Edge '${id}' not found`);
+    const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updatedEdge.spaceId), updCheck);
     return {
-      content: [{ type: 'text' as const, text: `Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).` }],
-      structuredContent: { ...updatedEdge },
+      content: [{ type: 'text' as const, text: [`Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).`, ...schemaWarnings.lines].join('\n') }],
+      structuredContent: { ...updatedEdge, ...schemaWarnings.structured },
     };
   },
 };
@@ -452,7 +454,7 @@ export const delete_edgeTool: ToolHandler = {
     if (!wt.ok) throw new Error(wt.error);
 
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteEdge(mid, id, ctx.actor));
-    if (!deleted) throw new Error(`Edge '${id}' not found`);
+    if (!deleted) throw new NotFoundError(`Edge '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
   },

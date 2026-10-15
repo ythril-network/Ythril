@@ -20,7 +20,7 @@ import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
-import { log, peerList, peerText } from '../util/log.js';
+import { log, peerList, peerText, NAME_QUOTED, REFUSAL_NAMES_MAX } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { edgeEndpointKind } from './entity-refs.js';
@@ -32,6 +32,8 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
+import { classifyMergedEntity, countSchemaRefusal, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
@@ -40,6 +42,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
+import { isObjectInternalKey } from '../util/object-internal-keys.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -229,11 +232,19 @@ export async function computeMergePlan(
     }
   }
 
+  /*
+   * COUNTED FIRST, as the merge is (`executeMerge`, R6-10). A merge that relinks more than `MERGE_MAX_RELINKS` records is refused
+   * whatever the plan says, so reading a hub's edges in full to report which of them would duplicate or break a rule bought a list
+   * nobody can act on and the read the bound exists to prevent: the plan of a merge that cannot run reports neither, and the execution
+   * says why it cannot run (`MergeTooLarge`). The count is `relinkTally`, the one the execution takes.
+   */
+  const refused = relinkTotal(await relinkTally(spaceId, absorbedId)) > MERGE_MAX_RELINKS;
+
   // ── Duplicate edge warnings ───────────────────────────────────────────
-  const duplicateEdgeWarnings = await detectDuplicateEdges(spaceId, survivorId, absorbedId);
+  const duplicateEdgeWarnings = refused ? [] : await detectDuplicateEdges(spaceId, survivorId, absorbedId);
 
   // ── Endpoint / cardinality rules the relink will break ────────────────
-  const endpointRuleWarnings = await detectEndpointRuleBreaks(spaceId, survivor, absorbedId);
+  const endpointRuleWarnings = refused ? [] : await detectEndpointRuleBreaks(spaceId, survivor, absorbedId);
 
   const plan: MergePlan = {
     survivorId,
@@ -324,7 +335,7 @@ async function detectEndpointRuleBreaks(
     // `functional` counts the OTHER edges from the subject, so the edge being examined is excluded.
     if (isFrom) resolved.otherEdgesFromSubject = subjectEdges.others(afterRelink(e));
 
-    for (const v of validateEdge(meta ?? {}, { label: e.label, properties: e.properties ?? {} }, resolved)) {
+    for (const v of validateEdge(meta ?? {}, recordViewOf('edge', e), resolved)) {
       if (v.field !== 'fromType' && v.field !== 'toType' && v.field !== 'functional') continue;
       out.push({ edgeId: e._id, label: e.label, end, field: v.field, reason: v.reason });
     }
@@ -384,15 +395,9 @@ async function detectDuplicateEdges(
 
 // ── Resolution application ─────────────────────────────────────────────────
 
-/**
- * Property keys that must never be written through a computed index, or they
- * would mutate the object prototype instead of adding a data property.
- */
-const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-/** True when `key` is safe to assign as a plain data property. */
+/** True when `key` is safe to assign as a plain data property (`util/object-internal-keys.ts` holds the keys). */
 function isSafeKey(key: string): boolean {
-  return !PROTO_KEYS.has(key);
+  return !isObjectInternalKey(key);
 }
 
 /**
@@ -462,25 +467,35 @@ export function applyResolutions(
  * Typed rather than a bare `Error` so a caller can tell "this merge is not allowed" from "the merge broke".
  * `dupe-scanner.ts` runs `automerge` unattended and must be able to count refusals without parsing prose — a
  * refusal it cannot see is the do-nothing option wearing the strict option's name.
+ *
+ * **It is a `SchemaViolationError`** (`Q-315`): the refusal every other write door answers, with the same body and the same
+ * `toStructured()` — it used to define a second one, `{ violations }` and nothing else, so a caller that reads `introduced` to say
+ * which of its fields to fix had to special-case merge. Only what the merge INTRODUCED is blamed, and the check it is built from
+ * says so (`classifyMergedEntity`). The status is not the family's: a refused merge is 400 on every merge door (published), and
+ * `mergeRefusal` is what says so before the generic mapping is asked.
  */
-export class MergeSchemaViolation extends Error {
+export class MergeSchemaViolation extends SchemaViolationError {
   constructor(
     readonly survivorId: string,
     readonly absorbedId: string,
     readonly spaceId: string,
-    readonly violations: SchemaViolation[],
+    check: UpdateValidation,
   ) {
-    super(
-      `merge refused: the survivor '${survivorId}' would violate the schema of space '${spaceId}' after `
-      + `absorbing '${absorbedId}' — ${violations.map(v => `${v.field}: ${v.reason}`).join('; ')}`,
-    );
+    // A refused merge names what the MERGE introduced and nothing else: the survivor's own stored undeclared keys are carried as its own
+    // (`classifyMergedEntity`), so they are neither blamed in `introduced` nor listed as `preExisting`, and `violations` is the list the
+    // merge broke — a caller reading the refusal is told what to change about the MERGE, never about records it left alone.
+    super({ ...check, preExisting: [], all: check.introduced, message: mergeRefusedMessage(survivorId, absorbedId, spaceId, check.introduced) });
     this.name = 'MergeSchemaViolation';
   }
+}
 
-  /** What a door carries beside the message (`structuredContent` on MCP, the body on REST): the violations. */
-  toStructured(): Record<string, unknown> {
-    return { violations: this.violations };
-  }
+/**
+ * The sentence a refused merge says: the two ids, the space, and what the merge introduced. The ids and the names are what a caller or a
+ * peer chose, so each is bounded where the sentence is built (R6-11) — a megabyte property key is a sentence, not a megabyte of one.
+ */
+function mergeRefusedMessage(survivorId: string, absorbedId: string, spaceId: string, introduced: readonly SchemaViolation[]): string {
+  return `merge refused: the survivor '${peerText(survivorId)}' would violate the schema of space '${peerText(spaceId)}' after `
+    + `absorbing '${peerText(absorbedId)}' — ${peerList(introduced.map(v => `${v.field}: ${v.reason}`), '; ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}`;
 }
 
 /**
@@ -600,7 +615,11 @@ function mergeTooLargeMessage({ survivor, absorbed, spaceId, tally, bound, rever
  */
 export function mergeRefusal(err: unknown): MergeRefusal | null {
   if (err instanceof MergeTooLarge) return { status: 422, refusal: err, body: { error: err.message, ...err.toStructured() } };
-  if (err instanceof MergeSchemaViolation) return { status: 400, refusal: err, body: { error: err.message, ...err.toStructured() } };
+  // The standard schema-refusal body, with the status a merge has always answered it with (never the family's 422/400 verb split).
+  if (err instanceof MergeSchemaViolation) {
+    countSchemaRefusal('merge', err);
+    return { status: 400, refusal: err, body: err.toStructured() };
+  }
   return null;
 }
 
@@ -660,8 +679,9 @@ interface MergeWrite {
  * edge holds, apply the resolved properties to the survivor, delete the absorbed entity — ONE transaction under the
  * seq horizon hold (`inHeldTransaction`), each class of record one bulk write with one seq block.
  *
- * Before the hold, in this order and for these reasons: the schema check (pure — a refusal writes nothing, not
- * even a seq); the bound (`MERGE_MAX_RELINKS`, counted, so a hub is refused before its edges are read); and the
+ * Before the hold, in this order and for these reasons: the bound (`MERGE_MAX_RELINKS`, counted, so a hub is refused before its
+ * edges are read and before anything is evaluated); the schema check (pure — a refusal writes nothing, not
+ * even a seq); and the
  * survivor's embedding (the model is not the driver, and every await inside the hold holds every reader of the
  * space — a first-time model load inside it used to outlive the hold's deadline and fail the merge 503).
  *
@@ -678,6 +698,17 @@ export async function executeMerge(
   const mergedTags = mergeTags(survivor.tags, absorbed.tags);
 
   /*
+   * COUNTED FIRST (R6-10): a merge above the bound is refused before anything is evaluated, so the size of the merge decides nothing a
+   * schema check would have to be run for, and a refusal of the size is never preceded by a rule evaluation of a record it will not write.
+   */
+  const tally = await relinkTally(spaceId, absorbed._id);
+  if (relinkTotal(tally) > MERGE_MAX_RELINKS) {
+    // The other direction is counted only here, on the refusal path, so the refusal offers it only when it is true.
+    const reverseRelinks = relinkTotal(await relinkTally(spaceId, survivor._id));
+    throw new MergeTooLarge({ survivor, absorbed, spaceId, tally, bound: MERGE_MAX_RELINKS, reverseRelinks });
+  }
+
+  /*
    * THE MERGE PATH RUNS THE VALIDATORS THE WRITE PATH RUNS. It did not, and nothing noticed.
    *
    * `mergeProperties` applies each property's `mergeFn`, so the survivor's properties are a value NEITHER
@@ -691,11 +722,18 @@ export async function executeMerge(
    * transaction: the check is pure, so a refusal writes nothing at all, where inside the transaction it rolled the
    * relinks back but had already spent their seqs.
    */
-  const violations = validateEntity(getSpaceMeta(spaceId) ?? {}, {
-    name: survivor.name, type: survivor.type, properties: mergedProperties,
-  });
-  const verdict = applyValidation(getSpaceMeta(spaceId), violations);
-  if (verdict.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
+  /*
+   * Judged as the write it is: what the merge INTRODUCES, against the survivor as stored (`classifyMergedEntity`). A key the survivor
+   * already stores is not blamed, whether its type declares it or not; a key the absorbed brings in that the survivor lacks is.
+   */
+  const meta = getSpaceMeta(spaceId);
+  const afterRows = validateEntity(meta ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
+  const beforeRows = validateEntity(meta ?? {}, recordViewOf('entity', survivor));
+  const check = classifyMergedEntity(meta, survivor, mergedProperties, beforeRows, afterRows);
+  // What the refusal and the warning name: the violations THIS merge introduced, never the survivor's own stored ones.
+  const violations = check.introduced;
+  if (check.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, check);
+  const verdict = applyValidation(meta, violations);
   if (verdict.warnings.length > 0) {
     log.warn(
       `merge: the survivor '${peerText(survivor._id)}' in space '${peerText(spaceId)}' violates its own schema after merging `
@@ -703,13 +741,6 @@ export async function executeMerge(
       + `mode so the merge PROCEEDED; these would have been refused on a direct write: `
       + peerList(verdict.warnings.map(v => `${v.field}: ${v.reason}`), '; '),
     );
-  }
-
-  const tally = await relinkTally(spaceId, absorbed._id);
-  if (relinkTotal(tally) > MERGE_MAX_RELINKS) {
-    // The other direction is counted only here, on the refusal path, so the refusal offers it only when it is true.
-    const reverseRelinks = relinkTotal(await relinkTally(spaceId, survivor._id));
-    throw new MergeTooLarge({ survivor, absorbed, spaceId, tally, bound: MERGE_MAX_RELINKS, reverseRelinks });
   }
 
   /*

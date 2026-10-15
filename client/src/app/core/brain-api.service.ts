@@ -661,7 +661,7 @@ export class BrainApi {
   // the same space would reject on the create form next to it), and it stores NO audit snapshot (so every
   // chrono edit made in this app was absent from the before/after trail that entities, facts and edges
   // all leave). An integrator found nine of their own flows on this route before we found one of ours.
-  updateChrono(spaceId: string, id: string, body: Partial<{ title: string; type: ChronoType; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; linkEntities: string[]; linkFacts: string[]; description: string; properties: Record<string, string | number | boolean>; suppressEmbeddings: boolean }>): Observable<ChronoEntry> {
+  updateChrono(spaceId: string, id: string, body: Partial<{ title: string; type: ChronoType; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; linkEntities: string[]; linkFacts: string[]; description: string; properties: Record<string, string | number | boolean>; suppressEmbeddings: boolean; deleteFields: string[] }>): Observable<ChronoEntry> {
     return this.http.patch<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`, body);
   }
 

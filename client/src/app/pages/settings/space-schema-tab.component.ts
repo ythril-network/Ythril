@@ -14,7 +14,7 @@
  * unrendered. That hazard is exactly why OnPush was not retrofitted onto the 1600-line parent and
  * is applied per component instead.
  */
-import { Component, ChangeDetectionStrategy, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
+import { Component, ChangeDetectionStrategy, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
@@ -22,21 +22,29 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
-import { SpaceSettingsState, emptyTypeSchemaState, typeSchemaFromState, type TypeSchemaState } from './space-settings-state.service';
-import { SchemaApi } from '../../core/schema-api.service';
+import { SpaceSettingsState, emptyTypeSchemaState, ruleRowsFromWire, typeSchemaFromState, typeStateFromSchema, type RuleRow, type TypeSchemaState } from './space-settings-state.service';
+import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
-import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, TypeSchema, recordTtlWindows } from '../../core/api.types';
+import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, SpaceMeta, TypeSchema, recordTtlWindows } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
+import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { httpErrorReason } from '../../core/http-error';
 import { saveBlob } from '../../core/authenticated-download';
 
 import { SCHEMA_MD_STYLES } from './schema-styles';
-import { SchemaTypeEditorComponent } from './schema-type-editor.component';
+import { SchemaTypeEditorComponent, type LayerMark } from './schema-type-editor.component';
+import { RuleRowsComponent, type RuleRowRefusal } from '../../shared/rule-rows.component';
+import { RULE_LIMITS } from '../../shared/rule-limits';
+import { SpacesApi, type ValidateSchemaResult } from '../../core/spaces-api.service';
+import { AuthApi } from '../../core/auth-api.service';
+import { describeWarnings, type RefusalRow } from '../../core/refusal-text';
+import { proposalFor } from './space-schema-layers.component';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent],
+  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
   template: `
@@ -62,6 +70,81 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
   </div>
 </div>
 
+<!-- SPACE RULES (F-46): constraints over a record that apply to every type, or to the kinds a rule names. Edited here, shown read-only in the
+     pane of each type they apply to. A token without schema admin sees them, and the reason it cannot change them. -->
+<section class="sch-space-rules" data-testid="space-rules-section">
+  <div class="section-title">{{ 'rules.space.title' | transloco }}
+    <span class="sch-hint">{{ 'rules.space.hint' | transloco }}</span></div>
+  @if (!canEditRules()) {
+    <p class="sch-hint" data-testid="rules-readonly-reason">{{ 'rules.readonlyReason' | transloco }}</p>
+  }
+  <app-rule-rows [rules]="state.schRules" [space]="true" [readOnly]="!canEditRules()" [max]="limits.perSpace"
+    [refusal]="spaceRuleRefusal()" idPrefix="space-rules" />
+</section>
+
+<!-- THE LIVE CHECK: ask the server how the schema as it stands (staged edits included) judges a pasted record, or the data the space
+     already holds, before saving it. Stored data is read a page at a time, and the all-clear is said only when the whole space was read. -->
+<section class="sch-validate">
+  <div class="section-title">{{ 'validate.title' | transloco }}
+    <span class="sch-hint">{{ 'validate.hint' | transloco }}</span></div>
+  <div class="val-modes" role="radiogroup" [attr.aria-label]="'validate.title' | transloco">
+    <label class="val-mode"><input type="radio" name="validateMode" value="sample" data-testid="validate-mode-sample"
+      [checked]="validateMode() === 'sample'" (change)="setValidateMode('sample')" /> {{ 'validate.mode.sample' | transloco }}</label>
+    <label class="val-mode"><input type="radio" name="validateMode" value="stored" data-testid="validate-mode-stored"
+      [checked]="validateMode() === 'stored'" (change)="setValidateMode('stored')" /> {{ 'validate.mode.stored' | transloco }}</label>
+  </div>
+  @if (validateMode() === 'sample') {
+    <textarea class="val-sample" data-testid="validate-sample" rows="4" spellcheck="false"
+      [ngModel]="validateSampleText()" (ngModelChange)="validateSampleText.set($event)"
+      [attr.aria-label]="'validate.sample.label' | transloco" [placeholder]="'validate.sample.placeholder' | transloco"></textarea>
+  }
+  @let stale = isValidateStale();
+  <div class="val-actions">
+    <button class="btn btn-secondary btn-sm" type="button" data-testid="validate-schema" [disabled]="validating()" (click)="runValidate()">
+      @if (validating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;margin-inline-end:5px;"></span> }{{ 'validate.run' | transloco }}
+    </button>
+    @if (validateCanContinue() && !stale) {
+      <button class="btn btn-secondary btn-sm" type="button" data-testid="validate-continue" [disabled]="validating()" (click)="runValidate(true)">{{ 'validate.continue' | transloco }}</button>
+    }
+  </div>
+  @if (validateError()) {
+    <div class="sch-msg err" role="alert">{{ validateError() }}</div>
+  }
+  <!-- The summary is a polite live region, and it is in the page from the start: a region inserted together with its words is not reliably
+       read, so finishing a check (the readout, the all-good word) or going stale is announced because its words change inside it. -->
+  <div class="val-summary" role="status" data-testid="validate-status">
+    @if (validateResult() && stale) {
+      <!-- The schema was edited after this check ran: what it found describes the schema as it WAS, so none of it is shown. -->
+      <div class="sch-msg warn" data-testid="validate-stale">{{ 'validate.stale' | transloco }}</div>
+    } @else if (validateResult()) {
+      <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
+      @if (validateMode() === 'stored') {
+        <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
+          {{ validateProgressKey() | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
+          @if (!validateDone()) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
+        </div>
+      }
+      @if (validateAllGood()) {
+        <!-- "Matches" is said only when the whole space (or the one sample) was read and nothing was found. -->
+        <div class="sch-msg ok" data-testid="validate-all-good"><app-status-pill variant="ok" icon="check-circle">{{ 'validate.outcome.match' | transloco }}</app-status-pill> {{ 'validate.allGood' | transloco }}</div>
+      }
+    }
+  </div>
+  @if (validateResult() && !stale) {
+    @if (validateRows().length) {
+      <ul class="val-violations">
+        @for (v of validateRows(); track $index) {
+          <li>@if (v.sample) { <span class="val-where" data-testid="validate-sample-row">{{ 'validate.sample.row' | transloco }}</span> } @else { <code class="val-where">{{ v.where }}</code> }
+            @for (r of v.rows; track $index) {
+              <span class="val-row"><app-status-pill [variant]="outcomeWord(r.outcome).variant">{{ outcomeWord(r.outcome).key | transloco }}</app-status-pill> {{ r.text }}</span>
+            }
+          </li>
+        }
+      </ul>
+    }
+  }
+</section>
+
 <!-- export / import toolbar -->
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
   <button class="btn btn-secondary btn-sm" type="button" (click)="exportSchema()" [attr.title]="'spaces.schema.exportTitle' | transloco"><ph-icon name="upload" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.exportJsonButton' | transloco }}</button>
@@ -73,25 +156,19 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
   <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.autoSyncHint' | transloco }}</span>
 </div>
 <!-- collection tabs -->
+<!-- One tab stop for the strip (roving tabindex): the selected tab is in the Tab order, the others are reached with the arrow keys, Home and End. -->
 <div class="sch-coll-tabs" role="tablist" [attr.aria-label]="'spaces.schema.collTabsAriaLabel' | transloco">
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='entity'" [attr.aria-selected]="state.schemaCollTab()==='entity'" role="tab" (click)="state.schemaCollTab.set('entity');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.entities' | transloco }}
-    @if (state.typeCount('entity')) { <span class="sch-cnt-badge">{{ state.typeCount('entity') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='edge'" [attr.aria-selected]="state.schemaCollTab()==='edge'" role="tab" (click)="state.schemaCollTab.set('edge');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.edges' | transloco }}
-    @if (state.typeCount('edge')) { <span class="sch-cnt-badge">{{ state.typeCount('edge') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='fact'" [attr.aria-selected]="state.schemaCollTab()==='fact'" role="tab" (click)="state.schemaCollTab.set('fact');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.facts' | transloco }}
-    @if (state.typeCount('fact')) { <span class="sch-cnt-badge">{{ state.typeCount('fact') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='chrono'" [attr.aria-selected]="state.schemaCollTab()==='chrono'" role="tab" (click)="state.schemaCollTab.set('chrono');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.chrono' | transloco }}
-    @if (state.typeCount('chrono')) { <span class="sch-cnt-badge">{{ state.typeCount('chrono') }}</span> }
-  </button>
+  @for (t of collTabs; track t.kt) {
+    <button class="sch-coll-tab" type="button" role="tab" [id]="'sch-coll-tab-' + t.kt" [attr.data-testid]="'sch-coll-tab-' + t.kt"
+      [class.active]="state.schemaCollTab() === t.kt" [attr.aria-selected]="state.schemaCollTab() === t.kt"
+      aria-controls="sch-coll-panel" [attr.tabindex]="state.schemaCollTab() === t.kt ? 0 : -1"
+      (click)="selectCollTab(t.kt)" (keydown)="onCollTabKey($event)">
+      {{ t.label | transloco }}
+      @if (state.typeCount(t.kt)) { <span class="sch-cnt-badge">{{ state.typeCount(t.kt) }}</span> }
+    </button>
+  }
 </div>
-<div class="sch-coll-body">
+<div class="sch-coll-body" id="sch-coll-panel" role="tabpanel" [attr.aria-labelledby]="'sch-coll-tab-' + state.schemaCollTab()">
 
   <!-- collection sub-header (per-type guidance for the active collection) -->
   <!-- ONE hint, with the field name as a parameter. There used to be four near-identical strings that
@@ -141,22 +218,25 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
            (and push the imports / Save out of reach) — it stays put and the list scrolls. -->
       <div class="sch-type-list">
       @for (name of state.typeNames(kt); track name) {
-        <button type="button" class="sch-type-item" [class.sel]="state.isTypeSelected(kt,name)" (click)="state.selectType(kt,name)">
+        <button type="button" class="sch-type-item" [class.sel]="state.isTypeSelected(kt,name)" [attr.aria-current]="state.isTypeSelected(kt,name) ? 'true' : null" (click)="state.selectType(kt,name)">
           <span class="nm">{{ name }}</span>
           <span class="sch-type-badges">
             @if (state.typeLibRef(kt,name)) {
-              <span class="badge badge-blue">Library</span>
+              <span class="badge badge-blue">{{ 'spaces.schema.badge.library' | transloco }}</span>
             } @else {
               @if (state.typeState(kt,name).propertySchemas.length) {
                 <span class="badge badge-gray">{{ state.typeState(kt,name).propertySchemas.length }}p</span>
               }
+              @if (state.typeState(kt,name).rules.length) {
+                <span class="badge badge-gray rules-count" data-testid="rules-count" [attr.title]="'rules.countTitle' | transloco: { count: state.typeState(kt,name).rules.length }">{{ state.typeState(kt,name).rules.length }}</span>
+              }
               @if (kt === 'entity' && state.typeState(kt,name).namingPattern) {
-                <span class="badge badge-gray">pat</span>
+                <span class="badge badge-gray">{{ 'spaces.schema.badge.pattern' | transloco }}</span>
               }
               <!-- A window deletes records, so it is visible from the list rather than only after selecting
                    the type. Amber, not grey: this is the one badge here that describes data loss. -->
               @if (state.typeState(kt,name).retentionDays || state.typeState(kt,name).retentionContentDays) {
-                <span class="badge badge-yellow">ttl</span>
+                <span class="badge badge-yellow">{{ 'spaces.schema.badge.ttl' | transloco }}</span>
               }
             }
           </span>
@@ -207,6 +287,11 @@ import { SchemaTypeEditorComponent } from './schema-type-editor.component';
           [draft]="state.typeState(kt,name)"
           [libRef]="state.typeLibRef(kt,name)"
           [linkedProps]="linkedProps(kt,name)"
+          [linkedRules]="linkedRules(kt,name)"
+          [applicableRules]="applicableRules(kt)"
+          [ruleRefusal]="typeRuleRefusal(kt,name)"
+          [layerMarks]="layerMarksFor(kt,name)"
+          (proposeTo)="onProposeProperty(kt,name,$event)"
           [spaceWindowDays]="spaceWindow(kt)"
           [entityTypeNames]="state.typeNames('entity')"
           (unlink)="unlinkType(kt,name)" />
@@ -317,6 +402,67 @@ export class SpaceSchemaTabComponent implements OnInit {
   private schemaApi = inject(SchemaApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+  private spacesApi = inject(SpacesApi);
+  private injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  protected readonly limits = RULE_LIMITS;
+
+  // ── the collection tabs (roving tabindex)
+  /** The strip, left to right: the order the arrow keys walk. */
+  protected readonly collTabs: readonly { kt: KnowledgeType; label: string }[] = [
+    { kt: 'entity', label: 'spaces.schema.tab.entities' },
+    { kt: 'edge', label: 'spaces.schema.tab.edges' },
+    { kt: 'fact', label: 'spaces.schema.tab.facts' },
+    { kt: 'chrono', label: 'spaces.schema.tab.chrono' },
+  ];
+
+  protected selectCollTab(kt: KnowledgeType): void {
+    this.state.schemaCollTab.set(kt);
+    this.schImportError.set('');
+    this.schImportInfo.set('');
+  }
+
+  /**
+   * ArrowRight / ArrowLeft move to the next / previous tab and wrap, Home / End go to the first / last. The tab that receives focus is
+   * selected as well (the panel beneath is a quick switch, not a load), so the one tab in the Tab order is always the selected one.
+   */
+  protected onCollTabKey(event: KeyboardEvent): void {
+    const at = this.collTabs.findIndex(t => t.kt === this.state.schemaCollTab());
+    if (at < 0) return;
+    const last = this.collTabs.length - 1;
+    const to = event.key === 'ArrowRight' ? (at === last ? 0 : at + 1)
+      : event.key === 'ArrowLeft' ? (at === 0 ? last : at - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    this.selectCollTab(this.collTabs[to]!.kt);
+    // The tabindex of the new tab is applied by the next change detection; focus once it has run.
+    queueMicrotask(() => this.host.nativeElement.querySelector<HTMLElement>(`#sch-coll-tab-${this.collTabs[to]!.kt}`)?.focus());
+  }
+
+  // ── rights: the rules are a constraint on every write, so changing them needs schema admin
+  /** Whether this token may change rules. Unknown (still loading, or no rights to read) counts as yes: the server decides, this only explains. */
+  private readonly schemaAdmin = signal(true);
+  readonly canEditRules = computed(() => this.schemaAdmin());
+
+  // ── the live check
+  protected readonly validateMode = signal<'sample' | 'stored'>('sample');
+  protected readonly validateSampleText = signal('');
+  protected readonly validating = signal(false);
+  protected readonly validateError = signal('');
+  protected readonly validateResult = signal<ValidateSchemaResult | null>(null);
+  /**
+   * Whether any page of the check has found a violation. A boolean, not the rows: only the CURRENT page's rows are shown, and the
+   * earlier pages' rows were kept for the life of the check to be asked whether there were any.
+   */
+  private readonly validateFound = signal(false);
+  private readonly validateCursor = signal<string | null>(null);
+  /** The records the check has read, summed over its pages: each answer's `progress.checked` is what THAT call read. */
+  private readonly validateRead = signal(0);
+  /** How many records the space held when the check started, as the latest answer says. */
+  private readonly validateTotal = signal(0);
 
   @ViewChild('schImportInput') schImportInputRef?: ElementRef<HTMLInputElement>;
   @ViewChild('schTypeImportInput') schTypeImportInputRef?: ElementRef<HTMLInputElement>;
@@ -375,11 +521,232 @@ export class SpaceSchemaTabComponent implements OnInit {
   readonly libEntriesByName = signal<Record<string, SchemaLibraryEntry>>({});
 
   ngOnInit(): void {
+    this.loadRights();
     // Load the library once so linked types can render their (read-only) properties and be unlinked
     // into an inline copy without a per-type round-trip.
     this.schemaApi.listSchemaLibrary().subscribe({
       next: ({ entries }) => this.libEntriesByName.set(Object.fromEntries(entries.map(e => [e.name, e]))),
       error: () => this.libEntriesByName.set({}),
+    });
+  }
+
+  /**
+   * Read what this token may do to the space's schema. Silent on failure and when the host has no auth api (a spec of the tab alone):
+   * the section simply stays editable, and a write the token may not make is refused by the server.
+   */
+  private loadRights(): void {
+    let auth: AuthApi;
+    try { auth = this.injector.get(AuthApi); } catch { return; }
+    auth.verifyToken().subscribe({
+      next: (me) => {
+        const rights = me.rights;
+        if (!rights) return;
+        const id = this.state.settingsSpace()?.id ?? '';
+        const admin = rights.instanceAdmin || rights.spaceAdmin?.floor === true || rights.spaceAdmin?.spaces.includes(id) === true
+          || rights.perSpace?.[id]?.['schema'] === 'admin' || (!rights.perSpace?.[id] && rights.floor?.['schema'] === 'admin');
+        this.schemaAdmin.set(!!admin);
+      },
+      error: () => { /* the server decides */ },
+    });
+  }
+
+  // ── rules: what the type pane and the space section are told about a refused save
+  /** The refusal, when it names a rule of THIS type: the same object each time, so a row is asked to open once per refusal. */
+  typeRuleRefusal(kt: KnowledgeType, name: string): RuleRowRefusal | null {
+    const r = this.state.ruleRefusal();
+    return r && r.scope === 'type' && r.kt === kt && r.type === name ? r : null;
+  }
+
+  spaceRuleRefusal(): RuleRowRefusal | null {
+    const r = this.state.ruleRefusal();
+    return r && r.scope === 'space' ? r : null;
+  }
+
+  /** The space rules that apply to a record of this kind: those that name it, and those that name none (every kind). */
+  applicableRules(kt: KnowledgeType): { name: string; message: string }[] {
+    return this.state.schRules.filter(r => r.kinds.length === 0 || r.kinds.includes(kt)).map(r => ({ name: r.name, message: r.message }));
+  }
+
+  // ── layers: the properties a network supplies
+  private static readonly NO_MARKS: Record<string, LayerMark> = {};
+
+  /** Per `kind|type`: the properties whose definition a network layer supplies, and which network applies. Derived from the clashes the layers answer lists. */
+  private readonly layerMarks = computed<Record<string, Record<string, LayerMark>>>(() => {
+    const view = this.state.schemaLayers();
+    const out: Record<string, Record<string, LayerMark>> = {};
+    if (!view) return out;
+    const label = (id: string): string => view.layers.find(l => l.networkId === id)?.networkLabel ?? id;
+    for (const c of view.clashes) {
+      if (!c.kind || !c.type || !c.property || !c.values.length) continue;
+      const [winner, ...rest] = c.values;
+      (out[`${c.kind}|${c.type}`] ??= {})[c.property] = {
+        networkId: winner!.networkId,
+        networkLabel: label(winner!.networkId),
+        others: rest.map(v => ({ networkId: v.networkId, networkLabel: label(v.networkId) })),
+      };
+    }
+    return out;
+  });
+
+  layerMarksFor(kt: KnowledgeType, name: string): Record<string, LayerMark> {
+    return this.layerMarks()[`${kt}|${name}`] ?? SpaceSchemaTabComponent.NO_MARKS;
+  }
+
+  /** Offer the definition that applies here to another network that holds a different one: a vote on that network, never a direct write (F-39.5). */
+  onProposeProperty(kt: KnowledgeType, name: string, ev: { key: string; networkId: string }): void {
+    const view: SchemaLayersView | null = this.state.schemaLayers();
+    const spaceId = this.state.settingsSpace()?.id;
+    const clash = view?.clashes.find(c => c.kind === kt && c.type === name && c.property === ev.key);
+    if (!view || !spaceId || !clash) return;
+    const layer = view.layers.find(l => l.networkId === ev.networkId)?.meta ?? {};
+    const network = view.layers.find(l => l.networkId === ev.networkId)?.networkLabel ?? ev.networkId;
+    this.schemaApi.proposeToNetwork(spaceId, ev.networkId, proposalFor(clash, layer)).subscribe({
+      next: () => {
+        this.toast.success(this.transloco.translate('spaces.schema.layers.proposed', { network }));
+        this.state.layersRefresh.update(n => n + 1);
+      },
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'spaces.schema.layers.proposeFailed')),
+    });
+  }
+
+  // ── the live check
+  setValidateMode(mode: 'sample' | 'stored'): void {
+    this.validateMode.set(mode);
+    this.resetValidate();
+  }
+
+  private resetValidate(): void {
+    this.validateResult.set(null);
+    this.validateFound.set(false);
+    this.validateCursor.set(null);
+    this.validateRead.set(0);
+    this.validateTotal.set(0);
+    this.validateRunMeta = null;
+    this.validateRunKey = '';
+    this.validateError.set('');
+  }
+
+  /** True when the walk reached the end of the space (or the sample was judged): nothing is left after the latest answer. The answer's `complete`. */
+  readonly validateDone = computed(() => {
+    const r = this.validateResult();
+    return !!r && SpaceSchemaTabComponent.isDone(r);
+  });
+
+  private static isDone(result: ValidateSchemaResult): boolean { return result.complete === true; }
+
+  /** The next page is offered while the check is not done and the server gave a cursor. */
+  readonly validateCanContinue = computed(() => this.validateMode() === 'stored' && this.validateResult() !== null && !this.validateDone() && this.validateCursor() !== null);
+
+  /**
+   * What the whole check has read so far, of how many records the space holds. Each answer's `progress.checked` is what THAT call read, so
+   * the readout is their sum (b23 W6b: a call no longer re-reads records an earlier page passed, and counts nothing past its page); the
+   * total is the latest answer's. An answer without `progress` falls back to the one call's per-collection count.
+   */
+  readonly validateChecked = computed(() => ({ checked: this.validateRead(), total: this.validateTotal() }));
+
+  /**
+   * The sentence the readout is said in. "Checked N of M" says the check has covered M, so a check that is not done never says it when N has
+   * reached M (the space grew while paging): it says how many it has read so far, and no total to contradict "not finished" (Q-488).
+   */
+  readonly validateProgressKey = computed(() => {
+    const { checked, total } = this.validateChecked();
+    return !this.validateDone() && checked >= total ? 'validate.progressOpen' : 'validate.progress';
+  });
+
+  /** "All good" is said only when the whole space was read (or the sample judged) and nothing was found. */
+  readonly validateAllGood = computed(() => this.validateDone() && !this.validateFound());
+
+  /** What one answer read: its `progress`, else the per-collection counts of the call. */
+  private static readOf(result: ValidateSchemaResult): { checked: number; total: number } {
+    if (result.progress) return result.progress;
+    let checked = 0, total = 0;
+    for (const c of Object.values(result.checked ?? {})) { checked += c.checked; total += c.total; }
+    return { checked, total };
+  }
+
+  private static readonly VALIDATE_SHOWN = 50;
+
+  /**
+   * The CURRENT page's rows. Each page is asked for at most {@link VALIDATE_SHOWN} records, so a page's rows are all shown and the next
+   * page brings new ones; listing every page's rows together and showing the first fifty left page two invisible (b23 verify U4). A
+   * sample's one row has no stored id: it is labelled as the pasted record (b23 verify U2: it read "entities undefined").
+   */
+  readonly validateRows = computed<{ where: string; sample: boolean; rows: RefusalRow[] }[]>(() =>
+    (this.validateResult()?.violations ?? []).slice(0, SpaceSchemaTabComponent.VALIDATE_SHOWN).map(v => ({
+      where: `${v.collection} ${v._id ?? ''}`,
+      sample: this.validateMode() === 'sample',
+      rows: describeWarnings(this.transloco, '', v.violations),
+    })));
+
+  /** The word an outcome is said with (StatusPill's vocabulary): the translation key, and the pill's variant. */
+  protected outcomeWord(outcome: RefusalRow['outcome']): { key: string; variant: StatusVariant } {
+    switch (outcome) {
+      case 'could_not_evaluate': return { key: 'validate.outcome.couldNotEvaluate', variant: 'warn' };
+      case 'too_large': return { key: 'validate.outcome.tooLarge', variant: 'warn' };
+      case 'undeclared': return { key: 'validate.outcome.undeclared', variant: 'warn' };
+      default: return { key: 'validate.outcome.violated', variant: 'error' };
+    }
+  }
+
+  /** The schema the result on screen was judged under, and its serialisation: what a later edit is told apart from. Null while there is no result. */
+  private validateRunMeta: Partial<SpaceMeta> | null = null;
+  private validateRunKey = '';
+
+  /**
+   * True when the schema has been edited since the check that produced the result on screen ran. The staged schema is plain mutable
+   * state with no change signal, so it is compared as the request would carry it; the template asks on every pass, and an edit is an event
+   * inside this component's tree, so the pass happens. A stale result is not shown and cannot be continued: it describes a schema that is
+   * no longer the one on the screen.
+   */
+  isValidateStale(): boolean {
+    return this.validateResult() !== null && this.validateRunKey !== JSON.stringify(this.state.buildMeta());
+  }
+
+  /**
+   * Run the live check on the schema AS STAGED. A sample is one pasted record (nothing is scanned); stored data is read a page at a time,
+   * the next page asked for with the cursor the last answer gave. A continuation belongs to the run it continues: it asks under the schema
+   * that run started with (never the staged schema as it is now), and after an edit there is nothing to continue.
+   */
+  runValidate(next = false): void {
+    const spaceId = this.state.settingsSpace()?.id;
+    if (!spaceId) return;
+    if (next && (!this.validateRunMeta || this.isValidateStale())) return;
+    const meta = next ? this.validateRunMeta! : this.state.buildMeta();
+    const body: Parameters<SpacesApi['validateSchema']>[1] = { meta };
+    if (this.validateMode() === 'sample') {
+      try {
+        body.sample = JSON.parse(this.validateSampleText());
+      } catch {
+        this.resetValidate();
+        this.validateError.set(this.transloco.translate('validate.sample.notJson'));
+        return;
+      }
+    } else {
+      // A page holds no more than is shown, so every row of it is seen and continuing brings the next ones.
+      body.limit = SpaceSchemaTabComponent.VALIDATE_SHOWN;
+      if (next && this.validateCursor()) body.after = this.validateCursor()!;
+    }
+    if (!next) {
+      this.resetValidate();
+      this.validateRunMeta = meta;
+      this.validateRunKey = JSON.stringify(meta);
+    }
+    this.validateError.set('');
+    this.validating.set(true);
+    this.spacesApi.validateSchema(spaceId, body).subscribe({
+      next: (result) => {
+        this.validating.set(false);
+        this.validateResult.set(result);
+        if (result.violations?.length) this.validateFound.set(true);
+        const read = SpaceSchemaTabComponent.readOf(result);
+        this.validateRead.update(n => n + read.checked);
+        this.validateTotal.set(read.total);
+        this.validateCursor.set(SpaceSchemaTabComponent.isDone(result) ? null : (result.nextAfter ?? null));
+      },
+      error: (err) => {
+        this.validating.set(false);
+        this.validateError.set(refusalText(this.transloco, err, 'validate.failed'));
+      },
     });
   }
 
@@ -393,6 +760,11 @@ export class SpaceSchemaTabComponent implements OnInit {
   linkedProps(kt: KnowledgeType, name: string): { key: string; s: PropertySchema }[] {
     const schema = this.linkedEntry(kt, name)?.schema;
     return Object.entries(schema?.propertySchemas ?? {}).map(([key, s]) => ({ key, s }));
+  }
+
+  /** A linked type's rules, as `{ name, rule, message }` rows (read-only), resolved from the library like `linkedProps`; empty until the entry has loaded. */
+  linkedRules(kt: KnowledgeType, name: string): RuleRow[] {
+    return ruleRowsFromWire(this.linkedEntry(kt, name)?.schema.rules);
   }
 
   /**
@@ -443,18 +815,15 @@ export class SpaceSchemaTabComponent implements OnInit {
   unlinkType(kt: KnowledgeType, name: string): void {
     const entry = this.linkedEntry(kt, name);
     if (!entry) { this.toast.error(this.transloco.translate('spaces.schema.libRef.unlinkFailed')); return; }
-    const schema = entry.schema;
     this.state.schTypeSchemas = {
       ...this.state.schTypeSchemas,
       [kt]: {
         ...(this.state.schTypeSchemas[kt] ?? {}),
-        // No retention: a library entry cannot carry one (the library's own schema rejects the field), so an
-        // unlinked type starts on the space default rather than inheriting a window from somewhere it never had.
+        // The inline copy of EVERYTHING the entry holds - description, edge ends, embedding setting, rules, not only the naming
+        // pattern and the properties - through the one reader of a wire schema. A library entry carries no retention (its own
+        // schema rejects the field), so an unlinked type starts on the space default rather than inheriting a window it never had.
         // _libRef intentionally dropped — the type is now a plain inline schema.
-        [name]: emptyTypeSchemaState({
-          namingPattern:   schema.namingPattern ?? '',
-          propertySchemas: Object.entries(schema.propertySchemas ?? {}).map(([k, ps]) => ({ key: k, s: { ...ps }, _enumInput: '' })),
-        }),
+        [name]: typeStateFromSchema(entry.schema),
       },
     };
   }
@@ -515,7 +884,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         }));
       },
       error: (err) => {
-        this.exportLibDialog.set({ ...d, saving: false, error: err?.error?.error ?? this.transloco.translate('spaces.schema.exportToLibrary.failed') });
+        this.exportLibDialog.set({ ...d, saving: false, error: refusalText(this.transloco, err, 'spaces.schema.exportToLibrary.failed') });
       },
     });
   }
@@ -531,43 +900,7 @@ export class SpaceSchemaTabComponent implements OnInit {
    * gave two different answers depending on which button was used.
    */
   private mapImportedTypeSchema(ts2: Record<string, unknown>): TypeSchemaState {
-    const ref = ts2['$ref'];
-    if (typeof ref === 'string' && ref.startsWith('library:')) {
-      // `_libRef` is the editor's marker for "this type is a library reference"; `buildMeta()` turns it
-      // back into `{ $ref: 'library:<name>' }` on save, and the server resolves it.
-      return emptyTypeSchemaState({ _libRef: ref.slice('library:'.length) });
-    }
-    // A retention window travels with the type it belongs to. It is read defensively because the file is
-    // arbitrary JSON: a string or a negative number becomes "inherit" rather than a save the API will reject.
-    const ret = ts2['retention'];
-    const win = (k: string): number | null => {
-      if (!ret || typeof ret !== 'object' || Array.isArray(ret)) return null;
-      const v = (ret as Record<string, unknown>)[k];
-      return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
-    };
-    return emptyTypeSchemaState({
-      namingPattern:   typeof ts2['namingPattern'] === 'string' ? ts2['namingPattern'] : '',
-      retentionDays:        win('days'),
-      retentionContentDays: win('contentDays'),
-      /*
-       * Read in so they can be written back out. No control edits either — but `typeSchemaFromState` REBUILDS
-       * the type object, so a field this state never holds is deleted the next time an operator saves any type
-       * schema. Somebody who declared endpoint types through the API and later renamed a property in the editor
-       * would have lost the declaration with no message.
-       */
-      ...(ts2['endpoints'] !== undefined ? { endpoints: ts2['endpoints'] as { from?: string[]; to?: string[] } } : {}),
-      ...(typeof ts2['functional'] === 'boolean' ? { functional: ts2['functional'] } : {}),
-      propertySchemas: (() => {
-        const ps = ts2['propertySchemas'];
-        if (!ps || typeof ps !== 'object' || Array.isArray(ps)) return [];
-        // Spread preserves every field, including `$ref` (library references).
-        return Object.entries(ps as Record<string, unknown>).map(([k, v]) => ({
-          key: k,
-          s:   { ...(v as PropertySchema) },
-          _enumInput: '',
-        }));
-      })(),
-    });
+    return typeStateFromSchema(ts2);
   }
 
   onImportSchemaFile(event: Event): void {
@@ -759,7 +1092,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         if (losesRetention) this.toast.info(this.transloco.translate('spaces.schema.retention.libDropped', { name }));
       },
       error: (err) => {
-        this.schImportError.set(err?.error?.error ?? this.transloco.translate('spaces.schema.libSave.failed'));
+        this.schImportError.set(refusalText(this.transloco, err, 'spaces.schema.libSave.failed'));
       },
     });
   }

@@ -17,7 +17,7 @@
  *   write's return, a webhook payload, the live-view bus - even when a caller asks for it by projection;
  * - **a stale one is healed, counted and reported**: a phantom marker does not block the next insert for its subject,
  *   the heal is signalled through the housekeeping reporter, and `validate-schema` names stale markers under `staleGuards`
- *   without moving `totalViolations`;
+ *   without adding to the violating records;
  * - **its index exists** after `initSpace` creates the collection, after the background build for an existing one (which
  *   `initSpace` never scans), and after an online restore; it is partial (unmarked edges, and edges whose marker is `null`,
  *   coexist), duplicate markers are thinned and reported rather than failing the build, and a store failure during the
@@ -487,7 +487,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
   });
 
   describe('validate-schema reports a stale marker without calling it a violation', () => {
-    it('`staleGuards` names the edge whose marker does not match its (from, label); `totalViolations` is what it was without markers', async () => {
+    it('`staleGuards` names the edge whose marker does not match its (from, label); the violating records are what they were without markers', async () => {
       // Two edges under one functional label (the subject's other edge each: a real violation apiece), a valid marked
       // edge on another subject, and an edge under a plain label carrying a marker for a subject it is not under.
       await seedEdge(STRICT, { from: IDS.ALICE, to: IDS.BOB, label: LABELS.functional, peer: true, id: ID.R1 });
@@ -498,7 +498,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
 
       const before = await ask();
       assert.equal(before.status, 200, `fixture: validate-schema answered ${before.status}: ${before.text.slice(0, 300)}`);
-      assert.ok(before.body.totalViolations >= 2, `fixture: the two edges under one functional label are not reported: ${before.text.slice(0, 300)}`);
+      assert.ok(before.body.violations.length >= 2, `fixture: the two edges under one functional label are not reported: ${before.text.slice(0, 300)}`);
       assert.deepEqual(before.body.staleGuards ?? [], [], 'fixture: unmarked edges were reported as stale');
 
       await edgesOf(STRICT).updateOne({ _id: ID.R3 }, { $set: { [MARKER]: keyOf(IDS.BOB, LABELS.functional) } });
@@ -507,7 +507,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
       assert.equal(after.status, 200, `validate-schema answered ${after.status}: ${after.text.slice(0, 300)}`);
       assert.deepEqual(after.body.staleGuards, [{ _id: ID.R4, label: LABELS.plain }],
         `staleGuards must name exactly the edge whose marker is not key(from, label), by id and label: ${JSON.stringify(after.body.staleGuards)}`);
-      assert.equal(after.body.totalViolations, before.body.totalViolations, 'a stale marker was counted as a schema violation: totalViolations changed meaning');
+      assert.equal(after.body.violations.length, before.body.violations.length, 'a stale marker was counted as a schema violation: the violating records changed');
       assert.equal(JSON.stringify(after.body.violations).includes(ID.R4), false, 'a stale marker was listed among the violations');
     });
   });

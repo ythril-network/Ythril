@@ -1,19 +1,21 @@
-import { col } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { validateEdge } from './schema-validation.js';
+import { recordViewOf } from '../brain/record-view.js';
 import type { SpaceMeta } from '../config/types.js';
 import type { SchemaViolation } from './schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { SubjectEdges, guardNamesItsEdge } from '../brain/functional-subject.js';
 
 /** One stored edge, as much of it as validation reads. */
-interface StoredEdge {
+export interface StoredEdge {
   _id: string;
   label?: string;
   from?: string;
   to?: string;
   fromKind?: string;
   toKind?: string;
+  description?: string;
+  tags?: string[];
   properties?: Record<string, unknown>;
   _functionalGuard?: unknown;
 }
@@ -40,15 +42,18 @@ export interface StoredEdgeFindings {
 /**
  * What the dry run reads of a stored edge. EXPLICIT, and it names the guard: the marker is withheld from every answer
  * (`NEVER_RETURNED_FIELDS`), so a read that wants it says so, and this is one of the two readers that do. Everything else
- * is what `validateEdge` and the subject count read.
+ * is what `validateEdge` and the subject count read — the description and tags included, because a rule reads them (F-46) and a view
+ * built from a projection that left them out would make every such rule silently judge an empty field.
  */
-const STORED_EDGE_PROJECTION = { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1, properties: 1, _functionalGuard: 1 } as const;
+export const STORED_EDGE_PROJECTION = {
+  _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1, description: 1, tags: 1, properties: 1, _functionalGuard: 1,
+} as const;
 
 /**
  * Is this edge's write guard one it should not hold? A guard is `functionalSubjectKey(from, label)` or absent, so one that
  * is a string and is anything else is a PHANTOM: it holds a subject's unique slot for an edge that is not under it. Reported
  * as its own list and never as a schema violation — the schema did not break, an index entry outlived its edge — so
- * `totalViolations` means what it meant before the guard existed.
+ * `violations` means what it meant before the guard existed.
  */
 function staleGuardOf(e: StoredEdge): StaleGuard | null {
   const guard = e._functionalGuard;
@@ -57,7 +62,8 @@ function staleGuardOf(e: StoredEdge): StaleGuard | null {
 }
 
 /**
- * Validate a page of stored edges against a space's schema, including the parts that need a lookup.
+ * Validate a page of stored edges against a space's schema, including the parts that need a lookup. The caller reads the page (the
+ * dry run pages by `_id`, `spaces/schema-validate-door.ts`) with {@link STORED_EDGE_PROJECTION}.
  *
  * ## Why edges are the one collection with a module of their own
  *
@@ -72,7 +78,7 @@ function staleGuardOf(e: StoredEdge): StaleGuard | null {
  *
  * ## Two batched queries for the whole page, never one per edge
  *
- * A per-edge lookup is one round trip per row, and this endpoint scans up to ten thousand. `assertRefsResolve`
+ * A per-edge lookup is one round trip per row, and a page holds hundreds. `assertRefsResolve`
  * next door already learned this: one `$in` for every endpoint on the page, one pass to count subjects.
  *
  * ## The distinction that decides what gets reported
@@ -86,12 +92,10 @@ function staleGuardOf(e: StoredEdge): StaleGuard | null {
 export async function validateStoredEdges(
   spaceId: string,
   meta: SpaceMeta,
-  scanLimit: number,
+  docs: readonly StoredEdge[],
 ): Promise<StoredEdgeFindings> {
   const out: StoredViolation[] = [];
   const staleGuards: StaleGuard[] = [];
-  const edges = await col(spaceCollection(spaceId, 'edges')).find({}, { projection: STORED_EDGE_PROJECTION }).limit(scanLimit).toArray();
-  const docs = edges as unknown as StoredEdge[];
   if (docs.length === 0) return { violations: out, staleGuards };
 
   const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
@@ -116,7 +120,7 @@ export async function validateStoredEdges(
   for (const doc of docs) {
     const stale = staleGuardOf(doc);
     if (stale) staleGuards.push(stale);
-    const v = validateEdge(meta, doc, {
+    const v = validateEdge(meta, recordViewOf('edge', doc), {
       ...(doc.from && typeOf.has(doc.from) ? { fromType: typeOf.get(doc.from) } : {}),
       ...(doc.to && typeOf.has(doc.to) ? { toType: typeOf.get(doc.to) } : {}),
       // An edge is not its own duplicate: `others` excludes its own identity.

@@ -18,7 +18,7 @@ import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast, forceSetMemberSigningKey } from '../util/signing.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
@@ -50,7 +50,7 @@ function storePeerToken(instanceId: string, token: string): void {
 /** Add a peer member: `201` with the member, or `202` when the network's type puts it to a vote. */
 export async function addMemberAct(networkId: string, input: unknown): Promise<NetworkActResult> {
   const parsed = AddMemberBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
 
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
@@ -196,7 +196,7 @@ export const JoinNetworkBody = z.object({
 
 export async function admitByInviteKeyAct(networkId: string, input: unknown): Promise<NetworkActResult> {
   const parsed = JoinNetworkBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
 
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
@@ -383,7 +383,7 @@ export const SigningKeyBody = z.object({ signingPublicKey: z.string().min(100).m
 
 export function setSigningKeyAct(networkId: string, instanceId: string, input: unknown): NetworkActResult {
   const parsed = SigningKeyBody.safeParse(input);
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
 
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);

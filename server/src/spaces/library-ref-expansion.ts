@@ -36,21 +36,14 @@
 import { z } from 'zod';
 import { getSchemaLibrary } from '../config/loader.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
+import { canonicalJson } from '../util/canonical-json.js';
+import { libraryEntryNameOf } from './library-ref-name.js';
 
 /** The library entry's definition for a `library:<name>` reference, or undefined when there is none. */
 function definitionOf(ref: string): Record<string, unknown> | undefined {
-  if (!ref.startsWith('library:')) return undefined;
-  const name = ref.slice('library:'.length);
+  const name = libraryEntryNameOf(ref);
+  if (name === undefined) return undefined;
   return getSchemaLibrary().find(e => e.name === name)?.schema as Record<string, unknown> | undefined;
-}
-
-/** JSON with keys sorted, so two definitions that differ only in key order compare equal. */
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  if (v && typeof v === 'object') {
-    return `{${Object.keys(v as object).sort().map(k => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v);
 }
 
 /**
@@ -94,12 +87,13 @@ export function takeBackLibraryDefinition(
   if (Object.keys(rest).length === 0) return { $ref };
 
   const def = definitionOf($ref);
-  if (def && canonical(rest) === canonical(def)) return { $ref };
+  // Compared as canonical JSON (`util/canonical-json.ts`): two definitions that differ only in key order are equal.
+  if (def && canonicalJson(rest) === canonicalJson(def)) return { $ref };
 
   const fields = def
-    ? [...new Set([...Object.keys(rest), ...Object.keys(def)])].filter(k => canonical(rest[k]) !== canonical(def[k]))
+    ? [...new Set([...Object.keys(rest), ...Object.keys(def)])].filter(k => canonicalJson(rest[k]) !== canonicalJson(def[k]))
     : Object.keys(rest);
-  const entry = $ref.startsWith('library:') ? $ref.slice('library:'.length) : $ref;
+  const entry = libraryEntryNameOf($ref) ?? $ref;
   ctx.addIssue({
     code: 'custom',
     input: value,

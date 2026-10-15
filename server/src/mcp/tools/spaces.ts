@@ -257,7 +257,8 @@ export const update_spaceTool: ToolHandler = {
     + 'administering a different space does not grant this one. `purpose` is the space-level directive MCP '
     + 'clients receive at handshake. Its `description` alias was removed in 3.0 — sending `description` is now '
     + 'rejected, not silently folded into `purpose`. To change the space\'s storage quota you need instance-admin '
-    + 'rights and the REST route: `maxGiB` is the space\'s share of the host disk, so it is not a space setting. `faceDescriptorDims` is accepted here and refused by the space\'s STATE rather than by this surface: 409 if the gallery already holds descriptors, or if its index is built at a different width. On a space that has never held a face it succeeds, which is the case an operator was blocked on.',
+    + 'rights and the REST route: `maxGiB` is the space\'s share of the host disk, so it is not a space setting. `faceDescriptorDims` is accepted here and refused by the space\'s STATE rather than by this surface: 409 if the gallery already holds descriptors, or if its index is built at a different width. On a space that has never held a face it succeeds, which is the case an operator was blocked on. On a space in more than one network a `purpose` change opens a round per network and the reply '
+    + 'carries `layers` (`applied` or `vote_pending` per network), exactly as `schema_update`\'s does.',
   mutating: true,
   spaceAdmin: true,
   spaceRequired: true,
@@ -334,11 +335,24 @@ async function runSpaceMetaUpdate(
   rights: TokenRights | undefined,
   recordChanges?: ToolContext['recordChanges'],
 ): Promise<ToolResult> {
-  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } = await import('../../spaces/meta-update.js');
-  // Q-61: a networked replace is applied as a merge; the text says which types it kept, as the structured half does.
-  const mergeLine = (r: Parameters<typeof networkMergeNotice>[0]): string => {
-    const note = networkMergeNotice(r)['mergeNote'];
-    return typeof note === 'string' ? `\n\n${note}` : '';
+  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } = await import('../../spaces/meta-update.js');
+  // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice`, the one spread): the structured half is the
+  // notice itself and the text says the same in words — the merge note (Q-61: a networked replace is applied as a merge, naming the types
+  // it kept), what became of the write in each network it reached (R5-1), and the members that may refuse a key an earlier release does
+  // not know (R6-7), named only where this token may read networks.
+  const caller = { ...(rights ? { rights } : {}) };
+  const noticeOf = (r: Parameters<typeof networkWriteNotice>[0]) => networkWriteNotice(r, caller);
+  const noticeText = (notice: Record<string, unknown>): string => {
+    const lines: string[] = [];
+    if (typeof notice['mergeNote'] === 'string') lines.push(notice['mergeNote']);
+    if (Array.isArray(notice['layers'])) {
+      lines.push('Per network: ' + (notice['layers'] as Array<{ networkLabel: string; outcome: string }>)
+        .map(l => `${l.networkLabel} ${l.outcome === 'applied' ? 'applied it' : 'is voting on it'}`).join('; ') + '.');
+    }
+    for (const w of Array.isArray(notice['warnings']) ? notice['warnings'] as Array<{ message?: string }> : []) {
+      if (typeof w.message === 'string') lines.push(`Warning: ${w.message}`);
+    }
+    return lines.length > 0 ? `\n\n${lines.join('\n\n')}` : '';
   };
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
@@ -377,6 +391,7 @@ async function runSpaceMetaUpdate(
   if (result.outcome === 'not_found') {
     return { content: [{ type: 'text' as const, text: `Space '${spaceId}' not found` }], isError: true };
   }
+  const notice = noticeOf(result);
   if (result.outcome === 'vote_pending') {
     // NOT reported as success. The space belongs to a network that votes on meta changes, so nothing is stored yet
     // and an agent that read this as "done" would build on a schema that does not exist.
@@ -385,11 +400,11 @@ async function runSpaceMetaUpdate(
       content: [{ type: 'text' as const, text:
         `Proposed, NOT yet applied: '${spaceId}' belongs to ${result.rounds.length === 1 ? 'a network' : 'networks'} `
         + `that votes on meta changes (${nets}), so this opened a vote round instead of writing. The change takes `
-        + `effect if and when the round concludes in favour.` + mergeLine(result) }],
-      structuredContent: { outcome: 'vote_pending', rounds: result.rounds, ...networkMergeNotice(result) },
+        + `effect if and when the round concludes in favour.` + noticeText(notice) }],
+      structuredContent: { outcome: 'vote_pending', rounds: result.rounds, ...notice },
     };
   }
-  return { content: [{ type: 'text' as const, text: okText + mergeLine(result) }], structuredContent: { outcome: 'applied', ...networkMergeNotice(result) } };
+  return { content: [{ type: 'text' as const, text: okText + noticeText(notice) }], structuredContent: { outcome: 'applied', ...notice } };
 }
 
 /**
@@ -452,9 +467,16 @@ export const schema_updateTool: ToolHandler = {
     + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. A linked type '
     + 'may be sent back exactly as `space_meta` returned it — `$ref` beside the entry’s definition — and the '
     + 'link is kept; a CHANGED definition beside a `$ref` is refused (400, naming the field), because the '
-    + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. On a space whose '
+    + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. RULES (`rules`, and '
+    + 'a type\'s own `rules`) are replaced whole with their owner and a rule that could not be applied is refused when '
+    + 'saved, naming it; the limits are on the `rules` parameter. On a space whose '
     + 'network votes on meta changes this opens a vote round instead of writing — the reply says so, and nothing is '
-    + 'stored until the round concludes.',
+    + 'stored until the round concludes. A space in MORE THAN ONE network gets a round per network and the reply carries '
+    + '`layers`: for each network, `applied` (its round passed on this instance\'s own vote) or `vote_pending`; what '
+    + 'happens after that (a round that fails, a network\'s layer that outranks the edit) is not in the reply — read '
+    + '`space_schema_layers`. When the write sets a key that members on an earlier release refuse (`stampSkew`, `rules`) the '
+    + 'reply is still a success and carries a `warnings` row naming the keys and the members behind (their labels only '
+    + 'with `networks: read`, otherwise a count): upgrade every instance of the network.',
   mutating: true,
   /*
    * NOT `spaceAdmin: true`, since 2026-09-08, and the REST door is why.
@@ -478,8 +500,9 @@ export const schema_updateTool: ToolHandler = {
           + 'fields are collection-scoped and the complete, current list is the `TypeSchema` block in '
           + '`docs/integration-guide/06a-schema-api.md` — `namingPattern` (entity), `propertySchemas`, '
           + '`retention` (`contentDays` chrono-only), `suppressEmbeddings`, `whenDuePasses` (chrono-only), '
-          + 'and `endpoints`/`functional` (edge-only). A field sent on the wrong collection is REFUSED and '
-          + 'the message names the one it belongs to.',
+          + '`endpoints`/`functional` (edge-only), and `rules` — the type\'s own rules, `{ <name>: { rule, message } }`, '
+          + 'which belong to the type: a type written without `rules` has none. A field sent on the wrong collection is '
+          + 'REFUSED and the message names the one it belongs to.',
       },
       typeSchemasMode: {
         type: 'string', enum: ['merge', 'replace'],
@@ -500,6 +523,11 @@ export const schema_updateTool: ToolHandler = {
           + 'the write.',
       },
       strictLinkage: { type: 'boolean', description: 'Refuse a write whose entity references do not resolve.' },
+      purpose: {
+        type: 'string', maxLength: SPACE_PURPOSE_MAX,
+        description: `The space-level directive injected into MCP instructions at handshake (max ${SPACE_PURPOSE_MAX} chars). Same as `
+          + '`meta.purpose` on `PATCH /api/spaces/:id` (and `purpose` on `update_space`); needs the space administrator.',
+      },
       usageNotes: { type: 'string', maxLength: 50_000, description: 'Free-text guidance about the space, returned to MCP clients with its meta.' },
       suppressEmbeddings: { type: 'boolean', description: 'Space-level default for suppressing embeddings; a type schema can override it.' },
       whenDuePasses: {
@@ -508,6 +536,40 @@ export const schema_updateTool: ToolHandler = {
           + 'behaviour) or `nothing`, which returns the STORED status for entries recording something that '
           + 'happened rather than a deadline. A chrono type schema can override it. Absent leaves it unset, '
           + 'which is the built-in behaviour.',
+      },
+      stampSkew: {
+        type: 'object',
+        description: 'The stamp-integrity check: compare a record\'s OWN timestamp property against the server\'s `createdAt` on write '
+          + 'and warn (never refuse) when they disagree by more than `warnMinutes` (default 40; `0` DISABLES the check). `properties` names '
+          + 'the properties to read, the first that parses wins (default `stampedAt`, `postedAt`). The object is replaced whole: a field '
+          + 'you leave out is gone. Same as `meta.stampSkew` on `PATCH /api/spaces/:id`.',
+        properties: {
+          warnMinutes: {
+            type: 'number', minimum: 0, maximum: 525_600,
+            description: 'Warn when the record\'s own stamp and the server\'s `createdAt` differ by more than this many minutes. Default 40; `0` disables the check.',
+          },
+          properties: {
+            type: 'array', items: { type: 'string', minLength: 1, maxLength: 200 }, maxItems: 20,
+            description: 'Names of the properties holding the record\'s own timestamp, tried in order, the first that parses wins. Default `stampedAt`, `postedAt`.',
+          },
+        },
+        additionalProperties: false,
+      },
+      rules: {
+        type: 'object',
+        description: 'Space-level rules every record must satisfy: a map of rule name to `{ rule, message, kinds? }`, `kinds` being the '
+          + 'knowledge types the rule governs (omitted: every kind whose record has the fields the rule reads). `rule` is an expression '
+          + 'over the record as `self` — `self.title`, `self.type`, `self.description`, `self.tags`, `self.properties.<name>`, and on an '
+          + 'edge `self.label` (never its ends) — that must answer true or false; `message` is what a record that breaks it is told. '
+          + 'LIMITS: a name is a lower-case letter then letters, digits, `_` and `-` (64 characters at most); a rule at most 1000 '
+          + 'characters; a message at most 300; at most 50 rules on the space, 50 on one type, and 50 applying to one record (its '
+          + 'type\'s plus the space\'s for its kind). The map is REPLACED whole: send it without a rule to delete it, `{}` to clear '
+          + 'them; a type\'s rules are replaced with the type. A rule this instance could not apply — it does not parse, reads a '
+          + 'property its type does not declare, calls an unknown function, or need not answer true or false — is REFUSED when the '
+          + 'schema is saved, naming the rule. A property the rule reads that a record lacks makes the rule not apply to it. With '
+          + '`validationMode: strict` a write that breaks a rule is refused; `warn` reports it; `off` evaluates none. '
+          + 'Try one on a record first with `schema_validate`. Same as `meta.rules` on `PATCH /api/spaces/:id`; needs the schema '
+          + '`admin` rung, as `validationMode` does.',
       },
     },
     required: ['space'],
@@ -616,8 +678,8 @@ export const save_spaceTool: ToolHandler = {
       },
       meta: {
         type: 'object',
-        description: 'Initial meta: typeSchemas, validationMode, strictLinkage, usageNotes, suppressEmbeddings. '
-          + 'An explicit value here wins over the seeded strict defaults.',
+        description: 'Initial meta: typeSchemas, validationMode, strictLinkage, usageNotes, suppressEmbeddings, whenDuePasses, '
+          + 'stampSkew and rules (the keys `schema_update` takes). An explicit value here wins over the seeded strict defaults.',
       },
     },
     required: ['label'],

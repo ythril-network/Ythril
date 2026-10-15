@@ -41,7 +41,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
       <button class="icon-btn" type="button" (click)="start()"
         [attr.title]="'spaces.schema.renameType' | transloco"><ph-icon name="pencil-simple" [size]="13"/></button>
     }
-    @if (error()) { <span class="sch-msg error" style="margin-left:6px;">{{ error() }}</span> }
+    @if (error()) { <span class="sch-msg err" role="alert" style="margin-inline-start:6px;">{{ error() }}</span> }
   `,
 })
 export class SchemaTypeNameComponent {

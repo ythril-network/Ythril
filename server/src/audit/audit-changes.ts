@@ -55,7 +55,9 @@ export interface AuditChange {
  */
 export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = {
   // Space settings a reader would actually want explained after the fact.
-  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor'],
+  // `stampSkew.warnMinutes` (Q-217): `0` switches the stamp check off, and "an admin patched the space" would not say that happened.
+  // The dotted path keeps this scalars-only: the property NAMES beside it are not recorded.
+  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes'],
   'space.rename': ['id'],
   // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` renames.
   // Never `hash` or `prefix`; `token.create` and `token.regenerate` are absent entirely, because the

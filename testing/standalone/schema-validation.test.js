@@ -120,9 +120,21 @@ describe('validateEntity', () => {
     ok(validateEntity(META, { name: 'ANYTHING', properties: { whatever: 1 } }));
   });
 
-  it('a property not in the schema is not rejected', () => {
-    // The schema declares what it knows about; it is not an exhaustive allowlist of keys.
-    ok(validateEntity(META, { name: 'my-service', type: 'service', properties: { status: 'active', repo: 'x', extra: 'fine' } }));
+  it('a property the type does not declare IS rejected, once the type declares any (Q-93)', () => {
+    // This case read "a property not in the schema is not rejected" — the schema "declares what it knows about; it is not
+    // an exhaustive allowlist of keys" — and pinned exactly the behaviour Q-93 removes. Inverted by hand: a type that
+    // declares at least one property is a closed list of keys, and the key `extra` is not on it.
+    const v = validateEntity(META, { name: 'my-service', type: 'service', properties: { status: 'active', repo: 'x', extra: 'fine' } });
+    has(v, 'properties.extra', "property 'extra' is not declared on this type");
+    assert.equal(v.length, 1, `only the undeclared key is wrong here, got ${JSON.stringify(v)}`);
+  });
+
+  it('a type that declares no property at all stays open: nothing is undeclared on it', () => {
+    // `team` carries no propertySchemas (and `library` declares one): the rule needs at least one declared property to be a
+    // list at all, so an open type must keep accepting any key — or every untyped record in every space starts failing.
+    ok(validateEntity(META, { name: 'a-team', type: 'team', properties: { whatever: 'fine' } }));
+    ok(validateEntity({ typeSchemas: { entity: { team: { propertySchemas: {} } } }, validationMode: 'strict' },
+      { name: 'a-team', type: 'team', properties: { whatever: 'fine' } }));
   });
 });
 

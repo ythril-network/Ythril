@@ -238,12 +238,21 @@ Merge two entities into one. The **survivor** keeps its identity (ID, name, type
 | Unresolved property conflicts remain | `409` | `MergePlan` with conflict details |
 | Survivor or absorbed entity not found | `404` | Error |
 | Invalid resolution | `400` | Error |
-| The merged survivor would break a `strict` space's schema | `400` | `{ error, violations }` — nothing written |
-| The merge would relink more than 2500 records | `422` | `{ error, code: "merge_too_large", relinks, bound }` — nothing written |
+| The merged survivor would break a `strict` space's schema | `400` | the [standard refusal body](06a-schema-api.md#schema-validation) (`error`, `message`, `introduced`, `preExisting`, `violations`, `truncated?`) — nothing written |
+| The merge would relink more than 2500 records | `422` | `{ error, code: "merge_too_large", relinks, bound }` — nothing written, and refused **before** anything is evaluated |
 | The store did not finish the merge in time | `503` | `{ error, retryable: true }` — retry |
 
 The same refusals answer the same statuses on every door that merges: this route, the duplicate review's
 `POST /api/duplicates/:id/merge`, and the `graph_merge` tool (MCP, or `POST /api/graph_merge`).
+
+**A merge is a write of the survivor, and is judged as one.** The survivor as it is stored is compared with the survivor
+as the merge leaves it: a property key the survivor already stores is not blamed (it does not make every merge in a
+`strict` space refuse), and a key brought in from the absorbed entity that the survivor lacks, and its type does not
+declare, is **introduced** — the refusal names that key and nothing the merge left alone. In a `warn` space the merge
+lands and the key is logged with both ids. The relinks are **counted before anything is evaluated**, and the merge plan
+(the `409` conflict plan and the preview) counts first too: a merge over the bound reports no duplicate-edge or
+endpoint-rule warnings, because it will not run. A rule on the survivor is judged like any other: an unchanged break
+is pre-existing, a break the merge introduces refuses a strict space.
 
 **Response `200`** (merge executed):
 

@@ -122,6 +122,9 @@
         },
         "brand": {
           "type": "string"
+        },
+        "aliases": {
+          "type": "string"
         }
       }
     }
@@ -136,6 +139,9 @@
     "schema": {
       "propertySchemas": {
         "kind": {
+          "type": "string"
+        },
+        "aliases": {
           "type": "string"
         }
       }
@@ -152,6 +158,9 @@
       "propertySchemas": {
         "kind": {
           "type": "string"
+        },
+        "aliases": {
+          "type": "string"
         }
       }
     }
@@ -164,7 +173,11 @@
     "published": true,
     "description": "A bounded undertaking with an end in view. Its start, milestones and completion are chrono entries.",
     "schema": {
-      "propertySchemas": {}
+      "propertySchemas": {
+        "aliases": {
+          "type": "string"
+        }
+      }
     }
   },
   {
@@ -368,7 +381,14 @@
           "place"
         ]
       },
-      "propertySchemas": {},
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      },
       "suppressEmbeddings": true
     }
   },
@@ -392,7 +412,14 @@
           "work"
         ]
       },
-      "propertySchemas": {},
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      },
       "suppressEmbeddings": true
     }
   },
@@ -499,6 +526,12 @@
       "propertySchemas": {
         "role": {
           "type": "string"
+        },
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
         }
       },
       "suppressEmbeddings": true
@@ -527,7 +560,14 @@
           "person"
         ]
       },
-      "propertySchemas": {},
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      },
       "suppressEmbeddings": true
     }
   },
@@ -553,7 +593,14 @@
           "person"
         ]
       },
-      "propertySchemas": {},
+      "propertySchemas": {
+        "since": {
+          "type": "date"
+        },
+        "until": {
+          "type": "date"
+        }
+      },
       "suppressEmbeddings": true
     }
   },

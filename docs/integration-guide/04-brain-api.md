@@ -346,6 +346,13 @@ get two different answers to the same mistake** — which is worth knowing befor
 something to say, with the schema violations (in a `warn`-mode space) and the unknown-field rows in the same
 array — an edit is told about a schema violation exactly as a create is.
 
+**Both kinds of row are bounded, because the keys are the caller's.** At most **20** schema rows come back, each quoting
+a property name cut at 256 characters and a string `value` bounded and escaped, with `"warningsTruncated": true` when
+rows were left out; at most **10** unknown fields get a row, in the order the body carries them, and one last row says
+how many more there were. A property key the record's type does not declare is a schema row like any other, and the
+rows of the record's inline `edges` are in the same array, each naming its edge (`edges[1].properties.k`). See
+[Property keys a type does not declare](06a-schema-api.md#property-keys-a-type-does-not-declare).
+
 Their accepted-field lists differ from the creates', which is worth knowing before you copy one:
 `deleteFields` is an update field, and `id` is a path parameter rather than a body key.
 

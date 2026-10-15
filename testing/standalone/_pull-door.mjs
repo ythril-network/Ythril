@@ -177,6 +177,16 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
      * every route the fake peer does not serve does.
      */
     network: null,
+    /**
+     * `(req, res) => void | Promise<void>` — answers `GET /api/sync/meta` (the schema a space's UPSTREAM hands a subscriber, which the
+     * receiver keeps as the network's layer) as a case scripts it: `res.json({ meta })`, a 404, a meta carrying a key this release
+     * does not know. Unset, the route 404s like every route the fake peer does not serve — which the receiver logs and goes on from.
+     * `metaRequests` is the hit counter: a case that scripts a meta asserts it was ASKED for, or a pull that never reached the
+     * route would pass every "what it did with the answer" assertion by there being no answer.
+     */
+    meta: null,
+    /** Every `GET /api/sync/meta` the receiver sent, its query as the receiver wrote it, answered or not. */
+    metaRequests: [],
     // ── the file routes (`files: true` only) ────────────────────────────────────────────────────────────────────────
     /** Every `GET /file-tombstones` the receiver sent, its query as the receiver wrote it. */
     fileTombstoneRequests: [],
@@ -297,6 +307,12 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
       res.json({ status: 'ok' });
     });
   }
+  // `meta` is no record family either: before the family route, which would 404 it, and counted whether or not a case scripts it.
+  app.get('/api/sync/meta', (req, res, next) => {
+    state.metaRequests.push({ ...req.query });
+    if (!state.meta) { next(); return; }
+    Promise.resolve(state.meta(req, res)).catch(err => { if (!res.headersSent) res.status(500).json({ error: String(err) }); });
+  });
   // Before the family route, which would read `merkle` as a family it does not serve and 404 it.
   app.get('/api/sync/merkle', (req, res, next) => {
     if (!state.merkle) { next(); return; }
@@ -438,6 +454,15 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     await clearRecordFault();
     for (const s of [...spaces, ...extraSpaces]) await door.wipe(s);
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
+    // A schema layer a case's pull stored is the network's, and it sets the space's own definitions apart: both go, and the
+    // space's meta with them, or the next case would start from a schema it never asked for. Only a space that was set apart is
+    // touched — a case that put its own meta on a space by `configure`-time config keeps it.
+    for (const n of loader.getConfig().networks) delete n.schemaLayers;
+    for (const sp of loader.getConfig().spaces) {
+      if (sp.ownMeta === undefined) continue;
+      delete sp.ownMeta;
+      sp.meta = structuredClone(meta[sp.id] ?? {});
+    }
     // The topology goes back to what the door opened with, and the receiver's repair state is owed again: a case that
     // `configure`d or re-read must not decide the next one.
     configure({ type: initial.type, myParentInstanceId: initial.myParentInstanceId ?? null, lateral: initial.lateral });
@@ -461,7 +486,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {
-      tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null,
+      tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null, meta: null, metaRequests: [],
       family: null, merkle: null, batchUpsert: null, batchRequests: [], familyRequests: [],
       fileTombstoneRequests: [], fileTombstonesReceived: [], fileTombstonePosts: [], fileTombstoneGet: null, fileTombstonePost: null,
       manifestRequests: [], manifest: null, fileDownloads: [], fileUploads: [], fileUpload: null,

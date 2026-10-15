@@ -15,8 +15,9 @@ import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.j
 import { carriedLocalId } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
-import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
-import type { SpaceMeta } from '../config/types.js';
+import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
+import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
 import { roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
@@ -190,47 +191,96 @@ export function concludeRoundIfReady(
     // open for `votingDeadlineHours` — so writing it wholesale reverts every field another round changed
     // in the meantime, with no error and a correctly-recorded carried vote to hide it.
     // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4) — and acts
-    // only on a space this network carries here (S-7).
-    const localSpace = round.type === 'meta_change' ? carriedLocalId(net, round.spaceId) : null;
-    if (round.type === 'meta_change' && localSpace && round.pendingMeta) {
-      const currentMeta = getConfig().spaces.find(s => s.id === localSpace)?.meta;
-      let applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
-      // Who proposed it is what THIS instance recorded when it opened the round — never `subjectInstanceId` (S-7).
-      if (round.proposedHere && !round.proposesLayer) {
-        // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it. A proposal TO a
-        // network (F-39.5) is not one: it was that network's definition all along, so it takes the branch below.
-        commitOwnMetaEdit(localSpace, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
-        // Q-60: and the network's layer, where this instance holds one. Every other member keeps the passed round in
-        // that layer, and a layer outranks own definitions — so a proposer that wrote only its own kept the layer's
-        // OLD value in front of its own edit, and was the one instance on which its change could not be seen.
-        const layer = net.schemaLayers?.[localSpace];
-        if (layer) storeNetworkLayer(net.id, localSpace, applyMetaRound(layer, round as MetaRoundProposal).meta as SpaceMeta);
-      } else {
-        // Anyone else: the NETWORK decided it, so it lands in that network's layer (F-39.4). Replaying an old round
-        // on a late joiner can then only refresh the layer, never overwrite what this instance defined itself.
-        applied = applyMetaRound(net.schemaLayers?.[localSpace] ?? {}, round as MetaRoundProposal);
-        storeNetworkLayer(net.id, localSpace, applied.meta as SpaceMeta);
-      }
-      // F-42 / Q-61: the proposer tells the members below what the network just changed — on every path a round
-      // passes by, at once or later. A no-op on a network with nobody below this instance.
-      if (round.proposedHere) {
-        void queueGeneratedNote(net.id, metaChangeNote(getConfig().instanceLabel, net.label, localSpace,
-          { fields: round.metaChangedFields, changedTypes: round.changedTypes, keptTypes: round.keptTypes }), [localSpace]);
-      }
-      if (applied.conflicts.length > 0) {
-        // The vote wins — the network decided this value — but the operator whose edit it superseded has
-        // to be able to find out, and the only place that can say so is here.
-        log.warn(
-          `meta_change round ${peerText(round.roundId)} overwrote field(s) changed since it was proposed ` +
-          `(space ${peerText(round.spaceId)}, based on meta v${round.baseMetaVersion}, now v${currentMeta?.version ?? 0}): ` +
-          `${peerList(applied.conflicts, ', ')} — the passed vote wins`,
-        );
-      }
-    }
+    // only on a space this network carries here (S-7). What is written, and that it is parsed first, is `passedMetaChange`'s.
+    if (round.type === 'meta_change') passedMetaChange.apply(net, round);
     return true;
   }
   return false;
 }
+
+/**
+ * What a passed `meta_change` round would write on this instance, parsed — or why this member cannot read it; `null` when the round
+ * is not about a space this network carries here (`Q-216`, R6-6).
+ *
+ * One plan per store the round writes, each parsed AGAINST the base it merges into (`parseMetaRound`): the proposer's own definitions
+ * and, where it holds one, this network's layer; every other member's is the layer alone. If ANY of them cannot be read the whole
+ * round is unreadable here — refused whole, never in part, as `sync-protocol.md` already promises — so this is asked before a single
+ * store is written, and by a member deciding whether to cast its yes on the round at all (`castVoteAct`).
+ */
+export function planPassedMetaChange(net: NetworkConfig, round: VoteRound): MetaRoundPlan | null {
+  const localSpace = round.type === 'meta_change' ? carriedLocalId(net, round.spaceId) : null;
+  if (!localSpace || !round.pendingMeta) return null;
+  const space = getConfig().spaces.find(s => s.id === localSpace);
+  const proposal = round as MetaRoundProposal;
+  const layerBase = net.schemaLayers?.[localSpace];
+  // Who proposed it is what THIS instance recorded when it opened the round — never `subjectInstanceId` (S-7).
+  const ownEdit = round.proposedHere === true && round.proposesLayer !== true;
+  // The proposer's own edit goes through its own definitions (F-39.2) so a layered space keeps it. A proposal TO a network (F-39.5)
+  // is not one: it was that network's definition all along. Anyone else: the NETWORK decided it, so it lands in that network's layer
+  // (F-39.4), and replaying an old round on a late joiner can only refresh the layer, never overwrite what this instance defined.
+  const own = ownEdit ? parseMetaRound(space?.ownMeta ?? space?.meta, proposal) : undefined;
+  // Q-60: and the network's layer, where this instance holds one. Every other member keeps the passed round in that layer, and a
+  // layer outranks own definitions — so a proposer that wrote only its own kept the layer's OLD value in front of its own edit, and
+  // was the one instance on which its change could not be seen.
+  const layer = !ownEdit || layerBase ? parseMetaRound(layerBase ?? {}, proposal) : undefined;
+  const failed = [own, layer].filter((r): r is Extract<MetaRoundParse, { ok: false }> => r !== undefined && !r.ok);
+  if (failed.length > 0) return { ok: false, localSpace, reason: failed.map(f => f.reason).join('; ') };
+  const ok = (r: MetaRoundParse | undefined) => (r?.ok ? r : undefined);
+  return {
+    ok: true, localSpace, ownEdit,
+    ...(ok(own) ? { own: ok(own)!.meta } : {}),
+    ...(ok(layer) ? { layer: ok(layer)!.meta } : {}),
+    conflicts: (ok(own) ?? ok(layer))?.conflicts ?? [],
+    unknownFields: [...(ok(own)?.unknownFields ?? []), ...(ok(layer)?.unknownFields ?? [])],
+  };
+}
+
+/** The plan {@link planPassedMetaChange} answers. */
+export type MetaRoundPlan =
+  | { ok: true; localSpace: string; ownEdit: boolean; own?: ParsedSpaceMeta; layer?: ParsedSpaceMeta; conflicts: string[]; unknownFields: string[] }
+  | { ok: false; localSpace: string; reason: string };
+
+/**
+ * What a passed `meta_change` round DOES here: parse every part it writes, and write all of it or none of it.
+ *
+ * A member object rather than a function of its own: it is reached from `concludeRoundIfReady` and from nowhere else, and the
+ * conclusion it hangs off is called by the proposer's own path (`applySpaceMetaUpdate`) on the same tick, where the proposal is
+ * already parsed — the application is a step of a conclusion, not a function a caller may pick up.
+ */
+export const passedMetaChange = {
+  apply(net: NetworkConfig, round: VoteRound): void {
+    const plan = planPassedMetaChange(net, round);
+    if (plan === null) return;
+    if (!plan.ok) {
+      // Refused whole. The vote is carried, so the round stays passed — but this member keeps what it had in every store, says why on
+      // the round (the view an operator reads) and in the log, and its yes was never cast on it (`castVoteAct`).
+      round.refusedHere = peerText(plan.reason, { max: 1000 });
+      log.warn(`meta_change round ${peerText(round.roundId)} passed but this member cannot read what it proposes for space '${peerText(plan.localSpace)}', so none of it is applied: ${peerText(plan.reason, { max: 1000 })}`);
+      return;
+    }
+    const currentMeta = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
+    if (plan.own) commitOwnMetaEdit(plan.localSpace, () => plan.own!);
+    if (plan.layer) storeNetworkLayer(net.id, plan.localSpace, plan.layer);
+    // F-42 / Q-61: the proposer tells the members below what the network just changed — on every path a round
+    // passes by, at once or later. A no-op on a network with nobody below this instance.
+    if (round.proposedHere) {
+      void queueGeneratedNote(net.id, metaChangeNote(getConfig().instanceLabel, net.label, plan.localSpace,
+        { fields: round.metaChangedFields, changedTypes: round.changedTypes, keptTypes: round.keptTypes }), [plan.localSpace]);
+    }
+    if (plan.unknownFields.length > 0) {
+      log.warn(`meta_change round ${peerText(round.roundId)} named field(s) this release does not know, applied without them: ${peerList(plan.unknownFields, ', ')}`);
+    }
+    if (plan.conflicts.length > 0) {
+      // The vote wins — the network decided this value — but the operator whose edit it superseded has
+      // to be able to find out, and the only place that can say so is here.
+      log.warn(
+        `meta_change round ${peerText(round.roundId)} overwrote field(s) changed since it was proposed ` +
+        `(space ${peerText(round.spaceId)}, based on meta v${round.baseMetaVersion}, now v${currentMeta?.version ?? 0}): ` +
+        `${peerList(plan.conflicts, ', ')} — the passed vote wins`,
+      );
+    }
+  },
+};
 
 // ── Notify ejected member after a remove vote passes ──────────────────────
 // Fire-and-forget: non-fatal if the peer is unreachable.

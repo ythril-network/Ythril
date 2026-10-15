@@ -41,7 +41,7 @@ import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
-import { SchemaViolationError, writeRefusalAnswer } from '../brain/write-validation.js';
+import { SchemaViolationError, writeRefusalAnswer, schemaRefusalStatus, countSchemaRefusal } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
@@ -132,13 +132,25 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   // Unknown tools carry no flags and fall through the gates to be reported below, as they always did.
   const tool = TOOLS_BY_NAME.get(name);
 
+  /*
+   * A refusal of a WRITE tool is a row in the trail, whichever way it is refused (R6-13): the REST middleware records every response
+   * of a mutating route, and a tool door that recorded only what the handler returned left the refusals a tool THROWS, a call the
+   * dispatcher refused on its arguments and a call the token's rights refused out of the trail — so the same refused write left a row
+   * or not by how the refusal happened to be said. `auditSpace` is the space the REST path would name, and only a space that exists
+   * is named (a caller's spelling of one that does not is not written to the trail). An ACT is recorded by its own rule below.
+   */
+  const refuseAudited = (status: number, text: string, auditSpace = '', callSpace = ''): ToolCallOutcome => {
+    if (tool?.mutating && mcpActOperation(name) === null) recordToolCall(caller, name, auditSpace, status, 0, a);
+    return refuse(status, text, callSpace);
+  };
+
   // Reachability, from the same predicate that builds `tools/list` — so a listing cannot advertise a tool
   // this refuses. Filtering the list stays advisory; this is the enforcement point.
   if (tool && !toolIsVisible(tool, rights)) {
     // A space-creating tool is refused in the REST create's own sentence (Q-134): one predicate, one refusal.
     const createRefusal = tool.createsSpaces ? createSpacesRefusal({ rights }) : null;
-    if (createRefusal) return refuse(403, `Error (403): ${createRefusal}`);
-    return refuse(403, tool.admin
+    if (createRefusal) return refuseAudited(403, `Error (403): ${createRefusal}`);
+    return refuseAudited(403, tool.admin
       ? `Error: tool '${name}' requires a token with instance-admin rights`
       // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no
       // write rung", which names the wrong missing thing — a token can hold write everywhere and still
@@ -235,16 +247,16 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // A proxy is usable when the connection reaches AT LEAST ONE member; the tools then read only the
     // members it reaches. For a non-proxy space this returns the space itself, so it is one predicate.
     if (memberSpacesWithin(sid, accessibleSpaceIds).length === 0) {
-      return refuse(403, `Error: token does not have access to '${sid}' or any of its member spaces`);
+      return refuseAudited(403, `Error: token does not have access to '${sid}' or any of its member spaces`, sid);
     }
     // The space is the one the CALLER named. For a proxy that is the proxy's own id, which is where an
     // operator grants access; checking a member here would let a proxy grant be bypassed by naming it.
     const rightsRefusal = toolRightsRefusal(name, rights, sid);
-    if (rightsRefusal) return refuse(403, rightsRefusal);
+    if (rightsRefusal) return refuseAudited(403, rightsRefusal, sid);
     // And the space-admin question, for the tools that configure ONE space. `toolIsVisible` admitted anyone
     // administering *a* space, because it runs before a space is named; this is where one exists.
     const adminRefusal = spaceAdminRefusal(tool, rights, sid);
-    if (adminRefusal) return refuse(403, adminRefusal);
+    if (adminRefusal) return refuseAudited(403, adminRefusal, sid);
   }
   const callSpace = rawSpace;
   // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
@@ -261,7 +273,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call.
     if (!tool.skipSchemaValidation) {
       const argErr = validatorFor(accessibleSpaceIds).validate(tool, a);
-      if (argErr) return refuse(400, `Error: ${argErr}`, callSpace);
+      if (argErr) return refuseAudited(400, `Error: ${argErr}`, callSpace, callSpace);
     }
     /*
      * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
@@ -280,7 +292,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      */
     const rateKey = caller.tokenId ?? caller.ip;
     if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
-      return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
+      return refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace);
     }
     let snapshots: AuditSnapshots | undefined;
     const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
@@ -318,8 +330,16 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * credentials and then failed — out of the trail. A refusal is not a run (`ToolRefusal` is raised before the work), and a
      * stored record whose connections failed has recorded itself (`ConnectionsNotWritten`, below). Every other tool is
      * unchanged: a failed write is recorded by its caller's own entry or not at all, as before.
+     *
+     * A WRITE tool's refusal is recorded whatever threw it (R6-13, `Q-315`): a schema refusal, a merge refusal, a record the call names
+     * and cannot find, a conflict, a store failure — at the status that is answered, as the REST middleware records every response of a
+     * mutating route. Only the two tools that caught their own schema refusal and RETURNED it were recorded before, so a refused
+     * `update_entity` left no row while a refused `save_entity` did, and removing those two catches would have taken theirs away.
+     * No change list: a refused edit changed nothing and its intended values would claim one (`recordToolCall`). A stored record
+     * whose connections failed has recorded itself (`ConnectionsNotWritten`).
      */
-    if (!(err instanceof ToolRefusal) && !(err instanceof ConnectionsNotWritten) && mcpActOperation(name) !== null) {
+    const isAct = mcpActOperation(name) !== null;
+    if (!(err instanceof ConnectionsNotWritten) && (isAct ? !(err instanceof ToolRefusal) : tool?.mutating)) {
       recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a);
     }
     return answer;
@@ -331,7 +351,10 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // A refusal a shared module made with its own status (`ToolRefusal`): answered with that status, and not logged as a
     // tool's failure, because nothing failed.
     if (err instanceof ToolRefusal) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: err.status, callSpace };
+      return {
+        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, ...(err.body ? { structuredContent: { ...err.body } } : {}) },
+        status: err.status, callSpace,
+      };
     }
     /*
      * THE RECORD LANDED and its connections did not (`Q-170`) — matched before the store's classification below, which
@@ -363,11 +386,19 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * survive on the REST routes and not on the MCP one. The prose stays the whole answer for a client that
      * reads only `content`.
      */
+    // A refused MERGE answers what it answers on every merge door (`mergeRefusal`): 400 (a merge is the caller's to fix, never the family's
+    // 422) with the standard schema-refusal body, or 422 merge_too_large. Asked BEFORE the generic schema mapping below — a refused merge IS
+    // a `SchemaViolationError` now, and that mapping would flip `graph_merge` to 422 on this door and leave REST at 400 (R5-3).
+    const merge = mergeRefusal(err);
+    if (merge) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
+    }
     if (err instanceof SchemaViolationError) {
-      // A tool is an edit of what the caller named: the status is `writeRefusalAnswer`'s for an update, not spelled here.
+      countSchemaRefusal(caller.transport === 'mcp' ? 'mcp' : 'tool', err);
+      // A tool is an edit of what the caller named: the status is an update's, not spelled here.
       return {
         result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: err.toStructured() },
-        status: writeRefusalAnswer(err, 'update')!.status, callSpace,
+        status: schemaRefusalStatus('update'), callSpace,
       };
     }
     /*
@@ -381,11 +412,6 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      */
     if (err instanceof NotFoundError) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
-    }
-    // A refused merge answers what it answers on every merge door (`mergeRefusal`): 422 merge_too_large, or 400.
-    const merge = mergeRefusal(err);
-    if (merge) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
     }
     // A relabel onto an identity another edge holds: the REST route's 409 and body (`edgeIdentityTakenAnswer`).
     const identityTaken = edgeIdentityTakenAnswer(err);

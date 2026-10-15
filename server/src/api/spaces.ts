@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
+import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
@@ -30,7 +30,7 @@ import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { searchReadinessSnapshot, isSearchDown } from '../spaces/search-readiness.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -38,18 +38,17 @@ import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import {
-  TypeSchemaZ, TypeSchemasZ, SpaceMetaBody,
-  stripServerOwnedMeta, findBrokenLibraryRefs,
+  TypeSchemasZ,
+  findBrokenLibraryRefs, findWrongKindLibraryRefs, wrongKindRefsError,
+  parseTypeSchema, withTypeSchemas,
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
-import { requireSettingsFields } from '../auth/require-settings-fields.js';
-import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } from '../spaces/meta-update.js';
+import { requireSettingsFields, singleTypeEditBody } from '../auth/require-settings-fields.js';
+import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
-import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { pageList } from '../brain/list-page.js';
-import { defaultBudgetChars } from '../brain/result-budget.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure } from './send-failure.js';
 
 export const spacesRouter = Router();
@@ -94,7 +93,7 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
   const oldId = req.params['id'] as string;
   const parsed = RenameSpaceBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   // The rename IS the change, so the snapshot is just the two ids. Set before the attempt and only read
@@ -111,7 +110,7 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
 spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = ReorderSpacesBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const reordered = reorderSpaces(parsed.data.ids);
@@ -356,10 +355,10 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     return;
   }
   if (result.outcome === 'vote_pending') {
-    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) });
+    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, req.authToken as WriteCaller) });
     return;
   }
-  res.json({ space: spaceForWire(result.space), ...networkMergeNotice(result) });
+  res.json({ space: spaceForWire(result.space), ...networkWriteNotice(result, req.authToken as WriteCaller) });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
@@ -385,7 +384,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
 
   const parsed = PutSchemaBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -395,10 +394,16 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
     return;
   }
+  // And a reference to an entry filed under ANOTHER kind (`Q-215`): its fields would never apply.
+  const wrongKind = findWrongKindLibraryRefs(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
+  if (wrongKind.length > 0) {
+    res.status(422).json({ error: wrongKindRefsError(wrongKind) });
+    return;
+  }
 
   // Write a backup of the previous schema before replacing it
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, parsed.data.typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(id, parsed.data.typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   const previousTypeSchemas = space.meta?.typeSchemas;
   if (previousTypeSchemas && Object.keys(previousTypeSchemas).length > 0) {
@@ -424,7 +429,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
 
   // Replace the entire typeSchemas (full-replace semantics), through the own definitions (F-39.2) so a space whose
   // meta is rebuilt from network layers keeps the edit.
-  const updated = commitOwnMetaEdit(id, base => ({ ...base, typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'] }));
+  const updated = commitOwnMetaEdit(id, base => withTypeSchemas(base, parsed.data.typeSchemas));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -516,7 +521,8 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — upsert a single type definition
-spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
+spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly,
+  requireSettingsFields('id', singleTypeEditBody), async (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
@@ -524,17 +530,24 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     return;
   }
 
-  const parsed = TypeSchemaZ.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  // Parsed WITH the collection it is filed under (`Q-215`): `TypeSchemaZ` alone cannot see it, so `endpoints` on an entity type
+  // was stored by this door while every other door refused it.
+  const parsed = parseTypeSchema(knowledgeType as KnowledgeType, typeName, req.body ?? {});
+  if (!parsed.ok) {
+    res.status(400).json(parsed.refusal);
     return;
   }
 
   // Validate any $ref against the instance schema library before writing
-  if ('$ref' in parsed.data) {
-    const brokenRefs = findBrokenLibraryRefs({ [knowledgeType]: { _check: parsed.data } });
+  if ('$ref' in parsed.schema) {
+    const brokenRefs = findBrokenLibraryRefs({ [knowledgeType]: { _check: parsed.schema } });
     if (brokenRefs.length > 0) {
       res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
+      return;
+    }
+    const wrongKind = findWrongKindLibraryRefs({ [knowledgeType]: { [typeName]: parsed.schema } });
+    if (wrongKind.length > 0) {
+      res.status(422).json({ error: wrongKindRefsError(wrongKind) });
       return;
     }
   }
@@ -567,10 +580,10 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   }
 
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.data } }, 'merge');
+  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.schema } }, 'merge', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
-  const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.data));
+  const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.schema));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -584,7 +597,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
 
-  res.json({ knowledgeType: kt, typeName, schema: parsed.data });
+  res.json({ knowledgeType: kt, typeName, schema: parsed.schema });
 });
 
 // DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — remove a single type definition
@@ -620,7 +633,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   }
 
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(id, withoutType(existingMeta, kt, typeName).typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(id, withoutType(existingMeta, kt, typeName).typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   // Through the own definitions (F-39.2). A type a network layer defines comes back at the next recompute: a
   // replicated schema is additive, so only the network can take its own type away.
@@ -654,7 +667,9 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
  * another" — `/meta`, same area and one call apart, honoured the rung and answered 200.
  *
  * A DRY RUN is the right thing to sit at `read`: it writes nothing, stores nothing and reports what would
- * be refused.
+ * be refused. The one thing a reader may not do is RUN rules it could not save: a check (either mode) with a proposed `meta` whose
+ * rules differ from the stored ones is a 403 (`refusalOfUnsavableRules`, inside the door module), because a rule is
+ * evaluated on the event loop; the refusal comes before the heavy-call rail is charged.
  *
  * **The second factor STAYS.** `space-admin-reaches-its-own-space-settings.test.js` pins MFA on the widened
  * routes as deliberate, the reported defect is the rung rather than the factor, and loosening more than was
@@ -662,98 +677,25 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
  */
 spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
-  const cfg = getConfig();
-  const space = cfg.spaces.find(s => s.id === id);
-  if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
-    return;
-  }
-
-  // Use the provided meta for dry-run, or fall back to the space's current meta.
-  //
-  // This endpoint has stripped the server-owned housekeeping fields since it was written — which is why it
-  // accepted a round-tripped `GET` body while the PATCH above rejected it. Now both use the one helper, so
-  // the two cannot drift apart again: a future field added to SERVER_OWNED_META_FIELDS reaches both, where
-  // this inline destructure would have needed remembering.
-  const parsedMeta = SpaceMetaBody.safeParse(stripServerOwnedMeta(req.body?.meta ?? space.meta ?? {}));
-  if (!parsedMeta.success) {
-    res.status(400).json({ error: parsedMeta.error.message });
-    return;
-  }
-  const dryMeta = parsedMeta.data as SpaceMeta;
-
-  // Import validation functions dynamically to avoid circular deps
-  const { validateEntity, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
-  const resolvedMeta = resolveMetaRefs(dryMeta);
-
-  const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
-  const memberIds = memberSpacesForRequest(req, id);
-  // Edges whose write guard names another subject than the one they are under: not violations, so not in `totalViolations`.
-  const staleGuards: Array<{ _id: string; label: string }> = [];
-  const SCAN_LIMIT = 10_000;
   /*
-   * Q-129: how much of each collection was actually checked. The scan reads at most SCAN_LIMIT records per collection,
-   * and a clean dry-run over a larger space used to be a dry-run of its first ten thousand records with nothing saying
-   * so. Now every answer says what was checked against what exists, and `complete` is true only when that is all.
+   * F-46 (R6-12): the one sequence both doors run (`spaces/schema-validate-door.ts`) — `sample` mode, the stored-data walk paged by
+   * `after` / `nextAfter` with a fixed projection, values only for a caller who may read the space's knowledge, the heavy-call rail
+   * and the single flight. This door adds what it has always answered in stored mode: the meta it checked (the MCP tool never echoes
+   * it). The dynamic import keeps the validators out of this module's load, as the inline scan's import did.
    */
-  const checked: Record<string, { checked: number; total: number }> = {};
-  const note = async (mid: string, collection: Parameters<typeof spaceCollection>[1], read: number) => {
-    const total = await col(spaceCollection(mid, collection)).countDocuments();
-    const c = (checked[collection] ??= { checked: 0, total: 0 });
-    c.checked += Math.min(read, total);
-    c.total += total;
-  };
-
-  for (const mid of memberIds) {
-    // Entities
-    const entities = await col(spaceCollection(mid, 'entities')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'entities', entities.length);
-    for (const ent of entities) {
-      const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
-      const v = validateEntity(resolvedMeta, doc);
-      if (v.length) violations.push({ collection: 'entities', _id: String(doc._id), violations: v });
-    }
-
-    // Edges need two lookups the document cannot supply — see `validateStoredEdges`, which also
-    // explains why they live in a module of their own rather than here.
-    const storedEdges = await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT);
-    violations.push(...storedEdges.violations);
-    staleGuards.push(...storedEdges.staleGuards);
-    await note(mid, 'edges', SCAN_LIMIT);
-
-    // Facts
-    const facts = await col(spaceCollection(mid, 'facts')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'facts', facts.length);
-    for (const mem of facts) {
-      const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateFact(resolvedMeta, doc);
-      if (v.length) violations.push({ collection: 'facts', _id: String(doc._id), violations: v });
-    }
-
-    // Chrono
-    const chronoEntries = await col(spaceCollection(mid, 'chrono')).find({}).limit(SCAN_LIMIT).toArray();
-    await note(mid, 'chrono', chronoEntries.length);
-    for (const ch of chronoEntries) {
-      const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
-      const v = validateChrono(resolvedMeta, doc);
-      if (v.length) violations.push({ collection: 'chrono', _id: String(doc._id), violations: v });
-    }
-  }
-
-  // The violation list through the shared page rule (Q-129): it was `slice(0, 500)` with no way to reach the rest.
-  const page = pageList(violations, { limit: req.body?.limit ?? req.query['limit'], skip: req.body?.skip ?? req.query['skip'] },
-    { defaultLimit: 500, maxLimit: 500, budgetChars: defaultBudgetChars('rest') });
-  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-  res.json({
+  const { beginSchemaValidate } = await import('../spaces/schema-validate-door.js');
+  const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
+  const outcome = await beginSchemaValidate({
     spaceId: id,
-    meta: dryMeta,
-    checked,
-    complete: Object.values(checked).every(c => c.checked >= c.total),
-    totalViolations: violations.length,
-    violations: page.rows,
-    staleGuards,
-    ...page.fields,
+    memberIds: memberSpacesForRequest(req, id),
+    body: req.body ?? {},
+    rights,
+    callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',
+    transport: 'rest',
   });
+  if (outcome.status !== 200) { res.status(outcome.status).json(outcome.body ?? { error: outcome.error }); return; }
+  const { spaceId, ...answer } = outcome.answer;
+  res.json(outcome.mode === 'stored' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
 });
 
 // DELETE /api/spaces/:id

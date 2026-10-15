@@ -50,6 +50,12 @@ import { RUNGS } from './space-rights.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { effectiveRung } from './mint-cap.js';
 import { isSpaceAdminFor } from './editor-scope.js';
+import { isDeepStrictEqual } from 'node:util';
+import { getConfig } from '../config/loader.js';
+import type { SpaceMeta } from '../config/types.js';
+import { metaWriteBase, mergeSpaceMeta } from '../spaces/meta-write-base.js';
+import { PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { isPlainObject } from '../util/plain-object.js';
 
 /** Rungs contain the ones below them, so "at least" is an index comparison and never a set of cases. */
 const meetsRung = (held: Rung, need: Rung): boolean => RUNGS.indexOf(held) >= RUNGS.indexOf(need);
@@ -94,6 +100,13 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   targetNetwork: area('networks', 'write'),
   'meta.typeSchemas': area('schema', 'write'),
   'meta.whenDuePasses': area('schema', 'write'),
+  // `Q-217`: it changes what a space's records are checked against — a stamp that disagrees with the server's clock is a warning, and
+  // `warnMinutes: 0` switches the check off — which is the shape the schema area owns, and the same rung as `whenDuePasses`.
+  'meta.stampSkew': area('schema', 'write'),
+  // A rule says what every record of the space must satisfy, so it can start refusing writes that used to succeed: the same rung as
+  // `validationMode`, which is what decides whether a violation refuses at all (R6-12). A TYPE's rules are priced by this row too
+  // (`typeRuleEditsIn`): `meta.typeSchemas` alone is the write rung, and a rule refuses writes at either level.
+  'meta.rules': area('schema', 'admin'),
 
   // ENFORCEMENT rather than shape: flipping either makes writes that used to succeed start failing, for
   // every caller in the space, without anything having changed about their data.
@@ -176,7 +189,7 @@ export function refusalsForSpaceUpdate(
    * requirement an instance administrator does not satisfy — see the type. Read out of the table rather
    * than named here, so retiring a second field is a row and not another branch nothing can see.
    */
-  const settable = settingsFieldsIn(body);
+  const settable = [...settingsFieldsIn(body), ...typeRuleEditsIn(body, spaceId)];
   const refusedOutright = settable.filter(f => SPACE_FIELD_RIGHTS[f] === 'nobody');
   if (refusedOutright.length > 0) return refusedOutright;
 
@@ -188,7 +201,7 @@ export function refusalsForSpaceUpdate(
   const refused: string[] = [];
 
   for (const field of settable) {
-    const need = SPACE_FIELD_RIGHTS[field];
+    const need = requirementOf(field);
     /*
      * An unknown field is REFUSED, not allowed.
      *
@@ -206,9 +219,58 @@ export function refusalsForSpaceUpdate(
   return refused;
 }
 
+/** The `meta.typeSchemas.<kind>.<type>.rules` pseudo-field a type-rule edit is priced as (see {@link typeRuleEditsIn}). */
+const TYPE_RULES_FIELD = /^meta\.typeSchemas\.[^.]+\..+\.rules$/;
+
+/** What `field` requires: its row, and for a type's rules the row of `meta.rules` — a rule is a rule at either level (R6-12). */
+function requirementOf(field: string): FieldRight | undefined {
+  return TYPE_RULES_FIELD.test(field) ? SPACE_FIELD_RIGHTS['meta.rules'] : SPACE_FIELD_RIGHTS[field];
+}
+
+/** A rules map compared as content: absent and empty say the same thing. */
+const rulesOf = (def: unknown): unknown => (isPlainObject(def) && isPlainObject(def['rules']) ? def['rules'] : {});
+
+/**
+ * The types whose RULES a body changes, as `meta.typeSchemas.<kind>.<type>.rules` — priced as `meta.rules` (schema admin), because a
+ * type's rule can start refusing writes exactly as a space's can, and `meta.typeSchemas` alone is the schema WRITE rung (R6-12).
+ *
+ * A type sent with the rules the store already holds for it is not an edit of them: a schema writer may change a type that carries a
+ * rule without being refused for the rule it left alone. The comparison is against what the write is merged over — this instance's
+ * own definitions, or the targeted network's layer.
+ */
+export function typeRuleEditsIn(body: Record<string, unknown>, spaceId: string): string[] {
+  const meta = isPlainObject(body['meta']) ? body['meta'] : undefined;
+  if (!meta || !isPlainObject(meta[PER_TYPE_META_FIELD])) return [];
+  const cfg = getConfig();
+  const space = cfg.spaces.find(s => s.id === spaceId);
+  // The definitions the write is merged over, asked of the planner's own answer (`metaWriteBase`): the OWN ones, or the targeted
+  // network's layer. A network that does not carry the space is refused by the planner; priced here against nothing, so every rule counts.
+  const targetNetwork = typeof body['targetNetwork'] === 'string' ? body['targetNetwork'] : undefined;
+  const base = (space ? metaWriteBase(space, targetNetwork, cfg.networks) : undefined) ?? {};
+  // What the write LEAVES, not what it names: under `typeSchemasMode: 'replace'` a type is removed by leaving it out of the body.
+  const mode = body['typeSchemasMode'] === 'replace' ? 'replace' : 'merge';
+  const after = mergeSpaceMeta(base, { [PER_TYPE_META_FIELD]: meta[PER_TYPE_META_FIELD] } as Partial<SpaceMeta>, mode);
+  const typesOf = (m: object): Record<string, unknown> => {
+    const types = (m as Record<string, unknown>)[PER_TYPE_META_FIELD];
+    return isPlainObject(types) ? types : {};
+  };
+  const before = typesOf(base);
+  const left = typesOf(after);
+  const edits: string[] = [];
+  for (const kind of new Set([...Object.keys(before), ...Object.keys(left)])) {
+    const was = isPlainObject(before[kind]) ? before[kind] : {};
+    const is = isPlainObject(left[kind]) ? left[kind] : {};
+    for (const type of new Set([...Object.keys(was), ...Object.keys(is)])) {
+      const ruleOf = (types: Record<string, unknown>) => rulesOf(Object.hasOwn(types, type) ? types[type] : undefined);
+      if (!isDeepStrictEqual(ruleOf(is), ruleOf(was))) edits.push(`meta.${PER_TYPE_META_FIELD}.${kind}.${type}.rules`);
+    }
+  }
+  return edits;
+}
+
 /** How a refusal reads to the operator who has to go and ask for the grant. */
 export function describeFieldRequirement(field: string): string {
-  const need = SPACE_FIELD_RIGHTS[field];
+  const need = requirementOf(field);
   if (!need) return `${field} (no requirement is declared for this field, so it is refused)`;
   if (need === 'instanceAdmin') return `${field} (instance administrator)`;
   if (need === 'nobody') return `${field} (set by the link conversion and by space creation; with the 4.x `

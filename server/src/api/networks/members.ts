@@ -5,6 +5,7 @@
  * `network_member_add` / `network_member_remove` (F-36).
  */
 import { Router } from 'express';
+import { refusalOfParse } from '../../util/log.js';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { AddMemberBody, SigningKeyBody, addMemberAct, removeMemberAct, setSigningKeyAct, acceptIntroductionAct } from '../../networks/member-acts.js';
@@ -20,7 +21,7 @@ export const membersRouter = Router();
 // automatically via a signed proof over gossip.
 membersRouter.put('/:id/members/:instanceId/signing-key', globalRateLimit, requireAdmin, (req, res) => {
   const parsed = SigningKeyBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   sendAct(res, setSigningKeyAct(String(req.params['id']), String(req.params['instanceId']), parsed.data));
 });
 
@@ -32,7 +33,7 @@ membersRouter.put('/:id/members/:instanceId/signing-key', globalRateLimit, requi
 membersRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, res) => {
   try {
     const parsed = AddMemberBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
     sendAct(res, await addMemberAct(String(req.params['id']), parsed.data));
   } catch (err) {
     sendCaughtFailure(res, `POST /api/networks/:id/members`, err);

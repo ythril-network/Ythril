@@ -12,8 +12,15 @@ import { FormsModule } from '@angular/forms';
 import { throwError } from 'rxjs';
 import { BrainApi } from '../core/brain-api.service';
 import { KnowledgeType } from '../core/api.types';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ModalDirective } from './modal.directive';
+import { saveWithRetype, isRetypeCancelled, RetypeBody, type PropertyEdit } from '../pages/brain/retype-flow';
+import type { RefusalSource, WireRow } from '../core/refusal-text';
+import { refusalViewOf } from '../core/refusal-signals';
+import { splitWriteWarnings } from '../core/write-warnings';
+import { RetypeConfirmService } from '../core/retype-confirm.service';
+import { RefusalAlertComponent } from './refusal-alert.component';
+import { WriteWarningsComponent } from './write-warnings.component';
 
 type RecordType = KnowledgeType;
 
@@ -26,7 +33,7 @@ interface FieldEntry {
 @Component({
   selector: 'app-entry-popup',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, ModalDirective],
+  imports: [CommonModule, FormsModule, TranslocoPipe, ModalDirective, RefusalAlertComponent, WriteWarningsComponent],
   styles: [
     `
       .popup-backdrop {
@@ -243,13 +250,18 @@ interface FieldEntry {
 
           <!-- Body -->
           <div class="popup-body">
-            @if (statusMsg()) {
+            <!-- A refused save and a saved-with-warnings save are told the way the record tabs tell them: the shared alert (headline and
+                 one row per thing wrong) and the shared notice that stays until dismissed or replaced by the next save's. -->
+            <app-refusal-alert [view]="refusal()" idPrefix="entry-popup-refusal" />
+            <app-write-warnings [warnings]="writeWarnings()" [truncated]="writeWarningsTruncated()" (dismissed)="dismissWriteWarnings()" />
+            @if (statusKey()) {
               <div
                 class="status-msg"
+                [attr.role]="statusType() === 'error' ? 'alert' : 'status'"
                 [class.success]="statusType() === 'success'"
                 [class.error]="statusType() === 'error'"
               >
-                {{ statusMsg() }}
+                {{ statusKey() | transloco }}
               </div>
             }
 
@@ -383,6 +395,8 @@ interface FieldEntry {
 })
 export class EntryPopupComponent {
   private brainApi = inject(BrainApi);
+  private retype = inject(RetypeConfirmService);
+  private transloco = inject(TranslocoService);
 
   @Input() record: Record<string, unknown> | null = null;
   @Input() recordType: RecordType = 'entity';
@@ -390,12 +404,26 @@ export class EntryPopupComponent {
   @Input() canEdit = false;
 
   @Output() closed = new EventEmitter<void>();
+  /** A save that carried no warnings: the stored record, as the answer had it. The host may close the popup. */
   @Output() saved = new EventEmitter<Record<string, unknown>>();
+  /**
+   * A save the server stored and warned about (warn mode, or a violation a strict space does not block). Emitted INSTEAD of `saved`: the
+   * record changed, but the popup is where the warnings are read, so a host that closes it on `saved` leaves it open on this.
+   */
+  @Output() savedWithWarnings = new EventEmitter<Record<string, unknown>>();
 
   showRaw = signal(false);
   saving = signal(false);
-  statusMsg = signal('');
+  /** The translation key of the popup's own status line ('' for none): a sentence is the translation's, never a literal here. */
+  statusKey = signal('');
   statusType = signal<'success' | 'error'>('success');
+  /** The refused answer of the last save, as the request gave it; `refusal` is its words and rows. */
+  private failure = signal<RefusalSource | null>(null);
+  readonly refusal = refusalViewOf(this.transloco, this.failure, 'refusal.failed.save');
+  /** The `warnings` of the last successful save, kept until the next save replaces them or the reader dismisses them. */
+  readonly writeWarnings = signal<WireRow[]>([]);
+  /** The server cut the warnings (`warningsTruncated`): the notice says rows were left out. */
+  readonly writeWarningsTruncated = signal(false);
 
   /** Working copy that can be mutated by the user. */
   private draft = signal<Record<string, unknown>>({});
@@ -440,6 +468,8 @@ export class EntryPopupComponent {
       this.draft.set(copy);
       this.snapshot.set(structuredClone(this.record));
       this.clearStatus();
+      // A different record: what the last save warned about was about the one before it.
+      this.dismissWriteWarnings();
     }
   }
 
@@ -499,11 +529,9 @@ export class EntryPopupComponent {
   validate(): void {
     try {
       JSON.parse(JSON.stringify(this.draft()));
-      this.statusMsg.set('Valid ✓');
-      this.statusType.set('success');
+      this.say('entryPopup.valid', 'success');
     } catch {
-      this.statusMsg.set('Invalid JSON');
-      this.statusType.set('error');
+      this.say('entryPopup.invalidJson', 'error');
     }
   }
 
@@ -519,8 +547,7 @@ export class EntryPopupComponent {
   save(): void {
     const id = this.recordId();
     if (!id) {
-      this.statusMsg.set('Cannot save: no _id field');
-      this.statusType.set('error');
+      this.say('entryPopup.noId', 'error');
       return;
     }
 
@@ -528,31 +555,79 @@ export class EntryPopupComponent {
     this.clearStatus();
 
     const body = this.buildPatchBody();
-    const call = this.getUpdateCall(id, body);
+    // Through the retype flow like every other brain update: a strict space refuses a type change that leaves keys the new type does
+    // not declare, and the way out (remove them with the change) is asked of the person, not decided here.
+    const call = saveWithRetype(this.retype, b => this.getUpdateCall(id, b), body as Record<string, unknown> & RetypeBody, this.retypes(body),
+      this.propertyEdit(body));
 
     call.subscribe({
       next: (result) => {
         this.saving.set(false);
-        this.snapshot.set(structuredClone(result as Record<string, unknown>));
-        this.draft.set(structuredClone(result as Record<string, unknown>));
-        this.statusMsg.set('Saved ✓');
-        this.statusType.set('success');
-        this.saved.emit(result as Record<string, unknown>);
+        // The answer is the record AND the `warnings` it carried: the record is what the popup holds, the warnings are the notice's.
+        const { record, warnings, truncated } = splitWriteWarnings(result as Record<string, unknown>);
+        this.snapshot.set(structuredClone(record));
+        this.draft.set(structuredClone(record));
+        this.writeWarnings.set(warnings);
+        this.writeWarningsTruncated.set(truncated);
+        if (warnings.length) {
+          // "Saved, with warnings" is the notice's sentence: a second "Saved" beside it would say the same thing twice.
+          this.statusKey.set('');
+          this.savedWithWarnings.emit(record);
+        } else {
+          this.say('entryPopup.saved', 'success');
+          this.saved.emit(record);
+        }
       },
-      error: (err: { message?: string }) => {
+      error: (err: unknown) => {
         this.saving.set(false);
-        this.statusMsg.set(err.message ?? 'Save failed');
-        this.statusType.set('error');
+        // Declining the removal sends nothing and changes nothing: the JSON is still in the editor.
+        if (isRetypeCancelled(err)) return;
+        this.failure.set((err ?? {}) as RefusalSource);
       },
     });
   }
 
+  /** The reader closed the warnings notice. */
+  dismissWriteWarnings(): void {
+    this.writeWarnings.set([]);
+    this.writeWarningsTruncated.set(false);
+  }
+
   // ── Internals ─────────────────────────────────────────────────────────────
 
+  /** Does this PATCH change the record's type (an edge's label, an entity's or memory's type, a chrono entry's type) from what was loaded? */
+  private retypes(body: Record<string, unknown>): boolean {
+    const was = this.snapshot();
+    const key = this.recordType === 'edge' ? 'label' : 'type';
+    return key in body && body[key] !== was[key];
+  }
+
+  /**
+   * A stored property the JSON no longer holds is removed with `deleteFields`, as in the record editors. A JSON without `properties`
+   * at all states nothing about them, so it removes nothing (an update leaves an absent field alone).
+   */
+  private propertyEdit(body: Record<string, unknown>): PropertyEdit {
+    const stored = this.snapshot()['properties'];
+    const storedKeys = stored && typeof stored === 'object' ? Object.keys(stored) : [];
+    const kept = body['properties'];
+    return { stored: storedKeys, kept: kept && typeof kept === 'object' ? kept as Record<string, unknown> : Object.fromEntries(storedKeys.map(k => [k, true])) };
+  }
+
+  /**
+   * What the editor changed, and nothing else: a key the loaded record carries with the same value is not sent. A record as the server
+   * answers it holds fields no update takes (its space, author, stamps, seq); sent back untouched, each was answered "unknown field —
+   * ignored" beside the warning that was about the edit. A key the person added or changed is sent, so the server still says what it
+   * does not take.
+   */
   private buildPatchBody(): Record<string, unknown> {
-    const d = { ...this.draft() };
-    delete d['_id'];
-    return d;
+    const was = this.snapshot();
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(this.draft())) {
+      if (key === '_id') continue;
+      if (Object.hasOwn(was, key) && JSON.stringify(value) === JSON.stringify(was[key])) continue;
+      body[key] = value;
+    }
+    return body;
   }
 
   private getUpdateCall(
@@ -576,7 +651,15 @@ export class EntryPopupComponent {
     }
   }
 
+  /** The popup's own status line, by its translation key; it clears the refusal of an earlier save, which no longer describes the editor. */
+  private say(key: string, type: 'success' | 'error'): void {
+    this.failure.set(null);
+    this.statusKey.set(key);
+    this.statusType.set(type);
+  }
+
   private clearStatus(): void {
-    this.statusMsg.set('');
+    this.statusKey.set('');
+    this.failure.set(null);
   }
 }

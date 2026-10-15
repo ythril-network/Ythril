@@ -32,6 +32,11 @@ export interface FactInput {
   ttlDays?: number | null;
   /** A caller-supplied id ADDRESSES an existing record (and makes a retry converge); it never mints one. */
   id?: string;
+  /**
+   * The property keys the instance itself writes on a fact, exempt from the undeclared-key rule (`Q-93`). Set by the one writer that owns
+   * them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
+   */
+  instanceWrittenKeys?: readonly string[];
 }
 
 export interface FactPlanned {
@@ -66,7 +71,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
   const properties = existing
     ? input.properties
     : applyPropertyDefaults(type ? meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
-  const check = classifyFactUpsertAgainst(meta, existing, { type, properties });
+  const check = classifyFactUpsertAgainst(meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
 

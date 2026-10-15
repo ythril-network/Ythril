@@ -3,6 +3,8 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { Network } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
+import { refusalText } from '../../core/refusal-text';
+import { TranslocoService } from '@jsverse/transloco';
 
 /**
  * "Connecting" on a club card (`Q-135`): members a peer introduced that this instance has not paired with yet, each
@@ -46,12 +48,13 @@ export class NetworkConnectingComponent {
   accepting = signal<string | null>(null);
   private api = inject(NetworksApi);
   private toast = inject(ToastService);
+  private transloco = inject(TranslocoService);
 
   accept(instanceId: string): void {
     this.accepting.set(instanceId);
     this.api.acceptIntroduction(this.network().id, instanceId).subscribe({
       next: () => { this.accepting.set(null); this.accepted.emit(); },
-      error: (e) => { this.accepting.set(null); this.toast.error(e?.error?.error ?? 'Accept failed'); },
+      error: (e) => { this.accepting.set(null); this.toast.error(refusalText(this.transloco, e, 'refusal.failed.accept')); },
     });
   }
 }

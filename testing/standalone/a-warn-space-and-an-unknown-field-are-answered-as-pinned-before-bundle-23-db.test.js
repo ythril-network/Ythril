@@ -14,9 +14,11 @@
  *
  * **Warn output, per door.** A write that breaks the schema in a `warn` space LANDS, and each door says so its own way:
  *  - REST create (`201`) and PATCH (`200`) answer the record with a `warnings` array of `{ field, value, reason }`;
- *  - the MCP create tools print a `⚠️ Schema: <field> — <reason>` line; `save_edge` also carries the rows as `violations` in
- *    its structured content, `save_entity` and `save_fact` carry none, and `save_chrono` has no structured content at all;
- *  - the MCP UPDATE tools say NOTHING under `warn` (no line, no rows) — the record is stored with the violation.
+ *  - the MCP create tools print a `⚠️ Schema: <field> — <reason>` line, and carry the rows as `warnings` in their structured content
+ *    (`save_edge` used to carry them as `violations`; `save_chrono` used to have no structured content at all — both changed by
+ *    bundle-23's one warnings shape);
+ *  - the MCP UPDATE tools print the same line and carry the same `warnings` under `warn`, as the create tools do (until bundle-23
+ *    they said NOTHING) — the record is stored with the violation.
  *
  * **An unknown top-level field, per door.**
  *  - REST single-record writes ACCEPT it and answer a `warnings` row `{ field, value, reason: 'unknown field — ignored. This route
@@ -26,8 +28,9 @@
  *    `targetSpace`), and IGNORES an unknown key on an ITEM on both, silently.
  *
  * **An undeclared property key, per door.** In a strict space a key the type's `propertySchemas` does not declare is ACCEPTED today
- * on every door that stores a record — REST create and PATCH, the MCP create tools, bulk — with no warning, and stored. This is the
- * answer `Q-93` flips: the pins here are the "before" of that diff.
+ * on every door that stores a record — REST create and PATCH, the MCP create tools, bulk — with no warning, and stored. `Q-93` flips
+ * it: a strict space refuses the key (REST create 400, PATCH 422, bulk a row) and a warn space stores it and warns with a row
+ * `{ field: 'properties.<key>', value, reason, declared }`.
  *
  * ## MCP pins fail rather than skip
  *
@@ -162,31 +165,35 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
         });
       }
 
-      it('and where they put the rows: save_edge carries `violations`; save_entity and save_fact carry none; save_chrono has no structured content', async () => {
+      it('and where they put the rows: every create tool carries `warnings` in its structured content, and none carries `violations`', async () => {
         const saw = {};
         for (const kind of KINDS) {
           const c = violating(warnIds)[kind];
           const out = await pins.call(c.create_tool, { space: WARN, ...c.create });
           saw[c.create_tool] = { warnings: out.structured?.warnings, violations: out.structured?.violations, structured: out.structured !== undefined };
         }
+        // bundle-23: r4.1 Q-315 (one warnings shape on every door, in structured content) — was save_entity/save_fact none, save_chrono no structured content, save_edge `violations`
         assert.deepEqual(saw, {
-          save_entity: { warnings: undefined, violations: undefined, structured: true },
-          save_fact: { warnings: undefined, violations: undefined, structured: true },
-          save_chrono: { warnings: undefined, violations: undefined, structured: false },
-          save_edge: { warnings: undefined, violations: [violating(warnIds).edge.row], structured: true },
+          save_entity: { warnings: [violating(warnIds).entity.row], violations: undefined, structured: true },
+          save_fact: { warnings: [violating(warnIds).fact.row], violations: undefined, structured: true },
+          save_chrono: { warnings: [violating(warnIds).chrono.row], violations: undefined, structured: true },
+          save_edge: { warnings: [violating(warnIds).edge.row], violations: undefined, structured: true },
         });
       });
     });
 
-    describe('the MCP update tools say nothing of the violation under warn, and the edit lands', () => {
+    describe('the MCP update tools print one `⚠️ Schema:` line under warn, as the create tools do, and the edit lands', () => {
       for (const kind of KINDS) {
         it(violating({})[kind].update_tool, async () => {
           const c = violating(warnIds)[kind];
           const out = await pins.call(c.update_tool, { space: WARN, ...c.update });
           assert.equal(out.status, 200, out.text);
           assert.equal(out.isError, false);
-          assert.doesNotMatch(out.text, /Schema|⚠/, `an update tool printed the warning: ${out.text}`);
-          assert.equal(out.structured?.warnings, undefined);
+          // bundle-23: r4.1 Q-315 (update_* tools return the warnings, one MCP line and `warnings` in structured content) — was no line and no rows under warn
+          const lines = out.text.split('\n');
+          assert.equal(lines.length, 2, out.text);
+          assert.equal(lines[1], warnLine(c.row));
+          assert.deepEqual(out.structured?.warnings, [c.row]);
           assert.equal(out.structured?.violations, undefined);
         });
       }
@@ -255,7 +262,7 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
     });
   });
 
-  describe('an undeclared property key is ACCEPTED on every door today, in a strict and a warn space alike, with no warning', () => {
+  describe('an undeclared property key: a strict space refuses it on every door, a warn space stores it and warns', () => {
     /** The write each kind takes with `UNDECLARED` added to a type that declares other properties (a write the schema otherwise accepts). */
     const withKey = (ids_) => ({
       entity: { create: { name: 'Ann', type: 'person', properties: { age: 3, [UNDECLARED]: 1 } }, update: { id: ids_.person1, properties: { [UNDECLARED]: 1 } } },
@@ -264,40 +271,79 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
       edge: { create: { from: ids_.person1, to: ids_.person2, label: 'knows', properties: { since: 3, [UNDECLARED]: 1 } }, update: { id: ids_.edge, properties: { [UNDECLARED]: 1 } } },
     });
     const carries = (doc) => doc?.properties?.[UNDECLARED] === 1;
+    const COLLECTION = { entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges' };
+    /** `declared` is the type's own property keys, read from the warn space (the strict one is the same schema). */
+    const DECLARED = { entity: ['age', 'rank'], fact: ['confidence'], edge: ['since'], chrono: ['priority'] };
+    const UNDECLARED_REASON = `property '${UNDECLARED}' is not declared on this type`;
+    const UNDECLARED_MESSAGE = `The change violates this space's schema: properties.${UNDECLARED}. Not declared on this type: ${UNDECLARED}.`;
+    const undeclaredRow = (kind) => ({ field: `properties.${UNDECLARED}`, value: 1, reason: UNDECLARED_REASON, declared: DECLARED[kind] });
+    const refusedBody = (kind) => ({ error: 'schema_violation', message: UNDECLARED_MESSAGE, introduced: [undeclaredRow(kind)], preExisting: [], violations: [undeclaredRow(kind)] });
 
-    for (const space of [STRICT, WARN]) {
+    describe('a strict space refuses the key on every door, and stores nothing', () => {
       for (const kind of KINDS) {
-        it(`${space}: ${kind} — REST create, REST PATCH and the MCP create tool store the key`, async () => {
-          const ids_ = space === STRICT ? ids : warnIds;
-          const w = withKey(ids_)[kind];
-          const c = violating(ids_)[kind];
+        it(`${kind}: REST create 400, REST PATCH 422 and the MCP create tool refuse it`, async () => {
+          const w = withKey(ids)[kind];
+          const c = violating(ids)[kind];
 
-          const created = await pins.rest(kind, 'create', space, { body: w.create });
-          assert.equal(created.status, 201, JSON.stringify(created.body));
-          assert.equal(created.body.warnings, undefined, 'an undeclared key was warned about');
-          assert.ok(carries(await pins.door.coll(space, { entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges' }[kind]).findOne({ _id: created.body._id })));
+          // bundle-23: Q-93 (an undeclared key is a violation in a strict space) — was 201, stored, no warning
+          const created = await pins.rest(kind, 'create', STRICT, { body: w.create });
+          assert.equal(created.status, 400, JSON.stringify(created.body));
+          assert.deepEqual(created.body, refusedBody(kind));
 
           const { id, ...patch } = w.update;
-          const patched = await pins.rest(kind, 'update', space, { id, body: patch });
-          assert.equal(patched.status, 200, JSON.stringify(patched.body));
-          assert.equal(patched.body.warnings, undefined);
-          assert.ok(carries((await pins.stored(space, kind)).find(d => d._id === id)));
+          const patched = await pins.rest(kind, 'update', STRICT, { id, body: patch });
+          assert.equal(patched.status, 422, JSON.stringify(patched.body));
+          assert.deepEqual(patched.body, refusedBody(kind));
 
-          // A different name, so the tool's own "an entity with this name already exists" line is not mistaken for a schema warning.
-          const viaTool = await pins.call(c.create_tool, { space, ...w.create, ...(kind === 'entity' ? { name: 'Ann by tool' } : {}) });
-          assert.equal(viaTool.isError, false, viaTool.text);
-          assert.doesNotMatch(viaTool.text, /Schema:/, `an undeclared key was warned about: ${viaTool.text}`);
+          // A different name, so the tool's own "an entity with this name already exists" line is not mistaken for the refusal.
+          const viaTool = await pins.call(c.create_tool, { space: STRICT, ...w.create, ...(kind === 'entity' ? { name: 'Ann by tool' } : {}) });
+          assert.equal(viaTool.status, 422, viaTool.text);
+          assert.equal(viaTool.isError, true);
+          assert.equal(viaTool.text, `Error: schema_violation: ${UNDECLARED_MESSAGE}`);
+
+          assert.equal((await pins.stored(STRICT, kind)).some(carries), false, 'a refused undeclared key was stored');
         });
       }
-    }
+    });
 
-    it('bulk stores it too, on both doors, with no error row', async () => {
+    describe('a warn space stores the key on every door, and warns', () => {
+      for (const kind of KINDS) {
+        it(`${kind}: REST create, REST PATCH and the MCP create tool store the key and warn`, async () => {
+          const w = withKey(warnIds)[kind];
+          const c = violating(warnIds)[kind];
+
+          const created = await pins.rest(kind, 'create', WARN, { body: w.create });
+          assert.equal(created.status, 201, JSON.stringify(created.body));
+          // bundle-23: Q-93 (a warn space warns on an undeclared key, one row) — was no warning
+          assert.deepEqual(created.body.warnings, [undeclaredRow(kind)]);
+          assert.ok(carries(await pins.door.coll(WARN, COLLECTION[kind]).findOne({ _id: created.body._id })));
+
+          const { id, ...patch } = w.update;
+          const patched = await pins.rest(kind, 'update', WARN, { id, body: patch });
+          assert.equal(patched.status, 200, JSON.stringify(patched.body));
+          assert.deepEqual(patched.body.warnings, [undeclaredRow(kind)]);
+          assert.ok(carries((await pins.stored(WARN, kind)).find(d => d._id === id)));
+
+          // A different name, so the tool's own "an entity with this name already exists" line is not mistaken for a schema warning.
+          const viaTool = await pins.call(c.create_tool, { space: WARN, ...w.create, ...(kind === 'entity' ? { name: 'Ann by tool' } : {}) });
+          assert.equal(viaTool.isError, false, viaTool.text);
+          const lines = viaTool.text.split('\n');
+          assert.equal(lines.length, 2, viaTool.text);
+          assert.equal(lines[1], warnLine(undeclaredRow(kind)));
+        });
+      }
+    });
+
+    it('bulk refuses it in a strict space, per item, on both doors: a row with its `violation`, and nothing stored', async () => {
+      const row = { type: 'entity', index: 0, reason: `schema_violation: ${UNDECLARED_REASON}`,
+        violation: { error: 'schema_violation', message: UNDECLARED_MESSAGE, introduced: [{ ...undeclaredRow('entity') }], preExisting: [] } };
+      // bundle-23: Q-93 + R5-3 Q-315 (a bulk row for an undeclared key, with `violation`) — was 207 with no error row, stored
       const rest = await pins.bulkRest(STRICT, { entities: [{ name: 'Bulk Rest', type: 'person', properties: { age: 3, [UNDECLARED]: 1 } }] });
-      assert.deepEqual([rest.status, rest.body.errors], [207, []]);
+      assert.deepEqual([rest.status, rest.body.errors], [207, [row]]);
       const mcp = await pins.call('save_bulk', { space: STRICT, entities: [{ name: 'Bulk Mcp', type: 'person', properties: { age: 3, [UNDECLARED]: 1 } }] });
-      assert.deepEqual([mcp.isError, mcp.structured.errors], [false, []]);
+      assert.deepEqual([mcp.isError, mcp.structured.errors], [false, [row]]);
       const stored = await pins.stored(STRICT, 'entity');
-      assert.ok(carries(stored.find(d => d.name === 'Bulk Rest')) && carries(stored.find(d => d.name === 'Bulk Mcp')));
+      assert.equal(stored.some(d => d.name === 'Bulk Rest' || d.name === 'Bulk Mcp'), false, 'a refused bulk item was stored');
     });
   });
 });

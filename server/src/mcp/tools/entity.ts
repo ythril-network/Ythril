@@ -7,15 +7,17 @@ import { readEditAudit } from '../../brain/edit-audit.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import type { UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { resolveMetaRefs } from '../../spaces/schema-validation.js';
+import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
@@ -51,7 +53,7 @@ export const save_entityTool: ToolHandler = {
             description: { type: 'string', description: 'Optional prose description or summary of this entity.' },
             properties: {
               type: 'object',
-              description: 'Key-value properties (e.g. {"wheels": 4, "color": "red"}). Values must be string, number, or boolean.',
+              description: 'Key-value properties (e.g. {"wheels": 4, "color": "red"}). Values must be string, number, or boolean. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
@@ -107,39 +109,26 @@ export const save_entityTool: ToolHandler = {
     // the write, so a refusal there would leave the record stored without the connections the same call asked for.
     await assertConnections(wt.target, 'entity', await connectionSubject(wt.target, 'entity', a, { id: rawId, type: eType.trim() }), a);
 
-    let upserted;
-    try {
-      // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
-      // grammar, so a change to it reaches every create door at once rather than one at a time.
-      const supCreate = parseRecordSuppression(a);
-      if (!supCreate.ok) throw new Error(supCreate.error);
-      const susCreate = parseRecordSuperseded(a);
-      if (!susCreate.ok) throw new Error(susCreate.error);
-      upserted = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId,
-        {
-          checkDuplicates: entDupeCheck, checkContradictions: entContraCheck, dupeThreshold: entDupeThreshold,
-          ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
-          ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
-        },
-        ctx.actor, entTtlDays, c => { entCheck = c; });
-    } catch (err) {
-      if (err instanceof SchemaViolationError) {
-        // The violations travel as structured data rather than a JSON tail glued to the sentence: a caller
-        // had to parse the message to act on them. The prose is unchanged for a client that reads only the
-        // content blocks.
-        return {
-          content: [{ type: 'text' as const, text: `Error: schema_violation: ${err.check.message}` }],
-          isError: true,
-          structuredContent: err.toStructured(),
-        };
-      }
-      throw err;
-    }
-    const { entity, warning, similar, contradicts } = upserted;
+    // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
+    // grammar, so a change to it reaches every create door at once rather than one at a time.
+    const supCreate = parseRecordSuppression(a);
+    if (!supCreate.ok) throw new Error(supCreate.error);
+    const susCreate = parseRecordSuperseded(a);
+    if (!susCreate.ok) throw new Error(susCreate.error);
+    // A schema refusal is NOT caught here (`Q-315`): it reaches `callTool`, which answers every tool's refusal the one way — the
+    // structured body and `Error: schema_violation: <message>`. A tool that caught its own could say something else, and the chrono
+    // tool did (it dropped the message).
+    const { entity, warning, similar, contradicts } = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId,
+      {
+        checkDuplicates: entDupeCheck, checkContradictions: entContraCheck, dupeThreshold: entDupeThreshold,
+        ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
+        ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
+      },
+      ctx.actor, entTtlDays, c => { entCheck = c; });
 
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
     // exists — a relationship needs both ends, and the `from` is what was just minted.
-    await applyConnections(wt.target, entity._id, 'entity', a, entity.author, ctx.actor);
+    const connected = await applyConnections(wt.target, entity._id, 'entity', a, entity.author, ctx.actor);
 
     let msg = `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).${warning ? `\n⚠️ ${warning}` : ''}`;
     if (similar && similar.length > 0) {
@@ -153,12 +142,11 @@ export const save_entityTool: ToolHandler = {
     }
     // Schema warnings, taken from the classification the writer handed back rather than re-derived — which
     // would be a second lookup per write and the second copy of the rule this change exists to remove.
-    if (entMeta?.validationMode === 'warn') {
-      for (const v of (entCheck as UpdateValidation | undefined)?.all ?? []) msg += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
+    const schemaWarnings = schemaWarningAnswer(entMeta, entCheck as UpdateValidation | undefined, connected.warnings);
+    for (const line of schemaWarnings.lines) msg += `\n${line}`;
     return {
       content: [{ type: 'text' as const, text: msg }],
-      structuredContent: { ...entity, ...(warning ? { warning } : {}) },
+      structuredContent: { ...entity, ...(warning ? { warning } : {}), ...schemaWarnings.structured },
     };
   },
 };
@@ -238,7 +226,7 @@ export const update_entityTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Key-value properties to merge with existing (e.g. {"wheels": 4}). Values must be string, number, or boolean.',
+              description: 'Key-value properties to merge with existing (e.g. {"wheels": 4}). Values must be string, number, or boolean. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
@@ -310,16 +298,21 @@ export const update_entityTool: ToolHandler = {
       await assertConnections(audit.home!, 'entity',
         await connectionSubject(audit.home!, 'entity', a, { stored: audit.prior, type: updates.type }), a);
     }
-    const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    let updCheck: UpdateValidation | undefined;
+    const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEnt) { const s = audit.snapshots(updatedEnt); ctx.recordChanges?.(s.before, s.after); }
-    if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
+    // A record the call names and cannot find is a 404, as the PATCH route answers it (`NotFoundError`, mapped once by `callTool`).
+    if (!updatedEnt) throw new NotFoundError(`Entity '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
     // semantics live in `applyConnections`, after the record write, exactly as the create does it.
     // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
-    await applyConnections(updatedEnt.spaceId, updatedEnt._id, 'entity', a, updatedEnt.author, ctx.actor);
+    const connected = await applyConnections(updatedEnt.spaceId, updatedEnt._id, 'entity', a, updatedEnt.author, ctx.actor);
+    // What a `warn` space says about the record as the update leaves it, and about its inline edges — from the classification the
+    // writer handed back (create says the same, `schemaWarningAnswer`).
+    const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updatedEnt.spaceId), updCheck as UpdateValidation | undefined, connected.warnings);
     return {
-      content: [{ type: 'text' as const, text: `Entity '${updatedEnt.name}' (${updatedEnt.type}) updated (ID ${updatedEnt._id}, seq ${updatedEnt.seq}).` }],
-      structuredContent: { ...updatedEnt },
+      content: [{ type: 'text' as const, text: [`Entity '${updatedEnt.name}' (${updatedEnt.type}) updated (ID ${updatedEnt._id}, seq ${updatedEnt.seq}).`, ...schemaWarnings.lines].join('\n') }],
+      structuredContent: { ...updatedEnt, ...schemaWarnings.structured },
     };
   },
 };
@@ -563,6 +556,6 @@ What would go now: ${JSON.stringify(r.preview)}`);
       structuredContent: { _id: id, deleted: true } };
       }
     }
-    throw new Error(`Entity '${id}' not found`);
+    throw new NotFoundError(`Entity '${id}' not found`);
   },
 };

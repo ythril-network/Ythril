@@ -22,6 +22,7 @@ import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
 import { encodeSeqCursor, isoReadStart, BAD_ISO_CURSOR } from '../../util/seq-keyset.js';
+import { refusalOfParse } from '../../util/log.js';
 
 export const syncTombstonesRouter = Router();
 
@@ -111,7 +112,7 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
     // honest sender pages well below it (`pushTombstones`).
     const parsed = TombstonePage.safeParse(req.body ?? {});
     if (!parsed.success) {
-      const tooMany = parsed.error.issues.some(i => i.code === 'too_big');
+      const tooMany = refusalOfParse(parsed.error).issues.some(i => i.code === 'too_big');
       res.status(400).json({ error: tooMany ? `At most ${MAX_TOMBSTONES_PER_REQUEST} tombstones per request` : 'Invalid tombstone format' });
       return;
     }

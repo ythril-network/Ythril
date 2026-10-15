@@ -12,6 +12,7 @@ import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-st
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
+import { refusalText } from '../../core/refusal-text';
 
 type UriSource = 'env' | 'config' | 'default';
 type Frequency = 'never' | 'hourly' | 'daily' | 'weekly' | 'monthly';
@@ -510,7 +511,7 @@ export class DataComponent implements OnInit {
       },
       error: err => {
         this.backingUp.set(false);
-        this.backupError.set(err?.error?.error ?? this.transloco.translate('data.backup.error'));
+        this.backupError.set(refusalText(this.transloco, err, 'data.backup.error'));
       },
     });
   }
@@ -537,7 +538,7 @@ export class DataComponent implements OnInit {
       },
       error: err => {
         this.restoringId.set(null);
-        this.restoreError.set(err?.error?.error ?? this.transloco.translate('data.backup.restoreError'));
+        this.restoreError.set(refusalText(this.transloco, err, 'data.backup.restoreError'));
       },
     });
   }
@@ -555,7 +556,7 @@ export class DataComponent implements OnInit {
       },
       error: err => {
         this.savingSchedule.set(false);
-        this.scheduleSaveError.set(err?.error?.error ?? this.transloco.translate('data.schedule.saveError'));
+        this.scheduleSaveError.set(refusalText(this.transloco, err, 'data.schedule.saveError'));
       },
     });
   }
@@ -573,7 +574,7 @@ export class DataComponent implements OnInit {
       },
       error: err => {
         this.savingDest.set(false);
-        this.destSaveError.set(err?.error?.error ?? this.transloco.translate('data.dest.saveError'));
+        this.destSaveError.set(refusalText(this.transloco, err, 'data.dest.saveError'));
       },
     });
   }
@@ -696,7 +697,7 @@ export class DataComponent implements OnInit {
         this.testing.set(false);
       },
       error: err => {
-        this.testResult.set({ ok: false, error: err?.error?.error ?? this.transloco.translate('data.migrate.requestFailed') });
+        this.testResult.set({ ok: false, error: refusalText(this.transloco, err, 'data.migrate.requestFailed') });
         this.testing.set(false);
       },
     });
@@ -712,7 +713,7 @@ export class DataComponent implements OnInit {
         this.togglingMaintenance.set(false);
       },
       error: err => {
-        this.maintenanceError.set(err?.error?.error ?? this.transloco.translate('data.maintenance.requestFailed'));
+        this.maintenanceError.set(refusalText(this.transloco, err, 'data.maintenance.requestFailed'));
         this.togglingMaintenance.set(false);
       },
     });
@@ -748,7 +749,7 @@ export class DataComponent implements OnInit {
         } else if (code === 'INFRA_MANAGED') {
           this.migrateError.set(this.transloco.translate('data.migrate.errorInfraManaged'));
         } else {
-          this.migrateError.set(err?.error?.error ?? this.transloco.translate('data.migrate.error'));
+          this.migrateError.set(refusalText(this.transloco, err, 'data.migrate.error'));
         }
       },
     });

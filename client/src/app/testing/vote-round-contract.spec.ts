@@ -28,6 +28,8 @@ const NOT_READ: Record<string, string> = {
   networkSpaceId: 'the network\'s id for the space; `localSpaceId` is the name this operator knows',
   wipeTypes: 'which collections a space_wipe empties; not shown by the row today',
   baseMetaVersion: 'the version a proposal was computed against; machinery for the conclusion, not for the voter',
+  metaBase: 'what the proposed fields and types held in the base the proposal was computed against (R6-8): the conclusion measures "did somebody change this since" against it; not what a voter is asked about',
+  refusedHere: 'LOCAL: why this member did not read the schema a meta_change round carries (R6-6); the layers panel shows it from `schema-layers` (`refusedRounds`), not the vote row',
   requiredVoters: 'braintree machinery for the conclusion',
   appliedHere: 'LOCAL conclusion bookkeeping',
   proposedHere: 'LOCAL: which instance opened the round',

@@ -10,6 +10,7 @@
  * a read joins beside it.
  */
 import { KNOWLEDGE_TYPES } from '../config/types.js';
+import { libraryEntryNameOf } from './library-ref-name.js';
 
 export interface LibraryUsage {
   spaceId: string;
@@ -24,7 +25,6 @@ interface SpaceLike {
   meta?: { typeSchemas?: Partial<Record<string, Record<string, unknown> | undefined>> };
 }
 
-const PREFIX = 'library:';
 
 /** Entry name → every space type that references it, in space order and then knowledge-type order. */
 export function libraryUsages(spaces: readonly SpaceLike[]): Map<string, LibraryUsage[]> {
@@ -36,9 +36,8 @@ export function libraryUsages(spaces: readonly SpaceLike[]): Map<string, Library
       const ktMap = ts[kt];
       if (!ktMap) continue;
       for (const [typeName, schema] of Object.entries(ktMap)) {
-        const ref = (schema as { $ref?: unknown } | null)?.$ref;
-        if (typeof ref !== 'string' || !ref.startsWith(PREFIX)) continue;
-        const name = ref.slice(PREFIX.length);
+        const name = libraryEntryNameOf((schema as { $ref?: unknown } | null)?.$ref);
+        if (name === undefined) continue;
         const list = out.get(name) ?? [];
         list.push({ spaceId: space.id, spaceLabel: space.label, knowledgeType: kt, typeName });
         out.set(name, list);

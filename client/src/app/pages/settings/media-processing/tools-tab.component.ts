@@ -30,6 +30,7 @@ import { SpaceIndexStatus } from './media-processing.types';
 import { SpacesApi } from '../../../core/spaces-api.service';
 import { ToastService } from '../../../core/toast.service';
 import { ConfirmDialogService } from '../../../core/confirm-dialog.service';
+import { refusalText, RefusalSource } from '../../../core/refusal-text';
 
 @Component({
   selector: 'app-tools-tab',
@@ -215,9 +216,9 @@ export class ToolsTabComponent {
         this.clearRebuilding(sp.id);
         this.toast.success(this.transloco.translate('spaces.dangerZone.rebuildIndexesStarted'));
       },
-      error: (err: { error?: { error?: string }; message?: string }) => {
+      error: (err: unknown) => {
         this.clearRebuilding(sp.id);
-        this.toast.error(err?.error?.error ?? err?.message ?? this.transloco.translate('spaces.dangerZone.rebuildIndexesFailed'));
+        this.toast.error(refusalText(this.transloco, err as RefusalSource, 'spaces.dangerZone.rebuildIndexesFailed'));
       },
     });
   }

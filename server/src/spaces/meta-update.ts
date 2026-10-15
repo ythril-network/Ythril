@@ -31,81 +31,71 @@
  */
 import { localToRemote } from '../sync/space-map.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
-import type { SpaceConfig, SpaceMeta, KnowledgeType, TypeSchema, DocExtractionMode } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig } from '../config/loader.js';
 import { updateSpace, refuseRemovedDescription } from './spaces.js';
 import { ensureTtlIndex } from '../brain/ttl.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
+import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
+import { visibleNetworks } from '../auth/network-rights.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log, peerText } from '../util/log.js';
+import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
 import { normaliseRecordTtl } from './record-ttl.js';
-import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedMeta, stripServerOwnedSpace } from './body-schemas.js';
-import type { TypeSchemasZ } from './body-schemas.js';
+import {
+  UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError, parseSpaceMeta,
+  stripServerOwnedMeta, stripServerOwnedSpace,
+} from './body-schemas.js';
+import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
+import { metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
+// The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
+import { mergeSpaceMeta, metaWriteBase } from './meta-write-base.js';
+export { mergeSpaceMeta };
+
 /**
- * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
+ * What a NETWORKED write proposes: the fields the request named and, inside the types, only the types it changed (R6-6).
  *
- * - Scalar fields (purpose, usageNotes, validationMode,
- *   strictLinkage) overwrite the existing value when present in `incoming`.
- * - `typeSchemas` is merged per-knowledge-type, then per-type-name:
- *   types present in `incoming` are added or updated; types *not* mentioned
- *   in the request body are left untouched.
+ * A round used to carry the merged meta the write was computed from — the space's EFFECTIVE meta, own definitions and every network's
+ * layer — and conclusion then merged every one of those types into the proposer's own definitions and into the voted network's layer.
+ * A one-type edit copied each other network's types into this network's layer, and the network's types into this instance's own
+ * definitions, where they are served to every network the space is in ("nothing mixed is sent on"). So the round carries the edit
+ * and nothing else; a member applies exactly that.
  *
- * The `version`, `updatedAt`, and `previousVersions` housekeeping fields are
- * intentionally omitted from the return value — `updateSpace()` re-adds them.
+ * `changedTypes` is `kind:Type` for each type whose definition differs from the base the write was merged over
+ * (`typesAnEditChanges`), so a type the request merely repeated is not proposed again.
  *
- * Exported for testing as well as for the planner. The merge/replace decision is pure and is where a deletion was
- * silently lost for as long as it was; a unit test that reaches it directly is worth more than one that has to
- * stand up Docker and a network to observe the same branch.
+ * It is the pick of "the fields a write named and the types it changed" out of ANY meta, so it also answers what those same parts HELD
+ * before the write: handed the base the write was merged over it is the round's `metaBase` (R6-8), the values the conclusion measures
+ * "did somebody change this field since the proposal" against. One walk, so what the round says it changed and what it was measured
+ * against cannot be read from two places.
  */
-export function mergeSpaceMeta(
-  existing: SpaceMeta,
-  incoming: Partial<SpaceMeta>,
-  typeSchemasMode: 'merge' | 'replace' = 'merge',
-): Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> {
-  // Spread the existing base (drop housekeeping fields that updateSpace re-adds)
-  const { version: _v, updatedAt: _u, previousVersions: _pv, ...existingBase } = existing;
-  const merged: Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> = { ...existingBase };
-
-  // Scalar fields — replace if present in incoming
-  if (incoming.purpose !== undefined) merged.purpose = incoming.purpose;
-  if (incoming.usageNotes !== undefined) merged.usageNotes = incoming.usageNotes;
-  if (incoming.validationMode !== undefined) merged.validationMode = incoming.validationMode;
-  if (incoming.strictLinkage !== undefined) merged.strictLinkage = incoming.strictLinkage;
-  // Guarded on `!== undefined`, not on truthiness. `suppressEmbeddings: false` is how an operator turns
-  // suppression back OFF, and a truthy guard would drop that patch and leave the space suppressed while
-  // answering 200 — the flag reporting one thing and the write path doing another.
-  if (incoming.suppressEmbeddings !== undefined) merged.suppressEmbeddings = incoming.suppressEmbeddings;
-
-  // typeSchemas — merge per-KT, per-type: incoming types add/update, existing untouched types preserved.
-  // Under `replace` the payload is authoritative instead, so a type absent from it is deleted. Note the
-  // guard is on `!== undefined`, so `replace` with `typeSchemas: {}` clears every type — which is the only
-  // way to express "this space declares nothing" and has to be reachable.
-  if (incoming.typeSchemas !== undefined && typeSchemasMode === 'replace') {
-    merged.typeSchemas = incoming.typeSchemas;
-  } else if (incoming.typeSchemas !== undefined) {
-    const existingTs = existingBase.typeSchemas ?? {};
-    const mergedTs: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = { ...existingTs };
-    for (const [kt, ktMap] of Object.entries(incoming.typeSchemas) as
-        [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
-      if (!ktMap) continue;
-      mergedTs[kt] = { ...(existingTs[kt] ?? {}), ...ktMap };
+export function proposalOf(merged: SpaceMeta, named: Partial<SpaceMeta> | undefined, changedTypes: readonly string[]): SpaceMeta {
+  const out: Record<string, unknown> = {};
+  const mergedFields = merged as Record<string, unknown>;
+  for (const field of proposedMetaFields(named ?? {})) {
+    if (metaFieldKind(field) !== 'per-type') { out[field] = mergedFields[field]; continue; }
+    const types: Record<string, Record<string, unknown>> = {};
+    const held = (mergedFields[field] ?? {}) as Record<string, Record<string, unknown> | undefined>;
+    for (const ref of changedTypes) {
+      const at = ref.indexOf(':');
+      const kind = ref.slice(0, at), type = ref.slice(at + 1);
+      const def = held[kind]?.[type];
+      if (def !== undefined) (types[kind] ??= {})[type] = def;
     }
-    merged.typeSchemas = mergedTs;
+    out[field] = types;
   }
-
-  return merged;
+  return out as SpaceMeta;
 }
 
 /**
@@ -152,6 +142,49 @@ export function networkMergeNotice(outcome: MetaUpdateOutcome): Record<string, u
   };
 }
 
+/** Who is asking, as the networks area reads a caller (`visibleNetworks`): the one reading of "may this token see this network". */
+export type WriteCaller = Parameters<typeof visibleNetworks>[0];
+
+/**
+ * What both doors add to the answer of a write to a space in networks — the one spread, so the two cannot word it apart (R5-1, R6-7):
+ * the merge notice (`networkMergeNotice`), `layers` (what became of the write in each network it reached, when that is more than one),
+ * and `warnings` naming the members that may refuse a key an earlier release does not know.
+ *
+ * **A member's label is the networks area's to read, and a warning must not be the way round it.** The row names the members only of
+ * networks the caller may see (`visibleNetworks`: `networks: read` on every space the network carries); for anyone else the row carries
+ * the keys and how many members are behind, and no label and no id.
+ */
+export function networkWriteNotice(outcome: MetaUpdateOutcome, caller: WriteCaller): Record<string, unknown> {
+  if (outcome.outcome === 'not_found') return {};
+  const rows = outcome.skew?.length ? memberSkewWarnings(outcome.skew, caller) : [];
+  return {
+    ...networkMergeNotice(outcome),
+    ...(outcome.layers ? { layers: outcome.layers } : {}),
+    ...(rows.length ? { warnings: rows } : {}),
+  };
+}
+
+/** The `warnings` rows for the members a write may be refused by — see {@link networkWriteNotice} for who is named. */
+function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): Record<string, unknown>[] {
+  const seen = new Set(visibleNetworks(caller, getConfig().networks).map(n => n.id));
+  return skew.map(s => {
+    const named = [...new Set(s.members.filter(m => seen.has(m.networkId)).map(m => peerText(m.label, { max: NAME_QUOTED })))];
+    const unheard = s.members.filter(m => m.neverHeardFrom).length;
+    return {
+      code: 'members_may_refuse_new_keys',
+      keys: s.keys,
+      since: s.since,
+      memberCount: s.members.length,
+      ...(named.length > 0 ? { members: named } : {}),
+      message: `${s.keys.join(', ')} ${s.keys.length === 1 ? 'is a key' : 'are keys'} only release ${s.since} and later read. `
+        + `${s.members.length} member${s.members.length === 1 ? '' : 's'} of the network${s.members.length === 1 ? '' : 's'} carrying this space run an older release `
+        + `or have not reported a version${unheard > 0 ? ` (${unheard} not yet heard from)` : ''}`
+        + `${named.length > 0 ? `: ${peerList(named, ', ')}` : ''}, and refuse the whole schema layer carrying it until upgraded. `
+        + 'The write is applied here regardless; upgrade every instance of the network.',
+    };
+  });
+}
+
 /**
  * A refusal, carrying the HTTP status.
  *
@@ -177,8 +210,15 @@ export type MetaUpdatePlan = {
   space: SpaceConfig;
   /** The parsed body, with `description` already rewritten into `meta.purpose`. */
   data: z.infer<typeof UpdateSpaceBody>;
-  /** The merged meta to store, or `undefined` when the request touches no meta at all. */
-  mergedMeta: SpaceMeta | undefined;
+  /**
+   * The merged meta to store, or `undefined` when the request touches no meta at all. Parsed (`Q-216`): the parts the request
+   * changed went through the one body, and the rest is what the store already holds.
+   */
+  mergedMeta: ParsedSpaceMeta | undefined;
+  /** What a networked write proposes — the changed fields and types only (R6-6); `undefined` with `mergedMeta`. */
+  proposal: SpaceMeta | undefined;
+  /** What those same fields and types held in the base the write was merged over (R6-8) — carried on the round, `undefined` with `mergedMeta`. */
+  metaBase: SpaceMeta | undefined;
   /** Present only when `documentExtraction` was in the body; already capped to the instance ceiling. */
   documentExtraction: DocExtractionMode | undefined;
   hasDocExtraction: boolean;
@@ -245,7 +285,9 @@ export function planSpaceMetaUpdate(input: {
 
   const parsed = UpdateSpaceBody.safeParse(bodyForParse);
   if (!parsed.success) {
-    return { ok: false, refusal: { status: 400, body: { error: parsed.error.message } } };
+    const refusal = refusalOfParse(parsed.error);
+    log.warn(`space update refused: ${peerText(refusal.error)}`);
+    return { ok: false, refusal: { status: 400, body: refusal } };
   }
 
 
@@ -254,6 +296,12 @@ export function planSpaceMetaUpdate(input: {
     const brokenRefs = findBrokenLibraryRefs(parsed.data.meta.typeSchemas as z.infer<typeof TypeSchemasZ>);
     if (brokenRefs.length > 0) {
       return { ok: false, refusal: { status: 422, body: { error: brokenRefsError(brokenRefs) } } };
+    }
+    // And a reference to an entry of ANOTHER kind: its endpoints and functional would never apply (`Q-215`). Checked here, at the save of
+    // the reference, against this instance's library — never inside the shared parse, because a peer's library is its own.
+    const wrongKind = findWrongKindLibraryRefs(parsed.data.meta.typeSchemas as z.infer<typeof TypeSchemasZ>);
+    if (wrongKind.length > 0) {
+      return { ok: false, refusal: { status: 422, body: { error: wrongKindRefsError(wrongKind) } } };
     }
   }
 
@@ -296,7 +344,13 @@ export function planSpaceMetaUpdate(input: {
   // the network's definition being changed. Only the meta may travel with it: a label, a quota or a TTL is this
   // instance's, and applying them beside a vote is the partial save a refusal exists to prevent.
   const targetNetwork = parsed.data.targetNetwork;
-  let base: Partial<SpaceMeta> = space.meta ?? {};
+  // The definitions this write changes are THIS INSTANCE'S OWN (`ownMeta`, once a network layer exists; `meta` is all its own until then):
+  // `space.meta` is the effective meta, own laid under each layer, and a type both define is the union of the two there. Merged over the
+  // union, an edit of one property of such a type would take the network's properties into the proposal, and from there into this
+  // instance's own definitions, where they are sent on to every other network the space is in (the editor loads the own definitions for the
+  // same reason: `GET /api/spaces` answers the effective meta, `GET /api/spaces/:id/schema-layers` the own one).
+  // The networks are read only for a write that targets one: a write to the own definitions asks nothing of the config.
+  const writeBase = metaWriteBase(space, targetNetwork, targetNetwork === undefined ? [] : getConfig().networks);
   if (targetNetwork !== undefined) {
     const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork'].includes(k)
       && (parsed.data as Record<string, unknown>)[k] !== undefined);
@@ -306,20 +360,37 @@ export function planSpaceMetaUpdate(input: {
     if (parsed.data.meta === undefined) {
       return { ok: false, refusal: { status: 400, body: { error: 'targetNetwork needs a meta to propose' } } };
     }
-    const net = getConfig().networks.find(n => n.id === targetNetwork && n.spaces.includes(spaceId));
-    if (!net) {
+    if (!writeBase) {
       return { ok: false, refusal: { status: 400, body: { error: `Network '${targetNetwork}' does not carry space '${spaceId}'` } } };
     }
-    base = net.schemaLayers?.[spaceId] ?? {};
   }
+  const base: Partial<SpaceMeta> = writeBase ?? {};
 
   // Merge the incoming meta with the existing meta so that PATCH has true RFC-7396 semantics: scalar fields
   // overwrite, typeSchemas entries are added/updated, and types *not* mentioned in the body are preserved.
   // `typeSchemasMode: 'replace'` opts out of that last clause so a deletion can be expressed at all.
-  const mergedMeta: SpaceMeta | undefined =
-    parsed.data.meta !== undefined
-      ? mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge') as SpaceMeta
-      : undefined;
+  // What is stored is PARSED (`Q-216`): the merged result is read against `base`, so the parts the request changed go through the one
+  // body and every other part is, by construction, what the store already holds. The planner's own body parse above is for the
+  // request's shape; this is the value a store accepts.
+  let mergedMeta: ParsedSpaceMeta | undefined;
+  if (parsed.data.meta !== undefined) {
+    const minted = parseSpaceMeta(mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge'), { against: base });
+    if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
+    mergedMeta = minted.meta;
+  }
+  /*
+   * What the audit log says about the schema (R6-13): the types, properties and rules as the edit LEAVES them against what it was merged
+   * over. The body's `typeSchemas` is a fragment (a PATCH names only the types it replaces), so comparing it with the stored map would
+   * record every type it did not mention as removed — the merged result is the after. An edit that carries no meta hands over neither
+   * part, and the summariser reads that as "not touched".
+   */
+  if (mergedMeta !== undefined) {
+    audit.before['typeSchemas'] = base.typeSchemas ?? {};
+    audit.before['rules'] = base.rules ?? {};
+    audit.after['typeSchemas'] = mergedMeta.typeSchemas ?? {};
+    audit.after['rules'] = mergedMeta.rules ?? {};
+  }
+  const changedTypes = typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined);
 
   return {
     ok: true,
@@ -328,6 +399,8 @@ export function planSpaceMetaUpdate(input: {
       space,
       data: parsed.data,
       mergedMeta,
+      proposal: mergedMeta === undefined ? undefined : proposalOf(mergedMeta, parsed.data.meta as Partial<SpaceMeta> | undefined, changedTypes),
+      metaBase: mergedMeta === undefined ? undefined : proposalOf(base as SpaceMeta, parsed.data.meta as Partial<SpaceMeta> | undefined, changedTypes),
       documentExtraction,
       hasDocExtraction,
       recordTtlDays,
@@ -335,7 +408,7 @@ export function planSpaceMetaUpdate(input: {
       audit,
       ...(targetNetwork !== undefined ? { targetNetwork } : {}),
       droppedTypes: typesAReplaceWouldDrop(base, parsed.data.meta as Partial<SpaceMeta> | undefined, parsed.data.typeSchemasMode ?? 'merge'),
-      changedTypes: typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined),
+      changedTypes,
     },
   };
 }
@@ -348,9 +421,35 @@ export function planSpaceMetaUpdate(input: {
  * into "ok" would tell an agent its schema was written when it was not.
  */
 export type MetaUpdateOutcome =
-  | { outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] }
-  | { outcome: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; keptTypes?: string[] }
+  | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite)
+  | ({ outcome: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; keptTypes?: string[] } & NetworkedWrite)
   | { outcome: 'not_found' };
+
+/** What a write to a space in networks became in ONE of them: its round passed on this instance's own vote, or is open (R5-1). */
+export interface LayerOutcome {
+  networkId: string;
+  networkLabel: string;
+  outcome: 'applied' | 'vote_pending';
+}
+
+/**
+ * What a networked write says beyond its single outcome — both parts present only when there is something to say:
+ *
+ * - `layers`: what became of the write in each network, when it reached MORE THAN ONE (one club's yes passes its round at once while a
+ *   closed network waits for its members, so the single word said which of them was `vote_pending` by saying neither);
+ * - `skew`: the members that may refuse a key an earlier release does not know, with their labels (`sync/meta-skew.ts`). Labels are the
+ *   networks area's to read: {@link networkWriteNotice} puts them in the answer only for a caller who may.
+ */
+interface NetworkedWrite {
+  layers?: LayerOutcome[];
+  skew?: MemberSkew[];
+}
+
+/** The members of the networks a write reached that may refuse what it sets — as the outcome carries it, or nothing. */
+function skewOf(plan: MetaUpdatePlan, reached: readonly NetworkConfig[]): Pick<NetworkedWrite, 'skew'> {
+  const skew = membersBehindNewKeys(plan.proposal, reached);
+  return skew.length > 0 ? { skew } : {};
+}
 
 /**
  * Apply a plan: the local settings, then either the network vote or the write.
@@ -369,7 +468,7 @@ export type MetaUpdateOutcome =
  * `not_found` — the one thing that can change between planning and writing.
  */
 export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUpdateOutcome> {
-  const { spaceId: id, space, data: patchData, mergedMeta } = plan;
+  const { spaceId: id, space, data: patchData, mergedMeta, proposal } = plan;
   const cfg = getConfig();
 
   // Duplicate rules are local (never governed) — applied now, so they are not silently dropped when a meta change
@@ -405,6 +504,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     if (networkedIn.length > 0) {
       const now = new Date().toISOString();
       const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
+      const layers: LayerOutcome[] = [];
 
       for (const net of networkedIn) {
         const roundId = uuidv4();
@@ -420,13 +520,17 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           votes: [],
           // The network's id for the space, so each member resolves it to its own local id (F-39.4).
           spaceId: localToRemote(net, id),
-          pendingMeta: mergedMeta,
+          // Only what this write CHANGED (R6-6): the fields it named and the types it changed, never the whole meta it was
+          // merged over — which was the space's effective meta, and copied every other network's types into this network's layer.
+          pendingMeta: proposal,
           // Provenance, so conclusion can apply just this patch rather than this whole snapshot. Rounds stay open
           // for `votingDeadlineHours`, so a second proposal landing before the first concludes is ordinary, and
           // without these two fields the later one reverts the earlier one's edit with no error anywhere. See
           // sync/meta-round-merge.ts.
           metaChangedFields: proposedMetaFields(patchData.meta ?? {}),
           baseMetaVersion: space.meta?.version ?? 0,
+          // What those fields held, so a member's conclusion warns of an overwrite only for a field that moved from here (R6-8).
+          ...(plan.metaBase !== undefined ? { metaBase: plan.metaBase } : {}),
           ...(plan.targetNetwork !== undefined ? { proposesLayer: true } : {}),
           // Q-61: what the change note says when the round passes (`sync/governance.ts`).
           ...(plan.changedTypes.length ? { changedTypes: plan.changedTypes } : {}),
@@ -443,9 +547,18 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
          * until somebody cast the identical yes again or the deadline expired it. The round stays in the list
          * either way, concluded or not, so peers learn of it exactly as before.
          */
-        if (!concludeRoundIfReady(net, opened)) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+        const concluded = concludeRoundIfReady(net, opened);
+        if (!concluded) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+        layers.push({ networkId: net.id, networkLabel: net.label, outcome: concluded ? 'applied' : 'vote_pending' });
       }
       const kept = plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {};
+      // What the write says of the networks it reached (R5-1, R6-8): per network, only where it reached more than one — on one the single
+      // outcome says it all — and only what is KNOWN now. A round that later fails, or a layer that outranks the edit, is not in the answer:
+      // `space_schema_layers` derives it. And the members that may refuse a key an earlier release does not know (R6-7).
+      const reached = {
+        ...(layers.length > 1 ? { layers } : {}),
+        ...(skewOf(plan, networkedIn)),
+      };
 
       // Non-meta updates apply immediately (label, maxGiB). `description` is not among them: the planner rewrote it
       // into `meta.purpose`, so it travels with the rest of the meta and is voted on.
@@ -482,13 +595,13 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
         }
       }
 
-      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept };
+      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached };
 
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion — and swept by
       // it: the conclusion writes through `updateSpace`, which asks for the sweep (a second one here swept it twice).
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      return { outcome: 'applied', space: applied, ...kept };
+      return { outcome: 'applied', space: applied, ...kept, ...reached };
     }
   }
 
@@ -525,6 +638,7 @@ export async function voteOnSchemaEditIfNetworked(
   spaceId: string,
   typeSchemas: unknown,
   mode: 'merge' | 'replace',
+  caller: WriteCaller,
 ): Promise<{ status: 202; body: Record<string, unknown> } | { status: number; body: Record<string, unknown> } | null> {
   const cfg = getConfig();
   if (!cfg.networks.some(n => n.spaces.includes(spaceId))) return null;
@@ -533,9 +647,9 @@ export async function voteOnSchemaEditIfNetworked(
   if (!decision.ok) return { status: decision.refusal.status, body: decision.refusal.body as Record<string, unknown> };
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'vote_pending') {
-    return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) } };
+    return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, caller) } };
   }
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
-  return { status: 200, body: { space: spaceForWire(result.space), ...networkMergeNotice(result) } };
+  return { status: 200, body: { space: spaceForWire(result.space), ...networkWriteNotice(result, caller) } };
 }

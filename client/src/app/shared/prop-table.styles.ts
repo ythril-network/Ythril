@@ -46,6 +46,9 @@ export const PROP_TABLE_STYLES = `
 .prop-row.prow-open td { background:color-mix(in srgb,var(--accent) 6%,transparent); }
 .prop-row.prow-open td:first-child { box-shadow:inset 2px 0 0 var(--accent); }
 .prop-caret { color:var(--text-muted); flex-shrink:0; display:inline-flex; transition:color .15s; }
+/* A property row's disclosure is a BUTTON, so a keyboard reaches it; it looks like the caret it replaced. */
+.prop-toggle { background:none; border:none; padding:2px; cursor:pointer; }
+.prop-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .prop-row:hover .prop-caret, .prop-row.prow-open .prop-caret { color:var(--accent); }
 /* The name is the row identity, so it does not shrink when the constraint column is long. */
 .prop-name { display:flex; align-items:center; gap:8px; min-width:0; }

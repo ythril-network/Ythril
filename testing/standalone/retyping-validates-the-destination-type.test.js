@@ -82,12 +82,22 @@ describe('re-typing validates the destination type', () => {
         + 'destination schema — its allowlist, required properties and enums are not applied and the write '
         + `succeeds anyway.\n\nafter-side argument:\n${after}`,
       );
-      // The after-side must name a type that can differ from the stored one. Both writers compute it before
-      // the call (`newType`, or the `$set`/`existing` pick), so the argument names that value.
-      assert.match(
-        after, /type:\s*(?!existing\.type\b)\w/,
-        `${door.name}'s after-side names no type at all, so the destination schema is never selected`,
-      );
+      // The after-side must name a type that can differ from the stored one. Either the argument names that value
+      // (`type: newType`), or it is the record the patch leaves (`recordAfterPatch(existing, $set, $unset)`, b23 D5:
+      // an update's after-view is never merged a second time) — and then the writer must put the new type in `$set`.
+      const viaPatch = /^\s*recordAfterPatch\(\s*existing\s*,\s*\$set\s*,\s*\$unset\s*\)\s*$/.test(after);
+      if (viaPatch) {
+        assert.match(
+          bodyOf(src, door.fn), /\$set\[\s*'type'\s*\]\s*=\s*(?!existing\.type\b)\w/,
+          `${door.name}'s after-side is the record the patch leaves, and the patch never sets the new type, so the destination `
+          + 'schema is never selected',
+        );
+      } else {
+        assert.match(
+          after, /type:\s*(?!existing\.type\b)\w/,
+          `${door.name}'s after-side names no type at all, so the destination schema is never selected`,
+        );
+      }
     });
 
     it(`${door.name}: the BEFORE side still uses the stored type`, () => {

@@ -9,6 +9,7 @@ import { DIALOG_STYLES } from './dialog.styles';
 import { FormsModule } from '@angular/forms';
 import type { TokenRights } from './rights-glyph.component';
 import type { Space, TokenRecord } from '../../core/api.types';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * Edit an existing token's rights.
@@ -238,8 +239,7 @@ export class TokenRightsDialogComponent {
         this.saving.set(false);
         // The exemption refusal is a 403 whose `message` carries the actionable half; `error` is the code
         // `MFA_REQUIRED`, which on its own reads as "you are not allowed" rather than "type your code".
-        this.error.set(err.error?.message ?? err.error?.error
-          ?? this.transloco.translate('tokens.error.rightsFailed'));
+        this.error.set(refusalText(this.transloco, err, 'tokens.error.rightsFailed'));
       },
     });
   }

@@ -15,15 +15,16 @@ import { primitivePropertyError } from './property-values.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
 import { getConfig } from '../config/loader.js';
-import { resolveMetaRefs, getAllowedChronoTypes } from '../spaces/schema-validation.js';
+import { resolveMetaRefs, getAllowedChronoTypes, type InstanceWrittenKeys } from '../spaces/schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { BatchRefs, resolveRef, refKeyDeclared, refKeyUsed, isRefUse, type ResolvedRef } from './batch-refs.js';
-import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom } from './write-connections.js';
+import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom, inlineEdgeWarnings } from './write-connections.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import { parseRecordFlags, type RecordFlags } from './record-flag.js';
 import type { ChronoType, ChronoStatus } from '../config/types.js';
-import { SchemaViolationError, EdgeSchemaViolation, type UpdateValidation } from './write-validation.js';
+import { SchemaViolationError, EdgeSchemaViolation, countSchemaRefusal, type UpdateValidation } from './write-validation.js';
+import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { writtenRecord, type WrittenRecord } from './connections-not-written.js';
 import type { DesiredLinks } from './links.js';
 import { ReadSet, mergeWants, tripletKey, type ReadWant, type Triplet } from './write-plan/read-set.js';
@@ -68,13 +69,37 @@ export const BULK_BODY_KEYS = ['facts', 'entities', 'edges', 'chrono'] as const;
 export type BulkInput = Partial<Record<typeof BULK_BODY_KEYS[number], unknown>>;
 
 /**
+ * What a TRUSTED in-process caller of `bulkWrite` hands it that a request never can — a third argument and never a field of the body,
+ * which is read from a caller and refused when it names something `BULK_BODY_KEYS` does not.
+ *
+ * `instanceWrittenKeys` is the property keys the instance itself writes, per kind, exempt from the undeclared-key rule (`Q-93`): the
+ * conversation extractor's, taken from `INSTANCE_WRITTEN_PROPERTY_KEYS`. A REST or MCP door builds its `BulkInput` from a request and
+ * calls `bulkWrite(space, input)` with nothing here, so it cannot claim the exemption — and
+ * `no-rest-or-mcp-door-can-pass-the-instance-written-keys-exemption.test.js` holds it that way.
+ */
+export interface BulkWriteTrust {
+  instanceWrittenKeys?: InstanceWrittenKeys;
+}
+
+/**
  * One item's error row.
  *
  * `written` is on a row for an item whose RECORD was stored and whose inline edge was not (`Q-170`): it names the record
  * and the ids of the edges that did land, so the caller sends the rest as an update to that id rather than sending the
  * item again — the row alone reads "failed", and a failed item is the one a caller retries. Absent on every other row.
+ *
+ * `violation` is on a row a SCHEMA refusal made (`Q-315`): the refusal body a single-record caller reads — `{ error, message,
+ * introduced, preExisting }`, without its duplicate `violations` list — beside the published `reason` string, which stays a string and is
+ * derived from `introduced` alone (what the item did, not what the record already had). A caller that handles the refusal reads the
+ * same object here as from `POST /entities`, and does not parse a sentence to find which of its fields to fix.
  */
-export interface BulkError { type: string; index: number; reason: string; written?: WrittenRecord }
+export interface BulkError { type: string; index: number; reason: string; violation?: BulkViolation; written?: WrittenRecord }
+
+/** A schema refusal as a batch row carries it (`SchemaViolationError.toRowViolation`). */
+export type BulkViolation = Record<string, unknown>;
+
+/** Why one item was refused: the published reason string and, for a schema refusal, the structured body beside it. */
+interface ItemReason { reason: string; violation?: BulkViolation }
 
 export interface BulkResult {
   inserted: Counts;
@@ -234,7 +259,7 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * is the one that leaves it stored, and its row carries `written` (`BulkError`), because a failed item is the one a
  * caller sends again.
  */
-export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
+export async function bulkWrite(spaceId: string, input: BulkInput, trusted: BulkWriteTrust = {}): Promise<BulkResult> {
   const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
   if (tooLarge) throw new Error(tooLarge);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
@@ -249,10 +274,11 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   const connections = { links: 0, edges: 0 };
 
   /** A refused item: its error, and — if it declared a key — the reason a dependant will be told. */
-  const reject = (type: string, index: number, item: unknown, reason: string): void => {
-    errors.push({ type, index, reason });
+  const reject: Reject = (type, index, item, reason, violation): void => {
+    errors.push({ type, index, reason, ...(violation ? { violation } : {}) });
     const key = refKeyDeclared(item);
-    if (key) refs.fail(key, reason);
+    // The structured refusal crosses the `$ref` boundary with its reason: an item that names this one is told the same thing.
+    if (key) refs.fail(key, reason, violation);
   };
 
   /*
@@ -265,11 +291,11 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
   };
 
-  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn);
+  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn, trusted.instanceWrittenKeys);
   const view = new ReadSet(spaceId);
   await view.load(mergeWants([...prepared.map(p => p.want), ...slice(input.edges).map(e => topLevelEdgeWant(spaceId, e))]));
 
-  const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors });
+  const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors }, trusted.instanceWrittenKeys);
   for (const p of prepared) await run.planRecord(p);
   for (const [i, item] of slice(input.edges).entries()) await run.planTopLevelEdge(i, item, strict);
   await run.flush();
@@ -312,7 +338,7 @@ interface PreparedRecord {
   want: ReadWant;
 }
 
-type Reject = (type: string, index: number, item: unknown, reason: string) => void;
+type Reject = (type: string, index: number, item: unknown, reason: string, violation?: BulkViolation) => void;
 type Warn = (type: string, index: number) => (check: UpdateValidation) => void;
 
 /**
@@ -321,6 +347,7 @@ type Warn = (type: string, index: number) => (check: UpdateValidation) => void;
  */
 function prepareItems(
   spaceId: string, input: BulkInput, meta: SpaceMeta | undefined, strict: boolean, reject: Reject, warn: Warn,
+  instanceWrittenKeys: InstanceWrittenKeys | undefined,
 ): PreparedRecord[] {
   const out: PreparedRecord[] = [];
   const common = (kind: 'fact' | 'entity' | 'chrono', item: Record<string, unknown>, i: number): {
@@ -354,6 +381,7 @@ function prepareItems(
       properties: optProps(item['properties']),
       type: typeof item['type'] === 'string' && item['type'].trim() ? item['type'] : undefined,
       opts: { ...c.flags, onValidation: warn('fact', i) }, ttlDays: c.ttlDays, id: c.rawId,
+      ...(instanceWrittenKeys?.fact ? { instanceWrittenKeys: instanceWrittenKeys.fact } : {}),
     };
     out.push({
       kind: 'fact', index: i, item, desired: c.desired, addresses: c.rawId,
@@ -376,6 +404,7 @@ function prepareItems(
       name, type, tags: strArray(item['tags']), properties: optProps(item['properties']) ?? {},
       description: typeof item['description'] === 'string' ? item['description'] : undefined,
       id: c.rawId, opts: c.flags, ttlDays: c.ttlDays, onValidation: warn('entity', i),
+      ...(instanceWrittenKeys?.entity ? { instanceWrittenKeys: instanceWrittenKeys.entity } : {}),
     };
     out.push({
       kind: 'entity', index: i, item, desired: c.desired, addresses: c.rawId,
@@ -468,7 +497,7 @@ interface Pending {
   replan?: (view: ReadSet) => Promise<{ plan: WritePlan }>;
   want: ReadWant;
   /** Set once committed: undefined while pending. */
-  result?: { ok: true } | { ok: false; reason: string };
+  result?: { ok: true } | { ok: false; reason: string; violation?: BulkViolation };
   /**
    * Shared by an item's record and each of its own inline edges (by reference, so it survives the re-plans that copy a
    * Pending): what the edges did, for the `written` a failed one reports.
@@ -497,6 +526,7 @@ function batchRun(
   reject: Reject,
   warn: Warn,
   out: { inserted: Counts; updated: Counts; connections: { links: number; edges: number }; errors: BulkResult['errors'] },
+  instanceWrittenKeys: InstanceWrittenKeys | undefined,
 ) {
   let pending: Pending[] = [];
   const inlines: InlineEdges[] = [];
@@ -540,7 +570,8 @@ function batchRun(
         ...(planned.warning ? { warning: planned.warning } : {}),
       };
     } catch (err) {
-      reject(type, p.index, p.item, itemReason(err));
+      const why = itemReason(err);
+      reject(type, p.index, p.item, why.reason, why.violation);
       return;
     }
     if (key) refs.declare(key, entry.plan.id, p.kind);
@@ -552,13 +583,15 @@ function batchRun(
       entry.inline = { kind: p.kind, id: entry.plan.id, landed: [], failed: [] };
       inlines.push(entry.inline);
     }
-    for (const e of inlineEdges) {
-      await planEdgeItem(e, type, p.index, p.item, null, entry);
+    for (const [i, e] of inlineEdges.entries()) {
+      // A `warn` space reports what a `strict` one would refuse, for the item's own edges too — the row names the edge (`edges[1].properties.k`).
+      const reported: EdgeInput = { ...e, opts: { ...e.opts, onValidation: check => warn(type, p.index)({ ...check, warnings: inlineEdgeWarnings(i, check) }) } };
+      await planEdgeItem(reported, type, p.index, p.item, null, entry);
     }
   }
 
   async function planTopLevelEdge(i: number, item: Record<string, unknown>, strict: boolean): Promise<void> {
-    const refuse = (reason: string) => reject('edge', i, item, reason);
+    const refuse = (reason: string, violation?: BulkViolation) => reject('edge', i, item, reason, violation);
     const rawFrom = typeof item['from'] === 'string' ? item['from'].trim() : '';
     const rawTo = typeof item['to'] === 'string' ? item['to'].trim() : '';
     const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
@@ -575,8 +608,8 @@ function batchRun(
      */
     const fromRef = resolveRef(rawFrom, refs, rawFromKind as RefKind | undefined);
     const toRef = resolveRef(rawTo, refs, rawToKind as RefKind | undefined);
-    if (fromRef.error) return refuse(`from: ${fromRef.error}`);
-    if (toRef.error) return refuse(`to: ${toRef.error}`);
+    if (fromRef.error) return refuse(`from: ${fromRef.error}`, fromRef.violation);
+    if (toRef.error) return refuse(`to: ${toRef.error}`, toRef.violation);
     const from = fromRef.id ?? '';
     const to = toRef.id ?? '';
     const fromKind = fromRef.kind ?? edgeEndpointKind(rawFromKind as RefKind | undefined);
@@ -602,6 +635,7 @@ function batchRun(
       // The RESOLVED kinds, always (`Q-193`): a `$ref` to a fact is stored as a fact end even when the
       // caller stated no kind. Passing them only when typed stored such an end as an entity.
       opts: { ...edgeFlags.flags, fromKind, toKind, onValidation: warn('edge', i) },
+      ...(instanceWrittenKeys?.edge ? { instanceWrittenKeys: instanceWrittenKeys.edge } : {}),
     };
     /*
      * What the edge asks of the read set, read now if the batch's one read did not (a `$ref` to a record addressed by
@@ -614,7 +648,8 @@ function batchRun(
     try {
       edgeRefusal(spaceId, edgeInput, view, undefined, []);
     } catch (err) {
-      return refuse(itemReason(err));
+      const why = itemReason(err);
+      return refuse(why.reason, why.violation);
     }
     const after = pendingFor(fromRef.id && rawFrom !== from ? `${fromKind}:${from}` : undefined)
       ?? pendingFor(toRef.id && rawTo !== to ? `${toKind}:${to}` : undefined);
@@ -639,10 +674,11 @@ function batchRun(
         ...(counted === null && after?.inline ? { inline: after.inline } : {}),
       }, target);
     } catch (err) {
-      if (counted !== null) { reject(type, index, item, itemReason(err)); return; }
+      const why = itemReason(err);
+      if (counted !== null) { reject(type, index, item, why.reason, why.violation); return; }
       // An item's own edge refused after its record was planned: the record is still written, so the row is kept to
       // say so once the record's commit is known (`nameWhatLanded`).
-      const row: BulkError = { type, index, reason: itemReason(err) };
+      const row: BulkError = { type, index, reason: why.reason, ...(why.violation ? { violation: why.violation } : {}) };
       out.errors.push(row);
       after?.inline?.failed.push(row);
     }
@@ -665,9 +701,11 @@ function batchRun(
     const outcomes = await commitPlans(spaceId, toWrite.map(x => x.p));
     const byEntry = new Map<number, CommitOutcome>(toWrite.map((x, j) => [x.k, outcomes[j]!]));
     batch.forEach((e, k) => {
-      const o: CommitOutcome = byEntry.get(k)
-        ?? { ok: false, reason: `it depends on an item of this request that was not written: ${(e.after!.result as { reason: string }).reason}` };
-      report(e, o);
+      const committed = byEntry.get(k);
+      if (committed) { report(e, committed); return; }
+      // Not written because what it hangs off was not: it is told why, and the structured refusal of that item travels with the reason.
+      const dependency = e.after!.result as { reason: string; violation?: BulkViolation };
+      report(e, { ok: false, reason: `it depends on an item of this request that was not written: ${dependency.reason}` }, dependency.violation);
     });
     // What was written is read again before an item addresses it, so a later converge plans against the truth.
     view.forget(
@@ -686,7 +724,8 @@ function batchRun(
         const { planned, outcome } = await planAndCommit(spaceId, e.want, e.replan!, 1);
         report({ ...e, plan: planned.plan, replan: undefined }, outcome.ok ? outcome : { ok: false, reason: outcome.reason });
       } catch (err) {
-        report({ ...e, replan: undefined }, { ok: false, reason: itemReason(err) });
+        const why = itemReason(err);
+        report({ ...e, replan: undefined }, { ok: false, reason: why.reason }, why.violation);
       }
     }
   }
@@ -708,7 +747,7 @@ function batchRun(
     targets.add(target);
   }
 
-  function report(e: Pending, o: CommitOutcome): void {
+  function report(e: Pending, o: CommitOutcome, violation?: BulkViolation): void {
     if (!o.ok && o.stale && e.replan) {
       stale.push(e);
       e.result = { ok: false, reason: o.reason };
@@ -716,11 +755,11 @@ function batchRun(
     }
     if (e.inline && e.counted !== null) e.inline.recordLanded = o.ok;
     if (!o.ok) {
-      e.result = { ok: false, reason: o.reason };
-      const row: BulkError = { type: e.type, index: e.index, reason: o.reason };
+      e.result = { ok: false, reason: o.reason, ...(violation ? { violation } : {}) };
+      const row: BulkError = { type: e.type, index: e.index, reason: o.reason, ...(violation ? { violation } : {}) };
       out.errors.push(row);
       if (e.counted === null) e.inline?.failed.push(row);
-      if (e.key) refs.fail(e.key, o.reason);
+      if (e.key) refs.fail(e.key, o.reason, violation);
       return;
     }
     e.result = { ok: true };
@@ -744,12 +783,24 @@ function batchRun(
   return { planRecord, planTopLevelEdge, flush, replanStale, nameWhatLanded };
 }
 
-/** A planning refusal as a per-item reason. A schema refusal keeps the `schema_violation:` form the batch always used. */
-function itemReason(err: unknown): string {
+/**
+ * A planning refusal as a per-item reason. A schema refusal keeps the `schema_violation:` form the batch always used — the PUBLISHED
+ * reason string — and now says what blocked the item: the reasons of what it INTRODUCED, never of what the record already had (the
+ * join used `check.all`, so a stored violation read as the fault). The structured half travels beside it as `violation`
+ * (`SchemaViolationError.toRowViolation`), the body every other door answers.
+ *
+ * This is the one place the `schema_violation:` prefix is written outside the refusal's own module, by name: a batch row is the
+ * published string (`a-schema-refusal-has-one-body-on-every-door` exempts `itemReason` and nothing else).
+ */
+function itemReason(err: unknown): ItemReason {
   if (err instanceof SchemaViolationError) {
+    const violation = err.toRowViolation();
     // An inline edge refused with its item says which edge (`edges[1]`) — the item has several and the reasons alone do not.
     const at = err instanceof EdgeSchemaViolation && err.at ? `${err.at}: ` : '';
-    return `schema_violation: ${at}${err.check.all.map(v => v.reason).join('; ')}`;
+    // From the BOUNDED rows the answer carries: a record that introduced a hundred violations is a row of twenty reasons, not a hundred.
+    const introduced = violation['introduced'] as SchemaViolation[];
+    countSchemaRefusal('bulk', err);
+    return { reason: `schema_violation: ${at}${introduced.map(v => v.reason).join('; ')}`, violation };
   }
-  return err instanceof Error ? err.message : String(err);
+  return { reason: err instanceof Error ? err.message : String(err) };
 }

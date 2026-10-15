@@ -24,22 +24,39 @@
  *
  * So violations are split against the record's prior state:
  *
- *   - **introduced** — not present before this patch. The patch caused it.
- *   - **pre-existing** — present before and still present. The patch did not cause it, and did not fix it.
+ *   - **introduced** — not present before this patch, or present before and about a path THIS WRITE CHANGED (R6-3: a stored bad
+ *     `status` does not shelter a new bad `status` a write puts in its place). The patch caused it.
+ *   - **pre-existing** — present before, still present, and about something the write left alone. The patch did not cause it,
+ *     and did not fix it.
  *
- * Both block, in a `strict` space. That is deliberate rather than a half-measure: the merged record is what
- * gets stored, and storing a known-invalid record because it was already invalid is how a space drifts
- * permanently out of conformance. And the record is not trapped — validation is of the *merged* result, so
- * a patch that repairs the pre-existing violation passes. The error names exactly what to include.
+ * Only what the patch INTRODUCES refuses it in a `strict` space (owner ruling P-6 = B, 2026-08-15; `classifyUpdateViolations`
+ * says why, and the first version of this header said the opposite — it called both blocking, which was the freeze P-6 removed).
+ * A record that was already broken is still REPORTED as broken on every write that touches it, and a patch that repairs the
+ * violation passes: validation is of the *merged* result, and the answer names exactly what to include.
+ *
+ * ## A key the type does not declare (`Q-93`)
+ *
+ * A type that declares at least one property is a closed list, and a write that ADDS a key outside it is refused in a `strict` space
+ * (flagged in `warn`, ignored in `off`). "Adds" is the P-6 split: a key already stored on the record is the record's own history and
+ * is never refused — changing its VALUE is not adding it. A retype is judged against the type it leaves and the type it lands on, so a
+ * key the new type does not declare is introduced by the retype when the old type declared it, or declared nothing at all; a key
+ * undeclared on both is pre-existing. The rows a refusal LISTS are bounded after this split, never before it (`SchemaViolationError`),
+ * or a new key sorted behind twenty stored ones would be cut off and the write would pass.
  */
 import { validateEntity, validateEdge, validateChrono, validateFact, type SchemaViolation } from '../spaces/schema-validation.js';
+import { recordViewOf, type RecordView } from './record-view.js';
 import type { SpaceMeta } from '../config/types.js';
+import { isDeepStrictEqual } from 'node:util';
+import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerList, peerText } from '../util/log.js';
+import { ownValue } from '../util/plain-object.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
-import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
+import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
+import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
 /**
  * Identity of a violation for before/after comparison.
@@ -74,21 +91,66 @@ export interface UpdateValidation {
 }
 
 /**
+ * What the write changed about the record, asked of one violation's `field` (R6-3).
+ *
+ * A violation that was there before and is there after is the write's own when the write changed the path it is about — a stored bad
+ * `status` replaced by ANOTHER bad `status` is the write's break, where the same bad `status` sent back (a round-tripping editor) or
+ * left alone is not. The default says nothing changed, which is what every caller that has no before and after to compare means.
+ */
+export interface WriteDelta { changedPath(row: SchemaViolation): boolean }
+const NOTHING_CHANGED: WriteDelta = { changedPath: () => false };
+
+/**
+ * The delta between the record as stored (`null`: nothing, an insert) and as the write leaves it.
+ *
+ * A schema row is asked about its `field`; a RULE's row (`rules.<name>`, `meta.rules.<name>`) names a rule and not a path, so it is asked
+ * about the paths that rule reads (`ruleReadsChanged`) — the one place that knows them.
+ */
+export function deltaBetween(before: RecordView | null, after: RecordView): WriteDelta {
+  if (!before) return { changedPath: () => true };
+  return {
+    changedPath(row) {
+      const reads = ruleReadsChanged(row, before, after);
+      if (reads !== undefined) return reads;
+      const field = row.field;
+      // A property: its VALUE, own keys only — a key named like something on `Object.prototype` is not on the record because the prototype has it.
+      if (field.startsWith('properties.')) {
+        const name = field.slice('properties.'.length);
+        return !isDeepStrictEqual(ownValue(before.properties, name), ownValue(after.properties, name));
+      }
+      if (field === 'name') return before.title !== after.title;
+      // Everything else is about the type (or the label) the record sits under: the allowlist, the unresolved reference, the ends.
+      return (before.type ?? before.label) !== (after.type ?? after.label);
+    },
+  };
+}
+
+/** A row that says a property KEY is not declared: judged by whether the write ADDED the key, never by its value (`Q-93`). */
+const isUndeclaredKey = (v: SchemaViolation): boolean => Array.isArray(v.declared);
+
+/**
  * Classify the merged record's violations against the record's prior ones.
  *
  * `beforeViolations` is what the SAME validator says about the record as it stands now. Recomputing it
  * rather than trusting a stored flag matters: the space's meta can have tightened since the record was
  * written, and the question here is not "was this record valid when created" but "is this field's failure
  * something this patch is responsible for".
+ *
+ * A violation is INTRODUCED when the record after the write breaks it AND (the record before did not, OR the write changed the path
+ * the violation is about — `wrote`). A row about an undeclared KEY is the one exception to the second half: its path is the key's
+ * PRESENCE, and the owner's Q-93 ruling is that only a key the write ADDS is refused, so writing a new value to a stored undeclared
+ * key stays pre-existing.
  */
 export function classifyUpdateViolations(
   meta: SpaceMeta | undefined,
   beforeViolations: SchemaViolation[],
   afterViolations: SchemaViolation[],
+  wrote: WriteDelta = NOTHING_CHANGED,
 ): UpdateValidation {
   const before = new Set(beforeViolations.map(key));
-  const introduced = afterViolations.filter(v => !before.has(key(v)));
-  const preExisting = afterViolations.filter(v => before.has(key(v)));
+  const introduced = afterViolations.filter(v => !before.has(key(v)) || (!isUndeclaredKey(v) && wrote.changedPath(v)));
+  const introducedSet = new Set(introduced);
+  const preExisting = afterViolations.filter(v => !introducedSet.has(v));
 
   // Two verdicts from one mode, and the split IS the P-6 ruling (owner, 2026-08-15: B).
   //
@@ -183,16 +245,83 @@ export class SchemaViolationError extends Error {
     this.name = 'SchemaViolationError';
   }
 
-  /** The machine-readable body an MCP tool result carries beside the prose. */
+  /**
+   * The machine-readable body an MCP tool result carries beside the prose — and the body a REST refusal answers.
+   *
+   * Every row list is cut to {@link MAX_ROWS} AFTER the classification, never before it, and `truncated` says how many were left
+   * out of `introduced` and `preExisting`: a record carrying a hundred undeclared keys answers twenty rows and `truncated: 80`, and which twenty is the classifier's (`introduced` first, in the order the
+   * validator found them). A row quotes what the caller sent through the one bounded renderer (R6-11): a key was bounded when the
+   * validator named it, and a value is bounded here.
+   */
   toStructured(): Record<string, unknown> {
+    const { introduced, preExisting, all } = this.check;
+    // HOW MANY rows were left out of `introduced` and `preExisting`, the two lists a reader reads (`violations` is their union, cut to the
+    // same number): a count, because a caller that is told "some rows" cannot say how many to expect, and the client prints the number.
+    const truncated = Math.max(0, introduced.length - MAX_ROWS) + Math.max(0, preExisting.length - MAX_ROWS);
     return {
       error: 'schema_violation',
       message: this.check.message,
-      introduced: this.check.introduced,
-      preExisting: this.check.preExisting,
-      violations: this.check.all,
+      introduced: boundedRows(introduced),
+      preExisting: boundedRows(preExisting),
+      violations: boundedRows(all),
+      ...(truncated > 0 ? { truncated } : {}),
     };
   }
+
+  /**
+   * The same refusal as ONE ROW of a batch's answer carries it (`bulk.ts`, `Q-315`): `toStructured()` without `violations`. Every row
+   * of `introduced` and `preExisting` is already in it, and the second list is the bloat a five-hundred-item batch would pay for five
+   * hundred times. Derived from `toStructured()`, so a row cannot say something a single-record caller does not read.
+   */
+  toRowViolation(): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(this.toStructured()).filter(([k]) => k !== 'violations'));
+  }
+}
+
+/**
+ * The `warnings` fields of a SUCCESSFUL write's answer — the violations the space's mode says to report, and the keys the route did not
+ * understand — bounded like a refusal's rows (R6-11): at most {@link MAX_ROWS} of them, each quoting the caller's `field` and string
+ * `value` through the one renderer, and `warningsTruncated: true` when rows were left out. `{}` when there are none, so a caller spreads
+ * it and a write with nothing to say answers no key. Both doors: every REST create and update route and the MCP tools' structured
+ * answer say it through this, so a record carrying a hundred undeclared keys does not answer a hundred rows on one door and twenty on
+ * the other.
+ */
+export function writeWarningFields(rows: readonly SchemaViolation[]): { warnings?: SchemaViolation[]; warningsTruncated?: true } {
+  if (rows.length === 0) return {};
+  return { warnings: boundedRows(rows), ...(rows.length > MAX_ROWS ? { warningsTruncated: true as const } : {}) };
+}
+
+/** How many violation rows one refusal lists per list. The classification is of every row; only what is SAID is cut. */
+export const MAX_ROWS = 20;
+
+/**
+ * A violation's value as a refusal quotes it: a STRING through the one bounded renderer (cut, credential-redacted, line breaks
+ * escaped), anything else exactly as it came. A number, a boolean, `null`, an array or an object is the caller's structured value, and
+ * stringifying it would change what a caller that compares it sees (R5-4).
+ */
+function boundedValue(value: unknown): unknown {
+  return typeof value === 'string' ? peerText(value) : value;
+}
+
+/**
+ * At most {@link MAX_ROWS} rows, each quoting the caller's choices bounded: the `field` (a property key the caller chose) at
+ * `NAME_QUOTED`, a string `value` by `peerText`. The one place violation rows are rendered for anyone to read — a refusal's
+ * `introduced`, `preExisting` and `violations`, a write's warnings, a push's recorded rows, an import's report and the live schema
+ * check's answer — so none of them can quote more than another.
+ *
+ * `value: false` leaves every row without its value: for a reader who may not see the stored data (the stored-data check without
+ * `knowledge: read`) or a sink that never carries values (an import's report). The push answer, the live check's sample and a reader
+ * who may read the data keep it. Before this was one function, three of those sinks cut the list themselves and echoed `field` and
+ * `value` whole.
+ */
+export function boundedRows(rows: readonly SchemaViolation[], { value = true }: { value?: boolean } = {}): SchemaViolation[] {
+  return rows.slice(0, MAX_ROWS).map(v => {
+    const { value: held, ...rest } = v;
+    const row: SchemaViolation = { ...rest, field: peerText(v.field, { max: NAME_QUOTED }) } as SchemaViolation;
+    // A row with no value stays without one: a `value: undefined` key is a field the row never had.
+    if (value && Object.hasOwn(v, 'value')) row.value = boundedValue(held);
+    return row;
+  });
 }
 
 export function assertUpdateAllowed(check: UpdateValidation): void {
@@ -244,6 +373,36 @@ export function danglingReferenceCheck(field: string, value: string, message: st
 }
 
 /**
+ * The status a schema refusal answers with, from the verb alone: a create is `400`, an update `422`. The two have always differed, and a
+ * status is part of a caller's contract even when the pair looks inconsistent — so it is spelled here and nowhere else, and a door that
+ * needs only the status (`callTool`, which answers a tool call as an edit of what the caller named) asks this and does not run the
+ * answering mapper, which COUNTS the refusal.
+ */
+export function schemaRefusalStatus(verb: 'create' | 'update'): 400 | 422 {
+  return verb === 'create' ? 400 : 422;
+}
+
+/**
+ * Count one schema refusal at the door that answered it (`ythril_schema_refusals_total`, R6-13), once per refusal and by what blocked
+ * the write: the first violation it INTRODUCED. Called by every mapper that answers one — `connectionRefusalAnswer` (REST),
+ * `callTool` (MCP and `POST /api/<tool>`), `mergeRefusal` and the bulk row's reason — so a door cannot answer without it.
+ */
+export function countSchemaRefusal(door: SchemaRefusalDoor, err: SchemaViolationError): void {
+  const first = err.check.introduced[0] ?? err.check.all[0];
+  tallySchemaRefusal(door, first ? refusalOutcomeOf(first) : 'property');
+}
+
+/**
+ * What kind of wrong one violation row is, as the refusal metric counts it — read from the row's own marks (`declared`, `outcome`) and
+ * its field, never from the prose of its reason. The client's `outcomeOf` (`core/refusal-text.ts`) is the mirror that shows it.
+ */
+export function refusalOutcomeOf(row: SchemaViolation): SchemaRefusalOutcome {
+  if (isUndeclaredKey(row)) return 'undeclared';
+  if (row.outcome === 'could_not_evaluate' || row.outcome === 'too_large') return row.outcome;
+  return isRuleRow(row) ? 'rule' : 'property';
+}
+
+/**
  * What a record write refused for its connections, or its own schema, answers on REST — the status and the body, from
  * ONE place; `null` when the failure is none of those and the route answers it as it always has.
  *
@@ -258,7 +417,10 @@ export function danglingReferenceCheck(field: string, value: string, message: st
 export function connectionRefusalAnswer(
   err: unknown, verb: 'create' | 'update',
 ): { status: number; body: Record<string, unknown> } | null {
-  if (err instanceof SchemaViolationError) return { status: verb === 'create' ? 400 : 422, body: err.toStructured() };
+  if (err instanceof SchemaViolationError) {
+    countSchemaRefusal('rest', err);
+    return { status: schemaRefusalStatus(verb), body: err.toStructured() };
+  }
   if (err instanceof ReferenceRefusal) return { status: 400, body: { error: err.message } };
   return null;
 }
@@ -301,10 +463,19 @@ export function describeUpdateViolations(
   introduced: SchemaViolation[],
   preExisting: SchemaViolation[],
 ): string {
-  const names = (vs: SchemaViolation[]) => [...new Set(vs.map(v => v.field))].join(', ');
+  // The names are fields the CALLER chose (a property key), so the list is bounded in count and in each name: a megabyte key, or a hundred
+  // of them, is a sentence, not a megabyte of one (R6-11).
+  const names = (vs: SchemaViolation[]) => peerList([...new Set(vs.map(v => v.field))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED });
+
+  // A caller who read only the prose (an MCP tool's error text) must still learn WHY a property key is refused: the row's reason says
+  // "not declared", and the sentence is all of it that reaches them.
+  const undeclared = introduced.filter(isUndeclaredKey);
+  const undeclaredNote = undeclared.length > 0
+    ? ` Not declared on this type: ${peerList([...new Set(undeclared.map(v => v.field.replace(/^properties\./, '')))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}.`
+    : '';
 
   if (introduced.length > 0 && preExisting.length === 0) {
-    return `The change violates this space's schema: ${names(introduced)}.`;
+    return `The change violates this space's schema: ${names(introduced)}.${undeclaredNote}`;
   }
   if (introduced.length === 0 && preExisting.length > 0) {
     // Reported, not refused (owner ruling P-6 = B). This sentence used to end "so the write is refused until
@@ -315,7 +486,7 @@ export function describeUpdateViolations(
       + 'schema — include those field(s) in a write to repair it.';
   }
   if (introduced.length > 0 && preExisting.length > 0) {
-    return `The change violates this space's schema: ${names(introduced)}. `
+    return `The change violates this space's schema: ${names(introduced)}.${undeclaredNote} `
       + `Separately, this record was already non-compliant before your change: ${names(preExisting)} — `
       + 'that part is reported rather than refused; include those field(s) in a write to repair them.';
   }
@@ -342,6 +513,61 @@ export function describeUpdateViolations(
 /** An upsert onto nothing is an insert: no prior record, so nothing can be pre-existing. */
 const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 
+/** The record fields a write may state beside its identity — every one a rule can read, so none may fall out of the after-view. */
+interface StatedFields {
+  description?: string | null;
+  tags?: string[] | null;
+  properties?: Record<string, string | number | boolean>;
+}
+
+/**
+ * The record an upsert LEAVES — the one thing the after-view is built from (R6-3: the view is of the MERGED record).
+ *
+ * The stored record (nothing, on an insert), with every field the write states laid over it — a `null` is a field the write REMOVES and
+ * reads as absent — then tags unioned and properties merged the way every writer stores them (`merge-fields.ts`).
+ *
+ * It exists because each classifier built its after-view from a literal of the fields it had in hand: an edge and a fact lost their
+ * tags, a fact and a chrono entry their title and description, an entity its description. The before-view was the whole stored record,
+ * so a rule reading `self.description` blamed a write that never touched it, and a write that set a refused description was judged on
+ * `''` and passed as the record's old break (`a-rule-reads-the-record-the-write-leaves`).
+ */
+export function recordAfterUpsert(existing: object | null, incoming: object): Record<string, unknown> {
+  const stored = (existing ?? {}) as Record<string, unknown> & StatedFields;
+  const stated = incoming as Record<string, unknown> & StatedFields;
+  return {
+    ...stored,
+    // A key the write does not state (`undefined`) leaves the stored value; one it states, `null` included, replaces it.
+    ...Object.fromEntries(Object.entries(stated).filter(([, v]) => v !== undefined)),
+    tags: mergeTags(stored.tags, stated.tags ?? undefined),
+    properties: mergePropertiesOrKeep(stored.properties, stated.properties) ?? {},
+  };
+}
+
+/** A record an update LEAVES, already whole: minted only by {@link recordAfterPatch}, so a classifier knows not to merge it again. */
+export type RecordLeft = Record<string, unknown> & { readonly __recordLeft: true };
+const RECORDS_LEFT = new WeakSet<object>();
+
+/**
+ * The record a PATCH leaves: the stored record with `$set` written over it and every `$unset` field gone — what the store will hold.
+ *
+ * An update writer has already merged the patch and applied its `deleteFields` when it builds `$set`/`$unset`, so its fields are FINAL
+ * and must not be merged over the stored record again. They were: the classifier ran {@link recordAfterUpsert} on them, which unions the
+ * stored tags and merges the stored properties back, so every key a `deleteFields` removed and every tag a write dropped reappeared in
+ * the after-view. A strict retype that deleted the old type's keys was refused for "introducing" the keys it was removing, and could
+ * never complete (`a-retype-that-deletes-the-old-keys-completes-db`).
+ */
+export function recordAfterPatch(existing: object, $set: Record<string, unknown>, $unset: Record<string, unknown>): RecordLeft {
+  const left: Record<string, unknown> = { ...(existing as Record<string, unknown>), ...$set };
+  for (const k of Object.keys($unset)) delete left[k];
+  RECORDS_LEFT.add(left);
+  return left as RecordLeft;
+}
+
+/** The after-view's record: a {@link RecordLeft} as it is, an upsert's stated fields merged over what it lands on. */
+function recordAfter(existing: object | null, incoming: object): Record<string, unknown> {
+  return RECORDS_LEFT.has(incoming) ? incoming as Record<string, unknown> : recordAfterUpsert(existing, incoming);
+}
+
 /**
  * The whole decision, given the record the upsert lands on — no database.
  *
@@ -355,25 +581,61 @@ const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 export function classifyEntityUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] } | null,
-  incoming: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] },
+  /** An upsert's stated fields, merged over `existing`; or the whole record an update leaves ({@link recordAfterPatch}), taken as it is. */
+  incoming: ({ name: string; type: string } & StatedFields) | RecordLeft,
+  /** The property keys the instance itself writes on this kind — handed in by the one writer that owns them (`INSTANCE_WRITTEN_PROPERTY_KEYS`); never a caller's. */
+  instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
-  const merged = mergeTagsAndProperties(existing, incoming);
-  const after = validateEntity(meta ?? {}, {
-    name: incoming.name, type: incoming.type, properties: merged.properties,
-  });
-  const before = existing
-    ? validateEntity(meta ?? {}, {
-      name: existing.name, type: existing.type, properties: existing.properties ?? {},
-    })
-    : INSERT_HAS_NO_PRIOR;
-  return classifyUpdateViolations(meta, before, after);
+  return classifyViews(
+    meta, view => validateEntity(meta ?? {}, view, instanceWrittenKeys),
+    existing ? recordViewOf('entity', existing) : null,
+    recordViewOf('entity', recordAfter(existing, incoming)),
+  );
+}
+
+/**
+ * What a MERGE's write introduces: the survivor as it is stored, against the survivor as the merge leaves it (`mergedProperties` — what
+ * `mergeProperties` resolved, with the absorbed's keys brought in). A merge is a write of the survivor, so it is judged as one: a key the
+ * survivor already stores is not one the merge adds, and a key brought in from the absorbed that the survivor lacks is.
+ *
+ * It exists so the merge path asks the question the write path asks. It judged the whole merged record, so a survivor with a stored
+ * undeclared key refused every merge in a strict space and the refusal blamed the key the merge never added. The merge runs the
+ * validator itself, on the merged values, and hands both row lists here: this decides which of them the merge is answerable for.
+ */
+export function classifyMergedEntity(
+  meta: SpaceMeta | undefined,
+  survivor: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] },
+  mergedProperties: Record<string, string | number | boolean>,
+  beforeRows: SchemaViolation[],
+  afterRows: SchemaViolation[],
+): UpdateValidation {
+  // Only the survivor's stored UNDECLARED KEYS are carried as its own. Every other break of the merged record is the merge's to answer for,
+  // as it always was: `mergeProperties` applies each property's `mergeFn`, so the survivor lands on a value neither input had, and a
+  // strict space that refuses it on a direct write refuses it here (`a-refused-merge-answers-alike-on-every-door-db`).
+  return classifyUpdateViolations(
+    meta, beforeRows.filter(isUndeclaredKey), afterRows,
+    deltaBetween(recordViewOf('entity', survivor), recordViewOf('entity', { ...survivor, properties: mergedProperties })),
+  );
+}
+
+/**
+ * The classification both validations of one upsert make: the record as stored (`null` on an insert, which has nothing pre-existing) and
+ * as the write leaves it, each judged by the same validator, then split by `classifyUpdateViolations` with what the write changed.
+ */
+function classifyViews(
+  meta: SpaceMeta | undefined,
+  validate: (view: RecordView) => SchemaViolation[],
+  before: RecordView | null,
+  after: RecordView,
+): UpdateValidation {
+  return classifyUpdateViolations(meta, before ? validate(before) : INSERT_HAS_NO_PRIOR, validate(after), deltaBetween(before, after));
 }
 
 /** As above, for an edge. Its identity is `(from, to, label)`, so only the properties can merge. */
 export function classifyEdgeUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { label: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { label: string; properties?: Record<string, string | number | boolean> },
+  incoming: ({ label: string } & StatedFields) | RecordLeft,
   /**
    * What the caller resolved about the endpoints — the entity type at each end, and how many OTHER edges carry
    * this label from the same subject.
@@ -388,14 +650,14 @@ export function classifyEdgeUpsertAgainst(
    * description.
    */
   resolved: ResolvedEdgeEnds = {},
+  /** As for an entity: the keys the instance itself writes on an edge, handed in by the writer that owns them. */
+  instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
-  const after = validateEdge(meta ?? {}, {
-    label: incoming.label, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  }, resolved);
-  const before = existing
-    ? validateEdge(meta ?? {}, { label: existing.label, properties: existing.properties ?? {} }, resolved)
-    : INSERT_HAS_NO_PRIOR;
-  return classifyUpdateViolations(meta, before, after);
+  return classifyViews(
+    meta, view => validateEdge(meta ?? {}, view, resolved, instanceWrittenKeys),
+    existing ? recordViewOf('edge', existing) : null,
+    recordViewOf('edge', recordAfter(existing, incoming)),
+  );
 }
 
 
@@ -414,31 +676,29 @@ export function classifyEdgeUpsertAgainst(
 export function classifyFactUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type?: string; properties?: Record<string, string | number | boolean> },
+  incoming: ({ type?: string; fact?: string } & StatedFields) | RecordLeft,
+  /** As for an entity: the keys the instance itself writes on a fact, handed in by the writer that owns them. */
+  instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
-  const after = validateFact(meta ?? {}, {
-    type: incoming.type ?? existing?.type,
-    properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  });
-  const before = existing
-    ? validateFact(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
-    : INSERT_HAS_NO_PRIOR;
-  return classifyUpdateViolations(meta, before, after);
+  return classifyViews(
+    meta, view => validateFact(meta ?? {}, view, instanceWrittenKeys),
+    existing ? recordViewOf('fact', existing) : null,
+    recordViewOf('fact', recordAfter(existing, incoming)),
+  );
 }
 
 /** As above, for a chrono entry. Its identity is a supplied `_id`, so type and properties both merge in. */
 export function classifyChronoUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type: string; properties?: Record<string, string | number | boolean> },
+  incoming: ({ type: string; title?: string } & StatedFields) | RecordLeft,
 ): UpdateValidation {
-  const after = validateChrono(meta ?? {}, {
-    type: incoming.type, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-  });
-  const before = existing
-    ? validateChrono(meta ?? {}, { type: existing.type, properties: existing.properties ?? {} })
-    : INSERT_HAS_NO_PRIOR;
-  return classifyUpdateViolations(meta, before, after);
+  // The instance writes no property on a chrono entry, so there is no exemption to take (`INSTANCE_WRITTEN_PROPERTY_KEYS` has no row for it).
+  return classifyViews(
+    meta, view => validateChrono(meta ?? {}, view),
+    existing ? recordViewOf('chrono', existing) : null,
+    recordViewOf('chrono', recordAfter(existing, incoming)),
+  );
 }
 
 

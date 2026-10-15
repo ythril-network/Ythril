@@ -34,7 +34,11 @@ const { SERVER_OWNED_META_FIELDS } = await import('../../server/dist/spaces/body
 /** Line comments first — see `Q-1`: a `/*` inside a `//` comment otherwise opens a phantom block. */
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** Fields that live outside `meta` in the response, which a caller peels off rather than sending back. */
+/**
+ * Fields that live outside `meta` in the response, which a caller peels off rather than sending back. Exactly the three a caller has
+ * always been told to peel: a fourth would be refused for every client written before it, on its next GET-then-PATCH — which is why
+ * `invalidRules` (F-46), though a report ABOUT the meta, is stripped rather than added here (the Full run's round-trip test caught it).
+ */
 const ENVELOPE = new Set(['spaceId', 'spaceName', 'stats']);
 
 /**
@@ -82,8 +86,10 @@ describe('the meta response and the PATCH strip agree', () => {
 
   it('the strip stays SMALL — it is not a licence to ignore unknown keys', () => {
     // The distinction is the whole design: an echoed-back field costs the caller nothing to drop, while
-    // silently ignoring `validationMdoe` would let someone believe they had turned validation on.
-    assert.ok(SERVER_OWNED_META_FIELDS.length <= 6,
+    // silently ignoring `validationMdoe` would let someone believe they had turned validation on. Every field on the list is DERIVED and
+    // server-written (version, history, reindex state, actualSchema, invalidRules), and the bound moved only when F-46 added one. A field a caller
+    // could mean to set never belongs here, whatever the count.
+    assert.ok(SERVER_OWNED_META_FIELDS.length <= 7,
       `${SERVER_OWNED_META_FIELDS.length} stripped fields is heading towards "accept anything": `
       + SERVER_OWNED_META_FIELDS.join(', '));
   });

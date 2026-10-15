@@ -16,7 +16,7 @@
  * through the Schema Library's group apply, where an operator can see it happen.
  */
 import { createHash } from 'node:crypto';
-import type { SpaceMeta, SchemaLibraryEntry } from '../config/types.js';
+import type { SpaceMeta, SchemaLibraryEntry, ValidationMode } from '../config/types.js';
 import { resolveMetaRefs } from '../spaces/schema-validation.js';
 import { shippedLibraryEntries } from '../config/shipped-library-entries.js';
 import { loadConversation, ConversationSourceError, type ConversationSource, type LoadedConversation } from './conversation/load.js';
@@ -92,6 +92,8 @@ export interface IngestSpaceContext {
   /** The group's fact type: what a claim is written as. */
   claimType: string;
   group: SchemaLibraryEntry[];
+  /** How the space judges a record (`off` when it never said): which of the pre-write checks REFUSE — a key a type does not declare refuses in `strict` only. */
+  validationMode: ValidationMode;
 }
 
 export function spaceContextFrom(meta: SpaceMeta | undefined): IngestSpaceContext {
@@ -114,7 +116,7 @@ export function spaceContextFrom(meta: SpaceMeta | undefined): IngestSpaceContex
   }
   const claim = group.find(e => e.knowledgeType === 'fact');
   if (!claim) throw new Error(`the shipped '${GROUP}' group declares no fact type — nowhere to write a claim`);
-  return { declared, schemaEntries, vocabulary: { entityTypes, edgeLabels }, claimType: claim.typeName, group };
+  return { declared, schemaEntries, vocabulary: { entityTypes, edgeLabels }, claimType: claim.typeName, group, validationMode: meta?.validationMode ?? 'off' };
 }
 
 /** The checks phase 0 runs, injected so a test can say which of them fail. Each throws or answers false. */
@@ -150,7 +152,7 @@ export async function ingestRefusals(request: IngestRequest, ctx: IngestSpaceCon
 
 export interface IngestDeps {
   extract: (conversationId: string, source: ConversationSource, vocabulary: ExtractVocabulary) => Promise<ExtractResult>;
-  write: (spaceId: string, extraction: Extraction, opts: { schemaEntries: SchemaEntry[]; claimType: string; transcripts: boolean }) => Promise<WriteOutcome>;
+  write: (spaceId: string, extraction: Extraction, opts: { schemaEntries: SchemaEntry[]; claimType: string; transcripts: boolean; validationMode: ValidationMode }) => Promise<WriteOutcome>;
 }
 
 /**
@@ -187,7 +189,7 @@ export async function runIngest(
     run.backends = extraction.producedBy?.backends ?? [];
     run.phase = 'writing';
     if (!grants.transcripts) run.transcripts = 'skipped: the token does not hold files: write in this space';
-    const w = await deps.write(spaceId, extraction, { schemaEntries: ctx.schemaEntries, claimType: ctx.claimType, transcripts: grants.transcripts });
+    const w = await deps.write(spaceId, extraction, { schemaEntries: ctx.schemaEntries, claimType: ctx.claimType, transcripts: grants.transcripts, validationMode: ctx.validationMode });
     run.written = w.written;
     run.writeErrors = w.errors;
     run.ids = w.ids;

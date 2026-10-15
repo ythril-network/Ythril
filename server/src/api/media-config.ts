@@ -24,7 +24,7 @@ import {
   allowPrivateForSlot, isLocalModelEndpoint, privateAddressHint, type EgressSlot,
 } from '../config/model-egress-policy.js';
 import { listUrlFor, type VlmWire } from '../files/converters/vlm-endpoint.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { providerSignature, getActiveProviderSignature } from '../files/media/worker.js';
 import { MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
@@ -412,7 +412,8 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
 
   const parsed = MediaConfigPatchSchema.safeParse(stripped.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request body', details: parsed.error.issues });
+    // `details` is the bounded issue list (`refusalOfParse`): code and path, no received value — the raw issues quoted every key whole, and a value.
+    res.status(400).json({ error: 'Invalid request body', details: refusalOfParse(parsed.error).issues });
     return;
   }
 
@@ -843,7 +844,8 @@ export const TestConnectionSchema = z.object({
 mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => {
   const parsed = TestConnectionSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request body', details: parsed.error.issues });
+    // `details` is the bounded issue list (`refusalOfParse`): code and path, no received value — the raw issues quoted every key whole, and a value.
+    res.status(400).json({ error: 'Invalid request body', details: refusalOfParse(parsed.error).issues });
     return;
   }
   const cfg = getMediaEmbeddingConfig();

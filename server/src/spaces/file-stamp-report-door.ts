@@ -20,8 +20,10 @@
  */
 import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
+import { refusalOfParse } from '../util/log.js';
 import { isProxy } from './proxy.js';
-import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
+import { HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
+import { heavyRunner } from '../rate-limit/heavy-run.js';
 import {
   fileStampReport, FILE_STAMP_REPORT_MAX_LIMIT, FILE_STAMP_REPORT_DEFAULT_LIMIT, FILE_STAMP_REPORT_CURSOR_MAX, type FileStampAnswer,
 } from '../files/file-stamp-report.js';
@@ -44,16 +46,8 @@ export type FileStampReportOutcome =
 export const FILE_STAMP_REPORT_RATE_LIMITED = `file_stamp_report is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
   + 'counted across the REST route and the tool; try again shortly';
 
-/** The spaces a report is running for. Module state, so a second door finds the first one's run. */
-const running = new Set<string>();
-
-/** Why a body was refused, naming the parameter — the sentence both doors send. */
-function bodyRefusal(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'Invalid body';
-  const where = issue.path.join('.');
-  return where ? `${where}: ${issue.message}` : issue.message;
-}
+/** The reports running, by space. Module state, so a second door finds the first one's run. */
+const reports = heavyRunner();
 
 /**
  * Run a report for `spaceId`.
@@ -68,19 +62,15 @@ export async function beginFileStampReport(spaceId: string, body: unknown, calle
     return { status: 400, error: `'${spaceId}' is a proxy space and holds no files of its own. Report on its members instead: ${(space.proxyFor ?? []).join(', ')}.` };
   }
   const parsed = FileStampReportBody.safeParse(body ?? {});
-  if (!parsed.success) return { status: 400, error: bodyRefusal(parsed.error) };
-  // Before the rail, so a call that finds the space busy costs the caller no slot. No `await` between this check, the
-  // rail and the claim: two calls cannot both pass it.
-  if (running.has(spaceId)) return { status: 409, error: `A file stamp report for '${spaceId}' is already running — try again when it ends` };
-  if (!consumeHeavyToolCall(callerKey)) return { status: 429, error: FILE_STAMP_REPORT_RATE_LIMITED };
-  running.add(spaceId);
-  try {
-    const answer = await fileStampReport(spaceId, {
-      limit: parsed.data.limit ?? FILE_STAMP_REPORT_DEFAULT_LIMIT,
-      ...(parsed.data.after !== undefined ? { after: parsed.data.after } : {}),
-    });
-    return { status: 200, answer };
-  } finally {
-    running.delete(spaceId);
-  }
+  // Why a body was refused, naming each parameter — the one sentence both doors send (`refusalOfParse`, which `bodyRefusal` here was a copy of).
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
+  // One report per space at a time, priced on the heavy rail, in the order that makes it a guard (`heavyRunner`).
+  const ran = await reports.run(spaceId, callerKey, {
+    busy: `A file stamp report for '${spaceId}' is already running — try again when it ends`,
+    limited: FILE_STAMP_REPORT_RATE_LIMITED,
+  }, () => fileStampReport(spaceId, {
+    limit: parsed.data.limit ?? FILE_STAMP_REPORT_DEFAULT_LIMIT,
+    ...(parsed.data.after !== undefined ? { after: parsed.data.after } : {}),
+  }));
+  return ran.ok ? { status: 200, answer: ran.value } : { status: ran.status, error: ran.error };
 }

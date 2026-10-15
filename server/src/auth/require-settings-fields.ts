@@ -28,7 +28,21 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { isInstanceAdmin } from './middleware.js';
 import { refusalsForSpaceUpdate, describeFieldRequirement } from './space-field-rights.js';
 
-export function requireSettingsFields(paramName: string) {
+/**
+ * What a route that writes ONE type definition says it is changing, as the space-update body the field table prices: the type under its
+ * kind, inside `meta.typeSchemas`. `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` is that edit through a narrower door,
+ * so a type that carries a rule is priced exactly as PATCH, `update_space` and `schema_update` price it (`typeRuleEditsIn`) — a door
+ * that priced the type only as `meta.typeSchemas` would let a schema writer add the rule the other three refuse them.
+ */
+export const singleTypeEditBody = (req: Request): Record<string, unknown> => ({
+  meta: { typeSchemas: { [req.params['knowledgeType'] as string]: { [req.params['typeName'] as string]: req.body ?? {} } } },
+});
+
+/**
+ * `bodyOf` is what the request changes, as a space-update body: the request's own body by default (PATCH), or what a narrower route
+ * says it is changing (`singleTypeEditBody`).
+ */
+export function requireSettingsFields(paramName: string, bodyOf: (req: Request) => Record<string, unknown> = r => (r.body ?? {}) as Record<string, unknown>) {
   return function (req: Request, res: Response, next: NextFunction): void {
     const spaceId = req.params[paramName] as string | undefined;
     /*
@@ -46,7 +60,7 @@ export function requireSettingsFields(paramName: string) {
       return;
     }
     const refused = refusalsForSpaceUpdate(
-      (req.body ?? {}) as Record<string, unknown>,
+      bodyOf(req),
       spaceId,
       !!(req.authToken && isInstanceAdmin(req.authToken)),
       (req.authToken as { rights?: TokenRights } | undefined)?.rights,

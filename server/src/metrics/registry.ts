@@ -27,6 +27,7 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
+import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
@@ -34,6 +35,7 @@ import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKin
 import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
+import { ruleEngineStats, onRuleEvaluated } from '../spaces/schema-rules.js';
 
 export const register = new Registry();
 
@@ -804,18 +806,32 @@ fileMoveLinkFallbackTotal.inc(0);
  */
 function counterMirroringTally(spec: { name: string; help: string; read: () => number }): Counter<string>;
 function counterMirroringTally<L extends string>(spec: { name: string; help: string; labelName: L; read: () => Readonly<Record<string, number>> }): Counter<L>;
+/** Labelled by several labels (`labelNames`): `read` returns one row per series, each label's value beside its `count`. */
+function counterMirroringTally<L extends string>(
+  spec: { name: string; help: string; labelNames: readonly L[]; read: () => ReadonlyArray<Readonly<Record<L, string>> & { count: number }> },
+): Counter<L>;
 function counterMirroringTally(
-  spec: { name: string; help: string; labelName?: string; read: () => number | Readonly<Record<string, number>> },
+  spec: {
+    name: string; help: string; labelName?: string; labelNames?: readonly string[];
+    read: () => number | Readonly<Record<string, number>> | ReadonlyArray<Readonly<Record<string, string>> & { count: number }>;
+  },
 ): Counter<string> {
-  const { name, help, labelName, read } = spec;
+  const { name, help, read } = spec;
+  const labelNames = spec.labelNames ?? (spec.labelName === undefined ? undefined : [spec.labelName]);
   return new Counter({
-    name, help, ...(labelName === undefined ? {} : { labelNames: [labelName] as const }), registers: [register],
+    name, help, ...(labelNames === undefined ? {} : { labelNames }), registers: [register],
     collect() {
       this.reset();
       const tally = read();
       if (typeof tally === 'number') { this.inc(tally); return; }
-      if (labelName === undefined) throw new Error(`${name}: a tally per label value needs a labelName`);
-      for (const [value, count] of Object.entries(tally)) this.inc({ [labelName]: value }, count);
+      if (labelNames === undefined) throw new Error(`${name}: a tally per label value needs a labelName`);
+      if (Array.isArray(tally)) {
+        for (const row of tally as ReadonlyArray<Readonly<Record<string, string>> & { count: number }>) {
+          this.inc(Object.fromEntries(labelNames.map(l => [l, row[l]!])), row.count);
+        }
+        return;
+      }
+      for (const [value, count] of Object.entries(tally)) this.inc({ [labelNames[0]!]: value }, count);
     },
   });
 }
@@ -830,6 +846,19 @@ export const fileActAnswersTotal = counterMirroringTally({
   help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
   labelName: 'code',
   read: fileActAnswerCounts,
+});
+
+/**
+ * Schema refusals answered, by the door that answered (`rest`, `mcp`, `tool`, `bulk`, `merge`) and what blocked the write (`R6-13`): counted
+ * where the refusal is answered (`countSchemaRefusal`), once per refusal. The tally is kept by `brain/schema-refusal-tally.ts` and mirrored
+ * here at scrape time like the file act answers, so every pair is on the scrape at 0 from the start. Both labels are a fixed vocabulary:
+ * no space, rule or property name, which a caller could mint a new series with.
+ */
+export const schemaRefusalsTotal = counterMirroringTally({
+  name: 'ythril_schema_refusals_total',
+  help: 'Writes the space\'s strict schema refused, by the door that answered and what blocked the write',
+  labelNames: ['door', 'outcome'] as const,
+  read: schemaRefusalCounts,
 });
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
@@ -882,6 +911,45 @@ export const webhookRetriesDroppedTotal = counterMirroringTally({
   labelName: 'reason',
   read: webhookRetriesDroppedCounts,
 });
+
+/**
+ * F-46: the stored schema rules that no longer compile, or read a property their type no longer declares, and are therefore SKIPPED
+ * (not enforced), counted by the boot check (`checkStoredRules`). Declared at 0 so an alert has something to read before the first rule
+ * goes bad. The engine's state and its program cache are read from `spaces/schema-rules.ts` at scrape time: that module is imported by
+ * the schema bodies, so it cannot import this one.
+ */
+export const schemaRulesInvalid = new Gauge({
+  name: 'ythril_schema_rules_invalid',
+  help: 'Stored schema rules that no longer compile (or read a property their type no longer declares) and are skipped, not enforced',
+  registers: [register],
+  collect() { this.set(ruleEngineStats().invalidRules); },
+});
+schemaRulesInvalid.set(0);
+
+/** 1 while the rule engine is loaded and passed its self-test; 0 means every rule reports "could not be evaluated" (fail closed). */
+export const schemaRuleEngineAvailable = new Gauge({
+  name: 'ythril_schema_rule_engine_available',
+  help: '1 if the schema rule engine loaded and passed its self-test, 0 if every rule reports "could not be evaluated"',
+  registers: [register],
+  collect() { this.set(ruleEngineStats().engineAvailable ? 1 : 0); },
+});
+
+/** The compiled-rule cache: a lookup that found a program, one that compiled one, and a program dropped to make room. */
+export const schemaRuleProgramCacheTotal = counterMirroringTally({
+  name: 'ythril_schema_rule_program_cache_total',
+  help: 'Compiled schema-rule cache lookups by outcome: hit, miss (compiled), eviction',
+  labelName: 'outcome',
+  read: () => { const s = ruleEngineStats(); return { hit: s.compileHits, miss: s.compileMisses, eviction: s.compileEvictions }; },
+});
+
+/** How long one rule took to evaluate on one record. Bucketed for the budget: a rule at the input caps is still milliseconds. */
+export const schemaRuleEvaluationSeconds = new Histogram({
+  name: 'ythril_schema_rule_evaluation_seconds',
+  help: 'Time one schema rule took to evaluate on one record',
+  buckets: [0.00001, 0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5],
+  registers: [register],
+});
+onRuleEvaluated(seconds => schemaRuleEvaluationSeconds.observe(seconds));
 
 export const embedWaitSeconds = new Histogram({
   name: 'ythril_embed_wait_seconds',
@@ -1251,6 +1319,31 @@ export const syncFileArrivalsTotal = new Counter({
 });
 // Declared at 0, so a scrape before the first arrival reports 0 rather than nothing (`recallDegradedTotal`).
 for (const door of FILE_ARRIVAL_DOORS) for (const outcome of FILE_ARRIVAL_OUTCOMES) syncFileArrivalsTotal.labels({ door, outcome }).inc(0);
+
+/**
+ * The doors a record arrives through that are recorded against this instance's schema (`sync/arrival-recording.ts`, R6-9), the values of
+ * the `source` label: `push` (a peer's POST), `pull` (this instance fetched a page) and `import` (an admin restore). Listed here so the
+ * series can be declared at 0, and the ONE list: the recorder's `RecordingSource` is derived from it.
+ */
+export const SCHEMA_RECORDING_SOURCES = ['push', 'pull', 'import'] as const;
+
+export const schemaViolationsRecordedTotal = new Counter({
+  name: 'ythril_schema_violations_recorded_total',
+  help: 'Documents a peer sent or an import restored that were STORED carrying a violation of this instance\'s schema that the copy they replaced did not (recorded, never refused), by source (push, pull, import)',
+  labelNames: ['source'] as const,
+  registers: [register],
+});
+export const schemaRecorderFailuresTotal = new Counter({
+  name: 'ythril_schema_recorder_failures_total',
+  help: 'Times the recording of what an arrival broke in this instance\'s schema failed; the arrival itself was stored (a recorder never stops a write), by source (push, pull, import)',
+  labelNames: ['source'] as const,
+  registers: [register],
+});
+// Declared at 0, so a scrape before the first arrival reports 0 rather than nothing: "absent" and "0" mean opposite things on a graph.
+for (const source of SCHEMA_RECORDING_SOURCES) {
+  schemaViolationsRecordedTotal.labels({ source }).inc(0);
+  schemaRecorderFailuresTotal.labels({ source }).inc(0);
+}
 
 // ── Media embedding ──────────────────────────────────────────────────────────
 // Pipeline that converts image / audio / video into text → embedding vector.

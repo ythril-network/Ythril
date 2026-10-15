@@ -333,6 +333,7 @@ deadline instant itself it still is — and a round past it takes no cast, wheth
 |---|---|---|
 | `404` | the round does not exist on this network, or has concluded | `{ "error": "Round not found or already concluded" }` |
 | `409` | the round is past its deadline | `{ "error": "Voting on this round closed at <ISO deadline>", "code": "round_expired", "deadline": "<ISO>" }` |
+| `409` | a `yes` on a `meta_change` round whose schema this instance cannot read | `{ "error": "This instance cannot read the schema this round proposes, so it casts no yes on it: <what failed>" }` — a veto is always this instance's to cast. Nothing of the round is applied here (a round is applied whole or not at all), and `GET /api/spaces/:id/schema-layers` lists it under `refusedRounds` with the reason |
 
 A cast that is taken answers `200` `{ "concluded": false, "round": { … } }`; `concluded` is `true` when this cast ended the
 round, and `round.outcome` then says how (`passed` or `vetoed`).
@@ -395,7 +396,8 @@ refused naming the deadline ([Cast a Vote](#cast-a-vote)). A concluded round is 
 A round carries the fields it travels with — `roundId`, `type`, the subject (`subjectInstanceId`, `subjectLabel`,
 `subjectUrl`), `openedAt`, `deadline`, `votes`, and by type `spaceId`, `networkSpaceId`, `wipeTypes`,
 `metaChangedFields`, `changedTypes`, `keptTypes`, `proposesLayer`, `requiredVoters` — and never a proposal's body
-(`pendingMeta`), a joining member (`pendingMember`) or an invite-key hash. A round about a space carries `localSpaceId`
+(`pendingMeta`), the values its changed fields held when it was proposed (`metaBase`), a joining member
+(`pendingMember`) or an invite-key hash. A round about a space carries `localSpaceId`
 (since 5.6.0): what THIS instance calls the space, which after a rename is neither the network's id nor the proposer's name.
 It is absent for a space not carried here yet (a `space_addition` round), and on this route only — the peer-facing votes
 route serves rounds as they travel.
@@ -403,6 +405,11 @@ route serves rounds as they travel.
 **`summary`** (a `meta_change` round) is one plain sentence per change saying what the proposal would do to the space,
 named as this instance calls it and worded as a proposal rather than a done thing. It is English text and is text only: a
 client shows it as such. MCP: `network_votes`.
+
+**A `meta_change` round proposes only what the write changed**, and a member applies it whole or not at all; what a
+passed round did to the space, which network's layer outranks an edit, and which rounds a member could not read are on
+[`GET /api/spaces/:id/schema-layers`](06a-schema-api.md#network-schema-layers), and a write that reaches several
+networks answers one `layers` outcome per network ([06a](06a-schema-api.md#what-a-schema-write-answers-on-a-space-in-more-than-one-network)).
 
 ---
 
@@ -477,7 +484,7 @@ MCP: `network_join_by_key` with the same fields.
 
 | status | when |
 |---|---|
-| `400` | a malformed body, or a URL that is not a safe peer URL |
+| `400` | a malformed body, answered `{ "error", "issues": [{ "code", "path" }] }` naming each failing field and never a received value ([Error Format](03-auth-and-limits.md#error-format)), or a URL that is not a safe peer URL |
 | `403` | the publisher does not recognise the key, or the token is short on a right the join needs |
 | `429` | too many joins by key are open for that network on the publisher |
 | `502` | the publisher could not be reached, or answered without a usable handshake |
@@ -652,11 +659,22 @@ without saying so and pass a negative through (`Q-109`).
       "completedAt": "2026-03-26T12:00:02.500Z",
       "status": "success",
       "pulled": { "facts": 5, "entities": 2, "edges": 1, "files": 0 },
-      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 }
+      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 },
+      "schemaViolations": [
+        { "spaceId": "research", "records": 4, "top": [ { "name": "properties.statuz", "count": 4 } ] }
+      ]
     }
   ]
 }
 ```
+
+**`schemaViolations` says what the cycle's pulls stored that the receiving space's schema does not accept**, per
+space: `records` is how many documents were stored carrying something the copy they replaced lacked (an undeclared
+property key, a value of the wrong type — in a space whose `validationMode` is `warn` or `strict` only), and `top` the
+field names most of them carried with how many each. **Names and counts only — never a value, never a document id.**
+The records are stored as the peer sent them, never refused ([What arrivals record](06a-schema-api.md#what-arrivals-record)).
+It is absent on a cycle that recorded nothing, so a clean row is the row it always was; a push is not in it, because a
+pushing peer is answered per document. MCP `network_sync_history` answers the same field.
 
 **`status` says whether every member's transfers completed.** `success` means each member was reached and every
 transfer finished; `partial` means some members did not; `failed` means none did. A member counts as not

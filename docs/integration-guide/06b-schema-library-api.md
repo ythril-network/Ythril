@@ -21,6 +21,23 @@ that parses the same values through both doors and requires the same verdict.
 type in one space, not to a shape any number of spaces reference — and nothing resolves a `$ref` when a window
 is read, so a window stored here would never fire. The refusal says so rather than accepting and ignoring it.
 
+**An entry's `schema` is read out of the inline type body, so it takes every other field an inline type takes** —
+`description`, `whenDuePasses`, `suppressEmbeddings`, `endpoints`, `functional`, `propertySchemas`, `namingPattern`
+and [`rules`](06a-schema-api.md#rules) — and meets every refusal an inline type meets: the ReDoS and length checks on a
+pattern, the limits and the save-time check on a rule. **It is checked against the collection it is filed under**
+(`knowledgeType`): `endpoints` on an `entity` entry is refused, because every space referencing it would run a
+constraint that could never apply, and a rule is judged as a rule of that collection's records. A rule in a library
+entry reads only the properties the entry declares, and is part of the type a space links: a linked type shows its
+library rules read-only, and a space that unlinks the type takes them inline.
+
+**A `$ref` of the wrong kind is refused (`422`) at every door that saves one** — `POST /api/spaces`, `PATCH`, the two
+`PUT` routes — naming the entry, the type and what each is. **An entry cannot change kind while a space references it
+as a type of its own kind**: `PUT` or `PATCH` with another `knowledgeType` answers `409` naming the spaces; move the
+references first.
+
+`schema-library.json` has **no watcher**: it is read when the instance starts, so an entry edited by hand takes a
+restart, and a rule in it that no longer compiles is skipped and reported (`invalidRules`) until it is fixed.
+
 **Entry structure:**
 
 ```json
@@ -158,9 +175,10 @@ restating `tier`, `owner`, the `namingPattern`, the description or the type name
 |---|---|
 | `schema.propertySchemas` | **merged per key.** A named property is REPLACED as a whole definition — naming it is how you change it, and deep-merging into it would make removing a constraint impossible |
 | `schema.namingPattern` | replaced when present, preserved when absent. One value and one whole list; merging a list would leave no way to remove a single tag |
+| every other `schema` key (`description`, `suppressEmbeddings`, `whenDuePasses`, `endpoints`, `functional`, `rules`) | replaced as a whole when present, preserved when absent. The merge reads the keys the body accepts, so a key the body takes is never accepted and then dropped (`suppressEmbeddings`, `endpoints` and `functional` were) |
 | `knowledgeType`, `typeName`, `published` | replaced when present |
 | `description`, `schemaGroup`, `sourceUrl`, `sourceCatalog` | `null` clears, a value sets, absent preserves — the same three-way contract `PUT` honours |
-| `deleteFields` | dot paths to remove: `propertySchemas.<key>`, `propertySchemas`, `namingPattern`, `tagSuggestions`. Applied **after** the merge, so one request can replace one property and drop another |
+| `deleteFields` | dot paths to remove, any path inside the entry's `schema`: `propertySchemas.<key>`, `propertySchemas`, `namingPattern`, `rules.<name>`, `rules`, `endpoints.from`, `functional`, … Applied **after** the merge, so one request can replace one property and drop another |
 
 **Response** `200 { "entry": { ... } }`.
 
@@ -168,8 +186,12 @@ restating `tier`, `owner`, the `namingPattern`, the description or the type name
   existed, a `PATCH` here returned a `404` from the router itself, which read as "not supported" because it
   was.)
 - `400` if the body names no field at all, so a no-op cannot be mistaken for an applied change.
-- `400` for an unrecognised `deleteFields` path, rather than ignoring it — a silently dropped typo would leave
-  you believing a property was removed while it is still validating records.
+- `400` for an unrecognised `deleteFields` path, rather than ignoring it, **naming it and the keys a schema has** — a
+  silently dropped typo would leave you believing a property was removed while it is still validating records.
+- `400` when the result — what the entry becomes — breaks a rule an inline type would break. A patch that changes
+  neither the schema nor the kind is not answerable for what the entry already holds (one stored before a rule
+  existed).
+- `409` when the patch changes `knowledgeType` while a space references the entry as a type of its own kind.
 
 Editing a library entry changes what **every space that `$ref`s it** validates against; use
 `GET /api/schema-library/:name/usages` first if you need to know who that is.
@@ -206,7 +228,7 @@ Content-Type: application/json
 { "spaceId": "research", "groupName": "research-schemas", "namePrefix": "research" }
 ```
 
-Creates or updates one library entry per **inline** type schema in the space's `meta.typeSchemas`, tagging them all with `groupName` (`$ref` entries are skipped — they are already library-backed). Entry names are derived as `<namePrefix|groupName>-<knowledgeType>-<typeName>`. **Response** `200 { "created", "updated", "entries": [ ... ] }`. Requires an admin token (and MFA when enabled).
+Creates or updates one library entry per **inline** type schema in the space's `meta.typeSchemas`, tagging them all with `groupName` (`$ref` entries are skipped — they are already library-backed). Entry names are derived as `<namePrefix|groupName>-<knowledgeType>-<typeName>`. **Response** `200 { "created", "updated", "entries": [ ... ] }`, plus — only when there is something to say — `skipped: [{ type, reason }]` and `retentionDropped: ["entity:person", …]` with a `retentionNote`. **An export never launders a schema into the library**: a type this space holds that the library would refuse (a pattern, a rule or an `endpoints` the library's checks reject, kept from before the check existed, a peer or an import) is **left out and named in `skipped` with the reason**, and a `retention` window is **taken off** the entries it was exported with — a window belongs to a type in one space — and named in `retentionDropped`. Requires an admin token (and MFA when enabled).
 
 ```http
 POST /api/schema-library/groups/:group/apply

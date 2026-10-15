@@ -15,6 +15,7 @@ import { modelEndpointExposure, formatExposure, classifyEndpoint } from './model
 import { publicBaseUrlIsFallback } from './public-url.js';
 import { atRestMigrationState } from '../files/at-rest-migration.js';
 import { unreadableCount } from '../files/unreadable-files.js';
+import { rulePostureCheck } from '../spaces/schema-rules.js';
 
 export { POSTURE_LEVELS, type PostureLevel } from './posture-levels.js';
 import type { PostureLevel } from './posture-levels.js';
@@ -254,6 +255,12 @@ export function computeSecurityPosture(): SecurityPosture {
   checks.push(mongoAuthenticated()
     ? { id: 'mongo.auth', level: 'pass', message: 'MongoDB connection is authenticated.' }
     : { id: 'mongo.auth', level: 'warn', message: 'MongoDB connection has no credentials — enable auth on the database. On shared hardware, run a dedicated mongod per tenant on its own encrypted volume (do not share a mongod across tenants).' });
+
+  // ── Schema rules (F-46, R6-4) ─────────────────────────────────────────────────
+  // A FAIL when the rule engine is down (every rule fails closed, so strict spaces refuse what their rules govern), a warning while stored
+  // rules are skipped for no longer compiling, and nothing when all is well.
+  const rules = rulePostureCheck();
+  if (rules) checks.push(rules);
 
   const worst = checks.reduce<PostureLevel>((w, c) => (RANK[c.level] > RANK[w] ? c.level : w), 'pass');
   return { checks, worst };

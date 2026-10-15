@@ -18,6 +18,7 @@ import { type IncompleteRow } from '../../core/recall-graph-report';
 import { SpillEndingComponent } from './spill-ending.component';
 import { ceilingFieldKeys } from '../../core/ceiling-advice';
 import { formatList } from '../../core/list-format';
+import { refusalText } from '../../core/refusal-text';
 
 /**
  * The brain page's Query tab — advanced (MongoDB-style) query + semantic recall.
@@ -732,7 +733,7 @@ export class QueryTabComponent {
       next: (res) => { this.queryRunning.set(false); this.queryResult.set(res); },
       error: (err) => {
         this.queryRunning.set(false);
-        this.queryError.set(err.error?.error ?? 'Query failed');
+        this.queryError.set(refusalText(this.transloco, err, 'refusal.failed.query'));
       },
     });
   }
@@ -812,7 +813,7 @@ export class QueryTabComponent {
       },
       // NOT `recallRan` on an error: a failed search did not find nothing, it did not finish. Saying "no
       // matches" beside an error message would tell the reader two different things about one click.
-      error: (err) => { this.recallRunning.set(false); this.recallTookMs.set(null); this.recallError.set(err.error?.error ?? 'Search failed'); },
+      error: (err) => { this.recallRunning.set(false); this.recallTookMs.set(null); this.recallError.set(refusalText(this.transloco, err, 'refusal.failed.search')); },
     });
   }
 

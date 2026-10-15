@@ -31,6 +31,11 @@ export interface EntityInput {
   ttlDays?: number | null;
   /** Hands the classification back, so a door never runs the classifier a second time for presentation. */
   onValidation?: (check: UpdateValidation) => void;
+  /**
+   * The property keys the instance itself writes on an entity, exempt from the undeclared-key rule (`Q-93`). Set by the one writer that
+   * owns them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
+   */
+  instanceWrittenKeys?: readonly string[];
 }
 
 export interface EntityPlanned {
@@ -59,7 +64,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   const meta = getSpaceMeta(spaceId);
   const properties = (existing ? input.properties : applyPropertyDefaults(meta?.typeSchemas?.entity?.[type], input.properties))
     ?? input.properties ?? {};
-  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, properties, tags });
+  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   input.onValidation?.(check);
 

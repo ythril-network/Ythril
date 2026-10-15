@@ -464,7 +464,8 @@ describe('Schema validation — POST validate-schema dry-run', () => {
     const r = await post(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/validate-schema`, {});
     assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.spaceId, TEST_SPACE, 'Response should include spaceId');
-    assert.ok(typeof r.body.totalViolations === 'number', 'Response should have totalViolations count');
+    assert.ok(typeof r.body.progress?.checked === 'number' && typeof r.body.progress?.total === 'number', 'Response should have progress { checked, total }');
+    assert.ok(!('totalViolations' in r.body), 'Response should not count violations past its page');
     assert.ok(Array.isArray(r.body.violations), 'Response should have violations array');
   });
 });

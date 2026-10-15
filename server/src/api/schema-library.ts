@@ -27,21 +27,27 @@
  *   GET    /api/schema-library/public/:name           — a single published entry
  */
 
-import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
+import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { Router } from 'express';
+import { isDeepStrictEqual } from 'node:util';
 import { boundedJson } from '../util/bounded-read.js';
 import { requireAuth, requireAdminMfa, acceptSchemaLibraryToken } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getSchemaLibrary, saveSchemaLibrary, getConfig, getSchemaCatalogs, saveSchemaCatalogs } from '../config/loader.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import { z } from 'zod';
-import { PropertySchemaZ } from '../spaces/body-schemas.js';
+import {
+  InlineTypeSchemaZ, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem, parseInlineDefinition, withTypeSchemas,
+  type ParsedLibraryEntry,
+} from '../spaces/body-schemas.js';
 import rateLimit from 'express-rate-limit';
-import type { SchemaLibraryEntry, SchemaCatalog } from '../config/types.js';
+import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
-import { EndpointMemberZ } from '../spaces/body-schemas.js';
 import { libraryUsages } from '../spaces/library-usages.js';
+import { mergeTypeDefinition } from '../spaces/meta-fields.js';
+import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
+import { peerText, peerList, refusalOfParse } from '../util/log.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -71,25 +77,18 @@ const MAX_LIBRARY_ENTRIES = 500;
 const MAX_CATALOGS = 50;
 const CATALOG_PROXY_TIMEOUT_MS = 8_000;
 
-/*
- * The property-schema grammar is IMPORTED, not re-declared.
- *
- * This file used to carry its own copy under the comment *"matches spaces.ts PropertySchemaZ"* — a validation
- * grammar duplicated and acknowledged in a comment rather than shared. The two were character-identical when
- * that was noticed, which is exactly the danger: nothing was wrong yet, and nothing would have said when it
- * went wrong. A property schema decides what values a caller may STORE, so two copies means a value the inline
- * door accepts and this one refuses, or the reverse, invisible from either side.
- *
- * The library's schema still DIFFERS in one place, deliberately, and that difference is now the only one it
- * can have: `retention` is refused below, because nothing resolves a `$ref` when a window is read.
- */
-
 /**
  * Zod schema for the inline TypeSchema stored in library entries.
  *
+ * It is the INLINE type definition and nothing else different (`Q-215`): the keys are READ OUT of the inline branch of `TypeSchemaZ`
+ * (`spaces/body-schemas.ts`), never restated here. This file used to carry a hand-built copy "kept in step by a comment", and the copy
+ * drifted: it lacked `description` and `whenDuePasses`, accepted a ReDoS naming pattern, knew nothing of the collection an entry is
+ * filed under, and its PATCH merged two keys of the eight it accepted. The property grammar, the pattern rule and the endpoints
+ * grammar are the inline body's own, so a value one door accepts and the other refuses cannot arise from here.
+ *
  * `$ref` is not permitted inside a library entry (no recursive references).
  *
- * ## `retention` is refused ON PURPOSE, and now says so
+ * ## `retention` is refused ON PURPOSE, and says so
  *
  * A library entry is referenced by any number of spaces, and a delete policy is not a property of a shape — so a
  * window belongs to a type IN a space, never to the library definition. That decision predates this comment and is
@@ -105,32 +104,7 @@ const CATALOG_PROXY_TIMEOUT_MS = 8_000;
  * a genuine typo — this is only for the one field whose absence is a design decision rather than an oversight.
  */
 export const LibraryTypeSchemaZ = z.object({
-  namingPattern: z.string().max(500).optional(),
-  propertySchemas: z.record(z.string().min(1).max(200), PropertySchemaZ).optional(),
-  // Kept in step with `TypeSchemaZ` in `api/spaces.ts` deliberately: a library entry that cannot express a field the
-  // inline schema can is a surface that silently drops it.
-  suppressEmbeddings: z.boolean().optional(),
-  /*
-    * ACCEPTED here, unlike `retention` below, and the distinction is shape versus policy.
-    *
-    * A retention window is a decision about one space's data, so it cannot travel with an entry that any number
-    * of spaces reference. What may sit at each end of a `reports_to` edge, and whether a subject may have more
-    * than one, are facts about the SHAPE — which is the thing a library entry exists to carry. Refusing them
-    * would make this surface silently less expressive than the inline one, which the comment above this object
-    * already names as the failure to avoid.
-    *
-    * `EndpointMemberZ` is imported rather than restated: the grammar is reserved (`entity:` accepted, other
-    * knowledge-type prefixes refused with a reason), and a second spelling of a reserved grammar is a second
-    * thing to keep in step. `PropertySchemaZ` was exactly that until 2026-09-02 and is now imported too, so
-    * this object's ONLY difference from the inline one is the `retention` refusal below.
-    */
-  endpoints: z.object({
-    from: z.array(EndpointMemberZ).min(1).max(50).optional(),
-    to: z.array(EndpointMemberZ).min(1).max(50).optional(),
-  }).strict().refine(v => v.from !== undefined || v.to !== undefined, {
-    message: 'endpoints needs from, to, or both — an empty object constrains nothing and is more likely a typo',
-  }).optional(),
-  functional: z.boolean().optional(),
+  ...InlineTypeSchemaZ.shape,
   retention: z.never({
     message: 'retention cannot be set on a schema-library entry: one entry is referenced by any number of spaces, '
       + 'and a delete window belongs to a type in a space rather than to the shape. Set it on the type after '
@@ -138,8 +112,27 @@ export const LibraryTypeSchemaZ = z.object({
   }).optional(),
 }).strict();
 
+/** One entry's schema, parsed with the collection the entry is filed under — what every door of the library stores. */
+const parseLibraryEntrySchema = (kind: KnowledgeType, schema: unknown) => parseInlineDefinition(LibraryTypeSchemaZ, kind, schema);
+
 /** Name must be URL-safe and reasonably short. Allows uppercase, dots, dashes, underscores. */
 const LIBRARY_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/;
+
+/** What a 400 for a name the pattern refuses says — read from the pattern's own meaning, never a second statement of it. */
+const LIBRARY_NAME_REFUSAL = 'Invalid library entry name. It must start with a letter or a digit and contain only letters, digits, dots, dashes and underscores (200 characters at most).';
+
+/**
+ * Why an entry cannot be filed under another kind, or `undefined` when it can: a space that references it as a type of its OWN kind
+ * would, after the change, take fields that only mean something on another collection (`Q-215`). Named by space, so the operator knows
+ * which reference to move first.
+ */
+function kindChangeRefusal(name: string, newKind: KnowledgeType): string | undefined {
+  const holding = (libraryUsages(getConfig().spaces).get(name) ?? []).filter(u => u.knowledgeType !== newKind);
+  if (holding.length === 0) return undefined;
+  const spaces = [...new Set(holding.map(u => u.spaceId))];
+  return `Library entry '${name}' is referenced as a ${holding[0]!.knowledgeType} type by ${peerList(spaces, ', ')} and cannot be filed under ${newKind}: `
+    + 'those spaces would run fields that only mean something on another collection. Move the references first.';
+}
 
 export const LibraryEntryBodyZ = z.object({
   name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
@@ -301,7 +294,7 @@ export const ExportSpaceBodyZ = z.object({
 schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = ExportSpaceBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -328,9 +321,14 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   const library = getSchemaLibrary();
   const now = new Date().toISOString();
   const kts = KNOWLEDGE_TYPES;
-  const resultEntries: SchemaLibraryEntry[] = [];
+  const resultEntries: ParsedLibraryEntry[] = [];
   let created = 0;
   let updated = 0;
+  // What the export left out or changed, and why (`Q-215`): a space can hold a schema stored before a rule existed (config.json, an
+  // import, a peer), and exporting it must not launder it into the library — where every space that references the entry would run
+  // the pattern — nor carry a `retention` window the library refuses on every other door.
+  const skipped: { type: string; reason: string }[] = [];
+  const retentionDropped: string[] = [];
 
   for (const kt of kts) {
     const ktMap = typeSchemas[kt];
@@ -339,20 +337,30 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
       // Skip $ref entries — they already point at a library entry
       if ('$ref' in schema) continue;
 
+      // The library's own parse of what would be stored: `retention` is taken off (a window belongs to a type in a space, never to a shape)
+      // and said so; a type the library would refuse is left out, naming it and why.
+      const { retention, ...withoutRetention } = schema as Record<string, unknown>;
+      const checked = parseLibraryEntrySchema(kt, withoutRetention);
+      if (!checked.ok) {
+        skipped.push({ type: `${kt}:${peerText(typeName, { max: 200 })}`, reason: peerText(checked.message, { max: 300 }) });
+        continue;
+      }
+      if (retention !== undefined) retentionDropped.push(`${kt}:${peerText(typeName, { max: 200 })}`);
+
       const safeName = typeName.toLowerCase().replace(/[^a-z0-9_.-]/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 80);
       const entryName = `${prefix}-${kt}-${safeName}`.slice(0, 200);
 
       const existingIdx = library.findIndex(e => e.name === entryName);
 
-      // Inline schema (no $ref) — store as-is (already compatible with LibraryTypeSchema)
-      const inlineSchema: Omit<import('../config/types.js').TypeSchema, '$ref'> = schema as Omit<import('../config/types.js').TypeSchema, '$ref'>;
+      // Inline schema (no $ref), as the library parses it.
+      const inlineSchema = checked.schema;
 
       if (existingIdx === -1) {
         if (library.length >= MAX_LIBRARY_ENTRIES) {
           // Stop if limit reached — still return what was exported so far
           break;
         }
-        const newEntry: SchemaLibraryEntry = {
+        const newEntry: ParsedLibraryEntry = {
           name: entryName,
           knowledgeType: kt,
           typeName,
@@ -365,7 +373,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
         resultEntries.push(newEntry);
         created++;
       } else {
-        const updatedEntry: SchemaLibraryEntry = {
+        const updatedEntry: ParsedLibraryEntry = {
           ...library[existingIdx]!,
           knowledgeType: kt,
           typeName,
@@ -381,7 +389,11 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   }
 
   saveSchemaLibrary(library);
-  res.json({ created, updated, entries: resultEntries });
+  res.json({
+    created, updated, entries: resultEntries,
+    ...(skipped.length ? { skipped } : {}),
+    ...(retentionDropped.length ? { retentionDropped, retentionNote: 'a retention window belongs to a type in a space, not to a library entry: it was left out of these entries' } : {}),
+  });
 });
 
 // ── POST /groups/:group/apply — apply all entries in a group to a space ───
@@ -399,7 +411,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   const group = req.params['group'] as string;
   const parsed = ApplyGroupBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -434,12 +446,13 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   // Through the own definitions (F-39.2): the group's references land in what this instance defines, so a space
   // whose meta is rebuilt from network layers keeps them.
   // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
-  const voted = await voteOnSchemaEditIfNetworked(spaceId, typeSchemas, 'replace');
+  const voted = await voteOnSchemaEditIfNetworked(spaceId, typeSchemas, 'replace', req.authToken as WriteCaller);
   if (voted) { res.status(voted.status).json(voted.body); return; }
   const updated = commitOwnMetaEdit(spaceId, base => {
     const own = { ...base.typeSchemas };
     for (const a of applied) own[a.knowledgeType as keyof typeof own] = { ...(own[a.knowledgeType as keyof typeof own] ?? {}), [a.typeName]: { $ref: `library:${a.entryName}` } };
-    return { ...base, typeSchemas: own };
+    // Parsed like every other write of a type schema: the map is the own definitions' types and `$ref`s to entries of the right kind.
+    return withTypeSchemas(base, own);
   });
 
   if (!updated) {
@@ -467,11 +480,11 @@ schemaLibraryRouter.get('/:name', globalRateLimit, requireAuth, (req, res) => {
 schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = LibraryEntryBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
-  const { name, knowledgeType, typeName, schema, description, schemaGroup, published, sourceUrl, sourceCatalog } = parsed.data;
+  const { name, knowledgeType, typeName, schema: bodySchema, description, schemaGroup, published, sourceUrl, sourceCatalog } = parsed.data;
   const library = getSchemaLibrary();
 
   if (library.some(e => e.name === name)) {
@@ -484,8 +497,16 @@ schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
     return;
   }
 
+  // The same refusals the inline doors make, with the collection the entry is filed under (`Q-215`).
+  const checked = parseLibraryEntrySchema(knowledgeType, bodySchema);
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.message });
+    return;
+  }
+  const schema = checked.schema;
+
   const now = new Date().toISOString();
-  const entry: SchemaLibraryEntry = {
+  const entry: ParsedLibraryEntry = {
     name,
     knowledgeType,
     typeName,
@@ -509,17 +530,17 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
   const name = req.params['name'] as string;
 
   if (!LIBRARY_NAME_RE.test(name)) {
-    res.status(400).json({ error: 'Invalid library entry name. Must be lowercase alphanumeric with optional dashes/underscores.' });
+    res.status(400).json({ error: LIBRARY_NAME_REFUSAL });
     return;
   }
 
   const parsed = LibraryEntryPutBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
-  const { knowledgeType, typeName, schema, description, schemaGroup, published, sourceUrl, sourceCatalog } = parsed.data;
+  const { knowledgeType, typeName, schema: bodySchema, description, schemaGroup, published, sourceUrl, sourceCatalog } = parsed.data;
 
   const library = getSchemaLibrary();
   const existingIdx = library.findIndex(e => e.name === name);
@@ -529,11 +550,24 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     return;
   }
 
+  // The same refusals the inline doors make, with the collection the entry is filed under (`Q-215`).
+  const checked = parseLibraryEntrySchema(knowledgeType, bodySchema);
+  if (!checked.ok) {
+    res.status(400).json({ error: checked.message });
+    return;
+  }
+  const schema = checked.schema;
+  const stranded = existingIdx === -1 ? undefined : kindChangeRefusal(name, knowledgeType);
+  if (stranded) {
+    res.status(409).json({ error: stranded });
+    return;
+  }
+
   const now = new Date().toISOString();
   const isNew = existingIdx === -1;
 
   if (isNew) {
-    const newEntry: SchemaLibraryEntry = {
+    const newEntry: ParsedLibraryEntry = {
       name,
       knowledgeType,
       typeName,
@@ -550,7 +584,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     res.status(201).json({ entry: newEntry });
   } else {
     const existing = library[existingIdx]!;
-    const updatedEntry: SchemaLibraryEntry = {
+    const updatedEntry: ParsedLibraryEntry = {
       ...existing,
       knowledgeType,
       typeName,
@@ -599,13 +633,13 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   const name = req.params['name'] as string;
 
   if (!LIBRARY_NAME_RE.test(name)) {
-    res.status(400).json({ error: 'Invalid library entry name. Must be lowercase alphanumeric with optional dashes/underscores.' });
+    res.status(400).json({ error: LIBRARY_NAME_REFUSAL });
     return;
   }
 
   const parsed = LibraryEntryPatchBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
   const patch = parsed.data;
@@ -626,42 +660,63 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   }
   const existing = library[idx]!;
 
-  // Merge the schema: named properties are added or replaced, unnamed ones survive. `namingPattern`
-  // replaces when present rather than merging.
-  const mergedSchema: SchemaLibraryEntry['schema'] = { ...(existing.schema ?? {}) };
-  if (patch.schema) {
-    if (patch.schema.namingPattern !== undefined) mergedSchema.namingPattern = patch.schema.namingPattern;
-    if (patch.schema.propertySchemas !== undefined) {
-      mergedSchema.propertySchemas = { ...(existing.schema?.propertySchemas ?? {}), ...patch.schema.propertySchemas };
-    }
-  }
+  // Merge the schema BY THE KEYS THE BODY ACCEPTS, not by a list kept beside it (`Q-215`): this merged two keys of the eight the body
+  // took, so `suppressEmbeddings`, `endpoints` and `functional` were ACCEPTED and then DROPPED — a 200 for an entry that had not
+  // changed. A key named replaces what the entry held; `propertySchemas` is the one map that is added to, a named property replacing
+  // its namesake and every unnamed one surviving — the merge of one type definition over another (`mergeTypeDefinition`), the same one
+  // a network layer's type is laid over the local one with.
+  const mergedSchema: Record<string, unknown> = mergeTypeDefinition(existing.schema, (patch.schema ?? {}) as Record<string, unknown>);
 
   // Removals, applied AFTER the merge so a single request can replace one property and drop another without
-  // the order mattering to the caller.
-  const unknownPaths: string[] = [];
-  for (const path of patch.deleteFields ?? []) {
-    if (path === 'namingPattern') { delete mergedSchema.namingPattern; continue; }
-    if (path === 'propertySchemas') { delete mergedSchema.propertySchemas; continue; }
-    const prop = /^propertySchemas\.(.+)$/.exec(path);
-    if (prop && mergedSchema.propertySchemas) { delete mergedSchema.propertySchemas[prop[1]!]; continue; }
-    if (prop) continue;   // nothing to delete from, but the path is valid
-    unknownPaths.push(path);
+  // the order mattering to the caller. Any path inside the schema is deletable, by the one deleter the record routes use; a path that
+  // names nothing a schema has is refused naming it, not ignored — a typo'd path that is silently dropped leaves the caller believing
+  // a property was removed when it is still validating records.
+  const deletable = validateDeleteFields(patch.deleteFields);
+  if (!deletable.ok) {
+    res.status(400).json({ error: deletable.error });
+    return;
   }
+  const unknownPaths = (patch.deleteFields ?? []).filter(p => libraryDeletePathProblem(p) !== undefined);
   if (unknownPaths.length > 0) {
-    // Refused rather than ignored: a typo'd path that is silently dropped leaves the caller believing a
-    // property was removed when it is still validating records.
     res.status(400).json({
-      error: `deleteFields paths must be 'namingPattern', 'propertySchemas', or 'propertySchemas.<key>' — unrecognised: ${unknownPaths.join(', ')}`,
+      error: `deleteFields paths must start with a key of the schema (${LIBRARY_SCHEMA_KEYS.join(', ')}) — unrecognised: ${peerList(unknownPaths, ', ', { each: 120 })}`,
     });
+    return;
+  }
+  if (patch.deleteFields?.length) {
+    applyDeleteFields(mergedSchema, patch.deleteFields);
+    // `endpoints` with neither end names no constraint and is refused by the body: taking out its last end takes the whole key out.
+    const ends = mergedSchema['endpoints'];
+    if (ends && typeof ends === 'object' && Object.keys(ends).length === 0) delete mergedSchema['endpoints'];
+  }
+
+  // The result is what the entry becomes, so it is what is checked: the collection the entry will be filed under is the one in the
+  // patch, or the one it has.
+  // A patch that changes neither the schema nor the kind is not answerable for what the entry already holds (one stored before a rule
+  // existed): the schema is checked when the write changes it.
+  const finalKind: KnowledgeType = patch.knowledgeType ?? existing.knowledgeType;
+  const schemaChanged = !isDeepStrictEqual(mergedSchema, existing.schema ?? {}) || finalKind !== existing.knowledgeType;
+  let nextSchema = existing.schema;
+  if (schemaChanged) {
+    const checked = parseLibraryEntrySchema(finalKind, mergedSchema);
+    if (!checked.ok) {
+      res.status(400).json({ error: checked.message });
+      return;
+    }
+    nextSchema = checked.schema;
+  }
+  const stranded = finalKind !== existing.knowledgeType ? kindChangeRefusal(name, finalKind) : undefined;
+  if (stranded) {
+    res.status(409).json({ error: stranded });
     return;
   }
 
   const now = new Date().toISOString();
-  const updated: SchemaLibraryEntry = {
+  const updated: ParsedLibraryEntry = {
     ...existing,
     ...(patch.knowledgeType !== undefined ? { knowledgeType: patch.knowledgeType } : {}),
     ...(patch.typeName !== undefined ? { typeName: patch.typeName } : {}),
-    schema: mergedSchema,
+    schema: nextSchema,
     // null clears, a value sets, absent preserves — the same three-way contract PUT already honours for these.
     ...(patch.description === null ? { description: undefined } : patch.description !== undefined ? { description: patch.description } : {}),
     ...(patch.schemaGroup === null ? { schemaGroup: undefined } : patch.schemaGroup !== undefined ? { schemaGroup: patch.schemaGroup } : {}),
@@ -719,7 +774,7 @@ schemaLibraryRouter.patch('/:name/publish', globalRateLimit, requireAdminMfa, (r
 
   const parsed = PublishPatchZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 
@@ -738,7 +793,7 @@ schemaLibraryRouter.patch('/:name/publish', globalRateLimit, requireAdminMfa, (r
 schemaLibraryRouter.post('/catalogs', globalRateLimit, requireAdminMfa, (req, res) => {
   const parsed = CatalogBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json(refusalOfParse(parsed.error));
     return;
   }
 

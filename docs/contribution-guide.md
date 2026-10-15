@@ -493,6 +493,31 @@ badge dialect gets written. The API of each, with the page-PR checklist that goe
 - Validate at system boundaries; trust internal code.
 - No temp fixes, no lazy implementations. State-of-the-art from day one.
 
+### Changing what a space's schema accepts
+
+A schema is stored, replicated, evaluated on every write and quoted back in every refusal, so each of those has **one
+place**, and a change that adds a second is the defect this repository produces most. What is one place now:
+
+- **A schema body is parsed once, before any store.** `spaces/body-schemas.ts` mints the parsed types every store takes
+  (a space's meta, a type, a library entry); nothing else does. A key added to a meta body needs its merge kind in
+  `spaces/meta-fields.ts` on the same commit (the body refuses to load without it), its rights row in
+  `auth/space-field-rights.ts`, its first release in `sync/meta-skew.ts` so a write names the members that will refuse it, and the
+  `schema_update` argument.
+- **A validator takes a `RecordView` and nothing else** (`brain/record-view.ts`, `recordViewOf`): the record as a rule and
+  a property check read it, built in one place, never a partial record or a copy of the fields.
+- **Rules run in `spaces/schema-rules.ts` only.** The limits a client shows are its exported constants, and the docs cite
+  them from there; the engine is never imported elsewhere.
+- **A refusal is one body** (`SchemaViolationError.toStructured`), bounded after classification, and a failed
+  schema parse of a request body answers through `refusalOfParse` (`util/log.ts`). Never quote a name or a value a caller or a peer
+  chose except through the bounded renderer (`peerText`).
+- **An arriving document is recorded, not refused**, at one site (`sync/arrival-recording.ts`), by every door that stores
+  a peer's documents or a restore.
+- **A capability change is all five places** — route, tool, integration guide, user guide, rights — in the same commit, as the
+  repository's `CLAUDE.md` says; for rules and the live check that is `06a-schema-api.md`, `16-mcp.md`, `07-tokens-api.md`, the
+  Schema tab page of the user guide and the field-rights table in `auth/space-field-rights.ts`.
+
+The decision behind these is record 10 in [Decision records](decisions.md).
+
 ---
 
 ## Commit Conventions

@@ -498,32 +498,22 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 
 **`POST :id/validate-schema` answers `staleGuards` beside `violations`**: `[{ _id, label }]`, the stored edges that
 hold a write guard for a subject they are not under (the guard is this instance's own lock on a functional label's
-subject, and no read returns it). They are not schema violations, so `violations` and `totalViolations` are unchanged.
+subject, and no read returns it). They are not schema violations, so `violations` is unchanged.
+It checks one record you send (`sample`) or the stored data, and pages by `after` / `nextAfter`.
 See [Validate Schema](06a-schema-api.md#validate-schema-dry-run).
+
+**A schema field in the body is parsed before anything is stored, and refused as `{ "error", "issues" }`** — a rule the
+instance could not apply, a name that is an object's internals, a `$ref` of the wrong kind. Every type the body
+carries is judged, changed or not, so a type sent back whole with a rule that no longer compiles is refused and the
+stored rule is fixed in the same save. On a space in networks the write is merged and priced against the space's
+**own** definitions and proposes only what it changed; see [Network Schema Layers](06a-schema-api.md#network-schema-layers).
 
 #### What each field in the update body requires
 
-Every field answers to the area that owns it rather than to the route. A token needs **one** of: the
-instance administrator, the space's administrator (`admin` on all four areas), or the rung named here on
-that space.
-
-| field | requires |
-|---|---|
-| `label`, `meta.purpose`, `meta.usageNotes` | space administrator — the space's own description of itself, which no data area owns |
-| `maxGiB` | **instance administrator** — it is the space's share of the host's disk, not a setting of the space |
-| `faceDescriptorDims` | `files` **admin** — changing the width invalidates every stored face descriptor |
-| `documentExtraction`, `imageAnalysis`, `audioAnalysis`, `videoAnalysis`, `textAnalysis` | `files` write |
-| `meta.typeSchemas`, `typeSchemasMode`, `meta.whenDuePasses` | `schema` write |
-| `targetNetwork` | `networks` write — it proposes the meta to one network as that network's definition; see [Network Schema Layers](06a-schema-api.md#settling-a-clash-propose-a-definition-to-one-network) |
-| `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
-| `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
-| `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
-| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation — except on a proxy made before 5.0, which the conversion never walks because it holds no records, so it never carries the marker and needs none; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
-| `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
-| `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
-
-A refusal is a `403` naming each field and its requirement, so one save produces one conversation with
-whoever grants rights rather than one per field.
+Every field answers to the area that owns it rather than to the route, and a refusal is a `403` naming each field
+and its requirement. The table moved to [Tokens API → What each field of the space update body requires](07-tokens-api.md#what-each-field-of-the-space-update-body-requires);
+the schema fields in it (`meta.typeSchemas`, `meta.validationMode`, `meta.strictLinkage`, `meta.stampSkew`,
+`meta.rules`, `targetNetwork`) are described in the [schema guide](06a-schema-api.md).
 
 **Optimistic concurrency (`If-Match`).** Meta writes are last-write-wins by default: if two clients read a space, both edit it, and both save, the second save replaces the first in full. To make your write conditional, send the `meta.version` you read as an `If-Match` header:
 
@@ -797,9 +787,15 @@ type schemas are readable only by tokens that may reach the space.
   },
   "stats": { "facts": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
   "needsReindex": false,
-  "reindexRun": { "running": false, "remaining": 0, "failed": 0 }
+  "reindexRun": { "running": false, "remaining": 0, "failed": 0 },
+  "invalidRules": []
 }
 ```
+
+`invalidRules` names the stored [rules](06a-schema-api.md#rules) that no longer compile, or read a property their type
+no longer declares — `typeSchemas.<kind>.<type>.rules.<name>` or `meta.rules.<name>`, **names only, never a rule's text
+or message**. Such a rule is skipped, not enforced, until it is fixed; `[]` when all is well. It is a field of the
+answer beside `stats`, not of the stored meta, and `space_meta` answers it too.
 
 `needsReindex` is `true` when the space holds embeddings from a different model than the one configured, and
 recall in the space refuses while it is. A reindex clears it when it has rebuilt every record — not when it starts.

@@ -6,6 +6,10 @@
   "published": true,
   "description": "A bounded undertaking with an end in view. Its start, milestones and completion are chrono entries.",
   "schema": {
-    "propertySchemas": {}
+    "propertySchemas": {
+      "aliases": {
+        "type": "string"
+      }
+    }
   }
 }

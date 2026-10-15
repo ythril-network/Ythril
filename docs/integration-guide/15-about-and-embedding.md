@@ -45,7 +45,11 @@ admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries
 missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`; and a key a door
 does not take is quoted the same way on both doors — a REST body's `Unknown field(s)` names (and `unrecognized_keys`
 lists) its first **10** unknown keys, and an MCP call's `unexpected property` names its key and path, each unknown key
-cut at **256** characters. An error passed
+cut at **256** characters. A body that fails validation is quoted the same way on every REST route that parses one:
+`{ "error", "issues": [{ "code", "path", "keys"? }] }`, ten issues at most, each path segment and each unknown key cut at
+**256** characters, and **no received value** in it ([Error Format](03-auth-and-limits.md#error-format)); a schema
+refusal's rows (`field` and a string `value`), a merge refusal's ids and a record's warning rows are bounded the same
+way, and the logged text of a refusal is the answer's own. An error passed
 with its stack keeps the stack (escaped onto the line) with its message bounded.
 
 **Response** `200`:

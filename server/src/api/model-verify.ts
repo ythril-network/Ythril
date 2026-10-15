@@ -40,7 +40,7 @@ import { getMediaEmbeddingConfig, getEmbeddingConfig } from '../config/loader.js
 import { createMediaProviders } from '../files/media/providers.js';
 import { embed } from '../brain/embedding.js';
 import { repairMarkdownExternal } from '../files/converters/vlm-client.js';
-import { log } from '../util/log.js';
+import { log, refusalOfParse } from '../util/log.js';
 import { assistProbeTarget } from '../config/assist-backend.js';
 import { envInt } from '../config/env-num.js';
 
@@ -202,7 +202,8 @@ export async function verifyTarget(target: z.infer<typeof VerifySchema>['target'
 modelVerifyRouter.post('/verify', requireAdminMfa, async (req, res) => {
   const parsed = VerifySchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid request body', details: parsed.error.issues });
+    // `details` is the bounded issue list (`refusalOfParse`), as on the media config routes.
+    res.status(400).json({ error: 'Invalid request body', details: refusalOfParse(parsed.error).issues });
     return;
   }
   res.json(await verifyTarget(parsed.data.target, { fallback: parsed.data.fallback === true }));

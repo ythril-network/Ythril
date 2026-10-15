@@ -22,6 +22,7 @@ import {
   CARD_SLOT, type SlotTuningCfg, type DecisionModelCfg,
 } from './media-processing.types';
 import { assistExtrasPatch, fallbackNeedsAck, hostOf } from './assist-extras';
+import { refusalText } from '../../../core/refusal-text';
 
 /**
  * The Models tab's cards that own editable config and therefore get their own Save button.
@@ -287,7 +288,7 @@ export class MediaProcessingStateService {
       next: res => this.testState.update(s => ({ ...s, [t]: { res } })),
       error: err => this.testState.update(s => ({ ...s, [t]: { res: {
         ok: false, reachable: false, verdict: 'unreachable' as const,
-        detail: err?.error?.error ?? err?.message ?? 'Test failed', latencyMs: 0,
+        detail: refusalText(this.transloco, err, 'refusal.failed.test'), latencyMs: 0,
       } } })),
     });
   }
@@ -310,7 +311,7 @@ export class MediaProcessingStateService {
       next: res => this.verifyState.update(s => ({ ...s, [t]: { res } })),
       error: err => this.verifyState.update(s => ({ ...s, [t]: { res: {
         target: t, outcome: 'failed' as const,
-        detail: err?.error?.error ?? err?.message ?? 'Verification failed', latencyMs: 0,
+        detail: refusalText(this.transloco, err, 'refusal.failed.verify'), latencyMs: 0,
       } } })),
     });
   }
@@ -685,7 +686,7 @@ export class MediaProcessingStateService {
         setTimeout(() => this.saveOk.set(''), 3000);
       },
       error: err => {
-        this.saveError.set(err?.error?.error ?? err?.message ?? 'Save failed');
+        this.saveError.set(refusalText(this.transloco, err, 'refusal.failed.save'));
         this.saving.set(false);
       },
     });
@@ -847,8 +848,10 @@ export class MediaProcessingStateService {
        * `enabled` IS NOT ONE, and sending it broke every save on this page — the whole body, not just the
        * face block, because the PATCH schema is `.strict()`:
        *
-       *     {"error":"Invalid request body","details":[{"code":"unrecognized_keys","keys":["enabled"],
-       *       "path":["faceRecognition"],"message":"Unrecognized key: \"enabled\""}]}
+       *     {"error":"Invalid request body","details":[{"code":"unrecognized_keys","path":["faceRecognition"],"keys":["enabled"]}]}
+       *
+       * (`details` is the bounded issue list the server answers now — code, path, keys; no message and no received value. The body
+       * that was reported carried zod's raw issues, which is why this page never reads an issue's `message`: it asks `refusalText`.)
        *
        * Reported by the canary operator 2026-08-20 after their owner spent an afternoon behind it. The comment
        * above this list was already correct and the list did not match it: `enabled` became an infra/env pin
@@ -996,7 +999,7 @@ export class MediaProcessingStateService {
         this.saving.set(false);
         setTimeout(() => this.saveOk.set(''), 3000);
       },
-      error: err => { this.saveError.set(`Save failed: ${err?.error?.error ?? err?.message ?? 'Unknown error'}`); this.saving.set(false); },
+      error: err => { this.saveError.set(refusalText(this.transloco, err, 'refusal.failed.save')); this.saving.set(false); },
     });
   }
 
@@ -1087,7 +1090,7 @@ export class MediaProcessingStateService {
         this.saving.set(false);
         setTimeout(() => this.saveOk.set(''), 3000);
       },
-      error: err => { this.saveError.set(`Save failed: ${err?.error?.error ?? err?.message ?? 'Unknown error'}`); this.saving.set(false); },
+      error: err => { this.saveError.set(refusalText(this.transloco, err, 'refusal.failed.save')); this.saving.set(false); },
     });
   }
 }

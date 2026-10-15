@@ -192,7 +192,8 @@ epoch seconds or milliseconds. A property that is not a timestamp at all is **no
 
 #### Configuring it, per space
 
-In the space's `meta`, so `PATCH /api/spaces/:id` and `schema_update` already write it:
+In the space's `meta`, written by `PATCH /api/spaces/:id`, `schema_update` and `save_space` (the settings page has no
+control for it):
 
 ```json
 { "meta": { "stampSkew": { "warnMinutes": 40, "properties": ["stampedAt", "postedAt"] } } }
@@ -202,6 +203,13 @@ In the space's `meta`, so `PATCH /api/spaces/:id` and `schema_update` already wr
 |---|---|---|
 | `warnMinutes` | `40` | Warn beyond this much disagreement. **`0` disables the check** — it does *not* mean "warn on any difference", because a caller's stamp and the server's clock never agree to the millisecond |
 | `properties` | `["stampedAt", "postedAt"]` | Which properties to check, in order. The **first one that parses** decides; naming your own **replaces** the defaults rather than adding to them |
+
+The object is **replaced whole**: a field you leave out is gone, so send both when you change one. Writing it needs
+`schema` `write` (`warnMinutes: 0` switches the check off, so the audit log records that number on `space.update`),
+and on a space in a network it travels with the schema to every member — one on the release before this one refuses a
+layer carrying it, which the write answers as a `warnings` row naming the members behind
+([Network Schema Layers](06a-schema-api.md#what-a-schema-write-answers-on-a-space-in-more-than-one-network)). Before
+5.7.0 the key was documented here and refused by the body, so a `PATCH` of it answered `400`.
 
 ---
 
@@ -602,6 +610,11 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 - System fields (`id`, `_id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) **cannot** be deleted. Attempting to do so returns `400`.
 - Paths with empty segments (e.g. `"properties..key"`) are rejected with `400`.
 - If the result after `deleteFields` + merge violates a `required: true` property schema in `typeSchemas` (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
+- **A retype in a `strict` space takes its undeclared keys off with `deleteFields`.** Changing a record's `type` (an
+  entity or fact type, a chrono `type`, an edge `label`) onto a type that does not declare a property key the record
+  carries *introduces* that key, and the write is refused. The write that goes through names those keys in
+  `deleteFields` (`properties.<key>`) and leaves them out of `properties`; a write that holds more than 100 needs two
+  saves. The Brain page asks before doing it ("This cannot be undone"), and nothing is removed in `warn` or `off`.
 - `deleteFields` can be the **only** parameter in the request body (no other updates needed).
 - Omitting `deleteFields` leaves the ordinary merge behaviour.
 - **Re-embedding:** deleting any content field (`properties`, `description`, `tags`, `fact`) triggers re-embedding of the affected document. Bulk `deleteFields` updates may incur embedding service latency.

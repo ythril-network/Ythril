@@ -1,6 +1,7 @@
 import type { VoteRound } from '../../core/api.types';
 import type { CastVoteResult } from '../../core/networks-api.service';
 import { outcomeKey, outcomeWord, roundTypeKey } from '../../core/vote-round-view';
+import { refusalText } from '../../core/refusal-text';
 
 /** What `TranslocoService.translate` is to this module — passed in, so what is said is a pure function of its inputs. */
 export type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -66,7 +67,7 @@ export function castRefusalNotice(
   }
   return {
     kind: 'error',
-    message: body?.error ?? t('networks.error.castVoteFailed'),
+    message: refusalText({ translate: t }, err, 'networks.error.castVoteFailed'),
     reload: err?.status === 404 || err?.status === 409,
   };
 }

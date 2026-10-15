@@ -5,7 +5,8 @@ import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDays
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
-import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
+import type { UpdateValidation } from '../../brain/write-validation.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 
 /**
  * What a passed due moment means — ONE sentence, quoted everywhere that used to state it.
@@ -30,12 +31,13 @@ import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
 import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { getAllowedChronoTypes, resolveMetaRefs } from '../../spaces/schema-validation.js';
+import { getAllowedChronoTypes, getSpaceMeta, resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
@@ -97,7 +99,7 @@ export const save_chronoTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Optional structured key-value metadata for this entry.',
+              description: 'Optional structured key-value metadata for this entry. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('Optional recurrence rule,'),
@@ -157,13 +159,13 @@ export const save_chronoTool: ToolHandler = {
     // the write, so a refusal there would leave the record stored without the connections the same call asked for.
     await assertConnections(wt.target, 'chrono', await connectionSubject(wt.target, 'chrono', a, { id: chronoSuppliedId }), a);
 
-    let entry;
-    try {
-      const chronoSuppress = parseRecordSuppression(a);
-      if (!chronoSuppress.ok) throw new Error(chronoSuppress.error);
-      const susCreate = parseRecordSuperseded(a);
-      if (!susCreate.ok) throw new Error(susCreate.error);
-      entry = await createChrono(wt.target, {
+    const chronoSuppress = parseRecordSuppression(a);
+    if (!chronoSuppress.ok) throw new Error(chronoSuppress.error);
+    const susCreate = parseRecordSuperseded(a);
+    if (!susCreate.ok) throw new Error(susCreate.error);
+    // A schema refusal is NOT caught here (`Q-315`): it reaches `callTool`, which answers every tool's refusal the one way. This catch
+    // answered `Error: schema_violation` and DROPPED the message, so the same refusal read three ways over one door.
+    const entry = await createChrono(wt.target, {
       id: chronoSuppliedId,
       title,
       type: chronoType,
@@ -184,24 +186,11 @@ export const save_chronoTool: ToolHandler = {
       checkDuplicates: a['checkDuplicates'] !== false,
       checkContradictions: a['checkContradictions'] === true,
       dupeThreshold: typeof a['dupeThreshold'] === 'number' ? a['dupeThreshold'] : undefined,
-        onValidation: c => { chronoCheck = c; },
-      });
-    } catch (err) {
-      if (err instanceof SchemaViolationError) {
-        // The violations travel as structured data rather than a JSON tail glued to the sentence: a caller
-        // had to parse the message to act on them. The prose is unchanged for a client that reads only the
-        // content blocks.
-        return {
-          content: [{ type: 'text' as const, text: 'Error: schema_violation' }],
-          isError: true,
-          structuredContent: err.toStructured(),
-        };
-      }
-      throw err;
-    }
+      onValidation: c => { chronoCheck = c; },
+    });
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
     // exists — a relationship needs both ends, and the `from` is what was just minted.
-    await applyConnections(wt.target, entry._id, 'chrono', a, entry.author, ctx.actor);
+    const connected = await applyConnections(wt.target, entry._id, 'chrono', a, entry.author, ctx.actor);
 
     let text = `Chrono entry '${entry.title}' (${entry.type}) created (ID ${entry._id}, seq ${entry.seq}).`
       + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
@@ -215,12 +204,11 @@ export const save_chronoTool: ToolHandler = {
         `"${c.summary}" (ID ${c.id}: ${c.fields.map(f => `${f.key} ${f.aValue} vs ${f.bValue}`).join(', ')})`).join('; ');
       text += `\n⚠️ Contradiction — ${entry.contradicts.length} existing entr${entry.contradicts.length === 1 ? 'y disagrees' : 'ies disagree'} with this one: ${detail}. This entry was still stored. If you are correcting an outdated entry, update or supersede the record above instead of leaving both.`;
     }
-    if (chronoMeta?.validationMode === 'warn') {
-      // From the classification the writer handed back, not re-derived — a second call would be a second
-      // lookup per write and the second copy of the rule.
-      for (const v of (chronoCheck as UpdateValidation | undefined)?.all ?? []) text += `\n⚠️ Schema: ${v.field} — ${v.reason}`;
-    }
-    return { content: [{ type: 'text' as const, text }] };
+    // From the classification the writer handed back, not re-derived — a second call would be a second
+    // lookup per write and the second copy of the rule.
+    const schemaWarnings = schemaWarningAnswer(chronoMeta, chronoCheck as UpdateValidation | undefined, connected.warnings);
+    for (const line of schemaWarnings.lines) text += `\n${line}`;
+    return { content: [{ type: 'text' as const, text }], structuredContent: { ...entry, ...schemaWarnings.structured } };
   },
 };
 
@@ -341,7 +329,7 @@ export const update_chronoTool: ToolHandler = {
             },
             properties: {
               type: 'object',
-              description: 'Key-value properties to merge into the stored map — keys you do not name are kept.',
+              description: 'Key-value properties to merge into the stored map — keys you do not name are kept. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('The repeat rule, replaced wholesale when sent,'),
@@ -452,15 +440,17 @@ export const update_chronoTool: ToolHandler = {
     }
     // Through the members, as REST's PATCH and every other update tool do: a write target may itself be a proxy, and the
     // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
-    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a)));
-    if (!entry) throw new Error(`Chrono entry '${id}' not found`);
+    let updCheck: UpdateValidation | undefined;
+    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
+    if (!entry) throw new NotFoundError(`Chrono entry '${id}' not found`);
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `entry.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
-    await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
-    return { content: [{ type: 'text' as const, text: `Chrono entry '${entry.title}' updated (seq ${entry.seq}).` }],
-      structuredContent: { ...entry } };
+    const connected = await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
+    const schemaWarnings = schemaWarningAnswer(getSpaceMeta(entry.spaceId), updCheck, connected.warnings);
+    return { content: [{ type: 'text' as const, text: [`Chrono entry '${entry.title}' updated (seq ${entry.seq}).`, ...schemaWarnings.lines].join('\n') }],
+      structuredContent: { ...entry, ...schemaWarnings.structured } };
   },
 };
 
@@ -528,7 +518,7 @@ export const delete_chronoTool: ToolHandler = {
     const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'chrono'));
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteChrono(mid, id, ctx.actor));
-    if (!deleted) throw new Error(`Chrono entry '${id}' not found`);
+    if (!deleted) throw new NotFoundError(`Chrono entry '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Chrono entry deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
   },

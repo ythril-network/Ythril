@@ -17,6 +17,7 @@ import { SpacesStore } from './spaces-store.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { SpaceMeta, ValidationMode } from '../../core/api.types';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-create-dialog',
@@ -80,7 +81,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
         <div class="field" style="margin-bottom:0;">
           <label>{{ 'spaces.create.validationMode' | transloco }}</label>
           <select [(ngModel)]="form.validationMode" name="validationMode" style="width:140px;">
-            <option value="off">{{ 'spaces.create.validation.off' | transloco }}</option><option value="warn">{{ 'spaces.create.validation.warn' | transloco }}</option><option value="strict">{{ 'spaces.create.validation.strict' | transloco }}</option>
+            <option value="off">{{ 'spaces.settings.validation.off' | transloco }}</option><option value="warn">{{ 'spaces.settings.validation.warn' | transloco }}</option><option value="strict">{{ 'spaces.settings.validation.strict' | transloco }}</option>
           </select>
         </div>
         <label class="field" style="margin-bottom:0;display:flex;flex-direction:row;align-items:center;gap:8px;font-weight:normal;cursor:pointer;height:34px;">
@@ -178,7 +179,7 @@ export class SpaceCreateDialogComponent {
           this.store.load();
           this.store.pollIndexStatus();
         } else {
-          this.createError.set(err.error?.error ?? this.transloco.translate('spaces.error.createFailed'));
+          this.createError.set(refusalText(this.transloco, err, 'spaces.error.createFailed'));
         }
       },
     });
