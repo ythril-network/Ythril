@@ -29,6 +29,7 @@
 import type express from 'express';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
+import { isPlainObject } from '../util/plain-object.js';
 
 /** The marker on a response: the keys of the decorators already installed on it. A symbol, so no body or header can collide with it. */
 const INSTALLED = Symbol('decorateJsonAnswer.installed');
@@ -38,9 +39,6 @@ export type JsonAnswerDecorator = (status: number, body: Record<string, unknown>
 
 /** Which decorators have been said to throw, once each, for as long as the process lives (a decorator is code: there are few). */
 const failureSaid = warnOnce<string>();
-
-const isPlainObject = (body: unknown): body is Record<string, unknown> =>
-  body !== null && typeof body === 'object' && !Array.isArray(body);
 
 /**
  * Wrap `res.json` so every plain-object answer of this request passes through `decorate` (see the module comment for the contract).

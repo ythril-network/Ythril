@@ -42,6 +42,7 @@ import { retiredWriteFieldError, retiredWriteFieldHint } from '../brain/retired-
 import { unknownWriteFieldsMode } from '../spaces/spaces.js';
 import { findSpace } from '../spaces/proxy.js';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText, unrecognizedKeysIssue, type ParseRefusalIssue } from '../util/log.js';
+import { isPlainObject } from '../util/plain-object.js';
 import { unknownWriteFieldsTotal } from '../metrics/registry.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
 import { JUDGED_WRITE_OPERATIONS, isJudgedWriteOperation, toolOfJudgedOperation } from './judged-write-operations.js';
@@ -229,9 +230,6 @@ export function carriesAnyAcceptedField(body: unknown, operation: string): boole
 
 // ── Membership, and the near miss ────────────────────────────────────────────────────────────────
 
-const isPlainObject = (body: unknown): body is Record<string, unknown> =>
-  body !== null && typeof body === 'object' && !Array.isArray(body);
-
 /**
  * The own keys of `bag` that are neither accepted nor a RETIRED name (a retired name is answered by its own sentence, by name), in the
  * order the body carries them. The one membership test every door and every bulk item uses: `Set.has`, own keys only.
@@ -328,20 +326,10 @@ export function answerUnknownWriteFields(body: unknown, operation: string, targe
   const refused = retired !== null || unknownRefused;
   const outcome: UnknownFieldOutcome = refused ? 'refused' : 'stored';
 
-  const rowed = names.slice(0, REFUSAL_NAMES_MAX);
-  const cut = rowed.map(n => peerText(n, { max: NAME_QUOTED }));
-  const rows = names.length === 0 ? [] : boundedUnknownFieldRows([
-    ...rowed.map((name, i): UnknownFieldRow => ({
-      field: name,
-      code: UNKNOWN_FIELD_CODE,
-      value: receivedValueSummary(Object.getOwnPropertyDescriptor(body, name)?.value),
-      reason: unknownFieldReason(outcome, {
-        ...(i === 0 ? { accepted: accepted.sentence } : {}),
-        ...nearMissOption(cut[i]!, accepted.sorted),
-      }),
-    })),
-    ...(names.length > rowed.length ? [unknownFieldMoreRow(names.length - rowed.length, outcome, rowed.length)] : []),
-  ], outcome);
+  const { cut, rows } = unknownFieldRowsOf(names, outcome, accepted.sorted, {
+    sentence: accepted.sentence,
+    echo: name => receivedValueSummary(Object.getOwnPropertyDescriptor(body, name)?.value),
+  });
 
   if (names.length > 0) countJudgedCall(door, operation, mode, outcome);
 
@@ -359,6 +347,44 @@ export function answerUnknownWriteFields(body: unknown, operation: string, targe
 function nearMissOption(cutName: string, accepted: readonly string[]): { nearMiss?: string } {
   const hint = nearMissOf(cutName, accepted);
   return hint === undefined ? {} : { nearMiss: hint };
+}
+
+/**
+ * The rows that name a write's unknown fields — the ONE place a name is turned into a row, for a single record (`answerUnknownWriteFields`)
+ * and for a bulk item (`brain/bulk-unknown-fields.ts`), so the two cannot word it, cut it or cap it differently.
+ *
+ * What it does that a hand-written copy would drop: at most {@link REFUSAL_NAMES_MAX} names are rowed and the rest are counted in ONE
+ * `…(+N more)` row; every name is cut at `NAME_QUOTED` BEFORE the near-miss test (an uncut name is the caller's, unbounded); the accepted
+ * list rides on the first row only, and only when `sentence` is given (the caller says it once per answer); and the rows come back
+ * bounded, with no `value` on a refusal (`boundedUnknownFieldRows`). `cut` is the rowed names, as cut.
+ *
+ * @param sorted  the accepted keys, sorted (what a near miss is measured against)
+ * @param sentence  the accepted-keys sentence to put on the first row, or none when this answer has already said it
+ * @param echo  the value to put on a stored row for a name; none for a caller whose rows carry none. (Not named `valueOf`: destructuring
+ *   an options object reads an INHERITED property too, and `{}.valueOf` is `Object.prototype.valueOf`, which would be called as the default.)
+ */
+export function unknownFieldRowsOf(
+  names: readonly string[],
+  outcome: UnknownFieldOutcome,
+  sorted: readonly string[],
+  { sentence, echo = () => undefined }: { sentence?: string | undefined; echo?: (name: string) => unknown } = {},
+): { cut: string[]; rows: UnknownFieldRow[] } {
+  const rowed = names.slice(0, REFUSAL_NAMES_MAX);
+  const cut = rowed.map(n => peerText(n, { max: NAME_QUOTED }));
+  if (names.length === 0) return { cut, rows: [] };
+  const rows = boundedUnknownFieldRows([
+    ...rowed.map((name, i): UnknownFieldRow => ({
+      field: name,
+      code: UNKNOWN_FIELD_CODE,
+      value: echo(name),
+      reason: unknownFieldReason(outcome, {
+        ...(i === 0 && sentence !== undefined ? { accepted: sentence } : {}),
+        ...nearMissOption(cut[i]!, sorted),
+      }),
+    })),
+    ...(names.length > rowed.length ? [unknownFieldMoreRow(names.length - rowed.length, outcome, rowed.length)] : []),
+  ], outcome);
+  return { cut, rows };
 }
 
 /**

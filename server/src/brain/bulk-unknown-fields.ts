@@ -11,7 +11,8 @@
  *
  * ## What it says, and what it will not
  *
- * - **`warn` (the default): the item is written and ONE row names its unknown keys**, `unknown_field: a, b — ignored`. **`refuse`: the item
+ * - **`warn` (the default): the item is written and ONE row names its unknown keys**, `unknown_field: a — ignored; b — ignored`, each name
+ *   worded exactly as a single record's row is (`unknownFieldRowsOf` builds both: the same cut, near miss, `…(+N more)` and words). **`refuse`: the item
  *   is rejected through the batch's own `reject`**, so a `$ref` dependant is told why and the other items proceed (the answer is a 207).
  *   The top level of a batch is refused in every mode (`bulkBodyRefusal`); this is only about items.
  * - **An item refused for ANOTHER reason keeps its unknown rows**, worded `not accepted` (nothing was ignored: it was not written), so a
@@ -25,13 +26,14 @@
  *   count, not 500, and a key a caller chose is never a label.
  */
 import {
-  acceptedWriteKeys, countJudgedCall, nearMissOf, unknownKeysOf, type WriteDoor,
+  acceptedWriteKeys, countJudgedCall, unknownFieldRowsOf, unknownKeysOf, type WriteDoor,
 } from '../contract/write-accepts.js';
-import { acceptedKeysSentence, type UnknownFieldOutcome } from '../contract/unknown-field-rows.js';
+import {
+  acceptedKeysSentence, unknownFieldOutcomeWords, unknownFieldText, UNKNOWN_FIELD_CODE, type UnknownFieldOutcome,
+} from '../contract/unknown-field-rows.js';
 import { unknownWriteFieldsMode } from '../spaces/spaces.js';
 import { findSpace } from '../spaces/proxy.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
-import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText } from '../util/log.js';
 
 /** How many items of one batch get a row of their own; the rest are counted in one `…(+N more items)` row. */
 export const BULK_UNKNOWN_ROWS_MAX = 50;
@@ -55,8 +57,6 @@ interface Flagged {
   /** Whether a row for it has been said (or its absence accounted for) already. */
   said: boolean;
 }
-
-const WORDS: Record<UnknownFieldOutcome, string> = { stored: 'ignored', refused: 'not accepted' };
 
 /**
  * The judge of one batch's items. Build it once per batch, before any item is prepared; it reads the items and the setting, and says
@@ -150,7 +150,7 @@ export class BulkUnknownFields {
       const outcome: UnknownFieldOutcome = this.mode === 'refuse' ? 'refused' : 'stored';
       this.push({
         type: 'batch', index: 0,
-        reason: `unknown_field: …(+${this.itemsNotNamed} more items) — ${WORDS[outcome]}; the first ${BULK_UNKNOWN_ROWS_MAX} items that carry one are named above`,
+        reason: `${UNKNOWN_FIELD_CODE}: …(+${this.itemsNotNamed} more items) — ${unknownFieldOutcomeWords(outcome)}; the first ${BULK_UNKNOWN_ROWS_MAX} items that carry one are named above`,
       });
     }
     if (this.flagged.size > 0) countJudgedCall(this.door, 'bulk.write', this.mode, this.mode === 'refuse' ? 'refused' : 'stored');
@@ -161,16 +161,10 @@ export class BulkUnknownFields {
     if (this.rowsSaid >= BULK_UNKNOWN_ROWS_MAX) { this.itemsNotNamed++; return null; }
     this.rowsSaid++;
     const accepted = this.accepted.get(flagged.collection)!;
-    const shown = flagged.names.slice(0, REFUSAL_NAMES_MAX).map(name => {
-      const cut = peerText(name, { max: NAME_QUOTED });
-      const near = nearMissOf(cut, accepted.sorted);
-      return near === undefined ? cut : `${cut} (did you mean '${near}'?)`;
-    });
-    if (flagged.names.length > shown.length) shown.push(`…(+${flagged.names.length - shown.length} more)`);
     // The accepted list is said once per batch, on the first row, and never again.
-    const list = this.acceptedSaid ? '' : `. ${accepted.sentence}`;
+    const { rows } = unknownFieldRowsOf(flagged.names, outcome, accepted.sorted, this.acceptedSaid ? {} : { sentence: accepted.sentence });
     this.acceptedSaid = true;
-    return `unknown_field: ${shown.join(', ')} — ${WORDS[outcome]}${list}`;
+    return `${UNKNOWN_FIELD_CODE}: ${rows.map(unknownFieldText).join('; ')}`;
   }
 
   /**
@@ -178,6 +172,6 @@ export class BulkUnknownFields {
    * told why, so it gets the sentence without the names (the overflow row says how many there are).
    */
   private pastTheCap(outcome: UnknownFieldOutcome): string {
-    return `unknown_field: ${WORDS[outcome]} — this item carries a field the write does not take; the batch names the first ${BULK_UNKNOWN_ROWS_MAX} items that do`;
+    return `${UNKNOWN_FIELD_CODE}: ${unknownFieldOutcomeWords(outcome)} — this item carries a field the write does not take; the batch names the first ${BULK_UNKNOWN_ROWS_MAX} items that do`;
   }
 }
