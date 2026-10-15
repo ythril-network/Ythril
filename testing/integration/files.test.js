@@ -47,8 +47,8 @@ let tokenA;
 const listFileMeta = (args = {}, spaceId = 'general') =>
   readCollection(INSTANCES.a, tokenA, spaceId, 'files', args);
 
-/** Helper: upload file as JSON body */
-async function uploadFile(token, spaceId, filePath, content) {
+/** Helper: upload file as JSON body; `extra` adds upload options (e.g. `{ inputFormat: 'text' }`). */
+async function uploadFile(token, spaceId, filePath, content, extra = {}) {
   const url = `${INSTANCES.a}/api/files/${spaceId}?path=${encodeURIComponent(filePath)}`;
   const r = await fetch(url, {
     method: 'POST',
@@ -56,7 +56,7 @@ async function uploadFile(token, spaceId, filePath, content) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify({ content, encoding: 'utf8' }),
+    body: JSON.stringify({ content, encoding: 'utf8', ...extra }),
   });
   return { status: r.status, body: await r.json().catch(() => null) };
 }
@@ -241,9 +241,13 @@ describe('Delete file and directory', () => {
   });
 
   it('DELETE orphaned meta (file removed externally) returns 204 and cleans up meta', async () => {
-    // Upload a file so both the disk copy and the meta record exist.
+    // Upload a file so both the disk copy and the meta record exist — one that queues NO processing job (Q-510): a queued job that
+    // reaches the file after the bytes are removed below reconciles its record away (disk is the source of truth), so the DELETE
+    // under test would sometimes find nothing to clean up and answer 404. Only the DELETE may remove this record.
     const filePath = 'orphan-test.txt';
-    await uploadFile(tokenA, 'general', filePath, 'orphan content');
+    const up = await uploadFile(tokenA, 'general', filePath, 'orphan content', { inputFormat: 'text' });
+    assert.equal(up.status, 201, `the upload was not stored as plain text (status ${up.status}): ${JSON.stringify(up.body)}`);
+    assert.equal(up.body?.embeddingStatus, undefined, `the upload queued a processing job (${up.body?.embeddingStatus}), which races the DELETE under test`);
 
     // Remove the physical file directly from the container, leaving the meta record intact.
     execSync(`docker exec ythril-a rm /data/files/general/${filePath}`);
