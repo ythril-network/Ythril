@@ -70,6 +70,31 @@ import { refusalText } from '../../core/refusal-text';
   </div>
 </div>
 
+<!-- THIS INSTANCE (bundle-128): a setting that is NOT part of the schema and is not shared. It has its own row, below the bar, because
+     the bar's hint promises space-wide, shared behaviour and a local setting inside it would inherit that promise. -->
+<section class="sch-instance" data-testid="this-instance-row">
+  <div class="section-title">{{ 'spaces.schema.instance.title' | transloco }}</div>
+  @if (isProxySpace()) {
+    <p class="sch-hint" data-testid="unknown-fields-proxy-note">{{ 'spaces.schema.unknownFields.proxyNote' | transloco }}</p>
+  } @else {
+    <label class="val-lbl">
+      {{ 'spaces.schema.unknownFields.label' | transloco }}
+      <select [(ngModel)]="state.schUnknownWriteFields" class="val-select inst-select" data-testid="unknown-fields-select"
+        [disabled]="!canEditInstanceSetting()" [attr.aria-describedby]="unknownFieldsDescribedBy()">
+        <option value="warn">{{ 'spaces.schema.unknownFields.warn' | transloco }}</option>
+        <option value="refuse">{{ 'spaces.schema.unknownFields.refuse' | transloco }}</option>
+      </select>
+    </label>
+    <p class="inst-hint" id="unknown-fields-hint" data-testid="unknown-fields-hint">{{ 'spaces.schema.unknownFields.hint' | transloco }}</p>
+    @if (state.schUnknownWriteFields === 'refuse') {
+      <p class="inst-hint" id="unknown-fields-consequence" data-testid="unknown-fields-consequence">{{ 'spaces.schema.unknownFields.consequence' | transloco }}</p>
+    }
+    @if (!canEditInstanceSetting()) {
+      <p class="inst-hint" id="unknown-fields-readonly-reason" data-testid="unknown-fields-readonly-reason">{{ 'spaces.schema.unknownFields.readonlyReason' | transloco }}</p>
+    }
+  }
+</section>
+
 <!-- SPACE RULES (F-46): constraints over a record that apply to every type, or to the kinds a rule names. Edited here, shown read-only in the
      pane of each type they apply to. A token without schema admin sees them, and the reason it cannot change them. -->
 <section class="sch-space-rules" data-testid="space-rules-section">
@@ -446,6 +471,22 @@ export class SpaceSchemaTabComponent implements OnInit {
   /** Whether this token may change rules. Unknown (still loading, or no rights to read) counts as yes: the server decides, this only explains. */
   private readonly schemaAdmin = signal(true);
   readonly canEditRules = computed(() => this.schemaAdmin());
+  /**
+   * The "This instance" control is charged to the same area as the rules (`schema` admin on REST), so it follows the same signal; it
+   * is its own name because it is not a rule, and a template that asked `canEditRules()` about it would read as a mistake.
+   */
+  readonly canEditInstanceSetting = computed(() => this.schemaAdmin());
+  /**
+   * A proxy space holds no data of its own and a write to it lands in a member, where the MEMBER's setting governs it, so the
+   * control would promise something this instance cannot keep here. `proxyFor` is non-empty for a member list and for `['*']`.
+   */
+  readonly isProxySpace = (): boolean => (this.state.settingsSpace()?.proxyFor?.length ?? 0) > 0;
+  /** The ids the select is described by: the hint always, the consequence while Refuse is chosen, the reason while it is disabled. */
+  protected unknownFieldsDescribedBy(): string {
+    return ['unknown-fields-hint',
+      ...(this.state.schUnknownWriteFields === 'refuse' ? ['unknown-fields-consequence'] : []),
+      ...(this.canEditInstanceSetting() ? [] : ['unknown-fields-readonly-reason'])].join(' ');
+  }
 
   // ── the live check
   protected readonly validateMode = signal<'sample' | 'stored'>('sample');

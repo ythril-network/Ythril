@@ -239,14 +239,21 @@ export class SpaceSettingsPopupComponent {
     this.spacesApi.updateSpace(target.id, body, ifMatch).subscribe({
       next: (result) => {
         this.state.settingsSaving.set(false);
+        // The instance-local setting is in force whatever else the save did, and a clear is a key the server's answer leaves out,
+        // which `applySpace`'s merge would not remove: so the list's copy is set from what was sent, before either answer is read.
+        const localSetting = 'unknownWriteFields' in body;
+        if (localSetting) this.store.setUnknownWriteFields(target.id, body['unknownWriteFields'] as 'warn' | 'refuse' | '' | null);
         // A networked space does not apply a meta change on the spot: the server opens a vote round per
         // network and answers 202 with no `space`. Destructuring it as one threw inside this callback —
         // which RxJS does not route to `error` — so Save appeared to do nothing at all, and the editor
         // then asked whether to discard the change it had just submitted. Say what happened instead.
         if (result.status === 'vote_pending') {
-          this.state.settingsNotice.set(this.transloco.translate('spaces.settings.votePending', {
-            networks: result.rounds.map(r => r.networkLabel).join(', '),
-          }));
+          const networks = result.rounds.map(r => r.networkLabel).join(', ');
+          // The one setting of this save that is NOT held: it is local to this instance and not part of the vote, so the server
+          // applied it before answering. Say so (the answer carries no space to merge; the list was refreshed above).
+          this.state.settingsNotice.set(localSetting
+            ? this.transloco.translate('spaces.settings.votePendingLocalNow', { networks })
+            : this.transloco.translate('spaces.settings.votePending', { networks }));
           this.state.markPristine();   // it is submitted; it is not an unsaved edit any more
           this.state.settingsSubmitted.set(true);  // ...and Save must stop offering to submit it again
           return;                      // stay open so the notice is read, unlike the applied path

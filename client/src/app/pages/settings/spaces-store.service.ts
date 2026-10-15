@@ -114,6 +114,21 @@ export class SpacesStore {
     });
   }
 
+  /**
+   * Record what a save sent for the instance-local "unknown top-level fields" setting, on the list's copy of the space.
+   *
+   * For the answer that carries no space to merge: a networked space holds its meta change for a vote (`vote_pending`), yet the
+   * server applied this setting at once, and the list behind the dialog would go on showing `Warn` for a space that now refuses.
+   * Not `applySpace`, whose merge keeps a key the patch omits, which is exactly a clear (the server leaves the key ABSENT for warn).
+   */
+  setUnknownWriteFields(spaceId: string, sent: 'warn' | 'refuse' | '' | null): void {
+    this.spaces.update(list => list.map(s => {
+      if (s.id !== spaceId) return s;
+      const { unknownWriteFields: _was, ...rest } = s;
+      return sent === 'refuse' ? { ...rest, unknownWriteFields: 'refuse' as const } : rest;
+    }));
+  }
+
   /** Merge a server-returned space back into the list (after a settings save). */
   applySpace(space: Space): void {
     this.spaces.update(list => list.map(s => s.id === space.id ? { ...s, ...space } : s));

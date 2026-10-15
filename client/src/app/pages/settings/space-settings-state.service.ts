@@ -481,6 +481,13 @@ export class SpaceSettingsState {
   schValidation:     ValidationMode = 'off';
   schStrictLinkage   = false;
   /**
+   * What this instance does with a write that names a top-level field its operation does not take (bundle-128). The form's own
+   * two-valued spelling: the server never stores `warn` and answers the key only as `'refuse'`, so an ABSENT key is `warn` here
+   * (`openSettings`) and `warn` leaves as the clear, `''` (`settingsPayload`). It is NOT part of `meta`: it is local to this
+   * instance, and the strict meta body would not take it.
+   */
+  schUnknownWriteFields: 'warn' | 'refuse' = 'warn';
+  /**
    * Space-wide tag suggestions. The editor for this was retired — it was one list applied to every
    * type and every record form, easy to set once and forget while steering what got tagged.
    *
@@ -577,7 +584,8 @@ export class SpaceSettingsState {
     const meta = s.meta ?? {};
     this.schValidation     = meta.validationMode ?? 'off';
     this.schStrictLinkage  = meta.strictLinkage ?? false;
-    this.schNewTypeInputs  = { entity: '', fact: '', edge: '', chrono: '' };
+    this.schUnknownWriteFields = s.unknownWriteFields === 'refuse' ? 'refuse' : 'warn';
+    this.schNewTypeInputs = { entity: '', fact: '', edge: '', chrono: '' };
     this.schSelectedType   = null;
     this.schExpandedProps.clear();
     this.loadDefinitionsFrom(meta);
@@ -658,6 +666,10 @@ export class SpaceSettingsState {
       audioAnalysis: this.stForm.audioAnalysis,
       videoAnalysis: this.stForm.videoAnalysis,
       textAnalysis: this.stForm.textAnalysis,
+      // Top level beside the media levels, never in `meta`. `warn` is sent as the clear (`''`), the spelling `clearedValueOf` gives
+      // every other emptied string, so the diff against the opened form sends it only when the operator changed it: the key is
+      // charged on presence (schema admin), and a save of a media level must not be refused for a setting it did not touch.
+      unknownWriteFields: this.schUnknownWriteFields === 'refuse' ? 'refuse' : '',
       meta: this.buildMeta(),
     };
   }
