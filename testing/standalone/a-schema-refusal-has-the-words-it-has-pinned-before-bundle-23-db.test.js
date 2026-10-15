@@ -116,10 +116,12 @@ describe('a refused type schema, in the words each door answers before bundle-23
       });
     }
 
-    it('the issues text is the zod error pretty-printed, two spaces to a level', async () => {
+    it('the single-type PUT answers the whole refusal, prose and issues, on the paths of the body it was sent', async () => {
       inst.reset();
       const out = await inst.doors['put-single-type'](SPACE, { typeSchemas: { entity: { thing: { namingPattern: TOO_LONG } } } });
-      assert.equal(out.body.error, JSON.stringify([tooBig(['namingPattern'])], null, 2));
+      // bundle-23: R5-4 Q-315 (every parse door answers `{ error, issues }`) — was the zod error pretty-printed as JSON text in `error`
+      assert.deepEqual(Object.keys(out.body).sort(), ['error', 'issues']);
+      assert.deepEqual(out.body.issues, [{ code: 'too_big', path: ['namingPattern'] }]);
     });
   });
 

@@ -368,6 +368,12 @@ export interface ParseRefusalOptions {
    * zod's `Invalid input`. Which branch that is belongs to the schema that built the union.
    */
   unionBranch?: (branches: readonly ParseIssueLike[][]) => readonly ParseIssueLike[] | undefined;
+  /**
+   * The path the caller's body was parsed UNDER, when a door wraps it to give the schema context the body cannot carry (the single-type
+   * PUT parses its definition as `{ <kind>: { <type>: body } }`). It is taken off every issue path that goes below it, so the refusal names
+   * the fields the caller sent; an issue AT the wrapper (its type name refused) keeps its path, since it is about the URL, not the body.
+   */
+  under?: readonly string[];
 }
 
 /** The structural part of a zod issue `refusalOfParse` reads. Not zod's own type: this module is imported by everything and imports nothing. */
@@ -410,7 +416,10 @@ export function refusalOfParse(error: unknown, options: ParseRefusalOptions = {}
     const reasons: string[] = [];
     const sentences: string[] = [];
     for (const issue of shown) {
-      const { path: rawPath, issue: leaf } = descendUnion(issue, [], options.unionBranch);
+      const { path: fullPath, issue: leaf } = descendUnion(issue, [], options.unionBranch);
+      const under = options.under ?? [];
+      const rawPath = under.length > 0 && fullPath.length > under.length && under.every((seg, i) => fullPath[i] === seg)
+        ? fullPath.slice(under.length) : fullPath;
       const path = rawPath.map(segment => peerText(typeof segment === 'symbol' ? segment.toString() : segment, { max: NAME_QUOTED }));
       const code = typeof leaf.code === 'string' ? leaf.code : 'invalid';
       const where = path.length > 0 ? `${path.join('.')}: ` : '';

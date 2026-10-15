@@ -74,7 +74,7 @@ describe('a name that reaches an object\'s internals is refused, not stored and 
     it(`the single-type door refuses ${name} as the type's name`, () => {
       const result = bodies.parseTypeSchema('entity', name, { namingPattern: '^a' });
       assert.equal(result.ok, false);
-      assert.match(result.message, /internals/);
+      assert.match(result.refusal.error, /internals/);
     });
   }
 

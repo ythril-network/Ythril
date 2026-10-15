@@ -534,7 +534,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   // was stored by this door while every other door refused it.
   const parsed = parseTypeSchema(knowledgeType as KnowledgeType, typeName, req.body ?? {});
   if (!parsed.ok) {
-    res.status(400).json({ error: parsed.message });
+    res.status(400).json(parsed.refusal);
     return;
   }
 

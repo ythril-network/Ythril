@@ -850,11 +850,16 @@ function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } 
  * names an object's internals is refused here as it is everywhere else.
  */
 export function parseTypeSchema(kind: KnowledgeType, typeName: string, input: unknown):
-  { ok: true; schema: ParsedTypeSchema } | { ok: false; message: string } {
+  { ok: true; schema: ParsedTypeSchema } | { ok: false; refusal: Pick<ParseRefusal, 'error' | 'issues'> } {
   const result = TypeSchemasZ.safeParse({ [kind]: { [typeName]: input } });
-  if (!result.success) return { ok: false, message: refusalOfParse(result.error, { unionBranch: branchAboutTheField }).error };
+  if (!result.success) {
+    // The whole refusal every parse door sends (`{ error, issues }`, Q-315), on the paths of the body the caller SENT: the definition is
+    // parsed under `<kind>.<type>` only so the collection can be seen, and a caller never wrote those two segments.
+    const { error, issues } = refusalOfParse(result.error, { unionBranch: branchAboutTheField, under: [kind, typeName] });
+    return { ok: false, refusal: { error, issues } };
+  }
   const schema = (result.data[kind] as Obj | undefined)?.[typeName];
-  if (!isPlainObject(schema)) return { ok: false, message: `type '${peerText(typeName, { max: NAME_QUOTED })}' did not parse to a definition` };
+  if (!isPlainObject(schema)) return { ok: false, refusal: { error: `type '${peerText(typeName, { max: NAME_QUOTED })}' did not parse to a definition`, issues: [] } };
   return { ok: true, schema: schema as unknown as ParsedTypeSchema };
 }
 
