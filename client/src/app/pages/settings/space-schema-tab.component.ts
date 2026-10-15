@@ -443,8 +443,11 @@ export class SpaceSchemaTabComponent implements OnInit {
   protected readonly validating = signal(false);
   protected readonly validateError = signal('');
   protected readonly validateResult = signal<ValidateSchemaResult | null>(null);
-  /** The violations of every page read so far, as rows. */
-  private readonly validateAccumulated = signal<ValidateSchemaResult['violations']>([]);
+  /**
+   * Whether any page of the check has found a violation. A boolean, not the rows: only the CURRENT page's rows are shown, and the
+   * earlier pages' rows were kept for the life of the check to be asked whether there were any.
+   */
+  private readonly validateFound = signal(false);
   private readonly validateCursor = signal<string | null>(null);
   /** The records the check has read, summed over its pages: each answer's `progress.checked` is what THAT call read. */
   private readonly validateRead = signal(0);
@@ -604,7 +607,7 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   private resetValidate(): void {
     this.validateResult.set(null);
-    this.validateAccumulated.set([]);
+    this.validateFound.set(false);
     this.validateCursor.set(null);
     this.validateRead.set(0);
     this.validateTotal.set(0);
@@ -639,7 +642,7 @@ export class SpaceSchemaTabComponent implements OnInit {
   });
 
   /** "All good" is said only when the whole space was read (or the sample judged) and nothing was found. */
-  readonly validateAllGood = computed(() => this.validateDone() && this.validateAccumulated().length === 0);
+  readonly validateAllGood = computed(() => this.validateDone() && !this.validateFound());
 
   /** What one answer read: its `progress`, else the per-collection counts of the call. */
   private static readOf(result: ValidateSchemaResult): { checked: number; total: number } {
@@ -700,7 +703,7 @@ export class SpaceSchemaTabComponent implements OnInit {
       next: (result) => {
         this.validating.set(false);
         this.validateResult.set(result);
-        this.validateAccumulated.update(all => [...all, ...(result.violations ?? [])]);
+        if (result.violations?.length) this.validateFound.set(true);
         const read = SpaceSchemaTabComponent.readOf(result);
         this.validateRead.update(n => n + read.checked);
         this.validateTotal.set(read.total);

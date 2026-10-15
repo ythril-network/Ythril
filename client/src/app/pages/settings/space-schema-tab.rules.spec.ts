@@ -20,6 +20,8 @@
  * translated (and the spec's translations echo keys), so a number inside a sentence cannot be asserted but a number
  * the element declares can.
  */
+import { isSignal } from '@angular/core';
+import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -30,6 +32,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { KNOWLEDGE_TYPES, type Space } from '../../core/api.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { declaredNearest, declaredValue } from '../../testing/declared-style';
+import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
@@ -768,6 +771,33 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     await h.settle();
     expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
     expect($$(h.el, '.sch-validate [role="alert"]').length, 'the refusal stays after a later success').toBe(0);
+  });
+
+  // b23 W6d Q1: every page's rows were kept for the life of the check only to be asked whether there were any. A check over a large space
+  // pages for a long time; what it keeps is whether it has found anything, and the page it shows.
+  it('keeps no more rows than the current page across a long check, and still says nothing was clean once one page found something', async () => {
+    const row = (i: number) => ({ collection: 'entities', _id: `e${i}`, violations: [{ field: 'rules.age-positive', reason: `broken ${i}` }] });
+    const page = (page: number) => Array.from({ length: 50 }, (_v, k) => row(page * 50 + k));
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 100, total: 400 }, done: false, nextAfter: 'c0', violations: page(0) }));
+    await h.settle();
+    for (let p = 1; p < 4; p++) {
+      $(h.el, '[data-testid="validate-continue"]')!.click();
+      // The last page finds nothing: the earlier pages' rows must still stop the all-good word.
+      post(h).flush(answer({ progress: { checked: 100, total: 400 }, done: p === 3, nextAfter: p === 3 ? undefined : `c${p}`, violations: p === 3 ? [] : page(p) }));
+      await h.settle();
+    }
+    const tab = h.fixture.debugElement.query(By.directive(SpaceSchemaTabComponent)).componentInstance as Record<string, unknown>;
+    const held: number[] = [];
+    for (const value of Object.values(tab)) {
+      if (!isSignal(value)) continue;
+      const v = (value as () => unknown)();
+      if (Array.isArray(v)) held.push(v.length);
+    }
+    expect(Math.max(0, ...held), 'a signal still holds the rows of several pages').toBeLessThanOrEqual(50);
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said after pages that found violations').toBeNull();
   });
 
   // b23 verify U1: the placeholder showed `{"kind":"entity","type":"person","properties":{}}`, a shape the server refuses; a person who
