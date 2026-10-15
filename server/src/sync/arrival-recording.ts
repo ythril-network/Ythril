@@ -44,7 +44,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { classifyUpdateViolations, deltaBetween } from '../brain/write-validation.js';
-import { recordViewOf, type RecordView } from '../brain/record-view.js';
+import { recordViewOf, viewSourceProjection, type RecordView } from '../brain/record-view.js';
 import {
   getSpaceMeta, judgesKeys, violationsOfRecord, applyValidation, type SchemaViolation,
 } from '../spaces/schema-validation.js';
@@ -107,8 +107,9 @@ export async function watchArrivals(spaceId: string, collection: BrainCollection
       if (++judged % YIELD_EVERY === 0) await yieldToEventLoop();
     }
     if (found.size === 0) return null;
-    // The copies these documents replace, read once and only for the documents that have something to say: a clean page reads nothing.
-    const copies = await readStoredById<Doc>(spaceCollection(spaceId, collection), [...new Set([...found.keys()].map(d => d._id))], 'all');
+    // The copies these documents replace, read once and only for the documents that have something to say: a clean page reads nothing. Read by
+    // the fields a view is built from (`viewSourceProjection`), the only thing judged here, so no vector rides along with a page of them.
+    const copies = await readStoredById<Doc>(spaceCollection(spaceId, collection), [...new Set([...found.keys()].map(d => d._id))], viewSourceProjection(kind));
     const held = new Map<string, { rows: SchemaViolation[]; view: RecordView }>();
     for (const [id, copy] of copies) held.set(id, { rows: violationsOfRecord(meta, kind, copy), view: recordViewOf(kind, copy) });
     return { spaceId, kind, meta, found, held };
