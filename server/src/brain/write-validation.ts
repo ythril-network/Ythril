@@ -249,21 +249,23 @@ export class SchemaViolationError extends Error {
   /**
    * The machine-readable body an MCP tool result carries beside the prose — and the body a REST refusal answers.
    *
-   * Every row list is cut to {@link MAX_ROWS} AFTER the classification, never before it, and `truncated` says it was: a record
-   * carrying a hundred undeclared keys answers twenty rows, and which twenty is the classifier's (`introduced` first, in the order the
+   * Every row list is cut to {@link MAX_ROWS} AFTER the classification, never before it, and `truncated` says how many were left
+   * out of `introduced` and `preExisting`: a record carrying a hundred undeclared keys answers twenty rows and `truncated: 80`, and which twenty is the classifier's (`introduced` first, in the order the
    * validator found them). A row quotes what the caller sent through the one bounded renderer (R6-11): a key was bounded when the
    * validator named it, and a value is bounded here.
    */
   toStructured(): Record<string, unknown> {
     const { introduced, preExisting, all } = this.check;
-    const truncated = [introduced, preExisting, all].some(rows => rows.length > MAX_ROWS);
+    // HOW MANY rows were left out of `introduced` and `preExisting`, the two lists a reader reads (`violations` is their union, cut to the
+    // same number): a count, because a caller that is told "some rows" cannot say how many to expect, and the client prints the number.
+    const truncated = Math.max(0, introduced.length - MAX_ROWS) + Math.max(0, preExisting.length - MAX_ROWS);
     return {
       error: 'schema_violation',
       message: this.check.message,
       introduced: boundedRows(introduced),
       preExisting: boundedRows(preExisting),
       violations: boundedRows(all),
-      ...(truncated ? { truncated: true } : {}),
+      ...(truncated > 0 ? { truncated } : {}),
     };
   }
 

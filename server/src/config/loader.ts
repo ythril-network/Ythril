@@ -4,6 +4,7 @@ import { log, peerList, peerText } from '../util/log.js';
 import { numericEnvOrExit } from './setting-bounds.js';
 import { pinnedFieldsFromEnv } from './pinned-fields.js';
 import type { Config, SecretsFile, SchemaLibraryEntry, SchemaCatalog } from './types.js';
+import type { ParsedLibraryEntry } from '../spaces/body-schemas.js';
 import { normalizeDocExtractionMode } from './types.js';
 import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } from './secretbox.js';
 import { envIntOpt } from './env-num.js';
@@ -726,13 +727,23 @@ export function saveSecrets(secrets: SecretsFile): void {
 
 // ── Schema Library ─────────────────────────────────────────────────────────
 
-let _schemaLibrary: SchemaLibraryEntry[] | null = null;
+let _schemaLibrary: ParsedLibraryEntry[] | null = null;
+
+/**
+ * Entries the library HOLDS, as the type its store takes (`ParsedLibraryEntry`) — the named trusted sources, and the only place an
+ * entry that no library parse produced is given that type: `schema-library.json` as it is read from disk, and the entries the product
+ * ships (`shipped-library-entries.ts`), which seed the library by name. Everything else that reaches the store is minted by the
+ * library's parse (`parseInlineDefinition`), so an entry written from a request body cannot skip it.
+ */
+export function entriesAsHeld(entries: SchemaLibraryEntry[]): ParsedLibraryEntry[] {
+  return entries as ParsedLibraryEntry[];
+}
 
 /**
  * Load schema-library.json from disk. Returns an empty array if the file
  * does not exist yet (first run before any entry is created).
  */
-export function loadSchemaLibrary(): SchemaLibraryEntry[] {
+export function loadSchemaLibrary(): ParsedLibraryEntry[] {
   if (!fs.existsSync(SCHEMA_LIB_PATH)) {
     _schemaLibrary = [];
     return _schemaLibrary;
@@ -740,7 +751,7 @@ export function loadSchemaLibrary(): SchemaLibraryEntry[] {
   try {
     checkPermissions(SCHEMA_LIB_PATH);
     const raw = fs.readFileSync(SCHEMA_LIB_PATH, 'utf8');
-    _schemaLibrary = JSON.parse(decodeStateFile(raw, 'schema-library.json')) as SchemaLibraryEntry[];
+    _schemaLibrary = entriesAsHeld(JSON.parse(decodeStateFile(raw, 'schema-library.json')) as SchemaLibraryEntry[]);
   } catch (err) {
     log.warn(`schema-library.json could not be loaded — treating as empty: ${peerText(err)}`);
     _schemaLibrary = [];
@@ -749,13 +760,13 @@ export function loadSchemaLibrary(): SchemaLibraryEntry[] {
 }
 
 /** Return the in-memory schema library, loading from disk if not yet loaded. */
-export function getSchemaLibrary(): SchemaLibraryEntry[] {
+export function getSchemaLibrary(): ParsedLibraryEntry[] {
   if (!_schemaLibrary) return loadSchemaLibrary();
   return _schemaLibrary;
 }
 
-/** Atomically persist the schema library to disk. */
-export function saveSchemaLibrary(entries: SchemaLibraryEntry[]): void {
+/** Atomically persist the schema library to disk. Takes only entries whose schema the library parsed or already held. */
+export function saveSchemaLibrary(entries: ParsedLibraryEntry[]): void {
   _schemaLibrary = entries;
   fs.mkdirSync(path.dirname(SCHEMA_LIB_PATH), { recursive: true });
   const tmp = SCHEMA_LIB_PATH + '.tmp';

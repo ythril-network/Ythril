@@ -73,7 +73,7 @@ export const schema_validateTool: ToolHandler = {
         description: `Violating records per page: 1 to ${SCHEMA_VALIDATE_MAX_LIMIT}, default ${SCHEMA_VALIDATE_MAX_LIMIT}.`,
       },
       after: {
-        type: 'string', maxLength: SCHEMA_VALIDATE_CURSOR_MAX,
+        type: 'string', minLength: 1, maxLength: SCHEMA_VALIDATE_CURSOR_MAX,
         description: 'The `nextAfter` of the previous page, to continue after it. Omit it to start from the beginning.',
       },
     },

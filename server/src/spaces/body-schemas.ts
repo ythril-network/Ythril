@@ -47,7 +47,7 @@ import { SPACE_PURPOSE_MAX, SCHEMA_DESCRIPTION_MAX, PROPERTY_DESCRIPTION_MAX } f
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { hasReDoSRisk, REDOS_REFUSAL } from '../util/redos.js';
-import type { KnowledgeType, SpaceMeta, TypeSchema } from '../config/types.js';
+import type { KnowledgeType, SchemaLibraryEntry, SpaceMeta, TypeSchema } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { DATE_PASSED_VALUES } from '../brain/chrono-date-policy.js';
 import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
@@ -573,6 +573,14 @@ export type ParsedTypeSchema = TypeSchema & { readonly [PARSED]: 'type-schema' }
  * with no parse at all, and `effectiveMeta` then dropped the layer that no longer parsed, silently (`Q-216`).
  */
 export type ParsedSpaceMeta = SpaceMeta & { readonly [PARSED]: 'space-meta' };
+
+/**
+ * A schema-library entry whose `schema` the library's parse accepted ({@link parseInlineDefinition}), or one the library already held.
+ * The only entry `saveSchemaLibrary` takes, so a path that stores an entry without parsing its schema is a type error: the library is
+ * where one stored pattern or rule runs in every space that references the entry. What the library already holds is of this type too
+ * (`getSchemaLibrary`, through the loader's one named trusted source), which is what lets a write keep the entries it did not touch.
+ */
+export type ParsedLibraryEntry = SchemaLibraryEntry & { schema: ParsedTypeSchema };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);

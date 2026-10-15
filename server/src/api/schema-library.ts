@@ -39,9 +39,10 @@ import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import { z } from 'zod';
 import {
   InlineTypeSchemaZ, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem, parseInlineDefinition, withTypeSchemas,
+  type ParsedLibraryEntry,
 } from '../spaces/body-schemas.js';
 import rateLimit from 'express-rate-limit';
-import type { SchemaLibraryEntry, SchemaCatalog, KnowledgeType } from '../config/types.js';
+import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
@@ -319,7 +320,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   const library = getSchemaLibrary();
   const now = new Date().toISOString();
   const kts = KNOWLEDGE_TYPES;
-  const resultEntries: SchemaLibraryEntry[] = [];
+  const resultEntries: ParsedLibraryEntry[] = [];
   let created = 0;
   let updated = 0;
   // What the export left out or changed, and why (`Q-215`): a space can hold a schema stored before a rule existed (config.json, an
@@ -351,14 +352,14 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
       const existingIdx = library.findIndex(e => e.name === entryName);
 
       // Inline schema (no $ref), as the library parses it.
-      const inlineSchema: SchemaLibraryEntry['schema'] = checked.schema;
+      const inlineSchema = checked.schema;
 
       if (existingIdx === -1) {
         if (library.length >= MAX_LIBRARY_ENTRIES) {
           // Stop if limit reached — still return what was exported so far
           break;
         }
-        const newEntry: SchemaLibraryEntry = {
+        const newEntry: ParsedLibraryEntry = {
           name: entryName,
           knowledgeType: kt,
           typeName,
@@ -371,7 +372,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
         resultEntries.push(newEntry);
         created++;
       } else {
-        const updatedEntry: SchemaLibraryEntry = {
+        const updatedEntry: ParsedLibraryEntry = {
           ...library[existingIdx]!,
           knowledgeType: kt,
           typeName,
@@ -504,7 +505,7 @@ schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
   const schema = checked.schema;
 
   const now = new Date().toISOString();
-  const entry: SchemaLibraryEntry = {
+  const entry: ParsedLibraryEntry = {
     name,
     knowledgeType,
     typeName,
@@ -565,7 +566,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
   const isNew = existingIdx === -1;
 
   if (isNew) {
-    const newEntry: SchemaLibraryEntry = {
+    const newEntry: ParsedLibraryEntry = {
       name,
       knowledgeType,
       typeName,
@@ -582,7 +583,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     res.status(201).json({ entry: newEntry });
   } else {
     const existing = library[existingIdx]!;
-    const updatedEntry: SchemaLibraryEntry = {
+    const updatedEntry: ParsedLibraryEntry = {
       ...existing,
       knowledgeType,
       typeName,
@@ -715,7 +716,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   }
 
   const now = new Date().toISOString();
-  const updated: SchemaLibraryEntry = {
+  const updated: ParsedLibraryEntry = {
     ...existing,
     ...(patch.knowledgeType !== undefined ? { knowledgeType: patch.knowledgeType } : {}),
     ...(patch.typeName !== undefined ? { typeName: patch.typeName } : {}),

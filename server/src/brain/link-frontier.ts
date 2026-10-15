@@ -25,6 +25,7 @@ import {
   type LinkClass, type LinkEnd,
 } from './link-adjacency.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
+import { recordTitleOf } from './record-view.js';
 
 /**
  * The three reads a link scan makes, as one object a caller may replace.
@@ -431,9 +432,9 @@ export async function entitiesLinkedFromRecords(
  * not call this, which is how a second copy of the mapping gets written.
  */
 export function recordDisplayName(kind: LinkClass['kind'], doc: ChronoEntry | FactDoc | FileMetaDoc): string {
-  if (kind === 'chrono') return (doc as ChronoEntry).title;
-  if (kind === 'fact') return (doc as FactDoc).fact;
-  return (doc as FileMetaDoc).path;
+  // A file's path is its name; a chrono entry's and a fact's name field is the view's (`recordTitleOf`), not a map of this file's.
+  if (kind === 'file') return (doc as FileMetaDoc).path;
+  return recordTitleOf(kind, doc) ?? '';
 }
 
 /**

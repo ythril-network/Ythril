@@ -175,7 +175,9 @@ describe('both network routes ask before they save', () => {
     const at = ui.indexOf('saveSchedule(net: Network)');
     assert.notEqual(at, -1, 'saveSchedule is gone — this gate is reading the wrong component');
     const fn = ui.slice(at, ui.indexOf('\n  }', at));
-    assert.match(fn, /err\.error\?\.error\s*\?\?/,
+    // Read through the one refusal formatter (`refusalText`, bundle-23 R6-14), which shows the server's sentence and falls back to the
+    // key it is given only when the body states none — the same promise `err.error?.error ?? 'could not save'` made by hand.
+    assert.match(fn, /refusalText\(\s*this\.transloco,\s*err,\s*'networks\.error\.[A-Za-z]+'\s*\)/,
       'the schedule save must show the server message and fall back to its own only when there is none');
   });
 

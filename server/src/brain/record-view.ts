@@ -57,6 +57,19 @@ export function endpointNameField(kind: Exclude<RefKind, 'file'>): string {
   return NAME_FIELD[kind];
 }
 
+/**
+ * What a record of `kind` is called, as a string, or `undefined` when its title field holds none — the one reading of the name field.
+ *
+ * The view's `title` is this, and so is the display name a graph walk gives a fact or a chrono entry that is reached through a link
+ * (`brain/link-frontier.ts` `recordDisplayName`): that walk reads thousands of records and cannot afford the view's copy of the
+ * properties, which is why the question has an answer of its own and not a call to {@link recordViewOf}. The map of kind to field stays
+ * behind {@link endpointNameField}, written once.
+ */
+export function recordTitleOf(kind: Exclude<RefKind, 'file'>, record: object): string | undefined {
+  const v = (record as Record<string, unknown>)[endpointNameField(kind)];
+  return typeof v === 'string' ? v : undefined;
+}
+
 /** The four kinds that have properties, and so a validator, and a view. */
 export type ViewKind = 'entity' | 'edge' | 'fact' | 'chrono';
 
@@ -103,7 +116,7 @@ export function recordViewOf(kind: ViewKind, record: object): RecordView {
   const shaped = kind === 'edge'
     ? { ...(text(r['label']) !== undefined ? { label: text(r['label']) } : {}), ...common }
     : {
-      ...(text(r[endpointNameField(kind)]) !== undefined ? { title: text(r[endpointNameField(kind)]) } : {}),
+      ...(recordTitleOf(kind, r) !== undefined ? { title: recordTitleOf(kind, r) } : {}),
       ...(text(r['type']) !== undefined ? { type: text(r['type']) } : {}),
       ...common,
     };

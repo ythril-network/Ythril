@@ -27,6 +27,7 @@
 import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import type { SpaceMeta } from '../config/types.js';
+import type { BrainCollection } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 import { idKeysetPage } from '../db/id-keyset-page.js';
@@ -108,7 +109,7 @@ export function mayReadStoredValues(rights: TokenRights | null | undefined, spac
 const running = new Set<string>();
 
 /** The collections in the order they are walked, with the fixed projection each is read with. */
-const WALK: ReadonlyArray<{ collection: 'entities' | 'edges' | 'facts' | 'chrono'; kind: ViewKind; projection: Readonly<Record<string, 1>> }> = [
+const WALK: ReadonlyArray<{ collection: Exclude<BrainCollection, 'links'>; kind: ViewKind; projection: Readonly<Record<string, 1>> }> = [
   { collection: 'entities', kind: 'entity', projection: { _id: 1, name: 1, type: 1, description: 1, tags: 1, properties: 1 } },
   { collection: 'edges', kind: 'edge', projection: STORED_EDGE_PROJECTION },
   { collection: 'facts', kind: 'fact', projection: { _id: 1, fact: 1, type: 1, description: 1, tags: 1, properties: 1 } },

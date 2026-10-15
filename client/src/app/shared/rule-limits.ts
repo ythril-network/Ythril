@@ -22,10 +22,16 @@ export const RULE_LIMITS = {
   namePattern: '^[a-z][a-zA-Z0-9_-]{0,63}$',
 } as const;
 
-/** Names a rule may not take: they are keys of every JS object, and a rule map is read by name. */
-export const RESERVED_RULE_NAMES: readonly string[] = ['constructor', 'prototype', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
+/**
+ * Is `name` one a rule may not take: a key of every JS object (`toString`, `isPrototypeOf`, `__proto__`, ...), or `prototype`? A rule map is
+ * read by name, so such a name would reach the object's internals. ASKED, never listed, and asked the way the server asks it
+ * (`schema-rules.ts`: `name in Object.prototype || name === 'prototype'`): a list is a second copy that misses the next name the platform adds.
+ */
+export function isReservedRuleName(name: string): boolean {
+  return name in Object.prototype || name === 'prototype';
+}
 
 /** Does `name` satisfy the server's rule-name rule? */
 export function isValidRuleName(name: string): boolean {
-  return new RegExp(RULE_LIMITS.namePattern).test(name) && !RESERVED_RULE_NAMES.includes(name);
+  return new RegExp(RULE_LIMITS.namePattern).test(name) && !isReservedRuleName(name);
 }

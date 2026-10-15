@@ -848,8 +848,10 @@ export class MediaProcessingStateService {
        * `enabled` IS NOT ONE, and sending it broke every save on this page — the whole body, not just the
        * face block, because the PATCH schema is `.strict()`:
        *
-       *     {"error":"Invalid request body","details":[{"code":"unrecognized_keys","keys":["enabled"],
-       *       "path":["faceRecognition"],"message":"Unrecognized key: \"enabled\""}]}
+       *     {"error":"Invalid request body","details":[{"code":"unrecognized_keys","path":["faceRecognition"],"keys":["enabled"]}]}
+       *
+       * (`details` is the bounded issue list the server answers now — code, path, keys; no message and no received value. The body
+       * that was reported carried zod's raw issues, which is why this page never reads an issue's `message`: it asks `refusalText`.)
        *
        * Reported by the canary operator 2026-08-20 after their owner spent an afternoon behind it. The comment
        * above this list was already correct and the list did not match it: `enabled` became an infra/env pin

@@ -326,7 +326,7 @@ export function planSpaceMetaUpdate(input: {
   const parsed = UpdateSpaceBody.safeParse(bodyForParse);
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
-    log.warn(`space update refused: ${refusal.error}`);
+    log.warn(`space update refused: ${peerText(refusal.error)}`);
     return { ok: false, refusal: { status: 400, body: refusal } };
   }
 
@@ -349,7 +349,7 @@ export function planSpaceMetaUpdate(input: {
   // over is safe: `audit-changes.ts` reads only the fields allowlisted for `space.update` and never
   // touches the rest, so this cannot publish something by carrying it. The middleware only records it on
   // a <400 response, so a request rejected above logs no change — which is why every refusal returns before here.
-  const scalarAudit = {
+  const audit = {
     before: { ...space, ...space.meta } as Record<string, unknown>,
     after: { ...space, ...space.meta, ...parsed.data, ...(parsed.data.meta ?? {}) } as Record<string, unknown>,
   };
@@ -419,10 +419,12 @@ export function planSpaceMetaUpdate(input: {
    * record every type it did not mention as removed — the merged result is the after. An edit that carries no meta hands over neither
    * part, and the summariser reads that as "not touched".
    */
-  const audit = mergedMeta === undefined ? scalarAudit : {
-    before: { ...scalarAudit.before, typeSchemas: base.typeSchemas ?? {}, rules: base.rules ?? {} },
-    after: { ...scalarAudit.after, typeSchemas: mergedMeta.typeSchemas ?? {}, rules: mergedMeta.rules ?? {} },
-  };
+  if (mergedMeta !== undefined) {
+    audit.before['typeSchemas'] = base.typeSchemas ?? {};
+    audit.before['rules'] = base.rules ?? {};
+    audit.after['typeSchemas'] = mergedMeta.typeSchemas ?? {};
+    audit.after['rules'] = mergedMeta.rules ?? {};
+  }
   const changedTypes = typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined);
 
   return {
