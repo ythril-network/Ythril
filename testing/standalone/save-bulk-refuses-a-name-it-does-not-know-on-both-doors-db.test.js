@@ -1,6 +1,6 @@
 /**
- * `save_bulk` refuses a name it does not know — a retired key or an unknown one, at the top level or on an item
- * — with the same refusal on BOTH doors.
+ * `save_bulk` refuses a name it does not know — a retired key at the top level or on an item, or an unknown TOP-LEVEL key — with the same
+ * refusal on BOTH doors. (An unknown key on an ITEM is not refused: see the correction below.)
  *
  * ## The defect (`Q-195`)
  *
@@ -15,6 +15,15 @@
  * three. The same `memories` payload is a 400 naming `facts` on one door and a clean success that wrote nothing
  * on the other. Both are individually defensible; the gap is only visible from outside, which is the shape
  * `CLAUDE.md` names as this repo's most expensive.
+ *
+ * ## Corrected by bundle-128 (Q-320): which names are refused
+ *
+ * This header used to say an unknown key is refused "at the top level or on an item". Only RETIRED names are refused on an item
+ * (`bulkBodyRefusal` checks `retiredWriteFieldError` per item and nothing else), and an unknown item key was stored with the key
+ * dropped, silently, on both doors. After bundle-128 an unknown ITEM key is answered by the setting of the instance for the space
+ * instead: under `warn` the item is written and one `unknown_field:` row names it in `errors[]`, under `refuse` the item is rejected
+ * with that row (design-v3 5). The top level is refused in every mode, and that is what the cases below hold. The item-key answers
+ * are asserted by `an-unknown-field-is-answered-alike-on-both-doors-db.test.js`, case (n).
  *
  * ## What is asserted
  *

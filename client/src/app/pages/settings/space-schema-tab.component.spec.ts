@@ -12,6 +12,8 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { of } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { SpaceSchemaTabComponent } from './space-schema-tab.component';
@@ -19,6 +21,8 @@ import { SpaceSettingsState, emptyTypeSchemaState, type TypeSchemaState } from '
 import { SpacesApi } from '../../core/spaces-api.service';
 import { SchemaApi } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
+import { AuthApi } from '../../core/auth-api.service';
+import type { Space } from '../../core/api.types';
 
 const mkType = (over: Partial<TypeSchemaState> = {}): TypeSchemaState => emptyTypeSchemaState(over);
 
@@ -531,5 +535,219 @@ describe('SpaceSchemaTabComponent — schema exports (characterization for Q-92)
     } finally {
       s.restore();
     }
+  });
+});
+
+/**
+ * bundle-128 (design-v3 §1.5): the Schema tab's "This instance" row, and its one control, "Unknown top-level fields".
+ *
+ * The setting is this instance's answer to a write that names a field its operation does not take: `warn` (stored without
+ * it, the answer names it) or `refuse` (a 400, nothing stored). It is NOT a validation mode and it is not shared with a
+ * network, which is why it sits in its own row BELOW the Schema-validation bar (whose hint promises shared, space-wide
+ * behaviour) rather than inside it.
+ *
+ * Real English / German / Polish are loaded so the visible wording can be asserted; a key that does not exist yet renders
+ * as the raw key, which has none of the words the plan fixes - the right red for copy that was never written.
+ *
+ * Test ids this spec asks for (chosen here, the plan does not name them): `this-instance-row`, `unknown-fields-select`,
+ * `unknown-fields-hint`, `unknown-fields-consequence`, `unknown-fields-readonly-reason`, `unknown-fields-proxy-note`.
+ * The state field is `schUnknownWriteFields` ('warn' | 'refuse'); it is reached through a cast so a missing field fails the
+ * ASSERTION that names it instead of failing the whole file at compile time.
+ *
+ * Not asserted here, because jsdom cannot: the 24 px target size and contrast in both themes (design §1.5 "Verify": axe on
+ * the Schema tab, light and dark, at runtime).
+ */
+describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level fields (bundle-128, §1.5)', () => {
+  const i18n = (lang: string): Record<string, string> =>
+    JSON.parse(readFileSync(resolve(__dirname, `../../../../public/assets/i18n/${lang}.json`), 'utf8'));
+  const EN = i18n('en');
+
+  const ROW = '[data-testid="this-instance-row"]';
+  const SELECT = '[data-testid="unknown-fields-select"]';
+  const HINT = '[data-testid="unknown-fields-hint"]';
+  const CONSEQUENCE = '[data-testid="unknown-fields-consequence"]';
+  const READONLY_REASON = '[data-testid="unknown-fields-readonly-reason"]';
+  const PROXY_NOTE = '[data-testid="unknown-fields-proxy-note"]';
+  const RAW_KEY = /^[a-z]+(\.[A-Za-z]+)+$/;
+
+  const work = (over: Record<string, unknown> = {}): Space => ({ id: 'work', label: 'Work', maxGiB: 10, networks: [], ...over }) as unknown as Space;
+  const fieldOf = (state: SpaceSettingsState) => (state as unknown as Record<string, unknown>)['schUnknownWriteFields'];
+
+  const adminRights = { instanceAdmin: false, perSpace: { work: { schema: 'admin' } }, floor: { schema: 'none' } };
+  const writeOnlyRights = { instanceAdmin: false, perSpace: { work: { schema: 'write' } }, floor: { schema: 'none' } };
+
+  async function mountRow(opts: { space?: Space; rights?: unknown; translation?: Record<string, string> } = {}) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [SpaceSchemaTabComponent, getTranslocoModule({ translation: { en: opts.translation ?? EN } })],
+      providers: [
+        SpaceSettingsState,
+        { provide: SpacesApi, useValue: { getSpaceStats: () => of({ spaceId: 'work', facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }) } },
+        { provide: ToastService, useValue: { show: () => {}, error: () => {}, success: () => {}, info: () => {} } },
+        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }) } },
+        ...(opts.rights ? [{ provide: AuthApi, useValue: { verifyToken: () => of({ id: 't', name: 't', rights: opts.rights }) } }] : []),
+      ],
+    });
+    const fixture = TestBed.createComponent(SpaceSchemaTabComponent);
+    const state = TestBed.inject(SpaceSettingsState);
+    state.openSettings(opts.space ?? work());
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    return { fixture, state, el, select: () => el.querySelector<HTMLSelectElement>(SELECT) };
+  }
+
+  it('a space that does not carry the key opens on Warn; one that carries refuse opens on Refuse', async () => {
+    const absent = await mountRow();
+    expect(fieldOf(absent.state), 'the state does not map an absent key to warn').toBe('warn');
+    expect(absent.select(), 'the control did not render').not.toBeNull();
+    expect(absent.select()!.value).toBe('warn');
+
+    const refusing = await mountRow({ space: work({ unknownWriteFields: 'refuse' }) });
+    expect(fieldOf(refusing.state)).toBe('refuse');
+    expect(refusing.select()!.value).toBe('refuse');
+  });
+
+  it('offers exactly warn and refuse, labelled "Unknown top-level fields", with the em-dash wording of the validation options', async () => {
+    const { select } = await mountRow();
+    const sel = select();
+    expect(sel, 'the control did not render').not.toBeNull();
+    expect(Array.from(sel!.options).map(o => o.value)).toEqual(['warn', 'refuse']);
+    const texts = Array.from(sel!.options).map(o => (o.textContent ?? '').trim());
+    // the pattern of `spaces.settings.validation.*`: "<Word> — <what happens>"
+    expect(texts[0]).toMatch(/^Warn — \S/);
+    expect(texts[1]).toMatch(/^Refuse — \S/);
+    expect(texts[0]).toContain('stored');
+    expect(texts[1]).toContain('nothing is stored');
+    const label = sel!.closest('label') ?? sel!.ownerDocument.querySelector(`label[for="${sel!.id}"]`);
+    expect(label, 'the select has no label').not.toBeNull();
+    expect(label!.textContent).toContain('Unknown top-level fields');
+  });
+
+  it('its row is called "This instance" and sits BELOW the Schema validation bar, not inside it', async () => {
+    const { el } = await mountRow();
+    const row = el.querySelector<HTMLElement>(ROW);
+    const bar = el.querySelector<HTMLElement>('.sch-validation-bar');
+    expect(row, 'there is no "This instance" row').not.toBeNull();
+    expect(bar).not.toBeNull();
+    expect(bar!.contains(row!), 'a local setting inside the shared bar inherits its promise').toBe(false);
+    expect(bar!.compareDocumentPosition(row!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the row comes before the bar').toBeTruthy();
+    expect(row!.textContent).toContain('This instance');
+    expect(row!.querySelector(SELECT), 'the select is not in the row').not.toBeNull();
+  });
+
+  it('the hint is visible text on its own line, linked to the select by aria-describedby, and says what it must', async () => {
+    const { select, el } = await mountRow();
+    const sel = select();
+    expect(sel, 'the control did not render').not.toBeNull();
+    const ids = (sel!.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    expect(ids.length, 'the select is not linked to a hint').toBeGreaterThan(0);
+    const hint = el.querySelector<HTMLElement>(HINT);
+    expect(hint, 'there is no hint element').not.toBeNull();
+    expect(hint!.id, 'the hint has no id for aria-describedby to name').not.toBe('');
+    expect(ids).toContain(hint!.id);
+    expect(hint!.hasAttribute('hidden')).toBe(false);
+    const hintText = (hint!.textContent ?? '').trim();
+    expect(hintText.length, 'the hint is empty (a title tooltip is not a hint)').toBeGreaterThan(20);
+    expect(hintText).not.toMatch(RAW_KEY);
+    expect(hintText).toMatch(/this instance/i);
+    expect(hintText).toMatch(/not shared|isn.t shared|is not shared/i);
+    expect(hintText).toMatch(/network/i);
+    // it separates a top-level field the write does not take from Validation mode's undeclared property of a type
+    expect(hintText).toMatch(/top-level/i);
+    expect(hintText).toMatch(/undeclared property/i);
+    expect(sel!.getAttribute('title'), 'the hint lives in a title tooltip').toBeNull();
+  });
+
+  it('choosing a value in the select writes state.schUnknownWriteFields (view to state)', async () => {
+    const { fixture, state, select } = await mountRow();
+    const sel = select();
+    expect(sel, 'the control did not render').not.toBeNull();
+    sel!.value = 'refuse';
+    sel!.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(fieldOf(state)).toBe('refuse');
+    sel!.value = 'warn';
+    sel!.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(fieldOf(state)).toBe('warn');
+  });
+
+  it('the consequence text appears for Refuse and not for Warn', async () => {
+    const { fixture, el, select } = await mountRow();
+    const sel = select();
+    expect(sel, 'the control did not render').not.toBeNull();
+    expect(el.querySelector(CONSEQUENCE), 'the consequence is shown while Warn is chosen').toBeNull();
+    sel!.value = 'refuse';
+    sel!.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    const consequence = el.querySelector<HTMLElement>(CONSEQUENCE);
+    expect(consequence, 'no consequence text for Refuse').not.toBeNull();
+    expect(consequence!.textContent).toMatch(/\b400\b/);
+    expect(consequence!.textContent).toMatch(/integration/i);
+  });
+
+  it('a token with schema admin gets an enabled select and no read-only reason (control)', async () => {
+    const { el, select } = await mountRow({ rights: adminRights });
+    expect(select(), 'the control did not render').not.toBeNull();
+    expect(select()!.disabled).toBe(false);
+    expect(el.querySelector(READONLY_REASON)).toBeNull();
+  });
+
+  it('a token without schema admin sees the select disabled, with the reason as visible text', async () => {
+    const { el, select } = await mountRow({ rights: writeOnlyRights });
+    const sel = select();
+    expect(sel, 'a read-only token loses the control altogether instead of seeing it disabled').not.toBeNull();
+    expect(sel!.disabled).toBe(true);
+    const reason = el.querySelector<HTMLElement>(READONLY_REASON);
+    expect(reason, 'disabled with no reason').not.toBeNull();
+    expect((reason!.textContent ?? '').trim().length).toBeGreaterThan(10);
+    expect(reason!.textContent).not.toMatch(RAW_KEY);
+  });
+
+  it.each([
+    ['a member list', ['a', 'b']],
+    ['the wildcard', ['*']],
+  ])('on a proxy space (%s) the control is hidden and a one-line note says each member governs', async (_name, proxyFor) => {
+    const { el, select } = await mountRow({ space: work({ proxyFor }) });
+    expect(select(), 'the select shows on a proxy space, where the member\'s own setting governs a write').toBeNull();
+    const note = el.querySelector<HTMLElement>(PROXY_NOTE);
+    expect(note, 'hidden with no note').not.toBeNull();
+    const text = (note!.textContent ?? '').trim();
+    expect(text.length).toBeGreaterThan(10);
+    expect(text).toMatch(/member/i);
+    expect(text).toMatch(/govern|own|decide/i);
+    expect(text, 'the note is more than one line').not.toContain('\n');
+  });
+
+  it('a space that is not a proxy shows no proxy note (control)', async () => {
+    const { el, select } = await mountRow();
+    expect(select(), 'the control did not render').not.toBeNull();
+    expect(el.querySelector(PROXY_NOTE)).toBeNull();
+  });
+
+  it.each(['de', 'pl'])('is translated into %s: options, hint and consequence are words, not keys, and not the English', async (lang) => {
+    const en = await mountRow();
+    const enSel = en.select();
+    expect(enSel, 'the control did not render').not.toBeNull();
+    const enTexts = Array.from(enSel!.options).map(o => (o.textContent ?? '').trim());
+    const enHint = (en.el.querySelector<HTMLElement>(HINT)?.textContent ?? '').trim();
+
+    // Refuse is chosen in this mount, so the consequence line is showing too.
+    const other = await mountRow({ translation: i18n(lang), space: work({ unknownWriteFields: 'refuse' }) });
+    const sel = other.select();
+    expect(sel, `${lang}: the control did not render`).not.toBeNull();
+    for (const t of Array.from(sel!.options).map(o => (o.textContent ?? '').trim())) {
+      expect(t, `${lang}: an option renders as a key`).not.toMatch(RAW_KEY);
+      expect(enTexts, `${lang}: an option is the English text`).not.toContain(t);
+    }
+    const hint = (other.el.querySelector<HTMLElement>(HINT)?.textContent ?? '').trim();
+    expect(hint.length).toBeGreaterThan(20);
+    expect(hint).not.toBe(enHint);
+    expect(hint).not.toMatch(RAW_KEY);
+    const consequence = (other.el.querySelector<HTMLElement>(CONSEQUENCE)?.textContent ?? '').trim();
+    expect(consequence.length, `${lang}: no consequence text`).toBeGreaterThan(10);
+    expect(consequence).not.toMatch(RAW_KEY);
   });
 });

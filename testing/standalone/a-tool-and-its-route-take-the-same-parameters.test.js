@@ -323,6 +323,53 @@ describe('a tool and its route take the same parameters', () => {
     assert.deepEqual(gaps, [], `a read tool and its GET route disagree:\n  ${gaps.join('\n  ')}`);
   });
 
+  it('the brain write routes are resolved through acceptedWriteKeys, and the tool declares exactly what they accept', async () => {
+    /*
+     * They were "unresolved" — twelve brain write routes the parser skipped because each reads its body through helpers (the
+     * shared write options go through `ttlDaysError`, `dupeCheckOptsFromBody` and the connection helpers), so every case above
+     * compared nothing about them and reported clean (bundle-128, design-v3 8.2 G3).
+     *
+     * After the change their accepted set IS `acceptedWriteKeys(operation)`, which `contract/write-accepts.ts` derives from the
+     * paired tool's own `inputSchema`. **So this case is not the parity evidence and must not be read as it:** a tool compared
+     * with a set derived from itself agrees by construction. It asserts that the routes are no longer skipped (the parser
+     * resolves them through the judge's set) and that the two names for the set agree; the evidence that a ROUTE reads what its
+     * tool declares is `a-route-reads-what-its-tool-declares.test.js`, which reads the handlers. `save_bulk` is outside it: its
+     * top-level keys are refused in every mode and its items are judged per collection, by that gate.
+     *
+     * The parser (`_route-accept-keys.mjs`) names the source of a resolved route in `via`; a route resolved through the judge says
+     * so there, which is the contract this case holds it to.
+     */
+    const judged = new Set(ROUTE_RULES
+      .filter(r => r.method !== 'GET' && r.method !== 'DELETE' && r.pattern.source.includes('brain'))
+      .map(r => r.operation)
+      .filter(op => /\.(create|update|merge)$/.test(op)));
+    const subjects = paired.filter(p => operationsOf(p.tool.name).some(op => judged.has(op)));
+    assert.ok(subjects.length >= 11, `only ${subjects.length} brain write pairs were derived — the derivation is wrong, not the code`);
+
+    const skipped = [];
+    for (const { tool, routes } of subjects) {
+      if (!routes.length) { skipped.push(`${tool.name}: no route registered for it`); continue; }
+      for (const r of routes) {
+        if (!r.keys || !/acceptedWriteKeys/.test(r.via ?? '')) {
+          skipped.push(`${r.method} ${r.route}: ${r.unresolved ?? `resolved through ${r.via ?? 'nothing'}, not acceptedWriteKeys`}`);
+        }
+      }
+    }
+    assert.deepEqual(skipped, [], 'a brain write route is still unresolved, so no parity case above reads it');
+
+    // The two spellings of the set agree. Imported here so its absence is part of the red output, not a reason this file cannot load.
+    const { acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
+    const differing = [];
+    for (const { tool, routes } of subjects) {
+      const op = operationsOf(tool.name).find(o => judged.has(o));
+      const want = [...acceptedWriteKeys(op)].sort();
+      for (const r of routes) {
+        const have = [...r.keys].sort();
+        if (JSON.stringify(have) !== JSON.stringify(want)) differing.push(`${r.method} ${r.route}: route ${have.join(',')} | ${op} ${want.join(',')}`);
+      }
+    }
+    assert.deepEqual(differing, []);
+  });
   it('the routes whose parameters cannot be read only get FEWER', () => {
     /*
      * The rest state their parameters in a shape the parser cannot follow: the body read field by field, a

@@ -6,7 +6,7 @@
  * plus the highest-value per-tool enrichments (filter.filter operators, recall filter key allowlist, the
  * corrected filter.maxTimeMS ceiling, similar's omit-space harmonisation) and the pure scope resolver.
  */
-import { describe, it } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
 import { resolveFindSimilarScope } from '../../server/dist/mcp/tools/search.js';
@@ -334,5 +334,204 @@ describe('resolveFindSimilarScope (find_similar space resolution)', () => {
     const r = resolveFindSimilarScope(['a'], true, accessible, members);
     assert.deepEqual(r.candidateBases, accessible);
     assert.deepEqual(r.searchIds, accessible);
+  });
+});
+
+// ── G4 (bundle-128, Q-320; design-v3 section 4 "Ajv, tolerant variant" and section 8.2 G4) ─────────────────────────────────────────────
+//
+// An argument a brain write tool does not take is answered by how this instance is set for the space (stored with a warning, or
+// refused), so the DISPATCHER's Ajv step must let a top-level unknown argument through for those tools — and for those tools only —
+// while `tools/list` keeps advertising the closed schema. Everything below is asserted over the tools the real routers' brain
+// write routes are paired to, derived (never listed), with a floor, and it FAILS rather than skips on a tool it has no fixture for.
+//
+// Red on the unchanged base: no tool carries the sentence, and `validate` takes no third argument, so the strict validator refuses
+// `zz` on the tolerant call as it does on the strict one.
+
+/** The sentence every paired write tool carries, as design-v3 section 4 words it (`UNKNOWN_ARGUMENT_RULE`). */
+const UNKNOWN_ARGUMENT_RULE_TEXT = 'After the target space is resolved, an argument this tool does not take is answered by how this '
+  + 'instance is set for the space: by default the write is stored and the argument is named in `warnings`; a space set to refuse '
+  + 'refuses the call and writes nothing. Either way the answer names it, with a suggestion when it looks like a misspelling. A retired '
+  + 'name is refused everywhere.';
+const flat = (s) => String(s).replace(/\s+/g, ' ').trim();
+
+/** The brain routers whose POST/PATCH routes are the record writes, by the name each exports. */
+const BRAIN_WRITE_ROUTERS = [
+  ['entities', 'entitiesRouter'], ['facts', 'memoriesRouter'], ['edges', 'edgesRouter'], ['chrono', 'chronoRouter'],
+  ['links', 'linksRouter'], ['file-meta', 'fileMetaRouter'], ['bulk', 'bulkRouter'],
+];
+/** What a RECORD write's operation is named: the families the brain routers write. `file.retry_embedding_all` is a POST on a brain router and writes no record. */
+const RECORD_WRITE_OPERATION = /^(?:entity|fact|edge|chrono|link|bulk|file\.meta)\./;
+
+/** `[{ tool, operation, route }]` for every POST/PATCH route of the brain routers whose operation is a record write and whose tool exists. */
+async function pairedRecordWriteTools() {
+  const { MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js');
+  const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
+  const out = [];
+  for (const [file, exportName] of BRAIN_WRITE_ROUTERS) {
+    const router = (await import(`../../server/dist/api/brain/${file}.js`))[exportName];
+    assert.ok(router?.stack, `${file}: ${exportName} is not a router: re-anchor`);
+    for (const layer of router.stack) {
+      if (!layer.route) continue;
+      for (const method of Object.keys(layer.route.methods).filter(m => m === 'post' || m === 'patch')) {
+        const url = `/api/brain${layer.route.path.replace(/:\w+/g, 'x')}`;
+        const rule = ROUTE_RULES.find(r => r.method === method.toUpperCase() && r.pattern.test(url));
+        if (!rule || !RECORD_WRITE_OPERATION.test(rule.operation)) continue;
+        for (const [tool, op] of Object.entries(MCP_TOOL_OPERATIONS)) {
+          if ((Array.isArray(op) ? op.includes(rule.operation) : op === rule.operation)) {
+            out.push({ tool, operation: rule.operation, route: `${method.toUpperCase()} ${layer.route.path}` });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const V4A = '3b241101-e2bb-4255-8caf-4136c566a962';
+const V4B = '8f14e45f-ceea-467f-a0e6-1e6f3c2b1a77';
+const REACH = ['b128-a', 'b128-b'];
+const WHEN = '2026-01-01T00:00:00.000Z';
+/**
+ * The smallest valid arguments of each paired write tool, and one nested value that must stay refused. A fixture table is a fixture:
+ * the SUBJECTS are derived, and a subject with no row here FAILS (it does not skip), so a tool paired next month is asked the day it is.
+ * `nested` is keyed by the top-level argument that holds a closed nested object; the gate derives which arguments those are.
+ */
+const FIXTURES = {
+  save_entity: { args: { space: 'b128-a', name: 'Acme', type: 'concept' }, nested: { edges: [{ to: V4A, label: 'relates', zz: 1 }] } },
+  update_entity: { args: { space: 'b128-a', id: V4A }, nested: { edges: [{ to: V4B, label: 'relates', zz: 1 }] } },
+  graph_merge: { args: { space: 'b128-a', survivorId: V4A, absorbedId: V4B }, nested: { resolutions: [{ key: 'name', resolution: 'survivor', zz: 1 }] } },
+  save_fact: { args: { space: 'b128-a', fact: 'a fact' }, nested: { edges: [{ to: V4A, label: 'relates', zz: 1 }] } },
+  update_fact: { args: { space: 'b128-a', id: V4A }, nested: { edges: [{ to: V4B, label: 'relates', zz: 1 }] } },
+  save_edge: { args: { space: 'b128-a', from: V4A, to: V4B, label: 'relates' }, nested: {} },
+  update_edge: { args: { space: 'b128-a', id: V4A }, nested: {} },
+  save_chrono: { args: { space: 'b128-a', title: 'An event', type: 'event', startsAt: WHEN },
+    nested: { recurrence: { freq: 'daily', zz: 1 }, edges: [{ to: V4A, label: 'relates', zz: 1 }] } },
+  update_chrono: { args: { space: 'b128-a', id: V4A },
+    nested: { recurrence: { freq: 'daily', zz: 1 }, edges: [{ to: V4B, label: 'relates', zz: 1 }] } },
+  save_link: { args: { space: 'b128-a', from: V4A, fromKind: 'fact', to: V4B, toKind: 'entity' }, nested: {} },
+  update_file_meta: { args: { space: 'b128-a', path: 'notes/a.txt' }, nested: {} },
+};
+
+/** Top-level arguments of a schema that hold a closed nested object (directly, in an array's items, or in a oneOf/anyOf branch). */
+function closedNestedArguments(schema) {
+  const holdsClosed = (s) => {
+    if (!s || typeof s !== 'object') return false;
+    if (s.type === 'object' && s.additionalProperties === false) return true;
+    if (s.items && holdsClosed(s.items)) return true;
+    return ['oneOf', 'anyOf', 'allOf'].some(k => (s[k] ?? []).some(holdsClosed));
+  };
+  return Object.entries(schema.properties ?? {}).filter(([, v]) => holdsClosed(v)).map(([k]) => k).sort();
+}
+
+describe('the tolerant argument validator and the sentence every paired write tool carries (G4)', () => {
+  let subjects;
+  let va;
+  let toolSchemas;
+
+  // `save_bulk` is `skipSchemaValidation` (it reports per-item errors and refuses its top level in the handler), so no Ajv step runs for
+  // it and there is no variant to test; every other paired write tool goes through the dispatcher's Ajv.
+  before(async () => {
+    va = await import('../../server/dist/mcp/validate-args.js');
+    toolSchemas = await import('../../server/dist/mcp/tool-schema.js');
+    const pairs = await pairedRecordWriteTools();
+    const byTool = new Map(pairs.map(p => [p.tool, p]));
+    subjects = [...byTool.keys()].filter(name => !ALL_TOOLS.find(t => t.name === name)?.skipSchemaValidation).sort();
+  });
+
+  const tool = (name) => ALL_TOOLS.find(t => t.name === name);
+  const minimal = (name) => ({ ...FIXTURES[name].args });
+
+  it('the subjects are derived from the routers and carry a floor', () => {
+    // 3 entity routes + 2 fact + 2 edge + 2 chrono + 1 link + 1 file meta, less nothing: save_bulk is excluded above.
+    assert.ok(subjects.length >= 11, `only ${subjects.length} paired record-write tools derived (${subjects.join(', ')}): the derivation is broken, not the tools`);
+    assert.ok(!subjects.includes('save_bulk'), 'save_bulk is skipSchemaValidation: it has no Ajv step and no tolerant variant');
+  });
+
+  it('every subject has a fixture, and every fixture is a subject — a tool with none FAILS here rather than skips', () => {
+    const missing = subjects.filter(n => !FIXTURES[n]);
+    assert.deepEqual(missing, [], `paired write tools with no fixture (add a row, never a skip): ${missing.join(', ')}`);
+    const stale = Object.keys(FIXTURES).filter(n => !subjects.includes(n));
+    assert.deepEqual(stale, [], `fixtures for tools that are not paired record writes: ${stale.join(', ')}`);
+  });
+
+  it('every subject carries UNKNOWN_ARGUMENT_RULE in its description', () => {
+    const lacking = subjects.filter(n => !flat(tool(n).description).includes(flat(UNKNOWN_ARGUMENT_RULE_TEXT)));
+    assert.deepEqual(lacking, [], `these write tools do not carry the rule a caller reads while building arguments: ${lacking.join(', ')}`);
+  });
+
+  it('the fixtures are valid to the STRICT validator (so a refusal below is about the unknown argument, not the fixture)', () => {
+    const v = va.validatorFor(REACH);
+    for (const n of subjects.filter(n => FIXTURES[n])) {
+      assert.equal(v.validate(tool(n), minimal(n)), null, `${n}: the fixture's minimal arguments are refused by the strict validator`);
+    }
+  });
+
+  it('the tolerant variant accepts {...minimalValid, zz:1} on every subject (while the strict validator still refuses it), and does not strip the argument', () => {
+    const v = va.validatorFor(REACH);
+    const refused = [];
+    for (const n of subjects.filter(n => FIXTURES[n])) {
+      const args = { ...minimal(n), zz: 1 };
+      assert.match(String(v.validate(tool(n), args)), /unexpected property 'zz'/, `${n}: the strict validator no longer refuses zz (the advertised contract changed)`);
+      const answer = v.validate(tool(n), args, { tolerateTopLevel: true });
+      if (answer !== null) refused.push(`${n}: ${answer}`);
+      assert.ok('zz' in args && args.zz === 1, `${n}: the validator stripped or changed the arguments (the handler must receive what was sent)`);
+    }
+    assert.deepEqual(refused, [], 'the tolerant variant refused a top-level unknown argument');
+  });
+
+  it('the tolerant variant still refuses a nested unknown key, on every closed nested argument of every subject', () => {
+    const v = va.validatorFor(REACH);
+    const problems = [];
+    for (const n of subjects.filter(n => FIXTURES[n])) {
+      const schema = toolSchemas.materialisedSchema(tool(n), toolSchemas.toolSchemasFor(REACH), REACH);
+      const derived = closedNestedArguments(schema);
+      const given = Object.keys(FIXTURES[n].nested).sort();
+      if (JSON.stringify(derived) !== JSON.stringify(given)) problems.push(`${n}: the schema closes ${JSON.stringify(derived)} and the fixture covers ${JSON.stringify(given)}`);
+      for (const [arg, value] of Object.entries(FIXTURES[n].nested)) {
+        // A top-level zz beside the nested one: only the nested one may be refused, so the answer is about the nested key and the
+        // tolerant variant is in force. (The strict validator would name BOTH.)
+        const answer = String(v.validate(tool(n), { ...minimal(n), zz: 1, [arg]: value }, { tolerateTopLevel: true }));
+        if (!answer.includes(`/${arg}`) || !answer.includes("unexpected property 'zz'") || answer.includes("(arguments): unexpected property 'zz'")) {
+          problems.push(`${n}.${arg}: expected a refusal of the NESTED zz alone, got ${JSON.stringify(answer)}`);
+        }
+      }
+    }
+    assert.deepEqual(problems, []);
+  });
+
+  it('the variant is a copy: tools/list keeps advertising the closed schema after tolerant calls', () => {
+    const v = va.validatorFor(REACH);
+    for (const n of subjects.filter(n => FIXTURES[n])) {
+      assert.equal(v.validate(tool(n), { ...minimal(n), zz: 1 }, { tolerateTopLevel: true }), null,
+        `${n}: the tolerant call was refused, so there is no variant whose copy-ness could be asked`);
+    }
+    for (const n of subjects.filter(n => FIXTURES[n])) {
+      const advertised = toolSchemas.materialisedSchema(tool(n), toolSchemas.toolSchemasFor(REACH), REACH);
+      assert.equal(advertised.additionalProperties, false, `${n}: the advertised schema was opened by the tolerant variant (a mutation, not a copy)`);
+      assert.equal(tool(n).inputSchema(schemas).additionalProperties, false, `${n}: inputSchema() no longer returns a closed schema`);
+    }
+  });
+
+  it('an unmarked tool still refuses zz after a tolerant call on a marked one, on the same reach', () => {
+    const v = va.validatorFor(REACH);
+    const unmarked = ALL_TOOLS.find(t => !subjects.includes(t.name) && !t.skipSchemaValidation && t.name === 'space_stats');
+    assert.ok(unmarked, 'space_stats is gone: pick another tool that writes no record');
+    assert.match(String(v.validate(unmarked, { space: 'b128-a', zz: 1 })), /unexpected property 'zz'/, 'fixture: refused before');
+    assert.equal(v.validate(tool('save_entity'), { ...minimal('save_entity'), zz: 1 }, { tolerateTopLevel: true }), null);
+    assert.match(String(v.validate(unmarked, { space: 'b128-a', zz: 1 })), /unexpected property 'zz'/, 'a tolerant call on save_entity opened another tool\'s validator');
+  });
+
+  it('a marked tool compiles ONLY its tolerant variant under its own cache key, and the strict entry is separate and untouched', () => {
+    va._resetValidatorCache();
+    const v = va.validatorFor(['b128-cache-a', 'b128-cache-b']);
+    const entity = tool('save_entity');
+    const args = { ...minimal('save_entity'), space: 'b128-cache-a', zz: 1 };
+    const c0 = va._validatorCacheStats().compiles;
+    assert.equal(v.validate(entity, args, { tolerateTopLevel: true }), null);
+    assert.equal(va._validatorCacheStats().compiles - c0, 1, 'the first tolerant call must compile exactly one schema: the variant, never both');
+    assert.equal(v.validate(entity, args, { tolerateTopLevel: true }), null);
+    assert.equal(va._validatorCacheStats().compiles - c0, 1, 'the variant is cached under `<tool>#tolerant`: a second tolerant call compiles nothing');
+    assert.match(String(v.validate(entity, args)), /unexpected property 'zz'/, 'the strict entry was served the variant\'s answer');
+    assert.equal(va._validatorCacheStats().compiles - c0, 2, 'the strict validator is its own entry (`<tool>`): it compiles once beside the variant');
   });
 });
