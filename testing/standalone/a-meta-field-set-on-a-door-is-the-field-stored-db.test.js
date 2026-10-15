@@ -50,7 +50,9 @@ const SAMPLES = {
 /** The doors, and the keys each does not carry by design (with the reason). */
 const DOORS = [
   ['space-patch', {}],
-  ['mcp-schema-update', { purpose: 'MCP writes the directive through update_space; schema_update carries the other meta keys' }],
+  // `schema_update` takes `purpose` as `PATCH` does (bundle-23: it is `meta.purpose`, and a door that took every other meta key and not this one made the
+  // pair differ by the one field an operator reads first). `update_space` also carries it, under its own name.
+  ['mcp-schema-update', {}],
 ];
 
 function interfaceKeys(file, name) {
@@ -105,8 +107,7 @@ describe('a meta key set by a door is the key stored', { skip }, () => {
     const stored = {};
     for (const [door] of DOORS) {
       inst.reset();
-      const { purpose: _p, ...meta } = SAMPLES;
-      const answer = await inst.doors[door](SPACE, structuredClone(meta));
+      const answer = await inst.doors[door](SPACE, structuredClone(SAMPLES));
       assert.equal(answer.refused, false, `${door}: ${answer.text.slice(0, 300)}`);
       const { version: _v, updatedAt: _u, previousVersions: _h, ...held } = inst.heldMeta(SPACE);
       stored[door] = held;
