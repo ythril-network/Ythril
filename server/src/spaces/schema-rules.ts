@@ -16,10 +16,11 @@
  *   records that is LINEAR in the paths it reads (all present, all absent, the boundary values, and each path on its own present and
  *   absent — never every combination). The verdict is cached by content, failures included.
  * - **No rule can stall the server.** Every set of rules that applies to one record is PRICED at save from its syntax tree — nodes,
- *   the largest list a loop can visit, the regex scans — and refused above a fixed budget: a function of the rules alone, never of a
- *   clock, so the same rules are refused the same way every time. The regex engine is RE2 (linear: `(a+)+$` is only a pattern), and
- *   the input a rule reads is capped per evaluation (strings of {@link LONGEST_CHECKED_STRING} code points, lists of 100, maps of 200)
- *   on the paths it reads.
+ *   what each loop runs over, the scans of text — and refused above a fixed budget: a function of the rules alone, never of a
+ *   clock, so the same rules are refused the same way every time. The price follows what a rule can make an evaluation do: a list or
+ *   a string a rule BUILDS (by `+`) is priced at the size it can reach, since the engine has no run-time limit and the input caps
+ *   (strings of {@link LONGEST_CHECKED_STRING} code points, lists of 100, maps of 200) hold only for what a rule reads. The regex
+ *   engine is RE2 (linear: `(a+)+$` is only a pattern).
  * - **A stored rule that goes bad later is skipped and reported, never enforced as a violation.** A property removed from its type, a
  *   hand-edited `config.json`, a layer from another release: one dead rule must not refuse every write of its type. It is skipped (the
  *   other rules still run), named on `space_meta` as `invalidRules`, counted in `ythril_schema_rules_invalid`, and said once per
@@ -75,18 +76,34 @@ export const LONGEST_CHECKED_STRING = 10_000;
 
 /** Parts of one rule's syntax tree. */
 const AST_NODE_LIMIT = 200;
-/** Elements of a list a rule reads, and so the most a loop can visit. */
+/**
+ * Elements of a list one READ of `self` holds. It is also what a loop is priced per unit of its range: a loop over what a rule only
+ * reads runs at most this often, and a loop over a list the rule BUILT (`self.tags + self.tags`) is priced for the bigger list, in
+ * caps ({@link SizeInCaps}). The input cap alone bounds nothing a rule makes.
+ */
 const LIST_CAP = 100;
 /** Properties of a map a rule reads whole. */
 const MAP_CAP = 200;
-/** What one regex scan costs, in node units: RE2 is linear, but over up to {@link LONGEST_CHECKED_STRING} code points. */
+/**
+ * What one scan costs per cap of its subject, in node units: RE2 is linear, but over up to {@link LONGEST_CHECKED_STRING} code points
+ * for each cap. A scan of a string the rule built is priced by the size it built, not by the one read it started from.
+ */
 const REGEX_WEIGHT = 100;
+/** The functions that scan their subject: the price of one is {@link REGEX_WEIGHT} per cap of the text it is called on. */
+const SCANS: ReadonlySet<string> = new Set(['matches', 'contains', 'startsWith', 'endsWith']);
 /**
  * What the rules that apply to one record may cost together, in node units (a node evaluated once is 1, inside a loop it is
- * {@link LIST_CAP}). Room for about twenty-five rules of the heaviest shape the other limits allow — one loop over the tags with a
- * regex on each, thirty-odd times — and for every set of ordinary rules; fifty of the heaviest are refused.
+ * {@link LIST_CAP} times the size of what the loop runs over). The price of a set follows the work the rules can make a write do —
+ * what they build as well as what they read — because the engine has no limit of its own at run time. Room for about twenty-five
+ * rules of the heaviest shape the other limits allow — one loop over the tags with a regex on each, thirty-odd times — and for every
+ * set of ordinary rules; fifty of the heaviest are refused.
  */
 const COST_BUDGET = 10_000_000;
+/**
+ * How much a value of a rule can hold, in caps: 1 is what one read of `self` can hold (a list of {@link LIST_CAP}, a string of
+ * {@link LONGEST_CHECKED_STRING} code points), 0 is a literal. A value a rule builds from others holds up to the sum of them.
+ */
+type SizeInCaps = number;
 /** The compiled-program cache is never smaller than this, and grows with the instance's rule count. */
 const PROGRAM_CACHE_FLOOR = 2048;
 
@@ -179,7 +196,11 @@ function stringConst(e: unknown): string | undefined {
 }
 const quoted = (s: string): string => peerText(s, { max: NAME_QUOTED });
 
-/** Walk one parsed rule: count it, price it, find what it reads, and say what is wrong with it for `scope`. */
+/**
+ * Walk one parsed rule: count it, price it, find what it reads, and say what is wrong with it for `scope`. The price is of what the
+ * rule can make an evaluation DO, so it follows the size of each value (what a read holds, what a `+` builds) into the loops and the
+ * scans that run over it: a rule cannot dodge the budget by making its list or its text rather than reading it.
+ */
 function analyse(root: unknown, scope: RuleScope): Analysis {
   const a: Analysis = {
     nodes: 0, cost: 0, problems: [], refs: { whole: false, fields: new Set(), props: new Set(), presence: new Set() }, patterns: [], kinds: [...scope.kinds],
@@ -211,29 +232,33 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
     (testOnly ? a.refs.presence : a.refs.props).add(name);
   };
 
-  const visit = (e: unknown, mult: number, consumed = false): void => {
-    if (e === undefined || e === null) return;
+  /**
+   * Visit one part of the rule and answer how much it can HOLD, in caps (see {@link SizeInCaps}): the price of a loop or a scan is
+   * what it runs over, and what it runs over may be something the rule built.
+   */
+  const visit = (e: unknown, mult: number, consumed = false): SizeInCaps => {
+    if (e === undefined || e === null) return 0;
     a.nodes++;
     a.cost += mult;
     const v = valueOf(e);
     switch (kindOf(e)) {
       case 'constExpr':
-        return;
+        return 0;
       case 'identExpr': {
         const name = String(v['name']);
-        if (bound.includes(name) || TYPE_IDENTS.has(name)) return;
-        if (name === 'self') { if (!consumed) a.refs.whole = true; return; }
+        if (bound.includes(name)) return 1;
+        if (TYPE_IDENTS.has(name)) return 0;
+        if (name === 'self') { if (!consumed) a.refs.whole = true; return 1; }
         problem(`reads '${quoted(name)}', which is not a variable a rule has: a rule reads only self (self.title, self.properties.<name>, ...)`);
-        return;
+        return 0;
       }
       case 'selectExpr': {
         const operand = v['operand'];
         const name = String(v['field']);
         const testOnly = v['testOnly'] === true;
-        if (isSelf(operand)) { field(name, testOnly, consumed); visit(operand, mult, true); return; }
-        if (isSelfProperties(operand)) { property(name, testOnly); visit(operand, mult, true); return; }
-        visit(operand, mult);
-        return;
+        if (isSelf(operand)) { field(name, testOnly, consumed); visit(operand, mult, true); return 1; }
+        if (isSelfProperties(operand)) { property(name, testOnly); visit(operand, mult, true); return 1; }
+        return visit(operand, mult);
       }
       case 'callExpr': {
         const fn = String(v['function']);
@@ -242,10 +267,10 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
         if (fn === '_[_]' && args.length === 2) {
           const key = stringConst(args[1]);
           if (isSelfProperties(args[0])) {
-            if (key !== undefined) { property(key, false); visit(args[0], mult, true); visit(args[1], mult); return; }
+            if (key !== undefined) { property(key, false); visit(args[0], mult, true); visit(args[1], mult); return 1; }
             if (scope.declared) problem('reads self.properties by a computed name: a type rule names each property it reads (self.properties.<name>)');
           } else if (isSelf(args[0]) && key !== undefined) {
-            field(key, false, false); visit(args[0], mult, true); visit(args[1], mult); return;
+            field(key, false, false); visit(args[0], mult, true); visit(args[1], mult); return 1;
           }
         }
         if (!PLANNER_OPERATORS.has(fn) && !env?.funcs.find(fn)) {
@@ -256,38 +281,52 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
           const lit = stringConst(pattern);
           if (lit === undefined) problem('passes matches() a pattern that is not a string literal: the pattern is part of the rule, so a record can never choose the regex run over it');
           else a.patterns.push(lit);
-          a.cost += mult * REGEX_WEIGHT;
         }
-        visit(target, mult);
-        for (const arg of args) visit(arg, mult);
-        return;
+        const targetSize = visit(target, mult);
+        const argSizes = args.map(arg => visit(arg, mult));
+        const operands = argSizes.reduce((n, s) => n + s, targetSize);
+        // A scan costs what it scans: its subject, which a rule may have built as well as read.
+        if (SCANS.has(fn)) a.cost += mult * REGEX_WEIGHT * Math.max(1, target !== undefined ? targetSize : argSizes[0] ?? 0);
+        switch (fn) {
+          case '_+_': a.cost += mult * operands; return operands; // the copy is paid for as often as it is made
+          case '_?_:_': return Math.max(argSizes[1] ?? 0, argSizes[2] ?? 0);
+          case '_[_]': return argSizes[0] ?? 0;
+          default: return operands;
+        }
       }
-      case 'listExpr':
-        for (const el of (Array.isArray(v['elements']) ? v['elements'] : []) as unknown[]) visit(el, mult);
-        return;
-      case 'structExpr':
+      case 'listExpr': {
+        let size = 0;
+        for (const el of (Array.isArray(v['elements']) ? v['elements'] : []) as unknown[]) size += visit(el, mult);
+        return size;
+      }
+      case 'structExpr': {
+        let size = 0;
         for (const entry of (Array.isArray(v['entries']) ? v['entries'] : []) as Record<string, unknown>[]) {
           const key = entry['keyKind'] as { case?: string; value?: unknown } | undefined;
-          if (key?.case === 'mapKey') visit(key.value, mult);
-          visit(entry['value'], mult);
+          if (key?.case === 'mapKey') size += visit(key.value, mult);
+          size += visit(entry['value'], mult);
         }
-        return;
+        return size;
+      }
       case 'comprehensionExpr': {
         if (loopDepth > 0) problem('puts a loop inside a loop (a comprehension nested in another): its work grows with the square of the list, so a rule may hold one level');
-        visit(v['iterRange'], mult);
+        const range = Math.max(1, visit(v['iterRange'], mult));
         visit(v['accuInit'], mult);
         const vars = [v['iterVar'], v['iterVar2'], v['accuVar']].filter((x): x is string => typeof x === 'string' && x !== '');
         bound.push(...vars);
         loopDepth++;
-        visit(v['loopCondition'], mult * LIST_CAP);
-        visit(v['loopStep'], mult * LIST_CAP);
+        // The body runs once per element, and a range the rule BUILT holds more than the input caps allow a read to.
+        const perRun = mult * LIST_CAP * range;
+        visit(v['loopCondition'], perRun);
+        const step = Math.max(1, visit(v['loopStep'], perRun));
         loopDepth--;
         visit(v['result'], mult);
         bound.splice(bound.length - vars.length, vars.length);
-        return;
+        return range * step;
       }
       default:
         problem('uses a kind of expression a rule cannot hold');
+        return 0;
     }
   };
   visit(root, 1);
