@@ -2403,6 +2403,7 @@
   "validate.incomplete": "Nicht abgeschlossen: Bisher nichts gefunden heißt nicht, dass nichts falsch ist.",
   "validate.allGood": "Alles in Ordnung: Jeder geprüfte Datensatz erfüllt das Schema.",
   "validate.progressOpen": "Bisher {{checked}} Datensätze geprüft",
+  "validate.stale": "Das Schema wurde nach dieser Prüfung geändert, ihr Ergebnis beschreibt es daher nicht mehr. Führen Sie die Prüfung erneut aus.",
   "validate.failed": "Die Prüfung konnte nicht ausgeführt werden",
   "validate.outcome.match": "Erfüllt",
   "validate.outcome.violated": "Verletzt",

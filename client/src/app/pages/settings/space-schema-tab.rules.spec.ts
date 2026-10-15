@@ -800,6 +800,100 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said after pages that found violations').toBeNull();
   });
 
+  // b23 W6d U1: a result describes the schema the check ran against. Editing a rule or a property afterwards left "All good" on screen
+  // (the reset ran only from the mode switch and Run), and Continue paged on under the schema as it had become, so pages were judged
+  // under different schemas.
+  describe('a result goes stale when the schema is edited after the check', () => {
+    const STALE = '[data-testid="validate-stale"]';
+    const RESULT_PARTS = ['[data-testid="validate-progress"]', '[data-testid="validate-continue"]', '.val-violations'];
+
+    /** An edit as an operator makes it: typed into a rule's text in the space rules section. */
+    async function editARule(h: Harness) {
+      const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+      await expand(h, row);
+      const text = $(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement;
+      type(text, 'size(self.tags) <= 3');
+      await h.settle();
+    }
+
+    async function storedPageOne(h: Harness) {
+      await chooseMode(h, 'stored');
+      button(h)!.click();
+      post(h).flush(answer({
+        progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1',
+        violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }],
+      }));
+      await h.settle();
+    }
+
+    it('a rule edited after a stored check hides the readout, its rows and Continue, and says why', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      for (const part of RESULT_PARTS) expect($(h.el, part), `${part} before the edit`).not.toBeNull();
+      expect($(h.el, STALE), 'stale before any edit').toBeNull();
+      await editARule(h);
+      expect($(h.el, STALE), 'the result is not marked stale after a rule edit').not.toBeNull();
+      for (const part of RESULT_PARTS) expect($(h.el, part), `${part} still shown for a schema it did not check`).toBeNull();
+    });
+
+    it('a sample result goes stale too, and a property-free setting edit (the validation mode) counts as an edit', async () => {
+      const h = await mount();
+      await chooseMode(h, 'sample');
+      type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","record":{"name":"x","type":"person","properties":{}}}');
+      await h.settle();
+      button(h)!.click();
+      post(h).flush(answer());
+      await h.settle();
+      expect($(h.el, '[data-testid="validate-all-good"]')).not.toBeNull();
+      const select = $(h.el, '.val-select') as HTMLSelectElement;
+      select.value = 'off';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await h.settle();
+      expect($(h.el, STALE), 'a changed validation mode left the result standing').not.toBeNull();
+      expect($(h.el, '[data-testid="validate-all-good"]')).toBeNull();
+    });
+
+    it('Continue asks under the schema the run started with, and a fresh run after an edit asks under the edited one and clears the note', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      const firstMeta = JSON.stringify(h.state.buildMeta());
+      $(h.el, '[data-testid="validate-continue"]')!.click();
+      const second = post(h);
+      expect(JSON.stringify((second.request.body as { meta?: unknown }).meta), 'Continue sent a different schema than the run started with').toBe(firstMeta);
+      second.flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c2' }));
+      await h.settle();
+
+      await editARule(h);
+      expect($(h.el, '[data-testid="validate-continue"]'), 'Continue offered for a run whose schema was edited').toBeNull();
+      button(h)!.click();
+      const fresh = post(h);
+      const body = fresh.request.body as { meta?: unknown; after?: unknown };
+      expect(body.after, 'a fresh run continued the old cursor').toBeUndefined();
+      expect(JSON.stringify(body.meta), 'the fresh run did not ask under the edited schema').toBe(JSON.stringify(h.state.buildMeta()));
+      expect(JSON.stringify(body.meta)).not.toBe(firstMeta);
+      fresh.flush(answer({ progress: { checked: 900, total: 900 }, done: true }));
+      await h.settle();
+      expect($(h.el, STALE), 'the note stays after a fresh run').toBeNull();
+      expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked'), 'the fresh run added to the old run\'s count').toBe('900');
+    });
+
+    it('an edit that is undone before anything else leaves the result standing (the schema is the one the check judged)', async () => {
+      const h = await mount();
+      await storedPageOne(h);
+      const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+      await expand(h, row);
+      const text = $(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement;
+      const original = text.value;
+      type(text, 'size(self.tags) <= 3');
+      await h.settle();
+      expect($(h.el, STALE)).not.toBeNull();
+      type(text, original);
+      await h.settle();
+      expect($(h.el, STALE)).toBeNull();
+      expect($(h.el, '[data-testid="validate-continue"]')).not.toBeNull();
+    });
+  });
+
   // b23 verify U1: the placeholder showed `{"kind":"entity","type":"person","properties":{}}`, a shape the server refuses; a person who
   // copies the example must be sending what the check takes: `{ kind, record }`, the record in the stored shape.
   it('the sample placeholder is, in every language, the shape the check takes', () => {

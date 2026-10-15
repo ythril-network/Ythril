@@ -25,7 +25,7 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsState, emptyTypeSchemaState, ruleRowsFromWire, typeSchemaFromState, typeStateFromSchema, type RuleRow, type TypeSchemaState } from './space-settings-state.service';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
-import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, TypeSchema, recordTtlWindows } from '../../core/api.types';
+import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, SpaceMeta, TypeSchema, recordTtlWindows } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { httpErrorReason } from '../../core/http-error';
@@ -98,18 +98,22 @@ import { refusalText } from '../../core/refusal-text';
       [ngModel]="validateSampleText()" (ngModelChange)="validateSampleText.set($event)"
       [attr.aria-label]="'validate.sample.label' | transloco" [placeholder]="'validate.sample.placeholder' | transloco"></textarea>
   }
+  @let stale = isValidateStale();
   <div class="val-actions">
     <button class="btn btn-secondary btn-sm" type="button" data-testid="validate-schema" [disabled]="validating()" (click)="runValidate()">
       @if (validating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;margin-inline-end:5px;"></span> }{{ 'validate.run' | transloco }}
     </button>
-    @if (validateCanContinue()) {
+    @if (validateCanContinue() && !stale) {
       <button class="btn btn-secondary btn-sm" type="button" data-testid="validate-continue" [disabled]="validating()" (click)="runValidate(true)">{{ 'validate.continue' | transloco }}</button>
     }
   </div>
   @if (validateError()) {
     <div class="sch-msg err" role="alert">{{ validateError() }}</div>
   }
-  @if (validateResult(); as result) {
+  @if (validateResult() && stale) {
+    <!-- The schema was edited after this check ran: what it found describes the schema as it WAS, so none of it is shown. -->
+    <div class="sch-msg warn" data-testid="validate-stale">{{ 'validate.stale' | transloco }}</div>
+  } @else if (validateResult(); as result) {
     <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
     @if (validateMode() === 'stored') {
       <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
@@ -611,6 +615,8 @@ export class SpaceSchemaTabComponent implements OnInit {
     this.validateCursor.set(null);
     this.validateRead.set(0);
     this.validateTotal.set(0);
+    this.validateRunMeta = null;
+    this.validateRunKey = '';
     this.validateError.set('');
   }
 
@@ -675,14 +681,32 @@ export class SpaceSchemaTabComponent implements OnInit {
       default: return { key: 'validate.outcome.violated', variant: 'error' };
     }
   }
+
+  /** The schema the result on screen was judged under, and its serialisation: what a later edit is told apart from. Null while there is no result. */
+  private validateRunMeta: Partial<SpaceMeta> | null = null;
+  private validateRunKey = '';
+
+  /**
+   * True when the schema has been edited since the check that produced the result on screen ran. The staged schema is plain mutable
+   * state with no change signal, so it is compared as the request would carry it; the template asks on every pass, and an edit is an event
+   * inside this component's tree, so the pass happens. A stale result is not shown and cannot be continued: it describes a schema that is
+   * no longer the one on the screen.
+   */
+  isValidateStale(): boolean {
+    return this.validateResult() !== null && this.validateRunKey !== JSON.stringify(this.state.buildMeta());
+  }
+
   /**
    * Run the live check on the schema AS STAGED. A sample is one pasted record (nothing is scanned); stored data is read a page at a time,
-   * the next page asked for with the cursor the last answer gave.
+   * the next page asked for with the cursor the last answer gave. A continuation belongs to the run it continues: it asks under the schema
+   * that run started with (never the staged schema as it is now), and after an edit there is nothing to continue.
    */
   runValidate(next = false): void {
     const spaceId = this.state.settingsSpace()?.id;
     if (!spaceId) return;
-    const body: Parameters<SpacesApi['validateSchema']>[1] = { meta: this.state.buildMeta() };
+    if (next && (!this.validateRunMeta || this.isValidateStale())) return;
+    const meta = next ? this.validateRunMeta! : this.state.buildMeta();
+    const body: Parameters<SpacesApi['validateSchema']>[1] = { meta };
     if (this.validateMode() === 'sample') {
       try {
         body.sample = JSON.parse(this.validateSampleText());
@@ -696,7 +720,11 @@ export class SpaceSchemaTabComponent implements OnInit {
       body.limit = SpaceSchemaTabComponent.VALIDATE_SHOWN;
       if (next && this.validateCursor()) body.after = this.validateCursor()!;
     }
-    if (!next) this.resetValidate();
+    if (!next) {
+      this.resetValidate();
+      this.validateRunMeta = meta;
+      this.validateRunKey = JSON.stringify(meta);
+    }
     this.validateError.set('');
     this.validating.set(true);
     this.spacesApi.validateSchema(spaceId, body).subscribe({
