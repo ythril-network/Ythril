@@ -124,8 +124,8 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
   > the result, so fixing the named field in any later save repairs the record.
 - **Unknown top-level fields (This instance)** — a control of its own, below the Schema validation bar, because it is not
   part of the space's shared schema. It answers a top-level field a write does not take, such as a misspelt `descripton`,
-  not an undeclared property of a type (Validation mode's job). *Warn — the write is stored without them and the answer
-  names them*; *Refuse — the write is refused and nothing is stored*. **Refuse** means integrations that send extra fields
+  not an undeclared property of a type (the Validation control's job). *Warn — store the write, name each field*: the
+  record is stored without them and the answer names them. *Refuse — refuse the write, store nothing*. **Refuse** means integrations that send extra fields
   start getting `400`. The setting applies to this instance only and is **not shared with networks**: each member of a
   network decides its own. A token without schema admin sees it disabled, with the reason beside it. A proxy space hides
   it, because each member's own setting governs a write that lands in that member.

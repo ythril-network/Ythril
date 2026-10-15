@@ -77,7 +77,7 @@ import { refusalText } from '../../core/refusal-text';
   @if (isProxySpace()) {
     <p class="sch-hint" data-testid="unknown-fields-proxy-note">{{ 'spaces.schema.unknownFields.proxyNote' | transloco }}</p>
   } @else {
-    <label class="val-lbl">
+    <label class="val-lbl inst-lbl">
       {{ 'spaces.schema.unknownFields.label' | transloco }}
       <select [(ngModel)]="state.schUnknownWriteFields" class="val-select inst-select" data-testid="unknown-fields-select"
         [disabled]="!canEditInstanceSetting()" [attr.aria-describedby]="unknownFieldsDescribedBy()">
@@ -87,7 +87,7 @@ import { refusalText } from '../../core/refusal-text';
     </label>
     <p class="inst-hint" id="unknown-fields-hint" data-testid="unknown-fields-hint">{{ 'spaces.schema.unknownFields.hint' | transloco }}</p>
     @if (state.schUnknownWriteFields === 'refuse') {
-      <p class="inst-hint" id="unknown-fields-consequence" data-testid="unknown-fields-consequence">{{ 'spaces.schema.unknownFields.consequence' | transloco }}</p>
+      <p class="inst-hint inst-warn" id="unknown-fields-consequence" data-testid="unknown-fields-consequence">{{ 'spaces.schema.unknownFields.consequence' | transloco }}</p>
     }
     @if (!canEditInstanceSetting()) {
       <p class="inst-hint" id="unknown-fields-readonly-reason" data-testid="unknown-fields-readonly-reason">{{ 'spaces.schema.unknownFields.readonlyReason' | transloco }}</p>
