@@ -613,10 +613,21 @@ export class EntryPopupComponent {
     return { stored: storedKeys, kept: kept && typeof kept === 'object' ? kept as Record<string, unknown> : Object.fromEntries(storedKeys.map(k => [k, true])) };
   }
 
+  /**
+   * What the editor changed, and nothing else: a key the loaded record carries with the same value is not sent. A record as the server
+   * answers it holds fields no update takes (its space, author, stamps, seq); sent back untouched, each was answered "unknown field —
+   * ignored" beside the warning that was about the edit. A key the person added or changed is sent, so the server still says what it
+   * does not take.
+   */
   private buildPatchBody(): Record<string, unknown> {
-    const d = { ...this.draft() };
-    delete d['_id'];
-    return d;
+    const was = this.snapshot();
+    const body: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(this.draft())) {
+      if (key === '_id') continue;
+      if (Object.hasOwn(was, key) && JSON.stringify(value) === JSON.stringify(was[key])) continue;
+      body[key] = value;
+    }
+    return body;
   }
 
   private getUpdateCall(

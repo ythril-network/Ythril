@@ -73,6 +73,22 @@ describe('a save that succeeds with warnings', () => {
     expect(h.$('.status-msg'), 'a second "Saved" beside "Saved, with warnings"').toBeNull();
   });
 
+  it('sends only what the editor changed: the fields the server keeps on a record are not sent back as edits', async () => {
+    // A record as the server answers it carries fields no update takes (its space, author, stamps, seq). Sent back unchanged,
+    // each came back as "unknown field — ignored" in the notice, beside the one warning that was about the edit.
+    const stored = { ...RECORD, spaceId: 'work', author: { instanceId: 'i1' }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z', seq: 7 };
+    const update = vi.fn((_space: unknown, _id: unknown, body: unknown) => of({ ...stored, ...(body as object) }));
+    const h = mount(update);
+    h.fixture.componentRef.setInput('record', structuredClone(stored));
+    await h.settle();
+    h.fixture.componentInstance.onRawJsonChange(JSON.stringify({ ...stored, properties: { age: 10 }, nickname: 'A' }));
+    h.saveButton().click();
+    await h.settle();
+    const body = update.mock.calls[0]![2] as Record<string, unknown>;
+    expect(Object.keys(body).sort(), 'a key the record carried unchanged was sent as an edit').toEqual(['nickname', 'properties']);
+    expect(body['properties']).toEqual({ age: 10 });
+  });
+
   it('dismisses the notice, and a later save without warnings removes it', async () => {
     const answers = [structuredClone(answer), structuredClone(RECORD)];
     const h = mount(() => of(answers.shift()));
