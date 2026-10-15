@@ -29,7 +29,7 @@ export const SCHEMA_MD_STYLES = `
 /* The label stacks above the control, as the reference form does, so it does not wrap beside it and the select can take
    the width its option text needs (it clipped at phone width when inline). */
 .inst-lbl { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
-.inst-select { min-height:28px; box-sizing:border-box; width:100%; max-width:52ch; }
+.inst-select { min-height:32px; box-sizing:border-box; width:100%; max-width:52ch; }
 .inst-hint { display:block; margin:6px 0 0; font-size:12px; line-height:1.45; color:var(--text-secondary); max-width:70ch; }
 .inst-warn { color:var(--warning); }
 .val-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
