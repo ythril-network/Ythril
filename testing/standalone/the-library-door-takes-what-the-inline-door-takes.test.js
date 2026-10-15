@@ -52,6 +52,8 @@ const SAMPLES = {
   suppressEmbeddings: { kind: 'entity', value: true },
   endpoints: { kind: 'edge', value: { from: ['person'], to: ['team'] } },
   functional: { kind: 'edge', value: true },
+  // F-46: added with the key (TypeSchema.rules); a rule that reads no property, so the sample needs no propertySchemas beside it.
+  rules: { kind: 'entity', value: { titled: { rule: "self.title != ''", message: 'needs a title' } } },
 };
 
 /** The members of `interface TypeSchema`, read from the source. */

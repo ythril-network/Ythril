@@ -172,12 +172,16 @@ export async function beginSchemaValidate(input: {
 
   // A proposed meta is parsed as a save would parse it, so a rule the save would refuse is refused here in the same words. The stored
   // meta was checked when it was stored: a rule in it that no longer compiles is skipped and reported, not a reason to refuse the check.
-  const proposed = parsed.data.meta !== undefined;
-  const metaParse = proposed
-    ? SpaceMetaBody.safeParse(stripServerOwnedMeta(parsed.data.meta))
-    : readingStoredRules(() => SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {})));
-  if (!metaParse.success) return { status: 400, error: metaParse.error.message };
-  const meta = metaParse.data as SpaceMeta;
+  let meta: SpaceMeta;
+  if (parsed.data.meta !== undefined) {
+    const proposedParse = SpaceMetaBody.safeParse(stripServerOwnedMeta(parsed.data.meta));
+    if (!proposedParse.success) return { status: 400, error: proposedParse.error.message };
+    meta = proposedParse.data as SpaceMeta;
+  } else {
+    const storedParse = readingStoredRules(() => SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {})));
+    if (!storedParse.success) return { status: 400, error: storedParse.error.message };
+    meta = storedParse.data as SpaceMeta;
+  }
   const resolved = resolveMetaRefs(meta);
 
   if (sample) {

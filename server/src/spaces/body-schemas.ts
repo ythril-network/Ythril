@@ -544,11 +544,7 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  * `reindexRun` joined in Q-99 part 2 — a running reindex's progress beside `needsReindex` — for the same reason, and
  * the same round-trip test caught it the same way.
  */
-/*
- * `invalidRules` joined with F-46: the stored rules that no longer compile, named on the meta answer — derived, and echoed back by a
- * caller who round-trips the meta.
- */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

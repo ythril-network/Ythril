@@ -112,6 +112,8 @@ export const CAPABILITIES = [
    */
   ['Spaces', 'space_reembed', 'POST /api/spaces/:id/reembed'],
   ['Spaces', 'file_stamp_report', 'POST /api/spaces/:id/file-stamp-report'],
+  // F-46: the live check of a schema, both modes (one record, or the stored ones) — no longer a UI-only dry run.
+  ['Spaces', 'schema_validate', 'POST /api/spaces/:id/validate-schema'],
 
   ['Tokens', 'list_tokens', 'GET /api/tokens'],
   ['Tokens', 'list_tokens', 'GET /api/brain/spaces/:spaceId/token-access'],
@@ -205,7 +207,6 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
   '/api/spaces/reorder': 'the order spaces appear in the UI sidebar.',
   '/api/spaces/:id/rebuild-indexes': 'rebuilds the Atlas search indexes — a repair for a broken index, '
     + 'which is an operator diagnosis rather than something an agent can know it needs.',
-  '/api/spaces/:id/validate-schema': 'dry-runs a schema against stored records, for the schema editor.',
   '/api/spaces/:id/completeness': 'the schema-completeness meter the UI draws.',
   '/api/spaces/:id': 'DELETE removes a space and everything in it. Instance-admin — `delete_space_data` is '
     + 'the agent-reachable half, which empties a space without destroying it.',

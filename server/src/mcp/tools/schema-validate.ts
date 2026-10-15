@@ -22,7 +22,7 @@ import { ToolRefusal } from '../../util/errors.js';
 export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
   description: 'Check a schema against records without writing anything — the space\'s stored schema, or one you propose in `meta` '
-    + '(parsed exactly as `schema_update` would parse it, so a rule the save would refuse is refused here in the same words). '
+    + '(parsed exactly as a schema save would parse it, so a rule the save would refuse is refused here in the same words). '
     + 'Needs the `read` rung on the `schema` area of the space.\n\n'
     + 'TWO MODES. With `sample: { kind, record }` the schema is run over ONE record you supply — `kind` is entity, edge, fact or '
     + 'chrono, `record` in the stored shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, '
@@ -48,15 +48,22 @@ export const schema_validateTool: ToolHandler = {
       space: s.requiredSpace,
       meta: {
         type: 'object',
-        description: 'The schema to check, as `schema_update` takes its fields (`typeSchemas`, `rules`, `validationMode`, ...). '
+        description: 'The schema to check, in the shape `space_meta` returns it (`typeSchemas`, `rules`, `validationMode`, ...). '
           + 'Omit it to check the space\'s stored schema.',
       },
       sample: {
         type: 'object',
         description: 'One record to check instead of the stored ones: `{ kind, record }`, `kind` one of entity, edge, fact, chrono.',
         properties: {
-          kind: { type: 'string', enum: ['entity', 'edge', 'fact', 'chrono'] },
-          record: { type: 'object', description: 'The record in its stored shape.' },
+          kind: {
+            type: 'string', enum: ['entity', 'edge', 'fact', 'chrono'],
+            description: 'Which kind of record `record` is: its rules and its type schemas are the ones for this kind (a file is refused).',
+          },
+          record: {
+            type: 'object',
+            description: 'The record in its STORED shape, not the write tool\'s: `name` for an entity, `fact` for a fact, `title` for a '
+              + 'chrono entry, `label` for an edge, with `type`, `description`, `tags` and `properties`. A field left out is empty.',
+          },
         },
         required: ['kind', 'record'],
         additionalProperties: false,
