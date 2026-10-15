@@ -26,6 +26,11 @@ export const SCHEMA_MD_STYLES = `
 .val-modes { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; }
 .val-mode { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
 .val-violations .val-row { display:block; margin-block-start:3px; overflow-wrap:anywhere; }
+/* The space rules and the live check are blocks of the tab like the validation bar and the toolbar, so they keep the same 14px apart;
+   without it the check's title sat on the rules and its buttons on the export toolbar. */
+.sch-space-rules, .sch-validate { display:block; margin-bottom:14px; }
+.val-sample { display:block; width:100%; box-sizing:border-box; margin-block-start:8px; }
+.val-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-block-start:8px; }
 .sch-validation-bar { display:flex; align-items:center; justify-content:space-between; gap:16px 20px; flex-wrap:wrap;
   padding:12px 14px; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; background:var(--bg-surface); }
 .sch-validation-bar .svb-label { display:flex; flex-direction:column; gap:2px; min-width:0; }
