@@ -17,6 +17,8 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { readFileWindow } from '../../files/files.js';
@@ -339,7 +341,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   if (typeof path !== 'string' || !path.trim()) {
     res.status(400).json({ error: '`path` query parameter required' }); return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   // The four brain record types honour `If-Match` against their `seq`, which advances on every write. A file
   // row's `seq` does NOT: `updateFileMeta` stamps one only for an AUTHORED write, and a write touching only
@@ -351,11 +353,15 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     res.status(400).json({ error: '`If-Match` is not supported on file metadata: a file record\'s `seq` advances only on an authored write, so a change to its derived fields leaves it unchanged and a precondition on it would pass over an edit you have not seen. It is honoured on `PATCH` for facts, entities, edges and chrono entries.' });
     return;
   }
+  // The unknown-field judge, after the target and the transport precondition and before the body is read (see `_judged-write.ts`).
+  // `linkFiles` is NOT a field of this write (a file holds links to entities, facts and chrono entries): it is an unknown key here, as
+  // it is on `update_file_meta`, and the connection helpers below read only the classes a file holds.
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'file.meta.update', wt.target, 'rest'))) return;
 
   const { description, tags, properties, deleteFields } = req.body ?? {};
   // The three link classes a file holds. Shape and well-formedness here, existence at the writer — the
   // one refusal both doors share, from `write-connections.ts`.
-  const linkErr = linkInputError(req.body, { strict: isStrictLinkage(wt.target) });
+  const linkErr = linkInputError(req.body, 'file', { strict: isStrictLinkage(wt.target) });
   if (linkErr) { res.status(400).json({ error: linkErr }); return; }
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so
@@ -386,9 +392,9 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // so handing the record over cannot publish it.
   // The before and the link sets, from whichever member holds the file — one read shared with the MCP tool (Q-50).
   // A file is keyed in the links collection by its stored path.
-  const editAudit = await readEditAudit(wt.target, mid => getFileMeta(mid, path), toDocId(path), req.body);
+  const editAudit = await readEditAudit(wt.target, mid => getFileMeta(mid, path), toDocId(path), req.body, 'file');
   const updated = await findFirstAcrossMembers(wt.target,
-    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body) }, dfPaths));
+    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths));
   if (updated) {
     req.auditSnapshots = editAudit.snapshots(updated);
     res.json(updated);

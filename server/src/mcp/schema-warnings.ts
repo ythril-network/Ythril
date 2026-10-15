@@ -26,8 +26,8 @@
 import { writeWarningFields, type UpdateValidation } from '../brain/write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import type { ToolResult } from './tools/types.js';
-import { answerCarriesUnknownFieldRows } from '../api/decorate-json-answer.js';
-import { unknownFieldLines, withUnknownFieldWarnings, type UnknownFieldRow } from '../contract/unknown-field-rows.js';
+import { answerCarriesUnknownFieldRows, answerLeftARecord } from '../api/decorate-json-answer.js';
+import { unknownFieldLines, unknownFieldRowsAs, withUnknownFieldWarnings, type UnknownFieldRow } from '../contract/unknown-field-rows.js';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 
@@ -103,11 +103,14 @@ const undecoratedSaid = warnOnce<string>();
  *   gets `{ error, warnings }`, because a client that surfaces `structuredContent` in preference to the text would otherwise see no
  *   refusal at all. A SUCCESS without one gets the text lines only: `{ warnings }` alone would replace its answer.
  */
-export function withUnknownFieldRows<T extends DecoratableOutcome>(outcome: T, rows: readonly UnknownFieldRow[]): T {
-  if (rows.length === 0) return outcome;
+export function withUnknownFieldRows<T extends DecoratableOutcome>(outcome: T, judged: readonly UnknownFieldRow[]): T {
+  if (judged.length === 0) return outcome;
   try {
     const { result } = outcome;
     if (!answerCarriesUnknownFieldRows(outcome.status, result.structuredContent)) return outcome;
+    // The rows are worded for the write the judge let through; a call that FAILED for another reason was not stored with the field
+    // ignored, so they are re-worded for it (and lose their value) — unless the failure left a record (`ConnectionsNotWritten`).
+    const rows = unknownFieldRowsAs(judged, result.isError === true && !answerLeftARecord(result.structuredContent) ? 'refused' : 'stored');
     const lines = unknownFieldLines(rows).join('\n');
     const content = result.content.length === 0
       ? [{ type: 'text' as const, text: lines }]

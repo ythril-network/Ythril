@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, DELETION_REACH } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -8,14 +8,14 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import type { UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 import { NotFoundError } from '../../util/errors.js';
 
@@ -23,7 +23,8 @@ export const save_entityTool: ToolHandler = {
   name: 'save_entity',
   description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — supply one and the matching record is updated, omit it and a NEW record is always inserted regardless of name. Two entities may share a name; nothing deduplicates for you. Search by name with `filter` on the `entities` collection first if you meant to update.\n\n'
     + 'An upsert onto an existing record MERGES: properties and tags are merged over what is stored, so you can set one field without restating the rest, and the record is validated in its MERGED form rather than as the fragment you sent. That is why a partial upsert of a conformant record is accepted even when the fragment alone would fail a required-property rule.\n\n'
-    + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is. `introduced` are violations your write caused — fix those. `preExisting` were already stored and your write neither caused nor fixed them; in `strict` mode they are REPORTED and do NOT refuse the write, so an unrelated edit is never blocked by a field somebody else broke. Branch on `introduced` and treat `preExisting` as a repair opportunity rather than an error.',
+    + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is. `introduced` are violations your write caused — fix those. `preExisting` were already stored and your write neither caused nor fixed them; in `strict` mode they are REPORTED and do NOT refuse the write, so an unrelated edit is never blocked by a field somebody else broke. Branch on `introduced` and treat `preExisting` as a repair opportunity rather than an error.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -59,6 +60,7 @@ export const save_entityTool: ToolHandler = {
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entities that CONTRADICT this one — a near-neighbour setting the same single-valued property to a different value. Deterministic only (no model call). The entity is still stored regardless.' },
             checkDuplicates: { type: 'boolean', default: true, description: 'On a NEW entity insert (no id / unknown id), run a semantic near-duplicate check first (default true). Flags highly similar existing entities (id + summary + score) so you can merge or update instead of creating a duplicate. Does not fire on updates. Set false to skip.' },
+            waitForEmbedding: waitForEmbeddingSchema('entity', true),
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
@@ -121,6 +123,7 @@ export const save_entityTool: ToolHandler = {
     const { entity, warning, similar, contradicts } = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId,
       {
         checkDuplicates: entDupeCheck, checkContradictions: entContraCheck, dupeThreshold: entDupeThreshold,
+        ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
         ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
         ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
       },
@@ -187,7 +190,8 @@ export const update_entityTool: ToolHandler = {
     + 'call is refused rather than guessing which member you meant.\n\n'
     + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the sync sequence number, '
     + 'which increments on every write and is how a peer knows this version is newer. An id that does not exist '
-    + 'is an error, not a silent no-op, so a successful reply means a record really changed.',
+    + 'is an error, not a silent no-op, so a successful reply means a record really changed.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -272,11 +276,11 @@ export const update_entityTool: ToolHandler = {
       updates.properties = a['properties'] as Record<string, string | number | boolean>;
     }
     const ttlDays = ttlDaysFromArgs(a);
-    // A connection field IS a field. `desiredLinksFrom` and `edgeInputsFrom` both return `null` for
-    // absent, never `undefined` — comparing against `undefined` would be true for `null` and would
-    // DISABLE this refusal rather than widen it.
-    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of name, type, description, tags, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
+    // Nothing to change, answered in the one sentence every update door says, over the one set of fields the write takes — a
+    // connection field and `superseded` included, which the hand-written list this replaced named none of.
+    // Loaded here, not at the top: the judge's module imports this tool to read its schema (no-runtime-import-cycles).
+    const { atLeastOneFieldRefusal, carriesAnyAcceptedField } = await import('../../contract/write-accepts.js');
+    if (!carriesAnyAcceptedField(a, 'entity.update')) throw new Error(atLeastOneFieldRefusal('entity.update'));
 
     // Validate the entity AS IT WILL BE, against the meta of the member space it actually lives in. This
     // path had no schema validation at all, so `type` could be moved outside the allowlist that
@@ -290,7 +294,7 @@ export const update_entityTool: ToolHandler = {
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the record is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => getEntityById(mid, id), id, a);
+    const audit = await readEditAudit(wt.target, mid => getEntityById(mid, id), id, a, 'entity');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the record is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it, and judged by the type this patch leaves the entity.
@@ -342,7 +346,8 @@ export const graph_mergeTool: ToolHandler = {
     + 'REFUSED BEFORE ANYTHING IS WRITTEN, on every door alike: `merge_too_large` (status 422, with `relinks` and `bound` in structuredContent) when the absorbed entity has more edges, links and face labels than one merge relinks (' + MERGE_MAX_RELINKS + '), and status 400 when the merged survivor would break a `strict` space\'s schema. The `merge_too_large` text names both entities and what would fit: deleting edges or links the absorbed entity no longer needs (an edge cannot be moved; its ends are not editable), or merging the other way round, offered only when that merge fits the bound. A merge that runs relinks everything in ONE transaction: it lands whole or not at all.\n\n'
     + 'RESOLVE EVERY CONFLICT OR NOTHING HAPPENS. A partial map returns the plan again rather than merging what it can, because a half-merge would leave two records that are neither separate nor one.\n\n'
     + 'Per type: numeric properties accept `fn:avg|min|max|sum`, booleans accept `fn:and|or|xor`, and strings take "survivor", "absorbed", or "custom" with `customValue` — there is no function that can combine two strings sensibly, so you have to choose. Properties that do NOT conflict are carried over without appearing in the plan.\n\n'
-    + 'IT CAN LEAVE AN EDGE BREAKING ITS LABEL\'S RULE, AND IT TELLS YOU WHICH. Relinking rewrites the ends of stored edges, so merging two entities of different types can move an edge onto an end its label forbids — and that is a legitimate thing to do, because a merge is how a mistyped record gets fixed. Any such edge is listed on both the plan and the result, naming the end that moved and what the label admits. It is REPORTED, not refused: a rule declared after the data existed must not make duplicates unmergeable. Fix them afterwards with `update_edge`/`delete_edge`, or widen the label\'s endpoints in the space schema.',
+    + 'IT CAN LEAVE AN EDGE BREAKING ITS LABEL\'S RULE, AND IT TELLS YOU WHICH. Relinking rewrites the ends of stored edges, so merging two entities of different types can move an edge onto an end its label forbids — and that is a legitimate thing to do, because a merge is how a mistyped record gets fixed. Any such edge is listed on both the plan and the result, naming the end that moved and what the label admits. It is REPORTED, not refused: a rule declared after the data existed must not make duplicates unmergeable. Fix them afterwards with `update_edge`/`delete_edge`, or widen the label\'s endpoints in the space schema.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

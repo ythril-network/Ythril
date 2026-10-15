@@ -46,6 +46,10 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import { unknownBodyFields } from './query.js';
+// TYPES ONLY, on purpose: the judge (`bulk-unknown-fields.ts`) is loaded inside `bulkWrite`, and nothing here may import
+// `contract/write-accepts.ts` at module load — see the comment at that `import()`.
+import type { WriteDoor } from '../contract/write-accepts.js';
+import type { BulkUnknownFields } from './bulk-unknown-fields.js';
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
 // three copies of one product fact, and the third had two of them wrong.
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
@@ -219,14 +223,14 @@ export function bulkSizeRefusal(input: Record<string, unknown>): string | null {
  * works depend on the order somebody happened to write it in. Refused, naming the array that does resolve
  * one, rather than stored as an edge pointing at the literal string.
  */
-function itemConnectionError(item: unknown, strict: boolean): string | null {
+function itemConnectionError(item: unknown, kind: 'fact' | 'entity' | 'chrono', strict: boolean): string | null {
   const at = (edgeInputsFrom(item) ?? []).findIndex(e => isRefUse(e?.to));
   if (at >= 0) {
     return `edges[${at}].to is a \`$ref\`, and an item's own \`edges\` do not resolve one — they name records `
       + 'that already exist. Use the top-level `edges` array for a relationship to a record this same call '
       + 'creates: it runs after every record array, so a reference there can point at any of them.';
   }
-  return connectionInputError(item, { strict });
+  return connectionInputError(item, kind, { strict });
 }
 
 /**
@@ -259,7 +263,11 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * is the one that leaves it stored, and its row carries `written` (`BulkError`), because a failed item is the one a
  * caller sends again.
  */
-export async function bulkWrite(spaceId: string, input: BulkInput, trusted: BulkWriteTrust = {}): Promise<BulkResult> {
+export async function bulkWrite(
+  spaceId: string, input: BulkInput, trusted: BulkWriteTrust = {},
+  /** Which door asked — only the label the unknown-field count carries (`REST` unless a tool says otherwise). */
+  door: WriteDoor = 'rest',
+): Promise<BulkResult> {
   const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
   if (tooLarge) throw new Error(tooLarge);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
@@ -272,9 +280,18 @@ export async function bulkWrite(spaceId: string, input: BulkInput, trusted: Bulk
   const updated: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const errors: BulkError[] = [];
   const connections = { links: 0, edges: 0 };
+  // What the batch says about its items' unknown keys (`bulk-unknown-fields.ts`): the setting is read once, here, for this space.
+  // LOADED HERE, not imported at the top: the judge reads what an item accepts from the `save_bulk` tool's own schema
+  // (`contract/write-accepts.ts`), whose module imports every write tool, and `mcp/tools/bulk.ts` reads this module's exports at ITS top
+  // level (`BULK_BODY_KEYS`, `BULK_MAX_PER_TYPE`). A static import made importing this module first reach the tool module while those were
+  // still uninitialised (`Cannot access 'BULK_MAX_PER_TYPE' before initialization`). By the first batch every module has been evaluated.
+  const { BulkUnknownFields: Judge } = await import('./bulk-unknown-fields.js');
+  const unknown = new Judge(spaceId, input, door, row => { errors.push(row); });
 
   /** A refused item: its error, and — if it declared a key — the reason a dependant will be told. */
   const reject: Reject = (type, index, item, reason, violation): void => {
+    // An item refused for another reason was not written, so its unknown keys were not ignored: they are said first, as not accepted.
+    unknown.say(item, 'refused');
     errors.push({ type, index, reason, ...(violation ? { violation } : {}) });
     const key = refKeyDeclared(item);
     // The structured refusal crosses the `$ref` boundary with its reason: an item that names this one is told the same thing.
@@ -291,16 +308,24 @@ export async function bulkWrite(spaceId: string, input: BulkInput, trusted: Bulk
     for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
   };
 
-  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn, trusted.instanceWrittenKeys);
+  // In a space set to refuse, an item that carries an unknown key is rejected here, before anything of it is prepared, and its row is
+  // its reason; `reject` records a `$ref` it declared as failed, so a dependant is told why.
+  for (const r of unknown.refusedItems(input)) reject(r.type, r.index, r.item, r.reason);
+
+  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn, trusted.instanceWrittenKeys, unknown);
   const view = new ReadSet(spaceId);
   await view.load(mergeWants([...prepared.map(p => p.want), ...slice(input.edges).map(e => topLevelEdgeWant(spaceId, e))]));
 
   const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors }, trusted.instanceWrittenKeys);
   for (const p of prepared) await run.planRecord(p);
-  for (const [i, item] of slice(input.edges).entries()) await run.planTopLevelEdge(i, item, strict);
+  for (const [i, item] of slice(input.edges).entries()) {
+    if (unknown.refuses('edges', i)) continue;
+    await run.planTopLevelEdge(i, item, strict);
+  }
   await run.flush();
   await run.replanStale();
   run.nameWhatLanded();
+  unknown.finish();
 
   return { inserted, updated, connections, errors, refs: refs.toJSON() };
 }
@@ -348,6 +373,7 @@ type Warn = (type: string, index: number) => (check: UpdateValidation) => void;
 function prepareItems(
   spaceId: string, input: BulkInput, meta: SpaceMeta | undefined, strict: boolean, reject: Reject, warn: Warn,
   instanceWrittenKeys: InstanceWrittenKeys | undefined,
+  unknown: BulkUnknownFields,
 ): PreparedRecord[] {
   const out: PreparedRecord[] = [];
   const common = (kind: 'fact' | 'entity' | 'chrono', item: Record<string, unknown>, i: number): {
@@ -364,12 +390,13 @@ function prepareItems(
     const flags = parseRecordFlags(item);
     if (!flags.ok) { reject(type, i, item, flags.error); return { ok: false }; }
     // `Q-44`: the SHARED refusal for the item's own connections.
-    const connErr = itemConnectionError(item, strict);
+    const connErr = itemConnectionError(item, kind, strict);
     if (connErr) { reject(type, i, item, connErr); return { ok: false }; }
     return { ok: true, ttlDays, rawId, flags: flags.flags, desired: connectionsOf(item, rawId ?? '', kind).desired };
   };
 
   for (const [i, item] of slice(input.facts).entries()) {
+    if (unknown.refuses('facts', i)) continue;
     const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
     if (!fact) { reject('fact', i, item, 'missing required field: fact'); continue; }
     if (fact.length > MAX_FACT_LENGTH) { reject('fact', i, item, '`fact` must not exceed 50 000 characters'); continue; }
@@ -390,6 +417,7 @@ function prepareItems(
   }
 
   for (const [i, item] of slice(input.entities).entries()) {
+    if (unknown.refuses('entities', i)) continue;
     const name = typeof item['name'] === 'string' ? item['name'].trim() : '';
     if (!name) { reject('entity', i, item, 'missing required field: name'); continue; }
     const type = typeof item['type'] === 'string' ? item['type'].trim() : '';
@@ -414,6 +442,7 @@ function prepareItems(
 
   const allowedChronoTypes = getAllowedChronoTypes(meta);
   for (const [i, item] of slice(input.chrono).entries()) {
+    if (unknown.refuses('chrono', i)) continue;
     const title = typeof item['title'] === 'string' ? item['title'].trim() : '';
     const type = typeof item['type'] === 'string' ? item['type'] : '';
     const startsAt = typeof item['startsAt'] === 'string' ? item['startsAt'] : '';

@@ -115,7 +115,8 @@ const { Server } = requireFromServer(path.join(driverLib, 'sdam', 'server.js'));
 const { PoolClearedError } = requireFromServer(path.join(driverLib, 'cmap', 'errors.js'));
 const { MongoNetworkTimeoutError } = requireFromServer('mongodb');
 
-let door, app, base, adminKey, callTool, ADMIN, getConfig, TOOLS_BY_NAME, toolSchemas, RETIRED, NAME_QUOTED, REFUSAL_NAMES_MAX;
+let door, app, base, adminKey, callTool, ADMIN, getConfig, TOOLS_BY_NAME, toolSchemas, RETIRED, NAME_QUOTED, REFUSAL_NAMES_MAX, peerText;
+const cutOnce = (name) => peerText(name, { max: NAME_QUOTED });
 let SUBJECTS = [];
 let counter = 0;
 const uniq = (label) => `${label} ${process.pid}-${++counter}`;
@@ -309,7 +310,7 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
     ({ TOOLS_BY_NAME } = await import('../../server/dist/mcp/tools/index.js'));
     ({ RETIRED_WRITE_FIELDS: RETIRED } = await import('../../server/dist/brain/retired-write-fields.js'));
-    ({ NAME_QUOTED, REFUSAL_NAMES_MAX } = await import('../../server/dist/util/log.js'));
+    ({ NAME_QUOTED, REFUSAL_NAMES_MAX, peerText } = await import('../../server/dist/util/log.js'));
     const { toolSchemasFor } = await import('../../server/dist/mcp/tool-schema.js');
     toolSchemas = toolSchemasFor([S, SCHEMA_SPACE, EMBED_SPACE, PROXY]);
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
@@ -751,7 +752,9 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
       const rows = unknownRows(a.data);
       if (ms > 5000) failures.push(`${which}: ${ms} ms for one oversized key`);
       if (rows.length !== 1 || rows[0].code !== 'unknown_field') failures.push(`${which}: the oversized key was not answered as one unknown row (${a.status}): ${fmt(rows).slice(0, 200)}`);
-      else if (rows[0].field.length > NAME_QUOTED + 8) failures.push(`${which}: the row quotes ${rows[0].field.length} characters of a key, past NAME_QUOTED=${NAME_QUOTED}`);
+      // Cut ONCE, by the one renderer of a caller's name: a name cut a second time comes out as a different string. (This
+      // read NAME_QUOTED + 8, a hand margin that a single cut's `…(+N more chars)` suffix already exceeds.)
+      else if (rows[0].field !== cutOnce(huge)) failures.push(`${which}: the row quotes ${rows[0].field.length} characters of a key, not the key cut once at NAME_QUOTED=${NAME_QUOTED} (${cutOnce(huge).length})`);
     }
     assert.ok(subject, 'no entity create subject');
     assert.deepEqual(failures, [], 'a caller\'s key is cut before it is measured, so a huge one costs the same as a short one');

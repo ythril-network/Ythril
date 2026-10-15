@@ -19,6 +19,20 @@
  * the routers' write operations with this set (`a-route-reads-what-its-tool-declares`) goes red until it is made.
  */
 import { MCP_TOOL_OPERATIONS } from '../mcp/audit-map.js';
+import type { UNKNOWN_WRITE_FIELD_DOORS } from '../metrics/registry.js';
+
+/** Which door asked: REST, an MCP tool call, or `POST /api/<tool>` (on the tool side, `caller.transport` says which of the last two). */
+export type WriteDoor = (typeof UNKNOWN_WRITE_FIELD_DOORS)[number];
+
+/**
+ * The door a tool call came through, in the judge's and the metric's vocabulary. A tool is reached by MCP (`mcp`) or by `POST /api/<tool>`,
+ * which the dispatcher's `transport` calls `rest` and the judge calls `tool` — `rest` is the brain ROUTES' door. One answer, so the
+ * dispatcher and a tool that judges for itself (`save_bulk`) cannot label one call two ways. Here, in the leaf, because a tool module
+ * names its door and must not import the judge's module, which imports the tools.
+ */
+export function writeDoorOfTransport(transport: 'mcp' | 'rest'): WriteDoor {
+  return transport === 'mcp' ? 'mcp' : 'tool';
+}
 
 /** A record family and a write verb: `entity.create`, `fact.update`, `entity.merge`, `link.create`, `file.meta.update`, `bulk.write`. */
 const RECORD_WRITE_OPERATION = /^(?:(?:entity|fact|edge|chrono|link)\.(?:create|update|merge)|file\.meta\.update|bulk\.write)$/;
@@ -50,6 +64,15 @@ export function isJudgedWriteOperation(operation: string): boolean {
 /** The MCP tool that is the door of a judged operation, or `undefined` for an operation the judge does not judge. */
 export function toolOfJudgedOperation(operation: string): string | undefined {
   return TOOL_OF_OPERATION.get(operation);
+}
+
+/**
+ * Is this operation a BATCH — one whose body holds collections of records rather than one record? Its top level is collection names
+ * (refused in every mode) and each ITEM is judged by the batch writer (`brain/bulk.ts`) against its collection, so a door that judges "the
+ * body" of a record write must leave a batch alone. One question, one answer: a door asks this and never spells the operation's name.
+ */
+export function isBatchWriteOperation(operation: string): boolean {
+  return operation === 'bulk.write';
 }
 
 /** The judged operation a tool performs, or `null` for a tool whose arguments are not judged (a read, a delete, an act, any other write). */

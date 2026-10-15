@@ -30,8 +30,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { LINK_INPUT_FIELDS, LINK_INPUT_NAMES, desiredLinksFrom, linkInputError, linkInputSchemas, edgeInputsFrom, edgeInputError, edgeInputSchema } =
+const { LINK_INPUT_FIELDS, LINK_INPUT_NAMES, linkInputSchemas, edgeInputsFrom, edgeInputError, edgeInputSchema, ...connectionHelpers } =
   await import('../../server/dist/brain/write-connections.js');
+// The helpers that read a body's `link*` fields take the record kind whose link classes bound what they read (bundle-128, design-v3
+// 2.4): a key the kind cannot hold is never read. Every case below asks as a FILE, the one kind that holds all three classes, so each
+// asserts what it always did about the field it names.
+const desiredLinksFrom = (body) => connectionHelpers.desiredLinksFrom(body, 'file');
+const linkInputError = (body, opts) => connectionHelpers.linkInputError(body, 'file', opts);
 const { REF_KINDS } = await import('../../server/dist/config/types-knowledge.js');
 
 const UUID = '11111111-2222-4333-8444-555555555555';
@@ -115,11 +120,17 @@ describe('what it refuses', () => {
     assert.match(linkInputError({ linkEntities: 'nope' }, { strict: false }), /must be an array/);
   });
 
-  it('a file reference is a PATH, and a UUID there is refused', () => {
+  it('a file reference is a PATH, and a UUID there is refused', async () => {
     // The hazard `save_link` names: the same UUID can name records in two collections, so a file field
     // holding one is a link that reads as correct and points at nothing.
-    assert.equal(linkInputError({ linkFiles: ['notes/report.md'] }), null);
-    assert.match(linkInputError({ linkFiles: ['../secrets/keys.txt'] }), /space-relative/);
+    // bundle-128 (Q-496): no record kind HOLDS a link class to a file (a file names entities, facts and chrono entries), so
+    // `linkFiles` is an unknown key on every write door and `linkInputError` no longer reads it for any kind. The rule this case
+    // holds — a file reference is a space-relative path, never a UUID — is the one `invalidRefsMessage` applies to a file
+    // endpoint (an edge's `toKind: 'file'`), so it is asked of that function directly.
+    const { invalidRefsMessage } = await import('../../server/dist/brain/entity-refs.js');
+    assert.equal(invalidRefsMessage('linkFiles', 'file', ['notes/report.md']), null);
+    assert.match(invalidRefsMessage('linkFiles', 'file', ['../secrets/keys.txt']), /space-relative/);
+    assert.equal(linkInputError({ linkFiles: [UUID] }), null, 'no kind holds a class to a file, so the helper never reads `linkFiles`');
   });
 
   it('and says nothing about a body that names no link field', () => {

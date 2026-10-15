@@ -59,6 +59,17 @@ import { stripComments } from './_strip-comments.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 import { argumentsOf } from './_structural-window.mjs';
 
+/**
+ * The judge's own answer to "what does this write accept", for the brain write routes (bundle-128, Q-320).
+ *
+ * A brain write route reads its body through helpers (the shared write options go through `ttlDaysError`, `dupeCheckOptsFromBody` and the
+ * connection helpers), so none of the shapes below could name its keys and every one came back unresolved. They are no longer hand-kept
+ * lists beside the route: what such a route accepts IS `acceptedWriteKeys(operation)` (`contract/write-accepts.ts`), and the route names its
+ * operation in the one call that judges its body. Loaded here, at the top, because `routeAcceptKeys` is synchronous; a build that is not
+ * there leaves `null`, and every such route is then reported unresolved BY NAME, never as accepting nothing.
+ */
+const writeAccepts = await import('../../server/dist/contract/write-accepts.js').catch(() => null);
+
 /** From the `{` at `open`, the matching `}`. Depth-counted, so a nested object does not end it early. */
 function literalAt(src, open) {
   let depth = 0;
@@ -153,6 +164,13 @@ const handsOffTheRequest = (body, readers) => {
 
 /** The body keys a handler accepts, or why they could not be read. */
 export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
+  // A brain write route names its operation in the call that judges its body, and what it accepts is that operation's accepted set.
+  const judged = body.match(/\banswerUnknownWriteFields\(\s*req\.body\s*,\s*'([a-z.]+)'/);
+  if (judged) {
+    if (!writeAccepts) return { unresolved: `${judged[1]} is judged, and server/dist/contract/write-accepts.js is not built` };
+    return { keys: [...writeAccepts.acceptedWriteKeys(judged[1])], via: `acceptedWriteKeys('${judged[1]}')` };
+  }
+
   const refusalAt = body.indexOf('unknownBodyFields(');
   if (refusalAt > -1) {
     /*

@@ -40,8 +40,6 @@ import { stripComments } from './_strip-comments.mjs';
 
 /** The helper that turns a body's `link*` and `edges` into storage. */
 const APPLY = 'applyConnections';
-/** The shared allowlist constant a body-key check spreads in. */
-const KEYS = 'CONNECTION_BODY_KEYS';
 
 /**
  * Every REST brain module whose create path applies connections, with its update allowlists.
@@ -54,9 +52,11 @@ function doorsThatAcceptConnections() {
   for (const { file, text } of readTrackedSources('server/src/api/brain', { floor: 5 })) {
     const src = stripComments(text);
     if (!src.includes(`${APPLY}(`)) continue;
-    const updateKeys = [...src.matchAll(/const\s+(\w*UPDATE_BODY_KEYS)\s*=\s*\[([^\]]*)\]/g)]
-      .map(m => ({ name: m[1], body: m[2] }));
-    found.push({ file: file.split('/').pop(), src, updateKeys });
+    // The record kind a create applies connections for, read from the call itself: `applyConnections(space, id, 'fact', body, …)`.
+    const kinds = [...new Set([...src.matchAll(/applyConnections\([^;]*?,\s*'(entity|fact|chrono|file)'\s*,/g)].map(m => m[1]))];
+    // bundle-128: the hand-kept `*_UPDATE_BODY_KEYS` lists are gone — what an update accepts is the accepted set its paired tool
+    // declares (`acceptedWriteKeys('<kind>.update')`), so "has an update allowlist" is "has an update route" (a `.patch(`).
+    found.push({ file: file.split('/').pop(), src, kinds, hasUpdateRoute: /\.patch\(/.test(src) });
   }
   return found;
 }
@@ -73,14 +73,28 @@ describe('an update takes the connections its create takes', () => {
     }
   });
 
-  it('each of them has an update allowlist that names the connection fields', () => {
+  it('each of them accepts, on update, every connection field its create accepts', async () => {
+    const { acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
+    const { connectionSchemas } = await import('../../server/dist/brain/write-connections.js');
     const offenders = [];
+    let compared = 0;
     for (const d of doorsThatAcceptConnections()) {
-      // A module with no update allowlist has no update route — nothing to be inconsistent with.
-      for (const k of d.updateKeys) {
-        if (!k.body.includes(KEYS)) offenders.push(`${d.file}:${k.name}`);
+      // A module with no update route has nothing to be inconsistent with.
+      if (!d.hasUpdateRoute) continue;
+      assert.ok(d.kinds.length > 0, `${d.file}: no record kind could be read from its applyConnections calls — re-anchor this derivation`);
+      for (const kind of d.kinds) {
+        // The connection fields a record of this kind can hold, from the one builder every door declares them with.
+        const fields = Object.keys(connectionSchemas(kind));
+        const create = acceptedWriteKeys(`${kind}.create`);
+        const update = acceptedWriteKeys(`${kind}.update`);
+        for (const f of fields.filter(x => create.has(x))) {
+          compared++;
+          if (!update.has(f)) offenders.push(`${d.file}:${kind}.update lacks ${f}`);
+        }
       }
     }
+    // A floor: an empty comparison passes every loop written over it.
+    assert.ok(compared >= 5, `only ${compared} connection field(s) were compared — the derivation is broken, not the code`);
     assert.deepEqual(offenders, [],
       `these update allowlists do not name the connection fields their own create accepts:\n`
       + offenders.map(o => `  ${o}`).join('\n')
@@ -100,7 +114,7 @@ describe('an update takes the connections its create takes', () => {
      * Counted rather than located: a module applying connections on create AND update calls it twice.
      */
     const offenders = doorsThatAcceptConnections()
-      .filter(d => d.updateKeys.length > 0)
+      .filter(d => d.hasUpdateRoute)
       .filter(d => (d.src.match(new RegExp(`${APPLY}\\(`, 'g')) ?? []).length < 2)
       .map(d => d.file);
     assert.deepEqual(offenders, [],

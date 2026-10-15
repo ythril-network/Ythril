@@ -78,6 +78,27 @@ export function boundedUnknownFieldRows(rows: readonly UnknownFieldRow[], outcom
   return boundedRows(rows, { value: outcome === 'stored' }) as UnknownFieldRow[];
 }
 
+/**
+ * The same rows, worded for the outcome of the answer they ride on.
+ *
+ * The judge decides BEFORE the write runs, so the rows it hands back say what happens to a write that goes through (`ignored`, with the
+ * received value). An answer decides later: the same call can end in a 400 for a missing field, a 404 for a record that is not there or a
+ * 412 for a stale precondition, and then nothing was ignored — the write failed, and a refusal reflects no received value. This puts the
+ * outcome's own words on a copy and drops `value` when it is `refused`, so a door that decorates its answers after the fact cannot say
+ * `ignored` about a write that did not happen. Idempotent: rows already worded for the outcome come back as they were.
+ */
+export function unknownFieldRowsAs(rows: readonly UnknownFieldRow[], outcome: UnknownFieldOutcome): UnknownFieldRow[] {
+  const words = new RegExp(`^(unknown field|\\d+ more unknown field\\(s\\)) — (?:${Object.values(BY_OUTCOME).join('|')})`);
+  // The rows were bounded once, by the judge that built them; bounding them again would cut an already-cut name a second
+  // time. Re-wording only changes the outcome's words and, for a refusal, drops the value the stored wording carried.
+  return rows.map(r => {
+    const { value, ...rest } = r;
+    const reworded = { ...rest, reason: r.reason.replace(words, `$1 — ${BY_OUTCOME[outcome]}`) } as UnknownFieldRow;
+    if (outcome === 'stored' && Object.hasOwn(r, 'value')) reworded.value = value;
+    return reworded;
+  });
+}
+
 /** How much of a string value a stored answer's row echoes: enough to tell which of several sends produced it. */
 const RECEIVED_STRING_MAX = 80;
 

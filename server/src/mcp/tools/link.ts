@@ -11,6 +11,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { DELETION_REACH } from './shared.js';
+import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
 const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
@@ -54,7 +55,8 @@ export const save_linkTool: ToolHandler = {
     + 'to create.\n'
     + '- `to` / `toKind` — the record it concerns.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space to write to.\n\n'
-    + 'RESPONSE: the link record, including the derived `_id` you would pass to `delete_link`.',
+    + 'RESPONSE: the link record, including the derived `_id` you would pass to `delete_link`.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

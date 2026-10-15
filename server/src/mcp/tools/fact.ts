@@ -18,11 +18,11 @@ import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.j
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, DELETION_REACH } from './shared.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 import { NotFoundError } from '../../util/errors.js';
 
@@ -32,7 +32,8 @@ export const save_factTool: ToolHandler = {
     + 'WITHOUT `id` IT IS ALWAYS AN INSERT, and nothing deduplicates by content: remembering the same fact twice stores it twice, and both then compete for the same result slots in a recall. Search before writing if a fact may already be there, and use `update_fact` when you mean to revise one.\n\n'
     + 'WITH an `id` that already names a record it CONVERGES instead of duplicating — that is the retry-safety contract, and it is why a repeated call after a timeout is safe. Convergence MERGES, the same way `save_entity` does: tags are unioned and properties shallow-merged over what is stored, so a partial payload does not erase the rest. An id that names nothing is ignored rather than adopted; identity is server-generated.\n\n'
     + 'Embedding is ASYNCHRONOUS. The write returns as soon as the record is stored and a queued job computes the vector. `recall` covers the second half of that gap for you — it always scans the newest records straight from the collection, so a record the vector index has not ingested yet is still found, with no parameter and nothing to wait for. What it cannot cover is a record whose embedding job has NOT RUN yet: the scan compares vectors, so there has to be one. `list_embed_jobs` says whether the queue is behind.\n\n'
-    + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
+    + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -68,7 +69,7 @@ export const save_factTool: ToolHandler = {
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar fact already exists, the response flags it (id + summary + score) so you can update it instead of creating a redundant one. The fact is still stored regardless. Set false to skip the check.' },
-            waitForEmbedding: { type: 'boolean', default: false, description: 'Block until this fact is embedded, so it is searchable the moment this returns (default false). Normally the vector is computed moments later by the embedding queue and the write does not pay the model latency. Set true when you will immediately search for what you just wrote, or when a failure to embed should fail the write rather than be repaired in the background. Note: checkDuplicates (default true) already requires the vector up front, so it implies this.' },
+            waitForEmbedding: waitForEmbeddingSchema('fact', true),
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing facts that CONTRADICT this one — a near-neighbour that sets the same single-valued property to a different value (e.g. status="active" vs status="retired"). Different question from checkDuplicates: "is this redundant?" vs "does this conflict with what we already believe?". Deterministic only (no model call, no added latency). The fact is still stored regardless — if you are correcting an outdated fact, that is expected; consider updating or superseding the record named in the warning.' },
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
@@ -229,7 +230,8 @@ export const update_factTool: ToolHandler = {
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the record.\n\n'
     + 'RESPONSE: one line with the fact\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
-    + 'a silent no-op.',
+    + 'a silent no-op.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -332,10 +334,11 @@ export const update_factTool: ToolHandler = {
     }
 
     const ttlDays = ttlDaysFromArgs(a);
-    // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
-    // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
-    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of fact, tags, description, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
+    // Nothing to change, answered in the one sentence every update door says, over the one set of fields the write takes — a
+    // connection field and `superseded` included, which the hand-written list this replaced named none of.
+    // Loaded here, not at the top: the judge's module imports this tool to read its schema (no-runtime-import-cycles).
+    const { atLeastOneFieldRefusal, carriesAnyAcceptedField } = await import('../../contract/write-accepts.js');
+    if (!carriesAnyAcceptedField(a, 'fact.update')) throw new Error(atLeastOneFieldRefusal('fact.update'));
 
     // Validate the fact AS IT WILL BE, against the meta of the member space it actually lives in.
     // This path had no schema validation at all, so an agent could write through MCP a value the same
@@ -350,7 +353,7 @@ export const update_factTool: ToolHandler = {
     // Search member spaces sequentially — consistent with REST endpoint behaviour.
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the record is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => listFacts(mid, { _id: id }, 1, 0).then(r => r[0] ?? null), id, a);
+    const audit = await readEditAudit(wt.target, mid => listFacts(mid, { _id: id }, 1, 0).then(r => r[0] ?? null), id, a, 'fact');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the record is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it.

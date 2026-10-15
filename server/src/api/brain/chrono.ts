@@ -6,7 +6,8 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
-import { unknownFieldWarnings } from './unknown-fields.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { createChrono, updateChrono, getChronoById, deleteChrono, parseRecurrence } from '../../brain/chrono.js';
 import { getConfig } from '../../config/loader.js';
@@ -19,11 +20,9 @@ import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
 import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
-import {
-  parseRecordSuppression, RECORD_SUPPRESS_FIELD,
-} from '../../brain/suppress-embeddings.js';
+import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections } from '../../brain/write-connections.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 
 export const chronoRouter = Router();
@@ -36,20 +35,7 @@ export const chronoRouter = Router();
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
 
 // POST /api/brain/spaces/:spaceId/chrono — create a chrono entry
-/**
- * The body keys the chrono create reads.
- *
- * Declared so the route can say what it did NOT understand — see `unknownFieldWarnings`. It is a
- * second list beside the destructure below, which is exactly the kind of pair that drifts, so
- * `a-create-says-which-fields-it-did-not-understand.test.js` requires every destructured name to
- * appear here. A field added below and not here would produce an "unknown field" warning about a
- * parameter that works.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const CHRONO_CREATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'description', 'properties', 'recurrence', 'id',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('chrono.create')`: the paired tool's own schema, not a list kept beside this route.
 chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -57,8 +43,10 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.create', wt.target, 'rest'))) return;
 
   const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
@@ -173,28 +161,15 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   }
 
   const result: Record<string, unknown> = { ...entry };
-  // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
-  // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...(check?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, CHRONO_CREATE_BODY_KEYS)];
+  // The schema warnings a `warn` space produces; the unknown-field rows are put in front of them by the answer's decoration.
+  const warnings = [...(check?.warnings ?? []), ...connectionWarnings];
   Object.assign(result, writeWarningFields(warnings));
   res.status(201).json(result);
 });
 
 
 // PATCH /api/brain/spaces/:spaceId/chrono/:id — partial update a chrono entry by ID
-/**
- * The body keys the chrono UPDATE reads.
- *
- * Its own list, not the create's: `deleteFields` is an update field and `id` is a path parameter
- * here. Copying the create's would produce an "unknown field" warning about a parameter that works,
- * which is what the drift check in
- * `an-update-answers-the-same-questions-a-create-does-db.test.js` exists to refuse.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const CHRONO_UPDATE_BODY_KEYS = ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags', 'description', 'properties', 'recurrence', 'deleteFields',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('chrono.update')` (the id is the path's, so it is not among them).
 chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -203,12 +178,14 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.update', wt.target, 'rest'))) return;
 
-  const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence } = req.body ?? {};
+  const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence, deleteFields } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
   // check — unlike every sibling field — so an arbitrary object could be stored and later
   // read as a recurrence rule. Shared with MCP so both surfaces enforce the same shape.
@@ -257,27 +234,12 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
   const superseded = sus.value;
 
-  // Nothing this handler recognises is an ERROR, not a 200 with an unchanged record. The three sibling
-  // PATCH handlers have always answered `At least one field must be provided`; chrono answered success,
-  // so a client could not tell a no-op from an applied change — which is exactly how the missing flag
-  // above stayed invisible. Unknown keys are still dropped rather than named back (documented in the
-  // integration guide); what is no longer possible is dropping ALL of them and calling it success.
-  // Both spellings of the record tier, from the constants rather than as two literals. This list decides
-  // whether the caller sent anything AT ALL, and it is a separate question from whether the value parses —
-  // so naming only the new spelling here made a legacy-only PATCH answer `At least one field must be
-  // provided` while `parseRecordSuppression` was perfectly willing to read it. Accepted by one half and
-  // refused by the other is worse than not accepting it, and CI caught exactly that.
-  const PATCHABLE_FIELDS = [
-    'title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'tags',
-    'description', 'properties', 'recurrence', 'ttlDays', 'deleteFields',
-    RECORD_SUPPRESS_FIELD,
-    // A connection field IS a field. Without these, `{linkEntities: [...]}` alone answered
-    // "At least one field must be provided" for a body that plainly has one.
-    ...CONNECTION_BODY_KEYS,
-  ];
-  const body = req.body != null && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
-  if (!PATCHABLE_FIELDS.some(f => f in body)) {
-    res.status(400).json({ error: 'At least one field must be provided' });
+  // Nothing this handler recognises is an ERROR, not a 200 with an unchanged record: a client could not tell a no-op from an applied
+  // change. What counts as "something" is PRESENCE of any field the write takes, from the one accepted set (`carriesAnyAcceptedField`) —
+  // this was a hand list that omitted `superseded`, so `PATCH {superseded:true}` was a 400 here while `update_chrono` took it. The
+  // sentence names that same set. Whether a value parses is a separate question, asked above.
+  if (!carriesAnyAcceptedField(req.body, 'chrono.update')) {
+    res.status(400).json({ error: atLeastOneFieldRefusal('chrono.update') });
     return;
   }
 
@@ -285,13 +247,13 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // once could never be removed by any request. Validated here exactly as the three sibling routes do it —
   // same helper, same refusals, same 400 — because a fourth spelling of one rule is the defect this repo
   // produces most.
-  const dfResult = validateDeleteFields(body['deleteFields']);
+  const dfResult = validateDeleteFields(deleteFields);
   if (!dfResult.ok) {
     res.status(400).json({ error: dfResult.error });
     return;
   }
-  const dfPaths: string[] | undefined = Array.isArray(body['deleteFields']) && body['deleteFields'].length > 0
-    ? body['deleteFields'] as string[]
+  const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0
+    ? deleteFields as string[]
     : undefined;
 
   // Snapshot for the audit change list — see the note in facts.ts. Read before the write, since
@@ -299,7 +261,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // The member space holding this entry, captured while looking for it: the link sets below are read per
   // space, and an id belongs to the space that owns it.
   // The before and the link sets, from whichever member holds the entry — one read shared with the MCP tool (Q-50).
-  const editAudit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, req.body);
+  const editAudit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, req.body, 'chrono');
   const prior = editAudit.prior;
 
   // Validate the entry AS IT WILL BE. This path had NO property validation at all — the `type` allowlist
@@ -353,7 +315,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
      * lives in, and a proxy write must land where the record is rather than where the search began.
      */
     const connected = await applyConnections(updated.spaceId, updated._id, 'chrono', req.body, updated.author, webhookToken(req));
-    const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, CHRONO_UPDATE_BODY_KEYS)];
+    const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings];
     res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
     return;
   }

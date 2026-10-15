@@ -17,17 +17,31 @@ import { Ajv, type ValidateFunction } from 'ajv';
 import type { ToolHandler, ToolSchemas } from './tools/types.js';
 import { materialisedSchema, toolSchemasFor } from './tool-schema.js';
 import { retiredWriteFieldHint } from '../brain/retired-write-fields.js';
+import { judgedOperationOfTool } from '../contract/judged-write-operations.js';
 import { toolValidatorCacheTotal } from '../metrics/registry.js';
 import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
 
+/** How a call is validated beyond the advertised schema. */
+export interface ValidateOptions {
+  /**
+   * Let an argument the tool does not declare through at the TOP level (nested objects stay closed). It is for the tools whose unknown
+   * arguments the unknown-write-field judge answers (`judgedOperationOfTool`), and it is honoured for those alone: asked of any other
+   * tool it is ignored, so a caller cannot open another tool's schema by passing it.
+   */
+  readonly tolerateTopLevel?: boolean;
+}
+
 export interface ArgsValidator {
   /** The schemas `tools/list` advertises for this reach: the SAME objects this validator compiles from. */
   readonly schemas: ToolSchemas;
   /** Returns a human-readable error message if `args` violate the tool's schema, else `null`. */
-  validate(tool: ToolHandler, args: Record<string, unknown>): string | null;
+  validate(tool: ToolHandler, args: Record<string, unknown>, options?: ValidateOptions): string | null;
 }
+
+/** The cache key of the tolerant variant of a tool's validator: its own entry, beside (never inside) the strict one. */
+const TOLERANT_SUFFIX = '#tolerant';
 
 /** Schema compiles done by this process, for the test accessor: the count the once-per-reach test asserts on. */
 let compiles = 0;
@@ -46,16 +60,24 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
 
   return {
     schemas,
-    validate(tool, args) {
+    validate(tool, args, options) {
       // The per-tool cache is keyed by tool NAME and belongs to THIS validator, which `validatorFor` hands
       // out only to a caller with exactly the reach it was built for. Nothing here is shared across reaches:
       // a module-level cache keyed by tool name would serve one token's schema to another, now that the
       // schema depends on who is asking.
-      let validate = cache.get(tool.name);
+      //
+      // A tolerated call is a different schema, so it is a different entry — `<tool>#tolerant` — and a tool whose calls are
+      // all tolerated compiles ONLY that one: the strict schema is what `tools/list` advertises and what every other tool
+      // is held to, and compiling both for a tool that is never held to the strict one would cost 3.6 ms for nothing.
+      const tolerant = options?.tolerateTopLevel === true && judgedOperationOfTool(tool.name) !== null;
+      const key = tolerant ? `${tool.name}${TOLERANT_SUFFIX}` : tool.name;
+      let validate = cache.get(key);
       if (!validate) {
-        // The same materialisation `tools/list` advertises, not a second call to `inputSchema` — see B-6.
-        validate = ajv.compile(materialisedSchema(tool, schemas, accessibleSpaceIds) as object);
-        cache.set(tool.name, validate);
+        // The same materialisation `tools/list` advertises, not a second call to `inputSchema` — see B-6. The tolerant variant is a
+        // SHALLOW COPY with the top level opened: never a change to what `materialisedSchema` returned, which `tools/list` shares.
+        const schema = materialisedSchema(tool, schemas, accessibleSpaceIds) as Record<string, unknown>;
+        validate = ajv.compile((tolerant ? { ...schema, additionalProperties: true } : schema) as object);
+        cache.set(key, validate);
         compiles++;
       }
       if (validate(args)) return null;

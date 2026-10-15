@@ -339,6 +339,14 @@ record, and it is named **once per answer**, in the first unknown row, never in 
 is stored: a `400` whose body carries the unknown fields in `issues` (`code: "unrecognized_keys"`) and as `warnings`
 rows, with the reason `unknown field — not accepted`. A retired name is refused by name in either mode.
 
+**The setting itself** is set at the top level of the space `PATCH` body (or with `update_space`): `"refuse"`, or
+`"warn"`, `""` or `null`, which clear it to the default; any other value is a `400` on every door. It is **this
+instance's** setting: never carried in `meta`, replicated or voted on, so each member of a network decides its own; it
+takes effect at once, also beside a meta change waiting for a vote; it needs `schema` admin, the rung of
+`meta.validationMode`, because it turns writes that succeeded into refusals; and a meta-only `PATCH` drops it
+silently. `GET /api/spaces`, `GET /api/spaces/:id/meta`, `list_spaces` and `space_meta` report it as `"refuse"` and
+omit it when the space warns.
+
 Under `refuse` the uniform options a route does not read are unknown fields for that route: `checkDuplicates` on an
 update, `ttlDays` on a link, `waitForEmbedding` on an update. A client that reads a record and sends it back with
 its server-written keys is refused too, so send only the fields you change.

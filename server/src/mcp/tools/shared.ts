@@ -98,6 +98,21 @@ export const SUPPRESS_EMBEDDINGS_SCHEMA = {
     + 'record that no other tier suppresses, false does restore the vector.',
 } as const;
 
+/**
+ * JSON-schema fragment for `waitForEmbedding` on a CREATE tool, written once because four tools declare it and REST takes it on the same
+ * four creates (Q-495, bundle-128): `save_entity`, `save_chrono` and `save_edge` read it without declaring it until then, which the
+ * dispatcher refused as an unknown argument while REST honoured it. `what` is the record it blocks on ("fact", "entity", …);
+ * `impliedByDuplicateCheck` adds the note that a create with `checkDuplicates` already embeds inline (an edge has no such check).
+ */
+export function waitForEmbeddingSchema(what: string, impliedByDuplicateCheck: boolean) {
+  return {
+    type: 'boolean',
+    default: false,
+    description: `Block until this ${what} is embedded, so it is searchable the moment this returns (default false). Normally the vector is computed moments later by the embedding queue and the write does not pay the model latency. Set true when you will immediately search for what you just wrote, or when a failure to embed should fail the write rather than be repaired in the background.`
+      + (impliedByDuplicateCheck ? ' Note: checkDuplicates (default true) already requires the vector up front, so it implies this.' : ''),
+  } as const;
+}
+
 /*
  * `LEGACY_SUPPRESS_EMBEDDINGS_SCHEMA` STOOD HERE and went with `D-6` in 4.0.
  *

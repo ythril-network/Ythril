@@ -6,7 +6,8 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
-import { unknownFieldWarnings } from './unknown-fields.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../../brain/entities.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
@@ -21,27 +22,14 @@ import { UUID_V4_RE, webhookToken, ttlDaysFromBody, ttlDaysError, dupeCheckOptsF
 import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections } from '../../brain/write-connections.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const entitiesRouter = Router();
 
 
 // POST /api/brain/spaces/:spaceId/entities — create/upsert an entity
-/**
- * The body keys the entities create reads.
- *
- * Declared so the route can say what it did NOT understand — see `unknownFieldWarnings`. It is a
- * second list beside the destructure below, which is exactly the kind of pair that drifts, so
- * `a-create-says-which-fields-it-did-not-understand.test.js` requires every destructured name to
- * appear here. A field added below and not here would produce an "unknown field" warning about a
- * parameter that works.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const ENTITIES_CREATE_BODY_KEYS = ['id', 'name', 'type', 'tags', 'properties', 'description',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('entity.create')`: the paired tool's own schema, not a list kept beside this route.
 entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -49,8 +37,11 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // The unknown-field judge: after the target is resolved (the setting of the space the write LANDS in decides) and before any
+  // other check, so a refusal for another reason still names the field.
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'entity.create', wt.target, 'rest'))) return;
   /*
    * `type` IS REQUIRED, and it no longer defaults to the empty string.
    *
@@ -157,7 +148,7 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
     if (warning) result['warning'] = warning;
   // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
   // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-    const warnings = [...(check?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, ENTITIES_CREATE_BODY_KEYS)];
+    const warnings = [...(check?.warnings ?? []), ...connected.warnings];
     Object.assign(result, writeWarningFields(warnings));
     // Advisory, never blocking: the write already happened. An agent correcting an outdated fact must be
     // able to contradict the record it supersedes — the point is that it is TOLD, not that it is stopped.
@@ -271,19 +262,7 @@ entitiesRouter.get('/spaces/:spaceId/entities/:id/cascade-preview', globalRateLi
 
 
 // PATCH /api/brain/spaces/:spaceId/entities/:id — partial update an entity by ID
-/**
- * The body keys the entities UPDATE reads.
- *
- * Its own list, not the create's: `deleteFields` is an update field and `id` is a path parameter
- * here. Copying the create's would produce an "unknown field" warning about a parameter that works,
- * which is what the drift check in
- * `an-update-answers-the-same-questions-a-create-does-db.test.js` exists to refuse.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const ENTITIES_UPDATE_BODY_KEYS = ['name', 'type', 'description', 'tags', 'properties', 'deleteFields',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('entity.update')` (the id is the path's, so it is not among them).
 entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -292,10 +271,12 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'entity.update', wt.target, 'rest'))) return;
   const { name, type, description, tags, properties, deleteFields } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
@@ -308,7 +289,6 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   // must not.
   const shapeErr = shapeError('entity', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
-  const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { name?: string; type?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
   if (name !== undefined) {
@@ -344,10 +324,9 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   const sus = parseRecordSuperseded(req.body);
   if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
   if (sus.value !== undefined) updates.superseded = sus.value;
-  // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
-  // against `undefined` would be true for `null` and would DISABLE this check rather than widen it.
-  const hasConnections = desiredLinksFrom(req.body) !== null || edgeInputsFrom(req.body) !== null;
-  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided && !hasConnections) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  // PRESENCE of any field the write takes (a connection field, `ttlDays: null` and `deleteFields` included), from the one accepted set —
+  // the sentence names that same set, so it cannot omit a field the write takes (`superseded` was missing from every hand-written copy).
+  if (!carriesAnyAcceptedField(req.body, 'entity.update')) { res.status(400).json({ error: atLeastOneFieldRefusal('entity.update') }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     // Validate the entity AS IT WILL BE, on every patch — not only when `deleteFields` is present. That
@@ -404,7 +383,7 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
        * lives in, and a proxy write must land where the record is rather than where the search began.
        */
       const connected = await applyConnections(updated.spaceId, updated._id, 'entity', req.body, updated.author, webhookToken(req));
-      const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, ENTITIES_UPDATE_BODY_KEYS)];
+      const updateWarnings = [...(updateCheck?.warnings ?? []), ...connected.warnings];
       res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
       return;
     }
@@ -432,6 +411,14 @@ entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', g
     return;
   }
 
+  // A merge is refused on a proxy before anything else is read (Q-499 owns that divergence from MCP, which takes `targetSpace`), so
+  // the proxy refusal is this route's "target resolution" and the judge follows it. The UUID checks on the PATH ids are addressing
+  // checks, answered after the judge, as `graph_merge` answers them after its own.
+  if (isProxySpace(spaceId)) {
+    res.status(400).json({ error: 'Entity merge not supported on proxy spaces — target member spaces directly' });
+    return;
+  }
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'entity.merge', spaceId, 'rest'))) return;
   if (!UUID_V4_RE.test(survivorId)) {
     res.status(400).json({ error: '`survivorId` must be a valid UUID v4' });
     return;
@@ -442,11 +429,6 @@ entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', g
   }
   if (survivorId === absorbedId) {
     res.status(400).json({ error: 'Cannot merge an entity with itself' });
-    return;
-  }
-
-  if (isProxySpace(spaceId)) {
-    res.status(400).json({ error: 'Entity merge not supported on proxy spaces — target member spaces directly' });
     return;
   }
 

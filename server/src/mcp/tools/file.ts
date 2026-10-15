@@ -1,5 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH } from './shared.js';
+import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -562,7 +563,8 @@ export const update_file_metaTool: ToolHandler = {
     + 'merge. The only way to unset anything.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
     + 'RESPONSE: confirmation naming the path and which fields were changed. A path that does not exist is an '
-    + 'error, so a successful reply means a record really was updated.',
+    + 'error, so a successful reply means a record really was updated.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -622,14 +624,16 @@ export const update_file_metaTool: ToolHandler = {
     const { isStrictLinkage } = await import('../../spaces/proxy.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');
 
-    const linkErr = linkInputError(a, { strict: isStrictLinkage(wt.target) });
+    // Only the link classes a FILE holds are read out of the arguments: a link key it cannot hold (`linkFiles`) is an unknown argument,
+    // answered by the judge, and neither refused here as a class nor audited as a link change.
+    const linkErr = linkInputError(a, 'file', { strict: isStrictLinkage(wt.target) });
     if (linkErr) throw new Error(linkErr);
 
     const patch = {
       description: a['description'] as string | undefined,
       tags: a['tags'] as string[] | undefined,
       properties: a['properties'] as Record<string, string | number | boolean> | undefined,
-      ...linkFieldsFrom(a),
+      ...linkFieldsFrom(a, 'file'),
     };
 
     // The link classes are `linkEntities`, `linkFacts` and `linkChronos` now, and existence is asserted by
@@ -648,7 +652,7 @@ export const update_file_metaTool: ToolHandler = {
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     const { getFileMeta } = await import('../../files/file-meta.js');
     const { toDocId } = await import('../../util/paths.js');
-    const audit = await readEditAudit(wt.target, mid => getFileMeta(mid, filePath), toDocId(filePath), a);
+    const audit = await readEditAudit(wt.target, mid => getFileMeta(mid, filePath), toDocId(filePath), a, 'file');
     const updated = await updateFileMeta(wt.target, filePath, patch, dfPaths);
     if (!updated) throw new Error(`No file metadata record for '${filePath}' in '${wt.target}'.`);
     { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }

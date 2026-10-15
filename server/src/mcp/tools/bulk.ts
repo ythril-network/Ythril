@@ -8,9 +8,10 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { writeDoorOfTransport } from '../../contract/judged-write-operations.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
@@ -62,6 +63,10 @@ export const save_bulkTool: ToolHandler = {
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
+    + 'A KEY AN ITEM\'S COLLECTION DOES NOT TAKE is answered by how this instance is set for the space, item by item: by '
+    + 'default the item is written and its `errors` row names the key; a space set to refuse rejects that item alone and '
+    + 'the rest of the batch proceeds. The call\'s own top level takes only the collections, `space` and `targetSpace`, and '
+    + 'anything else refuses the whole batch in every mode. A retired name is refused everywhere.\n\n'
     + 'A RETRY CONVERGES: a fact, entity or chrono item carrying the `id` of an existing record converges onto '
     + 'it (tags union, properties merge) instead of duplicating, so resending a batch after a timeout is safe '
     + 'for every item that carried its id. An item depending on another item of this call that was not '
@@ -262,6 +267,9 @@ export const save_bulkTool: ToolHandler = {
                   // `Q-44`: the same two link classes a chrono entry has always held, plus `edges`, from the
                   // one builder — see the note on the `facts` item above for what the hand-written pair said.
                   ...connectionSchemas('chrono'),
+                  // The writer reads and stores `recurrence` on a chrono item (as `save_chrono` takes it), so the item schema declares it:
+                  // undeclared, an item carrying it would be answered as an unknown field, and under refuse refused, for a field that works.
+                  recurrence:  recurrenceSchema('Optional recurrence rule,'),
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '
@@ -293,7 +301,8 @@ export const save_bulkTool: ToolHandler = {
     const result = await bulkWrite(ts, {
       facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
       // `F-25`: who wrote it, for the conversion pre-flight.
-    });
+      // The door only labels the unknown-field count of the batch: the items are judged by the writer, not by the dispatcher.
+    }, {}, writeDoorOfTransport(ctx.transport));
     if (bulkWriteTotal(result) > 0) {
       // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.
       emitWebhookEvent({ event: 'bulk.write', spaceId: ts, entry: { inserted: result.inserted, updated: result.updated, connections: result.connections, errorCount: result.errors.length }, ...(ctx.actor ?? {}) });

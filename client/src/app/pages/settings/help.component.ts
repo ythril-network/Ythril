@@ -120,6 +120,7 @@ export const HELP_DOCS = [
       'decisions/08-a-file-stamp-is-reported-never-repaired.md',
       'decisions/09-a-move-the-instance-began-is-the-instances-to-finish.md',
       'decisions/10-a-rule-is-saved-only-when-the-instance-can-apply-it-and-an-unknown-key-is-named-not-refused.md',
+      'decisions/11-an-unknown-write-field-is-answered-by-the-instances-setting-for-its-space.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

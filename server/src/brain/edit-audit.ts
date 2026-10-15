@@ -12,7 +12,7 @@
  * `after` is built from what the writer returned, so a caller cannot hand it the values it MEANT to write.
  */
 import { locateForUpdate } from './write-validation.js';
-import { linkAuditSnapshots } from './write-connections.js';
+import { linkAuditSnapshots, type ConnectionKind } from './write-connections.js';
 
 export interface EditAudit<T> {
   /** The record before the write, or null when no member space holds it. */
@@ -32,19 +32,22 @@ export interface EditAudit<T> {
  * @param read    how this kind reads one record from one member space
  * @param linkId  the id the record's links are keyed by (a file's stored path, everything else its `_id`)
  * @param body    the edit as the caller sent it — the link classes it names are the ones snapshotted
+ * @param kind    the record kind being edited: only the link classes this kind holds are read out of `body`, so a link key
+ *                the write does not take is never audited as a link change (REQUIRED — see `ConnectionKind`)
  */
 export async function readEditAudit<T extends object>(
   target: string,
   read: (spaceId: string) => Promise<T | null>,
   linkId: string,
   body: unknown,
+  kind: ConnectionKind,
 ): Promise<EditAudit<T>> {
   // `locateForUpdate`: the record AND the member that holds it, from the one read — the same walk an update door's
   // refusal of its connections needs, so the two cannot name different members.
   const located = await locateForUpdate(target, read);
   const home = located?.memberId ?? null;
   const prior = located?.record ?? null;
-  const links = home ? await linkAuditSnapshots(home, linkId, body) : { before: {}, after: {} };
+  const links = home ? await linkAuditSnapshots(home, linkId, body, kind) : { before: {}, after: {} };
   return {
     prior,
     home,

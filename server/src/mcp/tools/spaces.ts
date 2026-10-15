@@ -276,7 +276,9 @@ export const update_spaceTool: ToolHandler = {
             space: s.requiredSpace,
             label: { type: 'string', minLength: 1, maxLength: 200, description: 'New display label for the space (1–200 chars).' },
             unknownWriteFields: {
-              type: ['string', 'null'], enum: [...UNKNOWN_WRITE_FIELD_ANSWERS, '', null],
+              // `null` is its own branch rather than a value of the enum, as on every nullable argument here: the value set the
+              // two doors compare is the string branch's, which is UpdateSpaceBody's enum ('null' clears on both).
+              anyOf: [{ type: 'string', enum: [...UNKNOWN_WRITE_FIELD_ANSWERS, ''] }, { type: 'null' }],
               description: 'What THIS instance does with a top-level field a brain write to this space does not take: `refuse` refuses the write and stores nothing; `warn` (also `""` and `null`, which clear the setting) stores the record and names each such field in the answer. It is this instance\'s own setting: it is not shared with networks, never voted on, and each member of a network decides for itself. It is applied at once, also on a networked space whose meta changes wait for a vote. Not the same as a space\'s validation mode, which judges an undeclared property of a record\'s type. `list_spaces` and `space_meta` report it as `refuse` and omit it when the space warns.',
             },
             purpose: { type: 'string', maxLength: SPACE_PURPOSE_MAX, description: `New purpose for the space (max ${SPACE_PURPOSE_MAX} chars) — the space-level directive injected into MCP instructions at handshake.` },

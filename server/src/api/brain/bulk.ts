@@ -40,12 +40,13 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   const targetSpace = wt.target;
 
-  // A name this door does not know is refused, at both levels — the same check the MCP tool runs
-  // (`bulkBodyRefusal`, which says why).
+  // A name this door does not know is refused at the TOP level and a retired name on an item, in every mode — the same check the MCP
+  // tool runs (`bulkBodyRefusal`, which says why). An unknown key on an ITEM is answered by this instance's setting for the space, per
+  // item, inside `bulkWrite` (`brain/bulk-unknown-fields.ts`): the rows go in `errors[]`, which is where a batch answers about items.
   const body = (req.body ?? {}) as Record<string, unknown>;
   const refusal = bulkBodyRefusal(body, new Set(BULK_BODY_KEYS));
   if (refusal) { res.status(400).json(refusal); return; }
@@ -57,7 +58,7 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
     ...(body as BulkInput),
     // `F-25`: who wrote it, for the conversion pre-flight. Spread AFTER the body so a caller cannot
     // supply its own actor and be recorded as somebody else.
-  });
+  }, {}, 'rest');
   if (bulkWriteTotal(result) > 0) {
     // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.
     emitWebhookEvent({ event: 'bulk.write', spaceId: targetSpace, entry: { inserted: result.inserted, updated: result.updated, connections: result.connections, errorCount: result.errors.length }, ...webhookToken(req) });

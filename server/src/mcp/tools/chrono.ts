@@ -1,12 +1,12 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import type { UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /**
  * What a passed due moment means — ONE sentence, quoted everywhere that used to state it.
@@ -35,7 +35,7 @@ import { getAllowedChronoTypes, getSpaceMeta, resolveMetaRefs } from '../../spac
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, assertConnections, connectionSubject, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 import { NotFoundError } from '../../util/errors.js';
 
@@ -44,7 +44,8 @@ export const save_chronoTool: ToolHandler = {
   description: 'Create a chronological entry — something that happened, or is meant to. Default types are event, deadline, plan, prediction and milestone; a space with its own `typeSchemas.chrono` accepts ITS names INSTEAD, not in addition, so a custom schema that omits `event` refuses `event`.\n\n'
     + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `filter` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
     + 'Link it with `linkEntities` — that is what lets `graph_traverse` reach it from the entity it is about (with `includeChrono`, on by default). `entityIds` was the 4.x spelling and is REFUSED in 5.0. Those links are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
-    + 'An INSERT — unless `id` names an existing entry, when it CONVERGES onto it (the retry-safety contract, as on `save_fact`); use `update_chrono` for a partial change, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
+    + 'An INSERT — unless `id` names an existing entry, when it CONVERGES onto it (the retry-safety contract, as on `save_fact`); use `update_chrono` for a partial change, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -106,6 +107,7 @@ export const save_chronoTool: ToolHandler = {
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar entry already exists, the response flags it (id + summary + score) so you can update it instead of logging the same event twice. The entry is still stored regardless. Set false to skip.' },
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entries that CONTRADICT this one — a near-neighbour claiming a different status, or setting the same single-valued property to a different value. Deterministic only (no model call). The entry is still stored regardless.' },
+            waitForEmbedding: waitForEmbeddingSchema('chrono entry', true),
             dupeThreshold: unitScoreSchema('Cosine-similarity threshold for the duplicate check (0-1, default ~0.92). Lower to flag looser matches.'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
@@ -186,6 +188,7 @@ export const save_chronoTool: ToolHandler = {
       checkDuplicates: a['checkDuplicates'] !== false,
       checkContradictions: a['checkContradictions'] === true,
       dupeThreshold: typeof a['dupeThreshold'] === 'number' ? a['dupeThreshold'] : undefined,
+      ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
       onValidation: c => { chronoCheck = c; },
     });
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
@@ -269,7 +272,8 @@ export const update_chronoTool: ToolHandler = {
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the entry.\n\n'
     + 'RESPONSE: one line with the entry\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
-    + 'a silent no-op.',
+    + 'a silent no-op.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -412,12 +416,11 @@ export const update_chronoTool: ToolHandler = {
       ? a['deleteFields'] as string[]
       : undefined;
 
-    // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
-    // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
-    const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
-    if (Object.keys(updates).length === 0 && ttlDaysFromArgs(a) === undefined && !dfPaths && !hasConnections) {
-      throw new Error('At least one of title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
-    }
+    // Nothing to change, answered in the one sentence every update door says, over the one set of fields the write takes — a
+    // connection field and `superseded` included, which the hand-written list this replaced named none of.
+    // Loaded here, not at the top: the judge's module imports this tool to read its schema (no-runtime-import-cycles).
+    const { atLeastOneFieldRefusal, carriesAnyAcceptedField } = await import('../../contract/write-accepts.js');
+    if (!carriesAnyAcceptedField(a, 'chrono.update')) throw new Error(atLeastOneFieldRefusal('chrono.update'));
 
     // Validate the entry AS IT WILL BE, against the meta of the member space it actually lives in. The
     // type allowlist above is not the whole schema: property constraints applied at `save_chrono` and
@@ -431,7 +434,7 @@ export const update_chronoTool: ToolHandler = {
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the entry is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, a);
+    const audit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, a, 'chrono');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the entry is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it.

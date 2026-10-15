@@ -50,6 +50,11 @@ import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/con
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { validatorFor } from './validate-args.js';
+import { withUnknownFieldRows } from './schema-warnings.js';
+import { resolveCallWriteTarget } from '../spaces/proxy.js';
+import { answerUnknownWriteFields, writeBodyOfToolCall, writeDoorOfTransport } from '../contract/write-accepts.js';
+import { judgedOperationOfTool, isBatchWriteOperation } from '../contract/judged-write-operations.js';
+import type { UnknownFieldRow } from '../contract/unknown-field-rows.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { auditChanges } from '../audit/audit-changes.js';
@@ -93,9 +98,16 @@ export interface ToolCallOutcome {
   retryAfterSeconds?: number;
 }
 
-/** A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. */
-function refuse(status: number, text: string, callSpace = ''): ToolCallOutcome {
-  return { result: { content: [{ type: 'text' as const, text }], isError: true }, status, callSpace };
+/**
+ * A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. `structuredContent` is the
+ * body a refusal carries beside its prose — the judge's `{ error, issues, warnings }` — so a client that reads that half and not the
+ * text sees the same refusal.
+ */
+function refuse(status: number, text: string, callSpace = '', structuredContent?: Record<string, unknown>): ToolCallOutcome {
+  return {
+    result: { content: [{ type: 'text' as const, text }], isError: true, ...(structuredContent ? { structuredContent } : {}) },
+    status, callSpace,
+  };
 }
 
 export interface ToolCallRequest {
@@ -139,9 +151,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
    * or not by how the refusal happened to be said. `auditSpace` is the space the REST path would name, and only a space that exists
    * is named (a caller's spelling of one that does not is not written to the trail). An ACT is recorded by its own rule below.
    */
-  const refuseAudited = (status: number, text: string, auditSpace = '', callSpace = ''): ToolCallOutcome => {
+  const refuseAudited = (status: number, text: string, auditSpace = '', callSpace = '', structuredContent?: Record<string, unknown>): ToolCallOutcome => {
     if (tool?.mutating && mcpActOperation(name) === null) recordToolCall(caller, name, auditSpace, status, 0, a);
-    return refuse(status, text, callSpace);
+    return refuse(status, text, callSpace, structuredContent);
   };
 
   // Reachability, from the same predicate that builds `tools/list` — so a listing cannot advertise a tool
@@ -261,91 +273,16 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   const callSpace = rawSpace;
   // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
   const startedAt = Date.now();
+  // Which door asked, in the judge's and the metric's vocabulary: `POST /api/<tool>` arrives as transport `rest` and is the `tool` door.
+  const writeDoor = writeDoorOfTransport(caller.transport);
 
-  try {
-    // Refused BEFORE it is counted (`Q-108`): `name` is whatever the caller sent, and as a metric label an
-    // unknown one mints a new time series per spelling — unbounded cardinality from any authenticated caller.
-    if (!tool) {
-      return refuse(404, `Unknown tool: ${name}`, callSpace);
-    }
-    toolCallsTotal.inc({ tool: name, space: callSpace || 'global', door: caller.transport });
-    // Enforce the advertised inputSchema before the handler runs — except partial-success tools
-    // (save_bulk), which report per-item errors in the result rather than rejecting the whole call.
-    if (!tool.skipSchemaValidation) {
-      const argErr = validatorFor(accessibleSpaceIds).validate(tool, a);
-      if (argErr) return refuseAudited(400, `Error: ${argErr}`, callSpace, callSpace);
-    }
-    /*
-     * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
-     * which nothing has been destroyed, and therefore the right one.
-     *
-     * It is in this function rather than in front of the REST route because that is where it used to be:
-     * express middleware on five routes, and nothing at all on the MCP door. An agent emptying a space in
-     * a loop met no limit a browser would have hit at the fifth call.
-     *
-     * **It counts calls that REACH the handler, not attempts, and that is a reversal worth recording.**
-     * The first version sat above the gates on the reasoning that a caller getting it wrong in a loop
-     * should be slowed too. It does not survive contact: a refused call destroys nothing, so counting
-     * refusals turns a malformed-argument loop into a lockout and makes the API hostile to anyone probing
-     * it — five 400s and an integrator learning the shape of the call is locked out of the real one. The
-     * rail exists to bound DESTRUCTION, and destruction begins one line below this.
-     */
-    const rateKey = caller.tokenId ?? caller.ip;
-    if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
-      return refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace);
-    }
-    let snapshots: AuditSnapshots | undefined;
-    const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
-    const result = await tool.handle({
-      args: a,
-      callSpace,
-      callSpaces: rawSpaces,
-      name,
-      // Handed to the handler as well as recorded in the audit trail, because the default byte budget
-      // depends on who is reading the answer rather than on which module produced it — see
-      // `defaultBudgetChars`. Before this the tool modules chose MCP's number themselves, so a caller on
-      // `POST /api/<tool>` got half the answer a caller on the legacy REST route got.
-      transport: caller.transport,
-      rateKey,
-      cfg,
-      // Narrowed to the tool's area for a read tool, so a search that names no space reads only where it may (Q-89).
-      accessibleSpaces: accessibleSpaces.filter(sp => handlerSpaceIds.includes(sp.id)),
-      accessibleSpaceIds: handlerSpaceIds,
-      // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin tool,
-      // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
-      rights,
-      actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
-      recordChanges: (before, after) => { snapshots = { before, after }; },
-    });
-    // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
-    // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
-    const status = result?.isError ? 422 : 200;
-    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
-    return { result, status, callSpace };
-  } catch (err) {
-    const answer = answerThrown(err);
-    /*
-     * An ACT that threw after it ran is recorded with the status that is answered: the REST middleware records every response
-     * of the route, and a tool door that recorded only the answered run would leave the failed run — the one that spent the
-     * credentials and then failed — out of the trail. A refusal is not a run (`ToolRefusal` is raised before the work), and a
-     * stored record whose connections failed has recorded itself (`ConnectionsNotWritten`, below). Every other tool is
-     * unchanged: a failed write is recorded by its caller's own entry or not at all, as before.
-     *
-     * A WRITE tool's refusal is recorded whatever threw it (R6-13, `Q-315`): a schema refusal, a merge refusal, a record the call names
-     * and cannot find, a conflict, a store failure — at the status that is answered, as the REST middleware records every response of a
-     * mutating route. Only the two tools that caught their own schema refusal and RETURNED it were recorded before, so a refused
-     * `update_entity` left no row while a refused `save_entity` did, and removing those two catches would have taken theirs away.
-     * No change list: a refused edit changed nothing and its intended values would claim one (`recordToolCall`). A stored record
-     * whose connections failed has recorded itself (`ConnectionsNotWritten`).
-     */
-    const isAct = mcpActOperation(name) !== null;
-    if (!(err instanceof ConnectionsNotWritten) && (isAct ? !(err instanceof ToolRefusal) : tool?.mutating)) {
-      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a);
-    }
-    return answer;
-  }
-
-  /** What a call that threw is answered with, whatever threw it: the one classification both doors share. */
+  /**
+   * What a call that threw is answered with, whatever threw it: the one classification both doors share.
+   *
+   * It stands BEFORE the judge on purpose, and not for tidiness: every `return` of this function after the judge call is an exit of a
+   * judged call and must go through `withUnknownFieldRows` (a gate holds it), whereas the returns in here only CLASSIFY — what they
+   * answer is handed back to the catch arm below, which is the exit.
+   */
   function answerThrown(err: unknown): ToolCallOutcome {
     const message = err instanceof Error ? err.message : String(err);
     // A refusal a shared module made with its own status (`ToolRefusal`): answered with that status, and not logged as a
@@ -394,7 +331,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
     }
     if (err instanceof SchemaViolationError) {
-      countSchemaRefusal(caller.transport === 'mcp' ? 'mcp' : 'tool', err);
+      countSchemaRefusal(writeDoor, err);
       // A tool is an edit of what the caller named: the status is an update's, not spelled here.
       return {
         result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: err.toStructured() },
@@ -450,6 +387,113 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       };
     }
     return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 400, callSpace };
+  }
+
+  /** The unknown-field rows of this call, once the judge has run; every answer from there on is given through `withUnknownFieldRows`. */
+  let rows: readonly UnknownFieldRow[] = [];
+
+  try {
+    // Refused BEFORE it is counted (`Q-108`): `name` is whatever the caller sent, and as a metric label an
+    // unknown one mints a new time series per spelling — unbounded cardinality from any authenticated caller.
+    if (!tool) {
+      return refuse(404, `Unknown tool: ${name}`, callSpace);
+    }
+    toolCallsTotal.inc({ tool: name, space: callSpace || 'global', door: caller.transport });
+    /*
+     * A brain RECORD write is judged for an argument it does not take (Q-320, bundle-128): the target space is resolved here,
+     * through the one function that does it for the dispatcher, because what becomes of such an argument is the setting of the
+     * space the write LANDS in; then `answerUnknownWriteFields` answers by that setting — a refusal before anything is stored, or
+     * the rows every answer from here on carries. A failed resolution is refused for that, with nothing said about the arguments
+     * (resolution precedes the judge, as it does on REST). The handlers keep their own `resolveWriteTarget`, a no-op re-check now.
+     *
+     * A batch (`save_bulk`) is not judged here: its top level is refused in every mode by the handler and its ITEMS are judged
+     * one by one by the batch writer.
+     */
+    const judgedOperation = judgedOperationOfTool(name);
+    if (judgedOperation !== null && !isBatchWriteOperation(judgedOperation)) {
+      const wt = resolveCallWriteTarget(callSpace, a);
+      if (!wt.ok) return refuseAudited(400, `Error: ${wt.error}`, callSpace, callSpace);
+      const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, wt.target, writeDoor);
+      rows = judged.rows;
+      if (judged.refused) {
+        return withUnknownFieldRows(refuseAudited(400, `Error: ${judged.refusal!.error}`, callSpace, callSpace, { ...judged.refusal }), rows);
+      }
+    }
+    // Enforce the advertised inputSchema before the handler runs — except partial-success tools
+    // (save_bulk), which report per-item errors in the result rather than rejecting the whole call. A judged tool's TOP level is
+    // tolerated (its unknown arguments were answered above); everything nested is still held to the closed schema.
+    if (!tool.skipSchemaValidation) {
+      const argErr = validatorFor(accessibleSpaceIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
+      if (argErr) return withUnknownFieldRows(refuseAudited(400, `Error: ${argErr}`, callSpace, callSpace), rows);
+    }
+    /*
+     * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
+     * which nothing has been destroyed, and therefore the right one.
+     *
+     * It is in this function rather than in front of the REST route because that is where it used to be:
+     * express middleware on five routes, and nothing at all on the MCP door. An agent emptying a space in
+     * a loop met no limit a browser would have hit at the fifth call.
+     *
+     * **It counts calls that REACH the handler, not attempts, and that is a reversal worth recording.**
+     * The first version sat above the gates on the reasoning that a caller getting it wrong in a loop
+     * should be slowed too. It does not survive contact: a refused call destroys nothing, so counting
+     * refusals turns a malformed-argument loop into a lockout and makes the API hostile to anyone probing
+     * it — five 400s and an integrator learning the shape of the call is locked out of the real one. The
+     * rail exists to bound DESTRUCTION, and destruction begins one line below this.
+     */
+    const rateKey = caller.tokenId ?? caller.ip;
+    if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
+      return withUnknownFieldRows(refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace), rows);
+    }
+    let snapshots: AuditSnapshots | undefined;
+    const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
+    const result = await tool.handle({
+      args: a,
+      callSpace,
+      callSpaces: rawSpaces,
+      name,
+      // Handed to the handler as well as recorded in the audit trail, because the default byte budget
+      // depends on who is reading the answer rather than on which module produced it — see
+      // `defaultBudgetChars`. Before this the tool modules chose MCP's number themselves, so a caller on
+      // `POST /api/<tool>` got half the answer a caller on the legacy REST route got.
+      transport: caller.transport,
+      rateKey,
+      cfg,
+      // Narrowed to the tool's area for a read tool, so a search that names no space reads only where it may (Q-89).
+      accessibleSpaces: accessibleSpaces.filter(sp => handlerSpaceIds.includes(sp.id)),
+      accessibleSpaceIds: handlerSpaceIds,
+      // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin tool,
+      // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
+      rights,
+      actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
+      recordChanges: (before, after) => { snapshots = { before, after }; },
+    });
+    // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
+    // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
+    const status = result?.isError ? 422 : 200;
+    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
+    return withUnknownFieldRows({ result, status, callSpace }, rows);
+  } catch (err) {
+    const answer = answerThrown(err);
+    /*
+     * An ACT that threw after it ran is recorded with the status that is answered: the REST middleware records every response
+     * of the route, and a tool door that recorded only the answered run would leave the failed run — the one that spent the
+     * credentials and then failed — out of the trail. A refusal is not a run (`ToolRefusal` is raised before the work), and a
+     * stored record whose connections failed has recorded itself (`ConnectionsNotWritten`, below). Every other tool is
+     * unchanged: a failed write is recorded by its caller's own entry or not at all, as before.
+     *
+     * A WRITE tool's refusal is recorded whatever threw it (R6-13, `Q-315`): a schema refusal, a merge refusal, a record the call names
+     * and cannot find, a conflict, a store failure — at the status that is answered, as the REST middleware records every response of a
+     * mutating route. Only the two tools that caught their own schema refusal and RETURNED it were recorded before, so a refused
+     * `update_entity` left no row while a refused `save_entity` did, and removing those two catches would have taken theirs away.
+     * No change list: a refused edit changed nothing and its intended values would claim one (`recordToolCall`). A stored record
+     * whose connections failed has recorded itself (`ConnectionsNotWritten`).
+     */
+    const isAct = mcpActOperation(name) !== null;
+    if (!(err instanceof ConnectionsNotWritten) && (isAct ? !(err instanceof ToolRefusal) : tool?.mutating)) {
+      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a);
+    }
+    return withUnknownFieldRows(answer, rows);
   }
 }
 

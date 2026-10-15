@@ -6,9 +6,10 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { assertConnections, connectionSubject, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { assertConnections, connectionSubject, applyConnections, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
-import { unknownFieldWarnings } from './unknown-fields.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
@@ -34,22 +35,7 @@ import { MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 export const memoriesRouter = Router();
 
 // POST /api/brain/spaces/:spaceId/facts — create a fact
-/**
- * The body keys the facts create reads.
- *
- * Declared so the route can say what it did NOT understand — see `unknownFieldWarnings`. It is a
- * second list beside the destructure below, which is exactly the kind of pair that drifts, so
- * `a-create-says-which-fields-it-did-not-understand.test.js` requires every destructured name to
- * appear here. A field added below and not here would produce an "unknown field" warning about a
- * parameter that works.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-// `LINK_INPUT_NAMES` spread rather than listed: a fifth kind gets its field here on the day it is declared,
-// and a caller using a real field must never be told it is unknown.
-const FACTS_CREATE_BODY_KEYS = ['fact', 'tags', 'description', 'properties', 'type', 'id',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('fact.create')`: the paired tool's own schema, not a list kept beside this route.
 memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -58,9 +44,11 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
     return;
   }
   // Proxy space: resolve target space for write
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   const targetSpace = wt.target;
+  // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.create', targetSpace, 'rest'))) return;
   const { fact, tags = [], description, properties, type: memoryType } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
     res.status(400).json({ error: '`fact` string required' });
@@ -178,9 +166,8 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   }
   const body: Record<string, unknown> = { ...doc };
   if (quotaResult?.softBreached) body['storageWarning'] = true;
-  // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
-  // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...(createCheck?.warnings ?? []), ...connectionWarnings, ...unknownFieldWarnings(req.body, FACTS_CREATE_BODY_KEYS)];
+  // The schema warnings a `warn` space produces; the unknown-field rows are put in front of them by the answer's decoration.
+  const warnings = [...(createCheck?.warnings ?? []), ...connectionWarnings];
   Object.assign(body, writeWarningFields(warnings));
   res.status(201).json(body);
 });
@@ -216,19 +203,7 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
 
 
 // PATCH /api/brain/spaces/:spaceId/facts/:id — partial update a fact (long-form)
-/**
- * The body keys the facts UPDATE reads.
- *
- * Its own list, not the create's: `deleteFields` is an update field and `id` is a path parameter
- * here. Copying the create's would produce an "unknown field" warning about a parameter that works,
- * which is what the drift check in
- * `an-update-answers-the-same-questions-a-create-does-db.test.js` exists to refuse.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const FACTS_UPDATE_BODY_KEYS = ['fact', 'tags', 'description', 'properties', 'deleteFields', 'type',
-  ...CONNECTION_BODY_KEYS];
+// What a body may carry is `acceptedWriteKeys('fact.update')` (the id is the path's, so it is not among them).
 memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -237,10 +212,12 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.update', wt.target, 'rest'))) return;
   const { fact, tags, description, properties, deleteFields, type: memoryType } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
@@ -256,7 +233,6 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
 
   // `F-27`: the one-call write. The connections' shape and refusals are asked below, once the record is found:
   // a record that is not there is a `404`, not its edges' refusal.
-  const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; type?: string; tags?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
   // `type` was accepted on CREATE and silently DROPPED here: this handler never destructured it, so a caller PATCHing
@@ -292,12 +268,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   const sus = parseRecordSuperseded(req.body);
   if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
   if (sus.value !== undefined) updates.superseded = sus.value;
-  // A connection field IS a field. Without this, `{linkEntities: [...]}` alone answered
-  // "At least one field must be provided" for a body that plainly has one.
-  // Both return `null` for absent, never `undefined` — `!== undefined` would be true for `null` and
-  // would disable the check below entirely rather than widening it.
-  const hasConnections = desiredLinksFrom(req.body) !== null || edgeInputsFrom(req.body) !== null;
-  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided && !hasConnections) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  // PRESENCE of any field the write takes (a connection field, `ttlDays: null` and `deleteFields` included), from the one accepted set —
+  // the sentence names that same set, so it cannot omit a field the write takes.
+  if (!carriesAnyAcceptedField(req.body, 'fact.update')) { res.status(400).json({ error: atLeastOneFieldRefusal('fact.update') }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     // Validate the record AS IT WILL BE, on every patch — not only when `deleteFields` is present.
@@ -312,7 +285,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     const existing = await listFacts(mid, { _id: id }, 1, 0);
     // The link sets BEFORE this write, for the audit entry. Read here because after the write they are
     // already what the body asked for — see `linkAuditSnapshots`.
-    const linkAudit = await linkAuditSnapshots(mid, id, req.body);
+    const linkAudit = await linkAuditSnapshots(mid, id, req.body, 'fact');
     if (existing.length === 0) continue;
     /*
      * The schema check moved into `updateFact`.
@@ -362,7 +335,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
        * and both semantics live in `applyConnections` so no door has to restate them.
        */
       const connected = await applyConnections(updated.spaceId, updated._id, 'fact', req.body, updated.author, webhookToken(req));
-      const warnings = [...(check?.warnings ?? []), ...connected.warnings, ...unknownFieldWarnings(req.body, FACTS_UPDATE_BODY_KEYS)];
+      const warnings = [...(check?.warnings ?? []), ...connected.warnings];
       res.json(warnings.length > 0 ? { ...updated, ...writeWarningFields(warnings) } : updated);
       return;
     }
