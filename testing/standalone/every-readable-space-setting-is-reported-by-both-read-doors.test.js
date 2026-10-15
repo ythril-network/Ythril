@@ -17,9 +17,8 @@
  *
  * The first run on the unchanged base lists what is missing today. The new `unknownWriteFields` row does not exist yet, so it is
  * guarded by name as well (a derivation over a table that lacks the row would pass about it). Existing gaps that are NOT this
- * bundle's are listed as exemptions below with `ticket: 'unfiled'`: design-v3 1.2 says each is "either fixed or becomes a reasoned
- * exemption naming a ticket", and filing them is the caller's step. Every exemption is checked still to be a gap, so a fixed one
- * must leave the list.
+ * bundle's are listed as exemptions below naming their ticket (Q-503): design-v3 1.2 says each is "either fixed or becomes a reasoned
+ * exemption naming a ticket". Every exemption is checked still to be a gap, so a fixed one must leave the list.
  *
  * Run: node --test testing/standalone/every-readable-space-setting-is-reported-by-both-read-doors.test.js
  */
@@ -42,11 +41,11 @@ const WRITE_ONLY = new Map([
 const NOT_ON_LIST_SPACES = new Map(
   ['recordTtlDays', 'dupeRules', 'dupeMergeSurvivor', 'dupeRulesOnInsert', 'documentExtraction',
     'imageAnalysis', 'audioAnalysis', 'videoAnalysis', 'textAnalysis', 'faceDescriptorDims']
-    .map(k => [k, { ticket: 'unfiled', why: '`list_spaces` reports identity, counts and quota; the instance-local settings are read through `space_meta` and `GET /api/spaces`' }]));
+    .map(k => [k, { ticket: 'Q-503', why: '`list_spaces` reports identity, counts and quota; the instance-local settings are read through `space_meta` and `GET /api/spaces`' }]));
 
 /** Settings the REST projection does not report today, until a ticket gives it them. */
 const NOT_ON_REST = new Map([
-  ['faceDescriptorDims', { ticket: 'unfiled', why: 'the face-descriptor width is not part of the `GET /api/spaces` projection today' }],
+  ['faceDescriptorDims', { ticket: 'Q-503', why: 'the face-descriptor width is not part of the `GET /api/spaces` projection today' }],
 ]);
 
 const topLevel = Object.entries(SPACE_FIELD_RIGHTS).filter(([k]) => !k.includes('.'));

@@ -17,7 +17,7 @@ import { makeSignedOwnCast } from '../util/signing.js';
 import { localToRemote } from '../sync/space-map.js';
 import { spaceForWire } from '../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../spaces/rename.js';
-import { reorderSpaces } from '../spaces/spaces.js';
+import { reorderSpaces, unknownWriteFieldsToReport } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
@@ -193,6 +193,8 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   const searchDown = isSearchDown(search);
   const spaces = visibleSpaces.map((space) => {
     const { id, label, builtIn, folders, maxGiB, flex, proxyFor, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
+    // Q-320: THIS instance's answer to an unknown write field, read back like the neighbouring settings — `'refuse'`, absent when warn.
+    const unknownWriteFields = unknownWriteFieldsToReport(space);
     return {
     id, label, builtIn, folders, maxGiB, flex,
     usageGiB: usageBySpaceId.get(id)?.usageGiB ?? 0,
@@ -223,6 +225,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     ...(audioAnalysis ? { audioAnalysis } : {}),
     ...(videoAnalysis ? { videoAnalysis } : {}),
     ...(textAnalysis ? { textAnalysis } : {}),
+    ...(unknownWriteFields ? { unknownWriteFields } : {}),
     ...(includeCounts && countsBySpaceId[id] ? { counts: countsBySpaceId[id] } : {}),
     };
   });

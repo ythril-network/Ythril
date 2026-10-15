@@ -119,6 +119,12 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   // It DELETES records on a clock.
   recordTtlDays: area('knowledge', 'admin'),
 
+  // Q-320: this instance's answer to a top-level field a brain write does not take. `refuse` makes writes that used to succeed start
+  // failing for every caller in the space, so it is priced as the enforcement rows above are: the schema area's `admin`, the rung of
+  // `meta.validationMode`. Top level, not `meta.`: it is a local setting, never replicated or voted (`SpaceConfig.unknownWriteFields`).
+  // `update_space` stays `spaceAdmin` (the four areas), which is stricter and applies to every one of its arguments.
+  unknownWriteFields: area('schema', 'admin'),
+
   /*
    * SETTABLE BY NOBODY.
    *
