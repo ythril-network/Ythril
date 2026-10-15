@@ -19,6 +19,9 @@ import { hasReDoSRisk, MAX_PATTERN_LENGTH, REDOS_REFUSAL } from '../util/redos.j
 import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
 import { evaluateRules, LONGEST_CHECKED_STRING } from './schema-rules.js';
+import { boundedNames } from './meta-fields.js';
+import { ownValue } from '../util/plain-object.js';
+import { libraryEntryNameOf } from './library-ref-name.js';
 
 // ── Violation type ─────────────────────────────────────────────────────────
 
@@ -31,6 +34,12 @@ export interface SchemaViolation {
    * what it should have sent. Bounded in count and in the length of a name — a type can declare hundreds, and a row is repeated per key.
    */
   declared?: string[];
+  /**
+   * Only on a RULE's row that is not a plain break (F-46): the rule could not be evaluated on this record, or the record is too large for
+   * it to read. Both are violations; this says which, so a refusal can be counted (`ythril_schema_refusals_total`) and shown
+   * (`core/refusal-text.ts` `outcomeOf`) by what it is without reading the prose of its reason.
+   */
+  outcome?: 'could_not_evaluate' | 'too_large';
 }
 
 /**
@@ -59,9 +68,6 @@ export const INSTANCE_WRITTEN_PROPERTY_KEYS = {
 /** The exemption as a validator takes it for one kind, or for a batch: a list of property keys per kind. */
 export type InstanceWrittenKeys = Partial<Record<'entity' | 'edge' | 'fact' | 'chrono', readonly string[]>>;
 
-/** The most declared names one row carries: a type can declare hundreds, and every undeclared key of a record repeats the list. */
-const MAX_DECLARED_NAMES = 50;
-
 // ── Library ref resolution ─────────────────────────────────────────────────
 
 /**
@@ -75,10 +81,9 @@ export function resolveTypeSchema(schema: TypeSchema | undefined): TypeSchema | 
   if (!ref) return schema;
 
   // Resolve library reference
-  if (ref.startsWith('library:')) {
-    const name = ref.slice('library:'.length);
-    const library = getSchemaLibrary();
-    const entry = library.find(e => e.name === name);
+  const name = libraryEntryNameOf(ref);
+  if (name !== undefined) {
+    const entry = getSchemaLibrary().find(e => e.name === name);
     return entry ? entry.schema : undefined;
   }
 
@@ -457,6 +462,23 @@ export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrit
 }
 
 /**
+ * What `meta` says about `record`, a stored-shaped record of `kind` — the validator of its kind, reached by name, handed the view of the
+ * WHOLE record (an edge with no resolved ends and no exemption: a record judged as it is, by a reader and not by its writer).
+ *
+ * The one switch for a caller that holds a record and a kind: the sync arrival recorder and the live schema check each wrote it, and a
+ * fifth kind added to one of the two would have been judged by nothing in the other.
+ */
+export function violationsOfRecord(meta: SpaceMeta, kind: ViewKind, record: object): SchemaViolation[] {
+  const view = recordViewOf(kind, record);
+  switch (kind) {
+    case 'entity': return validateEntity(meta, view);
+    case 'edge': return validateEdge(meta, view);
+    case 'fact': return validateFact(meta, view);
+    case 'chrono': return validateChrono(meta, view);
+  }
+}
+
+/**
  * Build a compact schema summary string for MCP instructions.
  */
 export function buildSchemaSummary(meta: SpaceMeta): string {
@@ -499,7 +521,7 @@ function checkUnresolvedRef(typeSchema: TypeSchema | undefined): SchemaViolation
   return [{
     field: '$ref',
     value: typeSchema._unresolvedRef,
-    reason: `schema library entry '${typeSchema._unresolvedRef.slice('library:'.length)}' not found — update or remove this $ref`,
+    reason: `schema library entry '${libraryEntryNameOf(typeSchema._unresolvedRef) ?? typeSchema._unresolvedRef}' not found — update or remove this $ref`,
   }];
 }
 
@@ -556,9 +578,6 @@ export function applyPropertyDefaults(
  */
 export const judgesKeys = (meta: SpaceMeta | undefined): boolean => meta?.validationMode === 'warn' || meta?.validationMode === 'strict';
 
-/** An own property's value, or `undefined`: a key named like something on `Object.prototype` is not on a record because the prototype has it. */
-const ownValue = (props: Readonly<Record<string, unknown>>, key: string): unknown => (Object.hasOwn(props, key) ? props[key] : undefined);
-
 function validatePropertiesAgainstSchema(
   meta: SpaceMeta | undefined,
   typeSchema: TypeSchema | undefined,
@@ -570,6 +589,7 @@ function validatePropertiesAgainstSchema(
   const props = properties ?? {};
 
   for (const [key, schema] of Object.entries(typeSchema.propertySchemas)) {
+    // An own property's value (`ownValue`): a key named like something on `Object.prototype` is not on a record because the prototype has it.
     const val = ownValue(props, key);
 
     // Required check (inline flag on PropertySchema)
@@ -612,7 +632,8 @@ function validatePropertiesAgainstSchema(
       if (value === undefined || value === null) continue;
       // A key the caller chose is quoted through the one bounded renderer, as every other name a refusal says (R6-11).
       const named = peerText(key, { max: NAME_QUOTED });
-      shown ??= declared.slice().sort().slice(0, MAX_DECLARED_NAMES).map(n => peerText(n, { max: NAME_QUOTED }));
+      // A type can declare hundreds, and every undeclared key of a record repeats the list: bounded, with the rest COUNTED.
+      shown ??= boundedNames(declared.slice().sort());
       violations.push({ field: `properties.${named}`, value, reason: `property '${named}' is not declared on this type`, declared: shown });
     }
   }

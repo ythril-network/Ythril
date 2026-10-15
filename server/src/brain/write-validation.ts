@@ -47,15 +47,16 @@ import { validateEntity, validateEdge, validateChrono, validateFact, type Schema
 import { recordViewOf, type RecordView } from './record-view.js';
 import type { SpaceMeta } from '../config/types.js';
 import { isDeepStrictEqual } from 'node:util';
-import { NAME_QUOTED, peerList, peerText } from '../util/log.js';
+import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerList, peerText } from '../util/log.js';
+import { ownValue } from '../util/plain-object.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
-import { ruleReadsChanged } from '../spaces/schema-rules.js';
-import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
+import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
-import { tallySchemaRefusal, type SchemaRefusalDoor } from './schema-refusal-tally.js';
+import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
 /**
  * Identity of a violation for before/after comparison.
@@ -115,9 +116,7 @@ export function deltaBetween(before: RecordView | null, after: RecordView): Writ
       // A property: its VALUE, own keys only — a key named like something on `Object.prototype` is not on the record because the prototype has it.
       if (field.startsWith('properties.')) {
         const name = field.slice('properties.'.length);
-        const was = Object.hasOwn(before.properties, name) ? before.properties[name] : undefined;
-        const is = Object.hasOwn(after.properties, name) ? after.properties[name] : undefined;
-        return !isDeepStrictEqual(was, is);
+        return !isDeepStrictEqual(ownValue(before.properties, name), ownValue(after.properties, name));
       }
       if (field === 'name') return before.title !== after.title;
       // Everything else is about the type (or the label) the record sits under: the allowlist, the unresolved reference, the ends.
@@ -306,14 +305,21 @@ function boundedValue(value: unknown): unknown {
 
 /**
  * At most {@link MAX_ROWS} rows, each quoting the caller's choices bounded: the `field` (a property key the caller chose) at
- * `NAME_QUOTED`, a string `value` by `peerText`. The one place a refusal's rows are rendered, so `introduced`, `preExisting`
- * and `violations` cannot differ in what they quote.
+ * `NAME_QUOTED`, a string `value` by `peerText`. The one place violation rows are rendered for anyone to read — a refusal's
+ * `introduced`, `preExisting` and `violations`, a write's warnings, a push's recorded rows, an import's report and the live schema
+ * check's answer — so none of them can quote more than another.
+ *
+ * `value: false` leaves every row without its value: for a reader who may not see the stored data (the stored-data check without
+ * `knowledge: read`) or a sink that never carries values (an import's report). The push answer, the live check's sample and a reader
+ * who may read the data keep it. Before this was one function, three of those sinks cut the list themselves and echoed `field` and
+ * `value` whole.
  */
-function boundedRows(rows: readonly SchemaViolation[]): SchemaViolation[] {
+export function boundedRows(rows: readonly SchemaViolation[], { value = true }: { value?: boolean } = {}): SchemaViolation[] {
   return rows.slice(0, MAX_ROWS).map(v => {
-    const row: SchemaViolation = { ...v, field: peerText(v.field, { max: NAME_QUOTED }) };
+    const { value: held, ...rest } = v;
+    const row: SchemaViolation = { ...rest, field: peerText(v.field, { max: NAME_QUOTED }) } as SchemaViolation;
     // A row with no value stays without one: a `value: undefined` key is a field the row never had.
-    if (Object.hasOwn(v, 'value')) row.value = boundedValue(v.value);
+    if (value && Object.hasOwn(v, 'value')) row.value = boundedValue(held);
     return row;
   });
 }
@@ -383,7 +389,17 @@ export function schemaRefusalStatus(verb: 'create' | 'update'): 400 | 422 {
  */
 export function countSchemaRefusal(door: SchemaRefusalDoor, err: SchemaViolationError): void {
   const first = err.check.introduced[0] ?? err.check.all[0];
-  tallySchemaRefusal(door, first && isUndeclaredKey(first) ? 'undeclared' : 'property');
+  tallySchemaRefusal(door, first ? refusalOutcomeOf(first) : 'property');
+}
+
+/**
+ * What kind of wrong one violation row is, as the refusal metric counts it — read from the row's own marks (`declared`, `outcome`) and
+ * its field, never from the prose of its reason. The client's `outcomeOf` (`core/refusal-text.ts`) is the mirror that shows it.
+ */
+export function refusalOutcomeOf(row: SchemaViolation): SchemaRefusalOutcome {
+  if (isUndeclaredKey(row)) return 'undeclared';
+  if (row.outcome === 'could_not_evaluate' || row.outcome === 'too_large') return row.outcome;
+  return isRuleRow(row) ? 'rule' : 'property';
 }
 
 /**
@@ -449,13 +465,13 @@ export function describeUpdateViolations(
 ): string {
   // The names are fields the CALLER chose (a property key), so the list is bounded in count and in each name: a megabyte key, or a hundred
   // of them, is a sentence, not a megabyte of one (R6-11).
-  const names = (vs: SchemaViolation[]) => peerList([...new Set(vs.map(v => v.field))], ', ', { count: 10, each: NAME_QUOTED });
+  const names = (vs: SchemaViolation[]) => peerList([...new Set(vs.map(v => v.field))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED });
 
   // A caller who read only the prose (an MCP tool's error text) must still learn WHY a property key is refused: the row's reason says
   // "not declared", and the sentence is all of it that reaches them.
   const undeclared = introduced.filter(isUndeclaredKey);
   const undeclaredNote = undeclared.length > 0
-    ? ` Not declared on this type: ${peerList([...new Set(undeclared.map(v => v.field.replace(/^properties\./, '')))], ', ', { count: 10, each: NAME_QUOTED })}.`
+    ? ` Not declared on this type: ${peerList([...new Set(undeclared.map(v => v.field.replace(/^properties\./, '')))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}.`
     : '';
 
   if (introduced.length > 0 && preExisting.length === 0) {
@@ -497,6 +513,44 @@ export function describeUpdateViolations(
 /** An upsert onto nothing is an insert: no prior record, so nothing can be pre-existing. */
 const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 
+/** The record fields a write may state beside its identity — every one a rule can read, so none may fall out of the after-view. */
+interface StatedFields {
+  description?: string | null;
+  tags?: string[] | null;
+  properties?: Record<string, string | number | boolean>;
+}
+
+/**
+ * The record an upsert LEAVES — the one thing the after-view is built from (R6-3: the view is of the MERGED record).
+ *
+ * The stored record (nothing, on an insert), with every field the write states laid over it — a `null` is a field the write REMOVES and
+ * reads as absent — then tags unioned and properties merged the way every writer stores them (`merge-fields.ts`).
+ *
+ * It exists because each classifier built its after-view from a literal of the fields it had in hand: an edge and a fact lost their
+ * tags, a fact and a chrono entry their title and description, an entity its description. The before-view was the whole stored record,
+ * so a rule reading `self.description` blamed a write that never touched it, and a write that set a refused description was judged on
+ * `''` and passed as the record's old break (`a-rule-reads-the-record-the-write-leaves`).
+ */
+export function recordAfterUpsert(existing: object | null, incoming: object): Record<string, unknown> {
+  const stored = (existing ?? {}) as Record<string, unknown> & StatedFields;
+  const stated = incoming as Record<string, unknown> & StatedFields;
+  return {
+    ...stored,
+    // A key the write does not state (`undefined`) leaves the stored value; one it states, `null` included, replaces it.
+    ...Object.fromEntries(Object.entries(stated).filter(([, v]) => v !== undefined)),
+    tags: mergeTags(stored.tags, stated.tags ?? undefined),
+    properties: mergePropertiesOrKeep(stored.properties, stated.properties) ?? {},
+  };
+}
+
+/**
+ * The fields a PATCH states, as an upsert's incoming fields: what `$set` writes, and `null` for a field `$unset` removes — so the
+ * after-view of an update is {@link recordAfterUpsert} of the stored record and this, and a removed description reads as none.
+ */
+export function patchedFields($set: Record<string, unknown>, $unset: Record<string, unknown>): Record<string, unknown> {
+  return { ...$set, ...Object.fromEntries(Object.keys($unset).map(k => [k, null])) };
+}
+
 /**
  * The whole decision, given the record the upsert lands on — no database.
  *
@@ -510,15 +564,14 @@ const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 export function classifyEntityUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] } | null,
-  incoming: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] },
+  incoming: { name: string; type: string } & StatedFields,
   /** The property keys the instance itself writes on this kind — handed in by the one writer that owns them (`INSTANCE_WRITTEN_PROPERTY_KEYS`); never a caller's. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
-  const merged = mergeTagsAndProperties(existing, incoming);
   return classifyViews(
     meta, view => validateEntity(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('entity', existing) : null,
-    recordViewOf('entity', { name: incoming.name, type: incoming.type, tags: merged.tags, properties: merged.properties }),
+    recordViewOf('entity', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -564,7 +617,7 @@ function classifyViews(
 export function classifyEdgeUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { label: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { label: string; properties?: Record<string, string | number | boolean> },
+  incoming: { label: string } & StatedFields,
   /**
    * What the caller resolved about the endpoints — the entity type at each end, and how many OTHER edges carry
    * this label from the same subject.
@@ -585,7 +638,7 @@ export function classifyEdgeUpsertAgainst(
   return classifyViews(
     meta, view => validateEdge(meta ?? {}, view, resolved, instanceWrittenKeys),
     existing ? recordViewOf('edge', existing) : null,
-    recordViewOf('edge', { label: incoming.label, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {} }),
+    recordViewOf('edge', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -605,17 +658,14 @@ export function classifyEdgeUpsertAgainst(
 export function classifyFactUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type?: string; properties?: Record<string, string | number | boolean> },
+  incoming: { type?: string; fact?: string } & StatedFields,
   /** As for an entity: the keys the instance itself writes on a fact, handed in by the writer that owns them. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
   return classifyViews(
     meta, view => validateFact(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('fact', existing) : null,
-    recordViewOf('fact', {
-      type: incoming.type ?? existing?.type,
-      properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-    }),
+    recordViewOf('fact', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -623,13 +673,13 @@ export function classifyFactUpsertAgainst(
 export function classifyChronoUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type: string; properties?: Record<string, string | number | boolean> },
+  incoming: { type: string; title?: string } & StatedFields,
 ): UpdateValidation {
   // The instance writes no property on a chrono entry, so there is no exemption to take (`INSTANCE_WRITTEN_PROPERTY_KEYS` has no row for it).
   return classifyViews(
     meta, view => validateChrono(meta ?? {}, view),
     existing ? recordViewOf('chrono', existing) : null,
-    recordViewOf('chrono', { type: incoming.type, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {} }),
+    recordViewOf('chrono', recordAfterUpsert(existing, incoming)),
   );
 }
 

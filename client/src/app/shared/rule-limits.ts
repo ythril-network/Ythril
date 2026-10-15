@@ -25,7 +25,8 @@ export const RULE_LIMITS = {
 /**
  * Is `name` one a rule may not take: a key of every JS object (`toString`, `isPrototypeOf`, `__proto__`, ...), or `prototype`? A rule map is
  * read by name, so such a name would reach the object's internals. ASKED, never listed, and asked the way the server asks it
- * (`schema-rules.ts`: `name in Object.prototype || name === 'prototype'`): a list is a second copy that misses the next name the platform adds.
+ * (`server/src/util/object-internal-keys.ts` `isObjectPrototypeName`, which the rule-name check calls): a list is a second copy that misses
+ * the next name the platform adds. `client-limits-match-the-server.spec.ts` holds the two expressions to one.
  */
 export function isReservedRuleName(name: string): boolean {
   return name in Object.prototype || name === 'prototype';

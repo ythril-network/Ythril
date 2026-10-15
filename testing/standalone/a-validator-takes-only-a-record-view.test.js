@@ -228,6 +228,40 @@ describe('every caller of a validator passes a view', () => {
       'these validator calls are handed something other than a RecordView: a rule that reads self.title or self.description would silently stop applying there');
   });
 
+  /**
+   * Every `recordViewOf(kind, record)` in the server, with whether its record is a WHOLE one: anything but an object literal that
+   * spreads nothing. A literal of hand-picked fields is the partial record the view exists to rule out, made one call earlier — the
+   * classifiers built their after-views that way and an edge and a fact lost their tags, a fact and a chrono entry their title and
+   * description (`a-rule-reads-the-record-the-write-leaves`). A literal that spreads the record and overrides a field (`{ ...survivor,
+   * properties }`) is a whole record.
+   */
+  function viewSources() {
+    const out = [];
+    for (const file of trackedSources([SERVER], { exclude: ['server/src/brain/record-view.ts'] })) {
+      const text = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
+      if (!text.includes('recordViewOf(')) continue;
+      const sf = parseSource(file, text);
+      const visit = (n) => {
+        if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'recordViewOf') {
+          const arg = n.arguments[1] && unwrapExpression(n.arguments[1]);
+          const literal = arg && ts.isObjectLiteralExpression(arg);
+          const whole = !literal || arg.properties.some(p => ts.isSpreadAssignment(p));
+          out.push({ where: `${file}:${lineOf(sf, n)}`, whole, arg: arg?.getText(sf).slice(0, 100) });
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    return out;
+  }
+
+  it('every view is built from a whole record, never a literal of the fields a caller had in hand (a floor, so an empty scan is not a clean one)', () => {
+    const sources = viewSources();
+    assert.ok(sources.length >= 8, `only ${sources.length} recordViewOf call(s) found in ${SERVER}: the scan is broken, not the code`);
+    assert.deepEqual(sources.filter(s => !s.whole).map(s => `${s.where} recordViewOf(kind, ${s.arg})`), [],
+      'these views are built from a literal of hand-picked fields: a rule reading a field the literal left out sees \'\' or [] after the write');
+  });
+
   it('recordViewOf and RecordView are defined once, in brain/record-view.ts, and nothing casts its way to one', () => {
     const defs = [];
     const casts = [];

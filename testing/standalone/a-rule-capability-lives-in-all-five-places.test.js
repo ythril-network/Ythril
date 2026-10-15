@@ -114,6 +114,19 @@ describe('the live check is a tool too, and takes what the route takes', () => {
     assert.equal(props['sample']?.type, 'object', '`sample` is not an object (`{ kind, record }`)');
   });
 
+  it('it takes the values the route takes: the sample kinds, the page size and the cursor length are the REST body\'s own', async () => {
+    // Read from the one body both doors parse (`SchemaValidateBody`), never listed here: a kind the body gains and the tool's enum does
+    // not is a caller told by the schema it reads that a kind does not exist.
+    const { SchemaValidateBody } = await import('../../server/dist/spaces/schema-validate-door.js');
+    const body = SchemaValidateBody.shape;
+    const kinds = body.sample.unwrap().shape.kind.options;
+    assert.ok(kinds.length >= 4, `the REST body's sample kinds read as ${JSON.stringify(kinds)}: the derivation is broken, not the code`);
+    const props = propsOf('schema_validate');
+    assert.deepEqual([...props['sample'].properties.kind.enum].sort(), [...kinds].sort(), 'the tool\'s sample kinds are not the route\'s');
+    assert.equal(props['limit'].maximum, body.limit.unwrap().maxValue, 'the tool\'s page size cap is not the route\'s');
+    assert.equal(props['after'].maxLength, body.after.unwrap().maxLength, 'the tool\'s cursor length cap is not the route\'s');
+  });
+
   it('it does not mutate, so a read-only token may use it', () => {
     assert.equal(toolNamed('schema_validate')?.mutating, false, 'a dry run is declared mutating');
   });

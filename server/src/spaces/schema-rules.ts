@@ -38,7 +38,7 @@ import type * as CelModule from '@bufbuild/cel';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { PropertySchema, SpaceMeta, TypeSchema } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
-import type { RecordView, ViewKind } from '../brain/record-view.js';
+import { ALL_VIEW_FIELDS, VIEW_FIELDS, viewFieldValue, type RecordView, type ViewField, type ViewKind } from '../brain/record-view.js';
 import type { SchemaViolation } from './schema-validation.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { LruMap } from '../util/lru-map.js';
@@ -46,6 +46,9 @@ import { warnOnce } from '../util/warn-once.js';
 import { canonicalJson } from '../util/canonical-json.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 import { log, NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
+import { isPlainObject, ownValue } from '../util/plain-object.js';
+import { isObjectPrototypeName } from '../util/object-internal-keys.js';
+import { PER_TYPE_META_FIELD } from './meta-fields.js';
 
 // ── The limits a caller can hit. The client shows these numbers (client-limits-match-the-server.spec.ts reads them literally). ────────
 
@@ -108,14 +111,10 @@ export function ruleEngineAvailable(): boolean {
 
 // ── The record view as the engine sees it ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** The fields of `self` per kind. An edge has its label and no title or type, and never its ends (R6-3). */
-const VIEW_FIELDS: Record<ViewKind, ReadonlySet<string>> = {
-  entity: new Set(['title', 'type', 'description', 'tags', 'properties']),
-  fact: new Set(['title', 'type', 'description', 'tags', 'properties']),
-  chrono: new Set(['title', 'type', 'description', 'tags', 'properties']),
-  edge: new Set(['label', 'description', 'tags', 'properties']),
-};
-const ALL_KINDS: readonly ViewKind[] = ['entity', 'edge', 'fact', 'chrono'];
+/** Whether `name` is a field of a `kind` view: `VIEW_FIELDS` (`brain/record-view.ts`), the one spelling of what `self` holds (R6-3). */
+const hasViewField = (kind: ViewKind, name: string): boolean => (VIEW_FIELDS[kind] as readonly string[]).includes(name);
+/** The kinds a rule can govern: the knowledge types, by their one declaration. */
+const ALL_KINDS: readonly ViewKind[] = KNOWLEDGE_TYPES;
 
 /** Identifiers CEL itself defines (type names), which a rule may use beside `self`. */
 const TYPE_IDENTS: ReadonlySet<string> = new Set(['int', 'uint', 'double', 'bool', 'string', 'bytes', 'list', 'map', 'null_type', 'type', 'dyn']);
@@ -124,10 +123,8 @@ const PLANNER_OPERATORS: ReadonlySet<string> = new Set(['_&&_', '_||_', '_?_:_',
 
 /** `self` for the engine: what the view carries, with the fields a rule may always read always present. */
 function engineSelf(kind: ViewKind, view: RecordView): Record<string, unknown> {
-  const common = { description: view.description, tags: [...view.tags], properties: view.properties };
-  return kind === 'edge'
-    ? { label: view.label ?? '', ...common }
-    : { title: view.title ?? '', type: view.type ?? '', ...common };
+  // The tags as a list of the engine's own: the view's is read-only.
+  return Object.fromEntries(VIEW_FIELDS[kind].map(f => [f, f === 'tags' ? [...view.tags] : viewFieldValue(view, f)]));
 }
 
 // ── Reading a rule's syntax tree ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -171,8 +168,7 @@ interface Analysis {
   kinds: ViewKind[];
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const kindOf = (e: unknown): string | undefined => (isObj(e) && isObj(e['exprKind']) ? e['exprKind']['case'] as string | undefined : undefined);
+const kindOf = (e: unknown): string | undefined => (isPlainObject(e) && isPlainObject(e['exprKind']) ? e['exprKind']['case'] as string | undefined : undefined);
 const valueOf = (e: unknown): Record<string, unknown> => ((e as Expr).exprKind.value ?? {}) as Record<string, unknown>;
 const isSelf = (e: unknown): boolean => kindOf(e) === 'identExpr' && valueOf(e)['name'] === 'self';
 const isSelfProperties = (e: unknown): boolean => kindOf(e) === 'selectExpr' && isSelf(valueOf(e)['operand']) && valueOf(e)['field'] === 'properties';
@@ -197,7 +193,7 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
       problem(`reads self.${name}: a rule never sees an edge's ends, because an edge is checked before they exist`);
       return;
     }
-    const lacking = scope.kinds.filter(k => !VIEW_FIELDS[k].has(name));
+    const lacking = scope.kinds.filter(k => !hasViewField(k, name));
     if (scope.implicit && lacking.length < scope.kinds.length) {
       a.kinds = a.kinds.filter(k => !lacking.includes(k));
     } else if (lacking.length > 0) {
@@ -434,12 +430,12 @@ export interface RuleIssue { path: (string | number)[]; message: string }
 /** A rule as stored, read defensively: the shape is the body's business, so a malformed entry is skipped here and refused there. */
 interface StoredRule { rule: string; message: string; kinds?: readonly string[] }
 function rulesIn(map: unknown): [string, StoredRule][] {
-  if (!isObj(map)) return [];
+  if (!isPlainObject(map)) return [];
   return Object.entries(map).filter((e): e is [string, StoredRule] =>
-    isObj(e[1]) && typeof e[1]['rule'] === 'string' && typeof e[1]['message'] === 'string');
+    isPlainObject(e[1]) && typeof e[1]['rule'] === 'string' && typeof e[1]['message'] === 'string');
 }
 const declaredOf = (schema: Record<string, unknown>): Map<string, PropertySchema> =>
-  new Map(Object.entries(isObj(schema['propertySchemas']) ? schema['propertySchemas'] as Record<string, PropertySchema> : {}));
+  new Map(Object.entries(isPlainObject(schema['propertySchemas']) ? schema['propertySchemas'] as Record<string, PropertySchema> : {}));
 const namesKinds = (r: StoredRule): boolean => Array.isArray(r.kinds) && r.kinds.length > 0;
 const spaceRuleKinds = (r: StoredRule): ViewKind[] => (namesKinds(r) ? ALL_KINDS.filter(k => r.kinds!.includes(k)) : [...ALL_KINDS]);
 /** How a space rule is judged at save: for the kinds it names, or — naming none — for every kind whose view has what it reads. */
@@ -450,7 +446,7 @@ const spaceScope = (r: StoredRule): RuleScope => ({ level: 'space', kinds: space
  * over the budget. Paths are relative to the type (`['rules', name]`). Nothing while a stored meta is being read.
  */
 export function typeRuleIssues(collection: string, schema: unknown): RuleIssue[] {
-  if (storedReads > 0 || !isObj(schema) || typeof schema['$ref'] === 'string') return [];
+  if (storedReads > 0 || !isPlainObject(schema) || typeof schema['$ref'] === 'string') return [];
   const kind = collection as ViewKind;
   if (!ALL_KINDS.includes(kind)) return [];
   const scope: RuleScope = { level: 'type', kinds: [kind], declared: declaredOf(schema) };
@@ -489,9 +485,10 @@ export interface ChangedRuleParts { spaceRules: boolean; types: ReadonlySet<stri
  * types and kinds a write did not touch are left alone: a stored meta is not re-judged by an unrelated edit.
  */
 export function applicableRuleIssues(meta: unknown, only?: ChangedRuleParts): RuleIssue[] {
-  if (storedReads > 0 || !isObj(meta)) return [];
+  if (storedReads > 0 || !isPlainObject(meta)) return [];
   const spaceRules = rulesIn(meta['rules']);
-  const typeSchemas = isObj(meta['typeSchemas']) ? meta['typeSchemas'] : {};
+  const held = meta[PER_TYPE_META_FIELD];
+  const typeSchemas: Record<string, unknown> = isPlainObject(held) ? held : {};
   const issues: RuleIssue[] = [];
   for (const kind of ALL_KINDS) {
     const applying = spaceRules.filter(([, r]) => spaceRuleKinds(r).includes(kind));
@@ -501,9 +498,9 @@ export function applicableRuleIssues(meta: unknown, only?: ChangedRuleParts): Ru
     if (applying.length > 0 && (!only || only.spaceRules) && spaceCost > COST_BUDGET) {
       issues.push({ path: ['rules'], message: `the space rules that apply to every ${kind} record are over the cost budget a record's rules may have together: remove or simplify some` });
     }
-    const types = isObj(typeSchemas[kind]) ? typeSchemas[kind] as Record<string, unknown> : {};
+    const types = isPlainObject(typeSchemas[kind]) ? typeSchemas[kind] as Record<string, unknown> : {};
     for (const [typeName, schema] of Object.entries(types)) {
-      if (!isObj(schema) || typeof schema['$ref'] === 'string') continue;
+      if (!isPlainObject(schema) || typeof schema['$ref'] === 'string') continue;
       if (only && !only.spaceRules && !only.types.has(`${kind}:${typeName}`)) continue;
       const own = rulesIn(schema['rules']);
       if (applying.length === 0) continue; // a type's own rules alone are bounded by the type body
@@ -552,7 +549,7 @@ export function ruleMapIssues(map: Record<string, unknown>, ruleZ: z.ZodType, ma
   for (const name of names) {
     if (!RULE_NAME_RE.test(name)) {
       issues.push({ path: [name], message: `the rule name '${quoted(name)}' is not a name: a lower-case letter, then letters, digits, _ and -, 64 characters at most` });
-    } else if (name in Object.prototype || name === 'prototype') {
+    } else if (isObjectPrototypeName(name)) {
       issues.push({ path: [name], message: `the rule name '${name}' is a name every object answers to, so a rule under it could not be told from the object` });
     }
     const r = ruleZ.safeParse(map[name]);
@@ -625,7 +622,7 @@ function oversize(v: unknown, depth = 0): string | undefined {
     for (const x of v) { const why = oversize(x, depth + 1); if (why) return why; }
     return undefined;
   }
-  if (isObj(v)) {
+  if (isPlainObject(v)) {
     if (depth > 8) return 'nested too deeply';
     const keys = Object.keys(v);
     if (keys.length > MAP_CAP) return `a map of more than ${MAP_CAP}`;
@@ -636,7 +633,7 @@ function oversize(v: unknown, depth = 0): string | undefined {
 
 /** Which path the rule reads is over the caps, as `self.<path> is <how>`, or `undefined`. Only what the rule reads is measured. */
 function tooLarge(refs: Refs, self: Record<string, unknown>): string | undefined {
-  const props = (isObj(self['properties']) ? self['properties'] : {}) as Record<string, unknown>;
+  const props = (isPlainObject(self['properties']) ? self['properties'] : {}) as Record<string, unknown>;
   const check = (path: string, v: unknown): string | undefined => { const why = oversize(v); return why ? `self.${path} is ${why}` : undefined; };
   if (refs.whole) for (const [k, v] of Object.entries(self)) { const why = check(k, v); if (why) return why; }
   for (const f of refs.fields) { const why = check(f, self[f]); if (why) return why; }
@@ -654,17 +651,14 @@ const ruleHash = (text: string): string => sha256Hex(text).slice(0, 8);
  */
 const rowReads = new WeakMap<SchemaViolation, Refs>();
 
-/** What a record's view says for one top-level field a rule may read, in the spelling the rule uses. */
+/** What a record's view says for one top-level field a rule may read, in the spelling the rule uses; nothing for a name no view has. */
 function viewField(view: RecordView, name: string): unknown {
-  switch (name) {
-    case 'title': return view.title ?? '';
-    case 'type': return view.type ?? '';
-    case 'label': return view.label ?? '';
-    case 'description': return view.description;
-    case 'tags': return view.tags;
-    case 'properties': return view.properties;
-    default: return undefined;
-  }
+  return (ALL_VIEW_FIELDS as readonly string[]).includes(name) ? viewFieldValue(view, name as ViewField) : undefined;
+}
+
+/** Whether `row` is a RULE's row — `rules.<name>` (a type's rule) or `meta.rules.<name>` (a space rule) — and not a path's. */
+export function isRuleRow(row: Pick<SchemaViolation, 'field'>): boolean {
+  return /^(meta\.)?rules\./.test(row.field);
 }
 
 /**
@@ -680,19 +674,19 @@ function viewField(view: RecordView, name: string): unknown {
  * has no reads to compare, and nothing the write did is its doing.
  */
 export function ruleReadsChanged(row: SchemaViolation, before: RecordView, after: RecordView): boolean | undefined {
-  if (!/^(meta\.)?rules\./.test(row.field)) return undefined;
+  if (!isRuleRow(row)) return undefined;
   const refs = rowReads.get(row);
   if (!refs) return false;
   const differs = (a: unknown, b: unknown): boolean => !isDeepStrictEqual(a, b);
   if (refs.whole) {
-    for (const f of ['title', 'type', 'label', 'description', 'tags', 'properties']) if (differs(viewField(before, f), viewField(after, f))) return true;
+    for (const f of ALL_VIEW_FIELDS) if (differs(viewFieldValue(before, f), viewFieldValue(after, f))) return true;
     return false;
   }
   for (const f of refs.fields) if (differs(viewField(before, f), viewField(after, f))) return true;
-  // Own keys only: a property named like something on `Object.prototype` is not on the record because the prototype has it.
-  const own = (view: RecordView, name: string): unknown => (Object.hasOwn(view.properties, name) ? view.properties[name] : undefined);
+  // Own keys only (`ownValue`): a property named like something on `Object.prototype` is not on the record because the prototype has it.
   for (const p of refs.props) {
-    if (Object.hasOwn(before.properties, p) !== Object.hasOwn(after.properties, p) || differs(own(before, p), own(after, p))) return true;
+    if (Object.hasOwn(before.properties, p) !== Object.hasOwn(after.properties, p)
+      || differs(ownValue(before.properties, p), ownValue(after.properties, p))) return true;
   }
   for (const p of refs.presence) if (Object.hasOwn(before.properties, p) !== Object.hasOwn(after.properties, p)) return true;
   return false;
@@ -702,7 +696,7 @@ export function ruleReadsChanged(row: SchemaViolation, before: RecordView, after
 export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView, typeSchema: TypeSchema | undefined): SchemaViolation[] {
   if (meta?.validationMode !== 'warn' && meta?.validationMode !== 'strict') return [];
   const sources: { field: string; rule: StoredRule; level: 'type' | 'space'; declared: ReadonlySet<string> | null }[] = [];
-  if (isObj(typeSchema) && isObj((typeSchema as Record<string, unknown>)['rules'])) {
+  if (isPlainObject(typeSchema) && isPlainObject((typeSchema as Record<string, unknown>)['rules'])) {
     const declared = new Set(Object.keys(typeSchema.propertySchemas ?? {}));
     for (const [name, r] of rulesIn((typeSchema as Record<string, unknown>)['rules'])) sources.push({ field: `rules.${name}`, rule: r, level: 'type', declared });
   }
@@ -715,25 +709,29 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
   const self = engineSelf(kind, view);
   for (const { field, rule, level, declared } of sources) {
     const hash = ruleHash(rule.rule);
-    const addRow = (reason: string, reads?: Refs): void => {
-      const row: SchemaViolation = { field, value: undefined, reason };
+    const addRow = (reason: string, reads?: Refs, outcome?: SchemaViolation['outcome']): void => {
+      const row: SchemaViolation = { field, value: undefined, reason, ...(outcome ? { outcome } : {}) };
       if (reads) rowReads.set(row, reads);
       rows.push(row);
     };
-    const say = (what: string, reads?: Refs): void => { addRow(`${rule.message} — ${what} (rule ${hash})`, reads); };
-    if (!ruleEngineAvailable()) { say('could not be evaluated on this record (the rule engine is not available)'); continue; }
+    // A rule that could not judge the record: a violation that says which, by its `outcome` as well as in its reason.
+    const say = (outcome: NonNullable<SchemaViolation['outcome']>, what: string, reads?: Refs): void => {
+      addRow(`${rule.message} — ${what} (rule ${hash})`, reads, outcome);
+    };
+    const couldNot = (why: string, reads?: Refs): void => { say('could_not_evaluate', `could not be evaluated on this record (${why})`, reads); };
+    if (!ruleEngineAvailable()) { couldNot('the rule engine is not available'); continue; }
     const program = programFor(kind, level, declared, rule.rule);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
-    if (large) { say(`too large to check: ${large}`, program.refs); continue; }
+    if (large) { say('too_large', `too large to check: ${large}`, program.refs); continue; }
     evaluations++;
     const t0 = performance.now();
     const out = program.run({ self });
     const seconds = (performance.now() - t0) / 1000;
     for (const observe of durationObservers) observe(seconds);
-    if (cel!.isCelError(out)) say(`could not be evaluated on this record (${/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error'})`, program.refs);
-    else if (typeof out !== 'boolean') say('could not be evaluated on this record (it did not answer true or false)', program.refs);
+    if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error', program.refs);
+    else if (typeof out !== 'boolean') couldNot('it did not answer true or false', program.refs);
     else if (!out) addRow(`${rule.message} (rule ${hash})`, program.refs);
   }
   return rows;
@@ -747,14 +745,14 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
  * rule dead would open a strict space. Library types are read with their definitions (`withLibraryDefinitions`) by the caller.
  */
 export function invalidRulesOf(meta: Partial<SpaceMeta> | undefined): string[] {
-  if (!ruleEngineAvailable() || !isObj(meta)) return [];
+  if (!ruleEngineAvailable() || !isPlainObject(meta)) return [];
   const out: string[] = [];
-  const typeSchemas = isObj(meta.typeSchemas) ? meta.typeSchemas as Record<string, unknown> : {};
+  const typeSchemas = isPlainObject(meta.typeSchemas) ? meta.typeSchemas as Record<string, unknown> : {};
   for (const kind of ALL_KINDS) {
-    const types = isObj(typeSchemas[kind]) ? typeSchemas[kind] as Record<string, unknown> : {};
+    const types = isPlainObject(typeSchemas[kind]) ? typeSchemas[kind] as Record<string, unknown> : {};
     for (const [typeName, schema] of Object.entries(types)) {
-      if (!isObj(schema)) continue;
-      const declared = new Set(Object.keys(isObj(schema['propertySchemas']) ? schema['propertySchemas'] : {}));
+      if (!isPlainObject(schema)) continue;
+      const declared = new Set(Object.keys(isPlainObject(schema['propertySchemas']) ? schema['propertySchemas'] : {}));
       for (const [name, r] of rulesIn(schema['rules'])) {
         if (!programFor(kind, 'type', declared, r.rule).ok) out.push(`typeSchemas.${kind}.${typeName}.rules.${name}`);
       }
@@ -775,8 +773,8 @@ function textOf(meta: Partial<SpaceMeta>, name: string): string {
   const rule = parts[0] === 'meta'
     ? (meta as Record<string, unknown>)['rules']
     : (((meta.typeSchemas as Record<string, Record<string, Record<string, unknown>>> | undefined)?.[parts[1]!]?.[parts[2]!]) ?? {})['rules'];
-  const r = isObj(rule) ? rule[parts[parts.length - 1]!] : undefined;
-  return isObj(r) && typeof r['rule'] === 'string' ? r['rule'] : '';
+  const r = isPlainObject(rule) ? rule[parts[parts.length - 1]!] : undefined;
+  return isPlainObject(r) && typeof r['rule'] === 'string' ? r['rule'] : '';
 }
 
 let invalidTotal = 0;
@@ -812,9 +810,9 @@ export async function checkStoredRules(): Promise<{ invalid: number; engine: boo
   let ruleCount = 0;
   for (const space of getConfig().spaces) {
     const meta = withLibraryDefinitions(space.meta ?? {});
-    ruleCount += Object.keys(isObj(meta.rules) ? meta.rules : {}).length;
+    ruleCount += Object.keys(isPlainObject(meta.rules) ? meta.rules : {}).length;
     for (const types of Object.values(meta.typeSchemas ?? {})) {
-      for (const t of Object.values(types ?? {})) ruleCount += Object.keys(isObj((t as Record<string, unknown>)['rules']) ? (t as Record<string, Record<string, unknown>>)['rules']! : {}).length;
+      for (const t of Object.values(types ?? {})) ruleCount += Object.keys(isPlainObject((t as Record<string, unknown>)['rules']) ? (t as Record<string, Record<string, unknown>>)['rules']! : {}).length;
     }
     const dead = invalidRulesOf(meta);
     total += dead.length;

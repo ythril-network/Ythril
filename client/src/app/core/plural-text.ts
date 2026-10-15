@@ -10,9 +10,9 @@
  * showing a raw key, and a platform that does not know the language falls back to `other` instead of throwing in the middle of
  * rendering an error message. The count is always passed as `{{count}}`, already formatted.
  */
-export interface PluralTranslator {
-  translate(key: string, params?: Record<string, unknown>): string;
-}
+import { translatedOrEmpty, type KeyTranslator } from './translated-text';
+
+export type PluralTranslator = KeyTranslator;
 
 export function pluralText(
   transloco: PluralTranslator,
@@ -27,8 +27,8 @@ export function pluralText(
   try { shown = new Intl.NumberFormat(language || 'en').format(count); } catch { /* an unknown language: the plain number */ }
   const all = { ...params, count: shown };
   for (const key of [`${base}.${category}`, `${base}.other`]) {
-    const text = transloco.translate(key, all);
-    if (text && text !== key) return text;
+    const text = translatedOrEmpty(transloco, key, all);
+    if (text) return text;
   }
   return '';
 }

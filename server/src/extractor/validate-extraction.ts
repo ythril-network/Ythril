@@ -8,7 +8,7 @@
  */
 import { UUID_V4_RE } from '../brain/entity-refs.js';
 import { recordViewOf } from '../brain/record-view.js';
-import { validateEntity, validateEdge, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
+import { validateEntity, validateEdge, validationRefuses, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { KnowledgeType, SpaceMeta, ValidationMode } from '../config/types.js';
 
 /** A Schema Library entry, as `schemas/` and `benchmarks/space/schema.json` hold them. */
@@ -154,7 +154,8 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
   const sayProperties = (at: string, who: string, rows: SchemaViolation[]) => {
     for (const row of rows) {
       if (!row.field.startsWith('properties.')) continue;
-      if (Array.isArray(row.declared) && validationMode !== 'strict') continue;
+      // What `strict` means is asked of the one predicate every write door asks (`validationRefuses`), never spelled here.
+      if (Array.isArray(row.declared) && !validationRefuses({ validationMode })) continue;
       problems.push(`${at} (${who}) ${row.field}: ${row.reason}${row.declared ? ` — it declares ${row.declared.join(', ') || 'nothing'}` : ''}`);
     }
   };
@@ -220,7 +221,7 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     }
     // The properties against the type's declarations, by the instance's own validator — so a key the type does not declare (and the
     // extractor does not own) is found here and not on request 340.
-    sayProperties(at, `'${e.key}'`, validateEntity(propertyMeta, recordViewOf('entity', { name: e.name, type: e.type, properties: e.properties ?? {} }), INSTANCE_WRITTEN_PROPERTY_KEYS.entity));
+    sayProperties(at, `'${e.key}'`, validateEntity(propertyMeta, recordViewOf('entity', e), INSTANCE_WRITTEN_PROPERTY_KEYS.entity));
     entityType.set(e.key, e.type);
   }
 
@@ -363,7 +364,7 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     }
     // The properties against the label's declarations, by the instance's own validator (below) — the enum, the type, the required and the
     // undeclared key, so the answer here is the answer the write would have given on request 340.
-    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', { label: e.label, properties: e.properties ?? {} }), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
+    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', e), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
   }
 
   /* ── claims ────────────────────────────────────────────────────────────────────────────────────────── */

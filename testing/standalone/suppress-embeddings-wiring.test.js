@@ -133,7 +133,8 @@ describe('both write surfaces accept it', () => {
     // guard would drop that patch while answering 200. `a-meta-field-keeps-its-merge-kind-through-every-merge.test.js` runs it.
     assert.match(read('server/src/spaces/meta-fields.ts'), /suppressEmbeddings:\s*'scalar'/);
     assert.match(read('server/src/spaces/meta-fields.ts'), /if \(value === undefined\) continue;/);
-    assert.match(read('server/src/spaces/meta-update.ts'), /mergeMetaFields\(/);
+    // The merge a write makes lives with the base it is merged over (`meta-write-base.ts`), read by the planner and the rights check alike.
+    assert.match(read('server/src/spaces/meta-write-base.ts'), /mergeMetaFields\(/);
   });
 
   it('the schema LIBRARY accepts it too, so the two surfaces do not drift', () => {

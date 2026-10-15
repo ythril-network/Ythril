@@ -251,3 +251,38 @@ describe('the client\'s rules types name every key the server accepts for a rule
     expect(missing, `the server accepts these rule keys and the client types do not declare them: ${missing.join(', ')}`).toEqual([]);
   });
 });
+
+/** `export const NAME = <number>` in `src`, as a number, or an error naming what is missing. */
+function exportedNumber(src: string, name: string, where: string): number {
+  const m = new RegExp(`export\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*([\\d_]+)\\s*;`).exec(src);
+  if (!m) throw new Error(`${where} exports no numeric \`${name}\``);
+  return asNumber(m[1]!);
+}
+
+/** The expression `function name(param) { return <expr>; }` returns, with the parameter renamed to `x` and whitespace folded. */
+function returnedExpression(src: string, name: string, where: string): string {
+  const m = new RegExp(`function\\s+${name}\\s*\\(\\s*(\\w+)[^)]*\\)[^{]*\\{\\s*return\\s+([^;]+);\\s*\\}`).exec(src);
+  if (!m) throw new Error(`${where} has no one-line \`function ${name}(...) { return ...; }\` — re-anchor this gate`);
+  return m[2]!.replace(new RegExp(`\\b${m[1]}\\b`, 'g'), 'x').replace(/\s+/g, ' ').trim();
+}
+
+describe('the other limits and questions the editor copies from the server (G1, G2)', () => {
+  const SERVER_BOUNDS = 'server/src/util/request-bounds.ts';
+  const CLIENT_RETYPE = 'src/app/pages/brain/retype-flow.ts';
+  const SERVER_NAMES = 'server/src/util/object-internal-keys.ts';
+
+  it('the retype flow\'s MAX_DELETE_FIELDS is the server\'s cap on deleteFields per write', () => {
+    // A client cap above the server's sends a removal the server refuses; one below makes two saves where one would do.
+    expect(exportedNumber(readClientSource(CLIENT_RETYPE), 'MAX_DELETE_FIELDS', CLIENT_RETYPE))
+      .toBe(exportedNumber(serverSource(SERVER_BOUNDS), 'MAX_DELETE_FIELDS', SERVER_BOUNDS));
+  });
+
+  it('isReservedRuleName asks what the server\'s rule-name check asks (isObjectPrototypeName), in the same words', () => {
+    // The server's check calls the module, so the module's expression IS the server's rule; the editor's is held to it.
+    expect(serverSource(SERVER_RULES), `${SERVER_RULES} does not ask isObjectPrototypeName — re-point this gate`).toMatch(/\bisObjectPrototypeName\(/);
+    const server = returnedExpression(serverSource(SERVER_NAMES), 'isObjectPrototypeName', SERVER_NAMES);
+    const client = returnedExpression(readClientSource(CLIENT_LIMITS), 'isReservedRuleName', CLIENT_LIMITS);
+    expect(server).toMatch(/Object\.prototype/);
+    expect(client).toBe(server);
+  });
+});

@@ -247,7 +247,7 @@ export async function updateEntityById(
    * this brings inside.
    */
   const check = classifyEntityUpsertAgainst(getSpaceMeta(spaceId), existing,
-    { name: newName, type: newType, properties: newProps, tags: newTags });
+    { name: newName, type: newType, properties: newProps, tags: newTags, description: 'description' in $unset ? null : newDesc });
   if (check.blocked) throw new SchemaViolationError(check);
   onValidation?.(check);
 

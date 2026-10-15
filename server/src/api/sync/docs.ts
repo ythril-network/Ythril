@@ -20,7 +20,7 @@ import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
 import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, withSchemaViolations } from './_shared.js';
-import { MAX_ROWS } from '../../brain/write-validation.js';
+import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
@@ -242,11 +242,12 @@ const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEP
 const refusedError = (r: AcceptedFamily) => ({ error: r.reasons[0] ?? 'the document was refused and was not written' });
 
 /**
- * What a single route answers a sender about the one document it stored: the rows the page accept recorded for it, at most `MAX_ROWS`
- * (a document carrying a hundred undeclared keys answers twenty; the count is in the metric and the history). Rows keep their value — they
- * answer the sender about its own document — which is the one sink of the recording that does.
+ * What a single route answers a sender about the one document it stored: the rows the page accept recorded for it, rendered by the one
+ * bounded renderer (`boundedRows`: at most `MAX_ROWS` — a document carrying a hundred undeclared keys answers twenty, the count is in the
+ * metric and the history — each `field` and string value bounded). Rows keep their value — they answer the sender about its own
+ * document — which is the one sink of the recording that does.
  */
-const recordedRows = (r: AcceptedFamily): SchemaViolation[] => (r.recorded[0] ?? []).slice(0, MAX_ROWS);
+const recordedRows = (r: AcceptedFamily): SchemaViolation[] => boundedRows(r.recorded[0] ?? []);
 
 /**
  * One document through the page accept, for a single route: its family's result, or `null` once the route has

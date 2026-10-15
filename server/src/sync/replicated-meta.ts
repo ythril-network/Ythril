@@ -35,45 +35,31 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { SpaceMeta } from '../config/types.js';
 import { readPeerMeta, readStoredMeta, stripServerOwnedMeta } from '../spaces/body-schemas.js';
-import { mergeMetaFields, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { eachTypeDefinition, mergeMetaFields, mergeTypeDefinition, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { isPlainObject, ownValue } from '../util/plain-object.js';
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** The meta a sender hands a peer for one space: all of it but what the server owns. */
 export function replicatedMetaOf(meta: SpaceMeta | undefined): Obj {
   const stripped = stripServerOwnedMeta(meta ?? {});
-  return isObj(stripped) ? stripped : {};
+  return isPlainObject(stripped) ? stripped : {};
 }
 
 /**
- * Merge one type definition: the network's fields over the local ones, and the two property maps unioned. A type
- * that is a schema-library reference (`$ref`) on either side is one unit — a reference cannot carry properties, so
- * the network's definition replaces the local one whole.
- *
- * Every OTHER field of a type is the network's value where it sets one: a type's `rules` (F-46) are one of those, so a layer's
- * rules for a type replace the local ones for that type and are never unioned (R6-5). `propertySchemas` is the one map that is
- * unioned, and it is the owner's additive ruling that makes it so.
+ * A network's types laid additively over the local ones: a type the receiver lacks is added, one both hold is merged by
+ * `mergeTypeDefinition` (`spaces/meta-fields.ts`) — the network's fields over the local ones, the property maps unioned, a `$ref` whole.
  */
-function mergeType(local: unknown, incoming: Obj): Obj {
-  if (!isObj(local) || '$ref' in local || '$ref' in incoming) return incoming;
-  const merged: Obj = { ...local, ...incoming };
-  const lp = local['propertySchemas'], ip = incoming['propertySchemas'];
-  if (isObj(lp) || isObj(ip)) merged['propertySchemas'] = { ...(isObj(lp) ? lp : {}), ...(isObj(ip) ? ip : {}) };
-  return merged;
-}
-
-/** A network's types laid additively over the local ones: a type the receiver lacks is added, one both hold is merged by {@link mergeType}. */
 function mergeTypesAdditively(local: unknown, incoming: unknown): unknown {
-  if (!isObj(incoming)) return local;
-  const localSchemas: Obj = isObj(local) ? local : {};
+  if (!isPlainObject(incoming)) return local;
+  const localSchemas: Obj = isPlainObject(local) ? local : {};
   const schemas: Obj = { ...localSchemas };
   for (const [kind, types] of Object.entries(incoming)) {
-    if (!isObj(types)) continue;
-    const localTypes: Obj = isObj(localSchemas[kind]) ? localSchemas[kind] as Obj : {};
+    if (!isPlainObject(types)) continue;
+    const localTypes: Obj = isPlainObject(localSchemas[kind]) ? localSchemas[kind] as Obj : {};
     const mergedTypes: Obj = { ...localTypes };
     for (const [name, def] of Object.entries(types)) {
-      if (isObj(def)) mergedTypes[name] = mergeType(localTypes[name], def);
+      if (isPlainObject(def)) mergedTypes[name] = mergeTypeDefinition(localTypes[name], def);
     }
     schemas[kind] = mergedTypes;
   }
@@ -165,22 +151,16 @@ export interface MetaClash extends MetaPlace {
  */
 function placesOf(meta: unknown): Array<{ place: MetaPlace; value: unknown }> {
   const out: Array<{ place: MetaPlace; value: unknown }> = [];
-  const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
+  const m = replicatedMetaOf((isPlainObject(meta) ? meta : {}) as SpaceMeta);
   for (const [field, value] of Object.entries(m)) {
     if (field === PER_TYPE_META_FIELD || value === undefined) continue;
     out.push({ place: { field }, value });
   }
-  const heldTypes = m[PER_TYPE_META_FIELD];
-  const schemas = isObj(heldTypes) ? heldTypes : {};
-  for (const [kind, types] of Object.entries(schemas)) {
-    if (!isObj(types)) continue;
-    for (const [type, def] of Object.entries(types)) {
-      if (!isObj(def)) continue;
-      for (const [typeField, value] of Object.entries(def)) {
-        if (typeField === 'propertySchemas' && isObj(value)) {
-          for (const [property, p] of Object.entries(value)) out.push({ place: { kind, type, property }, value: p });
-        } else out.push({ place: { kind, type, typeField }, value });
-      }
+  for (const { kind, type, def } of eachTypeDefinition(m)) {
+    for (const [typeField, value] of Object.entries(def)) {
+      if (typeField === 'propertySchemas' && isPlainObject(value)) {
+        for (const [property, p] of Object.entries(value)) out.push({ place: { kind, type, property }, value: p });
+      } else out.push({ place: { kind, type, typeField }, value });
     }
   }
   return out;
@@ -188,8 +168,8 @@ function placesOf(meta: unknown): Array<{ place: MetaPlace; value: unknown }> {
 
 /** What `meta` holds at `place`, or `undefined`. The read half of {@link placesOf}: own keys only, whatever the place's names are. */
 function valueAt(meta: unknown, place: MetaPlace): unknown {
-  const own = (o: unknown, key: string | undefined): unknown => (isObj(o) && key !== undefined && Object.hasOwn(o, key) ? o[key] : undefined);
-  const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
+  const own = ownValue;
+  const m = replicatedMetaOf((isPlainObject(meta) ? meta : {}) as SpaceMeta);
   if (place.field !== undefined) return own(m, place.field);
   const def = own(own(own(m, PER_TYPE_META_FIELD), place.kind), place.type);
   return place.property !== undefined ? own(own(def, 'propertySchemas'), place.property) : own(def, place.typeField);

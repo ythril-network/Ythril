@@ -52,6 +52,10 @@ import { effectiveRung } from './mint-cap.js';
 import { isSpaceAdminFor } from './editor-scope.js';
 import { isDeepStrictEqual } from 'node:util';
 import { getConfig } from '../config/loader.js';
+import type { SpaceMeta } from '../config/types.js';
+import { metaWriteBase, mergeSpaceMeta } from '../spaces/meta-write-base.js';
+import { PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { isPlainObject } from '../util/plain-object.js';
 
 /** Rungs contain the ones below them, so "at least" is an index comparison and never a set of cases. */
 const meetsRung = (held: Rung, need: Rung): boolean => RUNGS.indexOf(held) >= RUNGS.indexOf(need);
@@ -223,9 +227,8 @@ function requirementOf(field: string): FieldRight | undefined {
   return TYPE_RULES_FIELD.test(field) ? SPACE_FIELD_RIGHTS['meta.rules'] : SPACE_FIELD_RIGHTS[field];
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 /** A rules map compared as content: absent and empty say the same thing. */
-const rulesOf = (def: unknown): unknown => (isObj(def) && isObj(def['rules']) ? def['rules'] : {});
+const rulesOf = (def: unknown): unknown => (isPlainObject(def) && isPlainObject(def['rules']) ? def['rules'] : {});
 
 /**
  * The types whose RULES a body changes, as `meta.typeSchemas.<kind>.<type>.rules` — priced as `meta.rules` (schema admin), because a
@@ -236,22 +239,30 @@ const rulesOf = (def: unknown): unknown => (isObj(def) && isObj(def['rules']) ? 
  * own definitions, or the targeted network's layer.
  */
 export function typeRuleEditsIn(body: Record<string, unknown>, spaceId: string): string[] {
-  const meta = isObj(body['meta']) ? body['meta'] : undefined;
-  if (!meta || !isObj(meta['typeSchemas'])) return [];
+  const meta = isPlainObject(body['meta']) ? body['meta'] : undefined;
+  if (!meta || !isPlainObject(meta[PER_TYPE_META_FIELD])) return [];
   const cfg = getConfig();
-  const network = typeof body['targetNetwork'] === 'string' ? cfg.networks.find(n => n.id === body['targetNetwork']) : undefined;
   const space = cfg.spaces.find(s => s.id === spaceId);
-  // The definitions the write is merged over (`planSpaceMetaUpdate`): the OWN ones, not the effective meta a network layer is laid under.
-  const base = network ? network.schemaLayers?.[spaceId] : space?.ownMeta ?? space?.meta;
-  const stored = isObj(base?.typeSchemas) ? base.typeSchemas as Record<string, unknown> : {};
+  // The definitions the write is merged over, asked of the planner's own answer (`metaWriteBase`): the OWN ones, or the targeted
+  // network's layer. A network that does not carry the space is refused by the planner; priced here against nothing, so every rule counts.
+  const targetNetwork = typeof body['targetNetwork'] === 'string' ? body['targetNetwork'] : undefined;
+  const base = (space ? metaWriteBase(space, targetNetwork, cfg.networks) : undefined) ?? {};
+  // What the write LEAVES, not what it names: under `typeSchemasMode: 'replace'` a type is removed by leaving it out of the body.
+  const mode = body['typeSchemasMode'] === 'replace' ? 'replace' : 'merge';
+  const after = mergeSpaceMeta(base, { [PER_TYPE_META_FIELD]: meta[PER_TYPE_META_FIELD] } as Partial<SpaceMeta>, mode);
+  const typesOf = (m: object): Record<string, unknown> => {
+    const types = (m as Record<string, unknown>)[PER_TYPE_META_FIELD];
+    return isPlainObject(types) ? types : {};
+  };
+  const before = typesOf(base);
+  const left = typesOf(after);
   const edits: string[] = [];
-  for (const [kind, types] of Object.entries(meta['typeSchemas'])) {
-    if (!isObj(types)) continue;
-    const storedTypes = isObj(stored[kind]) ? stored[kind] as Record<string, unknown> : {};
-    for (const [type, def] of Object.entries(types)) {
-      if (!isDeepStrictEqual(rulesOf(def), rulesOf(Object.hasOwn(storedTypes, type) ? storedTypes[type] : undefined))) {
-        edits.push(`meta.typeSchemas.${kind}.${type}.rules`);
-      }
+  for (const kind of new Set([...Object.keys(before), ...Object.keys(left)])) {
+    const was = isPlainObject(before[kind]) ? before[kind] : {};
+    const is = isPlainObject(left[kind]) ? left[kind] : {};
+    for (const type of new Set([...Object.keys(was), ...Object.keys(is)])) {
+      const ruleOf = (types: Record<string, unknown>) => rulesOf(Object.hasOwn(types, type) ? types[type] : undefined);
+      if (!isDeepStrictEqual(ruleOf(is), ruleOf(was))) edits.push(`meta.${PER_TYPE_META_FIELD}.${kind}.${type}.rules`);
     }
   }
   return edits;
