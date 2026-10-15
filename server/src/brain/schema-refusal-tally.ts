@@ -25,9 +25,13 @@ export type SchemaRefusalDoor = (typeof SCHEMA_REFUSAL_DOORS)[number];
 /**
  * What blocked the write. `undeclared`: a property key the type does not declare. `property`: any other violation of a declared
  * property or of the type (a wrong type, an enum, an unresolved reference). `rule`, `could_not_evaluate` and `too_large`: a schema rule
- * the record broke, one that could not be judged, and a record too large to judge. `refused_name`: a body field refused by name.
+ * the record broke, one that could not be judged, and a record too large to judge.
+ *
+ * Exactly the outcomes `refusalOutcomeOf` (`write-validation.ts`) can answer, and no more: each is declared at 0, so an outcome no refusal
+ * can have would read "never happened" for ever (`refused_name` did, until bundle-23 wave 4). `a-schema-refusal-is-counted-by-what-blocked-it`
+ * holds every one to a refusal that produces it.
  */
-export const SCHEMA_REFUSAL_OUTCOMES = ['undeclared', 'property', 'rule', 'could_not_evaluate', 'too_large', 'refused_name'] as const;
+export const SCHEMA_REFUSAL_OUTCOMES = ['undeclared', 'property', 'rule', 'could_not_evaluate', 'too_large'] as const;
 export type SchemaRefusalOutcome = (typeof SCHEMA_REFUSAL_OUTCOMES)[number];
 
 const tally = new Map<string, number>(

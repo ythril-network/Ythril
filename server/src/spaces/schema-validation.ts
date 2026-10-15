@@ -31,6 +31,12 @@ export interface SchemaViolation {
    * what it should have sent. Bounded in count and in the length of a name — a type can declare hundreds, and a row is repeated per key.
    */
   declared?: string[];
+  /**
+   * Only on a RULE's row that is not a plain break (F-46): the rule could not be evaluated on this record, or the record is too large for
+   * it to read. Both are violations; this says which, so a refusal can be counted (`ythril_schema_refusals_total`) and shown
+   * (`core/refusal-text.ts` `outcomeOf`) by what it is without reading the prose of its reason.
+   */
+  outcome?: 'could_not_evaluate' | 'too_large';
 }
 
 /**

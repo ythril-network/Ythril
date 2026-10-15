@@ -667,6 +667,11 @@ function viewField(view: RecordView, name: string): unknown {
   }
 }
 
+/** Whether `row` is a RULE's row — `rules.<name>` (a type's rule) or `meta.rules.<name>` (a space rule) — and not a path's. */
+export function isRuleRow(row: Pick<SchemaViolation, 'field'>): boolean {
+  return /^(meta\.)?rules\./.test(row.field);
+}
+
 /**
  * Whether the write changed what the rule behind `row` reads (R6-3), or `undefined` when `row` is not a rule's row.
  *
@@ -680,7 +685,7 @@ function viewField(view: RecordView, name: string): unknown {
  * has no reads to compare, and nothing the write did is its doing.
  */
 export function ruleReadsChanged(row: SchemaViolation, before: RecordView, after: RecordView): boolean | undefined {
-  if (!/^(meta\.)?rules\./.test(row.field)) return undefined;
+  if (!isRuleRow(row)) return undefined;
   const refs = rowReads.get(row);
   if (!refs) return false;
   const differs = (a: unknown, b: unknown): boolean => !isDeepStrictEqual(a, b);
@@ -715,25 +720,29 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
   const self = engineSelf(kind, view);
   for (const { field, rule, level, declared } of sources) {
     const hash = ruleHash(rule.rule);
-    const addRow = (reason: string, reads?: Refs): void => {
-      const row: SchemaViolation = { field, value: undefined, reason };
+    const addRow = (reason: string, reads?: Refs, outcome?: SchemaViolation['outcome']): void => {
+      const row: SchemaViolation = { field, value: undefined, reason, ...(outcome ? { outcome } : {}) };
       if (reads) rowReads.set(row, reads);
       rows.push(row);
     };
-    const say = (what: string, reads?: Refs): void => { addRow(`${rule.message} — ${what} (rule ${hash})`, reads); };
-    if (!ruleEngineAvailable()) { say('could not be evaluated on this record (the rule engine is not available)'); continue; }
+    // A rule that could not judge the record: a violation that says which, by its `outcome` as well as in its reason.
+    const say = (outcome: NonNullable<SchemaViolation['outcome']>, what: string, reads?: Refs): void => {
+      addRow(`${rule.message} — ${what} (rule ${hash})`, reads, outcome);
+    };
+    const couldNot = (why: string, reads?: Refs): void => { say('could_not_evaluate', `could not be evaluated on this record (${why})`, reads); };
+    if (!ruleEngineAvailable()) { couldNot('the rule engine is not available'); continue; }
     const program = programFor(kind, level, declared, rule.rule);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
-    if (large) { say(`too large to check: ${large}`, program.refs); continue; }
+    if (large) { say('too_large', `too large to check: ${large}`, program.refs); continue; }
     evaluations++;
     const t0 = performance.now();
     const out = program.run({ self });
     const seconds = (performance.now() - t0) / 1000;
     for (const observe of durationObservers) observe(seconds);
-    if (cel!.isCelError(out)) say(`could not be evaluated on this record (${/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error'})`, program.refs);
-    else if (typeof out !== 'boolean') say('could not be evaluated on this record (it did not answer true or false)', program.refs);
+    if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error', program.refs);
+    else if (typeof out !== 'boolean') couldNot('it did not answer true or false', program.refs);
     else if (!out) addRow(`${rule.message} (rule ${hash})`, program.refs);
   }
   return rows;

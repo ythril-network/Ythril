@@ -51,11 +51,11 @@ import { NAME_QUOTED, peerList, peerText } from '../util/log.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
-import { ruleReadsChanged } from '../spaces/schema-rules.js';
+import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
 import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
-import { tallySchemaRefusal, type SchemaRefusalDoor } from './schema-refusal-tally.js';
+import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
 /**
  * Identity of a violation for before/after comparison.
@@ -383,7 +383,17 @@ export function schemaRefusalStatus(verb: 'create' | 'update'): 400 | 422 {
  */
 export function countSchemaRefusal(door: SchemaRefusalDoor, err: SchemaViolationError): void {
   const first = err.check.introduced[0] ?? err.check.all[0];
-  tallySchemaRefusal(door, first && isUndeclaredKey(first) ? 'undeclared' : 'property');
+  tallySchemaRefusal(door, first ? refusalOutcomeOf(first) : 'property');
+}
+
+/**
+ * What kind of wrong one violation row is, as the refusal metric counts it — read from the row's own marks (`declared`, `outcome`) and
+ * its field, never from the prose of its reason. The client's `outcomeOf` (`core/refusal-text.ts`) is the mirror that shows it.
+ */
+export function refusalOutcomeOf(row: SchemaViolation): SchemaRefusalOutcome {
+  if (isUndeclaredKey(row)) return 'undeclared';
+  if (row.outcome === 'could_not_evaluate' || row.outcome === 'too_large') return row.outcome;
+  return isRuleRow(row) ? 'rule' : 'property';
 }
 
 /**
