@@ -100,8 +100,8 @@ member. Your own definitions are not changed. It needs the Networks right at wri
 **The editor below the panel shows this space's own definitions, not what the networks supply** — what a network
 sends applies beneath them. A property a network supplies is marked with that network's name (*The definition from …
 applies*), with a **Propose** beside it. **An edit a network outranks is stored but does not take effect**, and the panel
-says so: *"… is saved here but not in effect: <network> overrides your value."* A change you proposed that is still
-waiting for a vote is listed too (*A change to … is waiting for a vote in <network>*), even after the dialog that proposed
+says so: *"… is saved here but not in effect: … overrides your value."* A change you proposed that is still
+waiting for a vote is listed too (*A change to … is waiting for a vote in …*), even after the dialog that proposed
 it was closed. If the panel cannot load it says so and offers **Try again**. Saving a change to a space in more than one
 network says what happened in each by name (*Saved in …; waiting for a vote in …*) and keeps the dialog open.
 If someone else changed the schema after you opened it, the save is refused with *Someone else changed this schema after
