@@ -128,7 +128,7 @@ import { refusalText } from '../../core/refusal-text';
           </li>
         }
       </ul>
-      @if (validateMore() > 0) { <div class="sch-hint">{{ 'validate.more' | transloco: { count: validateMore() } }}</div> }
+      @if (validateMore() > 0) { <div class="sch-hint" data-testid="validate-more" [attr.data-count]="validateMore()">{{ 'validate.more' | transloco: { count: validateMore() } }}</div> }
     }
   }
 </section>
@@ -606,11 +606,17 @@ export class SpaceSchemaTabComponent implements OnInit {
   /** The next page is offered while the check is incomplete and the server gave a cursor. */
   readonly validateCanContinue = computed(() => this.validateMode() === 'stored' && this.validateResult()?.complete === false && this.validateCursor() !== null);
 
-  /** What the last answer says was read, across collections. */
+  /**
+   * What the whole check has read so far, of how many records the space holds: the answer's `progress`. Not `checked` summed: that is
+   * per CALL, and a page that stopped for a full limit is continued from its last returned record, so the next call reads part of the
+   * same records again — shown alone the count went down, summed it would count records twice (b23 verify U4). An answer without
+   * `progress` (a server from before it) falls back to the one call's count.
+   */
   readonly validateChecked = computed(() => {
-    const checked = this.validateResult()?.checked ?? {};
+    const result = this.validateResult();
+    if (result?.progress) return { checked: result.progress.checked, total: result.progress.total };
     let done = 0, total = 0;
-    for (const c of Object.values(checked)) { done += c.checked; total += c.total; }
+    for (const c of Object.values(result?.checked ?? {})) { done += c.checked; total += c.total; }
     return { checked: done, total };
   });
 
@@ -622,8 +628,12 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   private static readonly VALIDATE_SHOWN = 50;
 
+  /**
+   * The CURRENT page's rows. Each page is asked for at most {@link VALIDATE_SHOWN} records, so a page's rows are all shown and the next
+   * page brings new ones; listing every page's rows together and showing the first fifty left page two invisible (b23 verify U4).
+   */
   readonly validateRows = computed<{ where: string; rows: RefusalRow[] }[]>(() =>
-    this.validateAccumulated().slice(0, SpaceSchemaTabComponent.VALIDATE_SHOWN).map(v => ({
+    (this.validateResult()?.violations ?? []).slice(0, SpaceSchemaTabComponent.VALIDATE_SHOWN).map(v => ({
       where: `${v.collection} ${v._id}`,
       rows: describeWarnings(this.transloco, '', v.violations),
     })));
@@ -637,7 +647,8 @@ export class SpaceSchemaTabComponent implements OnInit {
       default: return { key: 'validate.outcome.violated', variant: 'error' };
     }
   }
-  readonly validateMore = computed(() => Math.max(0, this.validateAccumulated().length - SpaceSchemaTabComponent.VALIDATE_SHOWN));
+  /** The violating records this page's call found and does not show: they come on the next page. */
+  readonly validateMore = computed(() => Math.max(0, (this.validateResult()?.totalViolations ?? 0) - this.validateRows().length));
 
   /**
    * Run the live check on the schema AS STAGED. A sample is one pasted record (nothing is scanned); stored data is read a page at a time,
@@ -655,8 +666,10 @@ export class SpaceSchemaTabComponent implements OnInit {
         this.validateError.set(this.transloco.translate('validate.sample.notJson'));
         return;
       }
-    } else if (next && this.validateCursor()) {
-      body.after = this.validateCursor()!;
+    } else {
+      // A page holds no more than is shown, so every row of it is seen and continuing brings the next ones.
+      body.limit = SpaceSchemaTabComponent.VALIDATE_SHOWN;
+      if (next && this.validateCursor()) body.after = this.validateCursor()!;
     }
     if (!next) this.resetValidate();
     this.validateError.set('');

@@ -331,7 +331,8 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
     }
   ],
   "staleGuards": [ { "_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "label": "reports_to" } ],
-  "nextAfter": "WyJlbmcta2IiLCJlbnRpdGllcyIsIjU1MGU4NDAwLi4uIl0"
+  "nextAfter": "WyJlbmcta2IiLCJlbnRpdGllcyIsIjU1MGU4NDAwLi4uIl0",
+  "progress": { "checked": 10830, "total": 15030 }
 }
 ```
 
@@ -339,7 +340,10 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
 member space's four collections in turn by `_id`, and stops with a cursor when it reaches that bound or when more
 violating records were found than `limit` holds. `checked` reports, per collection, how many records this call read
 against how many the collection holds; `totalViolations` counts the violating records this call found (every one it
-read, not only the page's); `complete` is `true` only when nothing is left, and then `nextAfter` is absent. **While
+read, not only the page's); `progress` (stored data only) counts the records the whole check has read across its
+pages, each once, against how many the space holds — the number to show as progress, because a page that stopped for a
+full `limit` is continued from its last returned record, so the next call reads part of the same records again and
+`checked` summed over pages over-counts; `complete` is `true` only when nothing is left, and then `nextAfter` is absent. **While
 records are left the answer carries `nextAfter`: send it back as `after` for the next page.** A clean answer with
 `complete: false` is a clean answer for the records read so far — not for the space. This is the server's one
 `after` / `nextAfter` keyset spelling; the `skip`, `count`, `total`, `truncated` and `nextSkip` fields this answer

@@ -622,4 +622,47 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     await h.settle();
     h.http.expectNone(r => r.method === 'POST' && r.url === URL);
   });
+
+  // b23 verify U4: `checked` is per CALL, and a page that stopped for a full limit is continued from its last returned record, so the
+  // second call read 74 of 1040 and the readout went DOWN; and the rows shown were the first 50 of every page together, so continuing
+  // showed nothing new. The readout is the answer's `progress` (the whole check, each record once) and the rows are the CURRENT page's.
+  it('stored-data mode shows the whole check\'s progress, never going down, and the CURRENT page\'s rows', async () => {
+    const row = (i: number) => ({ collection: 'entities', _id: `e${i}`, violations: [{ field: 'rules.age-positive', reason: `broken ${i}` }] });
+    const rows = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_v, k) => row(from + k));
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+
+    const first = post(h);
+    expect((first.request.body as { limit?: number }).limit, 'a page larger than the rows shown hides the rest for good').toBe(50);
+    first.flush(answer({
+      checked: { entities: { checked: 1040, total: 1040 } }, progress: { checked: 1040, total: 1040 },
+      complete: false, nextAfter: 'cur-1', totalViolations: 80, violations: rows(1, 50),
+    }));
+    await h.settle();
+    const progress = () => $(h.el, '[data-testid="validate-progress"]')!;
+    expect(progress().getAttribute('data-checked')).toBe('1040');
+    // The record each shown row names (its `collection _id` label), one per row.
+    const shown = () => $$(h.el, '.val-violations > li').map(li => (li.querySelector('code')?.textContent ?? '').trim().split(/\s+/).at(-1) ?? '');
+    expect(shown().length).toBe(50);
+    expect(shown()).toContain('e1');
+    expect($(h.el, '[data-testid="validate-more"]')?.getAttribute('data-count'), 'the page\'s own rest is not counted').toBe('30');
+
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    await h.settle();
+    const second = post(h);
+    expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
+    second.flush(answer({
+      checked: { entities: { checked: 74, total: 1040 } }, progress: { checked: 1040, total: 1040 },
+      complete: true, totalViolations: 30, violations: rows(51, 80),
+    }));
+    await h.settle();
+    expect(progress().getAttribute('data-checked'), 'the readout went down on the next page').toBe('1040');
+    expect(progress().getAttribute('data-total')).toBe('1040');
+    expect(shown().length, 'the next page\'s rows are not the ones shown').toBe(30);
+    expect(shown(), 'continuing showed nothing new').toContain('e51');
+    expect(shown(), 'the previous page\'s rows are still shown').not.toContain('e1');
+    expect($(h.el, '[data-testid="validate-more"]'), 'a page whose rows are all shown says more are not shown').toBeNull();
+  });
+
 });

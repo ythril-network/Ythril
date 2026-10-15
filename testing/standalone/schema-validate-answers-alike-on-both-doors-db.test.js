@@ -216,6 +216,31 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
         for (const id of wanted) assert.ok(unique.has(id), `${door}: ${id} was never returned by any page (${seen.length} seen)`);
       });
 
+      it(`${door}: \`progress\` counts the records the whole check has read, each once: never down, ending at the space's size`, async () => {
+        // `checked` is per CALL, and a page that stops for a full `limit` is continued from its last returned record, so the next
+        // call reads part of the same records again: summed it over-counts, and shown alone it goes DOWN (b23 verify U4).
+        const counts = [];
+        let continuation = {};
+        let last;
+        for (let page = 0; page < 10; page++) {
+          const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED, limit: 3, ...continuation });
+          assert.equal(a.refused, false, `${door}: page ${page}: ${a.text.slice(0, 300)}`);
+          last = a.body ?? {};
+          assert.ok(last.progress, `${door}: page ${page} answers no \`progress\``);
+          counts.push(last.progress.checked);
+          assert.equal(last.progress.total, HAS_STORED.length, `${door}: page ${page}: progress.total is not the space's size`);
+          if (last.nextAfter === undefined) break;
+          continuation = { after: last.nextAfter };
+        }
+        assert.ok(counts.length >= 2, `${door}: the fixture did not page (${counts.join(', ')})`);
+        for (let i = 1; i < counts.length; i++) {
+          assert.ok(counts[i] >= counts[i - 1], `${door}: progress went down across pages: ${counts.join(', ')}`);
+        }
+        assert.ok(counts.every(c => c <= HAS_STORED.length), `${door}: progress counted a record twice: ${counts.join(', ')}`);
+        assert.equal(last.complete, true);
+        assert.equal(counts.at(-1), HAS_STORED.length, `${door}: the finished check did not count every record: ${counts.join(', ')}`);
+      });
+
       it(`${door}: the answer says whether the scan is complete, and a truncated page is not complete`, async () => {
         const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED, limit: 3 });
         assert.equal(a.refused, false, a.text.slice(0, 300));

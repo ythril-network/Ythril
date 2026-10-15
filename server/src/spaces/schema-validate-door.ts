@@ -20,7 +20,8 @@
  *   never one a caller names; a body key the check does not take is dropped, never followed.
  * - **A scan with no way past its end.** It pages by `_id` (`db/id-keyset-page.ts`), spelled `after` / `nextAfter` as every keyset page
  *   on this server is; at most {@link SCHEMA_VALIDATE_SCAN_BOUND} records are read per call, `totalViolations` counts what the call read,
- *   and `complete` is true only when nothing is left after it. A page never holds more than `limit` records.
+ *   and `complete` is true only when nothing is left after it. A page never holds more than `limit` records. `progress` counts what the
+ *   whole check has read across its pages, each record once, carried in the cursor.
  * - **A check that stalls the server.** The stored-data check is priced like the ingest (`consumeHeavyToolCall`, one count per token
  *   across both doors) and runs once per space at a time; it yields to the event loop after every page. A refusal costs no slot.
  */
@@ -87,6 +88,13 @@ export interface SchemaValidateAnswer {
   staleGuards?: StaleGuard[];
   /** Pass as `after` to continue. Present only while records are left. */
   nextAfter?: string;
+  /**
+   * Stored mode only: the records the whole check has read so far, this page included, each counted once — of how many the space
+   * holds. `checked` is per CALL, and a page that stopped for a full `limit` is continued from its last returned record, so the next
+   * call reads part of the same records again: summed, `checked` over-counts, and shown alone it goes down (b23 verify U4). This is the
+   * number a progress line shows; it rides in the cursor, so it needs nothing from the caller but the `after` it already sends.
+   */
+  progress?: { checked: number; total: number };
 }
 
 export type SchemaValidateOutcome =
@@ -119,16 +127,23 @@ const WALK: ReadonlyArray<{ collection: Exclude<BrainCollection, 'links'>; kind:
   { collection: 'chrono', kind: 'chrono', projection: { _id: 1, ...viewSourceProjection('chrono') } },
 ];
 
-/** A position in the walk: a member space, a collection, the last `_id` read. Opaque to the caller. */
-interface Cursor { space: string; collection: string; last: string }
-const encodeCursor = (c: Cursor): string => Buffer.from(JSON.stringify([c.space, c.collection, c.last]), 'utf8').toString('base64url');
+/**
+ * A position in the walk: a member space, a collection, the last `_id` read — and `passed`, how many records the walk has gone past to
+ * get there (what `progress.checked` counts from). Opaque to the caller. A cursor without `passed` (one handed out before it existed)
+ * counts from nought: the walk is unchanged, only the progress line starts low.
+ */
+interface Cursor { space: string; collection: string; last: string; passed: number }
+const encodeCursor = (c: Cursor): string =>
+  Buffer.from(JSON.stringify([c.space, c.collection, c.last, c.passed]), 'utf8').toString('base64url');
 function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null {
   try {
     const v: unknown = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || v.length !== 3 || !v.every(x => typeof x === 'string')) return null;
+    if (!Array.isArray(v) || (v.length !== 3 && v.length !== 4) || !v.slice(0, 3).every(x => typeof x === 'string')) return null;
+    const passed = v.length === 4 ? v[3] : 0;
+    if (typeof passed !== 'number' || !Number.isSafeInteger(passed) || passed < 0) return null;
     const [space, collection, last] = v as [string, string, string];
     if (!memberIds.includes(space) || !WALK.some(w => w.collection === collection)) return null;
-    return { space, collection, last };
+    return { space, collection, last, passed };
   } catch {
     return null;
   }
@@ -204,6 +219,17 @@ async function walkStored(
   let read = 0;
   let lastReturned: Cursor | undefined;
   let stoppedAt: Cursor | undefined;
+  // The records earlier calls went past (`Cursor.passed`): this call's reads count on from there, so `progress` counts each record once.
+  const passedBefore = cursor?.passed ?? 0;
+
+  // Every collection's size, the ones this call will not reach included: `progress.total` is the space's, not this call's.
+  const sizes = new Map<string, number>();
+  for (const mid of memberIds) {
+    for (const { collection } of WALK) {
+      const name = spaceCollection(mid, collection);
+      sizes.set(name, await col(name).countDocuments());
+    }
+  }
 
   // Where to start: the cursor's member and collection, after its id; everything before it was answered by an earlier page.
   const startMember = cursor ? memberIds.indexOf(cursor.space) : 0;
@@ -214,16 +240,19 @@ async function walkStored(
       const { collection, kind, projection } = WALK[c]!;
       const name = spaceCollection(mid, collection);
       const tally = (checked[collection] ??= { checked: 0, total: 0 });
-      tally.total += await col(name).countDocuments();
+      tally.total += sizes.get(name) ?? 0;
       if (c < startCollection) continue;
       let afterId = cursor && m === startMember && c === startCollection ? cursor.last : undefined;
       for (;;) {
         if (read >= SCHEMA_VALIDATE_SCAN_BOUND) {
-          stoppedAt = { space: mid, collection, last: afterId ?? '' };
+          stoppedAt = { space: mid, collection, last: afterId ?? '', passed: passedBefore + read };
           break walk;
         }
         const docs = await idKeysetPage<{ _id: string } & Record<string, unknown>>(
           { collection: name, filter: {}, projection, size: Math.min(READ_PAGE, SCHEMA_VALIDATE_SCAN_BOUND - read) }, afterId);
+        // Where each record of this batch sits in the walk, so a cursor after it knows how many records it has gone past.
+        const readBefore = read;
+        const position = new Map(docs.rows.map((d, i) => [String(d._id), readBefore + i + 1]));
         read += docs.rows.length;
         tally.checked += docs.rows.length;
         let found: RecordViolations[];
@@ -244,7 +273,7 @@ async function walkStored(
             // The one bounded renderer: at most `MAX_ROWS` rows a record, each name and string bounded, and no value for a caller who
             // may not read the stored data.
             page.push({ ...f, violations: boundedRows(f.violations, { value: canReadValues }) });
-            lastReturned = { space: mid, collection, last: f._id ?? '' };
+            lastReturned = { space: mid, collection, last: f._id ?? '', passed: passedBefore + (position.get(f._id ?? '') ?? readBefore) };
           }
         }
         await yieldToEventLoop();
@@ -260,5 +289,6 @@ async function walkStored(
   return {
     spaceId, checked, complete: next === undefined, totalViolations: total, violations: page, staleGuards,
     ...(next !== undefined ? { nextAfter: encodeCursor(next) } : {}),
+    progress: { checked: passedBefore + read, total: [...sizes.values()].reduce((a, b) => a + b, 0) },
   };
 }

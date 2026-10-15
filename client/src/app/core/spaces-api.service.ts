@@ -40,11 +40,14 @@ export interface SchemaWriteLayer {
  */
 export interface ValidateSchemaResult {
   spaceId: string;
-  /** Per collection: how many records were looked at of how many there are. */
+  /** Per collection: how many records THIS call looked at of how many there are (a continued page may re-read some). */
   checked: Record<string, { checked: number; total: number }>;
+  /** Stored mode: the records the whole check has read across its pages, each once, of how many the space holds. */
+  progress?: { checked: number; total: number };
   complete: boolean;
   totalViolations: number;
-  violations: { collection: string; _id: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
+  /** A sample's row has no `_id`: it is the pasted record, not a stored one. */
+  violations: { collection: string; _id?: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
   staleGuards?: unknown[];
   /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
   nextAfter?: string;
@@ -77,7 +80,7 @@ export class SpacesApi {
    * (`after`: the previous answer's `nextAfter`). `meta` is the STAGED schema to check, so the dialog can ask before it saves; without
    * it the stored schema is checked.
    */
-  validateSchema(spaceId: string, body: { sample?: unknown; after?: string; meta?: Partial<SpaceMeta> }): Observable<ValidateSchemaResult> {
+  validateSchema(spaceId: string, body: { sample?: unknown; after?: string; limit?: number; meta?: Partial<SpaceMeta> }): Observable<ValidateSchemaResult> {
     return this.http.post<ValidateSchemaResult>(`/api/spaces/${encodeURIComponent(spaceId)}/validate-schema`, body);
   }
 

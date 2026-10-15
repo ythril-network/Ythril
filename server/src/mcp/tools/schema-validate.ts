@@ -31,8 +31,9 @@ export const schema_validateTool: ToolHandler = {
     + 'the schema is run over the space\'s stored records.\n\n'
     + 'THE ANSWER: `violations` lists each record that breaks the schema with its rows (`field`, `reason`); a rule\'s row is '
     + '`rules.<name>` (a type\'s rule) or `meta.rules.<name>` (a space rule) and its reason is the rule\'s message. `totalViolations` '
-    + 'counts the violating records the call read, `checked` says per collection how many records were read of how many there are, '
-    + 'and `complete` is true only when nothing is left. The meta you sent is not echoed.\n\n'
+    + 'counts the violating records the call read, `checked` says per collection how many records THIS call read of how many there are, '
+    + '`progress` (stored records) says how many records the whole check has read across its pages, each once, of how many the space '
+    + 'holds, and `complete` is true only when nothing is left. The meta you sent is not echoed.\n\n'
     + 'STORED VALUES are shown only to a caller who may read the space\'s knowledge; otherwise each row comes without its `value`. '
     + 'A rule\'s row never carries one.\n\n'
     + `PAGING (stored records): \`limit\` violating records per call (1 to ${SCHEMA_VALIDATE_MAX_LIMIT}, default ${SCHEMA_VALIDATE_MAX_LIMIT}); `
