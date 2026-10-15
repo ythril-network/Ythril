@@ -79,6 +79,62 @@ function failReadsOf(proto, collName, makeError, gate = Promise.resolve()) {
 }
 const hasVector = async (space) => (await mongo.col(`${space}_facts`).findOne({ _id: `${space}-1` }))?.embedding !== undefined;
 
+/**
+ * Run `fn` while EVERY collection of `space` hangs past the bound. The sweep reads with a filter, and the server may test the filter
+ * before the stalling stage: documents the sweep's filter MATCHES are what must reach the stage, so `seed` is as many of them as the
+ * fixture would seed stalling ones, and `readerFilter` is the filter the sweep reads that collection with: `suppressedWithVectorFilter`
+ * for a record kind (the sweep's own function, over the meta the config gives this space), and the space tier's
+ * `{ embedding: { $exists: true } }` for files (`sweepFiles`, which is not exported). The kinds are derived from the sweep's own, with a
+ * floor, so a sweep that went on past the first timeout would pay one bound per kind. Returns how many collections hung.
+ *
+ * A hung collection is a VIEW for the duration and comes back EMPTY (`withCollectionAsView` drops and recreates it), so the space's
+ * own records are put back afterwards: without that, a hung healthy space would read as swept because its record is simply gone.
+ */
+async function withEveryCollectionHung(space, fn) {
+  const db = mongo.getDb();
+  const own = await db.collection(`${space}_facts`).find({}).toArray();
+  const { COLLECTION_SUFFIX } = await import('../../server/dist/config/types.js');
+  const parts = [
+    ...Object.entries(COLLECTION_SUFFIX).map(([kind, suffix]) => ({ suffix, readerFilter: sweep.suppressedWithVectorFilter(SUPPRESSING, kind) })),
+    { suffix: 'files', readerFilter: { embedding: { $exists: true } } },
+  ];
+  assert.ok(parts.length >= 5, `only ${parts.length} collections derived for the sweep's kinds`);
+  const seed = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
+  const putBack = (suffix) => (suffix === 'facts' && own.length > 0 ? () => db.collection(`${space}_facts`).insertMany(own) : undefined);
+  const stalled = (rest) => rest.length === 0 ? fn()
+    : withStalledReads(db, `${space}_${rest[0].suffix}`, `g18_stall_src_${rest[0].suffix}`,
+      { ms: STALL_MS, readerFilter: rest[0].readerFilter, seed, restore: putBack(rest[0].suffix) },
+      () => stalled(rest.slice(1)));
+  await stalled(parts);
+  return parts.length;
+}
+
+/** The spaces the walk SAID failed, each by the shared report's words. */
+const spacesSaidToFail = () => new Set(lines.map(l => new RegExp(`${STEP} failed for space '([^']+)'`).exec(l)?.[1]).filter(Boolean));
+
+/**
+ * The healthy spaces were swept after the hung one — EXCEPT one the walk itself said ran past the bound. On a slow host (a shared CI
+ * runner) a healthy space can time out too: the walk then reports it in the bound's words and quarantines it, exactly as it does the
+ * hung one, and it is not swept. Requiring it swept made this assertion a statement about the host (Q-455, CI run 37962407565). Only
+ * that verdict excuses a space: one that failed in other words, or said nothing and stayed unswept, still fails. And at least one
+ * healthy space must have been swept, or the case shows nothing about the walk going on past a hung space.
+ */
+async function assertHealthySpacesSwept() {
+  const said = spacesSaidToFail();
+  const swept = [];
+  for (const space of HEALTHY) {
+    if (said.has(space)) {
+      assert.ok(warnsFor(space).some(l => new RegExp(`ran past its time bound of ${BOUND_MS} ms .*retried after quarantine`).test(l)),
+        `'${space}' failed for a reason other than the bound, so it is not excused:\n${warnsFor(space).join('\n')}`);
+      assert.ok(walk.quarantinedSpaces().includes(space), `'${space}' timed out but was not quarantined`);
+      continue;
+    }
+    assert.equal(await hasVector(space), false, `'${space}' was not swept after the hung space`);
+    swept.push(space);
+  }
+  assert.ok(swept.length >= 1, `no healthy space was swept (every one timed out), so the walk going on past the hung space is not shown`);
+}
+
 describe('the suppression sweep isolates a failing space', { skip }, () => {
   before(async () => {
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
@@ -251,31 +307,15 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
       await mongo.col(`${space}_facts`).updateOne({ _id: `${space}-1` }, { $set: VECTOR });
     }
     const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
-    const db = mongo.getDb();
-    // The sweep reads with a filter, and the server may test the filter before the stalling stage: documents the sweep's filter
-    // MATCHES are what must reach the stage, so `seed` is as many of them as the fixture would seed stalling ones, and `readerFilter` is
-    // the filter the sweep reads that collection with: `suppressedWithVectorFilter` for a record kind (the sweep's own function, over the
-    // meta the config gives this space), and the space tier's `{ embedding: { $exists: true } }` for files (`sweepFiles`, which is not
-    // exported). EVERY collection of the space hangs (derived from the sweep's own kinds, with a floor), so a sweep that went on past
-    // the first timeout would pay one bound per kind: the assertion below is that cost, seen.
-    const { COLLECTION_SUFFIX } = await import('../../server/dist/config/types.js');
-    const parts = [
-      ...Object.entries(COLLECTION_SUFFIX).map(([kind, suffix]) => ({ suffix, readerFilter: sweep.suppressedWithVectorFilter(SUPPRESSING, kind) })),
-      { suffix: 'files', readerFilter: { embedding: { $exists: true } } },
-    ];
-    assert.ok(parts.length >= 5, `only ${parts.length} collections derived for the sweep's kinds`);
-    const seed = Array.from({ length: Math.ceil(STALL_MS / 200) }, (_, i) => ({ _id: `g18-match-${i}`, ...VECTOR, suppressEmbeddings: true }));
-    const stalled = (rest, fn) => rest.length === 0 ? fn()
-      : withStalledReads(db, `echo_${rest[0].suffix}`, `g18_stall_src_${rest[0].suffix}`, { ms: STALL_MS, readerFilter: rest[0].readerFilter, seed },
-        () => stalled(rest.slice(1), fn));
     // The cost of a hung space is the number of reads it was made to wait out, one bound each. COUNTED, not timed: the boot sweep
     // walks every space of the file and a slow store (a shared CI host) stretches the wall clock of the healthy ones, so a time
     // figure here was a statement about the host (seen at 0.1 CPU on the store: 1399 ms against 3 bounds with ONE bound paid).
     let echoReads = 0;
+    let hungCollections = 0;
     const proto = Object.getPrototypeOf(mongo.col('probe'));
     const originalFind = proto.find;
     try {
-      await stalled(parts, async () => {
+      hungCollections = await withEveryCollectionHung('echo', async () => {
         proto.find = function counted(...args) {
           if (String(this.collectionName).startsWith('echo_')) echoReads++;
           return originalFind.apply(this, args);
@@ -289,20 +329,38 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
 
     // ONE bound, not one per kind: the stop at the first timeout is what keeps a hung space from costing (kinds x bound) — 24
     // minutes at the production figure — before it is quarantined.
-    assert.equal(echoReads, 1, `the hung space was read ${echoReads} times over ${parts.length} hung collections: more than one bound (${BOUND_MS} ms) was paid`);
+    assert.equal(echoReads, 1, `the hung space was read ${echoReads} times over ${hungCollections} hung collections: more than one bound (${BOUND_MS} ms) was paid`);
     const hung = warnsFor('echo');
     assert.equal(hung.length, 1, `the hung space was not reported once:\n${lines.join('\n')}`);
     // The walk read the failure: the bound's own words, and the space is in quarantine (a hung space is not retried at once).
     assert.match(hung[0], new RegExp(`ran past its time bound of ${BOUND_MS} ms .*retried after quarantine \\(\\d+s\\)`), `not the walk's wording for a timeout: ${hung[0]}`);
     assert.ok(walk.quarantinedSpaces().includes('echo'), 'the hung space was not quarantined');
-    for (const space of HEALTHY) assert.equal(await hasVector(space), false, `'${space}' was not swept after the hung space`);
+    await assertHealthySpacesSwept();
     // One count per failing SPACE. The rule is not "one failure in this file": the boot sweep walks every space, and on a slow store
     // a healthy one can run past a 400 ms bound too (the CI run that showed it: 'hotel' timed out beside 'echo', each its own failure,
     // each its own line). So the counts are matched to the spaces that SAID a failure — a space counted twice has one line and two
     // counts, and a failure counted but never said has a count and no line.
-    const said = new Set(lines.map(l => new RegExp(`${STEP} failed for space '([^']+)'`).exec(l)?.[1]).filter(Boolean));
+    const said = spacesSaidToFail();
     const counted = failures.filter(f => f.kind === 'failure' || f.kind === 'timeout');
     assert.ok(said.has('echo'), 'the hung space said nothing');
     assert.equal(counted.length, said.size, `${counted.length} failures counted for ${said.size} failing space(s) (${[...said].join(', ')}): a failure was counted twice or not said`);
+  });
+
+  // Q-455: a healthy space can run past the bound on a slow host (CI run 37962407565 saw it). Made to happen here on purpose: one
+  // HEALTHY space hangs, so the rule for the healthy spaces is exercised on the host this runs on, not only on a slow one. ('echo' is
+  // in quarantine from the case above, so this walk skips it.)
+  it('a healthy space that runs past the bound beside the others is reported and counted, and the rest are still swept', async () => {
+    lines.length = 0;
+    failures.length = 0;
+    for (const space of HEALTHY) await mongo.col(`${space}_facts`).updateOne({ _id: `${space}-1` }, { $set: VECTOR });
+    const [slow] = HEALTHY;
+    const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
+    try {
+      await withEveryCollectionHung(slow, () => sweep.sweepEverySpaceAtBoot());
+    } finally {
+      restore();
+    }
+    assert.ok(spacesSaidToFail().has(slow), `the slow healthy space said nothing:\n${lines.join('\n')}`);
+    await assertHealthySpacesSwept();
   });
 });
