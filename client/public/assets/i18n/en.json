@@ -2370,7 +2370,7 @@
   "rules.help.title": "Field reference and examples",
   "rules.help.fields": "A rule reads the record as self: self.title, self.type, self.description, self.tags and self.properties.NAME (an edge has self.label instead of a title). It must answer true or false.",
   "rules.help.absent": "A rule that reads a property the record does not have does not apply to that record. Dates are compared as ISO text.",
-  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at <= now",
+  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at >= '2020-01-01'",
   "rules.applicable.title": "Space rules that apply here",
   "rules.applicable.hint": "Read-only: edit them under the validation bar.",
   "rules.space.title": "Space rules",

@@ -2370,7 +2370,7 @@
   "rules.help.title": "Pola i przykłady",
   "rules.help.fields": "Reguła odczytuje rekord jako self: self.title, self.type, self.description, self.tags i self.properties.NAZWA (krawędź ma self.label zamiast tytułu). Musi dawać true lub false.",
   "rules.help.absent": "Reguła czytająca właściwość, której rekord nie ma, nie dotyczy tego rekordu. Daty porównuje się jako tekst ISO.",
-  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at <= now",
+  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at >= '2020-01-01'",
   "rules.applicable.title": "Reguły przestrzeni, które tu obowiązują",
   "rules.applicable.hint": "Tylko do odczytu: edytuj je pod paskiem walidacji.",
   "rules.space.title": "Reguły przestrzeni",

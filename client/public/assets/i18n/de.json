@@ -2370,7 +2370,7 @@
   "rules.help.title": "Feldreferenz und Beispiele",
   "rules.help.fields": "Eine Regel liest den Datensatz als self: self.title, self.type, self.description, self.tags und self.properties.NAME (eine Kante hat self.label statt eines Titels). Sie muss true oder false ergeben.",
   "rules.help.absent": "Eine Regel, die eine Eigenschaft liest, die der Datensatz nicht hat, gilt für diesen Datensatz nicht. Datumsangaben werden als ISO-Text verglichen.",
-  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at <= now",
+  "rules.help.example": "self.properties.age >= 0\nsize(self.title) > 3\nself.properties.at >= '2020-01-01'",
   "rules.applicable.title": "Space-Regeln, die hier gelten",
   "rules.applicable.hint": "Nur lesbar: Bearbeiten unter der Validierungsleiste.",
   "rules.space.title": "Space-Regeln",
