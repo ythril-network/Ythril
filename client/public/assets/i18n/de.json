@@ -1183,7 +1183,7 @@
   "spaces.schema.unknownFields.label": "Unbekannte Felder auf oberster Ebene",
   "spaces.schema.unknownFields.warn": "Warnen – der Schreibvorgang wird ohne sie gespeichert und die Antwort nennt sie",
   "spaces.schema.unknownFields.refuse": "Ablehnen – der Schreibvorgang wird abgelehnt und nichts wird gespeichert",
-  "spaces.schema.unknownFields.hint": "Gilt nur für diese Instanz und wird nicht mit Netzwerken geteilt: jedes Mitglied entscheidet selbst. Es betrifft ein Feld auf oberster Ebene, das ein Schreibvorgang nicht annimmt, nicht die nicht deklarierte Eigenschaft eines Typs aus dem Validierungsmodus.",
+  "spaces.schema.unknownFields.hint": "Gilt nur für diese Instanz und wird nicht mit Netzwerken geteilt: jedes Mitglied entscheidet selbst. Es betrifft ein Feld auf oberster Ebene, das ein Schreibvorgang nicht annimmt, nicht eine nicht deklarierte Eigenschaft eines Typs, die Validierung oben beurteilt.",
   "spaces.schema.unknownFields.consequence": "Integrationen, die zusätzliche Felder senden, erhalten künftig 400-Fehler.",
   "spaces.schema.unknownFields.readonlyReason": "Zum Ändern sind Schema-Administratorrechte für diesen Space nötig, die dieses Token nicht hat.",
   "spaces.schema.unknownFields.proxyNote": "Dies ist ein Proxy-Space: Jeder Mitglieds-Space entscheidet für seine eigenen Schreibvorgänge, stellen Sie dies daher am Mitglied ein.",

@@ -1183,7 +1183,7 @@
   "spaces.schema.unknownFields.label": "Unknown top-level fields",
   "spaces.schema.unknownFields.warn": "Warn — the write is stored without them and the answer names them",
   "spaces.schema.unknownFields.refuse": "Refuse — the write is refused and nothing is stored",
-  "spaces.schema.unknownFields.hint": "Set on this instance only and not shared with networks: each member decides its own. It covers a top-level field that a write does not take, not Validation mode's undeclared property of a type.",
+  "spaces.schema.unknownFields.hint": "Set on this instance only and not shared with networks: each member decides its own. It covers a top-level field that a write does not take, not an undeclared property of a type, which Validation above judges.",
   "spaces.schema.unknownFields.consequence": "Integrations that send extra fields start getting 400 errors.",
   "spaces.schema.unknownFields.readonlyReason": "Changing this needs schema admin rights on this space, which this token does not hold.",
   "spaces.schema.unknownFields.proxyNote": "This is a proxy space: each member space decides for its own writes, so set this on the member.",

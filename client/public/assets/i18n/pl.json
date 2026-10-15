@@ -1183,7 +1183,7 @@
   "spaces.schema.unknownFields.label": "Nieznane pola najwyższego poziomu",
   "spaces.schema.unknownFields.warn": "Ostrzegaj — zapis jest zachowywany bez nich, a odpowiedź je wymienia",
   "spaces.schema.unknownFields.refuse": "Odrzucaj — zapis jest odrzucany i nic nie jest zapisywane",
-  "spaces.schema.unknownFields.hint": "Ustawienie tylko tej instancji, niewspółdzielone z sieciami: każdy członek decyduje sam. Dotyczy pola najwyższego poziomu, którego zapis nie przyjmuje, a nie nieznanej właściwości typu z trybu walidacji.",
+  "spaces.schema.unknownFields.hint": "Ustawienie tylko tej instancji, niewspółdzielone z sieciami: każdy członek decyduje sam. Dotyczy pola najwyższego poziomu, którego zapis nie przyjmuje, a nie niezadeklarowanej właściwości typu, którą ocenia Walidacja powyżej.",
   "spaces.schema.unknownFields.consequence": "Integracje, które wysyłają dodatkowe pola, zaczną dostawać błędy 400.",
   "spaces.schema.unknownFields.readonlyReason": "Zmiana wymaga uprawnień administratora schematu w tej przestrzeni, których ten token nie ma.",
   "spaces.schema.unknownFields.proxyNote": "To przestrzeń proxy: każda przestrzeń członkowska decyduje o własnych zapisach, więc ustaw to w przestrzeni członkowskiej.",
