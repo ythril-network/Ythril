@@ -40,6 +40,8 @@ import { adoptPeerRound, adoptionRefusal, type AdoptionRefusal } from '../networ
 import { roundIsOpen } from '../networks/round-state.js';
 import { applyRoundConclusion } from '../networks/round-conclusion.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
+import { warnOnce } from '../util/warn-once.js';
+import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
@@ -75,6 +77,12 @@ import { FETCH_TIMEOUT_MS, BATCH_FETCH_TIMEOUT_MS } from './peer-timeouts.js';
 // After this many consecutive sync failures for a single member, we emit a
 // prominent warning. The member is NOT auto-removed — that is a human decision.
 const STALE_FAILURE_THRESHOLD = 10;
+
+/**
+ * A refused members or votes pull, said once per (route, network, member, status) and window, not per cycle: the peer may list this
+ * instance only after a join vote passes, or on one side only, and both routes now refuse a caller without standing (Q-454).
+ */
+const refusedGovernancePull = warnOnce<string>({ max: 500, every: SKIP_WARNING_WINDOW_MS });
 
 // ── Space ID resolution ────────────────────────────────────────────────────
 // Moved to ./space-map.ts (pure). Re-exported so existing importers are unaffected.
@@ -577,7 +585,7 @@ async function gossipWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/members`, opts());
     if (!resp.ok) {
-      log.warn(`Gossip pull from ${peerText(member.label)}: HTTP ${resp.status}`);
+      refusedGovernancePull(`members ${net.id} ${member.instanceId} ${resp.status}`, () => log.warn(`Gossip pull from ${peerText(member.label)} for network ${peerText(net.id)}: HTTP ${resp.status}`));
       return;
     }
     const { members: peerView, removed: peerRemoved } = await boundedJson<{ members: Partial<NetworkMember>[]; removed?: unknown }>(resp, 'sync peer');
@@ -651,7 +659,7 @@ async function propagateVotesWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/votes`, opts());
     if (!resp.ok) {
-      log.warn(`Vote pull from ${peerText(member.label)}: HTTP ${resp.status}`);
+      refusedGovernancePull(`votes ${net.id} ${member.instanceId} ${resp.status}`, () => log.warn(`Vote pull from ${peerText(member.label)} for network ${peerText(net.id)}: HTTP ${resp.status}`));
       return;
     }
     const { rounds: peerRounds } = await boundedJson<{ rounds: (Omit<VoteRound, 'concluded'>)[] }>(resp, 'sync peer');

@@ -8,6 +8,7 @@ import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
 import { peerRelayCaller } from '../../auth/peer-relay.js';
+import { joinRoundOf } from '../../networks/round-state.js';
 import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletion-authority.js';
 import { networksHolding } from '../../spaces/wipe-vote.js';
 import { isDirectionalNetwork } from '../../networks/network-spaces.js';
@@ -391,9 +392,10 @@ export function spaceAllowed(
     // A peer whose join is still being voted on (or was denied) holds a
     // provisioned PAT but no membership — it must NOT fall through to plain
     // space scoping, or the vote hold would be meaningless.
-    const heldByJoinRound = cfg.networks.some(n =>
-      n.pendingRounds?.some(r =>
-        r.type === 'join' && r.subjectInstanceId === peerId && !r.passed));
+    // `joinRoundOf` reads the round ONE way for every caller: this one refuses on either answer (open, or voted down / past
+    // its deadline and not yet pruned), where the standing question below admits only an open one.
+    const now = Date.now();
+    const heldByJoinRound = cfg.networks.some(n => joinRoundOf(n, peerId, now) !== null);
     if (heldByJoinRound) return false;
     // Unknown peer (manual token / asymmetric network): fall through to the
     // legacy space-existence check below — the token's own scope still applies.

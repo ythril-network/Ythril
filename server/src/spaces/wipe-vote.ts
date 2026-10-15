@@ -31,12 +31,13 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from '../networks/round-local-state.js';
+import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
 import { localToRemote } from '../sync/space-map.js';
 
 /** The verdict: wipe now, or a round was opened on each network holding the space. */
 export type WipePlan =
   | { governed: false }
-  | { governed: true; rounds: { networkId: string; networkLabel: string; roundId: string }[] };
+  | { governed: true; rounds: RoundAnswer[] };
 
 /**
  * Networks that carry this space. Exported so a caller can report "which networks" without re-deriving it — the wipe
@@ -65,7 +66,7 @@ export function planSpaceWipe(spaceId: string, types?: readonly string[]): WipeP
 
   const cfg = getConfig();
   const now = new Date().toISOString();
-  const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
+  const rounds: RoundAnswer[] = [];
 
   for (const net of cfg.networks.filter(n => n.spaces.includes(spaceId))) {
     const roundId = uuidv4();
@@ -100,7 +101,7 @@ export function planSpaceWipe(spaceId: string, types?: readonly string[]): WipeP
     };
     round.votes = [makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes')];
     openRoundHere(net, round);
-    rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+    rounds.push(roundAnswer(net, round));
   }
 
   saveConfig(cfg);

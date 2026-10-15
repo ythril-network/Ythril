@@ -33,6 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { callRouteAfterAuth } from './_route-after-auth.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -51,7 +52,7 @@ const OLDER = 'aaaaaaaa-0000-4000-8000-0000000000a1';
 const NEWER = 'aaaaaaaa-0000-4000-8000-0000000000b2';
 const CANDIDATE = `entity:${OLDER}:${NEWER}`;
 
-let mongo, spaceCollection, SPACE_AREAS, stack;
+let mongo, spaceCollection, SPACE_AREAS, duplicatesRouter;
 
 const coll = (space, kind) => mongo.col(spaceCollection(space, kind));
 
@@ -70,23 +71,11 @@ function rights(perSpace) {
  * every other layer — `denyReadOnly` included — runs as it does in production.
  */
 async function merge(id, tokenRights) {
-  const res = {
-    statusCode: 200, body: undefined, sent: false,
-    status(c) { this.statusCode = c; return this; },
-    json(b) { this.body = b; this.sent = true; return this; },
-    setHeader() { return this; }, set() { return this; },
-  };
-  const req = {
-    params: { id }, query: {}, body: {}, headers: {}, ip: '127.0.0.1',
+  const out = await callRouteAfterAuth(duplicatesRouter, 'post', '/:id/merge', {
+    params: { id },
     authToken: { id: 'tok-dupe-merge', name: 'dupe merge test', rights: tokenRights },
-  };
-  for (const layer of stack) {
-    if (res.sent) break;
-    let advanced = false;
-    await layer.handle(req, res, () => { advanced = true; });
-    if (!advanced && !res.sent) throw new Error(`the layer ${layer.name} neither answered nor called next()`);
-  }
-  return { status: res.statusCode, body: res.body };
+  });
+  return { status: out.code, body: out.body };
 }
 
 describe('a duplicate merge needs the merge rights where the pair lives', { skip }, () => {
@@ -102,13 +91,11 @@ describe('a duplicate merge needs the merge rights where the pair lives', { skip
     (await import('../../server/dist/config/loader.js')).loadConfig();
     ({ spaceCollection } = await import('../../server/dist/db/space-collection.js'));
     ({ SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js'));
-    const { duplicatesRouter } = await import('../../server/dist/api/duplicates.js');
+    ({ duplicatesRouter } = await import('../../server/dist/api/duplicates.js'));
     const layer = duplicatesRouter.stack.find(l => l.route?.path === '/:id/merge' && l.route.methods?.post);
     assert.ok(layer, 'POST /api/duplicates/:id/merge is gone or moved — re-anchor this test');
-    // Authentication and rate limiting are the two layers replaced by the token on the request; NAMED, so a guard
-    // added to the chain later runs here rather than being skipped by position.
-    stack = layer.route.stack.filter(l => !['requireAuth', 'globalRateLimit'].includes(l.name));
-    assert.ok(stack.some(l => l.name === 'denyReadOnly'), 'the merge route no longer runs denyReadOnly — re-read this test');
+    // Every layer after authentication runs (callRouteAfterAuth), so a guard added to the chain later runs here too.
+    assert.ok(layer.route.stack.some(l => l.name === 'denyReadOnly'), 'the merge route no longer runs denyReadOnly — re-read this test');
   });
 
   after(async () => {

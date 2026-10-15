@@ -78,3 +78,24 @@ export function walkOwnCode(node, visit) {
   });
   return found;
 }
+
+/**
+ * Visit `node` and EVERY node under it, nested functions included - the walk a gate wants when the question is about the whole
+ * file (every call, every route registration), where {@link walkOwnCode} stops at a function boundary. One copy: it had been
+ * written inline in four gates.
+ */
+export function walkEveryNode(node, visit) {
+  visit(node);
+  ts.forEachChild(node, (child) => walkEveryNode(child, visit));
+}
+
+/**
+ * The OUTERMOST function around `node` (a wrapper, not the callback inside it), or `null` at module level. A gate that names the
+ * function a site belongs to wants the wrapper: a timer set by the wrapper and the call inside its `new Promise` executor are one
+ * site, and reading the inner function would make them two. One copy for every gate that asks it.
+ */
+export function outermostFunctionOf(node) {
+  let outer = null;
+  for (let n = node.parent; n; n = n.parent) if (ts.isFunctionLike(n) && !ts.isSourceFile(n)) outer = n;
+  return outer;
+}

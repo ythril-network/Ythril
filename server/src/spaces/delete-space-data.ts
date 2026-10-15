@@ -29,8 +29,7 @@
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from './lifecycle.js';
 import { planSpaceWipe, notifyPeersOfWipe } from './wipe-vote.js';
 
-/** One open round, as the planner reports it. Named here so the result type does not index a union. */
-interface WipeRound { networkId: string; networkLabel: string; roundId: string }
+import type { RoundAnswer } from '../networks/vote-acts.js';
 import { isProxySpace } from './proxy.js';
 import { getConfig } from '../config/loader.js';
 
@@ -44,7 +43,7 @@ export type DeleteSpaceDataResult =
   /** The caller got it wrong. `status` is the HTTP code the REST door answers; MCP renders the message. */
   | { ok: false; status: 400 | 404; error: string }
   /** The space is governed: nothing was deleted and a round is open in each network. */
-  | { ok: true; outcome: 'vote_pending'; rounds: WipeRound[]; types: WipeCollectionType[] | null }
+  | { ok: true; outcome: 'vote_pending'; rounds: RoundAnswer[]; types: WipeCollectionType[] | null }
   /** Deleted, with a per-collection count. Zeroes mean the space was already empty. */
   | { ok: true; outcome: 'wiped'; deleted: Awaited<ReturnType<typeof wipeSpace>>; types: WipeCollectionType[] | null };
 

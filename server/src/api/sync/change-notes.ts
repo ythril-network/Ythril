@@ -10,12 +10,13 @@ import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { callerPeerId } from './_shared.js';
+import { requireNetworkStanding } from '../../auth/network-standing.js';
 import { receiveChangeNotes } from '../../sync/change-notes.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncChangeNotesRouter = Router();
 
-syncChangeNotesRouter.post('/networks/:networkId/change-notes', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
+syncChangeNotesRouter.post('/networks/:networkId/change-notes', syncRateLimit, requireAuth, requireNetworkStanding('change-notes-relay'), denyReadOnly, async (req, res) => {
   try {
     const r = await receiveChangeNotes(
       req.params['networkId'] as string,

@@ -157,7 +157,7 @@ instead of taking effect immediately — the response is then
 `{ "status": "vote_pending", "roundId": "...", ... }`. The inviting instance's own yes vote is cast
 implicitly (its admin generated the invite), so the common cases — first member of a closed network,
 leaf under a braintree **root** — still conclude immediately and return `"joined"`. While the round is
-open the joiner's provisioned peer token is refused on `/api/sync/*`; sync starts automatically once
+open the joiner's provisioned peer token is refused on the data endpoints of `/api/sync/*` (it may read only this network's votes and members, which it gossips while it waits); sync starts automatically once
 the vote passes. If the round is vetoed or expires, the provisioned credentials are revoked.
 
 **Errors:** `401` for an invalid or expired handshake, `400` if `/apply` has not run for the session, and `400`

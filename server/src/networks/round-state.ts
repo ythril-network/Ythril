@@ -51,6 +51,39 @@ export function roundIsOpen(round: RoundDatable, now: number): boolean {
   return !round.concluded && !roundPastDeadline(round, now);
 }
 
+/** The part of a join round {@link joinRoundOf} reads. */
+interface JoinRoundReadable extends RoundDatable {
+  type?: string;
+  subjectInstanceId?: string;
+  passed?: boolean;
+  pendingMember?: { instanceId?: string };
+}
+
+/**
+ * What a network's join rounds say about one peer, read ONE way (Q-454): `'open'` while a join round naming it can still be voted
+ * on; `'refused'` when such a round concluded without passing, or ran past its deadline, and is not yet pruned; `null` when no join
+ * round names it, or the one that did passed.
+ *
+ * It prevents the third spelling. "A pending joiner" was `!r.passed` in the sync data guard — true for a DENIED round too, so read as
+ * an admission it would have let a voted-down joiner in — and `!r.concluded` in the credential sweep, which kept a past-deadline
+ * joiner's token alive. Each caller now states its question against this answer: standing admits only `'open'`; the data guard
+ * refuses on either. `one-reading-of-a-join-round.test.js` holds that no other function scans a network's rounds for a joiner.
+ */
+export function joinRoundOf(
+  net: { pendingRounds?: readonly JoinRoundReadable[] },
+  peerId: string,
+  now: number,
+): 'open' | 'refused' | null {
+  let refused = false;
+  for (const r of net.pendingRounds ?? []) {
+    if (r.type !== 'join') continue;
+    if (r.subjectInstanceId !== peerId && r.pendingMember?.instanceId !== peerId) continue;
+    if (roundIsOpen(r, now)) return 'open';
+    if (!r.passed) refused = true;
+  }
+  return refused ? 'refused' : null;
+}
+
 /** What a door answers when a round cannot take a vote: the status, the sentence, and for an expired one the code and the deadline. */
 export interface RoundRefusal {
   status: 404 | 409;

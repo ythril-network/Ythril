@@ -36,20 +36,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
-import { ts, parseSource, lineOf } from '../_shared/syntax-tree.mjs';
+import { ts, parseSource, lineOf, outermostFunctionOf } from '../_shared/syntax-tree.mjs';
 
 const STARTERS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync']);
 const BINARIES = new Set(['ffmpeg', 'ffprobe']);
 
-/**
- * The OUTERMOST function around a node (the wrapper, not the executor callback inside its `new Promise`), or the source file: a
- * timer set by the wrapper and the `spawn` inside the executor are one bound, and reading only the inner function would call it two.
- */
-const enclosingFunction = (node) => {
-  let outer = null;
-  for (let n = node.parent; n; n = n.parent) if (ts.isFunctionLike(n)) outer = n;
-  return outer ?? node.getSourceFile();
-};
+/** The OUTERMOST function around a node, or the source file: the wrapper's timer and the `spawn` in its executor are one bound. */
+const enclosingFunction = (node) => outermostFunctionOf(node) ?? node.getSourceFile();
 
 /** Every start of ffmpeg in one source: `{ key, line, bounded, why }`. The ONE detector, so the self-test and the sweep read the same rule. */
 export function ffmpegStartSites(file, text) {

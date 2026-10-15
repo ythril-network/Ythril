@@ -119,7 +119,8 @@ export const network_add_spaceTool: ToolHandler = {
     + 'their next sync — a subscriber creates the space if it has none, and merges into it if it has.\n\n'
     + 'WHO DECIDES: the publisher of a pub/sub network and the root of a braintree add it at once; so does a club\'s '
     + 'organiser, whose own yes carries the vote. On a closed or democratic network it opens a vote and answers '
-    + '`status: "vote_pending"` with the round; the space is added when the vote passes. A member that already has a '
+    + '`status: "vote_pending"` with the round as the vote list shows it (`round`, and `rounds` as every opening door answers); '
+    + 'the space is added when the vote passes. A member that already has a '
     + 'space of that name keeps it out of the network unless it voted yes.\n\n'
     + 'WHO MAY: sharing the space (`networks: write` on it, or administering it) AND `networks: admin` on, or '
     + 'administering, every space the network already carries.',

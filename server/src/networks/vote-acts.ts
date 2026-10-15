@@ -53,14 +53,43 @@ const NOT_FOR_AN_OPERATOR = ['pendingMeta', 'metaBase', 'pendingMember', 'invite
  * with them. A proposal is shown by `summary` instead, a sentence a voter reads without opening a schema.
  * `a-round-answered-to-an-operator-carries-no-credential.test.js` drives every door that answers a round.
  */
-export function roundForOperator(net: NetworkConfig, round: VoteRound): Record<string, unknown> {
+export function roundForOperator(net: NetworkConfig, round: VoteRound): OperatorRound {
   const shown: Record<string, unknown> = { ...round };
   for (const key of NOT_FOR_AN_OPERATOR) delete shown[key];
   const localSpaceId = round.spaceId ? roundSpaceLocalId(net, round) : null;
   if (localSpaceId) shown['localSpaceId'] = localSpaceId;
   const summary = roundSummary(net, round);
   if (summary) shown['summary'] = summary;
-  return shown;
+  return shown as OperatorRound;
+}
+
+declare const operatorRound: unique symbol;
+
+/**
+ * A round that went through {@link roundForOperator}. The brand exists only in the type: a raw `VoteRound` is not assignable to it, so a
+ * door that hands a stored round to {@link RoundAnswer} does not compile (Q-456).
+ */
+export type OperatorRound = Record<string, unknown> & { readonly [operatorRound]: true };
+
+/** What every door that opens a round answers for each network it opened one in: where, which round, and the round as the vote list shows it. */
+export interface RoundAnswer {
+  networkId: string;
+  networkLabel: string;
+  roundId: string;
+  round: OperatorRound;
+}
+
+/**
+ * The one answer shape of an opened round — the pointer every door answers (`networkId`, `networkLabel`, `roundId`) and, beside it, the
+ * round as the vote list shows it (`roundForOperator`: no proposal body, no candidate record, no key hash; `summary` and `localSpaceId`
+ * for the voter).
+ *
+ * What Q-456 found: the add-space door answered the stored round with the space's whole schema in it while every other door answered a
+ * bare id, and the operator had to make a second call to learn what it was voting on. `every-answer-that-carries-a-round-is-projected-*`
+ * hold that no other file spells the pointer, so an answer cannot go back to a bare id on one door.
+ */
+export function roundAnswer(net: NetworkConfig, round: VoteRound): RoundAnswer {
+  return { networkId: net.id, networkLabel: net.label, roundId: round.roundId, round: roundForOperator(net, round) };
 }
 
 /**

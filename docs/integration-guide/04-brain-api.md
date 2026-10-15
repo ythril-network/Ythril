@@ -605,7 +605,7 @@ token **on both doors**, and rejected on a proxy space (`400`) — target member
 **On a space that belongs to a network nothing is deleted yet.** Emptying a shared space is a governed act:
 a round opens in every network holding the space, this instance votes yes, and the wipe happens on every
 member when a round passes — one veto stops it. The reply is still `200`, with
-`data.status: "vote_pending"` and the open rounds. **That is the success case** — do not retry it, and do
+`data.status: "vote_pending"` and the open rounds (`data.rounds`, each `{ "networkId", "networkLabel", "roundId", "round" }` with `round` as the vote list shows it). **That is the success case** — do not retry it, and do
 not read the absence of counts as a failure. Branch on `data.status`, which is the same field MCP returns.
 
 > **Changed in 5.0:** the per-collection bulk `DELETE` routes, which answered `{ deleted: <count> }`, are

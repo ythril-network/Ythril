@@ -224,7 +224,7 @@ POST /api/networks/:id/spaces
 { "spaceId": "research" }
 ```
 
-Adds one of this instance's spaces to a network. Answers `200` with the network as `GET /api/networks/:id` shows it when the space is carried at once, or `202` with `{ "status": "vote_pending", "round" }` when the network has to agree first. MCP: `network_add_space` with `{ "id", "spaceId" }`.
+Adds one of this instance's spaces to a network. Answers `200` with the network as `GET /api/networks/:id` shows it when the space is carried at once, or `202` with `{ "status": "vote_pending", "round", "rounds" }` when the network has to agree first. `round` is the round as [`GET /api/networks/:id/votes`](#list-open-vote-rounds) shows it, with its `summary` and no proposal body (`pendingMeta` and `metaBase` no longer ride on it; the space's schema is read on the space); `rounds` is the one-entry list every opening door answers, `[{ "networkId", "networkLabel", "roundId", "round" }]`. MCP: `network_add_space` with `{ "id", "spaceId" }`.
 
 **Who decides, per type:**
 
@@ -269,7 +269,7 @@ POST /api/networks/:id/members
 }
 ```
 
-In `closed`/`democratic` networks this opens a voting round.
+In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash).
 In `club` networks the member is added immediately.
 In `braintree` networks all ancestors up to the root must approve.
 In `pubsub` networks the subscriber is added immediately with `direction` forced to `push` (publisher pushes to subscriber) regardless of the request body value.
@@ -299,7 +299,9 @@ with nothing but that key, use [Join a Pub/Sub by Its Published Key](#join-a-pub
 **Response** — depends on the network's governance:
 
 - `club` / `pubsub`: `200` `{ "status": "joined", "members": [...], "networkId": "..." }` — direct join, no vote.
-- `closed` / `democratic` / `braintree`: `202` `{ "status": "vote_pending", "roundId": "..." }` — the member
+- `closed` / `democratic` / `braintree`: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }` — `roundId` is what the joining
+  instance polls with (it re-presents its key and is answered `{ "status": "vote_pending", "roundId": "..." }`, no `round`); `round` is the round as
+  [List Open Vote Rounds](#list-open-vote-rounds) shows it, for the operator reading the answer — the member
   is **held in the vote round** (no sync possible) until the required voters approve (closed: all members;
   democratic: majority; braintree: every ancestor from the inviting node to the root). Exception: a join on a
   braintree **root** concludes immediately (the root is the only required voter) and returns `200 joined`.
@@ -352,7 +354,7 @@ re-apply it.
 
 **A passed `space_deletion` never deletes a member's space.** It takes the space out of the network on every member,
 which keeps its copy and data as a local space; only the proposer deletes its own copy, once no other network carries
-it. `DELETE /api/spaces/:id` on a networked space still answers `202` with the rounds it opened.
+it. `DELETE /api/spaces/:id` on a networked space still answers `202` with the rounds it opened, each as `{ "networkId", "networkLabel", "roundId", "round" }` with `round` the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
 
 The instance that opens a round other than a join or a removal is one of its voters: its signed `yes` is in `votes`
 from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
@@ -405,6 +407,11 @@ route serves rounds as they travel.
 **`summary`** (a `meta_change` round) is one plain sentence per change saying what the proposal would do to the space,
 named as this instance calls it and worded as a proposal rather than a done thing. It is English text and is text only: a
 client shows it as such. MCP: `network_votes`.
+
+**Every door that opens a round answers it this way**: the round that opened, as this list shows it, with the same `summary`. The doors are the
+add-space, schema and meta writes, space delete and wipe (their `rounds`, one entry per network, each `{ "networkId", "networkLabel", "roundId", "round" }`),
+and the member add, remove and invite-key join doors (`round` beside `roundId`). The signatures in `votes[]` are public: a cast is broadcast to every
+member, and a peer that is a member of the network reads them on `GET /api/sync/networks/:id/votes`.
 
 **A `meta_change` round proposes only what the write changed**, and a member applies it whole or not at all; what a
 passed round did to the space, which network's layer outranks an edit, and which rounds a member could not read are on
@@ -731,8 +738,10 @@ In `closed`/`democratic` networks this opens a removal voting round (**202**). I
 **Response** `204` (immediate removal) or `202`:
 
 ```json
-{ "status": "vote_pending", "roundId": "round-uuid" }
+{ "status": "vote_pending", "roundId": "round-uuid", "round": { ... } }
 ```
+
+`round` is the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
 
 ---
 

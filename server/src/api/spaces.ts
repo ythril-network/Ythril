@@ -13,6 +13,7 @@ import { editorScopeFor } from '../auth/editor-scope.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
 import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
+import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { localToRemote } from '../sync/space-map.js';
 import { spaceForWire } from '../spaces/space-for-wire.js';
@@ -746,7 +747,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
   // ── Networked path ────────────────────────────────────────────────────────
   // Open a space_deletion vote round on every network that contains this space.
   // This instance votes yes immediately; deletion happens once each round passes.
-  const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
+  const rounds: RoundAnswer[] = [];
   const now = new Date().toISOString();
 
   for (const net of networkedIn) {
@@ -768,7 +769,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
     // The proposer is a voter like any member (S-7): its yes is required and cast here, SIGNED, so a relayed copy of
     // it survives — a bare cast is taken only from the voter itself.
     opened.votes.push(makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes'));
-    rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+    rounds.push(roundAnswer(net, opened));
   }
   saveConfig(cfg);
 

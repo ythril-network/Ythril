@@ -112,6 +112,7 @@ export function fakeRes() {
     code: 200, body: undefined, sent: false, headers: {},
     status(c) { this.code = c; return this; },
     setHeader(n, v) { this.headers[n.toLowerCase()] = v; return this; },
+    set(n, v) { if (typeof n === 'string') this.headers[n.toLowerCase()] = v; return this; },
     json(b) { this.body = b; this.sent = true; return this; },
   };
 }

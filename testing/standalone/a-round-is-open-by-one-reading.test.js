@@ -139,7 +139,6 @@ const NOT_THE_OPEN_QUESTION = {
   'server/src/spaces/apply-wipe-round.ts': 'asks whether a space round has been decided and passed, to act on its outcome',
   'server/src/networks/member-introductions.ts': 'asks whether a join round concluded and passed, to admit or introduce its subject',
   'server/src/networks/network-spaces.ts': 'asks whether a space_addition round concluded and passed, to apply it',
-  'server/src/auth/tokens.ts': 'asks whether a round still names a pending member, so a credential someone may still need is not revoked',
   'server/src/sync/engine.ts': 'the post-merge pass asks which rounds are still undecided, to conclude them; the merge itself uses roundIsOpen',
 };
 
