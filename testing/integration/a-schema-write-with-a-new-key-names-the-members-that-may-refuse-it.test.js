@@ -192,8 +192,11 @@ describe('the control: every member recorded at a current release', () => {
     const m = await callTool(await session(admin), 'schema_update', { space: CURRENT, ...KEYS.stampSkew.mcp });
     assert.equal(m.isError, false, m.text);
     assert.equal(memberRow(m.body, 'stampSkew'), undefined, `a warning names members that are all current: ${JSON.stringify(m.body)}`);
-    // The write itself was taken as a proposal like any other: the round is there, so the control is not a refused write in disguise.
+    // The write itself was taken, so the control is not a refused write in disguise: a club's organiser applies a schema change at once,
+    // and a network that votes on it holds the round — either is the write having landed.
     const rounds = (await get(INSTANCES.a, admin, `/api/networks/${nets.current}/votes`)).body?.rounds ?? [];
-    assert.ok(rounds.some(x => x.type === 'meta_change'), 'the control write opened no round: it was refused or never reached the network');
+    const meta = (await get(INSTANCES.a, admin, `/api/spaces/${CURRENT}/meta`)).body ?? {};
+    assert.ok(rounds.some(x => x.type === 'meta_change') || meta.stampSkew?.warnMinutes === 30,
+      `the control write neither landed nor opened a round: it was refused or never reached the network (${JSON.stringify(meta.stampSkew)})`);
   });
 });
