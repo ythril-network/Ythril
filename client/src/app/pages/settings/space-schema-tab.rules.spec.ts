@@ -24,6 +24,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { KNOWLEDGE_TYPES, type Space } from '../../core/api.types';
@@ -541,7 +542,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
   it('sample mode sends the pasted record as `sample`, with no cursor, and scans nothing', async () => {
     const h = await mount();
     await chooseMode(h, 'sample');
-    const record = { kind: 'entity', type: 'person', properties: { age: -1 } };
+    const record = { kind: 'entity', record: { name: 'Ada', type: 'person', properties: { age: -1 } } };
     const box = $(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement | null;
     expect(box, 'no field to paste a sample into').not.toBeNull();
     type(box!, JSON.stringify(record));
@@ -663,6 +664,21 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect(shown(), 'continuing showed nothing new').toContain('e51');
     expect(shown(), 'the previous page\'s rows are still shown').not.toContain('e1');
     expect($(h.el, '[data-testid="validate-more"]'), 'a page whose rows are all shown says more are not shown').toBeNull();
+  });
+
+  // b23 verify U1: the placeholder showed `{"kind":"entity","type":"person","properties":{}}`, a shape the server refuses; a person who
+  // copies the example must be sending what the check takes: `{ kind, record }`, the record in the stored shape.
+  it('the sample placeholder is, in every language, the shape the check takes', () => {
+    for (const lang of ['en', 'de', 'pl']) {
+      const dict = JSON.parse(readFileSync(`public/assets/i18n/${lang}.json`, 'utf8')) as Record<string, string>;
+      const text = dict['validate.sample.placeholder'];
+      expect(text, `${lang}: no sample placeholder`).toBeTruthy();
+      const sample = JSON.parse(text) as Record<string, unknown>;
+      expect(Object.keys(sample).sort(), `${lang}: the placeholder is not { kind, record }`).toEqual(['kind', 'record']);
+      expect(KNOWLEDGE_TYPES as readonly unknown[], `${lang}: the placeholder's kind is not a kind`).toContain(sample['kind']);
+      expect(typeof sample['record'] === 'object' && sample['record'] !== null && !Array.isArray(sample['record']),
+        `${lang}: the placeholder's record is not an object`).toBe(true);
+    }
   });
 
   // b23 verify U2: a sample has no stored id and nothing is scanned, so "Checked 0 of 0 records" and "entities undefined" were noise.

@@ -2394,7 +2394,7 @@
   "validate.mode.sample": "Ein eingefügter Datensatz",
   "validate.mode.stored": "Gespeicherte Daten",
   "validate.sample.label": "Beispieldatensatz als JSON",
-  "validate.sample.placeholder": "{\"kind\":\"entity\",\"type\":\"person\",\"properties\":{}}",
+  "validate.sample.placeholder": "{\"kind\":\"entity\",\"record\":{\"name\":\"Ada\",\"type\":\"person\",\"properties\":{}}}",
   "validate.sample.notJson": "Das Beispiel ist kein gültiges JSON.",
   "validate.sample.row": "Der eingefügte Datensatz",
   "validate.run": "Prüfen",

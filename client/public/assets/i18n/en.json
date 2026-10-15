@@ -2394,7 +2394,7 @@
   "validate.mode.sample": "One pasted record",
   "validate.mode.stored": "Stored data",
   "validate.sample.label": "Sample record as JSON",
-  "validate.sample.placeholder": "{\"kind\":\"entity\",\"type\":\"person\",\"properties\":{}}",
+  "validate.sample.placeholder": "{\"kind\":\"entity\",\"record\":{\"name\":\"Ada\",\"type\":\"person\",\"properties\":{}}}",
   "validate.sample.notJson": "The sample is not valid JSON.",
   "validate.sample.row": "The pasted record",
   "validate.run": "Validate",
