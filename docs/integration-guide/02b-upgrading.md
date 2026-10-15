@@ -245,7 +245,7 @@ definition, and a type's rules go with it (that build refuses a body that carrie
 An older member refuses a network layer carrying `rules` whole each cycle, as the
 mixed-version note above says, and keeps the layer it had. Records written with a property key their type does not
 declare are intact: the older build never judged keys. The local fields this release added to a network or a round
-(`schemaLayerUnread`, `metaBase`, `refusedHere`) are read by nothing older and are never sent to a peer.
+(`schemaLayerUnread`, `refusedHere`) are read by nothing older and are never sent to a peer. A round's `metaBase` is the exception: it is not local, it travels with the round (what the changed fields held when the round was proposed), because every member judges the overwrite warning against the same base; nothing older reads it, and a round from a peer before this release carries none.
 
 **A rollback to 5.6.x rebuilds `{ seq: 1 }` before it listens, and leaves the new indexes behind.** An older build creates
 `{ seq: 1 }` (tombstones: `{ type: 1, seq: 1 }`) at every boot, before it accepts a request, on each collection that no
