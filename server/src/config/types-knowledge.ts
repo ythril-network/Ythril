@@ -147,6 +147,22 @@ export interface TypeSchema {
    * edges are not rewritten**: the conflict is reported on the next write and in the `validate-schema` dry run.
    */
   functional?: boolean;
+  /**
+   * F-46: rules every record of this type must satisfy — a CEL expression over the record's view (`self`) and the message a
+   * violation carries, by rule name. Part of the type: replaced with it. Checked when saved and evaluated by `spaces/schema-rules.ts`.
+   */
+  rules?: Record<string, SchemaRule>;
+}
+
+/** One schema rule: a CEL expression that must answer true for a record, and what a record that breaks it is told. */
+export interface SchemaRule {
+  rule: string;
+  message: string;
+}
+
+/** A space-level rule: a {@link SchemaRule} and the knowledge types it governs (absent or empty: every kind). */
+export interface SpaceSchemaRule extends SchemaRule {
+  kinds?: KnowledgeType[];
 }
 
 /** Validation mode for write operations against a space's schema. */
@@ -395,6 +411,11 @@ export interface SpaceMeta {
     /** Property names to check, first parseable one wins. Default `['stampedAt', 'postedAt']`. */
     properties?: string[];
   };
+  /**
+   * F-46: rules every record of the space must satisfy, beside each type's own — by rule name, each naming the kinds it governs.
+   * A top-level field replaced whole by every merge (`spaces/meta-fields.ts`): send the map without a rule to delete it.
+   */
+  rules?: Record<string, SpaceSchemaRule>;
   /** ISO8601 timestamp of the last meta update. */
   updatedAt?: string;
   /** History of previous meta versions (most recent first, capped). */

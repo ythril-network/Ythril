@@ -467,7 +467,9 @@ export const schema_updateTool: ToolHandler = {
     + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. A linked type '
     + 'may be sent back exactly as `space_meta` returned it — `$ref` beside the entry’s definition — and the '
     + 'link is kept; a CHANGED definition beside a `$ref` is refused (400, naming the field), because the '
-    + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. On a space whose '
+    + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. RULES (`rules`, and '
+    + 'a type\'s own `rules`) are replaced whole with their owner and a rule that could not be applied is refused when '
+    + 'saved, naming it; the limits are on the `rules` parameter. On a space whose '
     + 'network votes on meta changes this opens a vote round instead of writing — the reply says so, and nothing is '
     + 'stored until the round concludes. A space in MORE THAN ONE network gets a round per network and the reply carries '
     + '`layers`: for each network, `applied` (its round passed on this instance\'s own vote) or `vote_pending`; what '
@@ -498,8 +500,9 @@ export const schema_updateTool: ToolHandler = {
           + 'fields are collection-scoped and the complete, current list is the `TypeSchema` block in '
           + '`docs/integration-guide/06a-schema-api.md` — `namingPattern` (entity), `propertySchemas`, '
           + '`retention` (`contentDays` chrono-only), `suppressEmbeddings`, `whenDuePasses` (chrono-only), '
-          + 'and `endpoints`/`functional` (edge-only). A field sent on the wrong collection is REFUSED and '
-          + 'the message names the one it belongs to.',
+          + '`endpoints`/`functional` (edge-only), and `rules` — the type\'s own rules, `{ <name>: { rule, message } }`, '
+          + 'which belong to the type: a type written without `rules` has none. A field sent on the wrong collection is '
+          + 'REFUSED and the message names the one it belongs to.',
       },
       typeSchemasMode: {
         type: 'string', enum: ['merge', 'replace'],
@@ -520,6 +523,11 @@ export const schema_updateTool: ToolHandler = {
           + 'the write.',
       },
       strictLinkage: { type: 'boolean', description: 'Refuse a write whose entity references do not resolve.' },
+      purpose: {
+        type: 'string', maxLength: SPACE_PURPOSE_MAX,
+        description: `The space-level directive injected into MCP instructions at handshake (max ${SPACE_PURPOSE_MAX} chars). Same as `
+          + '`meta.purpose` on `PATCH /api/spaces/:id` (and `purpose` on `update_space`); needs the space administrator.',
+      },
       usageNotes: { type: 'string', maxLength: 50_000, description: 'Free-text guidance about the space, returned to MCP clients with its meta.' },
       suppressEmbeddings: { type: 'boolean', description: 'Space-level default for suppressing embeddings; a type schema can override it.' },
       whenDuePasses: {
@@ -550,8 +558,18 @@ export const schema_updateTool: ToolHandler = {
       rules: {
         type: 'object',
         description: 'Space-level rules every record must satisfy: a map of rule name to `{ rule, message, kinds? }`, `kinds` being the '
-          + 'knowledge types the rule governs (omitted: every kind). The map is replaced whole: send it without a rule to delete it. '
-          + 'A rule is stored and checked for shape; enforcement is not on yet.',
+          + 'knowledge types the rule governs (omitted: every kind whose record has the fields the rule reads). `rule` is an expression '
+          + 'over the record as `self` — `self.title`, `self.type`, `self.description`, `self.tags`, `self.properties.<name>`, and on an '
+          + 'edge `self.label` (never its ends) — that must answer true or false; `message` is what a record that breaks it is told. '
+          + 'LIMITS: a name is a lower-case letter then letters, digits, `_` and `-` (64 characters at most); a rule at most 1000 '
+          + 'characters; a message at most 300; at most 50 rules on the space, 50 on one type, and 50 applying to one record (its '
+          + 'type\'s plus the space\'s for its kind). The map is REPLACED whole: send it without a rule to delete it, `{}` to clear '
+          + 'them; a type\'s rules are replaced with the type. A rule this instance could not apply — it does not parse, reads a '
+          + 'property its type does not declare, calls an unknown function, or need not answer true or false — is REFUSED when the '
+          + 'schema is saved, naming the rule. A property the rule reads that a record lacks makes the rule not apply to it. With '
+          + '`validationMode: strict` a write that breaks a rule is refused; `warn` reports it; `off` evaluates none. '
+          + 'Try one on a record first with `schema_validate`. Same as `meta.rules` on `PATCH /api/spaces/:id`; needs the schema '
+          + '`admin` rung, as `validationMode` does.',
       },
     },
     required: ['space'],

@@ -33,6 +33,16 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Seeding the shipped Schema Library entries failed: ${err}`);
   }
 
+  // F-46 (R6-4): every stored schema rule compiled, after the library is seeded so a `$ref` type is a definition by now. Starts with
+  // the engine's self-test; a dead rule is skipped and reported, a dead ENGINE fails closed. Here, so a fresh install's first
+  // configuration (the setup route) runs it as boot does.
+  try {
+    const { checkStoredRules } = await import('./spaces/schema-rules.js');
+    await checkStoredRules();
+  } catch (err) {
+    log.error(`Checking the stored schema rules failed: ${err}`);
+  }
+
   // Peer tokens whose instance shares no network with us — left by handshakes that applied and never finalized,
   // before those tokens expired with their handshake. Local state, and `revokePeerCredentialsIfOrphaned` re-checks
   // membership before revoking anything, so a live peer is never touched.

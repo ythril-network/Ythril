@@ -18,6 +18,7 @@ import { getSchemaLibrary, getConfig } from '../config/loader.js';
 import { hasReDoSRisk, MAX_PATTERN_LENGTH, REDOS_REFUSAL } from '../util/redos.js';
 import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
+import { evaluateRules, LONGEST_CHECKED_STRING } from './schema-rules.js';
 
 // ── Violation type ─────────────────────────────────────────────────────────
 
@@ -214,6 +215,9 @@ export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrit
   // Required properties + property schemas
   violations.push(...validatePropertiesAgainstSchema(meta, typeSchema, entity.properties, instanceWrittenKeys));
 
+  // F-46: the type's rules and the space's for entities (nothing in `off`).
+  violations.push(...evaluateRules(meta, 'entity', entity, typeSchema));
+
   return violations;
 }
 
@@ -357,6 +361,7 @@ export function validateEdge(
   violations.push(...checkUnresolvedRef(typeSchema));
   if (!typeSchema?._unresolvedRef) {
     violations.push(...validatePropertiesAgainstSchema(meta, typeSchema, edge.properties, instanceWrittenKeys));
+    violations.push(...evaluateRules(meta, 'edge', edge, typeSchema));
   }
 
   return violations;
@@ -406,7 +411,8 @@ export function validateFact(meta: SpaceMeta, record: RecordView, instanceWritte
   const typeSchema = fact.type ? factSchemas?.[fact.type] : undefined;
   const refViolations = checkUnresolvedRef(typeSchema);
   if (refViolations.length) return [...violations, ...refViolations];
-  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, fact.properties, instanceWrittenKeys)];
+  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, fact.properties, instanceWrittenKeys),
+    ...evaluateRules(meta, 'fact', fact, typeSchema)];
 }
 
 /**
@@ -446,7 +452,8 @@ export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrit
   const typeSchema = chrono.type ? chronoSchemas?.[chrono.type] : undefined;
   const refViolations = checkUnresolvedRef(typeSchema);
   if (refViolations.length) return [...violations, ...refViolations];
-  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, chrono.properties, instanceWrittenKeys)];
+  return [...violations, ...validatePropertiesAgainstSchema(meta, typeSchema, chrono.properties, instanceWrittenKeys),
+    ...evaluateRules(meta, 'chrono', chrono, typeSchema)];
 }
 
 /**
@@ -684,7 +691,7 @@ function validateValue(field: string, value: unknown, schema: PropertySchema): S
 type PatternOutcome = 'match' | 'no-match' | 'not-evaluated';
 
 function testPattern(pattern: string, value: string): PatternOutcome {
-  if (pattern.length > MAX_PATTERN_LENGTH || value.length > 10_000) return 'not-evaluated';
+  if (pattern.length > MAX_PATTERN_LENGTH || value.length > LONGEST_CHECKED_STRING) return 'not-evaluated';
   if (hasReDoSRisk(pattern)) return 'not-evaluated';
   try {
     return new RegExp(pattern).test(value) ? 'match' : 'no-match';

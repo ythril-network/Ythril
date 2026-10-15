@@ -153,7 +153,15 @@ that exists: an edge's ends, whichever kind they are (entity, fact, chrono entry
 file) and the far end of an inline edges entry on a record write, and a link id.
 A refused connection stores nothing, the record included. Schema-declared property
 paths also unlock the fast filtered-recall path
-(see retrieval guide above).`;
+(see retrieval guide above).
+
+A schema may also carry rules: expressions over the record (self.title,
+self.properties.<name>, ...) that must answer true, each with the message a
+breaking write is told. A type's own rules sit in its typeSchemas entry and the
+space's in meta rules, both written with schema_update (the schema admin rung).
+A rule the instance could not apply is refused when saved; a property the rule
+reads that a record lacks makes it not apply. Try a schema on one record you type,
+or over the stored records, with schema_validate before saving it.`;
 
 const REST_SUMMARY = `EVERY TOOL ON THIS LIST IS ALSO "POST /api/<tool-name>", with the token you are
 using now as a Bearer header. The body is the tool's arguments exactly — the same

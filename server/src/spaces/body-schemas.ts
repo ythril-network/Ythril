@@ -54,6 +54,10 @@ import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
 import { NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal } from '../util/log.js';
 import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames } from './meta-fields.js';
+import {
+  TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
+  readingStoredRules, type RuleIssue,
+} from './schema-rules.js';
 
 // ── Zod schema for PropertySchema ──────────────────────────────────────────
 /**
@@ -154,18 +158,21 @@ const refuseInternalKeys = (value: unknown, ctx: { addIssue(issue: { code: 'cust
 };
 
 /**
- * The space-level `rules`: its SHAPE only — a name, the rule text, the message a refusal carries and the knowledge types it governs
- * (omitted: every kind). The limits and the checks a rule is held to when it is saved (its size, its count, that it compiles and reads
- * only what the type declares) are the rule engine's (F-46); until it lands a rule is stored and enforced by nothing, and the body is
- * where it is first told apart from a typo. A rule NAMED like an object's internals is refused here, as a type or a property is.
- * (A TYPE's own `rules` wait for the same engine and for the editor that can carry them: the type body is read by a gate that holds
- * every key it accepts to a control in the client.)
+ * A `rules` map (F-46) — a type's own (`TypeRuleZ`) or the space's (`SpaceRuleZ`), at most `max` of them — whose SHAPE is judged here:
+ * the count, each name and each entry, by `ruleMapIssues` in `spaces/schema-rules.ts`, the module that also holds the limits. Whether
+ * each rule is one the instance can APPLY is judged where its kind is known (`TypeSchemasZ` and `SpaceMetaBody` below).
+ *
+ * The entries are refused as refinement issues rather than by an inner object schema, and that is deliberate: a type body is a union
+ * (a `$ref` or an inline definition), and an inner failure inside the inline branch is reported as "no branch matched" with the `$ref`
+ * branch's "unrecognized keys" beside it — a refusal of a rule that names every field of the type but the rule. A rule NAMED like an
+ * object's internals is refused on the input, as a type or a property is.
  */
-const SpaceRulesZ = z.preprocess(refuseInternalKeys, z.record(z.string().min(1).max(200), z.object({
-  rule: z.string(),
-  message: z.string(),
-  kinds: z.array(z.enum(KNOWLEDGE_TYPES)).max(KNOWLEDGE_TYPES.length).optional(),
-}).strict()));
+function rulesMapOf<R extends z.ZodType>(ruleZ: R, max: number) {
+  // Typed as the map it admits: every entry it lets through is one `ruleZ` accepted.
+  return z.preprocess(refuseInternalKeys, z.record(z.string(), z.unknown()).superRefine((map, ctx) => {
+    for (const issue of ruleMapIssues(map, ruleZ, max)) ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  })) as unknown as z.ZodType<Record<string, z.output<R>>>;
+}
 
 /*
  * EVERY write of a type schema parses through here — the space meta PATCH and `schema_update`, `PUT .../schema`, the
@@ -231,6 +238,8 @@ export const TypeSchemaZ = z.preprocess(takeBackLibraryDefinition, z.union([
      * every other rule here, rather than inventing a second control.
      */
     functional: z.boolean().optional(),
+    // F-46: the type's own CEL rules, by name. Part of the type, so replaced with it; what each may be is judged in TypeSchemasZ.
+    rules: rulesMapOf(TypeRuleZ, MAX_RULES_PER_TYPE).optional(),
   }).strict(),
 ]));
 
@@ -361,6 +370,11 @@ export const TypeSchemasZ = z.object(
       for (const issue of collectionScopeIssues(collection, schema)) {
         ctx.addIssue({ code: 'custom', path: [collection, typeName, ...issue.path], message: issue.message });
       }
+      // F-46: each of the type's rules is one this instance can apply to a record of THIS collection, reading only what the type
+      // declares, and the set is within the cost budget. Here and not in the type body, because only here is the collection known.
+      for (const issue of typeRuleIssues(collection, schema)) {
+        ctx.addIssue({ code: 'custom', path: [collection, typeName, ...issue.path], message: issue.message });
+      }
     }
   }
 });
@@ -474,9 +488,15 @@ export const SpaceMetaBody = z.object({
     warnMinutes: z.number().min(0).max(525_600).optional(),
     properties: z.array(z.string().min(1).max(200)).max(20).optional(),
   }).strict().optional(),
-  // F-46, shape only here: the rules every record of the space is held to. See `RuleBodyZ`.
-  rules: SpaceRulesZ.optional(),
-}).strict();
+  // F-46: the CEL rules every record of the space is held to, beside each type's own. Replaced whole by every merge.
+  rules: rulesMapOf(SpaceRuleZ, MAX_RULES_PER_SPACE).optional(),
+}).strict().superRefine((meta, ctx) => {
+  // F-46: each space rule is one this instance can apply to every kind it names, and what APPLIES to one record (a type's own rules
+  // and the space's for its kind) is at most MAX_APPLICABLE_RULES and within the cost budget — refused here, never truncated at write.
+  for (const issue of [...spaceRuleIssues(meta.rules), ...applicableRuleIssues(meta)]) {
+    ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  }
+});
 
 // A key this body accepts that the merge table has no kind for would be carried by no merge: a write answered success and
 // the value not stored (`Q-217`). Refuse to load, so the omission is made at the commit that adds the key and never after it.
@@ -524,7 +544,11 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  * `reindexRun` joined in Q-99 part 2 — a running reindex's progress beside `needsReindex` — for the same reason, and
  * the same round-trip test caught it the same way.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema'] as const;
+/*
+ * `invalidRules` joined with F-46: the stored rules that no longer compile, named on the meta answer — derived, and echoed back by a
+ * caller who round-trips the meta.
+ */
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {
@@ -654,6 +678,11 @@ function failedParts(refusal: ParseRefusal): string[] {
 /** How many failing parts a refused meta names. */
 const FAILED_PARTS_MAX = 20;
 
+/** Rule refusals found outside a zod parse, as the error a parse would have given: one shape for every refusal of a meta. */
+function ruleIssuesError(issues: readonly RuleIssue[]): z.ZodError {
+  return new z.ZodError(issues.map(i => ({ code: 'custom' as const, path: i.path, message: i.message, input: undefined })));
+}
+
 /** What {@link parseSpaceMeta} answers. */
 export type MetaParse =
   | { ok: true; meta: ParsedSpaceMeta; unknown: string[] }
@@ -720,6 +749,18 @@ export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): 
   const parsed = result.data as Obj;
   if (!options.against) return { ok: true, meta: parsed as unknown as ParsedSpaceMeta, unknown: names.list() };
 
+  // F-46: what APPLIES to one record is judged on the meta as it will be stored — the part parsed above cannot see a stored type's rules
+  // beside new space rules — and only for what this write changed, so an unrelated edit never re-judges a stored type.
+  const changedTypes = new Set<string>();
+  for (const [kind, defs] of Object.entries(isObj(toParse[PER_TYPE_META_FIELD]) ? toParse[PER_TYPE_META_FIELD] as Obj : {})) {
+    for (const name of Object.keys(isObj(defs) ? defs : {})) changedTypes.add(`${kind}:${name}`);
+  }
+  const applicable = applicableRuleIssues(candidate, { spaceRules: Object.hasOwn(toParse, 'rules'), types: changedTypes });
+  if (applicable.length > 0) {
+    const refusal = refusalOfParse(ruleIssuesError(applicable), { maxIssues: FAILED_PARTS_MAX });
+    return { ok: false, message: refusal.error, failed: failedParts(refusal) };
+  }
+
   // Put the parts back in the order they arrived: a parsed part where one was parsed, the carried one where it was not.
   const out: Obj = {};
   for (const [k, v] of Object.entries(candidate)) {
@@ -754,6 +795,12 @@ export function readPeerMeta(incoming: unknown): MetaParse {
  * matters (nothing is wrong) costs one parse and not one per type.
  */
 export function readStoredMeta(stored: unknown): { meta: Obj; skipped: string[] } {
+  // A stored rule that no longer compiles is the rule engine's to skip and report (`invalidRulesOf`), never a reason to leave out the
+  // type that carries it: the save-time rule checks are off while what a store holds is read.
+  return readingStoredRules(() => readStoredMetaParts(stored));
+}
+
+function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } {
   const stripped = stripServerOwnedMeta(stored);
   if (!isObj(stripped)) return { meta: {}, skipped: [] };
   const known = readKnownMeta(stripped, new UnknownNames());
@@ -815,6 +862,9 @@ export function parseInlineDefinition(body: z.ZodType, kind: KnowledgeType, sche
   if (!result.success) return { ok: false, message: refusalOfParse(result.error, { unionBranch: branchAboutTheField }).error };
   const scope = collectionScopeIssues(kind, result.data);
   if (scope.length > 0) return { ok: false, message: scope.map(i => i.message).join(' ') };
+  // F-46: the entry's rules are judged for the collection it is filed under, as an inline type's are.
+  const rules = typeRuleIssues(kind, result.data);
+  if (rules.length > 0) return { ok: false, message: refusalOfParse(ruleIssuesError(rules)).error };
   return { ok: true, schema: result.data as ParsedTypeSchema };
 }
 

@@ -355,6 +355,9 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'update_file_meta', area: 'files', needs: 'write' },
   { tool: 'space_meta', area: 'schema', needs: 'read' },
   { tool: 'schema_update', area: 'schema', needs: 'admin' },
+  // F-46: the live check, the `read` rung of its REST twin (`POST .../validate-schema`). A stored value in its answer needs
+  // `knowledge: read` besides, and is withheld otherwise (`spaces/schema-validate-door.ts`), on both doors.
+  { tool: 'schema_validate', area: 'schema', needs: 'read' },
   { tool: 'space_schema_layers', area: 'schema', needs: 'read' },
   { tool: 'space_set_network_precedence', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
