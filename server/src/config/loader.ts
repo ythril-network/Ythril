@@ -5,7 +5,8 @@ import { numericEnvOrExit } from './setting-bounds.js';
 import { pinnedFieldsFromEnv } from './pinned-fields.js';
 import type { Config, SecretsFile, SchemaLibraryEntry, SchemaCatalog } from './types.js';
 import type { ParsedLibraryEntry } from '../spaces/body-schemas.js';
-import { normalizeDocExtractionMode } from './types.js';
+import { normalizeDocExtractionMode, normalizeUnknownWriteFields } from './types.js';
+import { warnOnce } from '../util/warn-once.js';
 import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } from './secretbox.js';
 import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
@@ -287,6 +288,31 @@ export function migrateFaceRecognitionSwitch(config: Config): boolean {
 }
 
 /**
+ * Which spaces have been told, and for which value, that their stored `unknownWriteFields` is not one this build reads. Keyed by space
+ * id with the stored value as the version, so a reload with the SAME bad value says nothing new and a CHANGED one is said again
+ * (`warnOnce`'s version semantics) — and bounded, because a space id is a name a hand edit chose.
+ */
+const unreadableUnknownWriteFieldsSaid = warnOnce<string>();
+
+/**
+ * A stored `unknownWriteFields` that is present and is not `'refuse'` reads as `warn` (`unknownWriteFieldsMode`), which is what an
+ * absent key means too — so an operator who hand-edited it to `true` or to another case of the word expecting refusal would otherwise get a space that
+ * warns and nothing saying so. Said ONCE per space per value, on `loadConfig` and `reloadConfig` alike (both call
+ * `normaliseLoadedConfig`), naming the space and the value through `peerText`. It never throws and never rewrites the file: the value is
+ * the operator's to correct.
+ */
+function reportUnreadableUnknownWriteFields(space: { id: string; unknownWriteFields?: unknown }): void {
+  if (!Object.hasOwn(space, 'unknownWriteFields')) return;
+  const stored = space.unknownWriteFields;
+  if (normalizeUnknownWriteFields(stored) !== undefined) return;
+  const shown = peerText(stored);
+  unreadableUnknownWriteFieldsSaid(`${space.id}`, () => {
+    log.warn(`config.json: space '${peerText(space.id)}' has unknownWriteFields ${shown}, which this build does not read (the one stored value is 'refuse') — `
+      + "treated as the default, 'warn'. Remove the key, or set it with PATCH /api/spaces/:id; the file is left as it is.");
+  }, `${typeof stored}:${shown}`);
+}
+
+/**
  * What every config read from disk goes through before anything else sees it — on load AND on reload.
  *
  * One function because the two paths each wrote it by hand, and a normalisation only one of them applies is
@@ -305,6 +331,7 @@ function normaliseLoadedConfig(parsed: Config): void {
   parsed.tokens ??= [];
   parsed.networks ??= [];
   for (const space of parsed.spaces) {
+    reportUnreadableUnknownWriteFields(space);
     if (Array.isArray(space.proxyFor) && space.proxyFor.length === 0) {
       delete space.proxyFor;
       log.warn(`config.json: space '${peerText(space.id)}' has an empty proxyFor — treated as a real space. `

@@ -14,6 +14,10 @@ import { getConfig } from '../config/loader.js';
 import { classifyOperation, recordSpaceCall } from '../metrics/space-activity.js';
 import { currentRequestId } from '../util/log.js';
 import type { OidcTokenRecord } from '../auth/oidc.js';
+// `req.recallOutcome` below is declared by `auth/middleware.ts` (a global `Express.Request` augmentation). This file reads it, so it names
+// the file that declares it: a program that reaches this module without reaching that one (the metric registry reads `MCP_TOOL_OPERATIONS`
+// through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time.
+import type {} from '../auth/middleware.js';
 
 // ── Operation mapping ──────────────────────────────────────────────────────
 

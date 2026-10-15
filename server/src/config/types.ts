@@ -269,6 +269,19 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    */
   completeLinkage?: boolean;
   /**
+   * What THIS instance does with a top-level field a brain write does not take (Q-320, bundle-128): absent (the default) stores the
+   * write and names the field in `warnings`; `'refuse'` refuses the write before anything is stored.
+   *
+   * **Local to this instance, and that placement is the whole point.** A top-level field of the space config, like `dupeRules` and
+   * `recordTtlDays`, and never a `meta` key: `meta` replicates through layers and network rounds, so a member that wants refusal
+   * would otherwise decide for every peer, and the first round would arm it everywhere. Never voted, never sent to a peer.
+   *
+   * Stored as `'refuse'` or ABSENT, never `'warn'` (`updateSpace` deletes the key for every clearing spelling), so "absent" and
+   * "warn" are one state and the audit records no change for a PATCH that changed nothing. Read only through
+   * `unknownWriteFieldsMode` (`spaces/spaces.ts`): a hand-edited value that is not `'refuse'` reads as `warn`.
+   */
+  unknownWriteFields?: 'refuse';
+  /**
    * The records stored here before the `deliveredBy` stamp existed have been stamped, once (`sync/delivered-by-backfill.ts`,
    * bundle-51). Local bookkeeping about THIS disk like `completeLinkage` — never governed, synced or settable through the
    * space API — and it lives on the space so that a rename carries it with the space and a deleted space takes it away.
@@ -788,6 +801,27 @@ export const IMAGE_LEVELS = ['off', 'caption', 'recognition', 'auto'] as const;
 export const AUDIO_LEVELS = ['off', 'on', 'auto'] as const;
 export const VIDEO_LEVELS = ['off', 'audio', 'full', 'auto'] as const;
 export const TEXT_LEVELS = ['off', 'embed', 'chunk', 'auto'] as const;
+
+/**
+ * The two answers an instance can give a top-level field a brain write does not take (`SpaceConfig.unknownWriteFields`, Q-320): the
+ * values the setting's body accepts beside `''` and `null`, and the values of the `mode` label of
+ * `ythril_unknown_write_fields_total`. Only `'refuse'` is ever STORED.
+ */
+export const UNKNOWN_WRITE_FIELD_ANSWERS = ['warn', 'refuse'] as const;
+export type UnknownWriteFieldAnswer = (typeof UNKNOWN_WRITE_FIELD_ANSWERS)[number];
+
+/**
+ * What a STORED `unknownWriteFields` value is: `'refuse'` when it is exactly that, `undefined` for everything else (absent, `'warn'`,
+ * `''`, `null`, a number, `true`, another case of the word). The one place that knows `'refuse'` is the only stored word, so the reader
+ * (`unknownWriteFieldsMode`, `spaces/spaces.ts`), the writer (`updateSpace`) and the load-time report of a value this build cannot read
+ * (`normaliseLoadedConfig`) cannot each spell the test their own way: a space hand-edited to `true` is judged alike by all of them,
+ * instead of by whichever one tests truthiness. Same shape as `normalizeDocExtractionMode`: a self-healing read, never a throw.
+ *
+ * `unknown` and not the field's type, because the question is asked of what a config file or a request body actually held.
+ */
+export function normalizeUnknownWriteFields(stored: unknown): 'refuse' | undefined {
+  return stored === 'refuse' ? 'refuse' : undefined;
+}
 
 /** Instance ceilings for the media classes. Absent = `auto` (no policy limit of its own). */
 export interface MediaLevelCeilings {

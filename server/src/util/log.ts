@@ -425,8 +425,9 @@ export function refusalOfParse(error: unknown, options: ParseRefusalOptions = {}
       const where = path.length > 0 ? `${path.join('.')}: ` : '';
       let reason: string;
       if (code === 'unrecognized_keys' && Array.isArray(leaf.keys)) {
-        issues.push({ code, path, keys: (leaf.keys as unknown[]).slice(0, REFUSAL_NAMES_MAX).map(k => peerText(k, { max: NAME_QUOTED })) });
-        reason = `unrecognized key${leaf.keys.length === 1 ? '' : 's'}: ${peerList(leaf.keys, ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}`;
+        const built = unrecognizedKeysIssue(leaf.keys as unknown[], path);
+        issues.push(built.issue);
+        reason = built.reason;
       } else {
         issues.push({ code, path });
         reason = peerText(typeof leaf.message === 'string' ? leaf.message : code, { max: NAME_QUOTED });
@@ -439,6 +440,23 @@ export function refusalOfParse(error: unknown, options: ParseRefusalOptions = {}
   } catch {
     return parseRefusal(UNRENDERABLE, [], []);
   }
+}
+
+/**
+ * The `unrecognized_keys` issue for a list of keys, and the one clause that says it: what `refusalOfParse` answers for a failed parse AND
+ * what the unknown-write-field judge (`contract/write-accepts.ts`, Q-320) refuses a write with, so a caller reads one shape for "this
+ * body carries a key it does not take" whichever door and whichever mechanism refused it.
+ *
+ * **Bounded the way every refusal is, inside, so no caller can drop it:** at most {@link REFUSAL_NAMES_MAX} keys in `issue.keys`, each
+ * rendered by `peerText` at `NAME_QUOTED`; the clause (`reason`) is rebuilt from the keys by `peerList` at the same bounds, because zod's
+ * own text copies a key unbounded. `path` is taken as already rendered (a parse refusal's path segments are); the judge's is `[]`, the
+ * body itself. Takes `unknown[]` because a parse's `keys` is whatever zod put there.
+ */
+export function unrecognizedKeysIssue(keys: readonly unknown[], path: readonly string[] = []): { issue: ParseRefusalIssue; reason: string } {
+  return {
+    issue: { code: 'unrecognized_keys', path: [...path], keys: keys.slice(0, REFUSAL_NAMES_MAX).map(k => peerText(k, { max: NAME_QUOTED })) },
+    reason: `unrecognized key${keys.length === 1 ? '' : 's'}: ${peerList(keys, ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}`,
+  };
 }
 
 /**

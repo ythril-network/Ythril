@@ -295,7 +295,8 @@ describe('both doors, and all three routes', () => {
     }
 
     const helper = stripComments(readFileSync('server/src/api/brain/_read-failure.ts', 'utf8'));
-    assert.match(helper, /res\.statusCode >= 500 \|\| res\.statusCode === 429/,
+    // Said inside the decorator `statesRetryability` hands `decorateJsonAnswer` (bundle-128), which names the status it was given.
+    assert.match(helper, /status >= 500 \|\| status === 429/,
       '429 is retryable by definition and already documents Retry-After — defaulting it to false would lie');
     assert.match(helper, /\['retryable'\] === undefined/,
       'a body that already states retryable must be left alone, so the classifier always wins over the default');

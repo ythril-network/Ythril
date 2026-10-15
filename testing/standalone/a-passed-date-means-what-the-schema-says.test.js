@@ -151,7 +151,10 @@ describe('both doors take the same space-meta fields', () => {
 
   it('the handler forwards what the schema declares, rather than a second list', () => {
     // The defect was two lists disagreeing. One of them is gone; this refuses its return.
-    const handler = src('server/src/mcp/tools/spaces.ts');
+    // `forwardedArgNames` moved to `contract/write-accepts.ts` (bundle-128): the handler calls it, and it reads the tool's own schema.
+    const handler = src('server/src/contract/write-accepts.ts');
+    assert.match(src('server/src/mcp/tools/spaces.ts'), /forwardedArgNames\(schema_updateTool/,
+      'schema_update must forward through the shared helper');
     assert.match(handler, /inputSchema\(\{\} as ToolSchemas\)\.properties/,
       'the forwarded keys must come from the schema the tool itself declares, not from an array beside it');
   });

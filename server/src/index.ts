@@ -234,6 +234,15 @@ async function main(): Promise<void> {
     warnIfEmbeddingEnabled();
   }
 
+  /*
+   * What every brain write accepts is derived from its paired MCP tool's schema (`contract/write-accepts.ts`), and the derivation THROWS
+   * when an operation has no tool or declares nothing. Forced here, after the tool registry is built and before the server listens, on a
+   * first-run start as well (it needs no config), so a broken derivation stops the boot instead of answering the first write of that
+   * kind with a 500.
+   */
+  const { warmAcceptedWriteKeys } = await import('./contract/write-accepts.js');
+  warmAcceptedWriteKeys();
+
   const app = createApp();
   const server = createServer(app);
   configureConnections(server);

@@ -65,9 +65,13 @@ describe('a tool forwards what its own schema declares', () => {
 
   it('and the tools that had it now read their own schema', () => {
     // The positive half: the shape is gone AND the replacement is the schema, not a differently-spelled list.
+    // The helper moved to `contract/write-accepts.ts` when the unknown-write-field judge became its third caller (bundle-128): it is
+    // DEFINED there once, and the two tools that read their own schema import it and call it.
     const s = src('server/src/mcp/tools/spaces.ts');
-    assert.match(s, /function forwardedArgNames/, 'the shared helper is what both tools should use');
-    assert.equal((s.match(/forwardedArgNames\(/g) ?? []).length >= 3, true,
-      'declared once and used by both tools — a helper with one caller is a copy with extra steps');
+    assert.match(src('server/src/contract/write-accepts.ts'), /function forwardedArgNames/, 'the shared helper is what both tools should use');
+    assert.doesNotMatch(s, /function forwardedArgNames/, 'a second definition of the shared helper beside its callers');
+    assert.match(s, /import \{[^}]*\bforwardedArgNames\b[^}]*\} from '[^']*contract\/write-accepts\.js'/, 'spaces.ts must use the shared helper, not its own');
+    assert.equal((s.match(/forwardedArgNames\(/g) ?? []).length >= 2, true,
+      'used by both tools — a helper with one caller is a copy with extra steps');
   });
 });
