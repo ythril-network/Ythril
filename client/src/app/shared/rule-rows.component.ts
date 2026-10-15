@@ -127,7 +127,7 @@ const KIND_KEYS: Record<KnowledgeType, string> = {
     }
     @if (!readOnly()) {
       <div class="add-row">
-        <input type="text" [ngModel]="newName()" (ngModelChange)="newName.set($event)" [ngModelOptions]="{ standalone: true }"
+        <input type="text" data-testid="rule-add-name" [ngModel]="newName()" (ngModelChange)="newName.set($event)" [ngModelOptions]="{ standalone: true }"
           [placeholder]="'rules.add.placeholder' | transloco" [attr.aria-label]="'rules.add.button' | transloco"
           [attr.maxlength]="limits.nameMax" (keydown.enter)="$event.preventDefault(); add()" />
         <button type="button" class="btn btn-secondary btn-sm" [disabled]="!!addProblem()" (click)="add()">{{ 'rules.add.button' | transloco }}</button>
@@ -184,9 +184,28 @@ export class RuleRowsComponent implements AfterViewChecked {
   /** Focus waits for the row to exist: it is opened by the same change that asked for the focus. */
   private pendingFocus: RuleRowRefusal | null = null;
 
+  /** Where focus goes once the removed row is gone from the page: the index it had, so the row that took its place (else the one before it) is the target. */
+  private focusAfterRemoveAt: number | null = null;
+
   ngAfterViewChecked(): void {
     const refused = this.pendingFocus;
     if (refused && this.focusField(refused)) this.pendingFocus = null;
+    const removedAt = this.focusAfterRemoveAt;
+    if (removedAt !== null) {
+      this.focusAfterRemoveAt = null;
+      this.focusNeighbour(removedAt);
+    }
+  }
+
+  /**
+   * The remove button that was pressed leaves the page with its row, and a keyboard or screen-reader user's focus would fall to the top of
+   * the document. It goes to the disclosure of the row that took the removed row's place, else to the one before it, else to the field that
+   * adds a rule (always there while rows can be removed).
+   */
+  private focusNeighbour(removedAt: number): void {
+    const toggles = this.host.nativeElement.querySelectorAll<HTMLElement>('[data-testid="rule-toggle"]');
+    const target = toggles[removedAt] ?? toggles[removedAt - 1] ?? this.host.nativeElement.querySelector<HTMLElement>('[data-testid="rule-add-name"]');
+    target?.focus();
   }
 
   isOpen(name: string): boolean { return this.openNames().has(name); }
@@ -236,6 +255,7 @@ export class RuleRowsComponent implements AfterViewChecked {
   remove(i: number): void {
     const [gone] = this.rules().splice(i, 1);
     if (gone) this.openNames.update(set => { const next = new Set(set); next.delete(gone.name); return next; });
+    this.focusAfterRemoveAt = i;
     this.changed.emit();
   }
 

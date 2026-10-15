@@ -110,21 +110,27 @@ import { refusalText } from '../../core/refusal-text';
   @if (validateError()) {
     <div class="sch-msg err" role="alert">{{ validateError() }}</div>
   }
-  @if (validateResult() && stale) {
-    <!-- The schema was edited after this check ran: what it found describes the schema as it WAS, so none of it is shown. -->
-    <div class="sch-msg warn" data-testid="validate-stale">{{ 'validate.stale' | transloco }}</div>
-  } @else if (validateResult(); as result) {
-    <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
-    @if (validateMode() === 'stored') {
-      <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
-        {{ validateProgressKey() | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
-        @if (!validateDone()) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
-      </div>
+  <!-- The summary is a polite live region, and it is in the page from the start: a region inserted together with its words is not reliably
+       read, so finishing a check (the readout, the all-good word) or going stale is announced because its words change inside it. -->
+  <div class="val-summary" role="status" data-testid="validate-status">
+    @if (validateResult() && stale) {
+      <!-- The schema was edited after this check ran: what it found describes the schema as it WAS, so none of it is shown. -->
+      <div class="sch-msg warn" data-testid="validate-stale">{{ 'validate.stale' | transloco }}</div>
+    } @else if (validateResult()) {
+      <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
+      @if (validateMode() === 'stored') {
+        <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
+          {{ validateProgressKey() | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
+          @if (!validateDone()) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
+        </div>
+      }
+      @if (validateAllGood()) {
+        <!-- "Matches" is said only when the whole space (or the one sample) was read and nothing was found. -->
+        <div class="sch-msg ok" data-testid="validate-all-good"><app-status-pill variant="ok" icon="check-circle">{{ 'validate.outcome.match' | transloco }}</app-status-pill> {{ 'validate.allGood' | transloco }}</div>
+      }
     }
-    @if (validateAllGood()) {
-      <!-- "Matches" is said only when the whole space (or the one sample) was read and nothing was found. -->
-      <div class="sch-msg ok" data-testid="validate-all-good"><app-status-pill variant="ok" icon="check-circle">{{ 'validate.outcome.match' | transloco }}</app-status-pill> {{ 'validate.allGood' | transloco }}</div>
-    }
+  </div>
+  @if (validateResult() && !stale) {
     @if (validateRows().length) {
       <ul class="val-violations">
         @for (v of validateRows(); track $index) {

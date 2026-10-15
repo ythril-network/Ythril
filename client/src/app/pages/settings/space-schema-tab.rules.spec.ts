@@ -531,6 +531,44 @@ describe('a field a network layer supplies is marked with that network and can b
   });
 });
 
+// ── focus after a rule row is removed (b23 W6d X1) ───────────────────────────────────────────────────────────────────
+
+describe('removing a rule row moves focus to a neighbour instead of dropping it', () => {
+  const spaceRows = (h: Harness) => $$(h.el, '[data-testid="space-rule-row"]');
+  const nameOf = (el: Element | null) => (el as HTMLElement | null)?.closest('[data-rule-name]')?.getAttribute('data-rule-name') ?? null;
+  const active = () => document.activeElement as HTMLElement | null;
+  async function remove(h: Harness, name: string) {
+    const row = ruleRow(h.el, name, 'space-rule-row');
+    expect(row, `no space rule named ${name}`).not.toBeNull();
+    ($(row!, '.rule-head .icon-btn.danger') as HTMLButtonElement).click();
+    await h.settle();
+  }
+
+  it('removing a middle row focuses the disclosure of the row that took its place', async () => {
+    const h = await mount();
+    expect(spaceRows(h).map(r => r.getAttribute('data-rule-name'))).toEqual(['no-future', 'few-tags', 'edges-only']);
+    await remove(h, 'few-tags');
+    expect(active()?.getAttribute('data-testid'), 'focus is not on a disclosure').toBe('rule-toggle');
+    expect(nameOf(active())).toBe('edges-only');
+  });
+
+  it('removing the last row focuses the disclosure of the previous one', async () => {
+    const h = await mount();
+    await remove(h, 'edges-only');
+    expect(active()?.getAttribute('data-testid')).toBe('rule-toggle');
+    expect(nameOf(active())).toBe('few-tags');
+  });
+
+  it('removing the only row focuses the field that adds one', async () => {
+    const h = await mount();
+    await remove(h, 'no-future');
+    await remove(h, 'few-tags');
+    await remove(h, 'edges-only');
+    expect(spaceRows(h).length).toBe(0);
+    expect(active()?.getAttribute('data-testid'), 'focus fell to the page').toBe('rule-add-name');
+  });
+});
+
 // ── the live check ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('Validate runs the live check, in sample mode and in stored-data mode', () => {
@@ -798,6 +836,31 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     }
     expect(Math.max(0, ...held), 'a signal still holds the rows of several pages').toBeLessThanOrEqual(50);
     expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said after pages that found violations').toBeNull();
+  });
+
+  // b23 W6d X1: the readout, the all-good word and the stale note appeared in the page without being announced. The live region has to
+  // exist BEFORE its words do (a region inserted together with its content is not reliably read), so it is there from the start.
+  it('the summary lives in a polite live region that exists before the check runs and holds the readout, all-good and stale note', async () => {
+    const h = await mount();
+    const region = () => $(h.el, '[data-testid="validate-status"]');
+    expect(region(), 'no live region before the check runs').not.toBeNull();
+    expect(region()!.getAttribute('role')).toBe('status');
+    expect(region()!.getAttribute('aria-live') ?? 'polite', 'a status region must stay polite').toBe('polite');
+    const before = region();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 900, total: 900 }, done: true }));
+    await h.settle();
+    expect(region(), 'the region was replaced by the result, so nothing was announced').toBe(before);
+    expect($(region()!, '[data-testid="validate-progress"]'), 'the readout is outside the live region').not.toBeNull();
+    expect($(region()!, '[data-testid="validate-all-good"]'), 'the all-good word is outside the live region').not.toBeNull();
+    const row = ruleRow(h.el, 'few-tags', 'space-rule-row');
+    await expand(h, row);
+    type($(row!, '[data-testid="rule-text"]') as HTMLTextAreaElement, 'size(self.tags) <= 3');
+    await h.settle();
+    expect($(region()!, '[data-testid="validate-stale"]'), 'the stale note is outside the live region').not.toBeNull();
+    // The refusal of a call that could not run is an alert of its own, not a status.
+    expect($$(h.el, '.sch-validate [role="status"]').length, 'more than one status region in the check').toBe(1);
   });
 
   // b23 W6d U1: a result describes the schema the check ran against. Editing a rule or a property afterwards left "All good" on screen
