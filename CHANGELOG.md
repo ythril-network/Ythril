@@ -73,20 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | The first minute after upgrade concludes every round already past its deadline, and a failed join's orphaned peer credentials are revoked, which cannot be undone | Read the upgrade notes before upgrading a network with old rounds |
 | A `strict` space refuses a write that adds a property key its type does not declare (a type with any property is a closed list); `warn` returns it, `off` ignores it; stored keys are never refused | Find them with `validate-schema` |
 | A schema refusal's `truncated` is a count (was `true`); a refused merge answers the standard refusal body, still `400`; an invalid body answers `{ "error", "issues" }` without received values | Match `issues[].code` |
-| `validate-schema` pages by `after`/`nextAfter` (`skip`, `count`, `total`, `truncated`, `nextSkip` are gone) and shows a stored value only with `knowledge: read`; MCP `save_edge` answers `warnings`, not `violations` | Page with `nextAfter` |
+| `validate-schema` pages by `nextAfter` and stops at a full page (`skip`, `count`, `total`, `nextSkip`, `totalViolations` gone; `truncated` = size budget cut; `progress.checked` per call); a value needs `knowledge: read`; MCP `save_edge` answers `warnings` | Page by `nextAfter`; sum `checked` |
 | `meta.rules` and a type's rules need `schema: admin` (the single-type `PUT` too); `meta.stampSkew` is accepted (was `400`); a library entry cannot change kind while a space uses it (`409`) | Grant admin to tokens that edit rules |
-| A member on 5.6.x refuses a schema carrying `rules` or `stampSkew` whole; a write that sets one answers a `warnings` row naming such members | Upgrade every instance of a network first |
+| A member on 5.6.x refuses a schema carrying `rules` or `stampSkew` whole; a write setting one warns, naming them | Upgrade every instance of a network first |
 
 ### Added
 
 - **Sync:** `file_stamp_report` (admin; REST and MCP) lists the files a 4.0–5.5 version likely stamped with its own author, from each peer's file feed. It repairs nothing, writes one audit entry, and shares the five-a-minute heavy-call budget: [Spaces API](docs/integration-guide/06-spaces-api.md).
-- **Sync:** Documents from a push, pull or import that carry what the local schema does not accept are stored and recorded by name and count (`schemaViolations`), never refused.
+- **Sync:** Arrivals (push, pull, import) the local schema does not accept are stored and recorded by name and count (`schemaViolations`), never refused.
 - **Networks:** New `GET /api/networks/:id/vote-outcomes` and MCP `network_vote_outcomes` (`limit` 1-50, default 20) list how rounds ended (passed, vetoed, expired), the newest 50 kept on this instance only; a vote shows when it opened and what it changes, and the card lists Recent decisions.
-- **Schemas:** `rules` on a type and the space: CEL with a message, saved only if this instance can run them, refused in `strict`, returned in `warn` ([Schema API](docs/integration-guide/06a-schema-api.md#rules)); `invalidRules` names any that stopped compiling.
-- **Schemas:** `schema_validate` (MCP) and `validate-schema` `sample` check a record or the stored data; `space_schema_layers` answers `fields` (`own`, `effective`, `winner`, `hidden`), `unknownFields`, `refusedRounds`.
-- **Schemas:** A write reaching several networks answers `layers`; a receiver names unknown meta keys instead of refusing the layer; a round carries only its changes, applied whole or not at all.
+- **Schemas:** `rules` on a type and the space: CEL with a message, saved only if this instance runs them, refused in `strict`, returned in `warn` ([Schema API](docs/integration-guide/06a-schema-api.md#rules)); `invalidRules` names any that stopped compiling.
+- **Schemas:** `schema_validate` (MCP) and `validate-schema` check a sample record or the stored data; `space_schema_layers` answers `fields` (`own`, `effective`, `winner`, `hidden`), `unknownFields`, `refusedRounds`.
+- **Schemas:** A write reaching several networks answers `layers`; unknown meta keys in a layer or round are named, not refused; a round carries only its changes, applied whole.
 - **Server:** New `ythril_schema_refusals_total{door,outcome}`, `ythril_schema_rules_invalid`, `ythril_schema_rule_engine_available`, `ythril_schema_violations_recorded_total{source}`.
-- **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared properties.
+- **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared keys.
 
 ### Changed
 
