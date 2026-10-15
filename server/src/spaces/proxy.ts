@@ -1,5 +1,6 @@
 import { getConfig, isConfigLoaded } from '../config/loader.js';
 import type { SpaceConfig } from '../config/types.js';
+import { NAME_QUOTED, peerText } from '../util/log.js';
 
 /**
  * Whether a space RECORD is a proxy: it names at least one member. A proxy holds no records of its own.
@@ -85,16 +86,30 @@ export function resolveMemberSpaces(spaceId: string): string[] {
   return [spaceId];
 }
 
+/** What resolving a write target answers: the one space the write lands in, or the sentence both doors refuse with. */
+export type ResolvedWriteTarget = { ok: true; target: string } | { ok: false; error: string };
+
 /**
  * Validate and resolve a targetSpace parameter for a write operation on a proxy space.
  * Returns the resolved target space ID, or an error string.
+ *
+ * **`targetSpace` is `unknown`, and a PRESENT value that is not a string is refused here, first, on every door** (`targetSpace must be
+ * a string`): it is whatever a caller chose to send. Express 5 parses `?targetSpace=a&targetSpace=b` to an ARRAY, which the templates
+ * below stringified into a misleading "not found" name, and an MCP caller's `{"toString":1}` threw a `TypeError` out of them. Absent is
+ * `undefined` or `null` — what a body or query that names no target holds — and an empty string is still "name none" below.
+ *
+ * **Every name echoed back is rendered by `peerText`**: the space and the target are caller text, and one oversized or line-breaking
+ * name neither floods the answer nor forges a line. The member lists are the instance's own configuration and are listed as they are.
  */
 export function resolveWriteTarget(
   spaceId: string,
-  targetSpace: string | undefined,
-): { ok: true; target: string } | { ok: false; error: string } {
+  targetSpace: unknown,
+): ResolvedWriteTarget {
+  if (targetSpace !== undefined && targetSpace !== null && typeof targetSpace !== 'string') {
+    return { ok: false, error: 'targetSpace must be a string' };
+  }
   const space = findSpace(spaceId);
-  if (!space) return { ok: false, error: `Space '${spaceId}' not found` };
+  if (!space) return { ok: false, error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' not found` };
 
   // Regular space — ignore targetSpace, write directly
   if (!isProxy(space)) {
@@ -102,32 +117,48 @@ export function resolveWriteTarget(
   }
   const members = space.proxyFor!;
 
-  // Proxy space — targetSpace is required
-  if (!targetSpace) {
+  // Proxy space — targetSpace is required (an absent value and an empty string both name none)
+  const named = typeof targetSpace === 'string' ? targetSpace : '';
+  if (!named) {
     return {
       ok: false,
       error: `This is a proxy space. Specify targetSpace (one of: ${resolveMemberSpaces(spaceId).join(', ')})`,
     };
   }
+  const shown = peerText(named, { max: NAME_QUOTED });
 
   // Wildcard proxy — any non-proxy space is a valid target
   if (isWildcardProxy(space)) {
-    const target = findSpace(targetSpace);
-    if (!target) return { ok: false, error: `Target space '${targetSpace}' not found` };
+    const target = findSpace(named);
+    if (!target) return { ok: false, error: `Target space '${shown}' not found` };
     if (isProxy(target)) {
-      return { ok: false, error: `'${targetSpace}' is itself a proxy space and cannot be a write target` };
+      return { ok: false, error: `'${shown}' is itself a proxy space and cannot be a write target` };
     }
-    return { ok: true, target: targetSpace };
+    return { ok: true, target: named };
   }
 
-  if (!members.includes(targetSpace)) {
+  if (!members.includes(named)) {
     return {
       ok: false,
-      error: `'${targetSpace}' is not a member of proxy space '${spaceId}' (members: ${members.join(', ')})`,
+      error: `'${shown}' is not a member of proxy space '${peerText(spaceId, { max: NAME_QUOTED })}' (members: ${members.join(', ')})`,
     };
   }
 
-  return { ok: true, target: targetSpace };
+  return { ok: true, target: named };
+}
+
+/**
+ * The write target of a tool CALL, resolved by the dispatcher itself (`callTool`) — the ONE way the dispatcher resolves one.
+ *
+ * It exists because the unknown-write-field judge answers by the setting of the space the write LANDS in, so the dispatcher must know the
+ * target before any handler runs, and a second reading of `targetSpace` out of the arguments there would be a second implementation of
+ * the proxy rules. The handlers keep their own `resolveWriteTarget` call, which on a call that got past this is a no-op re-check. A
+ * reach check on the resolved target (Q-440) is added HERE, so a handler cannot skip it by not asking.
+ *
+ * `args` is the caller's own object, so `targetSpace` is read as `unknown` and `resolveWriteTarget` refuses a non-string.
+ */
+export function resolveCallWriteTarget(callSpace: string, args: Readonly<Record<string, unknown>>): ResolvedWriteTarget {
+  return resolveWriteTarget(callSpace, Object.hasOwn(args, 'targetSpace') ? args['targetSpace'] : undefined);
 }
 
 /**

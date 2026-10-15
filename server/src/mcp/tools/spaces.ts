@@ -18,6 +18,7 @@ import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
+import { forwardedArgNames } from '../../contract/write-accepts.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
@@ -441,20 +442,6 @@ const NOT_META = new Set(['space', 'typeSchemasMode', 'targetNetwork']);
  * at the call site rather than forwarded, and must not be forwarded under its own name as well.
  */
 const NOT_BODY = new Set(['purpose']);
-
-/**
- * The argument names a tool forwards: everything its own `inputSchema` declares, minus the ones that are not
- * part of the payload.
- *
- * Written once because two tools had hand-written copies of their own schemas beside them, and one of those
- * copies was already wrong — a field declared, accepted by the dispatcher, and dropped before the write,
- * with the other door storing it. The schema is the contract, so the schema is the list, and a field added
- * to it is forwarded by the same commit.
- */
-function forwardedArgNames(tool: ToolHandler, exclude: ReadonlySet<string>): string[] {
-  const props = (tool.inputSchema({} as ToolSchemas).properties ?? {}) as Record<string, unknown>;
-  return Object.keys(props).filter(k => !exclude.has(k));
-}
 
 export const schema_updateTool: ToolHandler = {
   name: 'schema_update',

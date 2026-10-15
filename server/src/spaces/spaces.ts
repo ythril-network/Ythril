@@ -6,7 +6,8 @@
  */
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
-import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows, UnknownWriteFieldAnswer } from '../config/types.js';
+import { normalizeUnknownWriteFields } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import type { ParsedSpaceMeta } from './body-schemas.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
@@ -37,6 +38,19 @@ export function spacePurpose(space: { meta?: SpaceMeta }): string | undefined {
 }
 
 
+/**
+ * What THIS instance does with a top-level field a brain write to `space` does not take: `'refuse'` for the one stored value
+ * `'refuse'`, `'warn'` for everything else (absent, a hand-edited word this build cannot read, a number, `true`).
+ *
+ * **The one reader.** The judge (`contract/write-accepts.ts`), the audit snapshot of a settings change, the metric label and every
+ * projection call this and compare nothing themselves, so a space whose config was edited by hand is judged alike by all of them
+ * instead of by whichever tests truthiness. It never throws: an unreadable value is `warn` (and said once at load).
+ * What a stored value IS lives in `normalizeUnknownWriteFields` (`config/types.ts`), shared with the writer and the loader.
+ */
+export function unknownWriteFieldsMode(space: { unknownWriteFields?: unknown } | undefined | null): UnknownWriteFieldAnswer {
+  return normalizeUnknownWriteFields(space?.unknownWriteFields) ?? 'warn';
+}
+
 /** Update mutable fields (label, meta, quotas, ladders) of an existing space in config.
  *  When `meta` is provided the version counter is auto-incremented and the
  *  previous version is pushed to `previousVersions` (capped at META_VERSION_CAP).
@@ -44,7 +58,7 @@ export function spacePurpose(space: { meta?: SpaceMeta }): string | undefined {
  *  it already holds. Returns the updated SpaceConfig, or null if the space was not found. */
 export function updateSpace(
   spaceId: string,
-  updates: { label?: string; maxGiB?: number | null; meta?: ParsedSpaceMeta; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: DocExtractionMode | null; imageAnalysis?: ImageLevel | null; audioAnalysis?: AudioLevel | null; videoAnalysis?: VideoLevel | null; textAnalysis?: TextLevel | null; completeLinkage?: boolean },
+  updates: { label?: string; maxGiB?: number | null; meta?: ParsedSpaceMeta; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; documentExtraction?: DocExtractionMode | null; imageAnalysis?: ImageLevel | null; audioAnalysis?: AudioLevel | null; videoAnalysis?: VideoLevel | null; textAnalysis?: TextLevel | null; completeLinkage?: boolean; unknownWriteFields?: UnknownWriteFieldAnswer | '' | null },
 ): SpaceConfig | null {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
@@ -90,6 +104,17 @@ export function updateSpace(
   if ('audioAnalysis' in updates) space.audioAnalysis = updates.audioAnalysis ?? undefined;
   if ('videoAnalysis' in updates) space.videoAnalysis = updates.videoAnalysis ?? undefined;
   if ('textAnalysis' in updates) space.textAnalysis = updates.textAnalysis ?? undefined;
+  /*
+   * What this instance does with a top-level field a write does not take (Q-320) — local, never voted, never replicated, so it is
+   * applied here whatever the vote branch does with the meta. `in` so an explicit clear removes the key, and **`'warn'`, `''` and
+   * `null` all clear it**: only `'refuse'` is ever stored, so "absent" and "warn" are one state and the audit snapshot (which reads
+   * both sides through `unknownWriteFieldsMode`) records no change for a PATCH that changed nothing. `delete`, not `= undefined`: an
+   * absent key is what a reader and a round trip through config.json must see.
+   */
+  if ('unknownWriteFields' in updates) {
+    const stored = normalizeUnknownWriteFields(updates.unknownWriteFields);
+    if (stored) space.unknownWriteFields = stored; else delete space.unknownWriteFields;
+  }
   /*
    * The conversion marker, and it is NOT settable through the space API any more.
    *

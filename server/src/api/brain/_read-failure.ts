@@ -15,6 +15,7 @@
 import type express from 'express';
 import { storeFailureAnswer } from '../../brain/store-failure.js';
 import { sendStoreFailure } from '../send-failure.js';
+import { decorateJsonAnswer } from '../decorate-json-answer.js';
 
 /**
  * Answer a read failure with the truth about whose fault it is.
@@ -60,14 +61,11 @@ export function sendReadFailure(res: express.Response, where: string, err: unkno
 export function statesRetryability(
   _req: express.Request, res: express.Response, next: express.NextFunction,
 ): void {
-  const original = res.json.bind(res);
-  res.json = (body: unknown) => {
-    const isPlainObject = body !== null && typeof body === 'object' && !Array.isArray(body);
-    if (res.statusCode >= 400 && isPlainObject
-        && (body as Record<string, unknown>)['retryable'] === undefined) {
-      return original({ ...(body as Record<string, unknown>), retryable: res.statusCode >= 500 || res.statusCode === 429 });
-    }
-    return original(body);
-  };
+  // The wrapper itself is `decorateJsonAnswer`'s (plain objects only, a copy, never throws, once per request): this says only WHAT to add.
+  decorateJsonAnswer(res, 'retryable', (status, body) => (
+    status >= 400 && body['retryable'] === undefined
+      ? { ...body, retryable: status >= 500 || status === 429 }
+      : body
+  ));
   next();
 }

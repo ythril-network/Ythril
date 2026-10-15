@@ -28,6 +28,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
+import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
 import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
@@ -860,6 +861,38 @@ export const schemaRefusalsTotal = counterMirroringTally({
   labelNames: ['door', 'outcome'] as const,
   read: schemaRefusalCounts,
 });
+
+/** Which door asked the unknown-write-field judge: REST, an MCP tool call, or `POST /api/<tool>` (`caller.transport` on the tool side). The values of the `door` label. */
+export const UNKNOWN_WRITE_FIELD_DOORS = ['rest', 'mcp', 'tool'] as const;
+/**
+ * What the judge did with a call that carried an unknown key, the values of the `outcome` label: `stored` is "the judge let the write
+ * proceed" (not "the write succeeded": another check may still refuse it) and `refused` is "the judge refused it".
+ */
+export const UNKNOWN_WRITE_FIELD_OUTCOMES = ['stored', 'refused'] as const;
+/**
+ * The (mode, outcome) pairs a judged call can end in, and no more: a `warn` space lets a call proceed or refuses it for a retired name,
+ * a `refuse` space always refuses a call that carried an unknown key. `refuse` + `stored` cannot happen, and a series that cannot happen
+ * would read "never" for ever (the rule `SCHEMA_REFUSAL_OUTCOMES` states).
+ */
+export const UNKNOWN_WRITE_FIELD_MODE_OUTCOMES = [['warn', 'stored'], ['warn', 'refused'], ['refuse', 'refused']] as const;
+
+/**
+ * Judged brain writes that carried a top-level field the write does not take, by door, operation, the space's `unknownWriteFields`
+ * mode and what the judge did with the call (Q-320, bundle-128). Counted ONCE per judged call (not per key) and only inside the judge
+ * (`contract/write-accepts.ts`), so both doors count alike; every label is a fixed vocabulary — never a key a caller chose, which would
+ * mint a series per spelling — and every pair is declared at 0 below, so absent and 0 never mean opposite things on a graph.
+ */
+export const unknownWriteFieldsTotal = new Counter({
+  name: 'ythril_unknown_write_fields_total',
+  help: 'Brain writes that carried a top-level field the write does not take, by door (rest, mcp, tool), operation, the space\'s unknownWriteFields mode (warn, refuse) and outcome (stored, refused); outcome stored means the judge let the write proceed, refused means the judge refused it',
+  labelNames: ['door', 'operation', 'mode', 'outcome'] as const,
+  registers: [register],
+});
+for (const door of UNKNOWN_WRITE_FIELD_DOORS) {
+  for (const operation of JUDGED_WRITE_OPERATIONS) {
+    for (const [mode, outcome] of UNKNOWN_WRITE_FIELD_MODE_OUTCOMES) unknownWriteFieldsTotal.labels({ door, operation, mode, outcome }).inc(0);
+  }
+}
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
 export const fileMoveBatchReplansTotal = new Counter({
