@@ -123,7 +123,8 @@ describe('both doors take the same space-meta fields', () => {
     const src2 = src('server/src/spaces/body-schemas.ts');
     const at = src2.indexOf('export const SpaceMetaBody = z.object({');
     assert.ok(at > -1, 'SpaceMetaBody moved — re-anchor this gate');
-    return [...src2.slice(at, src2.indexOf('}).strict();', at)).matchAll(/^\s{2}(\w+):/gm)].map(m => m[1]);
+    // The body ends at its `.strict()`, which may be followed by a refinement (F-46 judges the rules there), not only by `;`.
+    return [...src2.slice(at, src2.indexOf('}).strict()', at)).matchAll(/^\s{2}(\w+):/gm)].map(m => m[1]);
   })();
 
   const mcpKeys = (() => {

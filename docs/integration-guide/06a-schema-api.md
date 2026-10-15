@@ -368,6 +368,8 @@ interface TypeSchema {
                                                   //   the CROSS PRODUCT. See below.
   functional?: boolean;                           // EDGE only — at most one edge with this label per subject,
                                                   //   i.e. one edge per `(from, label)`, whatever its `to`. Absent = many.
+  rules?: Record<string, { rule: string; message: string }>;  // the type's own CEL rules, by name; part of the
+                                                  //   type, so replaced with it. Checked when saved.
 }
 interface PropertySchema {
   description?: string;  // what this property MEANS, in your own words. Free text, never parsed, max 2000

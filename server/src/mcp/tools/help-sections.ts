@@ -158,7 +158,7 @@ paths also unlock the fast filtered-recall path
 A schema may also carry rules: expressions over the record (self.title,
 self.properties.<name>, ...) that must answer true, each with the message a
 breaking write is told. A type's own rules sit in its typeSchemas entry and the
-space's in meta rules, both written with schema_update (the schema admin rung).
+space's in its meta rules; writing either needs the schema admin rung.
 A rule the instance could not apply is refused when saved; a property the rule
 reads that a record lacks makes it not apply. Try a schema on one record you type,
 or over the stored records, with schema_validate before saving it.`;

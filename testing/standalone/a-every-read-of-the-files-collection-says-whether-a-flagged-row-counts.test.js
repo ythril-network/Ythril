@@ -69,7 +69,7 @@ const EXEMPT = {
   'server/src/app.ts:createApp': 'the app builder: it mounts the routers and reads no row of its own — its one read of a collection is the admin export handler below',
   'server/src/files/media/job-queue.ts:fileCollection': 'hands the collection to one caller, which reads a single `sizeBytes` for a stalled-job WARN line and surfaces no row to anybody',
   'server/src/auth/find-where-token-may.ts:findWhereTokenMay': 'a by-id lookup of review-state rows across the spaces a token reaches; every caller passes a conflicts or candidates collection, never files',
-  'server/src/api/spaces.ts:POST /api/spaces/:id/validate-schema': 'dry-runs a schema against the schema-bearing records; no file is a schema subject, and its computed collection name is only ever passed entities, edges, facts or chrono',
+  'server/src/spaces/schema-validate-door.ts:walkStored': 'dry-runs a schema against the schema-bearing records; no file is a schema subject, and its computed collection name is only ever passed entities, edges, facts or chrono',
   // ── it must SEE the flagged row, because the flag is what it decides on
   'server/src/brain/ttl-sweep.ts:flaggedPage': 'the page of the purge unit: it selects rows BY the flag, because the audit records of deleted files are exactly what it reaps once the space\'s file window has passed since the deletion',
   'server/src/brain/ttl-sweep.ts:stillFlagged': 'the purge unit\'s reading of "the deleter matched nothing": it asks whether the row is STILL flagged, so a re-upload that revived the path between the page and the delete is the correct outcome rather than a reported failure',

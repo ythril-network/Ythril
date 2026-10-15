@@ -43,6 +43,8 @@ const SAMPLES = {
   whenDuePasses: 'nothing',
   stampSkew: { warnMinutes: 5, properties: ['stampedAt'] },
   typeSchemas: { entity: { Door: { namingPattern: '^[A-Z]' } } },
+  // F-46: added with the key (SpaceMeta.rules), as this table asks of every key added to SpaceMeta.
+  rules: { door: { rule: "self.description != 'forbidden'", message: 'not that description' } },
 };
 
 /** The doors, and the keys each does not carry by design (with the reason). */

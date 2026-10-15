@@ -35,7 +35,9 @@ const { SERVER_OWNED_META_FIELDS } = await import('../../server/dist/spaces/body
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 
 /** Fields that live outside `meta` in the response, which a caller peels off rather than sending back. */
-const ENVELOPE = new Set(['spaceId', 'spaceName', 'stats']);
+// `invalidRules` (F-46) is a report ABOUT the meta — the stored rules that no longer compile, by name — beside the counts, not a
+// meta field: a caller peels it off as it peels off `stats`, and the strip below stays small.
+const ENVELOPE = new Set(['spaceId', 'spaceName', 'stats', 'invalidRules']);
 
 /**
  * The object the meta answer assembles, as a list of top-level keys.
