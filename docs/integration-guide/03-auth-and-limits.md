@@ -91,7 +91,9 @@ Extended errors may include:
 `issues` is `[{ code, path, keys? }]` and nothing more — **no received value is reflected back**, because a value is the
 caller's and possibly a credential. At most **10** issues are shown (the prose says how many more there were); a name a
 caller chose is cut at **256** characters and escaped, so one oversized or line-breaking key neither floods the answer
-nor forges a log line. For an unknown key `code` is `unrecognized_keys` and `keys` lists the first 10. Branch on `code`
+nor forges a log line. For an unknown key `code` is `unrecognized_keys` and `keys` lists the first 10. A brain write
+refused for an unknown top-level field also carries a `warnings` row per field, and no row on any `4xx` holds a received
+value; see [Brain API](04-brain-api.md#a-create-tells-you-which-fields-it-did-not-understand). Branch on `code`
 and `path`, not on the prose. Every route that parses a body with a schema answers this way — the record routes, the
 space, schema, library, network, invite and sync routes, admin settings — so an old client that reads only `error`
 keeps reading a sentence; it used to be zod's own message, a JSON document of the whole issue array.

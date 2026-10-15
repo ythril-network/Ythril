@@ -229,8 +229,9 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
 **A `PATCH` can change a record's CONNECTIONS too.** `linkEntities`, `linkFacts`, `linkChronos`,
-`linkFiles` and `edges` are accepted on the update verb of every door that accepts them on create —
-`facts`, `chrono` and `entities`, on both surfaces — and they mean exactly what they mean on a create:
+`linkEntities`, `linkFacts`, `linkChronos` and `edges` are accepted on the update verb of every door that accepts them on
+create — `facts`, `chrono` and `entities`, on both surfaces — and `linkFiles` on `facts` and `chrono` (an entity does not
+take it, and a `linkFiles` there is an unknown field). They mean exactly what they mean on a create:
 
 | field | on a `PATCH` |
 |---|---|

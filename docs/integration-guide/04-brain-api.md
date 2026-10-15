@@ -117,7 +117,8 @@ Two fields, and they behave differently on purpose. What a `PATCH` does with the
 
 **`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINKS. A link is unlabelled and which
 way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
-space-relative paths; the other three take UUIDs.
+space-relative paths; the other three take UUIDs. An entity does not take `linkFiles`: on an entity it is an unknown field, answered by the
+space's setting, and the write does not link it.
 
 > **Changed in 5.0:** `entityIds`, `memoryIds` and `chronoIds` are refused — port them to `linkEntities`,
 > `linkFacts` and `linkChronos`, ids unchanged.
@@ -315,32 +316,51 @@ starts anywhere.
 
 #### A create tells you which fields it did not understand
 
-**Every brain create returns a `warnings` array naming any body key it does not accept**, and stores the record
-anyway. `{"fact": "...", "totallyMadeUpField": "xyzzy"}` returns `201` with:
+**Every brain write names the top-level fields it does not take, and the space's setting answers them.** A space
+set to `warn`, the default, stores the record anyway and returns a `warnings` row for each such field.
+`{"fact": "...", "totallyMadeUpField": "xyzzy"}` returns `201` with:
 
 ```json
 "warnings": [
   {
+    "code": "unknown_field",
     "field": "totallyMadeUpField",
     "value": "xyzzy",
-    "reason": "unknown field — ignored. This route accepts: checkContradictions, checkDuplicates, description, dupeThreshold, edges, fact, id, linkChronos, linkEntities, linkFacts, linkFiles, properties, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding"
+    "reason": "unknown field — ignored. This write accepts: checkContradictions, checkDuplicates, description, …"
   }
 ]
 ```
 
-**It is a warning, never a refusal.** A `400` would break every forward-compatible client the day a field is
-removed. The point is not to reject the write — it is that a caller can tell *"this parameter is not
-implemented"* from *"this parameter was applied"*, which a bare `201` and an id cannot say.
+The example abbreviates the accepted list. The list is the route's own, derived from the tool that writes the same
+record, and it is named **once per answer**, in the first unknown row, never in each row.
 
-The rows share the `warnings` array with schema violations in a `warn` space, and the same
-`{field, value, reason}` shape. An object or array value is named by its type rather than reflected back, and a
-long string is truncated: a warning is not a place to echo a payload.
+**The space's setting decides the answer.** Set the space to `refuse` (`PATCH /api/spaces/:id` with
+`"unknownWriteFields": "refuse"`, see [Spaces API](06-spaces-api.md)) and the same write is refused before anything
+is stored: a `400` whose body carries the unknown fields in `issues` (`code: "unrecognized_keys"`) and as `warnings`
+rows, with the reason `unknown field — not accepted`. A retired name is refused by name in either mode.
 
-**MCP refuses where REST warns**, and the difference is deliberate. A tool's input schema is
-`additionalProperties: false` and the dispatcher enforces it, so an unknown argument there is an error before
-any handler runs. An MCP schema is published to its caller and a REST body shape is not, so the strict door can
-afford to refuse and the open one has to explain. **Test through one and deploy through the other and you will
-get two different answers to the same mistake** — which is worth knowing before it surprises you.
+Under `refuse` the uniform options a route does not read are unknown fields for that route: `checkDuplicates` on an
+update, `ttlDays` on a link, `waitForEmbedding` on an update. A client that reads a record and sends it back with
+its server-written keys is refused too, so send only the fields you change.
+
+**A refusal carries no received value.** A stored row's `value` is the caller's value, cut to 80 characters. A row on
+a refusal, a `4xx` of any kind, has no `value`, so a refused body is never echoed back. A `412` and a `ConnectionsNotWritten` answer (the record was stored and its
+connections were not) carry the rows as well; a plain store failure, where nothing was stored, carries none. Every row has
+`"code": "unknown_field"`, a stable code to branch on, and the reason text may change; match the code.
+
+**A near miss is named.** An unknown field one edit away from an accepted one, or differing from it only in case,
+ends its reason with `— did you mean '<key>'?`.
+
+The rows share the `warnings` array with schema violations, in the same `{code, field, reason, value?}` shape. An
+object or array value is named by its type rather than reflected back, and a long string is truncated: a warning is
+not a place to echo a payload.
+
+**The same rule on MCP.** An MCP tool takes the same fields and answers them by the same setting. Under `warn` the
+call succeeds, the rows are lines in its result text and in `structuredContent.warnings`; under `refuse` it returns
+an error result that carries the same rows. `POST /api/<tool>` answers the same outcome: a refusal is
+`{"ok": false, "error", "data"}` with the rows in `data.warnings`. `tools/list` publishes what each tool takes, and
+[MCP](16-mcp.md) describes the argument. The two doors give the same answer to the same mistake; the only difference is which
+setting the space holds.
 
 **The UPDATE routes answer both questions too.** An update response carries `warnings` when there is
 something to say, with the schema violations (in a `warn`-mode space) and the unknown-field rows in the same
