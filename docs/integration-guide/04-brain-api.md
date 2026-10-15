@@ -115,10 +115,12 @@ record needs alongside the record itself, **on the update verb as well as the cr
 Two fields, and they behave differently on purpose. What a `PATCH` does with them is in
 [Write & Read Semantics](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties).
 
-**`linkEntities`, `linkFacts`, `linkChronos`, `linkFiles`** create LINKS. A link is unlabelled and which
-way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
-space-relative paths; the other three take UUIDs. An entity does not take `linkFiles`: on an entity it is an unknown field, answered by the
-space's setting, and the write does not link it.
+**`linkEntities`, `linkFacts`, `linkChronos`** create LINKS. A link is unlabelled and which way it runs follows
+from the kinds at its ends, so a bare UUID is the whole thing. Which a write takes follows from the kinds a link can
+join: a fact links to entities, a chrono entry to entities and facts, a file to all three, and an entity to none (it
+takes `edges`). So `linkFiles` is taken by no record write — a link to a file is made on the file, with
+`PATCH .../files/meta?path=` or `update_file_meta` — and on a record, like any connection field the record does not
+take, it is an unknown field, answered by the space's setting, and the write links nothing.
 
 > **Changed in 5.0:** `entityIds`, `memoryIds` and `chronoIds` are refused — port them to `linkEntities`,
 > `linkFacts` and `linkChronos`, ids unchanged.
@@ -132,8 +134,7 @@ space's setting, and the write does not link it.
 ```json
 {
   "fact": "The 72-hour clock starts at detection, not at containment.",
-  "linkEntities": ["3f2b1c9e-7d84-4a51-9e60-1b2c3d4e5f60"],
-  "linkFiles": ["policies/incident-response.md"]
+  "linkEntities": ["3f2b1c9e-7d84-4a51-9e60-1b2c3d4e5f60"]
 }
 ```
 
