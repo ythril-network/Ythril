@@ -88,10 +88,12 @@ async function mint(name, rights) {
 before(async () => {
   admin = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   for (const id of [MIXED, CURRENT]) assert.equal((await post(INSTANCES.a, admin, '/api/spaces', { id, label: id })).status, 201);
-  const mixed = await post(INSTANCES.a, admin, '/api/networks', { label: `skew-mixed-${RUN}`, type: 'closed', spaces: [MIXED] });
+  // Club networks: the inviter admits each member alone. In a closed network the second handshake member waits for the first one's
+  // yes, which a member made of a key pair never casts, so it never joined (the Full run's "no member ...0002").
+  const mixed = await post(INSTANCES.a, admin, '/api/networks', { label: `skew-mixed-${RUN}`, type: 'club', spaces: [MIXED] });
   assert.equal(mixed.status, 201, JSON.stringify(mixed.body));
   nets.mixed = mixed.body.id;
-  const current = await post(INSTANCES.a, admin, '/api/networks', { label: `skew-current-${RUN}`, type: 'closed', spaces: [CURRENT] });
+  const current = await post(INSTANCES.a, admin, '/api/networks', { label: `skew-current-${RUN}`, type: 'club', spaces: [CURRENT] });
   assert.equal(current.status, 201, JSON.stringify(current.body));
   nets.current = current.body.id;
   for (const k of ['old', 'unknown', 'current']) await addMember(nets.mixed, k);

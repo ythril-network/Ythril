@@ -96,7 +96,9 @@ describe('the largest record the caps admit, and one past them', () => {
     const over = await timed(() => writeEntity({ s: 'x' }, Array(101).fill(TAG)));
     assert.ok(over.ms < ANSWERED_MS, `a record over the caps took ${over.ms} ms`);
     assert.ok([400, 422].includes(over.status), `a record over the caps was accepted: ${over.status}`);
-    assert.match(JSON.stringify(over.body), /too large/i, 'the refusal does not say the record was too large to check');
+    // A 101st tag is refused by the request bound (`tags` holds at most 100) before any rule runs: the bound and the rule input's cap are
+    // the same number, so the rule's own "too large to check" answer is for a value no write door lets through. Either says why.
+    assert.match(JSON.stringify(over.body), /too large|at most 100 entries/i, 'the refusal does not say the record was too large');
     assert.ok(!JSON.stringify(over.body).includes(TAG.slice(0, 200)), 'the refusal quotes the oversize value');
   });
 });
