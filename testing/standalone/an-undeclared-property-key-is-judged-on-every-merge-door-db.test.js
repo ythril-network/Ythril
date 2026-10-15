@@ -118,8 +118,15 @@ async function seedPair(space, { survivorProps = {}, absorbedProps = {}, vector,
   if (edge) {
     const thirdId = crypto.randomUUID();
     const edgeId = crypto.randomUUID();
-    // The third end is a type that declares nothing (open), so it cannot be what a schema refuses.
-    await coll(space, 'entities').insertOne(entity(thirdId, 'Third Party', {}, 'scratch'));
+    // The third end is a type that declares nothing (open), so it cannot be what a schema refuses. Its vector is NOT the
+    // pair's: with the same seeded vector it was a third near-duplicate, and a scan that met it first merged the edge's
+    // own far end into the survivor, so the edge could not reach the survivor and the case failed by scan order (Q-493).
+    await coll(space, 'entities').insertOne({
+      ...entity(thirdId, 'Third Party', {}, 'scratch'),
+      // The pair's vector reversed: the similarity reads as about 0, far under the automerge rule's 0.5 (an unrelated vector
+      // reads as about 0.5 and was still merged).
+      ...(vector ? { embedding: vector.map(x => -x) } : {}),
+    });
     await coll(space, 'edges').insertOne({
       _id: edgeId, spaceId: space, from: absorbedId, to: thirdId, label: EDGE_LABEL, tags: [],
       properties: edge.properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: seq++,
