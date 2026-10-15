@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { TranslocoService } from '@jsverse/transloco';
 import type { Rung } from './rights-glyph.component';
+import { translatedOrEmpty } from '../../core/translated-text';
 
 export const RUNGS: readonly Rung[] = ['none', 'read', 'write', 'admin'];
 const RANK: Record<Rung, number> = { none: 0, read: 1, write: 2, admin: 3 };
@@ -159,9 +160,7 @@ export class RungPickerComponent {
   private grants(rung: Rung): string {
     const a = this.area();
     if (!a) return '';
-    const key = `tokens.rights.plain.${a}.${rung}`;
-    const text = this.t.translate(key);
-    return text === key ? '' : `${text}`;
+    return translatedOrEmpty(this.t, `tokens.rights.plain.${a}.${rung}`);
   }
 
   /** What the click will do. Kept, because a reader still needs to know a second click steps down. */

@@ -1,6 +1,7 @@
 import type { TranslocoService } from '@jsverse/transloco';
 import { formatList } from './list-format';
 import { pluralText } from './plural-text';
+import { translatedOrEmpty } from './translated-text';
 
 /**
  * The ONE module that turns a failed request into words and rows (`Q-133`, bundle-23 `R6-14`).
@@ -155,23 +156,25 @@ function proseOf(err: unknown): string {
 
 const isSchemaViolation = (body: Record<string, unknown> | null): boolean => body?.['error'] === 'schema_violation';
 
-const rowsOf = (v: unknown): WireRow[] =>
+/**
+ * The violation rows a field of an answer holds: only objects with a string `field` count, and anything else the field could be is no row
+ * at all. The one reading of a row list, for a refusal's lists and a successful write's `warnings` (`write-warnings.ts`) alike.
+ */
+export const rowsOf = (v: unknown): WireRow[] =>
   Array.isArray(v) ? v.filter((r): r is WireRow => r !== null && typeof r === 'object' && typeof (r as WireRow).field === 'string') : [];
+
+/** A row that says a property KEY is not declared on its type (`Q-93`): the one predicate, for the outcome and for the retype. */
+const isUndeclaredRow = (r: WireRow): boolean => r.field.startsWith(PROPERTIES_PREFIX) && Array.isArray(r.declared);
 
 const languageOf = (transloco: Translate, language?: string): string => language || transloco.getActiveLang?.() || 'en';
 
-/** The key's sentence, or `''` when the translation service answers the key itself (no such key). */
-function tryTranslate(transloco: Translate, key: string, params?: Record<string, unknown>): string {
-  const text = transloco.translate(key, params);
-  return text && text !== key ? text : '';
-}
 
 type Outcome = RefusalRow['outcome'];
 
 /** Which of the four kinds of wrong a row is. An outcome this client has no word for is a violation: its reason is the answer. */
 function outcomeOf(row: WireRow): Outcome {
   if (row.outcome === 'could_not_evaluate' || row.outcome === 'too_large') return row.outcome;
-  if (row.field.startsWith(PROPERTIES_PREFIX) && Array.isArray(row.declared)) return 'undeclared';
+  if (isUndeclaredRow(row)) return 'undeclared';
   return 'violated';
 }
 
@@ -186,7 +189,7 @@ function rowText(transloco: Translate, language: string, row: WireRow, kind: Ref
   const reason = row.reason ?? '';
   const subject = key || row.field;
   const family = 'refusal.row';
-  const ask = (name: string, params: Record<string, unknown>): string => tryTranslate(transloco, `${family}.${name}.${when}`, params);
+  const ask = (name: string, params: Record<string, unknown>): string => translatedOrEmpty(transloco, `${family}.${name}.${when}`, params);
 
   let text = '';
   if (outcome === 'undeclared') {
@@ -231,7 +234,7 @@ export function retypeKeys(err: unknown): { key: string; value: unknown }[] | nu
   if (!isSchemaViolation(body)) return null;
   const introduced = rowsOf(body!['introduced']);
   if (introduced.length === 0) return null;
-  if (!introduced.every(r => r.field.startsWith(PROPERTIES_PREFIX) && Array.isArray(r.declared))) return null;
+  if (!introduced.every(isUndeclaredRow)) return null;
   return introduced.map(r => ({ key: r.field.slice(PROPERTIES_PREFIX.length), value: r.value }));
 }
 
@@ -248,8 +251,8 @@ function describeViolation(transloco: Translate, language: string, body: Record<
 
   const headline = rows.length === 0 && !more
     // Nothing structured to say: the server's own sentence is the truest thing there is.
-    ? nonEmpty(body['message']) || tryTranslate(transloco, 'refusal.schema.headline')
-    : tryTranslate(transloco, 'refusal.schema.headline');
+    ? nonEmpty(body['message']) || translatedOrEmpty(transloco, 'refusal.schema.headline')
+    : translatedOrEmpty(transloco, 'refusal.schema.headline');
   return { headline, rows, more };
 }
 
@@ -269,7 +272,7 @@ export function describeRefusal(
   const lang = languageOf(transloco, language);
   const plain = (text: string, reload = false): RefusalView => ({ text, rows: [], reload, headline: text, more: '' });
 
-  if (err?.status === 412) return plain(tryTranslate(transloco, 'refusal.schemaChanged') || proseOf(err), true);
+  if (err?.status === 412) return plain(translatedOrEmpty(transloco, 'refusal.schemaChanged') || proseOf(err), true);
 
   const body = bodyOf(err);
   if (body && isSchemaViolation(body)) {
@@ -280,7 +283,7 @@ export function describeRefusal(
 
   const code = nonEmpty(body?.['code']);
   if (code) {
-    const sentence = tryTranslate(transloco, `${keyPrefix}.${code}`, { path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']) });
+    const sentence = translatedOrEmpty(transloco, `${keyPrefix}.${code}`, { path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']) });
     if (sentence) return plain(withRequestId(sentence, err));
   }
   const prose = proseOf(err);

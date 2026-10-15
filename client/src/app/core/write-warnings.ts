@@ -1,4 +1,4 @@
-import type { WireRow } from './refusal-text';
+import { rowsOf, type WireRow } from './refusal-text';
 
 /**
  * A successful write's answer, split into the RECORD and the `warnings` it carried.
@@ -14,9 +14,7 @@ export function splitWriteWarnings<T extends object>(answer: T): { record: T; wa
   // An answer without the field is the record itself, not a copy of it: a host that compares what it saved by identity keeps working.
   if (!('warnings' in answer) && !('warningsTruncated' in answer)) return { record: answer, warnings: [], truncated: false };
   const { warnings, warningsTruncated, ...record } = answer as T & { warnings?: unknown; warningsTruncated?: unknown };
-  const rows = Array.isArray(warnings)
-    ? warnings.filter((w): w is WireRow => w !== null && typeof w === 'object' && typeof (w as WireRow).field === 'string')
-    : [];
+  const rows = rowsOf(warnings);
   // `warningsTruncated: true` is the server saying it cut the list (twenty rows, on both doors): the notice says rows were left out.
   return { record: record as T, warnings: rows, truncated: warningsTruncated === true && rows.length > 0 };
 }
