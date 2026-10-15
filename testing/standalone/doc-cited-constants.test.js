@@ -471,6 +471,25 @@ const CITED = [
       text: (v) => new RegExp(`at most\\s+[0-9]+\\s+pages\\s+of\\s+${v}\\s+rows`),
     },
   ]),
+  // The CEL rule limits the schema guide quotes in one paragraph ("Limits", 06a). Each is refused at save naming the rule, so a
+  // number here that drifts from the engine is a caller told the wrong ceiling.
+  ...[
+    ['rule length', /export const MAX_RULE_LENGTH = ([0-9_]+);/, (v) => `a rule is at most ${v} characters`],
+    ['rule message length', /export const MAX_MESSAGE_LENGTH = ([0-9_]+);/, (v) => `its message at most ${v};`],
+    ['rules per type', /export const MAX_RULES_PER_TYPE = ([0-9_]+);/, (v) => `at most ${v} rules on a type`],
+    ['rules per space', /export const MAX_RULES_PER_SPACE = ([0-9_]+);/, (v) => `rules on a type, ${v} on the space`],
+    ['rules applying to one record', /export const MAX_APPLICABLE_RULES = ([0-9_]+);/, (v) => `on the space, and ${v}\\s+that \\*\\*apply to one record`],
+    ['rule expression parts', /const AST_NODE_LIMIT = ([0-9_]+);/, (v) => `an expression has at most ${v} parts`],
+    ['list a rule reads', /const LIST_CAP = ([0-9_]+);/, (v) => `lists of up to ${v}`],
+    ['map a rule reads', /const MAP_CAP = ([0-9_]+);/, (v) => `maps\\s+of up to ${v} entries`],
+    ['string a rule reads', /export const LONGEST_CHECKED_STRING = ([0-9_]+);/, (v) => `strings up to ${Number(v).toLocaleString('en-US')} characters`],
+  ].map(([what, code, sentence]) => ({
+    what: `CEL ${what}`,
+    source: 'server/src/spaces/schema-rules.ts',
+    code,
+    doc: 'docs/integration-guide/06a-schema-api.md',
+    text: (v) => new RegExp(sentence(v)),
+  })),
 ];
 
 /**
