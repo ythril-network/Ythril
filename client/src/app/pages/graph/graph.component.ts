@@ -234,6 +234,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
         [canEdit]="canEdit()"
         (closed)="closePopup()"
         (saved)="onPopupSaved($event)"
+        (savedWithWarnings)="refreshAfterPopupSave()"
       />
     }
 
@@ -849,6 +850,11 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onPopupSaved(_evt: Record<string, unknown>): void {
     this.popupRecord.set(null);
+    this.refreshAfterPopupSave();
+  }
+
+  /** What a popup save changed is shown behind it. A save the server warned about leaves the popup OPEN (it is where the warnings are read) and comes here alone. */
+  refreshAfterPopupSave(): void {
     const root = this.rootEntity();
     if (root) {
       this.traverse(root._id, this.depth(), this.direction());
