@@ -23,8 +23,15 @@ export const SCHEMA_MD_STYLES = `
 /* The "This instance" row: a local setting beneath the shared validation bar. The hint is real text on its own line (not a title
    tooltip), in the secondary colour for contrast in both themes; the select keeps a 24px target. */
 .sch-instance { display:block; margin-bottom:14px; }
-.inst-select { min-height:24px; box-sizing:border-box; }
+/* The component's own border on .val-select outranks the global select:focus rule, so focus showed only a faint halo; the
+   accent border is restored here for every .val-select (the Validation select had the same weakness). */
+.val-select:focus, .val-select:focus-visible { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim); outline:none; }
+/* The label stacks above the control, as the reference form does, so it does not wrap beside it and the select can take
+   the width its option text needs (it clipped at phone width when inline). */
+.inst-lbl { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+.inst-select { min-height:28px; box-sizing:border-box; width:100%; max-width:52ch; }
 .inst-hint { display:block; margin:6px 0 0; font-size:12px; line-height:1.45; color:var(--text-secondary); max-width:70ch; }
+.inst-warn { color:var(--warning); }
 .val-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .val-check input { margin:0; }
 /* The live check's two mode labels: spaced by a gap, since the whitespace between the two labels is dropped by Angular. */

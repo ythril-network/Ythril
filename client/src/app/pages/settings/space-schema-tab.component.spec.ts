@@ -618,8 +618,11 @@ describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level f
     // the pattern of `spaces.settings.validation.*`: "<Word> — <what happens>"
     expect(texts[0]).toMatch(/^Warn — \S/);
     expect(texts[1]).toMatch(/^Refuse — \S/);
-    expect(texts[0]).toContain('stored');
-    expect(texts[1]).toContain('nothing is stored');
+    // Each option says what happens to the write, short enough not to clip in the closed select at phone width
+    // (the first wording clipped at 375px, found by the pre-ship measurement).
+    expect(texts[0]).toMatch(/\bstore the write\b/);
+    expect(texts[1]).toMatch(/\bstore nothing\b/);
+    for (const t of texts) expect(t.length, `"${t}" is too long for the closed select at phone width`).toBeLessThanOrEqual(44);
     const label = sel!.closest('label') ?? sel!.ownerDocument.querySelector(`label[for="${sel!.id}"]`);
     expect(label, 'the select has no label').not.toBeNull();
     expect(label!.textContent).toContain('Unknown top-level fields');
