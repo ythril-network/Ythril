@@ -43,7 +43,7 @@ import { visibleNetworks } from '../auth/network-rights.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log, NAME_QUOTED, peerList, peerText } from '../util/log.js';
+import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
@@ -325,7 +325,9 @@ export function planSpaceMetaUpdate(input: {
 
   const parsed = UpdateSpaceBody.safeParse(bodyForParse);
   if (!parsed.success) {
-    return { ok: false, refusal: { status: 400, body: { error: parsed.error.message } } };
+    const refusal = refusalOfParse(parsed.error);
+    log.warn(`space update refused: ${refusal.error}`);
+    return { ok: false, refusal: { status: 400, body: refusal } };
   }
 
 

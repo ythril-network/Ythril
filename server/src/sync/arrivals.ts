@@ -258,16 +258,6 @@ export function arrivalId(doc: unknown): string {
 }
 
 /**
- * The fields a wire schema refused an element for, as text for a refusal's reason: each issue's path, `(element)` for the
- * element itself, named once and bounded. A path names a peer's keys, so it is bounded where the reason is built (`Q-270`) —
- * the one spelling for every apply that refuses an element by shape (a record's tombstone, a file's), so a refusal reads
- * the same from each and none of them says a peer's key unbounded.
- */
-export function refusedFieldsOf(error: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> }> }): string {
-  return peerList(new Set(error.issues.map(i => i.path.join('.') || '(element)')), ', ');
-}
-
-/**
  * One warning per page for what a door did not store, naming the first ids — the shape every door logs, so a
  * refusal reads the same from a push, a pull and a restore. Never a line per document: a poison page would
  * flood the log ring with one fact.

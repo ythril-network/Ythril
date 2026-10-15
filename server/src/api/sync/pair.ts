@@ -15,6 +15,7 @@ import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { answerPairing, confirmPairing } from '../../networks/member-introductions.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { refusalOfParse } from '../../util/log.js';
 
 export const syncPairRouter = Router();
 
@@ -31,7 +32,7 @@ syncPairRouter.use('/networks/:networkId/pair', (req, res, next) => {
 
 syncPairRouter.post('/networks/:networkId/pair', authRateLimit, async (req, res) => {
   const parsed = PairBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   try {
     const r = await answerPairing(req.params['networkId'] as string, parsed.data);
     res.status(r.status).json(r.body);
@@ -42,7 +43,7 @@ syncPairRouter.post('/networks/:networkId/pair', authRateLimit, async (req, res)
 
 syncPairRouter.post('/networks/:networkId/pair/confirm', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const parsed = ConfirmBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
   try {
     const r = await confirmPairing(req.params['networkId'] as string, req.authToken as { id?: string; peerInstanceId?: string }, parsed.data);
     res.status(r.status).json(r.body);

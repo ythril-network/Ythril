@@ -34,7 +34,7 @@ import { localToRemote, remoteToLocal } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { NetworkActResult } from '../networks/network-acts.js';
 
 const COLLECTION = '_change_notes';
@@ -149,7 +149,7 @@ export async function attachSyncNote(
   net: NetworkConfig, input: unknown, author: string,
 ): Promise<null | { queued: ChangeNote } | { status: 400 | 409; error: string }> {
   const parsed = SyncNoteBody.safeParse(input ?? {});
-  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { note, spaces } = parsed.data;
   if (note === undefined) return spaces?.length ? { status: 400, error: '`spaces` names what a change note concerns; send it with a `note`.' } : null;
   const blocked = changeNoteRefusal(net);
@@ -267,7 +267,10 @@ export async function receiveChangeNotes(
     return { status: 403, body: { error: 'Only the instance above this one in the network may send it change notes.' } };
   }
   const parsed = IncomingChangeNotes.safeParse(body);
-  if (!parsed.success) return { status: 400, body: { error: parsed.error.message } };
+  if (!parsed.success) {
+    const refusal = refusalOfParse(parsed.error);
+    return { status: 400, body: { error: refusal.error, issues: refusal.issues } };
+  }
   const coll = col<ChangeNote>(COLLECTION);
   let stored = 0;
   for (const n of parsed.data.notes) {
