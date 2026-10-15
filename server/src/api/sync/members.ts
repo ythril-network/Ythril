@@ -17,6 +17,7 @@ import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/netwo
 import { selfRecordFor } from '../../networks/self-record.js';
 import { rosterIsAuthority } from '../../networks/member-introductions.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { requireNetworkStanding } from '../../auth/network-standing.js';
 
 export const syncMembersRouter = Router();
 
@@ -41,7 +42,7 @@ syncMembersRouter.use('/networks/:networkId', (req, res, next) => {
  * GET /api/sync/networks/:networkId/members
  * Return our current view of this network's member list (excluding sensitive fields).
  */
-syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth, async (req, res) => {
+syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth, requireNetworkStanding('members-read'), async (req, res) => {
   try {
     const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === req.params['networkId']);

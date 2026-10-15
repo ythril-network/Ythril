@@ -260,8 +260,9 @@ Content-Type: application/json
 > stops it there.
 >
 > The answer is `202` with `{ "status": "vote_pending", "rounds": [...] }` instead of `200` with `deleted`
-> counts. **Treat that as success** — do not retry, and do not read the missing counts as a failure. Watch
-> the rounds via `GET /api/networks/:id/votes`.
+> counts. **Treat that as success** — do not retry, and do not read the missing counts as a failure. Each entry
+> of `rounds` is `{ "networkId", "networkLabel", "roundId", "round" }`, `round` being the round as
+> `GET /api/networks/:id/votes` shows it. Watch the rounds there.
 >
 > **A space in no network is unaffected**: it wipes immediately and answers `200` with counts, exactly as
 > before.

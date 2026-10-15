@@ -24,13 +24,19 @@ describe('which peers the sweep revokes', () => {
     const networks = [{ members: [{ instanceId: 'live' }], pendingRounds: [] }];
     assert.deepEqual(orphanedPeerInstanceIds({ tokens: [token('live')], networks }), []);
   });
+  // A join round as `joinRoundOf` reads it: a `join` round naming the peer, open until its deadline (Q-454).
+  const joinRound = (instanceId, extra = {}) => ({ type: 'join', subjectInstanceId: instanceId, concluded: false, deadline: new Date(Date.now() + 3_600_000).toISOString(), pendingMember: { instanceId }, ...extra });
   it('never a joiner whose vote round is still open', () => {
-    const networks = [{ members: [], pendingRounds: [{ concluded: false, pendingMember: { instanceId: 'voting' } }] }];
+    const networks = [{ members: [], pendingRounds: [joinRound('voting')] }];
     assert.deepEqual(orphanedPeerInstanceIds({ tokens: [token('voting')], networks }), []);
   });
   it('a concluded round keeps nobody alive', () => {
-    const networks = [{ members: [], pendingRounds: [{ concluded: true, pendingMember: { instanceId: 'rejected' } }] }];
+    const networks = [{ members: [], pendingRounds: [joinRound('rejected', { concluded: true })] }];
     assert.deepEqual(orphanedPeerInstanceIds({ tokens: [token('rejected')], networks }), ['rejected']);
+  });
+  it('a round past its deadline that nothing has concluded keeps nobody alive either', () => {
+    const networks = [{ members: [], pendingRounds: [joinRound('late', { deadline: new Date(Date.now() - 3_600_000).toISOString() })] }];
+    assert.deepEqual(orphanedPeerInstanceIds({ tokens: [token('late')], networks }), ['late']);
   });
   it('a user token is never a peer', () => {
     assert.deepEqual(orphanedPeerInstanceIds({ tokens: [token(undefined)], networks: [] }), []);

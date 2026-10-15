@@ -42,7 +42,7 @@ import { dirname, join } from 'node:path';
 import { BSON, MongoBulkWriteError, MongoNetworkError, MongoServerError } from 'mongodb';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
+import { lineOf, parseSource, ts, walkEveryNode as walk } from '../_shared/syntax-tree.mjs';
 import { MONGO_MAX_WRITE_BATCH_SIZE, ONE_COMMAND_BYTES, ONE_COMMAND_MAX_OPERATIONS, SlicedBulkWriteError, bulkCommandOf, inOneCommandChunks, writeInOneCommands } from '../../server/dist/db/one-command.js';
 import { classifyReadFailure } from '../../server/dist/brain/store-failure.js';
 import { isWriteTimeout } from '../../server/dist/db/write-timeout.js';
@@ -429,7 +429,6 @@ const KINDS = new Set(['sliced', 'chunked', 'session', 'own-client', 'request-ca
 
 // ── what a `sliced` file is read for, over its syntax tree (not a count of calls, not text) ──────────────────────────
 const parsed = (file) => parseSource(file, readFileSync(join(REPO_ROOT, file), 'utf8'));
-const walk = (node, visit) => { visit(node); ts.forEachChild(node, (c) => walk(c, visit)); };
 const nodes = (root, is) => { const out = []; walk(root, (n) => { if (is(n)) out.push(n); }); return out; };
 const calleeName = (call) => (ts.isIdentifier(call.expression) ? call.expression.text : ts.isPropertyAccessExpression(call.expression) ? call.expression.name.text : '');
 const callsTo = (root, name) => nodes(root, (n) => ts.isCallExpression(n) && calleeName(n) === name);

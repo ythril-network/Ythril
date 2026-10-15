@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
-import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
+import { peerRelayCaller } from '../../auth/peer-relay.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
@@ -15,6 +15,7 @@ import { roundIsOpen } from '../../networks/round-state.js';
 import { roundToVoteOn } from '../../networks/vote-acts.js';
 import { applyRoundConclusion } from '../../networks/round-conclusion.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { requireNetworkStanding } from '../../auth/network-standing.js';
 
 export const syncVotesRouter = Router();
 
@@ -24,7 +25,7 @@ export const syncVotesRouter = Router();
  * Return the vote rounds a peer may act on: those still open — before their deadline, not concluded — and the PASSED
  * `space_addition` and `meta_change` rounds a member that joined later has to learn of.
  */
-syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, async (req, res) => {
+syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, requireNetworkStanding('votes-read'), async (req, res) => {
   try {
     const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
@@ -58,21 +59,15 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
  * POST /api/sync/networks/:networkId/votes/:roundId
  * Peer submits or relays a vote: { vote: 'yes' | 'veto', instanceId }
  */
-syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
+syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requireAuth, requireNetworkStanding('votes-relay'), denyReadOnly, async (req, res) => {
   try {
     /*
-     * WHO before WHAT, and the order is the point.
-     *
-     * This check used to sit below the network and round lookups, so an unauthorised caller learned whether
-     * a given round existed — an existence oracle over another network's governance — and the 404 arrived
-     * before the 403 for every id that did not. Authorising first closes that and makes the refusal
-     * testable without constructing a round to be refused on.
+     * WHO before WHAT: `requireNetworkStanding('votes-relay')` has already refused every caller that is not an administrator or a
+     * member of this network, before any network or round lookup, so the route is no oracle of which rounds exist. It is the ONE
+     * refusal; this read only names the caller, and a refused kind here means the middleware was removed from the route.
      */
     const caller = peerRelayCaller(req.authToken as Parameters<typeof peerRelayCaller>[0]);
-    if (caller.kind === 'refused') {
-      res.status(403).json({ error: PEER_RELAY_REFUSAL });
-      return;
-    }
+    if (caller.kind === 'refused') throw new Error('votes relay reached without requireNetworkStanding');
 
     // The one reading of a cast off the wire (Q-138), so the bound signature is not dropped here.
     const cast = castFromBody(req.body);

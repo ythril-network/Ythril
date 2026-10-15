@@ -7,6 +7,7 @@ import type { TokenRecord, Config } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
 import { withInstanceAdminGrants } from './instance-admin-grants.js';
 import { resolveLimitFor } from '../rate-limit/per-token.js';
+import { joinRoundOf } from '../networks/round-state.js';
 
 const BCRYPT_ROUNDS = 12;
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -474,12 +475,17 @@ export function supersededPeerTokenIds(config: Pick<Config, 'tokens'>): string[]
  * token outlived it with no expiry and no member record. Pure, so the choice is testable without a config; the boot
  * sweep hands each id to `revokePeerCredentialsIfOrphaned`, which re-checks membership before revoking anything.
  */
-export function orphanedPeerInstanceIds(config: Pick<Config, 'tokens' | 'networks'>): string[] {
-  const live = new Set(config.networks.flatMap(n => [
-    ...n.members.map(m => m.instanceId),
-    ...(n.pendingRounds ?? []).filter(r => !r.concluded && r.pendingMember).map(r => r.pendingMember!.instanceId),
-  ]));
-  return [...new Set(config.tokens.flatMap(t => (t.peerInstanceId && !live.has(t.peerInstanceId) ? [t.peerInstanceId] : [])))];
+export function orphanedPeerInstanceIds(config: Pick<Config, 'tokens' | 'networks'>, now: number = Date.now()): string[] {
+  return [...new Set(config.tokens.flatMap(t => (t.peerInstanceId && !peerNeedsItsCredential(config, t.peerInstanceId, now) ? [t.peerInstanceId] : [])))];
+}
+
+/**
+ * Does a membership, or a join round that can still be voted on, need this peer's credential? A member of ANY network does, and so does
+ * the joiner of an OPEN round (`joinRoundOf`): a voted-down joiner, or one whose round ran past its deadline unconcluded, does not — its
+ * credential is for a round nobody can vote on. The boot sweep and the revoke ask it of the same config, so they cannot disagree.
+ */
+function peerNeedsItsCredential(config: Pick<Config, 'networks'>, instanceId: string, now: number): boolean {
+  return config.networks.some(n => n.members.some(m => m.instanceId === instanceId) || joinRoundOf(n, instanceId, now) === 'open');
 }
 
 export async function revokeToken(id: string): Promise<boolean> {
@@ -501,8 +507,8 @@ export async function revokeToken(id: string): Promise<boolean> {
  * `peerInstanceId`) and our outbound token for calling it (`secrets.peerTokens`).
  *
  * A peer can legitimately be a member of several networks, so this is a no-op
- * while the instance still appears in any network's member list or in an
- * unconcluded join round's pending member. Call it after a member has been
+ * while the instance still appears in any network's member list or is the joiner
+ * of a join round that is still open (`joinRoundOf`). Call it after a member has been
  * removed (vote conclusion, direct removal, departure, or network deletion).
  *
  * Returns true if any credential was actually revoked.
@@ -510,11 +516,7 @@ export async function revokeToken(id: string): Promise<boolean> {
 export async function revokePeerCredentialsIfOrphaned(instanceId: string): Promise<boolean> {
   if (!instanceId) return false;
   const config = getConfig();
-  const stillMember = config.networks.some(n =>
-    n.members.some(m => m.instanceId === instanceId) ||
-    n.pendingRounds?.some(r => !r.concluded && r.pendingMember?.instanceId === instanceId),
-  );
-  if (stillMember) return false;
+  if (peerNeedsItsCredential(config, instanceId, Date.now())) return false;
 
   let revoked = false;
   const inbound = config.tokens.filter(t => t.peerInstanceId === instanceId);

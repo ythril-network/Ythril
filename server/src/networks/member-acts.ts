@@ -24,6 +24,7 @@ import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_s
 import type { NetworkActResult } from './network-acts.js';
 import { openRoundHere } from './round-local-state.js';
 import { roundIsOpen } from './round-state.js';
+import { roundForOperator } from './vote-acts.js';
 import { joinOutcomesAbout, joinWasDenied } from './round-outcomes.js';
 import { stampAdmission, recordRemoval, acceptIntroduction } from './member-introductions.js';
 
@@ -87,7 +88,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
     storePeerToken(instanceId, token);
     saveConfig(freshCfg);
     log.info(`Opened join vote round ${peerText(round.roundId)} for ${peerText(label)} in network ${peerText(freshNet.id)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
   }
 
   if (freshNet.type === 'club' || freshNet.type === 'pubsub') {
@@ -117,7 +118,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
   }
   saveConfig(freshCfg);
   log.info(`Opened braintree join round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
-  return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+  return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
 }
 
 /** Remove a member: `204` when done at once, or `202` when the network's type puts it to a vote. */
@@ -146,7 +147,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     openRoundHere(net, round);
     saveConfig(cfg);
     log.info(`Opened remove vote round ${peerText(round.roundId)} for ${peerText(subject.label)} in network ${peerText(net.id)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(net, round) } };
   }
 
   if (net.type === 'club' || net.type === 'pubsub') {
@@ -175,7 +176,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
   }
   saveConfig(cfg);
   log.info(`Opened braintree remove round ${peerText(round.roundId)} for ${peerText(subject.label)} (${peerText(subject.instanceId)}) in network ${peerText(net.id)}`);
-  return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+  return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(net, round) } };
 }
 
 /**
@@ -295,7 +296,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
     saveSecrets(secrets);
     saveConfig(freshCfg);
     log.info(`Join via invite key opened vote round ${peerText(round.roundId)} for ${peerText(label)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
   }
 
   if (freshNet.type === 'braintree') {
@@ -337,7 +338,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
     }
     saveConfig(freshCfg);
     log.info(`Join via invite key opened braintree ancestor round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
+    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
   }
 
   // Club / Pubsub — direct join via invite key (documented behavior)

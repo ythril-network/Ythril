@@ -42,6 +42,7 @@ import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, r
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from './round-local-state.js';
 import { roundIsOpen, MAX_VOTING_DEADLINE_HOURS } from './round-state.js';
+import { roundAnswer, roundForOperator } from './vote-acts.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
@@ -273,7 +274,9 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
     if (!concludeRoundIfReady(net, round)) {
       saveConfig(cfg);
       log.info(`Network ${peerText(net.id)}: opened space_addition round ${peerText(round.roundId)} for '${peerText(spaceId)}'`);
-      return { status: 202, body: { status: 'vote_pending', round } };
+      // `round` stays the key the client reads, now as the vote list shows it (no `pendingMeta`: the space's schema is not for the
+      // answer); `rounds` is the shape every other opening door answers.
+      return { status: 202, body: { status: 'vote_pending', round: roundForOperator(net, round), rounds: [roundAnswer(net, round)] } };
     }
   }
   net.spaces.push(spaceId);

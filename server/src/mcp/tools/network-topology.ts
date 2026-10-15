@@ -18,7 +18,8 @@ export const network_member_admitTool: ToolHandler = {
   name: 'network_member_admit',
   description: 'Admit an instance that presents this network\'s invite key — the inviter\'s half of a join. Same '
     + 'parameters and answer as `POST /api/networks/:id/join`: `{ status: "joined", members, networkId }`, or '
-    + '`{ status: "vote_pending", roundId }` where the type votes (closed, democratic, braintree below the root). '
+    + '`{ status: "vote_pending", roundId, round }` where the type votes (closed, democratic, braintree below the root; `round` is '
+    + 'the round as the vote list shows it, and is absent when presenting the key again polls). '
     + 'Requires instance-admin rights.\n\n'
     + 'THE KEY IS SINGLE-USE except on pub/sub, and presenting it again polls the joiner\'s own round. An instance '
     + 'joining by handshake does not need this — `network_join_remote` on its side runs the whole exchange.',

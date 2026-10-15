@@ -98,7 +98,7 @@ export const network_member_addTool: ToolHandler = {
   name: 'network_member_add',
   description: 'Add a peer instance as a member of a network by hand. Same parameters and answer as '
     + '`POST /api/networks/:id/members`: the member (with no credential in it) when added at once, or '
-    + '`{ status: "vote_pending", roundId }` when the network\'s type puts it to a vote — closed and democratic always, '
+    + '`{ status: "vote_pending", roundId, round }` (the round as the vote list shows it) when the network\'s type puts it to a vote — closed and democratic always, '
     + 'braintree unless this instance is the root. Requires instance-admin rights.\n\n'
     + 'Most members arrive by invite and join, not by this: it is for wiring two instances whose tokens you already hold.',
   admin: true,
@@ -152,7 +152,7 @@ export const network_member_removeTool: ToolHandler = {
   name: 'network_member_remove',
   description: 'Remove a member from a network. Same as `DELETE /api/networks/:id/members/:instanceId`: removed at '
     + 'once on club and pub/sub (and on braintree when this instance alone must approve), otherwise '
-    + '`{ status: "vote_pending", roundId }`. Requires instance-admin rights.',
+    + '`{ status: "vote_pending", roundId, round }` (the round as the vote list shows it). Requires instance-admin rights.',
   admin: true,
   mutating: true,
   inputSchema: (_s: ToolSchemas) => ({

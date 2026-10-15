@@ -42,6 +42,7 @@ import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
 import { visibleNetworks } from '../auth/network-rights.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { openRoundHere } from '../networks/round-local-state.js';
+import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -429,7 +430,7 @@ export function planSpaceMetaUpdate(input: {
  */
 export type MetaUpdateOutcome =
   | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite)
-  | ({ outcome: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; keptTypes?: string[] } & NetworkedWrite)
+  | ({ outcome: 'vote_pending'; rounds: RoundAnswer[]; keptTypes?: string[] } & NetworkedWrite)
   | { outcome: 'not_found' };
 
 /** What a write to a space in networks became in ONE of them: its round passed on this instance's own vote, or is open (R5-1). */
@@ -518,7 +519,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
     if (networkedIn.length > 0) {
       const now = new Date().toISOString();
-      const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
+      const rounds: RoundAnswer[] = [];
       const layers: LayerOutcome[] = [];
 
       for (const net of networkedIn) {
@@ -563,7 +564,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
          * either way, concluded or not, so peers learn of it exactly as before.
          */
         const concluded = concludeRoundIfReady(net, opened);
-        if (!concluded) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+        if (!concluded) rounds.push(roundAnswer(net, opened));
         layers.push({ networkId: net.id, networkLabel: net.label, outcome: concluded ? 'applied' : 'vote_pending' });
       }
       const kept = plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {};

@@ -699,10 +699,10 @@ so nothing was checked`, which points at the schema instead.
 If the space participates in a network and `meta` is included, the update opens a governance vote in every network
 carrying the space. **When this instance's own vote already passes a round, it concludes at once** — a club
 organiser, a pub/sub publisher, or the only member of a closed network — and the answer is the ordinary `200` with
-the updated space. Otherwise the change waits for the other voters and the answer is `202`:
+the updated space. Otherwise the change waits for the other voters and the answer is `202` (`round` is as [the vote list](08-networks-api.md#list-open-vote-rounds) shows it, `summary` included):
 
 ```json
-{ "status": "vote_pending", "rounds": [...], "message": "Meta change requires network vote" }
+{ "status": "vote_pending", "rounds": [{ "networkId", "networkLabel", "roundId", "round" }], "message": "Meta change requires network vote" }
 ```
 
 **Two meta votes can be open at once, and they no longer overwrite each other.** A round records the
