@@ -34,7 +34,7 @@ import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig } from '../config/loader.js';
-import { updateSpace, refuseRemovedDescription } from './spaces.js';
+import { updateSpace, refuseRemovedDescription, unknownWriteFieldsMode } from './spaces.js';
 import { ensureTtlIndex } from '../brain/ttl.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
@@ -313,6 +313,13 @@ export function planSpaceMetaUpdate(input: {
     before: { ...space, ...space.meta } as Record<string, unknown>,
     after: { ...space, ...space.meta, ...parsed.data, ...(parsed.data.meta ?? {}) } as Record<string, unknown>,
   };
+  // `unknownWriteFields` (Q-320): both sides go through the one reader, so absent, `'warn'`, `''` and `null` are ONE state and a PATCH that
+  // changes nothing records nothing (`audit-changes.ts` skips equal sides). Left to the spread above, the cleared forms would read as
+  // a change from `refuse` to `''` or `null`, and a no-op PATCH of `'warn'` on a space that already warns would record a change from nothing.
+  audit.before['unknownWriteFields'] = unknownWriteFieldsMode(space);
+  audit.after['unknownWriteFields'] = parsed.data.unknownWriteFields === undefined
+    ? unknownWriteFieldsMode(space)
+    : unknownWriteFieldsMode({ unknownWriteFields: parsed.data.unknownWriteFields });
 
   // Record TTL (F10): a PARTIAL object MERGES over the stored windows, so `{"chrono":90}` does not silently clear
   // the other four. That is the opposite of the `typeSchemas` rule, and deliberately so: there a named type is a
@@ -492,6 +499,14 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     updateSpace(id, { completeLinkage: patchData.completeLinkage });
   }
 
+  // `unknownWriteFields` (Q-320): this instance's answer to a top-level field a brain write does not take. Local like the three above,
+  // and for their reason: it is never replicated, so a vote has nothing to carry and a networked PATCH that also changes the meta would
+  // answer `vote_pending` and drop it silently. `!== undefined`, not truthiness: `null` and `''` are the clear, and `updateSpace` removes
+  // the key for them and never stores `'warn'`. Applied HERE and taken out of `restPatch` below, so one site writes it.
+  if (patchData.unknownWriteFields !== undefined) {
+    updateSpace(id, { unknownWriteFields: patchData.unknownWriteFields });
+  }
+
   // Already capped to the instance ceiling by the planner.
   if (plan.hasDocExtraction) {
     updateSpace(id, { documentExtraction: plan.documentExtraction });
@@ -610,12 +625,15 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // four buckets it did not mention, and an all-cleared write stored five explicit nulls instead of nothing. Both
   // returned 200 and looked like they had worked; found by driving the UI.
   const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, ...restPatch } = patchData;
+  // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. (A second
+  // destructure and not a third name in the one above, which `record-ttl-buckets.test.js` pins by its exact text.)
+  const { unknownWriteFields: _rawUnknownWriteFields, ...storablePatch } = restPatch;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
   // `ownMeta` would come back the next time a network sends this space a layer.
   const held = getConfig().spaces.find(s => s.id === id);
   if (held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
   const updated = updateSpace(id, {
-    ...restPatch,
+    ...storablePatch,
     meta: mergedMeta,
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });

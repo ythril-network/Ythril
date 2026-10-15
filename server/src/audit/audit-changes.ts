@@ -57,7 +57,9 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // Space settings a reader would actually want explained after the fact.
   // `stampSkew.warnMinutes` (Q-217): `0` switches the stamp check off, and "an admin patched the space" would not say that happened.
   // The dotted path keeps this scalars-only: the property NAMES beside it are not recorded.
-  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes'],
+  // `unknownWriteFields` (Q-320): the setting that makes writes which succeeded start failing is an admin's act and has to leave a trace.
+  // Its snapshot is built through `unknownWriteFieldsMode` (`spaces/meta-update.ts`), so the value here is always `warn` or `refuse`.
+  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes', 'unknownWriteFields'],
   'space.rename': ['id'],
   // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` renames.
   // Never `hash` or `prefix`; `token.create` and `token.regenerate` are absent entirely, because the

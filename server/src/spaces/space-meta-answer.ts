@@ -21,6 +21,7 @@
  */
 import type { SpaceConfig } from '../config/types.js';
 import { reindexStateFor } from '../brain/reindex.js';
+import { unknownWriteFieldsToReport } from './spaces.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
 import { invalidRulesOf } from './schema-rules.js';
@@ -46,6 +47,7 @@ export async function spaceMetaAnswer(input: {
   const meta = resolveRefs ? withLibraryDefinitions(rawMeta) : rawMeta;
   // History is served by its own endpoint, never inline.
   const { previousVersions: _pv, ...metaPublic } = meta;
+  const unknownWriteFields = unknownWriteFieldsToReport(space);
 
   const [perMemberStats, actualPerMember, reindexState] = await Promise.all([
     Promise.all(memberIds.map(mid => spaceStatsOf(mid))),
@@ -67,6 +69,10 @@ export async function spaceMetaAnswer(input: {
     // F-46 (R6-4): the stored rules that no longer compile and are skipped — names only, never a rule's text or message — read from the
     // meta with its library definitions, so a linked type's rules are judged as they are evaluated.
     invalidRules: invalidRulesOf(withLibraryDefinitions(rawMeta)),
+    // Q-320: THIS instance's answer to a top-level field a brain write does not take — `'refuse'`, absent when the space warns.
+    // Server-owned on the meta door (`SERVER_OWNED_META_FIELDS`): this answer is GET-then-PATCHed back flat, and the setting is
+    // local, so a meta PATCH strips it rather than applies it.
+    ...(unknownWriteFields ? { unknownWriteFields } : {}),
     /*
      * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares, in the declared schema's own format so a type the
      * space really holds can be promoted into it. Per member on a proxy, never merged: two types sharing a name

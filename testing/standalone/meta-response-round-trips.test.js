@@ -89,7 +89,12 @@ describe('the meta response and the PATCH strip agree', () => {
     // silently ignoring `validationMdoe` would let someone believe they had turned validation on. Every field on the list is DERIVED and
     // server-written (version, history, reindex state, actualSchema, invalidRules), and the bound moved only when F-46 added one. A field a caller
     // could mean to set never belongs here, whatever the count.
-    assert.ok(SERVER_OWNED_META_FIELDS.length <= 7,
+    //
+    // The bound moved to 8 for Q-320 (bundle-128): `unknownWriteFields` is surfaced on the meta answer so a reader can learn this instance's
+    // answer to an unknown write field, and stripped on PATCH because the answer is spread flat and a GET-then-PATCH would otherwise be
+    // refused. It is the one entry that is a local setting rather than derived state, and it is stripped on this door only: the meta is the
+    // shared definition, the setting is set at the top level of `PATCH /api/spaces/:id` or by `update_space`.
+    assert.ok(SERVER_OWNED_META_FIELDS.length <= 8,
       `${SERVER_OWNED_META_FIELDS.length} stripped fields is heading towards "accept anything": `
       + SERVER_OWNED_META_FIELDS.join(', '));
   });

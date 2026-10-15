@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { refusalsForSpaceUpdate, describeFieldRequirement } from '../../auth/space-field-rights.js';
-import { BRAIN_COLLECTIONS } from '../../config/types.js';
+import { BRAIN_COLLECTIONS, UNKNOWN_WRITE_FIELD_ANSWERS } from '../../config/types.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
@@ -9,7 +9,7 @@ import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { isProxy } from '../../spaces/proxy.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
 import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
-import { spacePurpose } from '../../spaces/spaces.js';
+import { spacePurpose, unknownWriteFieldsToReport } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
@@ -65,7 +65,11 @@ export const list_spacesTool: ToolHandler = {
     }
     // `purpose` is the field an admin can edit, the one `space_meta` returns, and since 3.0 the only
     // spelling — its `description` alias was removed from every surface in the same release.
-    const result = accessibleSpaces.map(s => ({
+    const result = accessibleSpaces.map(s => {
+      // Q-320: this instance's answer to a top-level field a write does not take, so an integrator learns the mode BEFORE it writes.
+      // `'refuse'`, absent when the space warns — the same convention and the same reader as `GET /api/spaces`.
+      const unknownWriteFields = unknownWriteFieldsToReport(s);
+      return {
       id: s.id,
       label: s.label ?? null,
       purpose: spacePurpose(s) ?? null,
@@ -78,7 +82,9 @@ export const list_spacesTool: ToolHandler = {
       ...((usageBySpaceId.get(s.id)?.incomplete.length ?? 0) > 0
         ? { usageIncomplete: usageBySpaceId.get(s.id)!.incomplete }
         : {}),
-    }));
+      ...(unknownWriteFields ? { unknownWriteFields } : {}),
+      };
+    });
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       // NAMED, because `structuredContent` must be an object and this tool's text half is a bare array.
@@ -259,7 +265,8 @@ export const update_spaceTool: ToolHandler = {
     + 'clients receive at handshake. Its `description` alias was removed in 3.0 — sending `description` is now '
     + 'rejected, not silently folded into `purpose`. To change the space\'s storage quota you need instance-admin '
     + 'rights and the REST route: `maxGiB` is the space\'s share of the host disk, so it is not a space setting. `faceDescriptorDims` is accepted here and refused by the space\'s STATE rather than by this surface: 409 if the gallery already holds descriptors, or if its index is built at a different width. On a space that has never held a face it succeeds, which is the case an operator was blocked on. On a space in more than one network a `purpose` change opens a round per network and the reply '
-    + 'carries `layers` (`applied` or `vote_pending` per network), exactly as `schema_update`\'s does.',
+    + 'carries `layers` (`applied` or `vote_pending` per network), exactly as `schema_update`\'s does. '
+    + '`unknownWriteFields` is THIS instance\'s answer to an argument a write does not take (see its own description); it is applied at once, even on a networked space whose meta changes wait for a vote.',
   mutating: true,
   spaceAdmin: true,
   spaceRequired: true,
@@ -268,6 +275,10 @@ export const update_spaceTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
             label: { type: 'string', minLength: 1, maxLength: 200, description: 'New display label for the space (1–200 chars).' },
+            unknownWriteFields: {
+              type: ['string', 'null'], enum: [...UNKNOWN_WRITE_FIELD_ANSWERS, '', null],
+              description: 'What THIS instance does with a top-level field a brain write to this space does not take: `refuse` refuses the write and stores nothing; `warn` (also `""` and `null`, which clear the setting) stores the record and names each such field in the answer. It is this instance\'s own setting: it is not shared with networks, never voted on, and each member of a network decides for itself. It is applied at once, also on a networked space whose meta changes wait for a vote. Not the same as a space\'s validation mode, which judges an undeclared property of a record\'s type. `list_spaces` and `space_meta` report it as `refuse` and omit it when the space warns.',
+            },
             purpose: { type: 'string', maxLength: SPACE_PURPOSE_MAX, description: `New purpose for the space (max ${SPACE_PURPOSE_MAX} chars) — the space-level directive injected into MCP instructions at handshake.` },
             faceDescriptorDims: {
               type: 'integer', minimum: 64, maximum: 4096,
@@ -287,8 +298,10 @@ export const update_spaceTool: ToolHandler = {
     const newLabel = typeof a['label'] === 'string' ? a['label'].trim() : undefined;
     const newDesc = typeof a['purpose'] === 'string' ? a['purpose'] : undefined;
     const newDims = typeof a['faceDescriptorDims'] === 'number' ? a['faceDescriptorDims'] : undefined;
-    if (newLabel === undefined && newDesc === undefined && newDims === undefined) {
-      throw new Error('At least one of label, purpose or faceDescriptorDims must be provided');
+    // Present is not truthy: `null` and `''` are how the setting is cleared. The dispatcher's schema has already refused any other value.
+    const newUnknownWriteFields = a['unknownWriteFields'] === undefined ? undefined : a['unknownWriteFields'] as 'warn' | 'refuse' | '' | null;
+    if (newLabel === undefined && newDesc === undefined && newDims === undefined && newUnknownWriteFields === undefined) {
+      throw new Error('At least one of label, purpose, faceDescriptorDims or unknownWriteFields must be provided');
     }
     if (newLabel !== undefined && newLabel.length === 0) throw new Error('label must not be empty');
     if (newDesc !== undefined && newDesc.length > SPACE_PURPOSE_MAX) throw new Error(`purpose must not exceed ${SPACE_PURPOSE_MAX} characters`);
@@ -296,8 +309,9 @@ export const update_spaceTool: ToolHandler = {
     // `meta.purpose` directly. Until 3.0 this sent `description` and let the planner fold it in — that fold is
     // gone with the alias, so a tool still sending the old spelling would now be dropped by a `.strict()` body
     // rather than rewritten. The planner is the same one the REST route uses, so both doors keep one rule.
-    const updates: { label?: string; meta?: { purpose: string }; faceDescriptorDims?: number } = {};
+    const updates: { label?: string; meta?: { purpose: string }; faceDescriptorDims?: number; unknownWriteFields?: 'warn' | 'refuse' | '' | null } = {};
     if (newLabel !== undefined) updates.label = newLabel;
+    if (newUnknownWriteFields !== undefined) updates.unknownWriteFields = newUnknownWriteFields;
     if (newDesc !== undefined) updates.meta = { purpose: newDesc };
 
     // The state check runs HERE, before the planner, exactly where the REST route puts it — one implementation

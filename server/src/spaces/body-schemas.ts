@@ -48,7 +48,7 @@ import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { hasReDoSRisk, REDOS_REFUSAL } from '../util/redos.js';
 import type { KnowledgeType, SchemaLibraryEntry, SpaceMeta, TypeSchema } from '../config/types.js';
-import { RECORD_TYPES } from '../config/types.js';
+import { RECORD_TYPES, UNKNOWN_WRITE_FIELD_ANSWERS } from '../config/types.js';
 import { DATE_PASSED_VALUES } from '../brain/chrono-date-policy.js';
 import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
@@ -552,8 +552,13 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  *
  * `invalidRules` joined in F-46 (bundle-23): the stored rules that no longer compile, named on the answer — derived from the rules, and
  * the third field the round-trip test caught arriving on GET without arriving here.
+ *
+ * `unknownWriteFields` joined in Q-320 (bundle-128), and it is the one entry that is a SETTING and not derived state: the meta answer
+ * reports this instance's answer to an unknown write field so a reader can learn the mode, and the answer is spread flat, so a caller that
+ * GETs the meta and PATCHes it back would otherwise be refused for a key it never wrote. It is stripped here on THIS door only — the
+ * meta is the shared definition and the setting is local — and is set at the top level of `PATCH /api/spaces/:id` or by `update_space`.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {
@@ -1043,7 +1048,7 @@ const TtlWindowZ = z.number().int().nonnegative().max(36500).nullable().optional
  */
 const UPDATABLE = [
   'label', 'maxGiB', 'meta', 'dupeRules', 'dupeMergeSurvivor', 'dupeRulesOnInsert', 'recordTtlDays',
-  'documentExtraction', 'imageAnalysis', 'audioAnalysis', 'videoAnalysis', 'textAnalysis', 'completeLinkage',
+  'documentExtraction', 'imageAnalysis', 'audioAnalysis', 'videoAnalysis', 'textAnalysis', 'completeLinkage', 'unknownWriteFields',
 ] as const;
 
 export const UpdateSpaceBody = z.object({
@@ -1114,6 +1119,12 @@ export const UpdateSpaceBody = z.object({
    * for why the interface it sits on is the behaviour and not a filing decision.
    */
   completeLinkage: z.boolean().optional(),
+  /**
+   * THIS instance's answer to a top-level field a brain write does not take (`SpaceConfig.unknownWriteFields`, Q-320): `refuse` refuses the
+   * write, `warn` (and `''` and `null`, which clear it) stores the record and names the field. Local and never voted, so it is applied
+   * beside the other local settings and not with the meta. `''` is what the Settings form sends to clear.
+   */
+  unknownWriteFields: z.enum([...UNKNOWN_WRITE_FIELD_ANSWERS, '']).nullable().optional(),
 }).strict().refine(d => UPDATABLE.some(k => d[k] !== undefined), {
   message: `At least one of ${UPDATABLE.slice(0, -1).join(', ')}, or ${UPDATABLE[UPDATABLE.length - 1]} must be provided`,
 });

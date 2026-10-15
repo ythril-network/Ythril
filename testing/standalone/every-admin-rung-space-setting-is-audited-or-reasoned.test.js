@@ -12,10 +12,9 @@
  *
  * ## Existing gaps this derivation finds
  *
- * Four admin-rung fields are not in the allowlist on the unchanged base. They are listed as exemptions with `ticket: 'unfiled'`
- * (design-v3 1.4: "or has a reasoned exemption"); `meta.rules` has a real reason (its value is a list of objects, and the
- * allowlist records scalars and member lists), the other three are scalar settings the allowlist simply does not name yet. The
- * caller decides whether to fix or file them.
+ * Four admin-rung fields are not in the allowlist on the unchanged base. They are listed as exemptions (design-v3 1.4: "or has a
+ * reasoned exemption"); `meta.rules` has a real reason (its value is a list of objects, and the allowlist records scalars and
+ * member lists), the other three are scalar settings the allowlist simply does not name yet, and they are filed as Q-504.
  *
  * Seen red on the unchanged base: the new `unknownWriteFields` row and its allowlist entry do not exist.
  *
@@ -30,9 +29,9 @@ const { AUDIT_CHANGE_FIELDS } = await import('../../server/dist/audit/audit-chan
 /** Admin-rung settings the audit allowlist does not name, each with why (or the ticket still to be filed). */
 const EXEMPT = new Map([
   ['rules', { ticket: null, why: 'its value is a list of rule objects, and the allowlist records scalars and member lists only' }],
-  ['suppressEmbeddings', { ticket: 'unfiled', why: 'a scalar the allowlist does not name yet; it stops embedding space-wide' }],
-  ['recordTtlDays', { ticket: 'unfiled', why: 'a scalar the allowlist does not name yet; it deletes records on a clock' }],
-  ['faceDescriptorDims', { ticket: 'unfiled', why: 'a scalar the allowlist does not name yet; changing it invalidates stored descriptors' }],
+  ['suppressEmbeddings', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; it stops embedding space-wide' }],
+  ['recordTtlDays', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; it deletes records on a clock' }],
+  ['faceDescriptorDims', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; changing it invalidates stored descriptors' }],
 ]);
 
 const adminRung = Object.entries(SPACE_FIELD_RIGHTS)

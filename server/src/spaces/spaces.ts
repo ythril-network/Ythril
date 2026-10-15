@@ -51,6 +51,16 @@ export function unknownWriteFieldsMode(space: { unknownWriteFields?: unknown } |
   return normalizeUnknownWriteFields(space?.unknownWriteFields) ?? 'warn';
 }
 
+/**
+ * What a surface that REPORTS a space's settings says of `unknownWriteFields`: `'refuse'` when the space refuses, `undefined` when it
+ * warns, so the key is absent from the JSON answer, as the neighbouring settings are (an absent key means the default, and a form reads it
+ * as `warn`). `GET /api/spaces`, `list_spaces` and the meta answer all go through this, so a setting a client can write is read back by
+ * every door alike and none of them spells the absent-means-warn rule itself; it asks the one reader, `unknownWriteFieldsMode`.
+ */
+export function unknownWriteFieldsToReport(space: { unknownWriteFields?: unknown } | undefined | null): 'refuse' | undefined {
+  return unknownWriteFieldsMode(space) === 'refuse' ? 'refuse' : undefined;
+}
+
 /** Update mutable fields (label, meta, quotas, ladders) of an existing space in config.
  *  When `meta` is provided the version counter is auto-incremented and the
  *  previous version is pushed to `previousVersions` (capped at META_VERSION_CAP).
