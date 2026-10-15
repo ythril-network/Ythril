@@ -24,6 +24,7 @@ import type { RequestHandler } from 'express';
 import { getConfig } from '../config/loader.js';
 import { peerRelayCaller } from './peer-relay.js';
 import { joinRoundOf } from '../networks/round-state.js';
+import { isUpstreamPeer } from '../networks/network-spaces.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { log, peerText } from '../util/log.js';
@@ -35,7 +36,8 @@ export type NetworkStanding = 'member' | 'open-joiner' | 'admin' | 'local' | 'un
  * What this caller is in the network `networkId` names — ONE answer for every route that names a network.
  *
  * - `admin`: an instance administrator that is not acting as a peer (`peerRelayCaller`, which lets a peer identity win over admin).
- * - `member`: a peer token whose instance the network's `members` lists.
+ * - `member`: a peer token whose instance the network's `members` lists, or the instance above this one (`isUpstreamPeer`: a
+ *   tree node's declared parent, a subscriber's publisher), which a braintree child does not list among its members.
  * - `open-joiner`: a peer a join round of THIS network names while that round can still be voted on (`joinRoundOf`). A voted-down joiner
  *   and one past its deadline are not: read as an allow, the data guard's "held by a join round" would have admitted them.
  * - `unlisted-peer`: a peer token listed in no network and named by no join round (a manual token, or the other half of a network only
@@ -54,7 +56,9 @@ export function networkStanding(authToken: Parameters<typeof peerRelayCaller>[0]
   if (!net) return 'unknown-network';
   if (caller.kind === 'refused') return 'local';
   const peer = caller.peerInstanceId;
-  if (net.members.some(m => m.instanceId === peer)) return 'member';
+  // The instance above this one - a tree node's declared parent, a subscriber's publisher - is part of the network though a
+  // braintree child holds it in `myParentInstanceId`, not in `members`: it gossips this node's rounds and relays its casts.
+  if (net.members.some(m => m.instanceId === peer) || isUpstreamPeer(net, peer)) return 'member';
   if (joinRoundOf(net, peer, now) === 'open') return 'open-joiner';
   const knownElsewhere = networks.some(n => n.members.some(m => m.instanceId === peer) || joinRoundOf(n, peer, now) !== null);
   return knownElsewhere ? 'stranger' : 'unlisted-peer';
