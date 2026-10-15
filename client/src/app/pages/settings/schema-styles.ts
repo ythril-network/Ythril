@@ -22,6 +22,9 @@ export const SCHEMA_MD_STYLES = `
 .val-select { font:inherit; font-size:12px; text-transform:none; letter-spacing:0; padding:3px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elevated); color:var(--text-primary); }
 .val-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .val-check input { margin:0; }
+/* The live check's two mode labels: spaced by a gap, since the whitespace between the two labels is dropped by Angular. */
+.val-modes { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; }
+.val-mode { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
 .val-violations .val-row { display:block; margin-block-start:3px; overflow-wrap:anywhere; }
 .sch-validation-bar { display:flex; align-items:center; justify-content:space-between; gap:16px 20px; flex-wrap:wrap;
   padding:12px 14px; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; background:var(--bg-surface); }
@@ -138,7 +141,8 @@ export const SCHEMA_MD_STYLES = `
 .rules-help summary { cursor:pointer; }
 .rules-example { font-family:var(--font-mono, ui-monospace, monospace); font-size:12px; background:var(--bg-secondary); padding:6px 8px; border-radius:4px; margin:4px 0 0; white-space:pre-wrap; }
 .applicable-rules { list-style:none; margin:0; padding:0; font-size:12.5px; }
-.applicable-rules li { padding-block:2px; }
+/* A gap, not the space between the spans: Angular drops a whitespace-only node between elements, so the name ran into its message. */
+.applicable-rules li { padding-block:2px; display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
 .applicable-rules .rule-name { font-family:var(--font-mono, ui-monospace, monospace); }
 .rules-count { font-size:9px; }
 `;

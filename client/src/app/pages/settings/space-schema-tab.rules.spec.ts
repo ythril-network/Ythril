@@ -29,7 +29,7 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { KNOWLEDGE_TYPES, type Space } from '../../core/api.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
-import { declaredNearest } from '../../testing/declared-style';
+import { declaredNearest, declaredValue } from '../../testing/declared-style';
 import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
@@ -307,6 +307,18 @@ describe('the space rules that apply to the selected type are shown read-only in
     expect(names(list!)).toEqual(['no-future', 'few-tags']);
   });
 
+  // b23 verify U5: the rule's name ran into its message (the space between the two spans is a whitespace-only node Angular drops).
+  it('a rule\'s name is spaced from its message by the stylesheet, not by a space character', async () => {
+    const h = await mount();
+    const pane = await selectType(h, 'chrono', 'event');
+    const row = $(pane, '[data-testid="applicable-rules"] li');
+    expect(row, 'no applicable rule row').not.toBeNull();
+    // The control: the stylesheet is visible to the reader at all (the rule name's font is declared).
+    expect(declaredNearest($(row!, '.rule-name')!, 'font-family', h.el)).toMatch(/mono/i);
+    // On the row itself: a gap an ancestor declares spaces the rows, not the two spans inside one.
+    expect(declaredValue(row!, 'gap') ?? '', 'nothing separates a rule\'s name from its message').toMatch(/^[1-9]/);
+  });
+
   it('are read-only: no control inside the list can edit a space rule from the type pane', async () => {
     const h = await mount();
     const pane = await selectType(h, 'chrono', 'event');
@@ -537,6 +549,14 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     expect(button(h), 'no Validate button on the Schema tab').not.toBeNull();
     expect(button(h)!.tagName).toBe('BUTTON');
+  });
+
+  // b23 verify U5: "One pasted record" and "Stored data" ran together (the whitespace between the labels is dropped by Angular).
+  it('the two mode labels are spaced apart by the stylesheet', async () => {
+    const h = await mount();
+    const group = $(h.el, '.val-modes');
+    expect(group, 'no mode group').not.toBeNull();
+    expect(declaredValue(group!, 'gap') ?? '', 'nothing separates the two mode labels').toMatch(/^[1-9]/);
   });
 
   it('sample mode sends the pasted record as `sample`, with no cursor, and scans nothing', async () => {
