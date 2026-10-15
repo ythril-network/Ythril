@@ -20,6 +20,11 @@ export const SCHEMA_MD_STYLES = `
 .val-controls { display:inline-flex; align-items:center; gap:16px; flex-wrap:wrap; }
 .val-lbl { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
 .val-select { font:inherit; font-size:12px; text-transform:none; letter-spacing:0; padding:3px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elevated); color:var(--text-primary); }
+/* The "This instance" row: a local setting beneath the shared validation bar. The hint is real text on its own line (not a title
+   tooltip), in the secondary colour for contrast in both themes; the select keeps a 24px target. */
+.sch-instance { display:block; margin-bottom:14px; }
+.inst-select { min-height:24px; box-sizing:border-box; }
+.inst-hint { display:block; margin:6px 0 0; font-size:12px; line-height:1.45; color:var(--text-secondary); max-width:70ch; }
 .val-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .val-check input { margin:0; }
 /* The live check's two mode labels: spaced by a gap, since the whitespace between the two labels is dropped by Angular. */

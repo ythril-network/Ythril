@@ -91,6 +91,12 @@ export interface Space {
   dupeMergeSurvivor?: 'older' | 'newer';
   dupeRulesOnInsert?: boolean;
   /**
+   * This instance's answer to a write that names a top-level field its operation does not take (bundle-128). The server answers
+   * `'refuse'` when set and leaves the key ABSENT for the default, `warn`, exactly as the neighbouring local settings do, so a form
+   * reads absent as warn. Instance-local: it is not part of the space's meta and is not shared with a network.
+   */
+  unknownWriteFields?: 'refuse';
+  /**
    * Auto-TTL (F10): the SPACE tier of `record > schema > space`. Absent/0 = no expiry.
    *
    * **Two shapes.** A bare number is the legacy setting and still means all five buckets; the object is per
