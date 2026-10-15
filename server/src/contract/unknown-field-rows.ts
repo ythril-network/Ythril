@@ -52,7 +52,7 @@ export function unknownFieldReason(outcome: UnknownFieldOutcome, { accepted, nea
 }
 
 /** ` — did you mean '<key>'?`, the suffix a near miss carries on either outcome. */
-export function nearMissSuffix(accepted: string): string {
+function nearMissSuffix(accepted: string): string {
   return ` — did you mean '${accepted}'?`;
 }
 

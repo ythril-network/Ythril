@@ -252,7 +252,7 @@ const NEAR_MISS_EDITS = 2;
  * nowhere near any key, and the length test says so without a distance), a key whose length differs by more than the threshold is skipped
  * without computing one, and the distance gives up as soon as every cell of a row is past the threshold. A megabyte key costs the cut.
  */
-export function nearMissOf(name: string, accepted: readonly string[]): string | undefined {
+function nearMissOf(name: string, accepted: readonly string[]): string | undefined {
   const lower = name.toLowerCase();
   for (const key of accepted) if (key !== name && key.length === name.length && key.toLowerCase() === lower) return key;
   let best: string | undefined;
