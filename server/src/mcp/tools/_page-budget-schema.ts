@@ -11,11 +11,11 @@ import { MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOKEN, budgetDefaultsSe
  * answer is ("match", "row", "node", "item"), so the description a caller reads while building arguments says what
  * a budget cuts.
  */
-export function budgetSizeSchema(unit: string): Record<string, Record<string, unknown>> {
+export function budgetSizeSchema(unit: string, continuedBy = 'nextSkip'): Record<string, Record<string, unknown>> {
   return {
     maxChars: {
       type: 'integer', minimum: 1,
-      description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`nextSkip\`. `
+      description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`${continuedBy}\`. `
         + `${budgetDefaultsSentence()} Held between ${MIN_MAX_BYTES} and ${MAX_MAX_BYTES}: a smaller value is raised to ${MIN_MAX_BYTES}, not refused. Characters equal `
         + 'bytes only for ASCII — for a byte ceiling use `maxBytes`.',
     },

@@ -19,6 +19,7 @@ import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { ToolRefusal } from '../../util/errors.js';
+import { budgetSizeSchema } from './_page-budget-schema.js';
 
 export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
@@ -30,15 +31,21 @@ export const schema_validateTool: ToolHandler = {
     + 'with `type`, `description`, `tags`, `properties`) — and nothing stored is read: the quick way to try a rule. Without `sample` '
     + 'the schema is run over the space\'s stored records.\n\n'
     + 'THE ANSWER: `violations` lists each record that breaks the schema with its rows (`field`, `reason`); a rule\'s row is '
-    + '`rules.<name>` (a type\'s rule) or `meta.rules.<name>` (a space rule) and its reason is the rule\'s message. `totalViolations` '
-    + 'counts the violating records the call read, `checked` says per collection how many records THIS call read of how many there are, '
-    + '`progress` (stored records) says how many records the whole check has read across its pages, each once, of how many the space '
-    + 'holds, and `complete` is true only when nothing is left. The meta you sent is not echoed.\n\n'
+    + '`rules.<name>` (a type\'s rule) or `meta.rules.<name>` (a space rule) and its reason is the rule\'s message. `checked` says per '
+    + 'collection how many records THIS call read of how many there are, and `progress` (stored records) is `{ checked, total }`: '
+    + '`checked` is the records THIS call read — add it up over your pages, each record is read once, and it reaches `total` when the '
+    + 'walk ends — and `total` is the space\'s record count when the check started (collection metadata), so a space that grows while '
+    + 'you page can read above 100%. `complete` is true only when the walk reached its end. `staleGuards` lists the edges, among the '
+    + 'records this call read, whose write guard names another subject (at most `limit`, each once across pages). The meta you sent is '
+    + 'not echoed.\n\n'
     + 'STORED VALUES are shown only to a caller who may read the space\'s knowledge; otherwise each row comes without its `value`. '
     + 'A rule\'s row never carries one.\n\n'
     + `PAGING (stored records): \`limit\` violating records per call (1 to ${SCHEMA_VALIDATE_MAX_LIMIT}, default ${SCHEMA_VALIDATE_MAX_LIMIT}); `
-    + `a call reads at most ${SCHEMA_VALIDATE_SCAN_BOUND} records. While records are left the answer carries \`nextAfter\`: pass it as `
-    + '`after` for the next page. Same parameters as `POST /api/spaces/:id/validate-schema`.\n\n'
+    + 'a call STOPS reading at the record that fills its page (`limit` violating records, or `limit` stale guards, or the size budget), '
+    + `at ${SCHEMA_VALIDATE_SCAN_BOUND} records, or at the end — it does not read on to count what it does not show. While records are `
+    + 'left the answer carries `nextAfter`: pass it as `after` for the next page, which continues right after the last record this one '
+    + 'read. THE SIZE BUDGET (`maxChars`, `maxBytes`, `maxTokens`) cuts a page to whole records: `truncated` says it did, and '
+    + '`budgetChars` / `budgetBytes` say what was applied. Same parameters as `POST /api/spaces/:id/validate-schema`.\n\n'
     + `A stored-records check is limited to ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, counted with the REST route, and one run `
     + 'per space at a time (a second is a 409); a sample check is not limited.',
   mutating: false,
@@ -79,6 +86,8 @@ export const schema_validateTool: ToolHandler = {
         type: 'string', minLength: 1, maxLength: SCHEMA_VALIDATE_CURSOR_MAX,
         description: 'The `nextAfter` of the previous page, to continue after it. Omit it to start from the beginning.',
       },
+      // The size ceilings every budgeted tool takes, from their one declaration.
+      ...budgetSizeSchema('violating record', 'nextAfter'),
     },
     required: ['space'],
     additionalProperties: false,
@@ -91,6 +100,8 @@ export const schema_validateTool: ToolHandler = {
       body,
       canReadValues: mayReadStoredValues(ctx.rights, ctx.callSpace),
       callerKey: ctx.rateKey,
+      // The door that received the call, as every budgeted tool reads it: a tool is also served as `POST /api/schema_validate`.
+      transport: ctx.transport,
     });
     if (r.status !== 200) throw new ToolRefusal(r.status, r.error, r.body);
     // The answer in `content` as well as `structuredContent`: a client may read either one alone.

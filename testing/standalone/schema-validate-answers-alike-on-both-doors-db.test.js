@@ -216,9 +216,9 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
         for (const id of wanted) assert.ok(unique.has(id), `${door}: ${id} was never returned by any page (${seen.length} seen)`);
       });
 
-      it(`${door}: \`progress\` counts the records the whole check has read, each once: never down, ending at the space's size`, async () => {
-        // `checked` is per CALL, and a page that stops for a full `limit` is continued from its last returned record, so the next
-        // call reads part of the same records again: summed it over-counts, and shown alone it goes DOWN (b23 verify U4).
+      it(`${door}: \`progress.checked\` is what THIS call read: summed over the pages it is the space's size, no record read twice`, async () => {
+        // A page stops at the record that fills its `limit` and the next continues right after it, so each call's `checked` is its own
+        // and the sum is exact (b23 verify U4 saw the old cumulative number go down; the wave-6 contract made it per call).
         const counts = [];
         let continuation = {};
         let last;
@@ -233,12 +233,8 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
           continuation = { after: last.nextAfter };
         }
         assert.ok(counts.length >= 2, `${door}: the fixture did not page (${counts.join(', ')})`);
-        for (let i = 1; i < counts.length; i++) {
-          assert.ok(counts[i] >= counts[i - 1], `${door}: progress went down across pages: ${counts.join(', ')}`);
-        }
-        assert.ok(counts.every(c => c <= HAS_STORED.length), `${door}: progress counted a record twice: ${counts.join(', ')}`);
         assert.equal(last.complete, true);
-        assert.equal(counts.at(-1), HAS_STORED.length, `${door}: the finished check did not count every record: ${counts.join(', ')}`);
+        assert.equal(counts.reduce((a, b) => a + b, 0), HAS_STORED.length, `${door}: the pages' checked do not sum to the space's size: ${counts.join(', ')}`);
       });
 
       it(`${door}: the answer says whether the scan is complete, and a truncated page is not complete`, async () => {
@@ -246,7 +242,9 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
         assert.equal(a.refused, false, a.text.slice(0, 300));
         const body = a.body ?? {};
         assert.equal(typeof body.complete, 'boolean', `${door}: no \`complete\` flag`);
-        assert.ok(body.totalViolations >= VIOLATING, `${door}: totalViolations is ${body.totalViolations}`);
+        assert.equal(body.complete, false, `${door}: a page of 3 over ${VIOLATING} violating records says it is complete`);
+        assert.equal(body.violations.length, 3, `${door}: the page does not hold its limit`);
+        assert.ok(!('totalViolations' in body), `${door}: \`totalViolations\` is still answered: a page that counts what it does not show reads on past its end`);
       });
     }
   });

@@ -18,10 +18,15 @@
  *   and NO `value` key. A rule's row carries no value for anybody: its reason is the rule's message.
  * - **A read that takes the vectors with it.** Each collection is read with a FIXED projection — the fields a view is built from — and
  *   never one a caller names; a body key the check does not take is dropped, never followed.
- * - **A scan with no way past its end.** It pages by `_id` (`db/id-keyset-page.ts`), spelled `after` / `nextAfter` as every keyset page
- *   on this server is; at most {@link SCHEMA_VALIDATE_SCAN_BOUND} records are read per call, `totalViolations` counts what the call read,
- *   and `complete` is true only when nothing is left after it. A page never holds more than `limit` records. `progress` counts what the
- *   whole check has read across its pages, each record once, carried in the cursor.
+ * - **A page that reads far past what it shows.** It pages by `_id` (`db/id-keyset-page.ts`), spelled `after` / `nextAfter` as every
+ *   keyset page on this server is, and a call STOPS reading at the record that fills its page — `limit` violating records, `limit`
+ *   stale guards, or the byte budget — or at {@link SCHEMA_VALIDATE_SCAN_BOUND} records, or at the end. The next call continues right
+ *   after the last record this one read, so no record is read twice: `progress.checked` is what THIS call read, a caller sums it over
+ *   its pages, and it reaches `progress.total` when the walk ends (`complete`). Counting the violations a page does not show used to
+ *   read up to the bound for every page of fifty rows, and read the same records again on the next.
+ * - **An answer nobody can carry.** Rows go through the byte budget (`brain/result-budget.ts`) like every other read: `maxChars` /
+ *   `maxBytes` / `maxTokens`, a door default (the one sanctioned divergence: lower on MCP), the number used disclosed, whole rows only
+ *   and the cut continued by `nextAfter`.
  * - **A check that stalls the server.** The stored-data check is priced like the ingest (`consumeHeavyToolCall`, one count per token
  *   across both doors) and runs once per space at a time; it yields to the event loop after every page. A refusal costs no slot.
  */
@@ -40,6 +45,9 @@ import { refusalOfParse } from '../util/log.js';
 import { holdsRung } from '../auth/reachable-spaces.js';
 import { viewSourceProjection, type ViewKind } from '../brain/record-view.js';
 import { boundedRows } from '../brain/write-validation.js';
+import {
+  budgetFields, budgetMeter, carriagesFor, defaultBudgetChars, resolveBudget, type CeilingRefusal, type ResolvedBudget,
+} from '../brain/result-budget.js';
 import { parseSpaceMeta, readStoredMeta } from './body-schemas.js';
 import { violationsOfRecord, resolveMetaRefs, type SchemaViolation } from './schema-validation.js';
 import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
@@ -69,6 +77,10 @@ export const SchemaValidateBody = z.object({
   }).strict().optional(),
   limit: z.number().int().min(1).max(SCHEMA_VALIDATE_MAX_LIMIT).optional(),
   after: z.string().min(1).max(SCHEMA_VALIDATE_CURSOR_MAX).optional(),
+  // The size ceilings, read as every budgeted door reads them: `resolveBudget` states what is wrong with one, in one sentence.
+  maxChars: z.unknown().optional(),
+  maxBytes: z.unknown().optional(),
+  maxTokens: z.unknown().optional(),
 });
 
 /** One record's rows. */
@@ -79,22 +91,26 @@ export interface SchemaValidateAnswer {
   spaceId: string;
   /** Per collection: the records this call read, and how many the collection holds. */
   checked: Record<string, { checked: number; total: number }>;
-  /** True when nothing is left after this answer: no `nextAfter`. */
+  /** True when the walk reached its end: nothing is left after this answer, so no `nextAfter`. */
   complete: boolean;
-  /** The violating records this call found — every one it read, not only the page's. */
-  totalViolations: number;
   violations: RecordViolations[];
-  /** Edges whose write guard names another subject: not violations, so not counted in `totalViolations`. Stored mode only. */
+  /** Edges whose write guard names another subject: not violations. Stored mode only; the ones among the records THIS call read, at most `limit`. */
   staleGuards?: StaleGuard[];
   /** Pass as `after` to continue. Present only while records are left. */
   nextAfter?: string;
   /**
-   * Stored mode only: the records the whole check has read so far, this page included, each counted once — of how many the space
-   * holds. `checked` is per CALL, and a page that stopped for a full `limit` is continued from its last returned record, so the next
-   * call reads part of the same records again: summed, `checked` over-counts, and shown alone it goes down (b23 verify U4). This is the
-   * number a progress line shows; it rides in the cursor, so it needs nothing from the caller but the `after` it already sends.
+   * Stored mode only: `checked` is the records THIS call read (a caller sums it over its pages — each record is read once, the next
+   * call continues right after the last one this call read), `total` the records the space held when the check started
+   * (`estimatedDocumentCount`, collection metadata), so a space that grows while it is paged can read above its total.
    */
   progress?: { checked: number; total: number };
+  /** Stored mode only: whether the BYTE BUDGET (not `limit`, not the scan bound) ended this page, and the budget as `budgetFields` states it. */
+  truncated?: boolean;
+  budgetChars?: number;
+  budgetBytes?: number | null;
+  charsReturned?: number;
+  bytesReturned?: number;
+  budgetBoundBy?: string[];
 }
 
 export type SchemaValidateOutcome =
@@ -128,23 +144,17 @@ const WALK: ReadonlyArray<{ collection: Exclude<BrainCollection, 'links'>; kind:
   { collection: 'chrono', kind: 'chrono', projection: { _id: 1, ...viewSourceProjection('chrono') } },
 ];
 
-/**
- * A position in the walk: a member space, a collection, the last `_id` read — and `passed`, how many records the walk has gone past to
- * get there (what `progress.checked` counts from). Opaque to the caller. A cursor without `passed` (one handed out before it existed)
- * counts from nought: the walk is unchanged, only the progress line starts low.
- */
-interface Cursor { space: string; collection: string; last: string; passed: number }
+/** A position in the walk: a member space, a collection, the last `_id` read. Opaque to the caller. */
+interface Cursor { space: string; collection: string; last: string }
 const encodeCursor = (c: Cursor): string =>
-  Buffer.from(JSON.stringify([c.space, c.collection, c.last, c.passed]), 'utf8').toString('base64url');
+  Buffer.from(JSON.stringify([c.space, c.collection, c.last]), 'utf8').toString('base64url');
 function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null {
   try {
     const v: unknown = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || (v.length !== 3 && v.length !== 4) || !v.slice(0, 3).every(x => typeof x === 'string')) return null;
-    const passed = v.length === 4 ? v[3] : 0;
-    if (typeof passed !== 'number' || !Number.isSafeInteger(passed) || passed < 0) return null;
+    if (!Array.isArray(v) || v.length !== 3 || !v.every(x => typeof x === 'string')) return null;
     const [space, collection, last] = v as [string, string, string];
     if (!memberIds.includes(space) || !WALK.some(w => w.collection === collection)) return null;
-    return { space, collection, last, passed };
+    return { space, collection, last };
   } catch {
     return null;
   }
@@ -158,11 +168,12 @@ function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null
  * @param body           the caller's arguments — any value; refused here when it is not that shape
  * @param canReadValues  whether the caller may see stored values ({@link mayReadStoredValues})
  * @param callerKey      who the rail counts against: the calling token's id, or its address when it has none
+ * @param transport      the door, which decides the byte budget's default and how many times it carries the answer
  */
 export async function beginSchemaValidate(input: {
-  spaceId: string; memberIds: string[]; body: unknown; canReadValues: boolean; callerKey: string;
+  spaceId: string; memberIds: string[]; body: unknown; canReadValues: boolean; callerKey: string; transport: 'mcp' | 'rest';
 }): Promise<SchemaValidateOutcome> {
-  const { spaceId, memberIds, canReadValues, callerKey } = input;
+  const { spaceId, memberIds, canReadValues, callerKey, transport } = input;
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
   const parsed = SchemaValidateBody.safeParse(input.body ?? {});
@@ -174,6 +185,9 @@ export async function beginSchemaValidate(input: {
   }
   const { sample, after } = parsed.data;
   const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
+  // Resolved in both modes, so a size parameter that is wrong is refused whichever mode it rides on; only a stored-data answer is cut by it.
+  const budget = resolveBudget(parsed.data, defaultBudgetChars(transport), carriagesFor(transport));
+  if (!budget.ok) return { status: 400, error: budget.error };
 
   // A proposed meta is parsed by the one parse a save runs (`parseSpaceMeta`), so a meta the save would refuse is refused here in the
   // same words. The stored meta is read as every store reads what it holds (`readStoredMeta`): it was checked when it was stored, so a
@@ -195,7 +209,7 @@ export async function beginSchemaValidate(input: {
     return {
       status: 200, mode: 'sample', meta,
       answer: {
-        spaceId, checked: {}, complete: true, totalViolations: rows.length > 0 ? 1 : 0,
+        spaceId, checked: {}, complete: true,
         violations: rows.length > 0 ? [{ collection: WALK.find(w => w.kind === sample.kind)!.collection, violations: rows }] : [],
       },
     };
@@ -207,32 +221,35 @@ export async function beginSchemaValidate(input: {
   const ran = await checks.run(spaceId, callerKey, {
     busy: `A stored-data schema check of '${spaceId}' is already running — try again when it ends`,
     limited: SCHEMA_VALIDATE_RATE_LIMITED,
-  }, () => walkStored(spaceId, memberIds, resolved, { limit, cursor, canReadValues }));
+  }, () => walkStored(spaceId, memberIds, resolved, { limit, cursor, canReadValues, budget }));
   return ran.ok ? { status: 200, mode: 'stored', meta, answer: ran.value } : { status: ran.status, error: ran.error };
 }
 
-/** The stored-data walk: every member's four collections in turn, by `_id`, from `cursor`. */
+/**
+ * The stored-data walk: every member's four collections in turn, by `_id`, from `cursor` — one record at a time, and it stops AT the
+ * record that fills the page (see the header), so what it read is what it answers for.
+ */
 async function walkStored(
   spaceId: string, memberIds: readonly string[], meta: SpaceMeta,
-  opts: { limit: number; cursor: Cursor | null; canReadValues: boolean },
+  opts: { limit: number; cursor: Cursor | null; canReadValues: boolean; budget: ResolvedBudget },
 ): Promise<SchemaValidateAnswer> {
-  const { limit, cursor, canReadValues } = opts;
+  const { limit, cursor, canReadValues, budget } = opts;
   const checked: Record<string, { checked: number; total: number }> = {};
   const page: RecordViolations[] = [];
   const staleGuards: StaleGuard[] = [];
-  let total = 0;
+  const meter = budgetMeter(budget);
   let read = 0;
-  let lastReturned: Cursor | undefined;
-  let stoppedAt: Cursor | undefined;
-  // The records earlier calls went past (`Cursor.passed`): this call's reads count on from there, so `progress` counts each record once.
-  const passedBefore = cursor?.passed ?? 0;
+  /** Where the next call starts: set when this one stops before the end of the walk. */
+  let next: Cursor | undefined;
+  let refusedBy: CeilingRefusal | null = null;
 
-  // Every collection's size, the ones this call will not reach included: `progress.total` is the space's, not this call's.
+  // Every collection's size, the ones this call will not reach included: `progress.total` is the space's, not this call's. The count
+  // is the collection's metadata (`estimatedDocumentCount`), not a scan, and it is the count when this call started.
   const sizes = new Map<string, number>();
   for (const mid of memberIds) {
     for (const { collection } of WALK) {
       const name = spaceCollection(mid, collection);
-      sizes.set(name, await col(name).countDocuments());
+      sizes.set(name, await col(name).estimatedDocumentCount());
     }
   }
 
@@ -248,37 +265,49 @@ async function walkStored(
       tally.total += sizes.get(name) ?? 0;
       if (c < startCollection) continue;
       let afterId = cursor && m === startMember && c === startCollection ? cursor.last : undefined;
+      /** The last record of this collection this call has read: where a call that stops before the next record continues from. */
+      let previousId = afterId ?? '';
       for (;;) {
         if (read >= SCHEMA_VALIDATE_SCAN_BOUND) {
-          stoppedAt = { space: mid, collection, last: afterId ?? '', passed: passedBefore + read };
+          next = { space: mid, collection, last: previousId };
           break walk;
         }
         const docs = await idKeysetPage<{ _id: string } & Record<string, unknown>>(
           { collection: name, filter: {}, projection, size: Math.min(READ_PAGE, SCHEMA_VALIDATE_SCAN_BOUND - read) }, afterId);
-        // Where each record of this batch sits in the walk, so a cursor after it knows how many records it has gone past.
-        const readBefore = read;
-        const position = new Map(docs.rows.map((d, i) => [String(d._id), readBefore + i + 1]));
-        read += docs.rows.length;
-        tally.checked += docs.rows.length;
-        let found: RecordViolations[];
-        if (kind === 'edge') {
-          const edges = await validateStoredEdges(mid, meta, docs.rows as unknown as StoredEdge[]);
-          found = edges.violations;
-          staleGuards.push(...edges.staleGuards);
-        } else {
-          found = [];
-          for (const doc of docs.rows) {
-            const rows = violationsOfRecord(meta, kind, doc);
-            if (rows.length > 0) found.push({ collection, _id: String(doc._id), violations: rows });
+        // An edge is judged against the others of its page (a subject's count, the ends it names), so the page is judged whole and
+        // each record then takes its own findings in order — what it does not take, it was never read.
+        const edgeFindings = kind === 'edge'
+          ? await validateStoredEdges(mid, meta, docs.rows as unknown as StoredEdge[])
+          : null;
+        const edgeRows = new Map((edgeFindings?.violations ?? []).map(v => [v._id ?? '', v]));
+        const edgeGuards = new Map((edgeFindings?.staleGuards ?? []).map(g => [g._id, g]));
+        for (const doc of docs.rows) {
+          const id = String(doc._id);
+          const found: RecordViolations | undefined = kind === 'edge'
+            ? edgeRows.get(id)
+            : (() => {
+              const rows = violationsOfRecord(meta, kind, doc);
+              return rows.length > 0 ? { collection, _id: id, violations: rows } : undefined;
+            })();
+          const guard = edgeGuards.get(id);
+          // The one bounded renderer: at most `MAX_ROWS` rows a record, each name and string bounded, and no value for a caller who
+          // may not read the stored data.
+          const shown = found ? { ...found, violations: boundedRows(found.violations, { value: canReadValues }) } : undefined;
+          // The record that does not fit the budget is not read: the next call starts at it, and this one's `checked` ends before it.
+          if ((shown || guard) && !meter.admit({ ...(shown ? { violation: shown } : {}), ...(guard ? { guard } : {}) })) {
+            refusedBy = meter.refusedBy();
+            next = { space: mid, collection, last: previousId };
+            break walk;
           }
-        }
-        for (const f of found) {
-          total++;
-          if (page.length < limit) {
-            // The one bounded renderer: at most `MAX_ROWS` rows a record, each name and string bounded, and no value for a caller who
-            // may not read the stored data.
-            page.push({ ...f, violations: boundedRows(f.violations, { value: canReadValues }) });
-            lastReturned = { space: mid, collection, last: f._id ?? '', passed: passedBefore + (position.get(f._id ?? '') ?? readBefore) };
+          read++;
+          tally.checked++;
+          previousId = id;
+          if (shown) page.push(shown);
+          if (guard) staleGuards.push(guard);
+          // The record that fills the page ends the read: it is the last one this call has read, and the next one starts after it.
+          if (page.length >= limit || staleGuards.length >= limit) {
+            next = { space: mid, collection, last: id };
+            break walk;
           }
         }
         await yieldToEventLoop();
@@ -288,12 +317,20 @@ async function walkStored(
     }
   }
 
-  // More violating records than the page holds: continue right after the last one returned. Stopped at the bound with every violation
-  // it found returned: continue where it stopped. Neither: the walk reached the end.
-  const next = total > page.length ? lastReturned : stoppedAt;
+  const cut = refusedBy !== null;
+  const disclosed = budgetFields({
+    returned: page, remainder: [], charsReturned: meter.chars(), bytesReturned: meter.bytes(), truncated: cut,
+    ...(refusedBy ? { refusedBy } : {}),
+  }, page.length, budget);
   return {
-    spaceId, checked, complete: next === undefined, totalViolations: total, violations: page, staleGuards,
+    spaceId, checked, complete: next === undefined, violations: page, staleGuards,
     ...(next !== undefined ? { nextAfter: encodeCursor(next) } : {}),
-    progress: { checked: passedBefore + read, total: [...sizes.values()].reduce((a, b) => a + b, 0) },
+    progress: { checked: read, total: [...sizes.values()].reduce((a, b) => a + b, 0) },
+    truncated: cut,
+    budgetChars: disclosed['budgetChars'] as number,
+    budgetBytes: disclosed['budgetBytes'] as number | null,
+    charsReturned: meter.chars(),
+    bytesReturned: meter.bytes(),
+    ...(disclosed['budgetBoundBy'] ? { budgetBoundBy: disclosed['budgetBoundBy'] as string[] } : {}),
   };
 }

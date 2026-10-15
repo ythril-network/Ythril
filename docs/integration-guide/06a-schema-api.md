@@ -283,6 +283,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 | `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
+| `maxChars`, `maxBytes`, `maxTokens` | The size ceilings every budgeted read takes, on a stored-data check: the page is cut to **whole violating records** that fit, and `nextAfter` continues it. **Default `maxChars`: 50 000 on REST, 25 000 on MCP** — the one default the two doors deliberately differ on — and the answer discloses the number it used (`budgetChars`, `budgetBytes`). A value that is not a positive integer is a `400` |
 
 A key the check does not take is dropped, never followed: a `projection` or `fields` in the body changes nothing about
 what is read. **A body that fails validation is refused `400` with the whole refusal, `{ "error", "issues" }`** — the
@@ -320,9 +321,13 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
 {
   "spaceId": "eng-kb",
   "meta": { "validationMode": "strict", "typeSchemas": { "entity": { "service": {}, "person": {} } }, "..." : "..." },
-  "checked": { "entities": { "checked": 10000, "total": 14200 }, "edges": { "checked": 830, "total": 830 }, "...": "..." },
+  "checked": { "entities": { "checked": 200, "total": 14200 }, "edges": { "checked": 0, "total": 830 }, "...": "..." },
   "complete": false,
-  "totalViolations": 3,
+  "truncated": false,
+  "budgetChars": 50000,
+  "budgetBytes": null,
+  "charsReturned": 184,
+  "bytesReturned": 184,
   "violations": [
     {
       "collection": "entities",
@@ -334,22 +339,30 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
   ],
   "staleGuards": [ { "_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "label": "reports_to" } ],
   "nextAfter": "WyJlbmcta2IiLCJlbnRpdGllcyIsIjU1MGU4NDAwLi4uIl0",
-  "progress": { "checked": 10830, "total": 15030 }
+  "progress": { "checked": 200, "total": 15030 }
 }
 ```
 
 **It says how much it checked, and pages by cursor** (`Q-129`). One call reads at most 10,000 records, walking each
-member space's four collections in turn by `_id`, and stops with a cursor when it reaches that bound or when more
-violating records were found than `limit` holds. `checked` reports, per collection, how many records this call read
-against how many the collection holds; `totalViolations` counts the violating records this call found (every one it
-read, not only the page's); `progress` (stored data only) counts the records the whole check has read across its
-pages, each once, against how many the space holds — the number to show as progress, because a page that stopped for a
-full `limit` is continued from its last returned record, so the next call reads part of the same records again and
-`checked` summed over pages over-counts; `complete` is `true` only when nothing is left, and then `nextAfter` is absent. **While
-records are left the answer carries `nextAfter`: send it back as `after` for the next page.** A clean answer with
-`complete: false` is a clean answer for the records read so far — not for the space. This is the server's one
-`after` / `nextAfter` keyset spelling; the `skip`, `count`, `total`, `truncated` and `nextSkip` fields this answer
-carried before 5.7.0 are gone, and `limit` and `after` are taken in the body only.
+member space's four collections in turn by `_id`, **and stops reading at the record that fills the page**: `limit`
+violating records (or `limit` stale guards, or the byte budget — below), the 10,000-record bound, or the end. It does not
+read on to count violations it will not show, and the next call continues right after the last record this one read, so no
+record is read twice. `checked` reports, per collection, how many records this call read against how many the collection
+holds; `progress` (stored data only) is `{ "checked", "total" }`: **`checked` is the number of records THIS call read — add
+it up over your pages, and it reaches `total` when the walk ends** — and `total` is the space's record count when the check
+started, taken from the collections' metadata, so a space that grows while you page can read above 100%.
+`complete` is `true` only when the walk reached its end, and then `nextAfter` is absent. **While records are left the answer
+carries `nextAfter`: send it back as `after` for the next page.** A page that filled its `limit` exactly on the last
+violating record still carries `nextAfter`, and the next page is empty and `complete`. A clean answer with `complete: false` is a
+clean answer for the records read so far — not for the space. This is the server's one `after` / `nextAfter` keyset
+spelling; the `skip`, `count`, `total`, `nextSkip` and `totalViolations` fields this answer carried before 5.7.0 are gone,
+and `limit` and `after` are taken in the body only.
+
+**It is held to a byte budget**, as every read is (`maxChars`, `maxBytes`, `maxTokens` above): rows are cut to whole
+violating records, the answer discloses `budgetChars`, `budgetBytes`, `charsReturned`, `bytesReturned`, and `truncated` is
+`true` when the budget — not `limit` — ended the page (`budgetBoundBy` names the parameter to raise). The page always holds
+its first violating record, however large. The cut continues by `nextAfter`, and `progress.checked` stops at the record before
+the one that did not fit.
 
 **What it shows whom.** The stored value of the property that broke the schema is shown only to a caller who may read
 the space's knowledge (`knowledge` `read`, or an instance administrator): any other caller gets each row with its
@@ -365,9 +378,10 @@ counted nor serialised. Rights: `schema` `read` on both doors; audited as `space
 **`staleGuards` lists the stored edges that hold a write guard for a subject they are not under**, as
 `[{ _id, label }]` (`[]` when there are none). The write guard is the instance's own lock on a functional label's
 subject: it is never returned by a read, sent to a peer or exported, and it is not part of the schema. An edge holding
-one for another subject does not break any rule, so it is **never a violation** — it is not in `violations` and not
-in `totalViolations`, which mean what they always did — and it is not paged. The first write that meets such a guard
-clears it and goes on to land, so the list is how to see them before a write does.
+one for another subject does not break any rule, so it is **never a violation** — it is not in `violations`, which means
+what it always did. The list is that of the edges **among the records this call read**, at most `limit`, held to the byte
+budget with the violations; a page that holds `limit` guards ends there, so a guard is named once across the pages. The
+first write that meets such a guard clears it and goes on to land, so the list is how to see them before a write does.
 
 ---
 

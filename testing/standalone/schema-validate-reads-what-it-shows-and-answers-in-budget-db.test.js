@@ -104,4 +104,116 @@ describe('the stored-data schema check reads what it shows and answers within a 
       assert.equal(mcp.text.replace(/^Error:\s*/, ''), rest.body.error, 'the tool\'s text is not the REST error');
     });
   });
+
+  describe('P1: a page stops reading when it is full, and `progress` sums to the space', () => {
+    const TOTAL = 1250;
+    for (const [door, run] of Object.entries(DOORS)) {
+      it(`${door}: limit 100 over ${TOTAL} records (625 violating, more than one read page) reads up to the last returned one, and the pages sum to ${TOTAL}`, async () => {
+        await edges().deleteMany({});
+        await entities().deleteMany({});
+        await entities().insertMany(Array.from({ length: TOTAL }, (_, k) => entity(k + 1, { b: (k + 1) % 2 === 0 ? 500 : 5 })));
+
+        // A budget no page reaches, so it is `limit` that ends each page: the MCP default (25 000, half per carriage) holds ~70 of these rows.
+        const pages = await pageThrough(run, { meta: PROPOSED, limit: 100, maxChars: 1_000_000 });
+        const first = pages[0];
+        const lastOfFirst = first.violations.at(-1)._id;
+        const upToLast = Number(lastOfFirst.slice(-12));
+        assert.equal(first.violations.length, 100, `fixture: the first page is not full: ${first.violations.length}`);
+        assert.ok(first.progress.checked <= upToLast,
+          `${door}: page 1 reports ${first.progress.checked} records read, more than the ${upToLast} up to its last returned record: it read on to count violations it did not show`);
+        assert.equal(first.progress.total, TOTAL, `${door}: progress.total is not the space's record count`);
+        assert.ok(!('totalViolations' in first), `${door}: \`totalViolations\` is still answered`);
+        assert.equal(first.complete, false);
+
+        let sum = 0;
+        const seen = [];
+        for (const p of pages) {
+          assert.ok(!('totalViolations' in p), `${door}: \`totalViolations\` is still answered`);
+          assert.ok(p.violations.length <= 100, `${door}: a page holds ${p.violations.length} records`);
+          sum += p.progress.checked;
+          seen.push(...p.violations.map(v => v._id));
+        }
+        assert.equal(sum, TOTAL, `${door}: the pages' progress.checked sums to ${sum}, not ${TOTAL}: a record was read on two pages or never`);
+        assert.equal(new Set(seen).size, seen.length, `${door}: a violating record came back on two pages`);
+        assert.equal(seen.length, TOTAL / 2, `${door}: ${seen.length} violating records came back of ${TOTAL / 2}`);
+        assert.equal(pages.at(-1).complete, true);
+        assert.equal(pages.at(-1).nextAfter, undefined);
+      });
+    }
+
+    it('`total` is the count when the check started, from the collection metadata: the answer carries it on both doors alike', async () => {
+      // One after the other: a space runs one stored-data check at a time, and a second at once is a 409.
+      const rest = await viaRest({ meta: PROPOSED, limit: 3 });
+      const mcp = await viaMcp({ meta: PROPOSED, limit: 3 });
+      assert.equal(rest.status, 200, rest.text.slice(0, 200));
+      assert.equal(mcp.status, 200, mcp.text.slice(0, 200));
+      assert.deepEqual(mcp.body.progress, rest.body.progress, 'the two doors answer different progress for one first page');
+      assert.deepEqual(Object.keys(rest.body.progress).sort(), ['checked', 'total']);
+    });
+  });
+
+  describe('P2: the answer is held to a budget on both doors, and a guard is reported once', () => {
+    const N = 40;
+    const seedBig = async () => {
+      await edges().deleteMany({});
+      await entities().deleteMany({});
+      await entities().insertMany(Array.from({ length: N }, (_, k) => entity(k + 1, { b: 'y'.repeat(3000) })));
+    };
+
+    for (const [door, run, budget] of [['REST', viaRest, 50_000], ['MCP', viaMcp, 25_000]]) {
+      it(`${door}: the default budget (${budget}) holds the answer, discloses the number used, and paging loses and repeats nothing`, async () => {
+        await seedBig();
+        const first = await run({ meta: UNDECLARED });
+        assert.equal(first.refused, false, first.text.slice(0, 300));
+        assert.equal(first.body.budgetChars, budget, `${door}: the budget it says it used`);
+        assert.equal(first.body.truncated, true, `${door}: ${N} records of 3 KB went out whole, past the budget`);
+        assert.ok(first.text.length <= budget, `${door}: the answer is ${first.text.length} characters, over its ${budget} budget`);
+        assert.equal(typeof first.body.nextAfter, 'string', `${door}: a page cut by the budget has no \`nextAfter\``);
+        assert.equal(first.body.complete, false);
+        assert.ok(first.body.violations.length >= 1 && first.body.violations.length < N);
+
+        const pages = await pageThrough(run, { meta: UNDECLARED });
+        const seen = pages.flatMap(p => p.violations.map(v => v._id));
+        assert.equal(seen.length, N, `${door}: ${seen.length} of ${N} violating records came back`);
+        assert.equal(new Set(seen).size, N, `${door}: a record came back on two pages`);
+        assert.equal(pages.reduce((n, p) => n + p.progress.checked, 0), N, `${door}: the pages' checked does not sum to the space`);
+      });
+    }
+
+    it('both doors take the same size parameters: a stated maxChars is honoured as stated, and a bad one is the same 400', async () => {
+      await seedBig();
+      for (const [door, run] of Object.entries(DOORS)) {
+        const small = await run({ meta: UNDECLARED, maxChars: 1000 });
+        assert.equal(small.refused, false, small.text.slice(0, 300));
+        assert.equal(small.body.budgetChars, 1000, `${door}: the stated budget is not the one disclosed`);
+        assert.equal(small.body.violations.length, 1, `${door}: a 1000-character budget holds one whole record (the first always fits)`);
+        const bytes = await run({ meta: UNDECLARED, maxBytes: 20_000 });
+        assert.equal(bytes.body.budgetBytes, 20_000, `${door}: maxBytes is not disclosed`);
+        const tokens = await run({ meta: UNDECLARED, maxTokens: 2000 });
+        assert.equal(tokens.body.budgetChars, 7000, `${door}: maxTokens is not converted`);
+      }
+      const [r, m] = [await viaRest({ meta: UNDECLARED, maxChars: 'many' }), await viaMcp({ meta: UNDECLARED, maxChars: 'many' })];
+      assert.equal(r.status, 400, r.text.slice(0, 200));
+      assert.equal(m.status, 400, m.text.slice(0, 200));
+      assert.equal(m.text.replace(/^Error:\s*/, ''), r.body.error, 'the doors refuse a bad budget in different words');
+    });
+
+    for (const [door, run] of Object.entries(DOORS)) {
+      it(`${door}: \`staleGuards\` is cut to the page and a guard is named once across pages`, async () => {
+        await edges().deleteMany({});
+        await entities().deleteMany({});
+        const GUARDS = 30;
+        await edges().insertMany(Array.from({ length: GUARDS }, (_, k) => edge(k + 1, { _functionalGuard: `not-this-edge-${k}` })));
+        const pages = await pageThrough(run, { meta: UNDECLARED, limit: 5 });
+        const named = [];
+        for (const p of pages) {
+          assert.ok((p.staleGuards ?? []).length <= 5, `${door}: a page of limit 5 names ${(p.staleGuards ?? []).length} guards`);
+          named.push(...(p.staleGuards ?? []).map(g => g._id));
+        }
+        assert.equal(named.length, GUARDS, `${door}: ${named.length} guards named across the pages, ${GUARDS} are stale`);
+        assert.equal(new Set(named).size, GUARDS, `${door}: a stale guard was named on two pages`);
+        assert.ok(pages.length >= GUARDS / 5, `${door}: the guards did not page (${pages.length} pages)`);
+      });
+    }
+  });
 });

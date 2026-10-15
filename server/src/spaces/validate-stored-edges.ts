@@ -53,7 +53,7 @@ export const STORED_EDGE_PROJECTION = {
  * Is this edge's write guard one it should not hold? A guard is `functionalSubjectKey(from, label)` or absent, so one that
  * is a string and is anything else is a PHANTOM: it holds a subject's unique slot for an edge that is not under it. Reported
  * as its own list and never as a schema violation — the schema did not break, an index entry outlived its edge — so
- * `totalViolations` means what it meant before the guard existed.
+ * `violations` means what it meant before the guard existed.
  */
 function staleGuardOf(e: StoredEdge): StaleGuard | null {
   const guard = e._functionalGuard;

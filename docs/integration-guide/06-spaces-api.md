@@ -498,7 +498,7 @@ Update space properties. Requires an admin token (+ TOTP if MFA is enabled). At 
 
 **`POST :id/validate-schema` answers `staleGuards` beside `violations`**: `[{ _id, label }]`, the stored edges that
 hold a write guard for a subject they are not under (the guard is this instance's own lock on a functional label's
-subject, and no read returns it). They are not schema violations, so `violations` and `totalViolations` are unchanged.
+subject, and no read returns it). They are not schema violations, so `violations` is unchanged.
 It checks one record you send (`sample`) or the stored data, and pages by `after` / `nextAfter`.
 See [Validate Schema](06a-schema-api.md#validate-schema-dry-run).
 

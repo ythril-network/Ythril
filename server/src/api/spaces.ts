@@ -689,6 +689,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     body: req.body ?? {},
     canReadValues: mayReadStoredValues(rights, id),
     callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',
+    transport: 'rest',
   });
   if (outcome.status !== 200) { res.status(outcome.status).json(outcome.body ?? { error: outcome.error }); return; }
   const { spaceId, ...answer } = outcome.answer;

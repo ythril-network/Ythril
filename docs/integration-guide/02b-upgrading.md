@@ -63,8 +63,7 @@ one. Four things an integrator can see:
 - **A second edge to the same `to` of another kind is now refused.** "Another edge" is one of a different identity
   (`to` and both kinds); the check used to count distinct `to` values. It needs one id held by two kinds of record, so it
   is rare, and a second edge already stored is not touched.
-- **`POST /api/spaces/:id/validate-schema` answers a new key, `staleGuards`**, beside `violations` and `totalViolations`,
-  which are unchanged.
+- **`POST /api/spaces/:id/validate-schema` answers a new key, `staleGuards`**, beside `violations`, which is unchanged.
 - **A relabel onto an identity another edge holds answers `409 edge_identity_taken`** on the in-place path too, where it
   answered `500`.
 - **A restore rebuilds the edge indexes before maintenance mode ends**, and `POST /api/admin/data/restore` answers
@@ -214,8 +213,9 @@ The contract is in the [schema guide](06a-schema-api.md); what an integrator or 
   refusal body (`introduced`, `preExisting`, …), was `{ error, violations }`, still `400`; a bulk row carries `violation`.
 - **A body that fails validation answers `{ "error", "issues" }`** and never reflects a received value; `error` is bounded
   prose, no longer a JSON document. Match on `issues[].code` and `path`, not on the old sentence.
-- **`POST /api/spaces/:id/validate-schema` pages by `after` / `nextAfter`**: `skip`, `count`, `total`, `truncated` and `nextSkip`
-  are gone, `limit` and `after` are body parameters, one call reads at most 10,000 records, and a stored `value` is shown only to a
+- **`POST /api/spaces/:id/validate-schema` pages by `after` / `nextAfter`**: `skip`, `count`, `total`, `truncated`, `nextSkip` and `totalViolations`
+  are gone (a call stops reading when its page holds `limit` violating records, so it no longer counts the ones it does not show;
+  `progress.checked` is what that call read), `limit` and `after` are body parameters, one call reads at most 10,000 records, and a stored `value` is shown only to a
   caller who may read the space's knowledge. It also takes `sample` (one record) and is MCP `schema_validate`.
 - **MCP write tools answer `warnings`** where `save_edge` answered `violations` on success, `save_entity`, `save_fact` and
   `save_chrono` gain it, and `save_chrono` answers its entry as structured content. A refused write tool call is a row in
