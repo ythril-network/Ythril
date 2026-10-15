@@ -667,7 +667,9 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
  * another" — `/meta`, same area and one call apart, honoured the rung and answered 200.
  *
  * A DRY RUN is the right thing to sit at `read`: it writes nothing, stores nothing and reports what would
- * be refused.
+ * be refused. The one thing a reader may not do is RUN rules it could not save: a `sample` with a proposed `meta` whose
+ * rules differ from the stored ones is a 403 (`refusalOfUnsavableRules`, inside the door module), because a rule is
+ * evaluated on the event loop and a sample is not on the heavy-call rail.
  *
  * **The second factor STAYS.** `space-admin-reaches-its-own-space-settings.test.js` pins MFA on the widened
  * routes as deliberate, the reported defect is the rung rather than the factor, and loosening more than was
@@ -681,13 +683,13 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
    * and the single flight. This door adds what it has always answered in stored mode: the meta it checked (the MCP tool never echoes
    * it). The dynamic import keeps the validators out of this module's load, as the inline scan's import did.
    */
-  const { beginSchemaValidate, mayReadStoredValues } = await import('../spaces/schema-validate-door.js');
+  const { beginSchemaValidate } = await import('../spaces/schema-validate-door.js');
   const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
   const outcome = await beginSchemaValidate({
     spaceId: id,
     memberIds: memberSpacesForRequest(req, id),
     body: req.body ?? {},
-    canReadValues: mayReadStoredValues(rights, id),
+    rights,
     callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',
     transport: 'rest',
   });

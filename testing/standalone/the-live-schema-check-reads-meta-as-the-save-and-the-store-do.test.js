@@ -22,7 +22,7 @@
  */
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { scratchEnv, resetConfig } from './_cel-doors.mjs';
+import { scratchEnv, resetConfig, adminRights } from './_cel-doors.mjs';
 
 // Before anything imports the server: the loader reads CONFIG_PATH when it is first imported.
 const scratch = scratchEnv('ythril-live-check-meta-');
@@ -39,7 +39,7 @@ const sampleOf = (b) => ({ sample: { kind: 'entity', record: { name: 'Acme', typ
 
 async function check(storedMeta, body) {
   await resetConfig(scratch.configPath, { spaces: [{ id: SPACE, label: SPACE, builtIn: false, folders: [], meta: storedMeta }] });
-  return beginSchemaValidate({ spaceId: SPACE, memberIds: [SPACE], body, canReadValues: true, callerKey: 'test' });
+  return beginSchemaValidate({ spaceId: SPACE, memberIds: [SPACE], body, rights: await adminRights(), callerKey: 'test' });
 }
 
 describe('the stored meta is read as a store reads what it holds', () => {

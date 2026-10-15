@@ -14,7 +14,7 @@
  * call twice.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { beginSchemaValidate, mayReadStoredValues, SCHEMA_VALIDATE_MAX_LIMIT, SCHEMA_VALIDATE_CURSOR_MAX, SCHEMA_VALIDATE_SCAN_BOUND } from '../../spaces/schema-validate-door.js';
+import { beginSchemaValidate, SCHEMA_VALIDATE_MAX_LIMIT, SCHEMA_VALIDATE_CURSOR_MAX, SCHEMA_VALIDATE_SCAN_BOUND } from '../../spaces/schema-validate-door.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
@@ -25,7 +25,9 @@ export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
   description: 'Check a schema against records without writing anything — the space\'s stored schema, or one you propose in `meta` '
     + '(parsed exactly as a schema save would parse it, so a rule the save would refuse is refused here in the same words). '
-    + 'Needs the `read` rung on the `schema` area of the space.\n\n'
+    + 'Needs the `read` rung on the `schema` area of the space — and a `sample` that runs rules in a proposed `meta` needs the right to '
+    + 'SAVE those rules (`admin` on `schema`): a sample runs only the stored rules, or rules you could save, and is otherwise refused '
+    + '(403) naming each rule field and what it needs. A proposed `meta` whose rules equal the stored ones is not a change of them.\n\n'
     + 'TWO MODES. With `sample: { kind, record }` the schema is run over ONE record you supply — `kind` is entity, edge, fact or '
     + 'chrono, `record` in the stored shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, '
     + 'with `type`, `description`, `tags`, `properties`) — and nothing stored is read: the quick way to try a rule. Without `sample` '
@@ -98,7 +100,7 @@ export const schema_validateTool: ToolHandler = {
       spaceId: ctx.callSpace,
       memberIds: memberSpacesWithin(ctx.callSpace, ctx.accessibleSpaceIds),
       body,
-      canReadValues: mayReadStoredValues(ctx.rights, ctx.callSpace),
+      rights: ctx.rights,
       callerKey: ctx.rateKey,
       // The door that received the call, as every budgeted tool reads it: a tool is also served as `POST /api/schema_validate`.
       transport: ctx.transport,

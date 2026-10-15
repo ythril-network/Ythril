@@ -7,8 +7,8 @@
  * ## The two modes
  *
  * - **sample** (`sample: { kind, record }`): the meta (the caller's proposed one, or the stored one) run over ONE record the caller
- *   typed, in the stored shape `recordViewOf` takes. Nothing stored is read, so it costs one evaluation and asks no right beyond the
- *   route's: the record is the caller's own.
+ *   typed, in the stored shape `recordViewOf` takes. Nothing stored is read, so it costs one evaluation and the record needs no right
+ *   beyond the route's: it is the caller's own. The RULES it runs are another matter (see below).
  * - **stored data** (no `sample`): the meta run over the space's stored records, a page at a time.
  *
  * ## What it prevents
@@ -27,6 +27,11 @@
  * - **An answer nobody can carry.** Rows go through the byte budget (`brain/result-budget.ts`) like every other read: `maxChars` /
  *   `maxBytes` / `maxTokens`, a door default (the one sanctioned divergence: lower on MCP), the number used disclosed, whole rows only
  *   and the cut continued by `nextAfter`.
+ * - **A reader that blocks the server with a rule it could not save.** A sample evaluates a PROPOSED meta at `schema: read`, on the
+ *   event loop and off the heavy-call rail; the heaviest rule set a save accepts takes about half a second on one record. A sample
+ *   therefore runs only rules its caller could save (`refusalOfUnsavableRules`): a proposed meta whose rules differ from the stored
+ *   ones is a 403 naming each rule field and what it needs, decided by the rights table; the stored rules, or a proposed meta that
+ *   carries them unchanged (what the UI sends), stay open to a reader.
  * - **A check that stalls the server.** The stored-data check is priced like the ingest (`consumeHeavyToolCall`, one count per token
  *   across both doors) and runs once per space at a time; it yields to the event loop after every page. A refusal costs no slot.
  */
@@ -42,7 +47,10 @@ import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { refusalOfParse } from '../util/log.js';
+import { isDeepStrictEqual } from 'node:util';
 import { holdsRung } from '../auth/reachable-spaces.js';
+import { describeFieldRequirement, refusalsForSpaceUpdate, typeRuleEditsIn } from '../auth/space-field-rights.js';
+import { isPlainObject } from '../util/plain-object.js';
 import { viewSourceProjection, type ViewKind } from '../brain/record-view.js';
 import { boundedRows } from '../brain/write-validation.js';
 import {
@@ -116,11 +124,64 @@ export interface SchemaValidateAnswer {
 export type SchemaValidateOutcome =
   | { status: 200; answer: SchemaValidateAnswer; mode: 'sample' | 'stored'; meta: SpaceMeta }
   /** A refusal. `body` is the whole answer where it has structure — a failed parse's `{ error, issues }` — which both doors send as it is. */
-  | { status: 400 | 404 | 409 | 429; error: string; body?: Readonly<Record<string, unknown>> };
+  | { status: 400 | 403 | 404 | 409 | 429; error: string; body?: Readonly<Record<string, unknown>> };
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const SCHEMA_VALIDATE_RATE_LIMITED = `the stored-data schema check is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
   + 'counted across the REST route and the tool; try again shortly (a sample check is not limited)';
+
+/** The types' rules a proposed meta holds, as `meta.typeSchemas.<kind>.<type>.rules` -> the rules, for comparing with another meta's. */
+function typeRulesOf(meta: unknown): Map<string, unknown> {
+  const out = new Map<string, unknown>();
+  const types = isPlainObject(meta) && isPlainObject(meta['typeSchemas']) ? meta['typeSchemas'] : {};
+  for (const [kind, defs] of Object.entries(types)) {
+    for (const [type, def] of Object.entries(isPlainObject(defs) ? defs : {})) {
+      out.set(`meta.typeSchemas.${kind}.${type}.rules`, isPlainObject(def) && isPlainObject(def['rules']) ? def['rules'] : {});
+    }
+  }
+  return out;
+}
+const spaceRulesOf = (meta: unknown): unknown => (isPlainObject(meta) && isPlainObject(meta['rules']) ? meta['rules'] : {});
+
+/**
+ * The rule fields a PROPOSED meta changes against what the space stores, as the save prices them (`meta.rules`, and
+ * `meta.typeSchemas.<kind>.<type>.rules` per type) — the proposed meta being a whole one that replaces the stored one.
+ *
+ * What the space stores is its effective meta (`space.meta`, the network layers' rules included) AND its own definitions
+ * (`space.ownMeta`): a rule equal to either is a rule the space already holds, so a reader who sends back the whole meta it was
+ * shown is not asked for a right it does not need. Rules are compared as content: absent and empty say the same.
+ */
+function ruleEditsAgainstStored(space: { id: string; meta?: SpaceMeta; ownMeta?: SpaceMeta }, proposed: SpaceMeta): string[] {
+  const holds: SpaceMeta[] = [space.meta ?? {}, ...(space.ownMeta ? [space.ownMeta] : [])];
+  const proposedTypeRules = typeRulesOf(proposed);
+  // `typeRuleEditsIn` compares with the own definitions; a rule the effective meta holds is not an edit either.
+  const edits = typeRuleEditsIn({ meta: proposed, typeSchemasMode: 'replace' }, space.id)
+    .filter(field => !holds.some(m => isDeepStrictEqual(proposedTypeRules.get(field) ?? {}, typeRulesOf(m).get(field) ?? {})));
+  if (!holds.some(m => isDeepStrictEqual(spaceRulesOf(proposed), spaceRulesOf(m)))) edits.unshift('meta.rules');
+  return edits;
+}
+
+/**
+ * The sentence a caller gets for running rules it could not save, naming each rule field and what it needs — decided by the rights
+ * table (`refusalsForSpaceUpdate`, over exactly the rule fields the proposed meta changes) and worded by `describeFieldRequirement`,
+ * so a rung is never spelled here. `null` when the caller may run them.
+ */
+export function refusalOfUnsavableRules(
+  space: { id: string; meta?: SpaceMeta; ownMeta?: SpaceMeta }, proposed: SpaceMeta, rights: TokenRights | null | undefined,
+): string | null {
+  const edits = ruleEditsAgainstStored(space, proposed);
+  if (edits.length === 0) return null;
+  // Everything `refusalsForSpaceUpdate` prices in the whole meta is asked, and only the rule fields are kept: a sample check writes
+  // nothing, so the rest of a whole meta (its shape, its enforcement) is not the caller's to answer for here.
+  // `rules` is named even when the proposed meta leaves it out: a whole meta without them REPLACES the stored ones with none, and
+  // an update body is priced only for the keys it names.
+  const refused = refusalsForSpaceUpdate(
+    { meta: { ...proposed, rules: proposed.rules ?? {} }, typeSchemasMode: 'replace' }, space.id, !!rights?.instanceAdmin, rights,
+  ).filter(field => edits.includes(field));
+  if (refused.length === 0) return null;
+  return `A sample check runs only the rules its caller could save, and this one would run rules it could not: ${refused.map(describeFieldRequirement).join(', ')}. `
+    + 'Sample with the stored rules, or ask for the right to change them.';
+}
 
 /** Whether `rights` may see the stored values of `spaceId`'s records: `knowledge: read`, or an instance administrator. */
 export function mayReadStoredValues(rights: TokenRights | null | undefined, spaceId: string): boolean {
@@ -166,14 +227,17 @@ function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null
  *
  * @param memberIds      the spaces to read, as each door narrows a proxy (REST by request, MCP by the connection's reach)
  * @param body           the caller's arguments — any value; refused here when it is not that shape
- * @param canReadValues  whether the caller may see stored values ({@link mayReadStoredValues})
+ * @param rights         the caller's rights — a REQUIRED key, so a door cannot leave it out: they decide whether it may see stored
+ *                       values ({@link mayReadStoredValues}) and whether a sample may run the rules of a proposed meta
+ *                       ({@link refusalOfUnsavableRules}). `null` / `undefined` is a caller with none.
  * @param callerKey      who the rail counts against: the calling token's id, or its address when it has none
  * @param transport      the door, which decides the byte budget's default and how many times it carries the answer
  */
 export async function beginSchemaValidate(input: {
-  spaceId: string; memberIds: string[]; body: unknown; canReadValues: boolean; callerKey: string; transport: 'mcp' | 'rest';
+  spaceId: string; memberIds: string[]; body: unknown; rights: TokenRights | null | undefined; callerKey: string; transport: 'mcp' | 'rest';
 }): Promise<SchemaValidateOutcome> {
-  const { spaceId, memberIds, canReadValues, callerKey, transport } = input;
+  const { spaceId, memberIds, rights, callerKey, transport } = input;
+  const canReadValues = mayReadStoredValues(rights, spaceId);
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
   const parsed = SchemaValidateBody.safeParse(input.body ?? {});
@@ -198,6 +262,13 @@ export async function beginSchemaValidate(input: {
     const proposed = parseSpaceMeta(parsed.data.meta);
     if (!proposed.ok) return { status: 400, error: proposed.message };
     meta = proposed.meta as SpaceMeta;
+    // A sample runs the proposed rules synchronously and is not on the heavy-call rail, so it may run only rules the caller could
+    // save: the price of a rule is paid by the right to write one. After the parse, so a meta the save would refuse is refused in
+    // the save's words first.
+    if (sample) {
+      const unsavable = refusalOfUnsavableRules(space, meta, rights);
+      if (unsavable !== null) return { status: 403, error: unsavable };
+    }
   } else {
     meta = readStoredMeta(space.meta ?? {}).meta as SpaceMeta;
   }

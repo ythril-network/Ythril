@@ -106,7 +106,7 @@ const valuesIn = (answer) => {
 };
 
 describe('the live check of a schema answers alike on both doors', { skip }, () => {
-  let schemaReader, schemaAndKnowledgeReader;
+  let schemaAdmin, schemaReader, schemaAndKnowledgeReader;
 
   before(async () => {
     mongo = await openTestMongo('valdoors');
@@ -115,6 +115,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
     const { spacesRouter } = await import('../../server/dist/api/spaces.js');
     restValidate = routeOf(spacesRouter, 'post', '/:id/validate-schema');
     schemaReader = await rightsAt(SPACE, { schema: 'read' });
+    schemaAdmin = await rightsAt(SPACE, { schema: 'admin' });
     schemaAndKnowledgeReader = await rightsAt(SPACE, { schema: 'read', knowledge: 'read' });
   });
   after(async () => { await closeTestMongo(); scratch.cleanup(); });
@@ -125,12 +126,12 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
 
     for (const [door, run] of Object.entries(DOORS)) {
       it(`${door}: a record that breaks the rule answers the rule, one that holds answers nothing, no stored record is in either answer`, async () => {
-        const broken = await run(schemaReader, sample({ b: 500 }));
+        const broken = await run(schemaAdmin, sample({ b: 500 }));
         assert.equal(broken.refused, false, `${door} refused a sample check: ${broken.text.slice(0, 300)}`);
         const rows = violationRows(broken.body).filter(r => r.field === 'rules.below');
         assert.equal(rows.length, 1, `${door}: expected one row for rules.below, got ${JSON.stringify(violationRows(broken.body))}`);
         assert.ok(rows[0].reason.startsWith(BELOW), `${door}: the reason does not lead with the rule's message: ${rows[0].reason}`);
-        const fine = await run(schemaReader, sample({ b: 5 }));
+        const fine = await run(schemaAdmin, sample({ b: 5 }));
         assert.equal(fine.refused, false, fine.text.slice(0, 300));
         assert.deepEqual(violationRows(fine.body), [], `${door}: a record that holds the rule has rows: ${fine.text.slice(0, 300)}`);
         for (const a of [broken, fine]) {
@@ -139,7 +140,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
       });
 
       it(`${door}: the meta the caller sent is not echoed back`, async () => {
-        const a = await run(schemaReader, sample({ b: 500 }));
+        const a = await run(schemaAdmin, sample({ b: 500 }));
         assert.equal(a.refused, false, a.text.slice(0, 300));
         assert.ok(!('meta' in (a.body ?? {})), `${door} echoed the meta it was sent`);
         assert.doesNotMatch(a.text, /self\.properties\.b < 100\.0/, `${door} sent the rule text back to the caller who wrote it`);
@@ -147,7 +148,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
     }
 
     it('the two doors give the same rows for the same record, and the same refusal for a kind that is not one', async () => {
-      const [rest, mcp] = await Promise.all([viaRest(schemaReader, sample({ b: 500 })), viaMcp(schemaReader, sample({ b: 500 }))]);
+      const [rest, mcp] = await Promise.all([viaRest(schemaAdmin, sample({ b: 500 })), viaMcp(schemaAdmin, sample({ b: 500 }))]);
       assert.ok(violationRows(rest.body).some(r => r.field === 'rules.below'), `REST gave no row for the rule (two refusals would also be "the same"): ${rest.text.slice(0, 200)}`);
       assert.ok(violationRows(mcp.body).some(r => r.field === 'rules.below'), `schema_validate gave no row for the rule: ${mcp.text.slice(0, 200)}`);
       assert.deepEqual(violationRows(mcp.body), violationRows(rest.body), 'the two doors judge one record differently');
@@ -157,10 +158,17 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
       assert.equal(m2.refused, true, 'schema_validate checked a sample of a kind rules do not govern');
     });
 
-    it('a sample is a view of the schema: schema:read is all it asks, knowledge:none notwithstanding', async () => {
+    it('a sample is a view of the schema: schema:read is all it asks of the stored rules, knowledge:none notwithstanding; running a rule it could not save is refused', async () => {
+      const record = { sample: sample({ b: 500 }).sample };
+      // The rules the reader leaves as stored (none here): a proposed meta that differs elsewhere is still a view.
+      const unchangedRules = { validationMode: 'strict', typeSchemas: typeSchemasOf('entity', 'thing', undefined) };
       for (const [door, run] of Object.entries(DOORS)) {
-        const a = await run(schemaReader, sample({ b: 500 }));
-        assert.equal(a.refused, false, `${door} refused a schema reader a check of a record the reader typed: ${a.text.slice(0, 300)}`);
+        for (const [what, body] of [['the stored meta', record], ['a proposed meta with the rules as stored', { meta: unchangedRules, ...record }]]) {
+          const a = await run(schemaReader, body);
+          assert.equal(a.refused, false, `${door} refused a schema reader a check of a record the reader typed against ${what}: ${a.text.slice(0, 300)}`);
+        }
+        const withRule = await run(schemaReader, sample({ b: 500 }));
+        assert.equal(withRule.status, 403, `${door} ran a rule a schema reader could not save: ${withRule.text.slice(0, 300)}`);
       }
     });
   });
@@ -252,7 +260,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
   describe('schema_validate does not echo the meta it was sent', () => {
     it('stored-data mode and sample mode both answer without a `meta` key', async () => {
       const stored = await viaMcp(schemaReader, { meta: PROPOSED, limit: 3 });
-      const sampled = await viaMcp(schemaReader, { meta: PROPOSED, sample: { kind: 'entity', record: { name: 'x', type: 'thing', properties: { b: 500 } } } });
+      const sampled = await viaMcp(schemaAdmin, { meta: PROPOSED, sample: { kind: 'entity', record: { name: 'x', type: 'thing', properties: { b: 500 } } } });
       for (const [what, a] of [['stored', stored], ['sample', sampled]]) {
         assert.equal(a.refused, false, `${what}: ${a.text.slice(0, 300)}`);
         assert.ok(!('meta' in (a.body ?? {})), `${what} mode echoed the meta`);

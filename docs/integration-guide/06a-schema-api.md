@@ -280,7 +280,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 | Parameter | Meaning |
 |---|---|
 | `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`). Omit it to check the space's stored schema |
-| `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited |
+| `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited — **so it runs only rules you could save**: a `sample` with a `meta` whose rules (`rules`, or any type's `rules`) differ from the stored ones needs `admin` on `schema`, the right to save them, and is otherwise refused `403` (see *What it costs*) |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
 | `maxChars`, `maxBytes`, `maxTokens` | The size ceilings every budgeted read takes, on a stored-data check: the page is cut to **whole violating records** that fit, and `nextAfter` continues it. **Default `maxChars`: 50 000 on REST, 25 000 on MCP** — the one default the two doors deliberately differ on — and the answer discloses the number it used (`budgetChars`, `budgetBytes`). A value that is not a positive integer is a `400` |
@@ -373,7 +373,18 @@ message. The records are read through a fixed projection, never one a caller nam
 **What it costs.** A stored-data check is counted with the other heavy calls — five runs a minute per token, shared
 between this route and `schema_validate` (`429` beyond it) — and runs once per space at a time (`409` while another
 is running). It yields to the event loop between pages, so it cannot stall the server. A `sample` check is neither
-counted nor serialised. Rights: `schema` `read` on both doors; audited as `space.schema.validate` when the instance logs reads.
+counted nor serialised — and **it is the reason a sample may run only rules you could save**. A rule is evaluated on the event loop, and the
+heaviest rule set a save accepts takes about half a second on one record; at `schema` `read` a sample would let a read-only token
+block the server for most of every minute. So a `sample` whose proposed `meta` changes a rule — a new or changed `meta.rules`
+entry, a new or changed rule on any type, or one left out — is `403` unless the caller holds what saving that rule takes (`admin`
+on `schema`, as `PATCH /api/spaces/:id` asks of `meta.rules` and of a type's `rules`). The answer is one sentence naming each rule
+field and what it needs, the same on REST (`{ "error" }`) and on MCP (the tool's refusal, `Error: …`), for example
+`… could not: meta.rules (admin on schema), meta.typeSchemas.entity.person.rules (admin on schema). Sample with the stored rules, or ask for the right to change them.`
+What stays open to a `schema` `read` token is **the stored rules** (omit `meta`) and **a proposed `meta` whose rules equal the stored
+ones** — rules are compared as content, in any key order, and the effective meta and this instance's own definitions both count as
+stored — whatever else in it differs, because the Schema tab always sends the whole staged meta. A `meta` the save would refuse is
+still `400` first, in the save's words. (The stored-data check, which is counted and serialised, asks no right beyond `read`.)
+Rights: `schema` `read` on both doors, and `admin` on `schema` for a sample of rules you changed; audited as `space.schema.validate` when the instance logs reads.
 
 **`staleGuards` lists the stored edges that hold a write guard for a subject they are not under**, as
 `[{ _id, label }]` (`[]` when there are none). The write guard is the instance's own lock on a functional label's
@@ -692,7 +703,8 @@ refuses the writes its rules govern), the posture check fails and `ythril_schema
 type sent back holding a rule that no longer compiles is refused, so the stored rule is fixed in the same save. (A
 vote round carries only what its proposal changed, and a member judges only that.)
 
-Try a rule before saving it with [`sample` on `validate-schema`](#validate-schema-dry-run) or MCP `schema_validate`.
+Try a rule before saving it with [`sample` on `validate-schema`](#validate-schema-dry-run) or MCP `schema_validate` (a caller who could
+not save the rule is refused the trial, `403`).
 
 ### What arrivals record
 
