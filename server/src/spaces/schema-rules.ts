@@ -32,6 +32,7 @@
  * large to check — the last two value-free. A space whose validation is `off` evaluates nothing.
  */
 import { performance } from 'node:perf_hooks';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type * as CelModule from '@bufbuild/cel';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
@@ -646,6 +647,57 @@ function tooLarge(refs: Refs, self: Record<string, unknown>): string | undefined
 /** The short hash that makes a rule's violation its own: the same text gives the same hash, an edited text a new one. */
 const ruleHash = (text: string): string => sha256Hex(text).slice(0, 8);
 
+/**
+ * What each row {@link evaluateRules} returned read of the record, kept BESIDE the row and not on it: a row is the answer a caller reads
+ * and replicates, and what a rule happens to read is the classifier's business only (`ruleReadsChanged`). A row copied by a caller loses
+ * it, which is why the classification asks the rows the validator itself returned.
+ */
+const rowReads = new WeakMap<SchemaViolation, Refs>();
+
+/** What a record's view says for one top-level field a rule may read, in the spelling the rule uses. */
+function viewField(view: RecordView, name: string): unknown {
+  switch (name) {
+    case 'title': return view.title ?? '';
+    case 'type': return view.type ?? '';
+    case 'label': return view.label ?? '';
+    case 'description': return view.description;
+    case 'tags': return view.tags;
+    case 'properties': return view.properties;
+    default: return undefined;
+  }
+}
+
+/**
+ * Whether the write changed what the rule behind `row` reads (R6-3), or `undefined` when `row` is not a rule's row.
+ *
+ * A rule's identity is `(field, reason)`, so a record that breaks the same rule before and after has not necessarily had the same
+ * break: a write that replaces the very property the rule reads with another value that fails it the same way is a NEW break, and a
+ * record that arrived over sync with a value too large to check must not shelter another one. "Changed" is asked of exactly the paths
+ * the rule reads — the fields it names, the properties whose VALUE it reads, the properties whose PRESENCE it tests, and the whole view
+ * when it reads `self` whole — so an edit of anything else leaves the break the record's own (P-6).
+ *
+ * A row the engine could not read a rule for (the engine itself is down: every rule says it could not be evaluated, before and after)
+ * has no reads to compare, and nothing the write did is its doing.
+ */
+export function ruleReadsChanged(row: SchemaViolation, before: RecordView, after: RecordView): boolean | undefined {
+  if (!/^(meta\.)?rules\./.test(row.field)) return undefined;
+  const refs = rowReads.get(row);
+  if (!refs) return false;
+  const differs = (a: unknown, b: unknown): boolean => !isDeepStrictEqual(a, b);
+  if (refs.whole) {
+    for (const f of ['title', 'type', 'label', 'description', 'tags', 'properties']) if (differs(viewField(before, f), viewField(after, f))) return true;
+    return false;
+  }
+  for (const f of refs.fields) if (differs(viewField(before, f), viewField(after, f))) return true;
+  // Own keys only: a property named like something on `Object.prototype` is not on the record because the prototype has it.
+  const own = (view: RecordView, name: string): unknown => (Object.hasOwn(view.properties, name) ? view.properties[name] : undefined);
+  for (const p of refs.props) {
+    if (Object.hasOwn(before.properties, p) !== Object.hasOwn(after.properties, p) || differs(own(before, p), own(after, p))) return true;
+  }
+  for (const p of refs.presence) if (Object.hasOwn(before.properties, p) !== Object.hasOwn(after.properties, p)) return true;
+  return false;
+}
+
 /** The rows the rules of `meta` give `view`, a `kind` record of type schema `typeSchema` (resolved). Nothing when validation is off. */
 export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView, typeSchema: TypeSchema | undefined): SchemaViolation[] {
   if (meta?.validationMode !== 'warn' && meta?.validationMode !== 'strict') return [];
@@ -663,21 +715,26 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
   const self = engineSelf(kind, view);
   for (const { field, rule, level, declared } of sources) {
     const hash = ruleHash(rule.rule);
-    const say = (what: string): void => { rows.push({ field, value: undefined, reason: `${rule.message} — ${what} (rule ${hash})` }); };
+    const addRow = (reason: string, reads?: Refs): void => {
+      const row: SchemaViolation = { field, value: undefined, reason };
+      if (reads) rowReads.set(row, reads);
+      rows.push(row);
+    };
+    const say = (what: string, reads?: Refs): void => { addRow(`${rule.message} — ${what} (rule ${hash})`, reads); };
     if (!ruleEngineAvailable()) { say('could not be evaluated on this record (the rule engine is not available)'); continue; }
     const program = programFor(kind, level, declared, rule.rule);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
-    if (large) { say(`too large to check: ${large}`); continue; }
+    if (large) { say(`too large to check: ${large}`, program.refs); continue; }
     evaluations++;
     const t0 = performance.now();
     const out = program.run({ self });
     const seconds = (performance.now() - t0) / 1000;
     for (const observe of durationObservers) observe(seconds);
-    if (cel!.isCelError(out)) say(`could not be evaluated on this record (${/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error'})`);
-    else if (typeof out !== 'boolean') say('could not be evaluated on this record (it did not answer true or false)');
-    else if (!out) rows.push({ field, value: undefined, reason: `${rule.message} (rule ${hash})` });
+    if (cel!.isCelError(out)) say(`could not be evaluated on this record (${/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error'})`, program.refs);
+    else if (typeof out !== 'boolean') say('could not be evaluated on this record (it did not answer true or false)', program.refs);
+    else if (!out) addRow(`${rule.message} (rule ${hash})`, program.refs);
   }
   return rows;
 }

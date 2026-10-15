@@ -43,7 +43,7 @@ import {
   parseTypeSchema, withTypeSchemas,
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
-import { requireSettingsFields } from '../auth/require-settings-fields.js';
+import { requireSettingsFields, singleTypeEditBody } from '../auth/require-settings-fields.js';
 import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
@@ -521,7 +521,8 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — upsert a single type definition
-spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
+spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly,
+  requireSettingsFields('id', singleTypeEditBody), async (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {

@@ -232,11 +232,19 @@ export async function computeMergePlan(
     }
   }
 
+  /*
+   * COUNTED FIRST, as the merge is (`executeMerge`, R6-10). A merge that relinks more than `MERGE_MAX_RELINKS` records is refused
+   * whatever the plan says, so reading a hub's edges in full to report which of them would duplicate or break a rule bought a list
+   * nobody can act on and the read the bound exists to prevent: the plan of a merge that cannot run reports neither, and the execution
+   * says why it cannot run (`MergeTooLarge`). The count is `relinkTally`, the one the execution takes.
+   */
+  const refused = relinkTotal(await relinkTally(spaceId, absorbedId)) > MERGE_MAX_RELINKS;
+
   // ── Duplicate edge warnings ───────────────────────────────────────────
-  const duplicateEdgeWarnings = await detectDuplicateEdges(spaceId, survivorId, absorbedId);
+  const duplicateEdgeWarnings = refused ? [] : await detectDuplicateEdges(spaceId, survivorId, absorbedId);
 
   // ── Endpoint / cardinality rules the relink will break ────────────────
-  const endpointRuleWarnings = await detectEndpointRuleBreaks(spaceId, survivor, absorbedId);
+  const endpointRuleWarnings = refused ? [] : await detectEndpointRuleBreaks(spaceId, survivor, absorbedId);
 
   const plan: MergePlan = {
     survivorId,
@@ -671,8 +679,9 @@ interface MergeWrite {
  * edge holds, apply the resolved properties to the survivor, delete the absorbed entity — ONE transaction under the
  * seq horizon hold (`inHeldTransaction`), each class of record one bulk write with one seq block.
  *
- * Before the hold, in this order and for these reasons: the schema check (pure — a refusal writes nothing, not
- * even a seq); the bound (`MERGE_MAX_RELINKS`, counted, so a hub is refused before its edges are read); and the
+ * Before the hold, in this order and for these reasons: the bound (`MERGE_MAX_RELINKS`, counted, so a hub is refused before its
+ * edges are read and before anything is evaluated); the schema check (pure — a refusal writes nothing, not
+ * even a seq); and the
  * survivor's embedding (the model is not the driver, and every await inside the hold holds every reader of the
  * space — a first-time model load inside it used to outlive the hold's deadline and fail the merge 503).
  *
@@ -687,6 +696,17 @@ export async function executeMerge(
 ): Promise<{ entity: EntityDoc; deletedDuplicateEdgeIds: string[] }> {
   const now = new Date().toISOString();
   const mergedTags = mergeTags(survivor.tags, absorbed.tags);
+
+  /*
+   * COUNTED FIRST (R6-10): a merge above the bound is refused before anything is evaluated, so the size of the merge decides nothing a
+   * schema check would have to be run for, and a refusal of the size is never preceded by a rule evaluation of a record it will not write.
+   */
+  const tally = await relinkTally(spaceId, absorbed._id);
+  if (relinkTotal(tally) > MERGE_MAX_RELINKS) {
+    // The other direction is counted only here, on the refusal path, so the refusal offers it only when it is true.
+    const reverseRelinks = relinkTotal(await relinkTally(spaceId, survivor._id));
+    throw new MergeTooLarge({ survivor, absorbed, spaceId, tally, bound: MERGE_MAX_RELINKS, reverseRelinks });
+  }
 
   /*
    * THE MERGE PATH RUNS THE VALIDATORS THE WRITE PATH RUNS. It did not, and nothing noticed.
@@ -721,13 +741,6 @@ export async function executeMerge(
       + `mode so the merge PROCEEDED; these would have been refused on a direct write: `
       + peerList(verdict.warnings.map(v => `${v.field}: ${v.reason}`), '; '),
     );
-  }
-
-  const tally = await relinkTally(spaceId, absorbed._id);
-  if (relinkTotal(tally) > MERGE_MAX_RELINKS) {
-    // The other direction is counted only here, on the refusal path, so the refusal offers it only when it is true.
-    const reverseRelinks = relinkTotal(await relinkTally(spaceId, survivor._id));
-    throw new MergeTooLarge({ survivor, absorbed, spaceId, tally, bound: MERGE_MAX_RELINKS, reverseRelinks });
   }
 
   /*

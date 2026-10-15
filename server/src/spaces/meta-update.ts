@@ -349,7 +349,7 @@ export function planSpaceMetaUpdate(input: {
   // over is safe: `audit-changes.ts` reads only the fields allowlisted for `space.update` and never
   // touches the rest, so this cannot publish something by carrying it. The middleware only records it on
   // a <400 response, so a request rejected above logs no change — which is why every refusal returns before here.
-  const audit = {
+  const scalarAudit = {
     before: { ...space, ...space.meta } as Record<string, unknown>,
     after: { ...space, ...space.meta, ...parsed.data, ...(parsed.data.meta ?? {}) } as Record<string, unknown>,
   };
@@ -413,6 +413,16 @@ export function planSpaceMetaUpdate(input: {
     if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
     mergedMeta = minted.meta;
   }
+  /*
+   * What the audit log says about the schema (R6-13): the types, properties and rules as the edit LEAVES them against what it was merged
+   * over. The body's `typeSchemas` is a fragment (a PATCH names only the types it replaces), so comparing it with the stored map would
+   * record every type it did not mention as removed — the merged result is the after. An edit that carries no meta hands over neither
+   * part, and the summariser reads that as "not touched".
+   */
+  const audit = mergedMeta === undefined ? scalarAudit : {
+    before: { ...scalarAudit.before, typeSchemas: base.typeSchemas ?? {}, rules: base.rules ?? {} },
+    after: { ...scalarAudit.after, typeSchemas: mergedMeta.typeSchemas ?? {}, rules: mergedMeta.rules ?? {} },
+  };
   const changedTypes = typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined);
 
   return {

@@ -51,6 +51,7 @@ import { NAME_QUOTED, peerList, peerText } from '../util/log.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
+import { ruleReadsChanged } from '../spaces/schema-rules.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
@@ -95,14 +96,22 @@ export interface UpdateValidation {
  * `status` replaced by ANOTHER bad `status` is the write's break, where the same bad `status` sent back (a round-tripping editor) or
  * left alone is not. The default says nothing changed, which is what every caller that has no before and after to compare means.
  */
-export interface WriteDelta { changedPath(field: string): boolean }
+export interface WriteDelta { changedPath(row: SchemaViolation): boolean }
 const NOTHING_CHANGED: WriteDelta = { changedPath: () => false };
 
-/** The delta between the record as stored (`null`: nothing, an insert) and as the write leaves it. */
+/**
+ * The delta between the record as stored (`null`: nothing, an insert) and as the write leaves it.
+ *
+ * A schema row is asked about its `field`; a RULE's row (`rules.<name>`, `meta.rules.<name>`) names a rule and not a path, so it is asked
+ * about the paths that rule reads (`ruleReadsChanged`) — the one place that knows them.
+ */
 export function deltaBetween(before: RecordView | null, after: RecordView): WriteDelta {
   if (!before) return { changedPath: () => true };
   return {
-    changedPath(field) {
+    changedPath(row) {
+      const reads = ruleReadsChanged(row, before, after);
+      if (reads !== undefined) return reads;
+      const field = row.field;
       // A property: its VALUE, own keys only — a key named like something on `Object.prototype` is not on the record because the prototype has it.
       if (field.startsWith('properties.')) {
         const name = field.slice('properties.'.length);
@@ -140,7 +149,7 @@ export function classifyUpdateViolations(
   wrote: WriteDelta = NOTHING_CHANGED,
 ): UpdateValidation {
   const before = new Set(beforeViolations.map(key));
-  const introduced = afterViolations.filter(v => !before.has(key(v)) || (!isUndeclaredKey(v) && wrote.changedPath(v.field)));
+  const introduced = afterViolations.filter(v => !before.has(key(v)) || (!isUndeclaredKey(v) && wrote.changedPath(v)));
   const introducedSet = new Set(introduced);
   const preExisting = afterViolations.filter(v => !introducedSet.has(v));
 
