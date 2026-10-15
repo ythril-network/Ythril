@@ -331,6 +331,11 @@ Content-Type: application/json
 `update_file_meta` merges `properties`, so re-asserting the key is safe and idempotent — but with the
 guarantee above you do not have to re-assert it after every write.
 
+The body takes the file's description, tags, properties and links, and nothing else. A field it does not take is
+answered by the space's `unknownWriteFields` setting, as on every brain write: stored with a `warnings` row by default,
+refused on a space set to `refuse`. `linkFiles` is such a field on this route: it is named as unknown on both doors, and
+the write does not store it.
+
 ---
 
 ### Delete a File

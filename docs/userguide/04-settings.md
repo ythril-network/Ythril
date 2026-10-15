@@ -122,6 +122,13 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
   > The message says which is which — *"the change violates…"* versus *"this record was already
   > non-compliant before your change…"* — so you are not sent looking at the wrong field. Validation is of
   > the result, so fixing the named field in any later save repairs the record.
+- **Unknown top-level fields (This instance)** — a control of its own, below the Schema validation bar, because it is not
+  part of the space's shared schema. It answers a top-level field a write does not take, such as a misspelt `descripton`,
+  not an undeclared property of a type (Validation mode's job). *Warn — the write is stored without them and the answer
+  names them*; *Refuse — the write is refused and nothing is stored*. **Refuse** means integrations that send extra fields
+  start getting `400`. The setting applies to this instance only and is **not shared with networks**: each member of a
+  network decides its own. A token without schema admin sees it disabled, with the reason beside it. A proxy space hides
+  it, because each member's own setting governs a write that lands in that member.
 - **Strict linkage** — when on, references between items must be valid IDs of items that exist, and deletion of referenced items is blocked. That covers every link and every edge, including the far end of an edge saved together with its record, whether it points at an entity, a fact, a chrono entry or a file.
 - **Space rules** — under the validation bar, rules that apply to **every** type (*Apply to every type, or to the kinds a rule names*). Each has the same two boxes as a type's rule and **Applies to** checkboxes for the kinds it governs (entity, fact, edge, chrono); *with no kind ticked, the rule applies to every kind* whose record has what the rule reads (`self.title` reaches entities, facts and chrono entries, not edges). A space rule is a rule a record breaks in any type, so saving one needs the Schema right at **admin** — the right that **Validation mode** needs — and a token with only **write** sees them read-only. In a space in a network a space's rules travel with its schema, and **a member on an earlier release refuses a schema that carries rules** until it is upgraded: the save warns which members are behind.
 - **Type schemas** — define per-type rules under each knowledge type (entity, fact, edge, chrono). For each named type you can set:

@@ -215,9 +215,14 @@ may not is refused whole.
 | `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
 | `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
 | `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
+| `unknownWriteFields` (top level) | `schema` **admin** — it makes writes that succeeded start failing; the instance administrator and the space administrator may always set it |
 | `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation — except on a proxy made before 5.0, which the conversion never walks because it holds no records, so it never carries the marker and needs none; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
 | `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
 | `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
+
+**`update_space` on MCP needs the space administrator** for every key it takes, `unknownWriteFields` included; the REST
+`PATCH` prices that key at `schema` admin, as the row above says. A token that may change the setting on REST but not
+through `update_space` is answered by the MCP tool's own refusal.
 
 **A type's rules are priced as `meta.rules`, on every route that can carry one.** The single-type
 `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` is `schema` write, **and `schema` admin when the type's

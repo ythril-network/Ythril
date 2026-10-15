@@ -236,7 +236,11 @@ naming the members whose recorded version is older or unknown** (labels only for
 Upgrade every instance of the network, then set rules. From this release a receiver is a tolerant reader: the next key a
 release adds is named on `space_schema_layers` (`unknownFields`) instead of refusing the layer.
 
+**Upgrading past 5.6.x answers an unknown top-level field on a brain write by a per-space setting, and an MCP write no longer refuses one by default.** The setting, `unknownWriteFields`, is `warn` unless a space is set to `refuse` (`PATCH /api/spaces/:id`, or `update_space`). Under `warn` the write is stored and each unknown field is named in `warnings`, where an MCP call used to be refused. Under `refuse` the write is refused, and so is a uniform option a route does not read (`checkDuplicates` on an update, `ttlDays` on a link) and a GET-then-PATCH that sends server-written keys back. The setting is per instance and is never replicated, so members of a network may answer differently. Read `warnings` on the writes an integration sends, and set `refuse` only where you want refusal.
+
 ## Rolling Back
+
+**A rollback to 5.6.x ignores `unknownWriteFields`.** An older build neither reads nor enforces the setting: a space set to `refuse` warns again on REST, and an unknown argument on MCP is refused again by the tool's schema, whatever the space says. The setting stays in the space configuration and takes effect again on an upgrade.
 
 **A rollback to 5.6.x does not enforce the rules this release stored, and drops a layer that carries them.** `rules` and
 `stampSkew` stay in `config.json` (and `schema-library.json`), and the older build neither reads nor evaluates them: a `strict`

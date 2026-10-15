@@ -329,7 +329,7 @@ here as one made through the API. A **schema check** (`space.schema.validate`) i
 and is *skipped, not enforced* (`space_meta` names it): fix or remove it. `ythril_schema_rule_engine_available` at
 `0` means no rule can be evaluated, so strict spaces refuse the writes their rules govern, and the security posture says so.
 `ythril_schema_refusals_total` counts refused writes by door and outcome; a rising `undeclared` is a client sending a
-property the schema does not declare. `ythril_schema_violations_recorded_total` counts documents from peers or a restore that
+property the schema does not declare. `ythril_unknown_write_fields_total` counts brain writes that carried a top-level field the write does not take, by the space's setting (`warn` or `refuse`) and by whether the write was refused. `ythril_schema_violations_recorded_total` counts documents from peers or a restore that
 were stored carrying what this space's schema does not accept, and `ythril_schema_recorder_failures_total` counts the times that
 recording itself failed (the write still landed). The full list is in
 [Prometheus metrics](../integration-guide/11-setup-api.md#prometheus-metrics).

@@ -521,6 +521,14 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 
 **The body takes those four keys and no others, and a retired name is refused by name.** `{"memories": […]}` — the 4.x spelling — answers `400` naming `facts` as the replacement, and any other unrecognised top-level key answers `400` listing the four that are accepted. The same applies to a retired field **on an item**: `entityIds`, `memoryIds` and `chronoIds` are each refused with their `linkEntities` / `linkFacts` / `linkChronos` replacement.
 
+**Each item's unknown fields are judged as a single write's are, one item at a time.** On a space set to `warn` (the
+default) the item is stored and its `errors[]` row names each unknown field, `unknown_field:` first; up to 10 names per
+item, then `(+N more)`. Across the batch at most **50** unknown-field rows are listed, then one `(+N more items)` row,
+and the accepted list appears once. On a space set to `refuse` the item is not written: it is rejected as the other
+item errors are, dependants that reference it are told why, the other items proceed, and the answer is `207`. An item
+refused for another reason keeps its unknown-field rows. The top level is refused in both modes, as above. See
+[Brain API](04-brain-api.md#a-create-tells-you-which-fields-it-did-not-understand).
+
 **Response** `207`:
 
 ```json
