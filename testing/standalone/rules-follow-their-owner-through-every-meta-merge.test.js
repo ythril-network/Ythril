@@ -148,10 +148,12 @@ describe('a network layer: the network\'s rules for a type win for that type', (
   });
 
   it('the property map of that same type is still unioned: rules are replaced, propertySchemas is the one additive field', () => {
-    const local = metaWith({ types: { service: { propertySchemas: { mine: { type: 'string' } }, rules: rulesMap('mine') } } });
-    const incoming = { typeSchemas: { entity: { service: { propertySchemas: { theirs: { type: 'string' } }, rules: rulesMap('theirs') } } } };
-    const { meta } = mergeReplicatedMeta(local, incoming);
-    assert.deepEqual(Object.keys(meta.typeSchemas.entity.service.propertySchemas).sort(), ['mine', 'theirs']);
+    // Each side declares `a`, which its rules read: a rule on an undeclared property makes the layer invalid, which is not what this case is about.
+    const local = metaWith({ types: { service: { propertySchemas: { a: { type: 'string' }, mine: { type: 'string' } }, rules: rulesMap('mine') } } });
+    const incoming = { typeSchemas: { entity: { service: { propertySchemas: { a: { type: 'string' }, theirs: { type: 'string' } }, rules: rulesMap('theirs') } } } };
+    const { meta, invalid } = mergeReplicatedMeta(local, incoming);
+    assert.equal(invalid, undefined, `the layer was refused: ${invalid}`);
+    assert.deepEqual(Object.keys(meta.typeSchemas.entity.service.propertySchemas).sort(), ['a', 'mine', 'theirs']);
     assert.deepEqual(Object.keys(meta.typeSchemas.entity.service.rules ?? {}), ['theirs']);
   });
 

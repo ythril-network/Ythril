@@ -81,7 +81,10 @@ export interface TabEditor {
   listKey: string;
   createApi: string;
   updateApi: string;
-  /** The BrainStore signal the rows live in, and the tab's two form models. */
+  /**
+   * The BrainStore signal the rows live in, and the tab's two form models.
+   * NOT ALL BRAIN COLLECTIONS — these are the kinds with a record editor and a store list; links have neither.
+   */
   storeList: 'entities' | 'facts' | 'edges' | 'chrono';
   createForm: string;
   editForm: string;

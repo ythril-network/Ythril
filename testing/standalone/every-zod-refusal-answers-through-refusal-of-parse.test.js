@@ -294,10 +294,9 @@ describe('the gate flags what it is meant to flag', () => {
   const fixture = (() => {
     const options = { ...PROGRAM.getCompilerOptions(), noEmit: true };
     const host = ts.createCompilerHost(options);
-    const realGet = host.getSourceFile.bind(host);
     const realExists = host.fileExists.bind(host);
     const realRead = host.readFile.bind(host);
-    host.getSourceFile = (name, lang, ...rest) => (posix(name) === posix(FIXTURE) ? ts.createSourceFile(name, text, lang, true) : realGet(name, lang, ...rest));
+    // No getSourceFile override: the host's own reads the fixture through the readFile below.
     host.fileExists = (name) => posix(name) === posix(FIXTURE) || realExists(name);
     host.readFile = (name) => (posix(name) === posix(FIXTURE) ? text : realRead(name));
     const program = ts.createProgram({ rootNames: [FIXTURE], options, host });

@@ -45,8 +45,7 @@ function diagnosticsOf(source) {
   const real = { getSourceFile: host.getSourceFile.bind(host), fileExists: host.fileExists.bind(host), readFile: host.readFile.bind(host) };
   host.fileExists = (f) => resolve(f) === VIRTUAL || real.fileExists(f);
   host.readFile = (f) => (resolve(f) === VIRTUAL ? source : real.readFile(f));
-  host.getSourceFile = (f, lang, onError, shouldCreate) => (resolve(f) === VIRTUAL
-    ? ts.createSourceFile(f, source, lang, true) : real.getSourceFile(f, lang, onError, shouldCreate));
+  // No getSourceFile override: the host's own reads the virtual file through the readFile above.
   const program = ts.createProgram({ rootNames: [VIRTUAL], options, host });
   return ts.getPreEmitDiagnostics(program)
     .filter(d => d.file && resolve(d.file.fileName) === VIRTUAL)

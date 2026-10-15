@@ -32,7 +32,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import ts from 'typescript';
+import { ts, parseSource } from '../_shared/syntax-tree.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { readTrackedSources } from './_sources.mjs';
@@ -112,7 +112,7 @@ describe('no MCP tool catches the schema refusal itself', () => {
 
   /** The tool files that branch on a class whose name says SchemaViolation — the `instanceof` that is the catch. */
   const catching = tools.filter(({ file, text }) => {
-    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const sf = parseSource(file, text);
     let found = false;
     (function visit(n) {
       if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword && /SchemaViolation/.test(n.right.getText(sf))) found = true;

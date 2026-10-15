@@ -46,7 +46,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import ts from 'typescript';
+import { ts, parseSource } from '../_shared/syntax-tree.mjs';
 import { readTrackedSources } from './_sources.mjs';
 
 const BODY_OWNER = 'server/src/brain/write-validation.ts';
@@ -81,7 +81,7 @@ function branchOf(node) {
  * @returns {{ classes: object[], tags: object[], branches: object[] }}
  */
 export function analyse(files) {
-  const parsed = files.map(({ file, text }) => ({ file, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) }));
+  const parsed = files.map(({ file, text }) => ({ file, sf: parseSource(file, text) }));
   const classes = [];
   for (const { file, sf } of parsed) {
     (function visit(n) {
