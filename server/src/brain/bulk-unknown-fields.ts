@@ -36,7 +36,7 @@ import { findSpace } from '../spaces/proxy.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
 
 /** How many items of one batch get a row of their own; the rest are counted in one `…(+N more items)` row. */
-export const BULK_UNKNOWN_ROWS_MAX = 50;
+const BULK_UNKNOWN_ROWS_MAX = 50;
 
 /** The collections a batch's items are judged by, in the order the batch writes them, each with the `type` its error rows carry. */
 const COLLECTIONS = [
