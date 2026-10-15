@@ -135,6 +135,8 @@ export class SpaceSchemaLayersComponent {
   private show(v: SchemaLayersView): void {
     this.loadFailed.set(false);
     this.view.set(v); this.order.set([...v.precedence]); this.dirty.set(false);
+    // The settings dialog edits the space's OWN definitions; the space list answers the effective ones, so the editor is loaded again from `v.own`.
+    this.shared?.rebaseOnOwnDefinitions(v);
   }
 
   labelOf(networkId: string): string {

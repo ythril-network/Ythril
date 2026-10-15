@@ -384,7 +384,12 @@ export function planSpaceMetaUpdate(input: {
   // the network's definition being changed. Only the meta may travel with it: a label, a quota or a TTL is this
   // instance's, and applying them beside a vote is the partial save a refusal exists to prevent.
   const targetNetwork = parsed.data.targetNetwork;
-  let base: Partial<SpaceMeta> = space.meta ?? {};
+  // The definitions this write changes are THIS INSTANCE'S OWN (`ownMeta`, once a network layer exists; `meta` is all its own until then):
+  // `space.meta` is the effective meta, own laid under each layer, and a type both define is the union of the two there. Merged over the
+  // union, an edit of one property of such a type would take the network's properties into the proposal, and from there into this
+  // instance's own definitions, where they are sent on to every other network the space is in (the editor loads the own definitions for the
+  // same reason: `GET /api/spaces` answers the effective meta, `GET /api/spaces/:id/schema-layers` the own one).
+  let base: Partial<SpaceMeta> = space.ownMeta ?? space.meta ?? {};
   if (targetNetwork !== undefined) {
     const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork'].includes(k)
       && (parsed.data as Record<string, unknown>)[k] !== undefined);

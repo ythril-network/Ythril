@@ -123,7 +123,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
           }
 
           <app-refusal-alert [view]="createRefusal()" idPrefix="mem-create-refusal" />
-          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
+          <app-write-warnings [warnings]="writeWarnings()" [truncated]="writeWarningsTruncated()" (dismissed)="dismissWriteWarnings()" />
 
           <!-- Tag/type filtering now docks in the column headers (2b-ii). The active ENTITY filter —
                set by clicking an entity chip in a row — stays as an indicator chip here since it has

@@ -122,7 +122,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
           }
 
           <app-refusal-alert [view]="createRefusal()" idPrefix="ent-create-refusal" />
-          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
+          <app-write-warnings [warnings]="writeWarnings()" [truncated]="writeWarningsTruncated()" (dismissed)="dismissWriteWarnings()" />
 
           <!--
             A delete that did not happen, said out loud. It sits ABOVE the table rather than in the

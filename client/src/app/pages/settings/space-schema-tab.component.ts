@@ -27,6 +27,7 @@ import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service'
 import { ToastService } from '../../core/toast.service';
 import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, TypeSchema, recordTtlWindows } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
+import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { httpErrorReason } from '../../core/http-error';
 import { saveBlob } from '../../core/authenticated-download';
 
@@ -43,7 +44,7 @@ import { refusalText } from '../../core/refusal-text';
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent],
+  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
   template: `
@@ -114,12 +115,17 @@ import { refusalText } from '../../core/refusal-text';
       @if (!result.complete) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
     </div>
     @if (validateAllGood()) {
-      <div class="sch-msg ok" data-testid="validate-all-good">{{ 'validate.allGood' | transloco }}</div>
+      <!-- "Matches" is said only when the whole space (or the one sample) was read and nothing was found. -->
+      <div class="sch-msg ok" data-testid="validate-all-good"><app-status-pill variant="ok" icon="check-circle">{{ 'validate.outcome.match' | transloco }}</app-status-pill> {{ 'validate.allGood' | transloco }}</div>
     }
     @if (validateRows().length) {
       <ul class="val-violations">
         @for (v of validateRows(); track $index) {
-          <li><code>{{ v.where }}</code> {{ v.text }}</li>
+          <li><code>{{ v.where }}</code>
+            @for (r of v.rows; track $index) {
+              <span class="val-row"><app-status-pill [variant]="outcomeWord(r.outcome).variant">{{ outcomeWord(r.outcome).key | transloco }}</app-status-pill> {{ r.text }}</span>
+            }
+          </li>
         }
       </ul>
       @if (validateMore() > 0) { <div class="sch-hint">{{ 'validate.more' | transloco: { count: validateMore() } }}</div> }
@@ -138,25 +144,19 @@ import { refusalText } from '../../core/refusal-text';
   <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.autoSyncHint' | transloco }}</span>
 </div>
 <!-- collection tabs -->
+<!-- One tab stop for the strip (roving tabindex): the selected tab is in the Tab order, the others are reached with the arrow keys, Home and End. -->
 <div class="sch-coll-tabs" role="tablist" [attr.aria-label]="'spaces.schema.collTabsAriaLabel' | transloco">
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='entity'" [attr.aria-selected]="state.schemaCollTab()==='entity'" role="tab" (click)="state.schemaCollTab.set('entity');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.entities' | transloco }}
-    @if (state.typeCount('entity')) { <span class="sch-cnt-badge">{{ state.typeCount('entity') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='edge'" [attr.aria-selected]="state.schemaCollTab()==='edge'" role="tab" (click)="state.schemaCollTab.set('edge');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.edges' | transloco }}
-    @if (state.typeCount('edge')) { <span class="sch-cnt-badge">{{ state.typeCount('edge') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='fact'" [attr.aria-selected]="state.schemaCollTab()==='fact'" role="tab" (click)="state.schemaCollTab.set('fact');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.facts' | transloco }}
-    @if (state.typeCount('fact')) { <span class="sch-cnt-badge">{{ state.typeCount('fact') }}</span> }
-  </button>
-  <button class="sch-coll-tab" [class.active]="state.schemaCollTab()==='chrono'" [attr.aria-selected]="state.schemaCollTab()==='chrono'" role="tab" (click)="state.schemaCollTab.set('chrono');schImportError.set('');schImportInfo.set('')">
-    {{ 'spaces.schema.tab.chrono' | transloco }}
-    @if (state.typeCount('chrono')) { <span class="sch-cnt-badge">{{ state.typeCount('chrono') }}</span> }
-  </button>
+  @for (t of collTabs; track t.kt) {
+    <button class="sch-coll-tab" type="button" role="tab" [id]="'sch-coll-tab-' + t.kt" [attr.data-testid]="'sch-coll-tab-' + t.kt"
+      [class.active]="state.schemaCollTab() === t.kt" [attr.aria-selected]="state.schemaCollTab() === t.kt"
+      aria-controls="sch-coll-panel" [attr.tabindex]="state.schemaCollTab() === t.kt ? 0 : -1"
+      (click)="selectCollTab(t.kt)" (keydown)="onCollTabKey($event)">
+      {{ t.label | transloco }}
+      @if (state.typeCount(t.kt)) { <span class="sch-cnt-badge">{{ state.typeCount(t.kt) }}</span> }
+    </button>
+  }
 </div>
-<div class="sch-coll-body">
+<div class="sch-coll-body" id="sch-coll-panel" role="tabpanel" [attr.aria-labelledby]="'sch-coll-tab-' + state.schemaCollTab()">
 
   <!-- collection sub-header (per-type guidance for the active collection) -->
   <!-- ONE hint, with the field name as a parameter. There used to be four near-identical strings that
@@ -392,7 +392,43 @@ export class SpaceSchemaTabComponent implements OnInit {
   private transloco = inject(TranslocoService);
   private spacesApi = inject(SpacesApi);
   private injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly limits = RULE_LIMITS;
+
+  // ── the collection tabs (roving tabindex)
+  /** The strip, left to right: the order the arrow keys walk. */
+  protected readonly collTabs: readonly { kt: KnowledgeType; label: string }[] = [
+    { kt: 'entity', label: 'spaces.schema.tab.entities' },
+    { kt: 'edge', label: 'spaces.schema.tab.edges' },
+    { kt: 'fact', label: 'spaces.schema.tab.facts' },
+    { kt: 'chrono', label: 'spaces.schema.tab.chrono' },
+  ];
+
+  protected selectCollTab(kt: KnowledgeType): void {
+    this.state.schemaCollTab.set(kt);
+    this.schImportError.set('');
+    this.schImportInfo.set('');
+  }
+
+  /**
+   * ArrowRight / ArrowLeft move to the next / previous tab and wrap, Home / End go to the first / last. The tab that receives focus is
+   * selected as well (the panel beneath is a quick switch, not a load), so the one tab in the Tab order is always the selected one.
+   */
+  protected onCollTabKey(event: KeyboardEvent): void {
+    const at = this.collTabs.findIndex(t => t.kt === this.state.schemaCollTab());
+    if (at < 0) return;
+    const last = this.collTabs.length - 1;
+    const to = event.key === 'ArrowRight' ? (at === last ? 0 : at + 1)
+      : event.key === 'ArrowLeft' ? (at === 0 ? last : at - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    this.selectCollTab(this.collTabs[to]!.kt);
+    // The tabindex of the new tab is applied by the next change detection; focus once it has run.
+    queueMicrotask(() => this.host.nativeElement.querySelector<HTMLElement>(`#sch-coll-tab-${this.collTabs[to]!.kt}`)?.focus());
+  }
 
   // ── rights: the rules are a constraint on every write, so changing them needs schema admin
   /** Whether this token may change rules. Unknown (still loading, or no rights to read) counts as yes: the server decides, this only explains. */
@@ -586,11 +622,21 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   private static readonly VALIDATE_SHOWN = 50;
 
-  readonly validateRows = computed<{ where: string; text: string }[]>(() =>
+  readonly validateRows = computed<{ where: string; rows: RefusalRow[] }[]>(() =>
     this.validateAccumulated().slice(0, SpaceSchemaTabComponent.VALIDATE_SHOWN).map(v => ({
       where: `${v.collection} ${v._id}`,
-      text: describeWarnings(this.transloco, '', v.violations).map((r: RefusalRow) => r.text).join('; '),
+      rows: describeWarnings(this.transloco, '', v.violations),
     })));
+
+  /** The word an outcome is said with (StatusPill's vocabulary): the translation key, and the pill's variant. */
+  protected outcomeWord(outcome: RefusalRow['outcome']): { key: string; variant: StatusVariant } {
+    switch (outcome) {
+      case 'could_not_evaluate': return { key: 'validate.outcome.couldNotEvaluate', variant: 'warn' };
+      case 'too_large': return { key: 'validate.outcome.tooLarge', variant: 'warn' };
+      case 'undeclared': return { key: 'validate.outcome.undeclared', variant: 'warn' };
+      default: return { key: 'validate.outcome.violated', variant: 'error' };
+    }
+  }
   readonly validateMore = computed(() => Math.max(0, this.validateAccumulated().length - SpaceSchemaTabComponent.VALIDATE_SHOWN));
 
   /**

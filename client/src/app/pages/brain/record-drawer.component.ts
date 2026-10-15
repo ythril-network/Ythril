@@ -58,7 +58,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
               </div>
             </div>
             <app-refusal-alert [view]="refusal()" idPrefix="drw-refusal" />
-            <app-write-warnings [warnings]="state.drawerWarnings()" (dismissed)="state.dismissWarnings()" />
+            <app-write-warnings [warnings]="state.drawerWarnings()" [truncated]="state.drawerWarningsTruncated()" (dismissed)="state.dismissWarnings()" />
 
             <form>
               <!-- ── MEMORY ── -->
@@ -278,10 +278,12 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                     <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record.recurrence | json }}</div>
                   </div>
                 }
-                <div class="drawer-field">
-                  <div class="drawer-label">{{ 'common.author' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.author.instanceLabel }} ({{ dr.record.author.instanceId }})</div>
-                </div>
+                @if (dr.record.author; as author) {
+                  <div class="drawer-field">
+                    <div class="drawer-label">{{ 'common.author' | transloco }}</div>
+                    <div class="drawer-readonly-value">{{ authorLabel(author) }} ({{ author.instanceId }})</div>
+                  </div>
+                }
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
@@ -315,4 +317,9 @@ export class RecordDrawerComponent {
   /** The last refused save, in words and rows; the properties editors mark the rows it names. */
   readonly refusal = refusalViewOf(this.transloco, this.state.drawerFailure, 'refusal.failed.save');
   readonly propertyErrors = propertyErrorsOf(this.refusal);
+
+  /** The instance an author wrote from, by the label it carries (an author that predates labels has the id only). */
+  authorLabel(author: { instanceId: string; instanceLabel?: string }): string {
+    return author.instanceLabel ?? author.instanceId;
+  }
 }

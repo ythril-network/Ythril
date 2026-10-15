@@ -77,6 +77,8 @@ export abstract class RecordTabBase {
    * or the reader dismisses it (bundle-23, R6-14). A toast would be gone in seconds, and the record stays wrong.
    */
   readonly writeWarnings = signal<WireRow[]>([]);
+  /** The last write's warnings were cut by the server (`warningsTruncated`): the notice says rows were left out. */
+  readonly writeWarningsTruncated = signal(false);
   readonly pageSize = 20;
 
   skip = signal(0);
@@ -121,9 +123,16 @@ export abstract class RecordTabBase {
 
   /** Take a successful write's answer apart: its warnings replace the notice's (an empty list removes it), the record is returned. */
   protected takeWarnings<T extends object>(answer: T): T {
-    const { record, warnings } = splitWriteWarnings(answer);
+    const { record, warnings, truncated } = splitWriteWarnings(answer);
     this.writeWarnings.set(warnings);
+    this.writeWarningsTruncated.set(truncated);
     return record;
+  }
+
+  /** The reader closed the warnings notice. */
+  dismissWriteWarnings(): void {
+    this.writeWarnings.set([]);
+    this.writeWarningsTruncated.set(false);
   }
 
   /**

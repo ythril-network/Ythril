@@ -22,6 +22,7 @@ export const SCHEMA_MD_STYLES = `
 .val-select { font:inherit; font-size:12px; text-transform:none; letter-spacing:0; padding:3px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-elevated); color:var(--text-primary); }
 .val-check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
 .val-check input { margin:0; }
+.val-violations .val-row { display:block; margin-block-start:3px; overflow-wrap:anywhere; }
 .sch-validation-bar { display:flex; align-items:center; justify-content:space-between; gap:16px 20px; flex-wrap:wrap;
   padding:12px 14px; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; background:var(--bg-surface); }
 .sch-validation-bar .svb-label { display:flex; flex-direction:column; gap:2px; min-width:0; }

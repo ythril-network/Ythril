@@ -25,6 +25,7 @@ import { PhIconComponent } from './ph-icon.component';
     .title { margin: 0; font-weight: 600; }
     ul { margin: 4px 0 0; padding-inline-start: 18px; }
     li { margin-block: 2px; overflow-wrap: anywhere; }
+    .more { margin: 6px 0 0; }
     .dismiss { background: none; border: none; color: inherit; cursor: pointer; padding: 2px; line-height: 1; flex-shrink: 0; }
   `],
   template: `
@@ -35,6 +36,7 @@ import { PhIconComponent } from './ph-icon.component';
           <ul>
             @for (row of rows(); track $index) { <li> {{ row.text }} </li> }
           </ul>
+          @if (truncated()) { <p class="more" data-testid="write-warnings-more">{{ 'writeWarnings.more' | transloco }}</p> }
         </div>
         <button type="button" class="dismiss" data-testid="write-warnings-dismiss"
           [attr.aria-label]="'writeWarnings.dismiss' | transloco" [attr.title]="'writeWarnings.dismiss' | transloco"
@@ -48,6 +50,8 @@ export class WriteWarningsComponent {
 
   /** The `warnings` of the last successful write, as the server wrote them. */
   readonly warnings = input<readonly WireRow[] | null | undefined>(null);
+  /** The server cut the list (`warningsTruncated`): rows were left out, and the notice says so rather than present the cut list as the whole. */
+  readonly truncated = input<boolean>(false);
   /** The reader closed the notice. */
   readonly dismissed = output<void>();
 

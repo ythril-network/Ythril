@@ -124,7 +124,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
           }
 
           <app-refusal-alert [view]="createRefusal()" idPrefix="edge-create-refusal" />
-          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
+          <app-write-warnings [warnings]="writeWarnings()" [truncated]="writeWarningsTruncated()" (dismissed)="dismissWriteWarnings()" />
           @if (recordList.deleteError()) {
             <div class="delete-error" role="alert">
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}

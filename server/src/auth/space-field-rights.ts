@@ -240,7 +240,9 @@ export function typeRuleEditsIn(body: Record<string, unknown>, spaceId: string):
   if (!meta || !isObj(meta['typeSchemas'])) return [];
   const cfg = getConfig();
   const network = typeof body['targetNetwork'] === 'string' ? cfg.networks.find(n => n.id === body['targetNetwork']) : undefined;
-  const base = network ? network.schemaLayers?.[spaceId] : cfg.spaces.find(s => s.id === spaceId)?.meta;
+  const space = cfg.spaces.find(s => s.id === spaceId);
+  // The definitions the write is merged over (`planSpaceMetaUpdate`): the OWN ones, not the effective meta a network layer is laid under.
+  const base = network ? network.schemaLayers?.[spaceId] : space?.ownMeta ?? space?.meta;
   const stored = isObj(base?.typeSchemas) ? base.typeSchemas as Record<string, unknown> : {};
   const edits: string[] = [];
   for (const [kind, types] of Object.entries(meta['typeSchemas'])) {

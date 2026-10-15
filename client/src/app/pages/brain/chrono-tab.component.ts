@@ -123,7 +123,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
           }
 
           <app-refusal-alert [view]="createRefusal()" idPrefix="chrono-create-refusal" />
-          <app-write-warnings [warnings]="writeWarnings()" (dismissed)="writeWarnings.set([])" />
+          <app-write-warnings [warnings]="writeWarnings()" [truncated]="writeWarningsTruncated()" (dismissed)="dismissWriteWarnings()" />
 
 
           @if (recordList.deleteError()) {

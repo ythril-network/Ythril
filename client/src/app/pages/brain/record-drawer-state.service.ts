@@ -75,6 +75,8 @@ export class RecordDrawerState {
   });
   /** The `warnings` of the last successful save: shown until the next save replaces them or the reader dismisses them. */
   readonly drawerWarnings = signal<WireRow[]>([]);
+  /** The save's warnings were cut by the server (`warningsTruncated`): the notice says rows were left out. */
+  readonly drawerWarningsTruncated = signal(false);
 
   /** The keys the record STORED when it was opened or last saved: what a type change must never treat as an untouched seed. */
   private stored: ReadonlySet<string> = new Set();
@@ -146,7 +148,7 @@ export class RecordDrawerState {
     const target = { kind, record } as DrawerRecord;
     this.drawerRecord.set(target);
     this.drawerFailure.set(null);
-    this.drawerWarnings.set([]);
+    this.dismissWarnings();
     this.drawerSaving.set(false);
     this.stored = new Set(Object.keys(record.properties ?? {}));
     // Only facts and chrono entries carry entity references — the other two kinds have no such field.
@@ -206,12 +208,13 @@ export class RecordDrawerState {
   close(): void {
     this.drawerRecord.set(null);
     this.drawerFailure.set(null);
-    this.drawerWarnings.set([]);
+    this.dismissWarnings();
   }
 
   /** The reader closed the warnings notice. */
   dismissWarnings(): void {
     this.drawerWarnings.set([]);
+    this.drawerWarningsTruncated.set(false);
   }
 
   save(): void {
@@ -298,9 +301,10 @@ export class RecordDrawerState {
   private persist<T extends Fact | Entity | Edge | ChronoEntry>(save: Observable<T>, was: DrawerRecord, onSaved: (record: T) => void): void {
     save.subscribe({
       next: answer => {
-        const { record, warnings } = splitWriteWarnings(answer);
+        const { record, warnings, truncated } = splitWriteWarnings(answer);
         this.drawerSaving.set(false);
         this.drawerWarnings.set(warnings);
+        this.drawerWarningsTruncated.set(truncated);
         // Its keys are stored now: a later type change must not take them for seeds.
         this.stored = new Set(Object.keys(record.properties ?? {}));
         onSaved(record);

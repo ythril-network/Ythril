@@ -518,6 +518,40 @@ export class SpaceSettingsState {
   dangerDeleting    = signal(false);
   dangerDeleteError = signal('');
 
+  /** The type definitions and the space rules of `meta`, as the editor holds them. */
+  private loadDefinitionsFrom(meta: Partial<SpaceMeta>): void {
+    const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> =>
+      Object.fromEntries(Object.entries(meta.typeSchemas?.[kt] ?? {}).map(([name, ts]) => [name, typeStateFromSchema(ts)]));
+    this.schRules = spaceRuleRowsFromWire(meta.rules);
+    this.schTypeSchemas = {
+      entity: loadKt('entity'),
+      fact: loadKt('fact'),
+      edge:   loadKt('edge'),
+      chrono: loadKt('chrono'),
+    };
+  }
+
+  /**
+   * The editor edits THIS SPACE'S OWN definitions (bundle-23, R6-14: "verified at build, not assumed").
+   *
+   * `GET /api/spaces` answers `meta` as the EFFECTIVE meta — the own definitions with every network's layer laid under them — and the
+   * own ones are not in that answer (`ownMeta` stays on the server). A space that no network sends schema to has no difference, and the
+   * editor opens on what that answer says. A space that has a layer would open on the union: a type both the operator and a network
+   * define shows the network's properties as if they were the operator's, and saving an edit of it proposes — and then stores — the
+   * union as the space's own definition, whence it is sent on to every other network the space is in. So when the layers answer arrives
+   * (`GET /api/spaces/:id/schema-layers`: `own` is the own definitions) and the editor has not been touched, it is loaded again from
+   * `own`. What a network supplies is shown by the layers panel and marked on the properties that clash; it is applied beneath what
+   * is edited here. An editor with unsaved edits is left alone: replacing it would throw them away, and the save then sends what the
+   * operator was looking at.
+   */
+  rebaseOnOwnDefinitions(view: SchemaLayersView): void {
+    if (this.settingsSpace() === null || !view.layers.length || this.isDirty()) return;
+    this.loadDefinitionsFrom(view.own as Partial<SpaceMeta>);
+    const open = this.schSelectedType;
+    if (open && !this.schTypeSchemas[open.kt]?.[open.name]) this.schSelectedType = null;
+    this.markPristine();
+  }
+
   /**
    * Load a space into every tab. Copies by VALUE throughout: the dialog must never mutate the Space
    * object the list is rendering from.
@@ -546,16 +580,8 @@ export class SpaceSettingsState {
     this.schNewTypeInputs  = { entity: '', fact: '', edge: '', chrono: '' };
     this.schSelectedType   = null;
     this.schExpandedProps.clear();
-    const loadKt = (kt: KnowledgeType): Record<string, TypeSchemaState> =>
-      Object.fromEntries(Object.entries(meta.typeSchemas?.[kt] ?? {}).map(([name, ts]) => [name, typeStateFromSchema(ts)]));
-    this.schRules = spaceRuleRowsFromWire(meta.rules);
+    this.loadDefinitionsFrom(meta);
     this.schMetaVersion = meta.version;
-    this.schTypeSchemas = {
-      entity: loadKt('entity'),
-      fact: loadKt('fact'),
-      edge:   loadKt('edge'),
-      chrono: loadKt('chrono'),
-    };
     this.dangerRenameId = s.id;
     this.dangerRenameError.set('');
     this.dangerRenaming.set(false);

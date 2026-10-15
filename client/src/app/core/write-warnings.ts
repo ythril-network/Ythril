@@ -10,12 +10,13 @@ import type { WireRow } from './refusal-text';
  *
  * Only a list of rows counts: anything else the field could be is no warning at all.
  */
-export function splitWriteWarnings<T extends object>(answer: T): { record: T; warnings: WireRow[] } {
+export function splitWriteWarnings<T extends object>(answer: T): { record: T; warnings: WireRow[]; truncated: boolean } {
   // An answer without the field is the record itself, not a copy of it: a host that compares what it saved by identity keeps working.
-  if (!('warnings' in answer)) return { record: answer, warnings: [] };
-  const { warnings, ...record } = answer as T & { warnings?: unknown };
+  if (!('warnings' in answer) && !('warningsTruncated' in answer)) return { record: answer, warnings: [], truncated: false };
+  const { warnings, warningsTruncated, ...record } = answer as T & { warnings?: unknown; warningsTruncated?: unknown };
   const rows = Array.isArray(warnings)
     ? warnings.filter((w): w is WireRow => w !== null && typeof w === 'object' && typeof (w as WireRow).field === 'string')
     : [];
-  return { record: record as T, warnings: rows };
+  // `warningsTruncated: true` is the server saying it cut the list (twenty rows, on both doors): the notice says rows were left out.
+  return { record: record as T, warnings: rows, truncated: warningsTruncated === true && rows.length > 0 };
 }
