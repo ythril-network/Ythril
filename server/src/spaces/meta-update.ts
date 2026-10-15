@@ -31,7 +31,7 @@
  */
 import { localToRemote } from '../sync/space-map.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
-import type { SpaceConfig, SpaceMeta, KnowledgeType, TypeSchema, DocExtractionMode, NetworkConfig } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig } from '../config/loader.js';
 import { updateSpace, refuseRemovedDescription } from './spaces.js';
@@ -53,55 +53,15 @@ import {
   stripServerOwnedMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
-import { mergeMetaFields, metaFieldKind } from './meta-fields.js';
+import { metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
-/**
- * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
- *
- * - Scalar fields (purpose, usageNotes, validationMode,
- *   strictLinkage) overwrite the existing value when present in `incoming`.
- * - `typeSchemas` is merged per-knowledge-type, then per-type-name:
- *   types present in `incoming` are added or updated; types *not* mentioned
- *   in the request body are left untouched.
- *
- * The `version`, `updatedAt`, and `previousVersions` housekeeping fields are
- * intentionally omitted from the return value — `updateSpace()` re-adds them.
- *
- * Exported for testing as well as for the planner. The merge/replace decision is pure and is where a deletion was
- * silently lost for as long as it was; a unit test that reaches it directly is worth more than one that has to
- * stand up Docker and a network to observe the same branch.
- */
-export function mergeSpaceMeta(
-  existing: SpaceMeta,
-  incoming: Partial<SpaceMeta>,
-  typeSchemasMode: 'merge' | 'replace' = 'merge',
-): Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'> {
-  // Spread the existing base (drop housekeeping fields that updateSpace re-adds)
-  const { version: _v, updatedAt: _u, previousVersions: _pv, ...existingBase } = existing;
-
-  // Every field by its kind (`spaces/meta-fields.ts`), which is where `whenDuePasses` and `stampSkew` used to fall out of a
-  // list of six: a scalar replaces when STATED (`!== undefined`, never truthiness — `suppressEmbeddings: false` is how an
-  // operator turns suppression back off), an object replaces whole, and the types are merged below.
-  //
-  // typeSchemas — merge per-KT, per-type: incoming types add/update, existing untouched types preserved.
-  // Under `replace` the payload is authoritative instead, so a type absent from it is deleted. Note the
-  // guard is on `!== undefined`, so `replace` with `typeSchemas: {}` clears every type — which is the only
-  // way to express "this space declares nothing" and has to be reachable.
-  return mergeMetaFields(existingBase as Record<string, unknown>, incoming as Record<string, unknown>, (existingTs, incomingTs) => {
-    if (typeSchemasMode === 'replace') return incomingTs;
-    const had = (existingTs ?? {}) as Partial<Record<KnowledgeType, Record<string, TypeSchema>>>;
-    const mergedTs: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = { ...had };
-    for (const [kt, ktMap] of Object.entries(incomingTs as object) as [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
-      if (!ktMap) continue;
-      mergedTs[kt] = { ...(had[kt] ?? {}), ...ktMap };
-    }
-    return mergedTs;
-  }) as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>;
-}
+// The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
+import { mergeSpaceMeta, metaWriteBase } from './meta-write-base.js';
+export { mergeSpaceMeta };
 
 /**
  * What a NETWORKED write proposes: the fields the request named and, inside the types, only the types it changed (R6-6).
@@ -389,7 +349,8 @@ export function planSpaceMetaUpdate(input: {
   // union, an edit of one property of such a type would take the network's properties into the proposal, and from there into this
   // instance's own definitions, where they are sent on to every other network the space is in (the editor loads the own definitions for the
   // same reason: `GET /api/spaces` answers the effective meta, `GET /api/spaces/:id/schema-layers` the own one).
-  let base: Partial<SpaceMeta> = space.ownMeta ?? space.meta ?? {};
+  // The networks are read only for a write that targets one: a write to the own definitions asks nothing of the config.
+  const writeBase = metaWriteBase(space, targetNetwork, targetNetwork === undefined ? [] : getConfig().networks);
   if (targetNetwork !== undefined) {
     const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork'].includes(k)
       && (parsed.data as Record<string, unknown>)[k] !== undefined);
@@ -399,12 +360,11 @@ export function planSpaceMetaUpdate(input: {
     if (parsed.data.meta === undefined) {
       return { ok: false, refusal: { status: 400, body: { error: 'targetNetwork needs a meta to propose' } } };
     }
-    const net = getConfig().networks.find(n => n.id === targetNetwork && n.spaces.includes(spaceId));
-    if (!net) {
+    if (!writeBase) {
       return { ok: false, refusal: { status: 400, body: { error: `Network '${targetNetwork}' does not carry space '${spaceId}'` } } };
     }
-    base = net.schemaLayers?.[spaceId] ?? {};
   }
+  const base: Partial<SpaceMeta> = writeBase ?? {};
 
   // Merge the incoming meta with the existing meta so that PATCH has true RFC-7396 semantics: scalar fields
   // overwrite, typeSchemas entries are added/updated, and types *not* mentioned in the body are preserved.
