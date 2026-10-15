@@ -13,10 +13,13 @@ export class NotFoundError extends Error {
  * `409` from a single flight. `callTool` answers it with that status on the REST door; a refusal the handler merely
  * returns is a `422` ("well-formed and refused"), which tells a caller nothing about whether to wait or to change the call.
  * The message is the whole answer, the same sentence the dedicated REST route sends.
+ *
+ * `body` is the structure the REST door answers beside that sentence — a failed parse's `{ error, issues }` — carried as the tool
+ * result's `structuredContent`, so a caller that reads the structure gets it on both doors and not on one.
  */
 export class ToolRefusal extends Error {
   override readonly name = 'ToolRefusal';
-  constructor(readonly status: 400 | 404 | 409 | 429, message: string) {
+  constructor(readonly status: 400 | 404 | 409 | 429, message: string, readonly body?: Readonly<Record<string, unknown>>) {
     super(message);
   }
 }

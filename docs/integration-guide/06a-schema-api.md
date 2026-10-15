@@ -285,7 +285,9 @@ guarded at the rung it advertises rather than at "administers the whole space".
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
 
 A key the check does not take is dropped, never followed: a `projection` or `fields` in the body changes nothing about
-what is read.
+what is read. **A body that fails validation is refused `400` with the whole refusal, `{ "error", "issues" }`** — the
+one body every parse door answers ([Error Format](03-auth-and-limits.md#error-format)) — and MCP `schema_validate` answers
+the same sentence with the same `issues` as the result's `structuredContent`.
 
 ```json
 {

@@ -351,7 +351,10 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // A refusal a shared module made with its own status (`ToolRefusal`): answered with that status, and not logged as a
     // tool's failure, because nothing failed.
     if (err instanceof ToolRefusal) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: err.status, callSpace };
+      return {
+        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, ...(err.body ? { structuredContent: { ...err.body } } : {}) },
+        status: err.status, callSpace,
+      };
     }
     /*
      * THE RECORD LANDED and its connections did not (`Q-170`) — matched before the store's classification below, which

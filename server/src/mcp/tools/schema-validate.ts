@@ -92,7 +92,7 @@ export const schema_validateTool: ToolHandler = {
       canReadValues: mayReadStoredValues(ctx.rights, ctx.callSpace),
       callerKey: ctx.rateKey,
     });
-    if (r.status !== 200) throw new ToolRefusal(r.status, r.error);
+    if (r.status !== 200) throw new ToolRefusal(r.status, r.error, r.body);
     // The answer in `content` as well as `structuredContent`: a client may read either one alone.
     return { content: [{ type: 'text' as const, text: JSON.stringify(r.answer) }], structuredContent: { ...r.answer } };
   },

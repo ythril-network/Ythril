@@ -690,7 +690,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     canReadValues: mayReadStoredValues(rights, id),
     callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',
   });
-  if (outcome.status !== 200) { res.status(outcome.status).json({ error: outcome.error }); return; }
+  if (outcome.status !== 200) { res.status(outcome.status).json(outcome.body ?? { error: outcome.error }); return; }
   const { spaceId, ...answer } = outcome.answer;
   res.json(outcome.mode === 'stored' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
 });

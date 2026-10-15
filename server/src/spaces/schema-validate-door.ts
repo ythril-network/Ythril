@@ -99,7 +99,8 @@ export interface SchemaValidateAnswer {
 
 export type SchemaValidateOutcome =
   | { status: 200; answer: SchemaValidateAnswer; mode: 'sample' | 'stored'; meta: SpaceMeta }
-  | { status: 400 | 404 | 409 | 429; error: string };
+  /** A refusal. `body` is the whole answer where it has structure — a failed parse's `{ error, issues }` — which both doors send as it is. */
+  | { status: 400 | 404 | 409 | 429; error: string; body?: Readonly<Record<string, unknown>> };
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const SCHEMA_VALIDATE_RATE_LIMITED = `the stored-data schema check is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
@@ -165,8 +166,12 @@ export async function beginSchemaValidate(input: {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
   const parsed = SchemaValidateBody.safeParse(input.body ?? {});
-  // Why a body was refused, naming each parameter — the one sentence both doors send.
-  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
+  // Why a body was refused, naming each parameter: the whole refusal every parse door sends, `{ error, issues }` (the spread is its
+  // enumerable part; `reasons` is not part of a body).
+  if (!parsed.success) {
+    const refusal = refusalOfParse(parsed.error);
+    return { status: 400, error: refusal.error, body: { ...refusal } };
+  }
   const { sample, after } = parsed.data;
   const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
 
