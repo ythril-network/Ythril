@@ -15,7 +15,7 @@ import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy, typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyChronoUpsertAgainst, patchedFields, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
@@ -239,7 +239,7 @@ export async function updateChrono(
     const finalProps = ('properties' in $unset ? {}
       : ('properties' in $set ? $set['properties'] : existing.properties)) as Record<string, string | number | boolean> | undefined;
     const check = classifyChronoUpsertAgainst(getSpaceMeta(spaceId), existing,
-      { type: finalType, properties: finalProps });
+      { ...patchedFields($set, $unset), type: finalType, properties: finalProps });
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
   }

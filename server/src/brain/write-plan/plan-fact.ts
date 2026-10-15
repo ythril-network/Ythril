@@ -71,7 +71,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
   const properties = existing
     ? input.properties
     : applyPropertyDefaults(type ? meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
-  const check = classifyFactUpsertAgainst(meta, existing, { type, properties }, input.instanceWrittenKeys);
+  const check = classifyFactUpsertAgainst(meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
 

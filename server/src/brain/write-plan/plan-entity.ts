@@ -64,7 +64,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   const meta = getSpaceMeta(spaceId);
   const properties = (existing ? input.properties : applyPropertyDefaults(meta?.typeSchemas?.entity?.[type], input.properties))
     ?? input.properties ?? {};
-  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, properties, tags }, input.instanceWrittenKeys);
+  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   input.onValidation?.(check);
 

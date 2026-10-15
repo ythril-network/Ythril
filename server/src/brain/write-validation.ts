@@ -52,7 +52,7 @@ import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { ruleReadsChanged } from '../spaces/schema-rules.js';
-import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
 import { tallySchemaRefusal, type SchemaRefusalDoor } from './schema-refusal-tally.js';
@@ -497,6 +497,44 @@ export function describeUpdateViolations(
 /** An upsert onto nothing is an insert: no prior record, so nothing can be pre-existing. */
 const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 
+/** The record fields a write may state beside its identity — every one a rule can read, so none may fall out of the after-view. */
+interface StatedFields {
+  description?: string | null;
+  tags?: string[] | null;
+  properties?: Record<string, string | number | boolean>;
+}
+
+/**
+ * The record an upsert LEAVES — the one thing the after-view is built from (R6-3: the view is of the MERGED record).
+ *
+ * The stored record (nothing, on an insert), with every field the write states laid over it — a `null` is a field the write REMOVES and
+ * reads as absent — then tags unioned and properties merged the way every writer stores them (`merge-fields.ts`).
+ *
+ * It exists because each classifier built its after-view from a literal of the fields it had in hand: an edge and a fact lost their
+ * tags, a fact and a chrono entry their title and description, an entity its description. The before-view was the whole stored record,
+ * so a rule reading `self.description` blamed a write that never touched it, and a write that set a refused description was judged on
+ * `''` and passed as the record's old break (`a-rule-reads-the-record-the-write-leaves`).
+ */
+export function recordAfterUpsert(existing: object | null, incoming: object): Record<string, unknown> {
+  const stored = (existing ?? {}) as Record<string, unknown> & StatedFields;
+  const stated = incoming as Record<string, unknown> & StatedFields;
+  return {
+    ...stored,
+    // A key the write does not state (`undefined`) leaves the stored value; one it states, `null` included, replaces it.
+    ...Object.fromEntries(Object.entries(stated).filter(([, v]) => v !== undefined)),
+    tags: mergeTags(stored.tags, stated.tags ?? undefined),
+    properties: mergePropertiesOrKeep(stored.properties, stated.properties) ?? {},
+  };
+}
+
+/**
+ * The fields a PATCH states, as an upsert's incoming fields: what `$set` writes, and `null` for a field `$unset` removes — so the
+ * after-view of an update is {@link recordAfterUpsert} of the stored record and this, and a removed description reads as none.
+ */
+export function patchedFields($set: Record<string, unknown>, $unset: Record<string, unknown>): Record<string, unknown> {
+  return { ...$set, ...Object.fromEntries(Object.keys($unset).map(k => [k, null])) };
+}
+
 /**
  * The whole decision, given the record the upsert lands on — no database.
  *
@@ -510,15 +548,14 @@ const INSERT_HAS_NO_PRIOR: SchemaViolation[] = [];
 export function classifyEntityUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] } | null,
-  incoming: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] },
+  incoming: { name: string; type: string } & StatedFields,
   /** The property keys the instance itself writes on this kind — handed in by the one writer that owns them (`INSTANCE_WRITTEN_PROPERTY_KEYS`); never a caller's. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
-  const merged = mergeTagsAndProperties(existing, incoming);
   return classifyViews(
     meta, view => validateEntity(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('entity', existing) : null,
-    recordViewOf('entity', { name: incoming.name, type: incoming.type, tags: merged.tags, properties: merged.properties }),
+    recordViewOf('entity', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -564,7 +601,7 @@ function classifyViews(
 export function classifyEdgeUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { label: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { label: string; properties?: Record<string, string | number | boolean> },
+  incoming: { label: string } & StatedFields,
   /**
    * What the caller resolved about the endpoints — the entity type at each end, and how many OTHER edges carry
    * this label from the same subject.
@@ -585,7 +622,7 @@ export function classifyEdgeUpsertAgainst(
   return classifyViews(
     meta, view => validateEdge(meta ?? {}, view, resolved, instanceWrittenKeys),
     existing ? recordViewOf('edge', existing) : null,
-    recordViewOf('edge', { label: incoming.label, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {} }),
+    recordViewOf('edge', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -605,17 +642,14 @@ export function classifyEdgeUpsertAgainst(
 export function classifyFactUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type?: string; properties?: Record<string, string | number | boolean> },
+  incoming: { type?: string; fact?: string } & StatedFields,
   /** As for an entity: the keys the instance itself writes on a fact, handed in by the writer that owns them. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
   return classifyViews(
     meta, view => validateFact(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('fact', existing) : null,
-    recordViewOf('fact', {
-      type: incoming.type ?? existing?.type,
-      properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {},
-    }),
+    recordViewOf('fact', recordAfterUpsert(existing, incoming)),
   );
 }
 
@@ -623,13 +657,13 @@ export function classifyFactUpsertAgainst(
 export function classifyChronoUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type: string; properties?: Record<string, string | number | boolean> },
+  incoming: { type: string; title?: string } & StatedFields,
 ): UpdateValidation {
   // The instance writes no property on a chrono entry, so there is no exemption to take (`INSTANCE_WRITTEN_PROPERTY_KEYS` has no row for it).
   return classifyViews(
     meta, view => validateChrono(meta ?? {}, view),
     existing ? recordViewOf('chrono', existing) : null,
-    recordViewOf('chrono', { type: incoming.type, properties: mergePropertiesOrKeep(existing?.properties, incoming.properties) ?? {} }),
+    recordViewOf('chrono', recordAfterUpsert(existing, incoming)),
   );
 }
 

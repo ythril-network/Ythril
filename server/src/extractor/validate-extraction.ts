@@ -220,7 +220,7 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     }
     // The properties against the type's declarations, by the instance's own validator — so a key the type does not declare (and the
     // extractor does not own) is found here and not on request 340.
-    sayProperties(at, `'${e.key}'`, validateEntity(propertyMeta, recordViewOf('entity', { name: e.name, type: e.type, properties: e.properties ?? {} }), INSTANCE_WRITTEN_PROPERTY_KEYS.entity));
+    sayProperties(at, `'${e.key}'`, validateEntity(propertyMeta, recordViewOf('entity', e), INSTANCE_WRITTEN_PROPERTY_KEYS.entity));
     entityType.set(e.key, e.type);
   }
 
@@ -363,7 +363,7 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     }
     // The properties against the label's declarations, by the instance's own validator (below) — the enum, the type, the required and the
     // undeclared key, so the answer here is the answer the write would have given on request 340.
-    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', { label: e.label, properties: e.properties ?? {} }), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
+    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', e), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
   }
 
   /* ── claims ────────────────────────────────────────────────────────────────────────────────────────── */

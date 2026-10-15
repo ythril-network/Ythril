@@ -252,7 +252,8 @@ export function edgeRefusal(
   const functional = isFunctionalLabel(spaceId, label);
   const passed = sameBody.map(e => ({ from: e.from, to: e.to, label: e.label, fromKind: e.opts?.fromKind, toKind: e.opts?.toKind }));
   const ends = resolvedEnds(view, input, functional, subject, passed);
-  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, ends, input.instanceWrittenKeys);
+  const check = classifyEdgeUpsertAgainst(meta, existing,
+    { label, description: input.description, tags: input.tags, properties: withDefaults }, ends, input.instanceWrittenKeys);
   if (check.blocked) throw new EdgeSchemaViolation(check);
   return { existing, withDefaults, check };
 }

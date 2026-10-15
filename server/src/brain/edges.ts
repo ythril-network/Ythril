@@ -8,7 +8,7 @@ import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
-import { classifyEdgeUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyEdgeUpsertAgainst, patchedFields, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -331,7 +331,7 @@ export async function updateEdgeById(
         ...(existing.toKind ? { toKind: existing.toKind } : {}) },
     });
     const check = classifyEdgeUpsertAgainst(getSpaceMeta(spaceId), existing,
-      { label: finalLabel, properties: finalProps }, resolvedEnds);
+      { ...patchedFields($set, $unset), label: finalLabel, properties: finalProps }, resolvedEnds);
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
   };
