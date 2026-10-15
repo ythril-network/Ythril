@@ -16,8 +16,8 @@
  *    END's type answers the same body with the endpoint field (`fromType`), not a property field.
  *  - **REST PATCH: `422`**, the same body, for each kind.
  *  - **MCP create tools** (`save_entity`, `save_fact`, `save_chrono`, `save_edge`): status `422`, `isError`, the structured body
- *    beside the text — and the TEXTS differ today: `save_chrono` answers `Error: schema_violation` and drops the sentence, the
- *    others `Error: schema_violation: <message>`. That difference is the pin, not a defect of this file.
+ *    beside the text, and the text is `Error: schema_violation: <message>` on all four. Until bundle-23 `save_chrono` answered
+ *    `Error: schema_violation` and dropped the sentence; its own catch went, so the common path's text is the one it answers now.
  *  - **MCP update tools**: the same status, body and text as the create tools that carry the sentence.
  *  - **`POST /api/<tool>`** (`transport: 'rest'` of the same dispatch): the identical status, text and body as MCP.
  *  - **Nothing is stored** by a refused write, read from the store whole before and after.
@@ -129,9 +129,10 @@ describe('a strict space\'s schema refusal, as every record-write door answers i
     }
   });
 
-  describe('the MCP create tools answer 422, isError and the structured body — in texts that differ today', () => {
-    /** The text of each create tool's refusal: `save_chrono` drops the sentence the others carry. */
-    const TEXT = (c, kind) => (kind === 'chrono' ? 'Error: schema_violation' : `Error: schema_violation: ${c.body.message}`);
+  describe('the MCP create tools answer 422, isError and the structured body, and one text', () => {
+    /** The text of each create tool's refusal: the common MCP mapping's `Error: schema_violation: <message>`. */
+    // bundle-23: r4.1 Q-315 (MCP own catches in chrono.ts go; call-tool classifies every tool once) — was `Error: schema_violation` for save_chrono
+    const TEXT = (c) => `Error: schema_violation: ${c.body.message}`;
     for (const kind of KINDS) {
       it(`${cases({})[kind].create_tool}`, async () => {
         const c = cases(ids)[kind];
@@ -140,7 +141,7 @@ describe('a strict space\'s schema refusal, as every record-write door answers i
         assert.equal(out.status, 422, out.text);
         assert.equal(out.isError, true);
         assert.deepEqual(out.structured, c.body);
-        assert.equal(out.text, TEXT(c, kind));
+        assert.equal(out.text, TEXT(c));
         assert.deepEqual(await pins.stored(STRICT, kind), before_, `a refused ${c.create_tool} stored something`);
       });
     }

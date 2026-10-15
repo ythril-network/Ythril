@@ -84,15 +84,18 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
   describe('bulk, per item', () => {
     for (const [door, send] of Object.entries(BULK)) {
       describe(door, () => {
-        it('a strict space: the refused items are not stored, and a row says `schema_violation: <reason>` for each, with its index', async () => {
+        it('a strict space: the refused items are not stored, and a row says `schema_violation: <reason>` and its `violation` for each, with its index', async () => {
           const out = await send(STRICT, {
             entities: [{ name: 'Ok One', type: 'person', properties: { age: 3 } }, { name: 'Bad One', type: 'person', properties: { age: 'old' } }],
             edges: [{ from: ids.person1, to: ids.person2, label: 'employs' }],
           });
           assert.equal(out.status, door.startsWith('POST') ? 207 : 200);
+          // bundle-23: r4.1 + R5-3 Q-315 (a bulk row gains `violation`, the structured refusal; `reason` stays the published string) — was { type, index, reason } only
           assert.deepEqual(out.errors, [
-            { type: 'entity', index: 1, reason: `schema_violation: ${NUMBER_GOT_STRING}` },
-            { type: 'edge', index: 0, reason: "schema_violation: 'employs' declares its from endpoint as one of: org" },
+            { type: 'entity', index: 1, reason: `schema_violation: ${NUMBER_GOT_STRING}`,
+              violation: { error: 'schema_violation', message: "The change violates this space's schema: properties.age.", introduced: [{ field: 'properties.age', reason: NUMBER_GOT_STRING, value: 'old' }], preExisting: [] } },
+            { type: 'edge', index: 0, reason: "schema_violation: 'employs' declares its from endpoint as one of: org",
+              violation: { error: 'schema_violation', message: "The change violates this space's schema: fromType.", introduced: [{ field: 'fromType', reason: "'employs' declares its from endpoint as one of: org", value: 'person' }], preExisting: [] } },
           ]);
           assert.deepEqual([out.inserted.entities, out.inserted.edges], [1, 0], 'one refused item hid the others, or a refused item was stored');
           const names = (await pins.stored(STRICT, 'entity')).map(d => d.name);
@@ -100,21 +103,23 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
           assert.equal((await pins.stored(STRICT, 'edge')).some(d => d.label === 'employs'), false);
         });
 
-        it('a refused row has exactly `type`, `index` and `reason`: no field, no split, no structured violation', async () => {
+        it('a refused row has exactly `type`, `index`, `reason` and `violation`: the violation carries no duplicate `violations` array', async () => {
           const out = await send(STRICT, { entities: [{ name: 'Bad Two', type: 'person', properties: { age: 'old' } }] });
           assert.equal(out.errors.length, 1, JSON.stringify(out.errors));
-          assert.deepEqual(Object.keys(out.errors[0]).sort(), ['index', 'reason', 'type']);
+          // bundle-23: R5-3 Q-315 (the row's `violation` holds { error, message, introduced, preExisting }, no `violations`) — was ['index', 'reason', 'type']
+          assert.deepEqual(Object.keys(out.errors[0]).sort(), ['index', 'reason', 'type', 'violation']);
+          assert.deepEqual(Object.keys(out.errors[0].violation).sort(), ['error', 'introduced', 'message', 'preExisting']);
         });
 
-        it('an item that breaks one field while the record already broke another: the reason JOINS both, introduced first or not', async () => {
+        it('an item that breaks one field while the record already broke another: the reason is the breaking fault only, the pre-existing one is not joined', async () => {
           const id = randomUUID();
           await pins.door.coll(STRICT, 'entities').insertOne({ _id: id, spaceId: STRICT, name: 'Bob', type: 'person', tags: [], properties: { age: 'old' }, seq: 50, author: AUTHOR, createdAt: T0, updatedAt: T0 });
           await bumpSeq(STRICT, 50);
           const out = await send(STRICT, { entities: [{ id, name: 'Bob', type: 'person', properties: { rank: 5 } }] });
           assert.equal(out.errors.length, 1, JSON.stringify(out.errors));
           const reasons = out.errors[0].reason.replace(/^schema_violation: /, '').split('; ').sort();
-          assert.deepEqual(reasons, [NUMBER_GOT_STRING, STRING_GOT_NUMBER].sort(),
-            'the reason does not carry both the introduced and the pre-existing reason');
+          // bundle-23: R5-3 Q-315 (`reason` is derived from violation.introduced only, the blocking fault; the pre-existing reason lives in violation.preExisting) — was both reasons joined with '; '
+          assert.deepEqual(reasons, [STRING_GOT_NUMBER], 'the reason is not the introduced fault alone');
         });
 
         it('a warn space: the item LANDS and its row reads `schema_warning: <field> — <reason>`', async () => {
@@ -139,12 +144,13 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
       assert.deepEqual(mcp.errors, rest.errors);
     });
 
-    it('save_bulk\'s text lists the rows as JSON after a one-line summary', async () => {
+    it('save_bulk\'s text lists the rows as JSON after a one-line summary, each row with its `violation`', async () => {
       const out = await BULK.save_bulk(STRICT, { entities: [{ name: 'Bad Three', type: 'person', properties: { age: 'old' } }] });
+      // bundle-23: R5-3 Q-315 (the JSON rows carry the row's `violation`) — was the row without it
       assert.equal(out.text,
         'bulk_write complete — inserted: {"facts":0,"entities":0,"edges":0,"chrono":0}, updated: {"facts":0,"entities":0,"edges":0,"chrono":0}, '
         + 'connections: {"links":0,"edges":0}, errors: 1\n'
-        + `[{"type":"entity","index":0,"reason":"schema_violation: ${NUMBER_GOT_STRING}"}]`);
+        + `[{"type":"entity","index":0,"reason":"schema_violation: ${NUMBER_GOT_STRING}","violation":{"error":"schema_violation","message":"The change violates this space's schema: properties.age.","introduced":[{"field":"properties.age","reason":"${NUMBER_GOT_STRING}","value":"old"}],"preExisting":[]}}]`);
     });
   });
 
@@ -212,12 +218,14 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
             const out = await merge(STRICT, p);
             const error = sentence(STRICT, p, refusal.what);
             assert.equal(out.status, 400, JSON.stringify(out));
+            // bundle-23: R5-3 Q-315 (a merge answers the standard refusal body, toStructured(): error 'schema_violation', message the sentence; graph_merge's text is the common MCP mapping) — was { error: <sentence>, violations } and `Error: <sentence>`
+            const standard = { error: 'schema_violation', message: error, introduced: refusal.violations, preExisting: [], violations: refusal.violations };
             if (door === 'graph_merge') {
               assert.equal(out.isError, true);
-              assert.equal(out.text, `Error: ${error}`);
-              assert.deepEqual(out.structured, { violations: refusal.violations });
+              assert.equal(out.text, `Error: schema_violation: ${error}`);
+              assert.deepEqual(out.structured, standard);
             } else {
-              assert.deepEqual(out.body, { error, violations: refusal.violations });
+              assert.deepEqual(out.body, standard);
             }
             assert.deepEqual(await snapshot(STRICT), before_, `${door}: a refused merge wrote something`);
           });
@@ -225,20 +233,27 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
       });
     }
 
-    it('a refused merge answers `{ error, violations }` and NOT the standard refusal body: no `introduced`, `preExisting` or `message`', async () => {
+    it('a refused merge answers the standard refusal body: `error` is the code, with `message`, `introduced`, `preExisting` and `violations`', async () => {
       const p = await pair(STRICT, 'thing');
       const out = await DOORS['the entity merge route'](STRICT, p);
-      assert.deepEqual(Object.keys(out.body).sort(), ['error', 'violations']);
+      // bundle-23: R5-3 Q-315 (body becomes toStructured()) — was ['error', 'violations'] with the sentence in `error`
+      assert.deepEqual(Object.keys(out.body).sort(), ['error', 'introduced', 'message', 'preExisting', 'violations']);
+      assert.equal(out.body.error, 'schema_violation');
     });
 
     for (const [door, merge] of Object.entries(DOORS)) {
-      it(`${door}: a key the survivor's type does not DECLARE is merged today, in a strict space, and stored`, async () => {
+      it(`${door}: a key the absorbed entity brings in that the survivor's type does not DECLARE is refused in a strict space, and nothing is written`, async () => {
         const p = await pair(STRICT, 'person', { age: 3 }, { zzNotDeclared: 1 });
+        const before_ = await snapshot(STRICT);
         const out = await merge(STRICT, p);
-        assert.equal(out.status, 200, JSON.stringify(out));
-        const survivor = (await pins.stored(STRICT, 'entity')).find(d => d._id === p.survivorId);
-        assert.deepEqual(survivor.properties, { age: 3, zzNotDeclared: 1 });
-        assert.equal((await pins.stored(STRICT, 'entity')).some(d => d._id === p.absorbedId), false, 'the absorbed entity was not removed');
+        // bundle-23: R6-10 Q-93 (keys brought in from the absorbed record are introduced in strict; the merge keeps 400) — was 200, merged and stored
+        const error = sentence(STRICT, p, "properties.zzNotDeclared: property 'zzNotDeclared' is not declared on this type");
+        const violations = [{ field: 'properties.zzNotDeclared', value: 1, reason: "property 'zzNotDeclared' is not declared on this type", declared: ['age', 'rank'] }];
+        const standard = { error: 'schema_violation', message: error, introduced: violations, preExisting: [], violations };
+        assert.equal(out.status, 400, JSON.stringify(out));
+        if (door === 'graph_merge') assert.deepEqual(out.structured, standard);
+        else assert.deepEqual(out.body, standard);
+        assert.deepEqual(await snapshot(STRICT), before_, `${door}: a refused merge wrote something`);
       });
 
       it(`${door}: in a warn space the merge that a strict space refuses succeeds`, async () => {

@@ -12,14 +12,15 @@
  *
  * One refused schema per door FAMILY, and the words each family answers:
  *  - **The inline doors** — the space `PATCH`, `PUT .../schema`, the single-type `PUT` (REST) and `schema_update` (MCP) — answer
- *    `400`. The REST doors' body is `{ error: <the zod issues as pretty-printed JSON text> }`; the MCP door's text is
- *    `Error (400): <the same issues text>`. The ISSUES differ only in `path`, which starts where each door's body starts.
+ *    `400`. The REST doors' body is `{ error: <prose>, issues: [{ code, path }] }`; the MCP door's text is `Error (400): <the same
+ *    prose>`. The prose is the zod message under its dotted path, and the `issues` are the structured part. Before bundle-23 the
+ *    body's `error` was the zod issues as pretty-printed JSON text, whole.
  *  - **The library doors** (`POST /api/schema-library`) answer `400` in the same shape, with a `path` that starts at the entry's
  *    own body (`schema`, ...).
  *  - **A refusal stores nothing**, read from the instance after the call.
  *
- * And the ONE difference between the families that bundle-23 closes: a namingPattern that can backtrack exponentially is REFUSED
- * by every inline door and ACCEPTED by the library (its body is a plain length check). The pin records the accepted entry.
+ * And the ONE difference between the families that bundle-23 closed: a namingPattern that can backtrack exponentially was REFUSED
+ * by every inline door and ACCEPTED by the library (its body was a plain length check). The library now refuses it as well (Q-215).
  *
  * ## MCP pins fail rather than skip
  *
@@ -55,15 +56,22 @@ const INLINE_PATH = {
   'mcp-schema-update': ['meta', 'typeSchemas', 'entity', 'thing', 'namingPattern'],
 };
 
-/** The body of a REST refusal is `{ error }` and the MCP text is `Error (400): ` and the same issues text. Returns the issues text. */
-function issuesText(door, answer) {
+/** The prose a refusal answers: a REST body's `error`, or the MCP text after its `Error (400): ` prefix. */
+function wordsOf(door, answer) {
   if (door === 'mcp-schema-update') {
     assert.ok(answer.text.startsWith('Error (400): '), answer.text);
     return answer.text.slice('Error (400): '.length);
   }
-  assert.deepEqual(Object.keys(answer.body), ['error'], `the REST refusal body is not { error }: ${answer.text}`);
+  assert.deepEqual(Object.keys(answer.body).sort(), ['error', 'issues'], `the REST refusal body is not { error, issues }: ${answer.text}`);
   return answer.body.error;
 }
+
+/** The structured part a REST refusal answers beside its prose: `issues`, each `{ code, path }` (plus `keys` for an unknown key). */
+function issuesOf(answer) {
+  return answer.body.issues;
+}
+
+const dotted = (path) => path.join('.');
 
 describe('a refused type schema, in the words each door answers before bundle-23', { skip }, () => {
   let inst;
@@ -90,7 +98,9 @@ describe('a refused type schema, in the words each door answers before bundle-23
         const held = inst.heldTypes(SPACE);
         const out = await inst.doors[door](SPACE, { typeSchemas: { entity: { thing: { namingPattern: TOO_LONG } } } });
         assert.equal(out.status, 400, out.text);
-        assert.deepEqual(JSON.parse(issuesText(door, out)), [tooBig(INLINE_PATH[door])]);
+        // bundle-23: R5-4 Q-362 (prose = the message under its dotted path; the structured part is `issues`) — was the zod issues as pretty-printed JSON text in `error`
+        assert.equal(wordsOf(door, out), `${dotted(INLINE_PATH[door])}: Too big: expected string to have <=500 characters`);
+        if (door !== 'mcp-schema-update') assert.deepEqual(issuesOf(out), [{ code: 'too_big', path: INLINE_PATH[door] }]);
         assert.deepEqual(inst.heldTypes(SPACE), held, `${door}: a refused schema was stored`);
       });
 
@@ -99,7 +109,9 @@ describe('a refused type schema, in the words each door answers before bundle-23
         const held = inst.heldTypes(SPACE);
         const out = await inst.doors[door](SPACE, { typeSchemas: { entity: { thing: { namingPattern: TOO_RISKY } } } });
         assert.equal(out.status, 400, out.text);
-        assert.deepEqual(JSON.parse(issuesText(door, out)), [{ code: 'custom', path: INLINE_PATH[door], message: RISKY_MESSAGE }]);
+        // bundle-23: R5-4 Q-362 + R6-11 (the prose is bounded: the message is cut, and the cut is named) — was the zod custom issue as JSON with the whole message
+        assert.equal(wordsOf(door, out), `${dotted(INLINE_PATH[door])}: ${RISKY_MESSAGE.slice(0, -23)}…(+23 chars)`);
+        if (door !== 'mcp-schema-update') assert.deepEqual(issuesOf(out), [{ code: 'custom', path: INLINE_PATH[door] }]);
         assert.deepEqual(inst.heldTypes(SPACE), held);
       });
     }
@@ -118,8 +130,10 @@ describe('a refused type schema, in the words each door answers before bundle-23
       inst.reset();
       const out = await inst.library.post(entry({ namingPattern: TOO_LONG }));
       assert.equal(out.status, 400, out.text);
-      assert.deepEqual(Object.keys(out.body), ['error']);
-      assert.deepEqual(JSON.parse(out.body.error), [tooBig(['schema', 'namingPattern'])]);
+      // bundle-23: R5-4 Q-362 (prose in `error`, the structured part in `issues`) — was the zod issues as pretty-printed JSON in `error`
+      assert.deepEqual(Object.keys(out.body).sort(), ['error', 'issues']);
+      assert.equal(out.body.error, 'schema.namingPattern: Too big: expected string to have <=500 characters');
+      assert.deepEqual(out.body.issues, [{ code: 'too_big', path: ['schema', 'namingPattern'] }]);
       assert.deepEqual(inst.heldEntries(), []);
     });
 
@@ -127,20 +141,24 @@ describe('a refused type schema, in the words each door answers before bundle-23
       inst.reset();
       const out = await inst.library.post(entry({ bogusKey: 1 }));
       assert.equal(out.status, 400, out.text);
-      assert.deepEqual(JSON.parse(out.body.error), [
-        { code: 'unrecognized_keys', keys: ['bogusKey'], path: ['schema'], message: 'Unrecognized key: "bogusKey"' },
-      ]);
+      // bundle-23: R5-4 Q-362 (the unrecognized_keys sentence is rebuilt from issue.keys; the keys ride in `issues`) — was the zod issue as JSON in `error`
+      assert.deepEqual(Object.keys(out.body).sort(), ['error', 'issues']);
+      assert.equal(out.body.error, 'schema: unrecognized key: bogusKey');
+      assert.deepEqual(out.body.issues, [{ code: 'unrecognized_keys', path: ['schema'], keys: ['bogusKey'] }]);
       assert.deepEqual(inst.heldEntries(), []);
     });
   });
 
   describe('the one difference between the families', () => {
-    it('a library entry whose namingPattern backtracks exponentially is ACCEPTED and stored, where every inline door refuses it', async () => {
+    it('a library entry whose namingPattern backtracks exponentially is REFUSED, as every inline door refuses it, and nothing is stored', async () => {
       inst.reset();
       const out = await inst.library.post({ name: 'wordsrisky', knowledgeType: 'entity', typeName: 'thing', schema: { namingPattern: TOO_RISKY } });
-      assert.equal(out.refused, false, `the library refused a risky pattern: ${out.text}`);
-      assert.equal(out.status, 201, out.text);
-      assert.equal(inst.heldEntry('wordsrisky')?.schema?.namingPattern, TOO_RISKY);
+      // bundle-23: Q-215 (the library schema is the inline body; ReDoS refused alike on REST and MCP) — was 201, ACCEPTED and stored
+      assert.equal(out.refused, true, `the library accepted a risky pattern: ${out.text}`);
+      assert.equal(out.status, 400, out.text);
+      assert.equal(out.body.error, `schema.namingPattern: ${RISKY_MESSAGE.slice(0, -23)}…(+23 chars)`);
+      assert.deepEqual(out.body.issues, [{ code: 'custom', path: ['schema', 'namingPattern'] }]);
+      assert.equal(inst.heldEntry('wordsrisky'), undefined, 'a refused library entry was stored');
       for (const door of INLINE_DOORS) {
         inst.reset();
         const refused = await inst.doors[door](SPACE, { typeSchemas: { entity: { thing: { namingPattern: TOO_RISKY } } } });

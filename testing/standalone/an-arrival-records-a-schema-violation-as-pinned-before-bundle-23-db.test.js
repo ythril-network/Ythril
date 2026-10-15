@@ -16,11 +16,14 @@
  *    broke the schema — with every document stored. The rows themselves are not in the batch answer.
  *  - **Push, single** (`POST /api/sync/entities|facts|edges|chrono`): `200`, `{ status, schemaViolations: [{ field, value, reason }] }`
  *    — the ROWS, on the exit that kept the document.
- *  - **Both push answers count in every `validationMode`**, `off` included: the recording does not read the mode.
+ *  - **Both push answers count in `strict` and `warn`; `off` records nothing** (an off space evaluates no schema): the answer carries
+ *    no count and no rows there. Until bundle-23 the recording did not read the mode, and `off` counted too.
  *  - **Pull** (the real engine against a fake peer): the page is stored, the cycle answers `{ networksSynced, errors: 0, notFound }`
- *    with NO violation in it, the sync history holds none, and no warning line is logged — a pulled record records nothing.
- *  - **Admin import** (`importDocuments`): `results.<family>.schemaViolations` is `[{ _id, violations: [row] }]`, in every mode; a
- *    conforming document leaves the key absent.
+ *    with NO violation in it. In a strict space the pulled violation is logged, one line, by names and counts; the sync history
+ *    carries it per space. Until bundle-23 a pulled record recorded nothing at all.
+ *  - **Admin import** (`importDocuments`): `results.<family>` carries `schemaViolations: [{ _id, violations: [row] }]` and
+ *    `schemaViolationsTotal` in `strict` and `warn` (the rows by names, never values); a conforming document leaves the key absent;
+ *    `off` records nothing.
  *
  * ## MCP pins
  *
@@ -118,7 +121,7 @@ describe('an arriving record that breaks the schema, as push, pull and import re
     assert.deepEqual(Object.keys(FAMILIES).sort(), ['chrono', 'edges', 'entities', 'facts']);
   });
 
-  describe('push, batch: a COUNT per family, every document stored, in every mode', () => {
+  describe('push, batch: a COUNT per family in strict and warn, none in off, every document stored', () => {
     for (const mode of MODES) {
       for (const [name, f] of Object.entries(FAMILIES)) {
         it(`${mode}: ${name}`, async () => {
@@ -126,21 +129,23 @@ describe('an arriving record that breaks the schema, as push, pull and import re
           const out = await door.push('/batch-upsert', { [f.key]: [f.bad(space, `${name}-bad`, 5), f.ok(space, `${name}-ok`, 6)] }, at(space));
           assert.equal(out.code, 200, JSON.stringify(out.body));
           assert.equal(out.body.status, 'ok');
-          assert.deepEqual(out.body[f.key], f.counts(1));
+          // bundle-23: R6-9 Q-93 (an off space records nothing) — was a count of 1 in every mode, off included
+          assert.deepEqual(out.body[f.key], f.counts(mode === 'off' ? 0 : 1));
           assert.deepEqual(ids(await door.coll(space, f.collection).find({}).toArray()), [`${name}-bad`, `${name}-ok`].sort(), 'a violating document was not stored');
         });
       }
     }
   });
 
-  describe('push, single: the ROWS, on the exit that kept the document, in every mode', () => {
+  describe('push, single: the ROWS, on the exit that kept the document, in strict and warn; off answers no rows', () => {
     for (const mode of MODES) {
       for (const [name, f] of Object.entries(FAMILIES)) {
         it(`${mode}: ${name}`, async () => {
           const space = spaceOf(mode);
           const bad = await door.push(f.single, f.bad(space, `${name}-bad`, 5), at(space));
           assert.equal(bad.code, 200, JSON.stringify(bad.body));
-          assert.deepEqual(bad.body, { status: f.statusOnSingle, schemaViolations: [f.row] });
+          // bundle-23: R6-9 Q-93 (an off space records nothing, so no rows) — was the rows in every mode, off included
+          assert.deepEqual(bad.body, mode === 'off' ? { status: f.statusOnSingle } : { status: f.statusOnSingle, schemaViolations: [f.row] });
           const good = await door.push(f.single, f.ok(space, `${name}-ok`, 6), at(space));
           assert.deepEqual(good.body, { status: f.statusOnSingle }, 'a conforming document was reported');
           assert.equal(await door.coll(space, f.collection).countDocuments({ _id: `${name}-bad` }), 1, 'a violating document was not stored');
@@ -149,7 +154,7 @@ describe('an arriving record that breaks the schema, as push, pull and import re
     }
   });
 
-  describe('pull: the page is stored and nothing records the violation', () => {
+  describe('pull: the page is stored, and the violation is logged once, by names and counts', () => {
     for (const [name, f] of Object.entries(FAMILIES)) {
       it(name, async () => {
         const space = spaceOf('strict');
@@ -158,11 +163,16 @@ describe('an arriving record that breaks the schema, as push, pull and import re
         assert.deepEqual(result, { networksSynced: 1, errors: 0, notFound: false });
         assert.deepEqual(ids(await door.coll(space, f.collection).find({}).toArray()), [`${name}-pulled-bad`, `${name}-pulled-ok`].sort(),
           'a pulled violating document was not stored');
-        assert.deepEqual(lines.filter(l => /violat|properties[.]|expected type|pulled-bad/i.test(l)), [], 'a pull logged the violation');
+        // bundle-23: R6-9 Q-93 (a pulled record is recorded: one warnOnce line per (space, peer) per window, by names and counts, never values) — was no line.
+        // The warnOnce is spent by the first pull of the window, so only the first family (`entities`) in this file says it.
+        const said = name === 'entities' ? [
+          `pull from Pull-door peer: 1 ${f.key} record(s) stored in space '${space}' carry something its schema does not accept that the copy each replaced did not: ${f.row.field} (1). Stored as sent; the key and field names are all this line says`,
+        ] : [];
+        assert.deepEqual(lines.filter(l => /violat|properties[.]|expected type|pulled-bad/i.test(l)), said, 'the pulled violation was not logged as the once-per-window line');
       });
     }
 
-    it('the sync history of the cycle holds no violation', async () => {
+    it('the sync history of the cycle records the violation per space, by its count and top names', async () => {
       const space = spaceOf('strict');
       const f = FAMILIES.entities;
       door.state.records[space] = { entities: [f.bad(space, 'hist-bad', 30)] };
@@ -174,7 +184,8 @@ describe('an arriving record that breaks the schema, as push, pull and import re
       await waitFor(async () => (await getSyncHistory(door.NET)).length > 0, 15_000, 100, undefined, { what: 'the cycle\'s sync history row' });
       const history = await getSyncHistory(door.NET);
       assert.equal(await door.coll(space, 'entities').countDocuments({ _id: 'hist-bad' }), 1, 'the cycle did not pull the page (the pin would pass on nothing)');
-      assert.doesNotMatch(JSON.stringify(history), /schemaViolation/);
+      // bundle-23: R6-9 Q-93 (the sync history carries per space the records with violations and the top names, counts only) — was no violation in the history
+      assert.deepEqual(history[0].schemaViolations, [{ spaceId: space, records: 1, top: [{ name: 'properties.age', count: 1 }] }]);
     });
   });
 
@@ -183,15 +194,17 @@ describe('an arriving record that breaks the schema, as push, pull and import re
     before(async () => { ({ importDocuments } = await import('../../server/dist/api/admin-import.js')); });
 
     for (const mode of MODES) {
-      it(`${mode}: a violating document is stored and reported; a conforming one leaves the key absent`, async () => {
+      it(`${mode}: a violating document is stored; ${mode === 'off' ? 'off records nothing' : 'reported by names, never values'}; a conforming one leaves the key absent`, async () => {
         const space = spaceOf(mode);
         const out = await importDocuments(space, {
           entities: [{ _id: 'imp-bad', name: 'Bad', type: 'person', properties: { age: 'old' }, tags: [], seq: 30 }],
           facts: [{ _id: 'imp-ok', fact: 'fine', type: 'claim', properties: { confidence: 2 }, tags: [], seq: 31 }],
         });
-        assert.deepEqual(out.results.entities, {
-          inserted: 1, updated: 0, errors: 0,
-          schemaViolations: [{ _id: 'imp-bad', violations: [{ field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING }] }],
+        // bundle-23: R6-9 Q-93 (import result: first 50 records, the total, names and counts only; off records nothing) — was `value` in every row, every mode
+        if (mode === 'off') assert.deepEqual(out.results.entities, { inserted: 1, updated: 0, errors: 0 });
+        else assert.deepEqual(out.results.entities, {
+          inserted: 1, updated: 0, errors: 0, schemaViolationsTotal: 1,
+          schemaViolations: [{ _id: 'imp-bad', violations: [{ field: 'properties.age', reason: NUMBER_GOT_STRING }] }],
         });
         assert.deepEqual(out.results.facts, { inserted: 1, updated: 0, errors: 0 });
         assert.equal(await door.coll(space, 'entities').countDocuments({ _id: 'imp-bad' }), 1, 'a violating import document was not stored');
