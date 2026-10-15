@@ -646,13 +646,13 @@ false. It is `400` on `PATCH`, the `PUT` routes and library writes, and the same
 words on `schema_validate`. Saving needs `schema` **`admin`**.
 
 **What a record that breaks a rule is told.** One row per rule, on `rules.<name>` for a type's rule and
-`meta.rules.<name>` for a space's, and no `value`:
+`meta.rules.<name>` for a space's, and no `value`; a row that is not a plain violation says which in `outcome`:
 
-| Outcome | `reason` |
-|---|---|
-| violated | the rule's message, then `(rule <8 hex>)` — a short hash of the rule's text, so an edited rule is a new violation |
-| could not be evaluated | the message, then `— could not be evaluated on this record (…)` and the hash: a runtime error, or an answer that was not true or false |
-| too large to check | the message, then `— too large to check: self.<path> is …` and the hash |
+| Outcome | `outcome` | `reason` |
+|---|---|---|
+| violated | absent | the rule's message, then `(rule <8 hex>)` — a short hash of the rule's text, so an edited rule is a new violation |
+| could not be evaluated | `could_not_evaluate` | the message, then `— could not be evaluated on this record (…)` and the hash: a runtime error, or an answer that was not true or false |
+| too large to check | `too_large` | the message, then `— too large to check: self.<path> is …` and the hash |
 
 All three are violations: classified **introduced or pre-existing** as above, so one a record already had does not
 refuse an unrelated edit, and a strict space refuses only the introduced ones. A record that arrives from a peer or
