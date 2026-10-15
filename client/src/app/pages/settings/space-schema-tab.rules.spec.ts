@@ -574,10 +574,10 @@ describe('removing a rule row moves focus to a neighbour instead of dropping it'
 describe('Validate runs the live check, in sample mode and in stored-data mode', () => {
   const URL = '/api/spaces/work/validate-schema';
   const post = (h: Harness) => h.http.expectOne(r => r.method === 'POST' && r.url === URL);
-  // The stored-data answer's contract (b23 W6b): `progress.checked` is what THIS call read, `done` says the walk reached the end, and
+  // The stored-data answer's contract (b23 W6b): `progress.checked` is what THIS call read, `complete` says the walk reached the end, and
   // nothing counts violations past the page.
   const answer = (over: Record<string, unknown> = {}) => ({
-    spaceId: 'work', checked: { entities: { checked: 1, total: 1 } }, progress: { checked: 1, total: 1 }, done: true, violations: [], staleGuards: [], ...over,
+    spaceId: 'work', checked: { entities: { checked: 1, total: 1 } }, progress: { checked: 1, total: 1 }, complete: true, violations: [], staleGuards: [], ...over,
   });
   const button = (h: Harness) => $(h.el, '[data-testid="validate-schema"]') as HTMLButtonElement | null;
 
@@ -636,7 +636,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
   it('the all-good word appears only when the check is COMPLETE and found nothing', async () => {
     const cases: [string, Record<string, unknown>, boolean][] = [
       ['complete and clean', answer(), true],
-      ['clean so far but not complete', answer({ done: false, checked: { entities: { checked: 5, total: 9 } }, progress: { checked: 5, total: 9 } }), false],
+      ['clean so far but not complete', answer({ complete: false, checked: { entities: { checked: 5, total: 9 } }, progress: { checked: 5, total: 9 } }), false],
       ['complete with a violation', answer({ violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }), false],
     ];
     for (const [label, body, allGood] of cases) {
@@ -662,7 +662,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect(firstBody.sample, 'stored-data mode sent a sample').toBeUndefined();
     expect(firstBody.after, 'the first page carries no after').toBeUndefined();
     // The server pages by `_id` keyset: the answer's `nextAfter` is sent back as `after` (one spelling on REST, MCP and here).
-    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, progress: { checked: 100, total: 250 }, done: false, nextAfter: 'cur-1' }));
+    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, progress: { checked: 100, total: 250 }, complete: false, nextAfter: 'cur-1' }));
     await h.settle();
 
     const progress = $(h.el, '[data-testid="validate-progress"]');
@@ -678,7 +678,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const second = post(h);
     expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
     // The second call read the other 150: the readout is the SUM of what each call read.
-    second.flush(answer({ checked: { entities: { checked: 150, total: 250 } }, progress: { checked: 150, total: 250 }, done: true }));
+    second.flush(answer({ checked: { entities: { checked: 150, total: 250 } }, progress: { checked: 150, total: 250 }, complete: true }));
     await h.settle();
 
     expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('250');
@@ -701,7 +701,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect((first.request.body as { limit?: number }).limit, 'a page larger than the rows shown hides the rest for good').toBe(50);
     first.flush(answer({
       checked: { entities: { checked: 600, total: 1040 } }, progress: { checked: 600, total: 1040 },
-      done: false, nextAfter: 'cur-1', violations: rows(1, 50),
+      complete: false, nextAfter: 'cur-1', violations: rows(1, 50),
     }));
     await h.settle();
     const progress = () => $(h.el, '[data-testid="validate-progress"]')!;
@@ -719,7 +719,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
     second.flush(answer({
       checked: { entities: { checked: 440, total: 1040 } }, progress: { checked: 440, total: 1040 },
-      done: true, violations: rows(51, 80),
+      complete: true, violations: rows(51, 80),
     }));
     await h.settle();
     expect(progress().getAttribute('data-checked'), 'the readout is the sum of what each call read').toBe('1040');
@@ -735,16 +735,16 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1' }));
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1' }));
     await h.settle();
     const readout = () => $(h.el, '[data-testid="validate-progress"]')!;
     expect(readout().getAttribute('data-checked')).toBe('300');
     $(h.el, '[data-testid="validate-continue"]')!.click();
-    post(h).flush(answer({ progress: { checked: 250, total: 900 }, done: false, nextAfter: 'c2' }));
+    post(h).flush(answer({ progress: { checked: 250, total: 900 }, complete: false, nextAfter: 'c2' }));
     await h.settle();
     expect(readout().getAttribute('data-checked'), 'the second call\'s own count was shown as the whole check\'s').toBe('550');
     $(h.el, '[data-testid="validate-continue"]')!.click();
-    post(h).flush(answer({ progress: { checked: 350, total: 900 }, done: true }));
+    post(h).flush(answer({ progress: { checked: 350, total: 900 }, complete: true }));
     await h.settle();
     expect(readout().getAttribute('data-checked')).toBe('900');
     expect(readout().getAttribute('data-total')).toBe('900');
@@ -755,7 +755,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 1041, total: 1041 }, done: false, nextAfter: 'c1' }));
+    post(h).flush(answer({ progress: { checked: 1041, total: 1041 }, complete: false, nextAfter: 'c1' }));
     await h.settle();
     const readout = $(h.el, '[data-testid="validate-progress"]')!;
     expect(readout.textContent ?? '', 'the "N of N" sentence is said beside "not finished"').not.toMatch(/validate\.progress(?![A-Za-z])/);
@@ -768,21 +768,47 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 600, total: 1041 }, done: false, nextAfter: 'c1' }));
+    post(h).flush(answer({ progress: { checked: 600, total: 1041 }, complete: false, nextAfter: 'c1' }));
     await h.settle();
     const readout = $(h.el, '[data-testid="validate-progress"]')!;
     expect(readout.textContent ?? '').toMatch(/validate\.progress(?![A-Za-z])/);
     expect(readout.textContent ?? '').toContain('validate.incomplete');
   });
 
-  it('an answer that says `complete` and not `done` is still read as the end of the walk', async () => {
+  // A page that fills `limit` exactly on the last violating record returns `nextAfter`, and the next page comes back empty and complete:
+  // that is the end of the walk, not an error, and it is said as finished.
+  it('an empty final page with `complete` after a page that found rows is a finished check, with no error', async () => {
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    const { done: _done, ...old } = answer();
-    post(h).flush({ ...old, complete: true });
+    post(h).flush(answer({
+      progress: { checked: 500, total: 900 }, complete: false, nextAfter: 'c1',
+      violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }],
+    }));
     await h.settle();
-    expect($(h.el, '[data-testid="validate-all-good"]'), 'a finished walk was not recognised').not.toBeNull();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 400, total: 900 }, complete: true, violations: [] }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-continue"]'), 'Continue offered after the walk ended').toBeNull();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
+    expect($(h.el, '[data-testid="validate-progress"]')!.textContent ?? '').not.toContain('validate.incomplete');
+    expect($$(h.el, '.sch-validate [role="alert"]').length, 'an empty last page was shown as an error').toBe(0);
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'all-good said although an earlier page found a violation').toBeNull();
+  });
+
+  // The size budget may cut a page (`truncated: true`): the check goes on from `nextAfter` exactly as after any other page.
+  it('a page the size budget cut is continued from nextAfter like any other', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 40, total: 900 }, complete: false, nextAfter: 'c1', truncated: true }));
+    await h.settle();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    const next = post(h);
+    expect((next.request.body as { after?: unknown }).after).toBe('c1');
+    next.flush(answer({ progress: { checked: 860, total: 900 }, complete: true }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
   });
 
   // The heavy rail answers 429 once the caller is over it. The page already read stays, the server's own sentence is shown, and Continue
@@ -791,7 +817,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1' }));
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1' }));
     await h.settle();
     $(h.el, '[data-testid="validate-continue"]')!.click();
     post(h).flush({ error: 'Too many heavy checks: retry in 12 seconds.' }, { status: 429, statusText: 'Too Many Requests' });
@@ -805,7 +831,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     next!.click();
     const again = post(h);
     expect((again.request.body as { after?: unknown }).after, 'Continue did not ask for the same page').toBe('c1');
-    again.flush(answer({ progress: { checked: 600, total: 900 }, done: true }));
+    again.flush(answer({ progress: { checked: 600, total: 900 }, complete: true }));
     await h.settle();
     expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
     expect($$(h.el, '.sch-validate [role="alert"]').length, 'the refusal stays after a later success').toBe(0);
@@ -819,12 +845,12 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const h = await mount();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 100, total: 400 }, done: false, nextAfter: 'c0', violations: page(0) }));
+    post(h).flush(answer({ progress: { checked: 100, total: 400 }, complete: false, nextAfter: 'c0', violations: page(0) }));
     await h.settle();
     for (let p = 1; p < 4; p++) {
       $(h.el, '[data-testid="validate-continue"]')!.click();
       // The last page finds nothing: the earlier pages' rows must still stop the all-good word.
-      post(h).flush(answer({ progress: { checked: 100, total: 400 }, done: p === 3, nextAfter: p === 3 ? undefined : `c${p}`, violations: p === 3 ? [] : page(p) }));
+      post(h).flush(answer({ progress: { checked: 100, total: 400 }, complete: p === 3, nextAfter: p === 3 ? undefined : `c${p}`, violations: p === 3 ? [] : page(p) }));
       await h.settle();
     }
     const tab = h.fixture.debugElement.query(By.directive(SpaceSchemaTabComponent)).componentInstance as Record<string, unknown>;
@@ -849,7 +875,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const before = region();
     await chooseMode(h, 'stored');
     button(h)!.click();
-    post(h).flush(answer({ progress: { checked: 900, total: 900 }, done: true }));
+    post(h).flush(answer({ progress: { checked: 900, total: 900 }, complete: true }));
     await h.settle();
     expect(region(), 'the region was replaced by the result, so nothing was announced').toBe(before);
     expect($(region()!, '[data-testid="validate-progress"]'), 'the readout is outside the live region').not.toBeNull();
@@ -883,7 +909,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
       await chooseMode(h, 'stored');
       button(h)!.click();
       post(h).flush(answer({
-        progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1',
+        progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c1',
         violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }],
       }));
       await h.settle();
@@ -923,7 +949,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
       $(h.el, '[data-testid="validate-continue"]')!.click();
       const second = post(h);
       expect(JSON.stringify((second.request.body as { meta?: unknown }).meta), 'Continue sent a different schema than the run started with').toBe(firstMeta);
-      second.flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c2' }));
+      second.flush(answer({ progress: { checked: 300, total: 900 }, complete: false, nextAfter: 'c2' }));
       await h.settle();
 
       await editARule(h);
@@ -934,7 +960,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
       expect(body.after, 'a fresh run continued the old cursor').toBeUndefined();
       expect(JSON.stringify(body.meta), 'the fresh run did not ask under the edited schema').toBe(JSON.stringify(h.state.buildMeta()));
       expect(JSON.stringify(body.meta)).not.toBe(firstMeta);
-      fresh.flush(answer({ progress: { checked: 900, total: 900 }, done: true }));
+      fresh.flush(answer({ progress: { checked: 900, total: 900 }, complete: true }));
       await h.settle();
       expect($(h.el, STALE), 'the note stays after a fresh run').toBeNull();
       expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked'), 'the fresh run added to the old run\'s count').toBe('900');

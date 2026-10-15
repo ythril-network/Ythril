@@ -626,13 +626,13 @@ export class SpaceSchemaTabComponent implements OnInit {
     this.validateError.set('');
   }
 
-  /** True when the walk reached the end of the space (or the sample was judged): nothing is left after the latest answer. `complete` is what a server that has not renamed it says. */
+  /** True when the walk reached the end of the space (or the sample was judged): nothing is left after the latest answer. The answer's `complete`. */
   readonly validateDone = computed(() => {
     const r = this.validateResult();
     return !!r && SpaceSchemaTabComponent.isDone(r);
   });
 
-  private static isDone(result: ValidateSchemaResult): boolean { return (result.done ?? result.complete) === true; }
+  private static isDone(result: ValidateSchemaResult): boolean { return result.complete === true; }
 
   /** The next page is offered while the check is not done and the server gave a cursor. */
   readonly validateCanContinue = computed(() => this.validateMode() === 'stored' && this.validateResult() !== null && !this.validateDone() && this.validateCursor() !== null);
