@@ -54,7 +54,7 @@ import { isPlainObject } from '../util/plain-object.js';
 import { viewSourceProjection, type ViewKind } from '../brain/record-view.js';
 import { boundedRows } from '../brain/write-validation.js';
 import {
-  budgetFields, budgetMeter, carriagesFor, defaultBudgetChars, resolveBudget, type CeilingRefusal, type ResolvedBudget,
+  budgetCeilingZ, budgetFields, budgetMeter, carriagesFor, defaultBudgetChars, resolveBudget, type CeilingRefusal, type ResolvedBudget,
 } from '../brain/result-budget.js';
 import { parseSpaceMeta, readStoredMeta } from './body-schemas.js';
 import { violationsOfRecord, resolveMetaRefs, type SchemaViolation } from './schema-validation.js';
@@ -85,10 +85,10 @@ export const SchemaValidateBody = z.object({
   }).strict().optional(),
   limit: z.number().int().min(1).max(SCHEMA_VALIDATE_MAX_LIMIT).optional(),
   after: z.string().min(1).max(SCHEMA_VALIDATE_CURSOR_MAX).optional(),
-  // The size ceilings, read as every budgeted door reads them: `resolveBudget` states what is wrong with one, in one sentence.
-  maxChars: z.unknown().optional(),
-  maxBytes: z.unknown().optional(),
-  maxTokens: z.unknown().optional(),
+  // The size ceilings, bounded as the tools declare them (`budgetCeilingZ`, one floor for both doors); `resolveBudget` reads what passes.
+  maxChars: budgetCeilingZ().optional(),
+  maxBytes: budgetCeilingZ().optional(),
+  maxTokens: budgetCeilingZ().optional(),
 });
 
 /** One record's rows. */
