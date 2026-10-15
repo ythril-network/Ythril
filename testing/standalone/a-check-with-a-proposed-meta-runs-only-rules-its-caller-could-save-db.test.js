@@ -1,17 +1,18 @@
 /**
- * A sample check runs only rules its caller could save (b23 wave 7, finding S2) — on both doors, `POST /api/spaces/:id/validate-schema`
- * and MCP `schema_validate`.
+ * A check with a proposed meta runs only rules its caller could save (b23 wave 7, finding S2) — in BOTH modes (a sample, and the
+ * stored-data walk), on both doors, `POST /api/spaces/:id/validate-schema` and MCP `schema_validate`.
  *
  * ## What it prevents
  *
- * A sample check evaluates a PROPOSED meta and needs only `schema: read`. Measured, the heaviest rule set the save-time price accepts
- * takes about half a second to evaluate on one record at the input caps, synchronously on the event loop, and the sample check is not
- * on the heavy-call rail — so a read-only token could keep the server blocked for most of every minute. Saving a rule needs
+ * A check evaluates a PROPOSED meta and needs only `schema: read`. Measured, the heaviest rule set the save-time price accepts
+ * takes about half a second to evaluate on one record at the input caps, synchronously on the event loop. A sample is not on the
+ * heavy-call rail; the stored-data walk runs the proposed rules over up to 10 000 records and yields only between pages — so a
+ * read-only token could keep the server blocked for most of every minute. Saving a rule needs
  * `schema: admin` (`SPACE_FIELD_RIGHTS['meta.rules']`, a type's rules priced the same by `typeRuleEditsIn`). The rule: a caller may RUN
- * only rules it could SAVE. Sampling the stored rules — or a proposed meta whose rules equal the stored ones, which is what the UI
- * always sends (the whole staged meta) — stays open to a reader.
+ * only rules it could SAVE. Checking with the stored rules — or a proposed meta whose rules equal the stored ones, which is what the
+ * UI always sends (the whole staged meta) — stays open to a reader.
  *
- * ## What is held, each on BOTH doors
+ * ## What is held, each on BOTH doors (the numbered cases are samples; the stored-data mode is held by the second block)
  *
  * 1. a `schema: read` token sampling a proposed meta with a NEW type rule is refused (403), the sentence naming the type's rules field;
  * 2. the same with a changed `meta.rules`, and with both at once (each field is named);
@@ -21,15 +22,21 @@
  *    the rights table says admin and the door does not word a rung of its own;
  * 5. the two doors refuse in the same words.
  *
- * Run: node --test testing/standalone/a-sample-check-runs-only-rules-its-caller-could-save.test.js
+ * The stored-data mode: a reader with a new rule is refused 403 with the same sentence, the stored rules and equal rules are answered,
+ * an administrator is answered — and a refusal costs the caller NO heavy-call slot (the refusal comes before the rail).
+ *
+ * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
+ *      node --test testing/standalone/a-check-with-a-proposed-meta-runs-only-rules-its-caller-could-save-db.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import {
   scratchEnv, response, rightsAt, adminRights, routeOf, requestOf, callMcp, resetConfig, violationRows,
 } from './_cel-doors.mjs';
 
+const skip = await mongoSkipReason();
 const scratch = scratchEnv('ythril-sample-rules-');
 const { rule, typeSchemasOf, DECLARED } = await import('./_cel-rules.mjs');
 
@@ -54,22 +61,34 @@ const HOLDS = sampleOf({ a: 'fine', b: 5 });
 const safeJson = (t) => { try { return JSON.parse(t); } catch { return undefined; } };
 let restValidate;
 
-async function viaRest(rights, space, body) {
+/** `key`: the token the heavy-call rail counts against; without it every call is a new token, so nothing is ever counted twice. */
+async function viaRest(rights, space, body, key) {
   const res = response();
-  try { await restValidate.at(-1)(requestOf({ params: { id: space }, body, rights }), res, () => {}); }
+  const req = requestOf({ params: { id: space }, body, rights });
+  if (key) req.authToken.id = key;
+  try { await restValidate.at(-1)(req, res, () => {}); }
   catch (err) { res.status(err?.status ?? 500).json({ error: String(err?.message ?? err) }); }
   return { status: res.statusCode, refused: res.statusCode >= 400, body: res.body, error: res.body?.error, text: JSON.stringify(res.body ?? '') };
 }
-async function viaMcp(rights, space, body) {
-  const o = await callMcp('schema_validate', { space, ...body }, rights);
+async function viaMcp(rights, space, body, key) {
+  const o = key
+    ? await mcpAs(key, 'schema_validate', { space, ...body }, rights)
+    : await callMcp('schema_validate', { space, ...body }, rights);
   return { status: o.status, refused: o.isError, body: o.structured ?? safeJson(o.text), error: o.text.replace(/^Error:\s*/, ''), text: o.text };
+}
+/** `callMcp` as one named token (`_cel-doors.mjs` mints a new one per call). */
+async function mcpAs(tokenId, name, args, rights) {
+  const { callTool } = await import('../../server/dist/mcp/call-tool.js');
+  const out = await callTool({ name, args, caller: { rights, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId, tokenLabel: tokenId } });
+  return { status: out.status, isError: out.result?.isError === true, text: (out.result?.content ?? []).map(c => c.text ?? '').join('\n'), structured: out.result?.structuredContent };
 }
 const DOORS = { 'POST /api/spaces/:id/validate-schema': viaRest, 'schema_validate': viaMcp };
 
-describe('a sample check runs only rules its caller could save', () => {
-  let reader, writer, admin, instanceAdmin;
+describe('a check with a proposed meta runs only rules its caller could save', { skip }, () => {
+  let reader, writer, admin, instanceAdmin, mongo;
 
   before(async () => {
+    mongo = await openTestMongo('samplerules');
     await resetConfig(scratch.configPath, { spaces: [
       { id: SPACE, label: 'Sample rules', folders: [], completeLinkage: true, meta: STORED },
       // A space whose network layer adds a rule to its own definitions: what the check stores (`meta`) holds both, what it OWNS one.
@@ -84,7 +103,7 @@ describe('a sample check runs only rules its caller could save', () => {
     admin = await rightsAt(SPACE, { schema: 'admin' });
     instanceAdmin = await adminRights();
   });
-  after(() => scratch.cleanup());
+  after(async () => { await closeTestMongo(); scratch.cleanup(); });
 
   for (const [door, run] of Object.entries(DOORS)) {
     describe(door, () => {
@@ -194,5 +213,68 @@ describe('a sample check runs only rules its caller could save', () => {
     const [r, m] = [await viaRest(reader, SPACE, { meta: bad, ...HOLDS }), await viaMcp(reader, SPACE, { meta: bad, ...HOLDS })];
     assert.equal(r.status, 400, r.text.slice(0, 300));
     assert.equal(m.status, 400, m.text.slice(0, 300));
+  });
+
+  describe('the stored-data mode runs only rules its caller could save either', () => {
+    const NEW_TYPE = { ...STORED, typeSchemas: typeSchemasOf('entity', 'thing', { below: TYPE_RULE, above: rule('self.properties.b > 10.0', 'b must be above ten') }) };
+    const NEW_SPACE = { ...STORED, rules: { notForbidden: rule(`self.properties.a != 'other'`, 'a must not be other') } };
+    const entity = (i, properties) => ({
+      _id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, spaceId: SPACE, name: `Seeded ${i}`, type: 'thing', description: '', tags: [],
+      properties, seq: i, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', author: { instanceId: 'samplerules', instanceLabel: 'test' },
+    });
+    let serial = 0;
+    const keyOf = (door) => `rail-${door}-${++serial}`;
+
+    before(async () => {
+      await mongo.col(`${SPACE}_entities`).deleteMany({});
+      await mongo.col(`${SPACE}_entities`).insertMany([entity(1, { a: 'fine', b: 500 }), entity(2, { a: 'fine', b: 5 })]);
+    });
+
+    for (const [door, run] of Object.entries(DOORS)) {
+      describe(door, () => {
+        it('a reader with a NEW type rule, or a changed space rule, is refused 403 naming the field, and nothing is read', async () => {
+          const t = await run(reader, SPACE, { meta: NEW_TYPE });
+          assert.equal(t.status, 403, `${door}: ${t.text.slice(0, 300)}`);
+          assert.ok(t.error.includes('meta.typeSchemas.entity.thing.rules (admin on schema)'), `${door}: ${t.error}`);
+          assert.equal(t.body?.progress, undefined, `${door}: a refused check read the store`);
+          const s2 = await run(reader, SPACE, { meta: NEW_SPACE });
+          assert.equal(s2.status, 403, `${door}: ${s2.text.slice(0, 300)}`);
+          assert.ok(s2.error.includes('meta.rules (admin on schema)'), `${door}: ${s2.error}`);
+        });
+
+        it('a reader with the stored rules, or a proposed meta carrying them unchanged, is answered with the stored rule\'s rows', async () => {
+          const stored = await run(reader, SPACE, {});
+          assert.equal(stored.status, 200, `${door}: ${stored.text.slice(0, 300)}`);
+          assert.ok(violationRows(stored.body).some(r => r.field === 'rules.below'), `${door}: ${stored.text.slice(0, 300)}`);
+          const equal = await run(reader, SPACE, { meta: { ...STORED, validationMode: 'warn', purpose: 'edited' } });
+          assert.equal(equal.status, 200, `${door}: ${equal.text.slice(0, 300)}`);
+          assert.ok(violationRows(equal.body).some(r => r.field === 'rules.below'), `${door}: ${equal.text.slice(0, 300)}`);
+        });
+
+        it('a schema administrator is answered with new rules', async () => {
+          const a = await run(admin, SPACE, { meta: NEW_TYPE });
+          assert.equal(a.status, 200, `${door}: ${a.text.slice(0, 300)}`);
+          assert.ok(violationRows(a.body).some(r => r.field === 'rules.above'), `${door}: the new rule was not evaluated: ${a.text.slice(0, 300)}`);
+        });
+
+        it('a refusal costs no heavy-call slot: more refused calls than the rail allows, and the same token is still answered', async () => {
+          const { HEAVY_CALLS_PER_WINDOW } = await import('../../server/dist/rate-limit/heavy-tool.js');
+          const key = keyOf('refused');
+          for (let i = 0; i < HEAVY_CALLS_PER_WINDOW + 3; i++) {
+            const r = await run(reader, SPACE, { meta: NEW_TYPE }, key);
+            assert.equal(r.status, 403, `${door}: call ${i}: ${r.text.slice(0, 200)}`);
+          }
+          const ok = await run(reader, SPACE, {}, key);
+          assert.equal(ok.status, 200, `${door}: refusals were charged to the rail: ${ok.text.slice(0, 200)}`);
+        });
+
+        it('the control: answered stored-data checks ARE counted, so the case above says something', async () => {
+          const { HEAVY_CALLS_PER_WINDOW } = await import('../../server/dist/rate-limit/heavy-tool.js');
+          const key = keyOf('answered');
+          for (let i = 0; i < HEAVY_CALLS_PER_WINDOW; i++) assert.equal((await run(reader, SPACE, {}, key)).status, 200);
+          assert.equal((await run(reader, SPACE, {}, key)).status, 429, `${door}: the rail did not count answered runs`);
+        });
+      });
+    }
   });
 });

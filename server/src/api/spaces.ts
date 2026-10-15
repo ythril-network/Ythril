@@ -667,9 +667,9 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
  * another" — `/meta`, same area and one call apart, honoured the rung and answered 200.
  *
  * A DRY RUN is the right thing to sit at `read`: it writes nothing, stores nothing and reports what would
- * be refused. The one thing a reader may not do is RUN rules it could not save: a `sample` with a proposed `meta` whose
+ * be refused. The one thing a reader may not do is RUN rules it could not save: a check (either mode) with a proposed `meta` whose
  * rules differ from the stored ones is a 403 (`refusalOfUnsavableRules`, inside the door module), because a rule is
- * evaluated on the event loop and a sample is not on the heavy-call rail.
+ * evaluated on the event loop; the refusal comes before the heavy-call rail is charged.
  *
  * **The second factor STAYS.** `space-admin-reaches-its-own-space-settings.test.js` pins MFA on the widened
  * routes as deliberate, the reported defect is the rung rather than the factor, and loosening more than was

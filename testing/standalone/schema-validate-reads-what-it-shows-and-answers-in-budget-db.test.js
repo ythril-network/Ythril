@@ -84,7 +84,8 @@ describe('the stored-data schema check reads what it shows and answers within a 
       meta: { validationMode: 'strict', suppressEmbeddings: true, typeSchemas: typeSchemasOf('entity', 'thing', undefined) } }] });
     const { spacesRouter } = await import('../../server/dist/api/spaces.js');
     restValidate = routeOf(spacesRouter, 'post', '/:id/validate-schema');
-    reader = await rightsAt(SPACE, { schema: 'read', knowledge: 'read' });
+    // schema admin: a stored-data check of a PROPOSED rule needs the right to save it (b23 wave 7, S2); knowledge read: the values these cases read.
+    reader = await rightsAt(SPACE, { schema: 'admin', knowledge: 'read' });
   });
   after(async () => { await closeTestMongo(); scratch.cleanup(); });
 

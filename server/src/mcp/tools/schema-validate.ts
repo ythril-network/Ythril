@@ -25,8 +25,8 @@ export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
   description: 'Check a schema against records without writing anything — the space\'s stored schema, or one you propose in `meta` '
     + '(parsed exactly as a schema save would parse it, so a rule the save would refuse is refused here in the same words). '
-    + 'Needs the `read` rung on the `schema` area of the space — and a `sample` that runs rules in a proposed `meta` needs the right to '
-    + 'SAVE those rules (`admin` on `schema`): a sample runs only the stored rules, or rules you could save, and is otherwise refused '
+    + 'Needs the `read` rung on the `schema` area of the space — and a check (a `sample`, or the stored-data check) that runs rules in a '
+    + 'proposed `meta` needs the right to SAVE those rules (`admin` on `schema`): it runs only the stored rules, or rules you could save, and is otherwise refused '
     + '(403) naming each rule field and what it needs. A proposed `meta` whose rules equal the stored ones is not a change of them.\n\n'
     + 'TWO MODES. With `sample: { kind, record }` the schema is run over ONE record you supply — `kind` is entity, edge, fact or '
     + 'chrono, `record` in the stored shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, '

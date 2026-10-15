@@ -106,7 +106,7 @@ const valuesIn = (answer) => {
 };
 
 describe('the live check of a schema answers alike on both doors', { skip }, () => {
-  let schemaAdmin, schemaReader, schemaAndKnowledgeReader;
+  let schemaAdmin, schemaAdminAndKnowledgeReader, schemaReader, schemaAndKnowledgeReader;
 
   before(async () => {
     mongo = await openTestMongo('valdoors');
@@ -116,6 +116,8 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
     restValidate = routeOf(spacesRouter, 'post', '/:id/validate-schema');
     schemaReader = await rightsAt(SPACE, { schema: 'read' });
     schemaAdmin = await rightsAt(SPACE, { schema: 'admin' });
+    // Running a PROPOSED rule, in either mode, needs the right to save it (b23 wave 7, S2): the cases that page over a rule hold it.
+    schemaAdminAndKnowledgeReader = await rightsAt(SPACE, { schema: 'admin', knowledge: 'read' });
     schemaAndKnowledgeReader = await rightsAt(SPACE, { schema: 'read', knowledge: 'read' });
   });
   after(async () => { await closeTestMongo(); scratch.cleanup(); });
@@ -193,7 +195,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
       });
 
       it(`${door}: rows that are about a rule carry no value for anybody (the rule's reason is the message, not the record)`, async () => {
-        const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED });
+        const a = await run(schemaAdminAndKnowledgeReader, { meta: PROPOSED });
         assert.equal(a.refused, false, a.text.slice(0, 300));
         const ruleRows_ = violationRows(a.body).filter(r => r.field === 'rules.below');
         assert.ok(ruleRows_.length >= VIOLATING, `${door}: expected a row per violating record, got ${ruleRows_.length}`);
@@ -208,7 +210,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
         const seen = [];
         let continuation = {};
         for (let page = 0; page < 10; page++) {
-          const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED, limit: 3, ...continuation });
+          const a = await run(schemaAdminAndKnowledgeReader, { meta: PROPOSED, limit: 3, ...continuation });
           assert.equal(a.refused, false, `${door}: page ${page}: ${a.text.slice(0, 300)}`);
           const body = a.body ?? {};
           const ids = (body.violations ?? []).map(v => v._id ?? v.id).filter(Boolean);
@@ -231,7 +233,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
         let continuation = {};
         let last;
         for (let page = 0; page < 10; page++) {
-          const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED, limit: 3, ...continuation });
+          const a = await run(schemaAdminAndKnowledgeReader, { meta: PROPOSED, limit: 3, ...continuation });
           assert.equal(a.refused, false, `${door}: page ${page}: ${a.text.slice(0, 300)}`);
           last = a.body ?? {};
           assert.ok(last.progress, `${door}: page ${page} answers no \`progress\``);
@@ -246,7 +248,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
       });
 
       it(`${door}: the answer says whether the scan is complete, and a truncated page is not complete`, async () => {
-        const a = await run(schemaAndKnowledgeReader, { meta: PROPOSED, limit: 3 });
+        const a = await run(schemaAdminAndKnowledgeReader, { meta: PROPOSED, limit: 3 });
         assert.equal(a.refused, false, a.text.slice(0, 300));
         const body = a.body ?? {};
         assert.equal(typeof body.complete, 'boolean', `${door}: no \`complete\` flag`);
@@ -259,7 +261,7 @@ describe('the live check of a schema answers alike on both doors', { skip }, () 
 
   describe('schema_validate does not echo the meta it was sent', () => {
     it('stored-data mode and sample mode both answer without a `meta` key', async () => {
-      const stored = await viaMcp(schemaReader, { meta: PROPOSED, limit: 3 });
+      const stored = await viaMcp(schemaAdmin, { meta: PROPOSED, limit: 3 });
       const sampled = await viaMcp(schemaAdmin, { meta: PROPOSED, sample: { kind: 'entity', record: { name: 'x', type: 'thing', properties: { b: 500 } } } });
       for (const [what, a] of [['stored', stored], ['sample', sampled]]) {
         assert.equal(a.refused, false, `${what}: ${a.text.slice(0, 300)}`);

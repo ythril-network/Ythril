@@ -8,7 +8,7 @@
  *
  * - **sample** (`sample: { kind, record }`): the meta (the caller's proposed one, or the stored one) run over ONE record the caller
  *   typed, in the stored shape `recordViewOf` takes. Nothing stored is read, so it costs one evaluation and the record needs no right
- *   beyond the route's: it is the caller's own. The RULES it runs are another matter (see below).
+ *   beyond the route's: it is the caller's own. The RULES it runs, in either mode, are another matter (see below).
  * - **stored data** (no `sample`): the meta run over the space's stored records, a page at a time.
  *
  * ## What it prevents
@@ -27,11 +27,12 @@
  * - **An answer nobody can carry.** Rows go through the byte budget (`brain/result-budget.ts`) like every other read: `maxChars` /
  *   `maxBytes` / `maxTokens`, a door default (the one sanctioned divergence: lower on MCP), the number used disclosed, whole rows only
  *   and the cut continued by `nextAfter`.
- * - **A reader that blocks the server with a rule it could not save.** A sample evaluates a PROPOSED meta at `schema: read`, on the
- *   event loop and off the heavy-call rail; the heaviest rule set a save accepts takes about half a second on one record. A sample
+ * - **A reader that blocks the server with a rule it could not save.** A check evaluates a PROPOSED meta at `schema: read`, on the
+ *   event loop; the heaviest rule set a save accepts takes about half a second on one record, a sample is off the heavy-call rail and
+ *   the stored-data walk runs the rules over up to 10 000 records, yielding only between pages. EITHER mode
  *   therefore runs only rules its caller could save (`refusalOfUnsavableRules`): a proposed meta whose rules differ from the stored
- *   ones is a 403 naming each rule field and what it needs, decided by the rights table; the stored rules, or a proposed meta that
- *   carries them unchanged (what the UI sends), stay open to a reader.
+ *   ones is a 403 naming each rule field and what it needs, decided by the rights table and answered BEFORE the rail is charged; the
+ *   stored rules, or a proposed meta that carries them unchanged (what the UI sends), stay open to a reader.
  * - **A check that stalls the server.** The stored-data check is priced like the ingest (`consumeHeavyToolCall`, one count per token
  *   across both doors) and runs once per space at a time; it yields to the event loop after every page. A refusal costs no slot.
  */
@@ -171,7 +172,7 @@ export function refusalOfUnsavableRules(
 ): string | null {
   const edits = ruleEditsAgainstStored(space, proposed);
   if (edits.length === 0) return null;
-  // Everything `refusalsForSpaceUpdate` prices in the whole meta is asked, and only the rule fields are kept: a sample check writes
+  // Everything `refusalsForSpaceUpdate` prices in the whole meta is asked, and only the rule fields are kept: a check writes
   // nothing, so the rest of a whole meta (its shape, its enforcement) is not the caller's to answer for here.
   // `rules` is named even when the proposed meta leaves it out: a whole meta without them REPLACES the stored ones with none, and
   // an update body is priced only for the keys it names.
@@ -179,8 +180,8 @@ export function refusalOfUnsavableRules(
     { meta: { ...proposed, rules: proposed.rules ?? {} }, typeSchemasMode: 'replace' }, space.id, !!rights?.instanceAdmin, rights,
   ).filter(field => edits.includes(field));
   if (refused.length === 0) return null;
-  return `A sample check runs only the rules its caller could save, and this one would run rules it could not: ${refused.map(describeFieldRequirement).join(', ')}. `
-    + 'Sample with the stored rules, or ask for the right to change them.';
+  return `A check runs only the rules its caller could save, and this one would run rules it could not: ${refused.map(describeFieldRequirement).join(', ')}. `
+    + 'Check with the stored rules, or ask for the right to change them.';
 }
 
 /** Whether `rights` may see the stored values of `spaceId`'s records: `knowledge: read`, or an instance administrator. */
@@ -228,7 +229,7 @@ function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null
  * @param memberIds      the spaces to read, as each door narrows a proxy (REST by request, MCP by the connection's reach)
  * @param body           the caller's arguments — any value; refused here when it is not that shape
  * @param rights         the caller's rights — a REQUIRED key, so a door cannot leave it out: they decide whether it may see stored
- *                       values ({@link mayReadStoredValues}) and whether a sample may run the rules of a proposed meta
+ *                       values ({@link mayReadStoredValues}) and whether a check may run the rules of a proposed meta
  *                       ({@link refusalOfUnsavableRules}). `null` / `undefined` is a caller with none.
  * @param callerKey      who the rail counts against: the calling token's id, or its address when it has none
  * @param transport      the door, which decides the byte budget's default and how many times it carries the answer
@@ -262,13 +263,11 @@ export async function beginSchemaValidate(input: {
     const proposed = parseSpaceMeta(parsed.data.meta);
     if (!proposed.ok) return { status: 400, error: proposed.message };
     meta = proposed.meta as SpaceMeta;
-    // A sample runs the proposed rules synchronously and is not on the heavy-call rail, so it may run only rules the caller could
-    // save: the price of a rule is paid by the right to write one. After the parse, so a meta the save would refuse is refused in
-    // the save's words first.
-    if (sample) {
-      const unsavable = refusalOfUnsavableRules(space, meta, rights);
-      if (unsavable !== null) return { status: 403, error: unsavable };
-    }
+    // A check runs the proposed rules on the event loop, a sample off the heavy-call rail and the walk over thousands of records, so
+    // either mode may run only rules the caller could save: the price of a rule is paid by the right to write one. After the parse, so
+    // a meta the save would refuse is refused in the save's words first, and BEFORE the rail, so a refusal costs no slot.
+    const unsavable = refusalOfUnsavableRules(space, meta, rights);
+    if (unsavable !== null) return { status: 403, error: unsavable };
   } else {
     meta = readStoredMeta(space.meta ?? {}).meta as SpaceMeta;
   }
