@@ -14,7 +14,7 @@ import { BrainApi } from '../core/brain-api.service';
 import { KnowledgeType } from '../core/api.types';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ModalDirective } from './modal.directive';
-import { saveWithRetype, isRetypeCancelled, RetypeBody } from '../pages/brain/retype-flow';
+import { saveWithRetype, isRetypeCancelled, RetypeBody, type PropertyEdit } from '../pages/brain/retype-flow';
 import { httpErrorReason } from '../core/refusal-text';
 import { RetypeConfirmService } from '../core/retype-confirm.service';
 
@@ -534,7 +534,8 @@ export class EntryPopupComponent {
     const body = this.buildPatchBody();
     // Through the retype flow like every other brain update: a strict space refuses a type change that leaves keys the new type does
     // not declare, and the way out (remove them with the change) is asked of the person, not decided here.
-    const call = saveWithRetype(this.retype, b => this.getUpdateCall(id, b), body as Record<string, unknown> & RetypeBody, this.retypes(body));
+    const call = saveWithRetype(this.retype, b => this.getUpdateCall(id, b), body as Record<string, unknown> & RetypeBody, this.retypes(body),
+      this.propertyEdit(body));
 
     call.subscribe({
       next: (result) => {
@@ -562,6 +563,17 @@ export class EntryPopupComponent {
     const was = this.snapshot();
     const key = this.recordType === 'edge' ? 'label' : 'type';
     return key in body && body[key] !== was[key];
+  }
+
+  /**
+   * A stored property the JSON no longer holds is removed with `deleteFields`, as in the record editors. A JSON without `properties`
+   * at all states nothing about them, so it removes nothing (an update leaves an absent field alone).
+   */
+  private propertyEdit(body: Record<string, unknown>): PropertyEdit {
+    const stored = this.snapshot()['properties'];
+    const storedKeys = stored && typeof stored === 'object' ? Object.keys(stored) : [];
+    const kept = body['properties'];
+    return { stored: storedKeys, kept: kept && typeof kept === 'object' ? kept as Record<string, unknown> : Object.fromEntries(storedKeys.map(k => [k, true])) };
   }
 
   private buildPatchBody(): Record<string, unknown> {

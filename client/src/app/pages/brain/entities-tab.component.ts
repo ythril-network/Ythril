@@ -418,7 +418,8 @@ export class EntitiesTabComponent extends RecordTabBase {
       description: this.editEntity.description.trim(),
       ...(Object.keys(entProps).length ? { properties: entProps } : {}),
     };
-    saveWithRetype(this.retype, b => this.brainApi.updateEntity(this.spaceId(), id, b), body, body.type !== this.editOriginalType).subscribe({
+    saveWithRetype(this.retype, b => this.brainApi.updateEntity(this.spaceId(), id, b), body, body.type !== this.editOriginalType,
+      { stored: this.editStored, kept: this.editEntity.properties }).subscribe({
       next: (answer) => {
         const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);

@@ -441,7 +441,8 @@ export class EdgesTabComponent extends RecordTabBase {
       ...(this.editEdge.weight != null ? { weight: this.editEdge.weight } : {}),
       ...(Object.keys(edgeProps).length ? { properties: edgeProps } : {}),
     };
-    saveWithRetype(this.retype, b => this.brainApi.updateEdge(this.spaceId(), id, b), body, body.label !== this.editOriginalLabel).subscribe({
+    saveWithRetype(this.retype, b => this.brainApi.updateEdge(this.spaceId(), id, b), body, body.label !== this.editOriginalLabel,
+      { stored: this.editStored, kept: this.editEdge.properties }).subscribe({
       next: (answer) => {
         const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);

@@ -8,7 +8,7 @@ import { splitWriteWarnings } from '../../core/write-warnings';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { toLocalDatetime } from './brain-format';
-import { isRetypeCancelled, saveWithRetype } from './retype-flow';
+import { isRetypeCancelled, saveWithRetype, type PropertyEdit } from './retype-flow';
 
 /**
  * State for the record detail drawer — one drawer edits ONE record (memory/entity/edge/chrono),
@@ -236,7 +236,8 @@ export class RecordDrawerState {
         description: this.drawerEditMemory.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
       };
-      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateFact(spaceId, id, b), body, body.type !== (dr.record.type ?? '')), dr, updated => {
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateFact(spaceId, id, b), body, body.type !== (dr.record.type ?? ''),
+        this.propertyEdit(dr, this.drawerEditMemory.properties)), dr, updated => {
         this.drawerRecord.set({ kind: 'fact', record: updated });
         this.store.facts.update(list => list.map(m => m._id === id ? updated : m));
         this.lastSaved.set({ kind: 'fact', record: updated });
@@ -250,7 +251,8 @@ export class RecordDrawerState {
         description: this.drawerEditEntity.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
       };
-      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEntity(spaceId, id, b), body, body.type !== (dr.record.type ?? '')), dr, updated => {
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEntity(spaceId, id, b), body, body.type !== (dr.record.type ?? ''),
+        this.propertyEdit(dr, this.drawerEditEntity.properties)), dr, updated => {
         this.drawerRecord.set({ kind: 'entity', record: updated });
         this.store.entities.update(list => list.map(e => e._id === id ? updated : e));
         this.lastSaved.set({ kind: 'entity', record: updated });
@@ -265,7 +267,8 @@ export class RecordDrawerState {
         description: this.drawerEditEdge.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
       };
-      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEdge(spaceId, id, b), body, body.label !== dr.record.label), dr, updated => {
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateEdge(spaceId, id, b), body, body.label !== dr.record.label,
+        this.propertyEdit(dr, this.drawerEditEdge.properties)), dr, updated => {
         this.drawerRecord.set({ kind: 'edge', record: updated });
         this.store.edges.update(list => list.map(e => e._id === id ? updated : e));
         this.lastSaved.set({ kind: 'edge', record: updated });
@@ -286,7 +289,8 @@ export class RecordDrawerState {
         ...(this.drawerEditChrono.confidence != null ? { confidence: this.drawerEditChrono.confidence } : {}),
         ...(Object.keys(chronoProps).length ? { properties: chronoProps } : {}),
       };
-      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateChrono(spaceId, id, b), body, body.type !== dr.record.type), dr, updated => {
+      this.persist(saveWithRetype(this.retype, b => this.brainApi.updateChrono(spaceId, id, b), body, body.type !== dr.record.type,
+        this.propertyEdit(dr, this.drawerEditChrono.properties)), dr, updated => {
         this.drawerRecord.set({ kind: 'chrono', record: updated });
         this.store.chrono.update(list => list.map(c => c._id === id ? updated : c));
         this.lastSaved.set({ kind: 'chrono', record: updated });
@@ -298,6 +302,11 @@ export class RecordDrawerState {
    * One save's outcome, the same for all four kinds: a saved record is split from its `warnings` (which the notice keeps), a
    * refusal is held as it was answered, and a type change the person declined puts the type control back.
    */
+  /** What the drawer did to the record's properties: the keys the record stored when it opened, and the map the editor holds now. */
+  private propertyEdit(dr: DrawerRecord, kept: Record<string, unknown>): PropertyEdit {
+    return { stored: Object.keys(dr.record.properties ?? {}), kept };
+  }
+
   private persist<T extends Fact | Entity | Edge | ChronoEntry>(save: Observable<T>, was: DrawerRecord, onSaved: (record: T) => void): void {
     save.subscribe({
       next: answer => {

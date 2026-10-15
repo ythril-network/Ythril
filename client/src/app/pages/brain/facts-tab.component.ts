@@ -468,7 +468,8 @@ export class FactsTabComponent extends RecordTabBase {
       description: this.editMemory.description.trim(),
       ...(Object.keys(memProps).length ? { properties: memProps } : {}),
     };
-    saveWithRetype(this.retype, b => this.brainApi.updateFact(this.spaceId(), id, b), body, (body.type ?? this.editOriginalType) !== this.editOriginalType).subscribe({
+    saveWithRetype(this.retype, b => this.brainApi.updateFact(this.spaceId(), id, b), body, (body.type ?? this.editOriginalType) !== this.editOriginalType,
+      { stored: this.editStored, kept: memProps }).subscribe({
       next: (answer) => {
         const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);

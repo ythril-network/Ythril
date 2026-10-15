@@ -315,6 +315,40 @@ describe.each(SURFACES)('retype from the $label editor', ({ kind, mode, a, b }) 
   });
 });
 
+/**
+ * Removing a stored property is a DELETE, whether or not the type changes (b23 verify D6).
+ *
+ * An update MERGES `properties`, so a key the editor simply leaves out of the PATCH stays stored: "Remove property" on a stored key
+ * (an undeclared one, typically, which is why the editor offers the button) did nothing on save, and the server went on warning
+ * that the key is not declared. The removal has to travel as `deleteFields`, the same path the retype resend uses.
+ */
+describe.each(SURFACES)('removing a stored property in the $label editor', ({ kind, mode }) => {
+  const answered = (body: UpdateBody) => of({ _id: 'r1', author: { instanceId: 'test-instance', instanceLabel: 'Test Instance' }, ...body });
+
+  it('sends deleteFields for the removed key, with the type unchanged', async () => {
+    const r = await run(kind, mode, { keep: 'k', legacy: 'z' }, answered, () => true);
+    const row = [...r.host.querySelectorAll<HTMLElement>('.prop-row')]
+      .find(el => el.querySelector<HTMLInputElement>('.prop-key')?.value === 'legacy');
+    expect(row, `no property row for the stored key in the ${kind} ${mode} editor`).toBeTruthy();
+    row!.querySelector<HTMLButtonElement>('.prop-remove')!.click();
+    await r.settled();
+    expect(r.keys()).not.toContain('legacy');
+    r.save();
+    await vi.waitFor(() => expect(r.sent()).toHaveLength(1));
+    const [body] = r.sent();
+    expect(body.deleteFields, 'the removed stored key was not sent as a deletion, so the merge keeps it').toEqual(['properties.legacy']);
+    expect(body.properties ?? {}).not.toHaveProperty('legacy');
+    expect(r.confirm).not.toHaveBeenCalled();
+  });
+
+  it('a save that removes nothing deletes nothing', async () => {
+    const r = await run(kind, mode, { keep: 'k', legacy: 'z' }, answered, () => true);
+    r.save();
+    await vi.waitFor(() => expect(r.sent()).toHaveLength(1));
+    expect(r.sent()[0].deleteFields ?? []).toEqual([]);
+  });
+});
+
 /** The derived gate: nothing calls a brain update by itself. */
 describe('every client source that updates a brain record goes through the retype helper', () => {
   const SOURCES = trackedAppSources().map(f => ({ file: f, text: stripComments(readFileSync(resolve(CLIENT_ROOT, f), 'utf8')) }));

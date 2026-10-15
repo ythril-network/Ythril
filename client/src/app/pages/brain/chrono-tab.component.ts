@@ -490,7 +490,8 @@ export class ChronoTabComponent extends RecordTabBase {
       linkFacts: this.editChrono.linkFacts,
       properties: this.store.stripEmptyOptionalProps(this.editChrono.properties, this.store.chronoSchema(this.editChrono.kind)),
     };
-    saveWithRetype(this.retype, b => this.brainApi.updateChrono(this.spaceId(), id, b), body, body.type !== this.editOriginalKind).subscribe({
+    saveWithRetype(this.retype, b => this.brainApi.updateChrono(this.spaceId(), id, b), body, body.type !== this.editOriginalKind,
+      { stored: this.editStored, kept: this.editChrono.properties }).subscribe({
       next: (answer) => {
         const updated = this.takeWarnings(answer);
         this.recordList.editSaving.set(false);

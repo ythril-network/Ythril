@@ -15,7 +15,8 @@ import type { RetypeConfirmService } from '../../core/retype-confirm.service';
  *
  * ## The flow
  *
- * - the update is sent as it is;
+ * - the update is sent as it is, with every stored property the editor removed in `deleteFields` ({@link PropertyEdit}: an update
+ *   merges `properties`, so an omitted key would stay stored);
  * - a refusal whose introduced rows are ALL undeclared-key rows, of a write that CHANGES the record's type (`typeChanged`), asks once, through `RetypeConfirmService`, with the keys (no
  *   `properties.` prefix) and their values; any other row (a rule, a type mismatch) means removing keys would not fix the write,
  *   so it is an ordinary refusal and is passed on untouched, as is a refusal that lists only pre-existing rows;
@@ -60,12 +61,37 @@ function resendBody<B extends RetypeBody>(body: B, keys: string[]): B {
   return { ...body, properties, deleteFields };
 }
 
+/**
+ * What the editor did to the record's properties: the keys the record STORED when it was opened, and the map the editor holds now.
+ *
+ * An update MERGES `properties`, so a stored key the editor leaves out of the PATCH is kept: "Remove property" on a stored key did
+ * nothing on save (b23 verify D6). A stored key absent from `kept` is a removal and travels as `deleteFields`, the same path the retype
+ * resend uses. A required argument, so no editor can save without saying what it started from.
+ */
+export interface PropertyEdit {
+  stored: Iterable<string>;
+  kept: Readonly<Record<string, unknown>>;
+}
+
+/** The body with every stored key the editor removed added to `deleteFields` (and gone from `properties`), capped like a resend. */
+function withRemovedProperties<B extends RetypeBody>(body: B, edit: PropertyEdit): B {
+  const removed = [...new Set(edit.stored)].filter(k => !Object.hasOwn(edit.kept, k));
+  if (removed.length === 0) return body;
+  const gone = new Set(removed);
+  const deleteFields = [...new Set([...(body.deleteFields ?? []), ...removed.map(k => `properties.${k}`)])].slice(0, MAX_DELETE_FIELDS);
+  const out: B = { ...body, deleteFields };
+  if (body.properties) out.properties = Object.fromEntries(Object.entries(body.properties).filter(([k]) => !gone.has(k)));
+  return out;
+}
+
 export function saveWithRetype<R, B extends RetypeBody>(
   confirm: Pick<RetypeConfirmService, 'confirm'>,
   send: (body: B) => Observable<R>,
   body: B,
   typeChanged: boolean,
+  edit: PropertyEdit,
 ): Observable<R> {
+  body = withRemovedProperties(body, edit);
   return new Observable<R>(subscriber => {
     let inner: Unsubscribable | undefined;
     let closed = false;
