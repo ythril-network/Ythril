@@ -36,6 +36,11 @@ export type UnknownFieldRow = SchemaViolation & { code: typeof UNKNOWN_FIELD_COD
 const LEAD = 'unknown field — ';
 const BY_OUTCOME: Record<UnknownFieldOutcome, string> = { stored: 'ignored', refused: 'not accepted' };
 
+/** What became of the write, in the one word a row says it with: `ignored` (stored) or `not accepted` (refused). */
+export function unknownFieldOutcomeWords(outcome: UnknownFieldOutcome): string {
+  return BY_OUTCOME[outcome];
+}
+
 /**
  * The reason of one row: `unknown field — ignored` for a write that was stored, `unknown field — not accepted` for one that was refused
  * (by the judge, or for another reason the call failed); then, on the FIRST row of an answer only, `. This write accepts: a, b, c`
@@ -126,7 +131,16 @@ export function withUnknownFieldWarnings(existing: unknown, rows: readonly Unkno
   return [...rows, ...own.slice(0, MAX_ROWS)];
 }
 
+/**
+ * One row as a line of text after a label: `<name> — ignored|not accepted…`, the row's own words without the `unknown field — ` lead its
+ * `reason` begins with (the name stands where the lead did). The one reading of a row as prose: an MCP text line puts a label in front of
+ * it ({@link unknownFieldLines}) and a bulk item's `errors[]` row joins several after its own (`brain/bulk-unknown-fields.ts`).
+ */
+export function unknownFieldText(row: Pick<UnknownFieldRow, 'field' | 'reason'>): string {
+  return `${row.field} — ${row.reason.startsWith(LEAD) ? row.reason.slice(LEAD.length) : row.reason}`;
+}
+
 /** The text lines an MCP answer carries for the rows, one per row: `⚠️ Unknown field: <name> — ignored|not accepted…`. */
 export function unknownFieldLines(rows: readonly UnknownFieldRow[]): string[] {
-  return rows.map(r => `⚠️ Unknown field: ${r.field} — ${r.reason.startsWith(LEAD) ? r.reason.slice(LEAD.length) : r.reason}`);
+  return rows.map(r => `⚠️ Unknown field: ${unknownFieldText(r)}`);
 }

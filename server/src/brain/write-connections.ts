@@ -99,6 +99,25 @@ function linkTargetsHeldBy(kind: ConnectionKind): readonly RefKind[] {
 export type ConnectionKind = RefKind | 'edge';
 
 /**
+ * The `link*` fields of `body` that a record of `kind` can hold AND the body carries — in the order the kind holds them, each as its
+ * target kind, its field name and the value as sent (`null` included: it is the caller writing "none").
+ *
+ * The one walk both readers below make (`desiredLinksFrom` reads the values, `linkInputError` judges them), so what counts as "the body
+ * names this field" is decided once: the field is an OWN key of the body (`Object.hasOwn`, never a value inherited from a prototype), the
+ * kind can hold it (`linkTargetsHeldBy`, so a `linkFiles` sent to an entity is not read), and a body that is not an object names nothing.
+ */
+function linkFieldsPresent(body: unknown, kind: ConnectionKind): { toKind: RefKind; field: string; value: unknown }[] {
+  if (!body || typeof body !== 'object') return [];
+  const bag = body as Record<string, unknown>;
+  const present: { toKind: RefKind; field: string; value: unknown }[] = [];
+  for (const toKind of linkTargetsHeldBy(kind)) {
+    const field = LINK_INPUT_FIELDS[toKind];
+    if (Object.hasOwn(bag, field)) present.push({ toKind, field, value: bag[field] });
+  }
+  return present;
+}
+
+/**
  * Read the `link*` fields a record of `kind` can hold out of a request body.
  *
  * Returns `null` when the body names none of them — which a caller must treat as "this write has nothing to
@@ -106,14 +125,8 @@ export type ConnectionKind = RefKind | 'edge';
  * `{ entity: [] }` to `reconcileLinks`, and those two mean opposite things.
  */
 export function desiredLinksFrom(body: unknown, kind: ConnectionKind): DesiredLinks | null {
-  if (!body || typeof body !== 'object') return null;
-  const bag = body as Record<string, unknown>;
   const desired: Record<string, readonly string[]> = {};
-  for (const toKind of linkTargetsHeldBy(kind)) {
-    const field = LINK_INPUT_FIELDS[toKind];
-    if (!Object.hasOwn(bag, field)) continue;
-    desired[toKind] = (bag[field] as string[] | null) ?? [];
-  }
+  for (const { toKind, value } of linkFieldsPresent(body, kind)) desired[toKind] = (value as string[] | null) ?? [];
   return Object.keys(desired).length > 0 ? desired as DesiredLinks : null;
 }
 
@@ -161,14 +174,7 @@ export function linkFieldsFrom(body: unknown, kind: ConnectionKind): Record<stri
  * contain UUIDs" where the writer would have told them which value was the name.
  */
 export function linkInputError(body: unknown, kind: ConnectionKind, opts: { strict?: boolean } = {}): string | null {
-  if (!body || typeof body !== 'object') return null;
-  const bag = body as Record<string, unknown>;
-
-  for (const toKind of linkTargetsHeldBy(kind)) {
-    const field = LINK_INPUT_FIELDS[toKind];
-    if (!Object.hasOwn(bag, field)) continue;
-
-    const value = bag[field];
+  for (const { toKind, field, value } of linkFieldsPresent(body, kind)) {
     if (value === null) continue;
     if (!Array.isArray(value)) return `${field} must be an array of ids`;
     const tooMany = countError(field, value, MAX_LINKS_PER_KIND);

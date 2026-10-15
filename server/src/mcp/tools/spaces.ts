@@ -257,6 +257,9 @@ export const space_renameTool: ToolHandler = {
   },
 };
 
+/** What `update_space` declares that is not a change: the space it addresses. Every other declared argument is one the call may carry. */
+const NOT_A_SPACE_CHANGE = new Set(['space']);
+
 export const update_spaceTool: ToolHandler = {
   name: 'update_space',
   description: 'Update the label, purpose or face-descriptor width of the specified space. Needs EITHER instance-admin rights OR the '
@@ -303,7 +306,8 @@ export const update_spaceTool: ToolHandler = {
     // Present is not truthy: `null` and `''` are how the setting is cleared. The dispatcher's schema has already refused any other value.
     const newUnknownWriteFields = a['unknownWriteFields'] === undefined ? undefined : a['unknownWriteFields'] as 'warn' | 'refuse' | '' | null;
     if (newLabel === undefined && newDesc === undefined && newDims === undefined && newUnknownWriteFields === undefined) {
-      throw new Error('At least one of label, purpose, faceDescriptorDims or unknownWriteFields must be provided');
+      // Named from the tool's own schema, as `schema_update`'s is: a new argument is named here by being declared.
+      throw new Error(`At least one of ${forwardedArgNames(update_spaceTool, NOT_A_SPACE_CHANGE).join(', ')} must be provided`);
     }
     if (newLabel !== undefined && newLabel.length === 0) throw new Error('label must not be empty');
     if (newDesc !== undefined && newDesc.length > SPACE_PURPOSE_MAX) throw new Error(`purpose must not exceed ${SPACE_PURPOSE_MAX} characters`);
