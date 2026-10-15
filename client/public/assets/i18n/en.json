@@ -2402,7 +2402,7 @@
   "validate.progress": "Checked {{checked}} of {{total}} records",
   "validate.incomplete": "Not finished: nothing found so far does not mean nothing is wrong.",
   "validate.allGood": "All good: every record checked satisfies the schema.",
-  "validate.more": "{{count}} more not shown",
+  "validate.progressOpen": "Checked {{checked}} records so far",
   "validate.failed": "The check could not be run",
   "validate.outcome.match": "Matches",
   "validate.outcome.violated": "Violated",

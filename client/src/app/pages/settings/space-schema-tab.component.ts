@@ -113,8 +113,8 @@ import { refusalText } from '../../core/refusal-text';
     <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
     @if (validateMode() === 'stored') {
       <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
-        {{ 'validate.progress' | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
-        @if (!result.complete) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
+        {{ validateProgressKey() | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
+        @if (!validateDone()) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
       </div>
     }
     @if (validateAllGood()) {
@@ -131,7 +131,6 @@ import { refusalText } from '../../core/refusal-text';
           </li>
         }
       </ul>
-      @if (validateMore() > 0) { <div class="sch-hint" data-testid="validate-more" [attr.data-count]="validateMore()">{{ 'validate.more' | transloco: { count: validateMore() } }}</div> }
     }
   }
 </section>
@@ -447,6 +446,10 @@ export class SpaceSchemaTabComponent implements OnInit {
   /** The violations of every page read so far, as rows. */
   private readonly validateAccumulated = signal<ValidateSchemaResult['violations']>([]);
   private readonly validateCursor = signal<string | null>(null);
+  /** The records the check has read, summed over its pages: each answer's `progress.checked` is what THAT call read. */
+  private readonly validateRead = signal(0);
+  /** How many records the space held when the check started, as the latest answer says. */
+  private readonly validateTotal = signal(0);
 
   @ViewChild('schImportInput') schImportInputRef?: ElementRef<HTMLInputElement>;
   @ViewChild('schTypeImportInput') schTypeImportInputRef?: ElementRef<HTMLInputElement>;
@@ -603,31 +606,48 @@ export class SpaceSchemaTabComponent implements OnInit {
     this.validateResult.set(null);
     this.validateAccumulated.set([]);
     this.validateCursor.set(null);
+    this.validateRead.set(0);
+    this.validateTotal.set(0);
     this.validateError.set('');
   }
 
-  /** The next page is offered while the check is incomplete and the server gave a cursor. */
-  readonly validateCanContinue = computed(() => this.validateMode() === 'stored' && this.validateResult()?.complete === false && this.validateCursor() !== null);
+  /** True when the walk reached the end of the space (or the sample was judged): nothing is left after the latest answer. `complete` is what a server that has not renamed it says. */
+  readonly validateDone = computed(() => {
+    const r = this.validateResult();
+    return !!r && SpaceSchemaTabComponent.isDone(r);
+  });
+
+  private static isDone(result: ValidateSchemaResult): boolean { return (result.done ?? result.complete) === true; }
+
+  /** The next page is offered while the check is not done and the server gave a cursor. */
+  readonly validateCanContinue = computed(() => this.validateMode() === 'stored' && this.validateResult() !== null && !this.validateDone() && this.validateCursor() !== null);
 
   /**
-   * What the whole check has read so far, of how many records the space holds: the answer's `progress`. Not `checked` summed: that is
-   * per CALL, and a page that stopped for a full limit is continued from its last returned record, so the next call reads part of the
-   * same records again — shown alone the count went down, summed it would count records twice (b23 verify U4). An answer without
-   * `progress` (a server from before it) falls back to the one call's count.
+   * What the whole check has read so far, of how many records the space holds. Each answer's `progress.checked` is what THAT call read, so
+   * the readout is their sum (b23 W6b: a call no longer re-reads records an earlier page passed, and counts nothing past its page); the
+   * total is the latest answer's. An answer without `progress` falls back to the one call's per-collection count.
    */
-  readonly validateChecked = computed(() => {
-    const result = this.validateResult();
-    if (result?.progress) return { checked: result.progress.checked, total: result.progress.total };
-    let done = 0, total = 0;
-    for (const c of Object.values(result?.checked ?? {})) { done += c.checked; total += c.total; }
-    return { checked: done, total };
+  readonly validateChecked = computed(() => ({ checked: this.validateRead(), total: this.validateTotal() }));
+
+  /**
+   * The sentence the readout is said in. "Checked N of M" says the check has covered M, so a check that is not done never says it when N has
+   * reached M (the space grew while paging): it says how many it has read so far, and no total to contradict "not finished" (Q-488).
+   */
+  readonly validateProgressKey = computed(() => {
+    const { checked, total } = this.validateChecked();
+    return !this.validateDone() && checked >= total ? 'validate.progressOpen' : 'validate.progress';
   });
 
   /** "All good" is said only when the whole space was read (or the sample judged) and nothing was found. */
-  readonly validateAllGood = computed(() => {
-    const r = this.validateResult();
-    return !!r && r.complete && r.totalViolations === 0 && this.validateAccumulated().length === 0;
-  });
+  readonly validateAllGood = computed(() => this.validateDone() && this.validateAccumulated().length === 0);
+
+  /** What one answer read: its `progress`, else the per-collection counts of the call. */
+  private static readOf(result: ValidateSchemaResult): { checked: number; total: number } {
+    if (result.progress) return result.progress;
+    let checked = 0, total = 0;
+    for (const c of Object.values(result.checked ?? {})) { checked += c.checked; total += c.total; }
+    return { checked, total };
+  }
 
   private static readonly VALIDATE_SHOWN = 50;
 
@@ -652,9 +672,6 @@ export class SpaceSchemaTabComponent implements OnInit {
       default: return { key: 'validate.outcome.violated', variant: 'error' };
     }
   }
-  /** The violating records this page's call found and does not show: they come on the next page. */
-  readonly validateMore = computed(() => Math.max(0, (this.validateResult()?.totalViolations ?? 0) - this.validateRows().length));
-
   /**
    * Run the live check on the schema AS STAGED. A sample is one pasted record (nothing is scanned); stored data is read a page at a time,
    * the next page asked for with the cursor the last answer gave.
@@ -684,7 +701,10 @@ export class SpaceSchemaTabComponent implements OnInit {
         this.validating.set(false);
         this.validateResult.set(result);
         this.validateAccumulated.update(all => [...all, ...(result.violations ?? [])]);
-        this.validateCursor.set(result.complete ? null : (result.nextAfter ?? null));
+        const read = SpaceSchemaTabComponent.readOf(result);
+        this.validateRead.update(n => n + read.checked);
+        this.validateTotal.set(read.total);
+        this.validateCursor.set(SpaceSchemaTabComponent.isDone(result) ? null : (result.nextAfter ?? null));
       },
       error: (err) => {
         this.validating.set(false);

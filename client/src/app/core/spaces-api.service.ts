@@ -35,17 +35,20 @@ export interface SchemaWriteLayer {
 
 /**
  * The answer of `POST /api/spaces/:id/validate-schema` - the live check of a schema against a sample record or against stored data.
- * Stored-data mode is PAGED: `complete` is false until the whole space has been read, and the cursor carries the next page. A check that
- * is not complete has found nothing yet, which is not the same as nothing being wrong.
+ * Stored-data mode is PAGED: `done` is false until the walk has reached the end of the space, and the cursor carries the next page. A
+ * check that is not done has found nothing yet, which is not the same as nothing being wrong. A call stops when its page holds `limit`
+ * rows, so nothing here counts the violations past the page.
  */
 export interface ValidateSchemaResult {
   spaceId: string;
-  /** Per collection: how many records THIS call looked at of how many there are (a continued page may re-read some). */
+  /** Per collection: how many records THIS call looked at of how many there are. */
   checked: Record<string, { checked: number; total: number }>;
-  /** Stored mode: the records the whole check has read across its pages, each once, of how many the space holds. */
+  /** Stored mode: `checked` is the records THIS call read (a caller sums it over its pages), `total` the space's record count when the check started. */
   progress?: { checked: number; total: number };
-  complete: boolean;
-  totalViolations: number;
+  /** True when the walk reached the end of the space: nothing is left after this answer. */
+  done?: boolean;
+  /** What `done` was called before it: still read, so a server that has not changed it yet is understood. */
+  complete?: boolean;
   /** A sample's row has no `_id`: it is the pasted record, not a stored one. */
   violations: { collection: string; _id?: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
   staleGuards?: unknown[];

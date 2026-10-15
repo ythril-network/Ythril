@@ -2402,7 +2402,7 @@
   "validate.progress": "Sprawdzono {{checked}} z {{total}} rekordów",
   "validate.incomplete": "Niezakończone: brak dotychczasowych znalezisk nie oznacza, że nic nie jest nie tak.",
   "validate.allGood": "Wszystko w porządku: każdy sprawdzony rekord spełnia schemat.",
-  "validate.more": "{{count}} kolejnych nie pokazano",
+  "validate.progressOpen": "Dotychczas sprawdzono {{checked}} rekordów",
   "validate.failed": "Nie udało się wykonać sprawdzenia",
   "validate.outcome.match": "Zgodne",
   "validate.outcome.violated": "Naruszone",

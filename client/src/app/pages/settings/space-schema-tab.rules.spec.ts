@@ -533,8 +533,10 @@ describe('a field a network layer supplies is marked with that network and can b
 describe('Validate runs the live check, in sample mode and in stored-data mode', () => {
   const URL = '/api/spaces/work/validate-schema';
   const post = (h: Harness) => h.http.expectOne(r => r.method === 'POST' && r.url === URL);
+  // The stored-data answer's contract (b23 W6b): `progress.checked` is what THIS call read, `done` says the walk reached the end, and
+  // nothing counts violations past the page.
   const answer = (over: Record<string, unknown> = {}) => ({
-    spaceId: 'work', checked: { entities: { checked: 1, total: 1 } }, complete: true, totalViolations: 0, violations: [], staleGuards: [], ...over,
+    spaceId: 'work', checked: { entities: { checked: 1, total: 1 } }, progress: { checked: 1, total: 1 }, done: true, violations: [], staleGuards: [], ...over,
   });
   const button = (h: Harness) => $(h.el, '[data-testid="validate-schema"]') as HTMLButtonElement | null;
 
@@ -593,8 +595,8 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
   it('the all-good word appears only when the check is COMPLETE and found nothing', async () => {
     const cases: [string, Record<string, unknown>, boolean][] = [
       ['complete and clean', answer(), true],
-      ['clean so far but not complete', answer({ complete: false, checked: { entities: { checked: 5, total: 9 } } }), false],
-      ['complete with a violation', answer({ totalViolations: 1, violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }), false],
+      ['clean so far but not complete', answer({ done: false, checked: { entities: { checked: 5, total: 9 } }, progress: { checked: 5, total: 9 } }), false],
+      ['complete with a violation', answer({ violations: [{ collection: 'entities', _id: 'e1', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }), false],
     ];
     for (const [label, body, allGood] of cases) {
       const h = await mount();
@@ -619,7 +621,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect(firstBody.sample, 'stored-data mode sent a sample').toBeUndefined();
     expect(firstBody.after, 'the first page carries no after').toBeUndefined();
     // The server pages by `_id` keyset: the answer's `nextAfter` is sent back as `after` (one spelling on REST, MCP and here).
-    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, complete: false, nextAfter: 'cur-1' }));
+    first.flush(answer({ checked: { entities: { checked: 100, total: 250 } }, progress: { checked: 100, total: 250 }, done: false, nextAfter: 'cur-1' }));
     await h.settle();
 
     const progress = $(h.el, '[data-testid="validate-progress"]');
@@ -634,7 +636,8 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     if (next) { next.click(); await h.settle(); }
     const second = post(h);
     expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
-    second.flush(answer({ checked: { entities: { checked: 250, total: 250 } }, complete: true }));
+    // The second call read the other 150: the readout is the SUM of what each call read.
+    second.flush(answer({ checked: { entities: { checked: 150, total: 250 } }, progress: { checked: 150, total: 250 }, done: true }));
     await h.settle();
 
     expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('250');
@@ -644,9 +647,8 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     h.http.expectNone(r => r.method === 'POST' && r.url === URL);
   });
 
-  // b23 verify U4: `checked` is per CALL, and a page that stopped for a full limit is continued from its last returned record, so the
-  // second call read 74 of 1040 and the readout went DOWN; and the rows shown were the first 50 of every page together, so continuing
-  // showed nothing new. The readout is the answer's `progress` (the whole check, each record once) and the rows are the CURRENT page's.
+  // b23 verify U4: the rows shown were the first 50 of every page together, so continuing showed nothing new. The rows are the CURRENT
+  // page's. (b23 W6b: `progress.checked` is per CALL, so the readout is summed over the pages: see the progress tests below.)
   it('stored-data mode shows the whole check\'s progress, never going down, and the CURRENT page\'s rows', async () => {
     const row = (i: number) => ({ collection: 'entities', _id: `e${i}`, violations: [{ field: 'rules.age-positive', reason: `broken ${i}` }] });
     const rows = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_v, k) => row(from + k));
@@ -657,33 +659,115 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     const first = post(h);
     expect((first.request.body as { limit?: number }).limit, 'a page larger than the rows shown hides the rest for good').toBe(50);
     first.flush(answer({
-      checked: { entities: { checked: 1040, total: 1040 } }, progress: { checked: 1040, total: 1040 },
-      complete: false, nextAfter: 'cur-1', totalViolations: 80, violations: rows(1, 50),
+      checked: { entities: { checked: 600, total: 1040 } }, progress: { checked: 600, total: 1040 },
+      done: false, nextAfter: 'cur-1', violations: rows(1, 50),
     }));
     await h.settle();
     const progress = () => $(h.el, '[data-testid="validate-progress"]')!;
-    expect(progress().getAttribute('data-checked')).toBe('1040');
+    expect(progress().getAttribute('data-checked')).toBe('600');
     // The record each shown row names (its `collection _id` label), one per row.
     const shown = () => $$(h.el, '.val-violations > li').map(li => (li.querySelector('code')?.textContent ?? '').trim().split(/\s+/).at(-1) ?? '');
     expect(shown().length).toBe(50);
     expect(shown()).toContain('e1');
-    expect($(h.el, '[data-testid="validate-more"]')?.getAttribute('data-count'), 'the page\'s own rest is not counted').toBe('30');
+    // The server no longer counts violations past the page, so the page says nothing about a total it does not have.
+    expect($(h.el, '[data-testid="validate-more"]'), 'a count of violations the server no longer gives').toBeNull();
 
     $(h.el, '[data-testid="validate-continue"]')!.click();
     await h.settle();
     const second = post(h);
     expect((second.request.body as { after?: unknown }).after).toBe('cur-1');
     second.flush(answer({
-      checked: { entities: { checked: 74, total: 1040 } }, progress: { checked: 1040, total: 1040 },
-      complete: true, totalViolations: 30, violations: rows(51, 80),
+      checked: { entities: { checked: 440, total: 1040 } }, progress: { checked: 440, total: 1040 },
+      done: true, violations: rows(51, 80),
     }));
     await h.settle();
-    expect(progress().getAttribute('data-checked'), 'the readout went down on the next page').toBe('1040');
+    expect(progress().getAttribute('data-checked'), 'the readout is the sum of what each call read').toBe('1040');
     expect(progress().getAttribute('data-total')).toBe('1040');
     expect(shown().length, 'the next page\'s rows are not the ones shown').toBe(30);
     expect(shown(), 'continuing showed nothing new').toContain('e51');
     expect(shown(), 'the previous page\'s rows are still shown').not.toContain('e1');
-    expect($(h.el, '[data-testid="validate-more"]'), 'a page whose rows are all shown says more are not shown').toBeNull();
+  });
+
+  // b23 W6d P1 (client side). `progress.checked` is what ONE call read; the tab sums it over the pages and never shows a page's own count
+  // as the whole check's.
+  it('the readout sums `progress.checked` over every page, and takes the total from the latest answer', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = () => $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout().getAttribute('data-checked')).toBe('300');
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 250, total: 900 }, done: false, nextAfter: 'c2' }));
+    await h.settle();
+    expect(readout().getAttribute('data-checked'), 'the second call\'s own count was shown as the whole check\'s').toBe('550');
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush(answer({ progress: { checked: 350, total: 900 }, done: true }));
+    await h.settle();
+    expect(readout().getAttribute('data-checked')).toBe('900');
+    expect(readout().getAttribute('data-total')).toBe('900');
+  });
+
+  // Q-488: page 1 read "Checked 1041 of 1041 records" beside "Not finished". A check that is not done never says it has checked the whole.
+  it('a check that is not finished does not say it has checked every record', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 1041, total: 1041 }, done: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout.textContent ?? '', 'the "N of N" sentence is said beside "not finished"').not.toMatch(/validate\.progress(?![A-Za-z])/);
+    expect(readout.textContent ?? '').toContain('validate.progressOpen');
+    expect(readout.textContent ?? '').toContain('validate.incomplete');
+    expect($(h.el, '[data-testid="validate-all-good"]')).toBeNull();
+  });
+
+  it('a check that is not finished and has read less than the whole says "of N"', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 600, total: 1041 }, done: false, nextAfter: 'c1' }));
+    await h.settle();
+    const readout = $(h.el, '[data-testid="validate-progress"]')!;
+    expect(readout.textContent ?? '').toMatch(/validate\.progress(?![A-Za-z])/);
+    expect(readout.textContent ?? '').toContain('validate.incomplete');
+  });
+
+  it('an answer that says `complete` and not `done` is still read as the end of the walk', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    const { done: _done, ...old } = answer();
+    post(h).flush({ ...old, complete: true });
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-all-good"]'), 'a finished walk was not recognised').not.toBeNull();
+  });
+
+  // The heavy rail answers 429 once the caller is over it. The page already read stays, the server's own sentence is shown, and Continue
+  // is still there to press once the wait is over: it asks for the same page again.
+  it('a 429 on Continue shows the server\'s message and leaves Continue usable for the same page', async () => {
+    const h = await mount();
+    await chooseMode(h, 'stored');
+    button(h)!.click();
+    post(h).flush(answer({ progress: { checked: 300, total: 900 }, done: false, nextAfter: 'c1' }));
+    await h.settle();
+    $(h.el, '[data-testid="validate-continue"]')!.click();
+    post(h).flush({ error: 'Too many heavy checks: retry in 12 seconds.' }, { status: 429, statusText: 'Too Many Requests' });
+    await h.settle();
+    const alert = $$(h.el, '.sch-validate [role="alert"]');
+    expect(alert.map(a => a.textContent ?? '').join(' '), 'the server\'s message is not shown').toContain('Too many heavy checks: retry in 12 seconds.');
+    const next = $(h.el, '[data-testid="validate-continue"]') as HTMLButtonElement | null;
+    expect(next, 'Continue is gone after a 429').not.toBeNull();
+    expect(next!.disabled).toBe(false);
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked'), 'a refused call changed the count').toBe('300');
+    next!.click();
+    const again = post(h);
+    expect((again.request.body as { after?: unknown }).after, 'Continue did not ask for the same page').toBe('c1');
+    again.flush(answer({ progress: { checked: 600, total: 900 }, done: true }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]')!.getAttribute('data-checked')).toBe('900');
+    expect($$(h.el, '.sch-validate [role="alert"]').length, 'the refusal stays after a later success').toBe(0);
   });
 
   // b23 verify U1: the placeholder showed `{"kind":"entity","type":"person","properties":{}}`, a shape the server refuses; a person who
@@ -708,7 +792,7 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","record":{"name":"x","type":"person","properties":{}}}');
     await h.settle();
     button(h)!.click();
-    post(h).flush(answer({ checked: {}, totalViolations: 1, violations: [{ collection: 'entities', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }));
+    post(h).flush(answer({ checked: {}, violations: [{ collection: 'entities', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }));
     await h.settle();
     expect($(h.el, '[data-testid="validate-progress"]'), 'a sample check shows a records counter').toBeNull();
     const items = $$(h.el, '.val-violations > li');
