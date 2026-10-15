@@ -2396,6 +2396,7 @@
   "validate.sample.label": "Przykładowy rekord jako JSON",
   "validate.sample.placeholder": "{\"kind\":\"entity\",\"type\":\"person\",\"properties\":{}}",
   "validate.sample.notJson": "Przykład nie jest poprawnym JSON-em.",
+  "validate.sample.row": "Wklejony rekord",
   "validate.run": "Sprawdź",
   "validate.continue": "Sprawdź następną stronę",
   "validate.progress": "Sprawdzono {{checked}} z {{total}} rekordów",

@@ -110,10 +110,13 @@ import { refusalText } from '../../core/refusal-text';
     <div class="sch-msg err" role="alert">{{ validateError() }}</div>
   }
   @if (validateResult(); as result) {
-    <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
-      {{ 'validate.progress' | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
-      @if (!result.complete) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
-    </div>
+    <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
+    @if (validateMode() === 'stored') {
+      <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
+        {{ 'validate.progress' | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
+        @if (!result.complete) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
+      </div>
+    }
     @if (validateAllGood()) {
       <!-- "Matches" is said only when the whole space (or the one sample) was read and nothing was found. -->
       <div class="sch-msg ok" data-testid="validate-all-good"><app-status-pill variant="ok" icon="check-circle">{{ 'validate.outcome.match' | transloco }}</app-status-pill> {{ 'validate.allGood' | transloco }}</div>
@@ -121,7 +124,7 @@ import { refusalText } from '../../core/refusal-text';
     @if (validateRows().length) {
       <ul class="val-violations">
         @for (v of validateRows(); track $index) {
-          <li><code>{{ v.where }}</code>
+          <li>@if (v.sample) { <span class="val-where" data-testid="validate-sample-row">{{ 'validate.sample.row' | transloco }}</span> } @else { <code class="val-where">{{ v.where }}</code> }
             @for (r of v.rows; track $index) {
               <span class="val-row"><app-status-pill [variant]="outcomeWord(r.outcome).variant">{{ outcomeWord(r.outcome).key | transloco }}</app-status-pill> {{ r.text }}</span>
             }
@@ -630,11 +633,13 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   /**
    * The CURRENT page's rows. Each page is asked for at most {@link VALIDATE_SHOWN} records, so a page's rows are all shown and the next
-   * page brings new ones; listing every page's rows together and showing the first fifty left page two invisible (b23 verify U4).
+   * page brings new ones; listing every page's rows together and showing the first fifty left page two invisible (b23 verify U4). A
+   * sample's one row has no stored id: it is labelled as the pasted record (b23 verify U2: it read "entities undefined").
    */
-  readonly validateRows = computed<{ where: string; rows: RefusalRow[] }[]>(() =>
+  readonly validateRows = computed<{ where: string; sample: boolean; rows: RefusalRow[] }[]>(() =>
     (this.validateResult()?.violations ?? []).slice(0, SpaceSchemaTabComponent.VALIDATE_SHOWN).map(v => ({
-      where: `${v.collection} ${v._id}`,
+      where: `${v.collection} ${v._id ?? ''}`,
+      sample: this.validateMode() === 'sample',
       rows: describeWarnings(this.transloco, '', v.violations),
     })));
 

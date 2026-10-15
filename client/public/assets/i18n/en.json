@@ -2396,6 +2396,7 @@
   "validate.sample.label": "Sample record as JSON",
   "validate.sample.placeholder": "{\"kind\":\"entity\",\"type\":\"person\",\"properties\":{}}",
   "validate.sample.notJson": "The sample is not valid JSON.",
+  "validate.sample.row": "The pasted record",
   "validate.run": "Validate",
   "validate.continue": "Check the next page",
   "validate.progress": "Checked {{checked}} of {{total}} records",

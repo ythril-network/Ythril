@@ -2396,6 +2396,7 @@
   "validate.sample.label": "Beispieldatensatz als JSON",
   "validate.sample.placeholder": "{\"kind\":\"entity\",\"type\":\"person\",\"properties\":{}}",
   "validate.sample.notJson": "Das Beispiel ist kein gültiges JSON.",
+  "validate.sample.row": "Der eingefügte Datensatz",
   "validate.run": "Prüfen",
   "validate.continue": "Nächste Seite prüfen",
   "validate.progress": "{{checked}} von {{total}} Datensätzen geprüft",

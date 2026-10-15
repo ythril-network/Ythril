@@ -665,4 +665,19 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
     expect($(h.el, '[data-testid="validate-more"]'), 'a page whose rows are all shown says more are not shown').toBeNull();
   });
 
+  // b23 verify U2: a sample has no stored id and nothing is scanned, so "Checked 0 of 0 records" and "entities undefined" were noise.
+  it('sample mode shows no checked counter and labels its row as the sample', async () => {
+    const h = await mount();
+    await chooseMode(h, 'sample');
+    type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","record":{"name":"x","type":"person","properties":{}}}');
+    await h.settle();
+    button(h)!.click();
+    post(h).flush(answer({ checked: {}, totalViolations: 1, violations: [{ collection: 'entities', violations: [{ field: 'rules.age-positive', reason: 'x' }] }] }));
+    await h.settle();
+    expect($(h.el, '[data-testid="validate-progress"]'), 'a sample check shows a records counter').toBeNull();
+    const items = $$(h.el, '.val-violations > li');
+    expect(items.length).toBe(1);
+    expect(items[0].textContent ?? '').not.toContain('undefined');
+    expect($(items[0], '[data-testid="validate-sample-row"]'), 'the row is not labelled as the sample').not.toBeNull();
+  });
 });
