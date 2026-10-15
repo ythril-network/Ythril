@@ -710,3 +710,126 @@ describe('B-15 — a finished state ends on the next edit (owner-reported)', () 
     expect(s.isDirty()).toBe(true);
   });
 });
+
+/**
+ * bundle-128 (design-v3 §1.2 "Client load", §1.5 "State"): the Settings dialog's form field for the new instance-local
+ * setting, `unknownWriteFields`.
+ *
+ * The shape the plan fixes, and why each half matters:
+ *
+ * - **Absent on the wire shows as `warn` in the form.** The server never stores `'warn'` and answers the key only as
+ *   `'refuse'`; a form that read `undefined` would render a blank select, and one that did not map would show `Warn` only
+ *   by accident.
+ * - **`markPristine` takes the MAPPED value.** Baselined on the raw (absent) value, a space that opens on `warn` is dirty
+ *   the moment it opens, and the close guard asks about edits nobody made.
+ * - **Choosing `warn` sends `''`** (the clear: `'warn'`, `''` and `null` all clear the key, and `''` is what
+ *   `clearedValueOf` sends for every other cleared string). **An unchanged select sends nothing**: the key is charged on
+ *   presence (`schema:admin`), so a save that touches a media level must not be refused for a setting it did not edit.
+ * - **It is a TOP-LEVEL body key, beside `recordTtlDays`, not a `meta` key.** `SpaceMetaBody` is `.strict()` and the key
+ *   is server-owned on that door, so inside `meta` it would be stripped (or refused) and the setting would never save.
+ *
+ * `schUnknownWriteFields` is reached through a cast, so a missing field fails the assertion that names it and the file
+ * still compiles and runs.
+ */
+describe('SpaceSettingsState - the unknownWriteFields form field (bundle-128, §1.5)', () => {
+  const field = (s: SpaceSettingsState) => (s as unknown as Record<string, unknown>)['schUnknownWriteFields'];
+  const choose = (s: SpaceSettingsState, v: 'warn' | 'refuse') => { (s as unknown as Record<string, unknown>)['schUnknownWriteFields'] = v; };
+  const refusing = () => space({ unknownWriteFields: 'refuse' } as unknown as Partial<Space>);
+
+  it('opens on warn when the space carries no key, and on refuse when it carries refuse', () => {
+    const absent = make();
+    absent.openSettings(space());
+    expect(field(absent), 'an absent key is not mapped to warn').toBe('warn');
+
+    const set = make();
+    set.openSettings(refusing());
+    expect(field(set)).toBe('refuse');
+  });
+
+  it('is part of what the footer save persists, so it is in the payload and the snapshot', () => {
+    const s = make();
+    s.openSettings(refusing());
+    expect(s.settingsPayload(), 'the payload does not carry the field').toHaveProperty('unknownWriteFields');
+    const before = s.snapshot();
+    choose(s, 'warn');
+    expect(s.snapshot(), 'the snapshot ignores the field, so the dirty check cannot see it').not.toBe(before);
+  });
+
+  it('is clean on open, whichever way the space arrived (markPristine takes the mapped value)', () => {
+    for (const sp of [space(), refusing()]) {
+      const s = make();
+      s.openSettings(sp);
+      expect(field(s), 'the field is not loaded').toBeDefined();
+      expect(s.isDirty(), 'a freshly opened space is dirty').toBe(false);
+    }
+  });
+
+  it('an unchanged select sends nothing, absent or refuse', () => {
+    for (const sp of [space(), refusing()]) {
+      const s = make();
+      s.openSettings(sp);
+      expect(field(s), 'the field is not loaded').toBeDefined();
+      expect(s.changedSettings()).toEqual({});
+    }
+  });
+
+  it('absent to refuse sends exactly { unknownWriteFields: "refuse" } at the top level', () => {
+    const s = make();
+    s.openSettings(space());
+    choose(s, 'refuse');
+    expect(s.isDirty()).toBe(true);
+    expect(s.changedSettings()).toEqual({ unknownWriteFields: 'refuse' });
+  });
+
+  it('refuse to warn sends the clear, the empty string', () => {
+    const s = make();
+    s.openSettings(refusing());
+    choose(s, 'warn');
+    expect(s.isDirty()).toBe(true);
+    expect(s.changedSettings()).toEqual({ unknownWriteFields: '' });
+  });
+
+  it('choosing warn on a space that already warns sends nothing (absent is warn)', () => {
+    const s = make();
+    s.openSettings(space());
+    expect(field(s), 'the field is not loaded').toBe('warn');
+    choose(s, 'warn');
+    expect(s.changedSettings()).toEqual({});
+    expect(s.isDirty()).toBe(false);
+  });
+
+  it('never rides along when something else changed: a media level or a purpose edit leaves it out of the body', () => {
+    for (const sp of [space(), refusing()]) {
+      const s = make();
+      s.openSettings(sp);
+      expect(field(s), 'the field is not loaded').toBeDefined();
+      s.stForm.imageAnalysis = 'caption';
+      s.stForm.purpose = 'a changed purpose';
+      const body = s.changedSettings();
+      expect(body).toHaveProperty('imageAnalysis', 'caption');
+      expect(body, 'a setting charged on presence was sent without being edited').not.toHaveProperty('unknownWriteFields');
+      expect(body['meta'] ?? {}, 'the key leaked into meta, where the strict meta body would refuse it').not.toHaveProperty('unknownWriteFields');
+    }
+  });
+
+  it('is never a meta key: buildMeta does not emit it, whatever is chosen', () => {
+    const s = make();
+    s.openSettings(space());
+    choose(s, 'refuse');
+    expect(field(s)).toBe('refuse');
+    expect(s.buildMeta()).not.toHaveProperty('unknownWriteFields');
+    expect(s.changedSettings(), 'the chosen value is not sent at all').toEqual({ unknownWriteFields: 'refuse' });
+  });
+
+  it('re-baselines on markPristine: after a save that sent refuse, the form is clean and holds refuse', () => {
+    const s = make();
+    s.openSettings(space());
+    choose(s, 'refuse');
+    s.markPristine();                       // what a submitted save does
+    expect(field(s)).toBe('refuse');
+    expect(s.isDirty()).toBe(false);
+    expect(s.changedSettings()).toEqual({});
+    choose(s, 'warn');                      // and the NEXT edit is a change against refuse
+    expect(s.changedSettings()).toEqual({ unknownWriteFields: '' });
+  });
+});

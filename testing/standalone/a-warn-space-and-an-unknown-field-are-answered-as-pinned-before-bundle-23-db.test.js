@@ -20,12 +20,13 @@
  *  - the MCP UPDATE tools print the same line and carry the same `warnings` under `warn`, as the create tools do (until bundle-23
  *    they said NOTHING) — the record is stored with the violation.
  *
- * **An unknown top-level field, per door.**
- *  - REST single-record writes ACCEPT it and answer a `warnings` row `{ field, value, reason: 'unknown field — ignored. This route
- *    accepts: <the route's keys>' }`; the record is stored without it;
- *  - the MCP record tools REFUSE it: `400`, `Error: Invalid arguments for '<tool>': (arguments): unexpected property '<key>'`;
- *  - bulk refuses an unknown TOP-LEVEL key on both doors (`400`, the allowed list — and the MCP list also names `space` and
- *    `targetSpace`), and IGNORES an unknown key on an ITEM on both, silently.
+ * **An unknown top-level field, per door** (CHANGED by bundle-128, Q-320: ONE rule, decided by this instance's setting for the space; these spaces carry none, so `warn`).
+ *  - REST single-record writes and the MCP record tools both STORE the record without the field and answer one row `{ field, code: 'unknown_field', reason: 'unknown field — ignored. This write accepts: <the keys>', value }`
+ *    in `warnings` (MCP also prints a `⚠️ Unknown field: <key> — ignored` line); before bundle-128 REST said `This route accepts:` with no `code`, and the MCP tools REFUSED it with the strict validator's `400`;
+ *  - bulk refuses an unknown TOP-LEVEL key on both doors (`400`, the allowed list — and the MCP list also names `space` and `targetSpace`) in every mode, and an unknown key on an ITEM is stored without it and named in one
+ *    `unknown_field:` error row (before bundle-128 it was ignored silently on both).
+ *
+ * The `refuse` setting's answers (a 400 with the same rows and nothing stored) are asserted by `an-unknown-field-is-answered-alike-on-both-doors-db.test.js`, which owns the setting.
  *
  * **An undeclared property key, per door.** In a strict space a key the type's `propertySchemas` does not declare is ACCEPTED today
  * on every door that stores a record — REST create and PATCH, the MCP create tools, bulk — with no warning, and stored. `Q-93` flips
@@ -87,26 +88,30 @@ const valid = (ids) => ({
   edge: { create: { from: ids.person1, to: ids.person2, label: 'knows', properties: { since: 1 } }, update: { id: ids.edge, description: 'edited' } },
 });
 
-/** The keys a route says it accepts, per kind and verb — the text a REST single-record write answers for an unknown field. */
+/**
+ * The keys a write accepts, per kind and verb — the set `acceptedWriteKeys(operation)` derives from the paired MCP tool's schema, and the sentence an
+ * `unknown_field` row carries (`This write accepts: …`). bundle-128: Q-320, Q-494, Q-495 — was the route's hand-kept list, which also took the shared
+ * options a route never read (`checkDuplicates` on an update, `waitForEmbedding` on an update) and the link fields an entity cannot hold; those are unknown now.
+ * `waitForEmbedding` is on every create (Q-495). Literal on purpose: derived from the code it would compare the code with itself.
+ */
 const ACCEPTS = {
   entity: {
-    create: 'checkContradictions, checkDuplicates, description, dupeThreshold, edges, id, linkChronos, linkEntities, linkFacts, linkFiles, name, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
-    update: 'checkContradictions, checkDuplicates, deleteFields, description, dupeThreshold, edges, linkChronos, linkEntities, linkFacts, linkFiles, name, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
+    create: 'checkContradictions, checkDuplicates, description, dupeThreshold, edges, id, name, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
+    update: 'deleteFields, description, edges, name, properties, superseded, suppressEmbeddings, tags, ttlDays, type',
   },
   fact: {
-    create: 'checkContradictions, checkDuplicates, description, dupeThreshold, edges, fact, id, linkChronos, linkEntities, linkFacts, linkFiles, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
-    update: 'checkContradictions, checkDuplicates, deleteFields, description, dupeThreshold, edges, fact, linkChronos, linkEntities, linkFacts, linkFiles, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
+    create: 'checkContradictions, checkDuplicates, description, dupeThreshold, edges, fact, id, linkEntities, properties, superseded, suppressEmbeddings, tags, ttlDays, type, waitForEmbedding',
+    update: 'deleteFields, description, edges, fact, linkEntities, properties, superseded, suppressEmbeddings, tags, ttlDays, type',
   },
   chrono: {
-    create: 'checkContradictions, checkDuplicates, confidence, description, dupeThreshold, edges, endsAt, id, linkChronos, linkEntities, linkFacts, linkFiles, properties, recurrence, startsAt, status, superseded, suppressEmbeddings, tags, title, ttlDays, type, waitForEmbedding',
-    update: 'checkContradictions, checkDuplicates, confidence, deleteFields, description, dupeThreshold, edges, endsAt, linkChronos, linkEntities, linkFacts, linkFiles, properties, recurrence, startsAt, status, superseded, suppressEmbeddings, tags, title, ttlDays, type, waitForEmbedding',
+    create: 'checkContradictions, checkDuplicates, confidence, description, dupeThreshold, edges, endsAt, id, linkEntities, linkFacts, properties, recurrence, startsAt, status, superseded, suppressEmbeddings, tags, title, ttlDays, type, waitForEmbedding',
+    update: 'confidence, deleteFields, description, edges, endsAt, linkEntities, linkFacts, properties, recurrence, startsAt, status, superseded, suppressEmbeddings, tags, title, ttlDays, type',
   },
   edge: {
-    create: 'checkContradictions, checkDuplicates, description, dupeThreshold, from, fromKind, label, properties, superseded, suppressEmbeddings, tags, to, toKind, ttlDays, type, waitForEmbedding, weight',
-    update: 'checkContradictions, checkDuplicates, deleteFields, description, dupeThreshold, fromKind, label, properties, superseded, suppressEmbeddings, tags, toKind, ttlDays, type, waitForEmbedding, weight',
+    create: 'description, from, fromKind, label, properties, superseded, suppressEmbeddings, tags, to, toKind, ttlDays, type, waitForEmbedding, weight',
+    update: 'deleteFields, description, fromKind, label, properties, superseded, suppressEmbeddings, tags, toKind, ttlDays, type, weight',
   },
 };
-
 /** What the MCP create tools print under `warn` after the sentence of the write: one line per violation. */
 const warnLine = (row) => `⚠️ Schema: ${row.field} — ${row.reason}`;
 
@@ -201,42 +206,55 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
   });
 
   describe('an unknown top-level field', () => {
-    describe('REST create and PATCH accept it, answer a `warnings` row, and store the record without it', () => {
+    /**
+     * bundle-128: Q-320 (an unknown top-level field is judged by ONE rule on every door, by the instance's setting for the space: absent = `warn`)
+     * — was REST warn-and-store with `This route accepts: …` and no `code`, and MCP a 400 from the strict validator. These spaces carry no setting, so
+     * they are `warn`: BOTH doors store the record without the field and name it, in the one row shape `{ field, code, reason, value }`.
+     */
+    const unknownRow = (kind, verb) => ({ field: 'bogus', code: 'unknown_field', value: 1, accepts: ACCEPTS[kind][verb] });
+    /** The row a door answered, with the accepted list parsed out of its reason so its ORDER is not pinned, only what it holds. */
+    const parsed = (row) => {
+      const m = /^unknown field — ignored\. This write accepts: (.+)$/.exec(row?.reason ?? '');
+      return { field: row?.field, code: row?.code, value: row?.value, accepts: m ? m[1].split(', ').sort().join(', ') : `(reason did not say what the write accepts: ${row?.reason})` };
+    };
+
+    describe('REST create and PATCH store the record without the field and answer one `unknown_field` row', () => {
       for (const kind of KINDS) {
         it(kind, async () => {
           const v = valid(ids)[kind];
           const created = await pins.rest(kind, 'create', STRICT, { body: { ...v.create, bogus: 1 } });
           assert.equal(created.status, 201, JSON.stringify(created.body));
-          assert.deepEqual(created.body.warnings, [{ field: 'bogus', value: 1, reason: `unknown field — ignored. This route accepts: ${ACCEPTS[kind].create}` }]);
+          assert.deepEqual(created.body.warnings?.map(parsed), [unknownRow(kind, 'create')]);
           assert.equal((await pins.stored(STRICT, kind)).find(d => d._id === created.body._id).bogus, undefined, 'the unknown field was stored');
 
           const { id, ...patch } = v.update;
           const updated = await pins.rest(kind, 'update', STRICT, { id, body: { ...patch, bogus: 1 } });
           assert.equal(updated.status, 200, JSON.stringify(updated.body));
-          assert.deepEqual(updated.body.warnings, [{ field: 'bogus', value: 1, reason: `unknown field — ignored. This route accepts: ${ACCEPTS[kind].update}` }]);
+          assert.deepEqual(updated.body.warnings?.map(parsed), [unknownRow(kind, 'update')]);
         });
       }
     });
 
-    describe('the MCP record tools refuse it with 400, and store nothing', () => {
+    describe('the MCP record tools answer the SAME row, store the record without the field, and say so in a line', () => {
       for (const kind of KINDS) {
         it(kind, async () => {
           const v = valid(ids)[kind];
           const c = violating({})[kind];
-          const before_ = await pins.stored(STRICT, kind);
           const create = await pins.call(c.create_tool, { space: STRICT, ...v.create, bogus: 1 });
-          assert.deepEqual([create.status, create.isError, create.text],
-            [400, true, `Error: Invalid arguments for '${c.create_tool}': (arguments): unexpected property 'bogus'`]);
+          assert.deepEqual([create.status, create.isError], [200, false], create.text);
+          assert.deepEqual(create.structured?.warnings?.map(parsed), [unknownRow(kind, 'create')]);
+          assert.match(create.text, /Unknown field: bogus — ignored/);
           const update = await pins.call(c.update_tool, { space: STRICT, ...v.update, bogus: 1 });
-          assert.deepEqual([update.status, update.isError, update.text],
-            [400, true, `Error: Invalid arguments for '${c.update_tool}': (arguments): unexpected property 'bogus'`]);
-          assert.deepEqual(await pins.stored(STRICT, kind), before_);
+          assert.deepEqual([update.status, update.isError], [200, false], update.text);
+          assert.deepEqual(update.structured?.warnings?.map(parsed), [unknownRow(kind, 'update')]);
+          assert.match(update.text, /Unknown field: bogus — ignored/);
+          for (const doc of await pins.stored(STRICT, kind)) assert.equal(doc.bogus, undefined, 'the unknown argument was stored');
         });
       }
     });
 
     describe('bulk', () => {
-      it('an unknown TOP-LEVEL key is refused 400 on both doors, each naming its own allowed list', async () => {
+      it('an unknown TOP-LEVEL key is refused 400 on both doors in every mode, each naming its own allowed list', async () => {
         const body = { entities: [{ name: 'Org Three', type: 'org' }], bogus: 1 };
         const rest = await pins.bulkRest(STRICT, body);
         assert.deepEqual([rest.status, rest.body], [400, { error: 'Unknown field(s): bogus. Allowed: facts, entities, edges, chrono', unrecognized_keys: ['bogus'] }]);
@@ -245,13 +263,17 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
         assert.equal((await pins.stored(STRICT, 'entity')).some(d => d.name === 'Org Three'), false, 'a refused bulk stored an item');
       });
 
-      it('an unknown key on an ITEM is ignored silently on both doors: the item is stored, no error row, no warning', async () => {
+      it('an unknown key on an ITEM is stored without it and named in one `unknown_field:` error row, on both doors', async () => {
+        // bundle-128: Q-320 (design-v3 5: an item's unknown key under warn is one row in `errors[]` and the item is written) — was ignored silently on both doors: no error row, no warning
+        const isRow = (row, index) => row.type === 'entity' && row.index === index && /^unknown_field:/.test(row.reason) && row.reason.includes('bogus');
         const rest = await pins.bulkRest(STRICT, { entities: [{ name: 'Item Rest', type: 'org', bogus: 1 }] });
         assert.equal(rest.status, 207, JSON.stringify(rest.body));
-        assert.deepEqual(rest.body.errors, []);
+        assert.equal(rest.body.errors.length, 1, JSON.stringify(rest.body.errors));
+        assert.ok(isRow(rest.body.errors[0], 0), JSON.stringify(rest.body.errors));
         const mcp = await pins.call('save_bulk', { space: STRICT, entities: [{ name: 'Item Mcp', type: 'org', bogus: 1 }] });
         assert.equal(mcp.isError, false, mcp.text);
-        assert.deepEqual(mcp.structured.errors, []);
+        assert.equal(mcp.structured.errors.length, 1, JSON.stringify(mcp.structured.errors));
+        assert.ok(isRow(mcp.structured.errors[0], 0), JSON.stringify(mcp.structured.errors));
         const stored = await pins.stored(STRICT, 'entity');
         for (const name of ['Item Rest', 'Item Mcp']) {
           const d = stored.find(e => e.name === name);
@@ -261,7 +283,6 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
       });
     });
   });
-
   describe('an undeclared property key: a strict space refuses it on every door, a warn space stores it and warns', () => {
     /** The write each kind takes with `UNDECLARED` added to a type that declares other properties (a write the schema otherwise accepts). */
     const withKey = (ids_) => ({

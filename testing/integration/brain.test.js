@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Integration tests: Brain API (memories, entities, edges)
  *
  * Covers:
@@ -975,7 +975,10 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       notAFieldWeKnow: 1,
     });
     assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /At least one field must be provided/);
+    // bundle-128: Q-320 (the "nothing to update" sentence is derived from the accepted set, one spelling on every door, and `superseded` is in it) — was `At least one field must be provided`
+    assert.match(r.body.error, /^At least one of .+\bsuperseded\b.+ must be provided$/);
+    // ...and the judge answered first, so the unknown field is named — by name and code, never with the value a refusal must not reflect.
+    assert.deepEqual((r.body.warnings ?? []).map(w => [w.field, w.code, 'value' in w]), [['notAFieldWeKnow', 'unknown_field', false]], JSON.stringify(r.body));
   });
 
   it('POST-as-update is a 404 in 3.0, and writes nothing', async () => {
@@ -2045,6 +2048,8 @@ describe('Brain — PATCH memory updates description and properties', () => {
   it('PATCH memory with no fields returns 400', async () => {
     const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/facts/${memId}`, {});
     assert.equal(r.status, 400, `Expected 400 for empty body`);
+    // bundle-128: Q-320 (the "nothing to update" sentence is derived from the accepted set, one spelling on all four PATCH routes and the four update tools) — status only until now
+    assert.match(r.body.error, /^At least one of .+ must be provided$/);
   });
 
   it('PATCH memory with unknown ID returns 404', async () => {
@@ -2135,6 +2140,8 @@ describe('Brain — PATCH entity by ID', () => {
   it('PATCH entity with no fields returns 400', async () => {
     const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/entities/${entId}`, {});
     assert.equal(r.status, 400, `Expected 400`);
+    // bundle-128: Q-320 (the "nothing to update" sentence is derived from the accepted set, one spelling on all four PATCH routes and the four update tools) — status only until now
+    assert.match(r.body.error, /^At least one of .+ must be provided$/);
   });
 
   it('PATCH entity with unknown ID returns 404', async () => {
@@ -2204,6 +2211,8 @@ describe('Brain — PATCH edge by ID', () => {
   it('PATCH edge with no fields returns 400', async () => {
     const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/edges/${edgeId}`, {});
     assert.equal(r.status, 400, `Expected 400`);
+    // bundle-128: Q-320 (the "nothing to update" sentence is derived from the accepted set, one spelling on all four PATCH routes and the four update tools) — status only until now
+    assert.match(r.body.error, /^At least one of .+ must be provided$/);
   });
 
   it('PATCH edge with unknown ID returns 404', async () => {

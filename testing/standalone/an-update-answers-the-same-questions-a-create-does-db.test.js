@@ -16,11 +16,19 @@
  * That second one is why this is a response-shape change rather than a copy of the create fix: there was no
  * field to put a row in.
  *
- * ## The key lists differ from the creates
  *
- * `deleteFields` is accepted on an update and not on a create, and `id` is a path parameter rather than a body
- * field. Copying a create's list would produce an "unknown field" warning about a parameter that works, which
- * is the failure the drift check below exists for.
+ * ## Bundle-128 moved the unknown-field half; this file keeps the other
+ *
+ * The unknown-field half was asserted by reading each PATCH handler for a call to `unknownFieldWarnings` and for a hand-kept
+ * `*_UPDATE_BODY_KEYS` list that matched its destructure. The reporter and the lists are deleted (the accepted set is
+ * `acceptedWriteKeys`, derived from the paired tool), so two cases were deleted and the rule each held lives elsewhere:
+ *
+ *  - "the X update reports the fields it did not understand" -> a-route-judges-before-it-checks-the-body.test.js (each update route
+ *    calls the judge once, after its target and before its body checks).
+ *  - "each update declares every body key it reads" -> a-route-reads-what-its-tool-declares.test.js (what each PATCH route reads equals
+ *    what its tool declares; `deleteFields` is an update field and `id` a path parameter, which is why the set is derived, not copied).
+ *
+ * What is left is finding 2: a `warn`-mode space finally hears about an edit.
  *
  * Run: `npm run test:up` first, then
  *      node --test testing/standalone/an-update-answers-the-same-questions-a-create-does-db.test.js
@@ -56,14 +64,8 @@ function updateHandler(name) {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-describe('every update route answers both questions', () => {
+describe('every update route takes the classification the writer hands back', () => {
   for (const name of Object.keys(ROUTES)) {
-    it(`the ${name} update reports the fields it did not understand`, () => {
-      assert.match(updateHandler(name), /unknownFieldWarnings\(/,
-        `the ${name} update drops an unknown field silently, so a caller cannot tell an unimplemented `
-        + 'parameter from an applied one — the same silence the creates carried until 3.7');
-    });
-
     it(`the ${name} update takes the classification the writer hands back`, () => {
       /*
        * `onValidation` is the last parameter of all four update writers and existed the whole time — the
@@ -86,41 +88,7 @@ describe('every update route answers both questions', () => {
         + 'an edit while it is told about a create');
     });
   }
-
-  it('and each update declares every body key it reads', () => {
-    // set-claim: the collections this case's own fixture writes to, cleaned between runs. A test's own
-    // teardown, not a claim about the collection set.
-    // The same drift check the creates have, on lists that legitimately DIFFER: `deleteFields` is an update
-    // field, `id` is a path parameter. Copying a create's list would warn about a parameter that works.
-    const offenders = [];
-    for (const name of Object.keys(ROUTES)) {
-      const body = src(ROUTES[name]);
-      const handler = updateHandler(name);
-
-      const destructure = /const \{((?:[^{}]|\{\})*)\} = req\.body \?\? \{\};/.exec(handler);
-      assert.ok(destructure, `no body destructure found in the ${name} update`);
-      const read = destructure[1].split(',').map(s => s.split(':')[0].split('=')[0].trim()).filter(Boolean);
-      for (const m of handler.matchAll(/req\.body(?:\?\.|\.)?(?:\['(\w+)'\]|(\w+))/g)) {
-        const k = m[1] ?? m[2];
-        if (k && !read.includes(k)) read.push(k);
-      }
-
-      const declared = new RegExp(`const ${name.toUpperCase()}_UPDATE_BODY_KEYS = \\[([^\\]]*)\\]`).exec(body);
-      assert.ok(declared, `the ${name} update declares no ${name.toUpperCase()}_UPDATE_BODY_KEYS list`);
-      const known = declared[1].split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
-
-      for (const k of read) {
-        if (!known.includes(k) && !SHARED.includes(k)) {
-          offenders.push(`${name}: reads \`${k}\` but declares it in neither its own list nor the shared one`);
-        }
-      }
-    }
-    assert.deepEqual(offenders, [],
-      `a field the route reads is missing from its accepted-key list:\n  ${offenders.join('\n  ')}`);
-  });
 });
-
-let SHARED = [];
 
 // ── the writer half, from a database ───────────────────────────────────────────────────────────────────────
 
@@ -135,7 +103,6 @@ describe('a warn-mode space has something to be told', { skip }, () => {
   before(async () => {
     mongo = await openTestMongo('updatewarn');
     loader = await import('../../server/dist/config/loader.js');
-    ({ SHARED_WRITE_BODY_KEYS: SHARED } = await import('../../server/dist/api/brain/unknown-fields.js'));
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'update-warn-test', instanceLabel: 'test', tokens: [], networks: [],
       spaces: [{
