@@ -543,12 +543,29 @@ export function recordAfterUpsert(existing: object | null, incoming: object): Re
   };
 }
 
+/** A record an update LEAVES, already whole: minted only by {@link recordAfterPatch}, so a classifier knows not to merge it again. */
+export type RecordLeft = Record<string, unknown> & { readonly __recordLeft: true };
+const RECORDS_LEFT = new WeakSet<object>();
+
 /**
- * The fields a PATCH states, as an upsert's incoming fields: what `$set` writes, and `null` for a field `$unset` removes — so the
- * after-view of an update is {@link recordAfterUpsert} of the stored record and this, and a removed description reads as none.
+ * The record a PATCH leaves: the stored record with `$set` written over it and every `$unset` field gone — what the store will hold.
+ *
+ * An update writer has already merged the patch and applied its `deleteFields` when it builds `$set`/`$unset`, so its fields are FINAL
+ * and must not be merged over the stored record again. They were: the classifier ran {@link recordAfterUpsert} on them, which unions the
+ * stored tags and merges the stored properties back, so every key a `deleteFields` removed and every tag a write dropped reappeared in
+ * the after-view. A strict retype that deleted the old type's keys was refused for "introducing" the keys it was removing, and could
+ * never complete (`a-retype-that-deletes-the-old-keys-completes-db`).
  */
-export function patchedFields($set: Record<string, unknown>, $unset: Record<string, unknown>): Record<string, unknown> {
-  return { ...$set, ...Object.fromEntries(Object.keys($unset).map(k => [k, null])) };
+export function recordAfterPatch(existing: object, $set: Record<string, unknown>, $unset: Record<string, unknown>): RecordLeft {
+  const left: Record<string, unknown> = { ...(existing as Record<string, unknown>), ...$set };
+  for (const k of Object.keys($unset)) delete left[k];
+  RECORDS_LEFT.add(left);
+  return left as RecordLeft;
+}
+
+/** The after-view's record: a {@link RecordLeft} as it is, an upsert's stated fields merged over what it lands on. */
+function recordAfter(existing: object | null, incoming: object): Record<string, unknown> {
+  return RECORDS_LEFT.has(incoming) ? incoming as Record<string, unknown> : recordAfterUpsert(existing, incoming);
 }
 
 /**
@@ -564,14 +581,15 @@ export function patchedFields($set: Record<string, unknown>, $unset: Record<stri
 export function classifyEntityUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { name: string; type: string; properties?: Record<string, string | number | boolean>; tags?: string[] } | null,
-  incoming: { name: string; type: string } & StatedFields,
+  /** An upsert's stated fields, merged over `existing`; or the whole record an update leaves ({@link recordAfterPatch}), taken as it is. */
+  incoming: ({ name: string; type: string } & StatedFields) | RecordLeft,
   /** The property keys the instance itself writes on this kind — handed in by the one writer that owns them (`INSTANCE_WRITTEN_PROPERTY_KEYS`); never a caller's. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
   return classifyViews(
     meta, view => validateEntity(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('entity', existing) : null,
-    recordViewOf('entity', recordAfterUpsert(existing, incoming)),
+    recordViewOf('entity', recordAfter(existing, incoming)),
   );
 }
 
@@ -617,7 +635,7 @@ function classifyViews(
 export function classifyEdgeUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { label: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { label: string } & StatedFields,
+  incoming: ({ label: string } & StatedFields) | RecordLeft,
   /**
    * What the caller resolved about the endpoints — the entity type at each end, and how many OTHER edges carry
    * this label from the same subject.
@@ -638,7 +656,7 @@ export function classifyEdgeUpsertAgainst(
   return classifyViews(
     meta, view => validateEdge(meta ?? {}, view, resolved, instanceWrittenKeys),
     existing ? recordViewOf('edge', existing) : null,
-    recordViewOf('edge', recordAfterUpsert(existing, incoming)),
+    recordViewOf('edge', recordAfter(existing, incoming)),
   );
 }
 
@@ -658,14 +676,14 @@ export function classifyEdgeUpsertAgainst(
 export function classifyFactUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type?: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type?: string; fact?: string } & StatedFields,
+  incoming: ({ type?: string; fact?: string } & StatedFields) | RecordLeft,
   /** As for an entity: the keys the instance itself writes on a fact, handed in by the writer that owns them. */
   instanceWrittenKeys: readonly string[] = [],
 ): UpdateValidation {
   return classifyViews(
     meta, view => validateFact(meta ?? {}, view, instanceWrittenKeys),
     existing ? recordViewOf('fact', existing) : null,
-    recordViewOf('fact', recordAfterUpsert(existing, incoming)),
+    recordViewOf('fact', recordAfter(existing, incoming)),
   );
 }
 
@@ -673,13 +691,13 @@ export function classifyFactUpsertAgainst(
 export function classifyChronoUpsertAgainst(
   meta: SpaceMeta | undefined,
   existing: { type: string; properties?: Record<string, string | number | boolean> } | null,
-  incoming: { type: string; title?: string } & StatedFields,
+  incoming: ({ type: string; title?: string } & StatedFields) | RecordLeft,
 ): UpdateValidation {
   // The instance writes no property on a chrono entry, so there is no exemption to take (`INSTANCE_WRITTEN_PROPERTY_KEYS` has no row for it).
   return classifyViews(
     meta, view => validateChrono(meta ?? {}, view),
     existing ? recordViewOf('chrono', existing) : null,
-    recordViewOf('chrono', recordAfterUpsert(existing, incoming)),
+    recordViewOf('chrono', recordAfter(existing, incoming)),
   );
 }
 

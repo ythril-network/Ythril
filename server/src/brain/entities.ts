@@ -9,7 +9,7 @@ import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { classifyEntityUpsertAgainst, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyEntityUpsertAgainst, recordAfterPatch, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
@@ -237,20 +237,6 @@ export async function updateEntityById(
     }
   }
 
-  /*
-   * Validated HERE, after `deleteFields` has been applied, so the document checked is the document written.
-   *
-   * The order matters and is the same one `updateFact` needs: a patch that REMOVES a required property has
-   * only broken the record once the deletion is folded in, so validating before this point would check a
-   * merged record the caller is not about to store. `newType` rather than `existing.type` for the same
-   * reason — re-typing re-validates against the NEW type's schema, which is what #1047 fixed at the route and
-   * this brings inside.
-   */
-  const check = classifyEntityUpsertAgainst(getSpaceMeta(spaceId), existing,
-    { name: newName, type: newType, properties: newProps, tags: newTags, description: 'description' in $unset ? null : newDesc });
-  if (check.blocked) throw new SchemaViolationError(check);
-  onValidation?.(check);
-
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;
   if (updates.superseded !== undefined) $set['superseded'] = updates.superseded;
   if (updates.name !== undefined) $set['name'] = newName;
@@ -260,6 +246,20 @@ export async function updateEntityById(
   setUnlessDeleted($set, $unset, 'description', newDesc, updates.description !== undefined || !!deleteFieldsPaths);
   setUnlessDeleted($set, $unset, 'tags', newTags, updates.tags !== undefined || !!deleteFieldsPaths);
   setUnlessDeleted($set, $unset, 'properties', newProps, updates.properties !== undefined || !!deleteFieldsPaths);
+
+  /*
+   * Validated HERE, once `$set`/`$unset` say what the write does, so the document checked is the document written
+   * (`recordAfterPatch`: the stored record with this write applied, never merged a second time).
+   *
+   * The order matters and is the same one `updateFact` needs: a patch that REMOVES a required property has
+   * only broken the record once the deletion is folded in, so validating before this point would check a
+   * merged record the caller is not about to store. The new type rather than `existing.type` for the same
+   * reason — re-typing re-validates against the NEW type's schema, which is what #1047 fixed at the route and
+   * this brings inside.
+   */
+  const check = classifyEntityUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
+  if (check.blocked) throw new SchemaViolationError(check);
+  onValidation?.(check);
 
   // The re-embed is ENQUEUED after the write, not computed here. See `embedStoredRecord` for why computing
   // it inline was wrong rather than merely slow: the text would come from this function's stale read.

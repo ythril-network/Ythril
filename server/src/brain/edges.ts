@@ -8,7 +8,7 @@ import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
-import { classifyEdgeUpsertAgainst, patchedFields, SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import { classifyEdgeUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -318,8 +318,6 @@ export async function updateEdgeById(
   // A closure, because a relabel the store refuses with a duplicate key asks it AGAIN against what the winner wrote (`writeRelabel`).
   const classify = async (): Promise<void> => {
     const finalLabel = ('label' in $set ? $set['label'] : existing.label) as string;
-    const finalProps = ('properties' in $unset ? {}
-      : ('properties' in $set ? $set['properties'] : existing.properties)) as Record<string, string | number | boolean> | undefined;
     /*
      * The same resolution as the upsert path. A patch cannot move an endpoint — the triplet is the identity —
      * but it CAN change the label, and the rules belong to the label: patching `works_with` to `reports_to`
@@ -331,7 +329,7 @@ export async function updateEdgeById(
         ...(existing.toKind ? { toKind: existing.toKind } : {}) },
     });
     const check = classifyEdgeUpsertAgainst(getSpaceMeta(spaceId), existing,
-      { ...patchedFields($set, $unset), label: finalLabel, properties: finalProps }, resolvedEnds);
+      recordAfterPatch(existing, $set, $unset), resolvedEnds);
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
   };
