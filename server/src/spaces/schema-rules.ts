@@ -82,7 +82,7 @@ const AST_NODE_LIMIT = 200;
  * caps ({@link SizeInCaps}). The input cap alone bounds nothing a rule makes.
  */
 const LIST_CAP = 100;
-/** Properties of a map a rule reads whole. */
+/** Properties of a map a rule reads whole; a loop over one is priced for this many entries ({@link readSize}). */
 const MAP_CAP = 200;
 /**
  * What one scan costs per cap of its subject, in node units: RE2 is linear, but over up to {@link LONGEST_CHECKED_STRING} code points
@@ -104,6 +104,12 @@ const COST_BUDGET = 10_000_000;
  * {@link LONGEST_CHECKED_STRING} code points), 0 is a literal. A value a rule builds from others holds up to the sum of them.
  */
 type SizeInCaps = number;
+/**
+ * What one read of the top-level field `name` of `self` can hold, in caps. `properties` is a map of up to {@link MAP_CAP} entries and
+ * a loop over a map visits each of them, so the map is as many caps as it takes lists of {@link LIST_CAP} to hold that many entries
+ * (two): a loop over the properties is priced for the entries it can visit, not for as many as a list holds. Every other field is one cap.
+ */
+const readSize = (name: string): SizeInCaps => (name === 'properties' ? Math.ceil(MAP_CAP / LIST_CAP) : 1);
 /** The compiled-program cache is never smaller than this, and grows with the instance's rule count. */
 const PROGRAM_CACHE_FLOOR = 2048;
 
@@ -256,7 +262,7 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
         const operand = v['operand'];
         const name = String(v['field']);
         const testOnly = v['testOnly'] === true;
-        if (isSelf(operand)) { field(name, testOnly, consumed); visit(operand, mult, true); return 1; }
+        if (isSelf(operand)) { field(name, testOnly, consumed); visit(operand, mult, true); return readSize(name); }
         if (isSelfProperties(operand)) { property(name, testOnly); visit(operand, mult, true); return 1; }
         return visit(operand, mult);
       }
@@ -270,7 +276,7 @@ function analyse(root: unknown, scope: RuleScope): Analysis {
             if (key !== undefined) { property(key, false); visit(args[0], mult, true); visit(args[1], mult); return 1; }
             if (scope.declared) problem('reads self.properties by a computed name: a type rule names each property it reads (self.properties.<name>)');
           } else if (isSelf(args[0]) && key !== undefined) {
-            field(key, false, false); visit(args[0], mult, true); visit(args[1], mult); return 1;
+            field(key, false, false); visit(args[0], mult, true); visit(args[1], mult); return readSize(key);
           }
         }
         if (!PLANNER_OPERATORS.has(fn) && !env?.funcs.find(fn)) {

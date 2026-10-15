@@ -109,6 +109,32 @@ describe('a scan of text the rule built is priced by the size it built', () => {
   });
 });
 
+describe('a loop over a map the rule reads is priced for the map, which holds more than a list does', () => {
+  // `self.properties` is capped at 200 entries and a list at 100, so a loop over the properties visits twice what one over the tags does.
+  // Fifteen regex tests per loop, fifty rules: within the budget at 100 per element, over it at 200.
+  const overMap = fits(`self.properties.all(k, ${Array(15).fill(`k.matches(${REGEX})`).join(' && ')})`);
+  const overList = fits(`self.tags.all(t, ${Array(15).fill(`t.matches(${REGEX})`).join(' && ')})`);
+
+  it('the same loop over the tags: fifty of them are accepted (the control)', () => {
+    accepted(assert, parseTypeRules('entity', copies(50, overList)), 'fifty loops over self.tags');
+  });
+
+  it('one loop over the properties is a rule the other limits allow', () => {
+    accepted(assert, parseTypeRules('entity', copies(1, overMap)), 'ONE loop over self.properties');
+  });
+
+  it('fifty of them are over the budget: the properties hold up to 200 entries, and the loop is priced for that', () => {
+    refusedForPrice(copies(50, overMap), 'fifty loops over self.properties');
+    const rows = refusedOnRules(assert, parseSpaceRules(copies(50, overMap)), 'fifty space rules looping over self.properties');
+    assert.match(JSON.stringify(rows), COST_WORDS, `refused, but not for the cost: ${JSON.stringify(rows)}`);
+  });
+
+  it('indexing the map by name reads it whole alike', () => {
+    const indexed = fits(overMap.replace('self.properties', `self['properties']`));
+    refusedForPrice(copies(50, indexed), `fifty loops over self['properties']`);
+  });
+});
+
 describe('what an ordinary rule costs is not changed', () => {
   it('a loop with a regex on each tag, a scan of the title and a comparison of two properties are accepted together, fifty times', () => {
     const ordinary = `self.tags.all(t, t.matches(${REGEX})) && self.title.startsWith('a') && self.properties.a == self.properties.a`;
