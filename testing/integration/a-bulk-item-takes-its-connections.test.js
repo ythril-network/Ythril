@@ -192,20 +192,25 @@ describe('a connection it cannot honour is refused BEFORE the record is written'
       assert.equal(r.body.inserted?.facts ?? 0, 0, JSON.stringify(r.body));
     });
 
-    it(`${door}: a link class the record cannot hold is refused, not ignored`, async () => {
+    it(`${door}: a link class the record cannot hold is an unknown field, named and never silently dropped`, async () => {
       /*
-       * A fact names entities and nothing else. Before this, `linkFiles` on a fact item was simply never
-       * read — accepted, counted as inserted, and silently without the connection the caller asked for.
-       * That is the failure the whole module exists to prevent, arriving as an omission.
+       * A fact names entities and nothing else. Before 5.6, `linkFiles` on a fact item was simply never read —
+       * accepted, counted as inserted, and silently without the connection the caller asked for. That silence is
+       * the failure this case exists for. Since bundle-128 a link field a record's kind cannot hold is an unknown
+       * field like any other (Q-320): in a space that warns — the default, this one — the item is written WITHOUT
+       * the link and its row names `linkFiles` as unknown; a space set to refuse rejects the item (the parity test,
+       * case n, drives that mode). Either way the caller is told; nothing is dropped unsaid.
        */
       const text = `bulk fact with an impossible link class ${door} ${RUN}`;
       const r = await call({ facts: [{ fact: text, linkFiles: ['some/path.md'] }] });
 
       const errs = r.body.errors ?? [];
-      assert.equal(errs.length, 1, `expected exactly one item error: ${JSON.stringify(r.body)}`);
-      assert.match(errs[0].reason, /linkFiles|file/,
-        `the reason must name the class that was refused: ${errs[0].reason}`);
-      assert.equal(await factByText(text), null, 'the fact was written despite an impossible link class');
+      assert.equal(errs.length, 1, `expected exactly one row for the item: ${JSON.stringify(r.body)}`);
+      assert.match(errs[0].reason, /^unknown_field: .*linkFiles/,
+        `the row must name linkFiles as an unknown field: ${errs[0].reason}`);
+      const fact = await factByText(text);
+      assert.ok(fact, 'a warn space must write the item and name the field, not refuse it');
+      assert.equal(fact.linkFiles, undefined, 'the unknown field was stored on the record');
     });
 
     it(`${door}: a \`$ref\` in an item's edge is refused and names where refs DO resolve`, async () => {

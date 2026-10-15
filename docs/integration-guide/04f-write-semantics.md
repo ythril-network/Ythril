@@ -228,10 +228,11 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 | `PATCH .../facts/:id`, `update_fact` | merge | **replaces** the stored tags |
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
-**A `PATCH` can change a record's CONNECTIONS too.** `linkEntities`, `linkFacts`, `linkChronos`,
-`linkEntities`, `linkFacts`, `linkChronos` and `edges` are accepted on the update verb of every door that accepts them on
-create — `facts`, `chrono` and `entities`, on both surfaces — and `linkFiles` on `facts` and `chrono` (an entity does not
-take it, and a `linkFiles` there is an unknown field). They mean exactly what they mean on a create:
+**A `PATCH` can change a record's CONNECTIONS too.** The connection fields are accepted on the update verb of every door
+that accepts them on create, on both surfaces, each for the kinds the record can link to: an entity takes `edges` only,
+a fact `linkEntities` and `edges`, a chrono entry `linkEntities`, `linkFacts` and `edges`, and file metadata
+`linkEntities`, `linkFacts` and `linkChronos`. `linkFiles` is taken by no record write; a link to a file is made on the
+file. A connection field a record does not take is an unknown field. They mean exactly what they mean on a create:
 
 | field | on a `PATCH` |
 |---|---|

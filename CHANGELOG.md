@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Under Refuse, an option a route does not read (`ttlDays` on a link) or a server-written key sent back gets `400` | Send only what you change |
 | A refused brain write names its unknown fields in `warnings`, without values; so does a stored record whose connections failed | Read `warnings` on a refusal |
 | A non-string `targetSpace` answers `400` `targetSpace must be a string` on every write door; a merge into a proxy space is refused before a malformed path id | Send one space id |
-| Chrono `PATCH {superseded: true}` is accepted (was `400`); a brain PATCH with nothing to update names the accepted fields; file-metadata PATCH names `linkFiles` as unknown (it was dropped silently) | Read `warnings` |
+| Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field, so Warn stores without it (a bulk item's was refused) | Read `warnings` |
 | `bulk.write` `errorCount` counts unknown-field warning rows | Do not alarm on `errorCount` alone |
 
 ### Added
