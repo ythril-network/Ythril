@@ -33,6 +33,7 @@ import { idKeysetPage } from '../db/id-keyset-page.js';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { refusalOfParse } from '../util/log.js';
 import { effectiveRung } from '../auth/mint-cap.js';
 import { RUNGS } from '../auth/space-rights.js';
 import { recordViewOf, type ViewKind } from '../brain/record-view.js';
@@ -103,14 +104,6 @@ export function mayReadStoredValues(rights: TokenRights | null | undefined, spac
   return RUNGS.indexOf(effectiveRung(rights, spaceId, 'knowledge')) >= RUNGS.indexOf('read');
 }
 
-/** Why a body was refused, naming the parameter — the sentence both doors send. */
-function bodyRefusal(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'Invalid body';
-  const where = issue.path.join('.');
-  return where ? `${where}: ${issue.message}` : issue.message;
-}
-
 /** The spaces a stored-data check is running for. Module state, so a second door finds the first one's run. */
 const running = new Set<string>();
 
@@ -166,7 +159,8 @@ export async function beginSchemaValidate(input: {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
   const parsed = SchemaValidateBody.safeParse(input.body ?? {});
-  if (!parsed.success) return { status: 400, error: bodyRefusal(parsed.error) };
+  // Why a body was refused, naming each parameter — the one sentence both doors send.
+  if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { sample, after } = parsed.data;
   const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
 
@@ -175,12 +169,17 @@ export async function beginSchemaValidate(input: {
   let meta: SpaceMeta;
   if (parsed.data.meta !== undefined) {
     const proposedParse = SpaceMetaBody.safeParse(stripServerOwnedMeta(parsed.data.meta));
-    if (!proposedParse.success) return { status: 400, error: proposedParse.error.message };
+    if (!proposedParse.success) return { status: 400, error: refusalOfParse(proposedParse.error).error };
     meta = proposedParse.data as SpaceMeta;
   } else {
-    const storedParse = readingStoredRules(() => SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {})));
-    if (!storedParse.success) return { status: 400, error: storedParse.error.message };
-    meta = storedParse.data as SpaceMeta;
+    const stored = readingStoredRules(() => {
+      const storedParse = SpaceMetaBody.safeParse(stripServerOwnedMeta(space.meta ?? {}));
+      return storedParse.success
+        ? { ok: true as const, meta: storedParse.data as SpaceMeta }
+        : { ok: false as const, error: refusalOfParse(storedParse.error).error };
+    });
+    if (!stored.ok) return { status: 400, error: stored.error };
+    meta = stored.meta;
   }
   const resolved = resolveMetaRefs(meta);
 

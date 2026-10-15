@@ -44,7 +44,7 @@ import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
 import { canonicalJson } from '../util/canonical-json.js';
 import { sha256Hex } from '../util/sha256-hex.js';
-import { log, NAME_QUOTED, peerText } from '../util/log.js';
+import { log, NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
 
 // ── The limits a caller can hit. The client shows these numbers (client-limits-match-the-server.spec.ts reads them literally). ────────
 
@@ -555,7 +555,11 @@ export function ruleMapIssues(map: Record<string, unknown>, ruleZ: z.ZodType, ma
       issues.push({ path: [name], message: `the rule name '${name}' is a name every object answers to, so a rule under it could not be told from the object` });
     }
     const r = ruleZ.safeParse(map[name]);
-    if (!r.success) for (const i of r.error.issues) issues.push({ path: [name, ...i.path.map(p => (typeof p === 'symbol' ? String(p) : p))], message: i.message });
+    if (!r.success) {
+      // Read through the one bounded reader, as every parse failure is: the entry's issues become the outer body's, path and reason.
+      const refusal = refusalOfParse(r.error);
+      refusal.issues.forEach((issue, k) => issues.push({ path: [name, ...issue.path], message: refusal.reasons[k] ?? issue.code }));
+    }
   }
   return issues;
 }
