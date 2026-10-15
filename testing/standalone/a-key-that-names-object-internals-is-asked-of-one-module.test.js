@@ -56,6 +56,20 @@ describe('a key that names object internals is asked of one module', () => {
     }
   });
 
+  it('the module also answers the wider question — a name every object answers to — for the prototype\'s names and `prototype`', async () => {
+    const { isObjectPrototypeName } = await import('../../server/dist/util/object-internal-keys.js');
+    for (const name of ['toString', 'hasOwnProperty', 'valueOf', 'constructor', '__proto__', 'prototype']) {
+      assert.equal(isObjectPrototypeName(name), true, name);
+    }
+    for (const name of ['', 'title', 'minAge', 'tostring', 'Prototype']) assert.equal(isObjectPrototypeName(name), false, name);
+  });
+
+  it('no other server source asks `in Object.prototype` itself (G2: the rule-name check asks the module, as the editor mirrors it)', () => {
+    const copies = sources.filter(s => s.file !== MODULE && /\bin\s+Object\.prototype\b/.test(s.code)).map(s => s.file);
+    assert.deepEqual(copies, [],
+      `a second spelling of "a name every object answers to" — ask isObjectPrototypeName (${MODULE}) instead:\n  ${copies.join('\n  ')}`);
+  });
+
   it('no other server source spells the internal keys itself', () => {
     const copies = sources.filter(s => s.file !== MODULE && PROTO_LITERAL.test(s.code)).map(s => s.file);
     assert.deepEqual(copies, [],

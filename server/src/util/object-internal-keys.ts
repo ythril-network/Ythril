@@ -25,3 +25,16 @@ const OBJECT_INTERNAL_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constru
 export function isObjectInternalKey(key: string): boolean {
   return OBJECT_INTERNAL_KEYS.has(key);
 }
+
+/**
+ * True when `name` is one EVERY plain object already answers to — a key of `Object.prototype` (`toString`, `hasOwnProperty`,
+ * `__proto__`, ...) or `prototype` — so a map read by name with `in` or `map[name]` would find it there whatever the map holds.
+ *
+ * A wider question than {@link isObjectInternalKey}: a rule's name (`spaces/schema-rules.ts`) is refused for it, because a rules map is
+ * read by name. ASKED of the platform, never listed: a list is a second copy that misses the next name the platform adds. The editor
+ * asks the same question in the same words (`client/src/app/shared/rule-limits.ts` `isReservedRuleName`), and
+ * `client-limits-match-the-server.spec.ts` compares the two.
+ */
+export function isObjectPrototypeName(name: string): boolean {
+  return name in Object.prototype || name === 'prototype';
+}

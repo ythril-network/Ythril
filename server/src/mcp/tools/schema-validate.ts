@@ -17,6 +17,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { beginSchemaValidate, mayReadStoredValues, SCHEMA_VALIDATE_MAX_LIMIT, SCHEMA_VALIDATE_CURSOR_MAX, SCHEMA_VALIDATE_SCAN_BOUND } from '../../spaces/schema-validate-door.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
+import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { ToolRefusal } from '../../util/errors.js';
 
 export const schema_validateTool: ToolHandler = {
@@ -56,7 +57,8 @@ export const schema_validateTool: ToolHandler = {
         description: 'One record to check instead of the stored ones: `{ kind, record }`, `kind` one of entity, edge, fact, chrono.',
         properties: {
           kind: {
-            type: 'string', enum: ['entity', 'edge', 'fact', 'chrono'],
+            // The REST body's own list (`SchemaValidateBody`): the knowledge types, by their one declaration.
+            type: 'string', enum: [...KNOWLEDGE_TYPES],
             description: 'Which kind of record `record` is: its rules and its type schemas are the ones for this kind (a file is refused).',
           },
           record: {

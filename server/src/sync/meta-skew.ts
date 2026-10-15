@@ -30,7 +30,7 @@
  * is a warning nobody gets, and a key here that the previous release already reads is a warning about nothing.
  */
 import type { NetworkConfig, NetworkMember, SpaceMeta } from '../config/types.js';
-import { boundedNames, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { boundedNames, eachTypeDefinition, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
 import { peerRunsAtLeast } from './peer-floor.js';
 
 /**
@@ -57,7 +57,6 @@ export interface MemberSkew {
   members: Array<{ label: string; networkId: string; neverHeardFrom: boolean }>;
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * The new keys a proposal sets, by the release that reads them: its top-level keys and, inside the types it carries, the fields of each
@@ -72,12 +71,9 @@ function newKeysSet(proposal: SpaceMeta | undefined): Map<string, string[]> {
   for (const [field, value] of Object.entries(proposal ?? {})) {
     if (value !== undefined && Object.hasOwn(NEW_META_KEYS, field)) add(NEW_META_KEYS[field]!, field);
   }
-  const held = (proposal as Record<string, unknown> | undefined)?.[PER_TYPE_META_FIELD];
-  for (const [kind, types] of Object.entries(isObj(held) ? held : {})) {
-    for (const [type, def] of Object.entries(isObj(types) ? types : {})) {
-      for (const [field, value] of Object.entries(isObj(def) ? def : {})) {
-        if (value !== undefined && Object.hasOwn(NEW_TYPE_FIELDS, field)) add(NEW_TYPE_FIELDS[field]!, `${PER_TYPE_META_FIELD}.${kind}.${type}.${field}`);
-      }
+  for (const { kind, type, def } of eachTypeDefinition(proposal)) {
+    for (const [field, value] of Object.entries(def)) {
+      if (value !== undefined && Object.hasOwn(NEW_TYPE_FIELDS, field)) add(NEW_TYPE_FIELDS[field]!, `${PER_TYPE_META_FIELD}.${kind}.${type}.${field}`);
     }
   }
   return bySince;

@@ -45,6 +45,7 @@ import rateLimit from 'express-rate-limit';
 import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
+import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
 import { peerText, peerList, refusalOfParse } from '../util/log.js';
 
@@ -662,14 +663,9 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   // Merge the schema BY THE KEYS THE BODY ACCEPTS, not by a list kept beside it (`Q-215`): this merged two keys of the eight the body
   // took, so `suppressEmbeddings`, `endpoints` and `functional` were ACCEPTED and then DROPPED — a 200 for an entry that had not
   // changed. A key named replaces what the entry held; `propertySchemas` is the one map that is added to, a named property replacing
-  // its namesake and every unnamed one surviving.
-  const mergedSchema: Record<string, unknown> = { ...(existing.schema ?? {}) };
-  for (const [key, value] of Object.entries(patch.schema ?? {})) {
-    if (value === undefined) continue;
-    mergedSchema[key] = key === 'propertySchemas'
-      ? { ...(existing.schema?.propertySchemas ?? {}), ...(value as Record<string, unknown>) }
-      : value;
-  }
+  // its namesake and every unnamed one surviving — the merge of one type definition over another (`mergeTypeDefinition`), the same one
+  // a network layer's type is laid over the local one with.
+  const mergedSchema: Record<string, unknown> = mergeTypeDefinition(existing.schema, (patch.schema ?? {}) as Record<string, unknown>);
 
   // Removals, applied AFTER the merge so a single request can replace one property and drop another without
   // the order mattering to the caller. Any path inside the schema is deletable, by the one deleter the record routes use; a path that

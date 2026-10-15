@@ -8,6 +8,8 @@
  * It cannot live in `auth/rights-migration.ts` either, because `types.ts` would then import from `auth/`,
  * which imports `types.ts`. A leaf both can import breaks that cycle without either owning the other.
  */
+// Another leaf (it imports nothing), so this module stays one.
+import { isPlainObject } from '../util/plain-object.js';
 
 /** Rungs, lowest first. Each CONTAINS the one below, so "write but not read" is unrepresentable. */
 export type Rung = 'none' | 'read' | 'write' | 'admin';
@@ -191,8 +193,6 @@ export interface TokenRights {
 
 const isRung = (v: unknown): v is Rung => (RUNGS as readonly unknown[]).includes(v);
 const isArea = (k: string): k is SpaceArea => (SPACE_AREAS as readonly string[]).includes(k);
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  v != null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * Bring a STORED rights object back to the shape the API validates against, without ever granting more.

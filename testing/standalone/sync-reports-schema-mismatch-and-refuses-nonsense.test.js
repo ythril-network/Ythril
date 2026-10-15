@@ -34,6 +34,7 @@ const DOCS = 'server/src/api/sync/docs.ts';
 const SHARED = 'server/src/api/sync/_shared.ts';
 const RECORDER = 'server/src/sync/arrival-recording.ts';
 const ACCEPT = 'server/src/sync/accept-page.ts';
+const VALIDATION = 'server/src/spaces/schema-validation.ts';
 const docs = stripComments(readFileSync(DOCS, 'utf8'));
 const shared = stripComments(readFileSync(SHARED, 'utf8'));
 
@@ -48,10 +49,14 @@ describe('sync reports a schema mismatch and refuses nonsense', () => {
     const recorder = stripComments(readFileSync(RECORDER, 'utf8'));
     assert.match(recorder, /export async function watchArrivals/, 'no shared recorder');
     assert.match(recorder, /export function recordedOf/, 'no shared recorder');
+    // The switch by kind is the validator module's one (`violationsOfRecord`), which the live schema check asks too: the recorder
+    // asks it, and it has a case for every type.
+    assert.match(recorder, /\bviolationsOfRecord\(/, 'the recorder judges an arrival by a switch of its own, not the one switch by kind');
+    const theSwitch = bodyOf(stripComments(readFileSync(VALIDATION, 'utf8')), 'violationsOfRecord');
     for (const t of TYPES) {
       assert.match(
-        recorder, new RegExp(`case '${t}'`),
-        `the recorder does not handle '${t}', so that type ingests unchecked`,
+        theSwitch, new RegExp(`case '${t}'`),
+        `the one switch by kind does not handle '${t}', so that type ingests unchecked`,
       );
     }
     assert.doesNotMatch(shared, /violationsAgainstLocalSchema/, 'the six-site helper is back: the recorder is the one place a stored arrival is judged');

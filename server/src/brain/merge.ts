@@ -20,7 +20,7 @@ import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
-import { log, peerList, peerText, NAME_QUOTED } from '../util/log.js';
+import { log, peerList, peerText, NAME_QUOTED, REFUSAL_NAMES_MAX } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { edgeEndpointKind } from './entity-refs.js';
@@ -495,7 +495,7 @@ export class MergeSchemaViolation extends SchemaViolationError {
  */
 function mergeRefusedMessage(survivorId: string, absorbedId: string, spaceId: string, introduced: readonly SchemaViolation[]): string {
   return `merge refused: the survivor '${peerText(survivorId)}' would violate the schema of space '${peerText(spaceId)}' after `
-    + `absorbing '${peerText(absorbedId)}' — ${peerList(introduced.map(v => `${v.field}: ${v.reason}`), '; ', { count: 10, each: NAME_QUOTED })}`;
+    + `absorbing '${peerText(absorbedId)}' — ${peerList(introduced.map(v => `${v.field}: ${v.reason}`), '; ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}`;
 }
 
 /**

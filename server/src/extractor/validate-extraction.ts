@@ -8,7 +8,7 @@
  */
 import { UUID_V4_RE } from '../brain/entity-refs.js';
 import { recordViewOf } from '../brain/record-view.js';
-import { validateEntity, validateEdge, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
+import { validateEntity, validateEdge, validationRefuses, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { KnowledgeType, SpaceMeta, ValidationMode } from '../config/types.js';
 
 /** A Schema Library entry, as `schemas/` and `benchmarks/space/schema.json` hold them. */
@@ -154,7 +154,8 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
   const sayProperties = (at: string, who: string, rows: SchemaViolation[]) => {
     for (const row of rows) {
       if (!row.field.startsWith('properties.')) continue;
-      if (Array.isArray(row.declared) && validationMode !== 'strict') continue;
+      // What `strict` means is asked of the one predicate every write door asks (`validationRefuses`), never spelled here.
+      if (Array.isArray(row.declared) && !validationRefuses({ validationMode })) continue;
       problems.push(`${at} (${who}) ${row.field}: ${row.reason}${row.declared ? ` — it declares ${row.declared.join(', ') || 'nothing'}` : ''}`);
     }
   };

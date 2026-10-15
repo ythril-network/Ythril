@@ -806,18 +806,32 @@ fileMoveLinkFallbackTotal.inc(0);
  */
 function counterMirroringTally(spec: { name: string; help: string; read: () => number }): Counter<string>;
 function counterMirroringTally<L extends string>(spec: { name: string; help: string; labelName: L; read: () => Readonly<Record<string, number>> }): Counter<L>;
+/** Labelled by several labels (`labelNames`): `read` returns one row per series, each label's value beside its `count`. */
+function counterMirroringTally<L extends string>(
+  spec: { name: string; help: string; labelNames: readonly L[]; read: () => ReadonlyArray<Readonly<Record<L, string>> & { count: number }> },
+): Counter<L>;
 function counterMirroringTally(
-  spec: { name: string; help: string; labelName?: string; read: () => number | Readonly<Record<string, number>> },
+  spec: {
+    name: string; help: string; labelName?: string; labelNames?: readonly string[];
+    read: () => number | Readonly<Record<string, number>> | ReadonlyArray<Readonly<Record<string, string>> & { count: number }>;
+  },
 ): Counter<string> {
-  const { name, help, labelName, read } = spec;
+  const { name, help, read } = spec;
+  const labelNames = spec.labelNames ?? (spec.labelName === undefined ? undefined : [spec.labelName]);
   return new Counter({
-    name, help, ...(labelName === undefined ? {} : { labelNames: [labelName] as const }), registers: [register],
+    name, help, ...(labelNames === undefined ? {} : { labelNames }), registers: [register],
     collect() {
       this.reset();
       const tally = read();
       if (typeof tally === 'number') { this.inc(tally); return; }
-      if (labelName === undefined) throw new Error(`${name}: a tally per label value needs a labelName`);
-      for (const [value, count] of Object.entries(tally)) this.inc({ [labelName]: value }, count);
+      if (labelNames === undefined) throw new Error(`${name}: a tally per label value needs a labelName`);
+      if (Array.isArray(tally)) {
+        for (const row of tally as ReadonlyArray<Readonly<Record<string, string>> & { count: number }>) {
+          this.inc(Object.fromEntries(labelNames.map(l => [l, row[l]!])), row.count);
+        }
+        return;
+      }
+      for (const [value, count] of Object.entries(tally)) this.inc({ [labelNames[0]!]: value }, count);
     },
   });
 }
@@ -840,15 +854,11 @@ export const fileActAnswersTotal = counterMirroringTally({
  * here at scrape time like the file act answers, so every pair is on the scrape at 0 from the start. Both labels are a fixed vocabulary:
  * no space, rule or property name, which a caller could mint a new series with.
  */
-export const schemaRefusalsTotal = new Counter({
+export const schemaRefusalsTotal = counterMirroringTally({
   name: 'ythril_schema_refusals_total',
   help: 'Writes the space\'s strict schema refused, by the door that answered and what blocked the write',
   labelNames: ['door', 'outcome'] as const,
-  registers: [register],
-  collect() {
-    this.reset();
-    for (const { door, outcome, count } of schemaRefusalCounts()) this.inc({ door, outcome }, count);
-  },
+  read: schemaRefusalCounts,
 });
 
 /** Batches of a move whose plan went stale inside the transaction (a destination row appeared or was revived) and was planned again. */
@@ -1313,7 +1323,7 @@ for (const door of FILE_ARRIVAL_DOORS) for (const outcome of FILE_ARRIVAL_OUTCOM
 /**
  * The doors a record arrives through that are recorded against this instance's schema (`sync/arrival-recording.ts`, R6-9), the values of
  * the `source` label: `push` (a peer's POST), `pull` (this instance fetched a page) and `import` (an admin restore). Listed here so the
- * series can be declared at 0.
+ * series can be declared at 0, and the ONE list: the recorder's `RecordingSource` is derived from it.
  */
 export const SCHEMA_RECORDING_SOURCES = ['push', 'pull', 'import'] as const;
 

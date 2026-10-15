@@ -61,7 +61,7 @@ import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { BrainCollection } from '../config/types.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
-import { MAX_ROWS } from '../brain/write-validation.js';
+import { boundedRows } from '../brain/write-validation.js';
 import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from '../sync/arrival-recording.js';
 import { isNewerCopy } from '../sync/upsert-plan.js';
 import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
@@ -244,7 +244,8 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
       const rows = [...recorded];
       result.schemaViolations = rows.slice(0, IMPORT_VIOLATIONS_NAMED).map(([doc, found]) => ({
         _id: peerText(doc._id),
-        violations: found.slice(0, MAX_ROWS).map(({ field, reason }) => ({ field, reason })),
+        // The one bounded renderer, without values (an import's report never carries one), then the report's own two fields.
+        violations: boundedRows(found, { value: false }).map(({ field, reason }) => ({ field, reason })),
       }));
       result.schemaViolationsTotal = rows.length;
       if (rows.length > IMPORT_VIOLATIONS_NAMED) result.schemaViolationsTruncated = true;

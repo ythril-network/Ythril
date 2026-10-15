@@ -27,6 +27,7 @@
  */
 import type { AuditChange } from './audit-changes.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
+import { isPlainObject } from '../util/plain-object.js';
 
 /** The four knowledge collections a space's `typeSchemas` can describe. */
 // Imported rather than listed: a fifth kind must appear in an audit summary without anyone remembering to
@@ -36,9 +37,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
  *  writing thousands of names into a retained store; the count still tells the reader it happened. */
 export const MAX_KEYS_PER_FIELD = 25;
 
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
-}
+const asRecord = (v: unknown): Record<string, unknown> | null => (isPlainObject(v) ? v : null);
 
 /** Set difference over object keys, capped. Returns null when nothing changed. */
 function keyDelta(before: unknown, after: unknown): { added: string[]; removed: string[] } | null {

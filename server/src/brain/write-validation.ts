@@ -47,7 +47,8 @@ import { validateEntity, validateEdge, validateChrono, validateFact, type Schema
 import { recordViewOf, type RecordView } from './record-view.js';
 import type { SpaceMeta } from '../config/types.js';
 import { isDeepStrictEqual } from 'node:util';
-import { NAME_QUOTED, peerList, peerText } from '../util/log.js';
+import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerList, peerText } from '../util/log.js';
+import { ownValue } from '../util/plain-object.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -115,9 +116,7 @@ export function deltaBetween(before: RecordView | null, after: RecordView): Writ
       // A property: its VALUE, own keys only — a key named like something on `Object.prototype` is not on the record because the prototype has it.
       if (field.startsWith('properties.')) {
         const name = field.slice('properties.'.length);
-        const was = Object.hasOwn(before.properties, name) ? before.properties[name] : undefined;
-        const is = Object.hasOwn(after.properties, name) ? after.properties[name] : undefined;
-        return !isDeepStrictEqual(was, is);
+        return !isDeepStrictEqual(ownValue(before.properties, name), ownValue(after.properties, name));
       }
       if (field === 'name') return before.title !== after.title;
       // Everything else is about the type (or the label) the record sits under: the allowlist, the unresolved reference, the ends.
@@ -306,14 +305,21 @@ function boundedValue(value: unknown): unknown {
 
 /**
  * At most {@link MAX_ROWS} rows, each quoting the caller's choices bounded: the `field` (a property key the caller chose) at
- * `NAME_QUOTED`, a string `value` by `peerText`. The one place a refusal's rows are rendered, so `introduced`, `preExisting`
- * and `violations` cannot differ in what they quote.
+ * `NAME_QUOTED`, a string `value` by `peerText`. The one place violation rows are rendered for anyone to read — a refusal's
+ * `introduced`, `preExisting` and `violations`, a write's warnings, a push's recorded rows, an import's report and the live schema
+ * check's answer — so none of them can quote more than another.
+ *
+ * `value: false` leaves every row without its value: for a reader who may not see the stored data (the stored-data check without
+ * `knowledge: read`) or a sink that never carries values (an import's report). The push answer, the live check's sample and a reader
+ * who may read the data keep it. Before this was one function, three of those sinks cut the list themselves and echoed `field` and
+ * `value` whole.
  */
-function boundedRows(rows: readonly SchemaViolation[]): SchemaViolation[] {
+export function boundedRows(rows: readonly SchemaViolation[], { value = true }: { value?: boolean } = {}): SchemaViolation[] {
   return rows.slice(0, MAX_ROWS).map(v => {
-    const row: SchemaViolation = { ...v, field: peerText(v.field, { max: NAME_QUOTED }) };
+    const { value: held, ...rest } = v;
+    const row: SchemaViolation = { ...rest, field: peerText(v.field, { max: NAME_QUOTED }) } as SchemaViolation;
     // A row with no value stays without one: a `value: undefined` key is a field the row never had.
-    if (Object.hasOwn(v, 'value')) row.value = boundedValue(v.value);
+    if (value && Object.hasOwn(v, 'value')) row.value = boundedValue(held);
     return row;
   });
 }
@@ -459,13 +465,13 @@ export function describeUpdateViolations(
 ): string {
   // The names are fields the CALLER chose (a property key), so the list is bounded in count and in each name: a megabyte key, or a hundred
   // of them, is a sentence, not a megabyte of one (R6-11).
-  const names = (vs: SchemaViolation[]) => peerList([...new Set(vs.map(v => v.field))], ', ', { count: 10, each: NAME_QUOTED });
+  const names = (vs: SchemaViolation[]) => peerList([...new Set(vs.map(v => v.field))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED });
 
   // A caller who read only the prose (an MCP tool's error text) must still learn WHY a property key is refused: the row's reason says
   // "not declared", and the sentence is all of it that reaches them.
   const undeclared = introduced.filter(isUndeclaredKey);
   const undeclaredNote = undeclared.length > 0
-    ? ` Not declared on this type: ${peerList([...new Set(undeclared.map(v => v.field.replace(/^properties\./, '')))], ', ', { count: 10, each: NAME_QUOTED })}.`
+    ? ` Not declared on this type: ${peerList([...new Set(undeclared.map(v => v.field.replace(/^properties\./, '')))], ', ', { count: REFUSAL_NAMES_MAX, each: NAME_QUOTED })}.`
     : '';
 
   if (introduced.length > 0 && preExisting.length === 0) {

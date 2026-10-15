@@ -46,9 +46,9 @@ import { readStoredById } from '../db/read-by-id.js';
 import { classifyUpdateViolations, deltaBetween } from '../brain/write-validation.js';
 import { recordViewOf, type RecordView } from '../brain/record-view.js';
 import {
-  getSpaceMeta, judgesKeys, validateChrono, validateEdge, validateEntity, validateFact, applyValidation, type SchemaViolation,
+  getSpaceMeta, judgesKeys, violationsOfRecord, applyValidation, type SchemaViolation,
 } from '../spaces/schema-validation.js';
-import { schemaRecorderFailuresTotal, schemaViolationsRecordedTotal } from '../metrics/registry.js';
+import { schemaRecorderFailuresTotal, schemaViolationsRecordedTotal, type SCHEMA_RECORDING_SOURCES } from '../metrics/registry.js';
 import { log, logSafe, peerList, peerText, NAME_QUOTED } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
@@ -56,8 +56,12 @@ import { RECORD_TYPE_OF } from './replicated-families.js';
 
 type Doc = Record<string, unknown> & { _id: string };
 
-/** The doors a recording is made for: the label of `ythril_schema_violations_recorded_total`. */
-export type RecordingSource = 'push' | 'pull' | 'import';
+/**
+ * The doors a recording is made for: the label of `ythril_schema_violations_recorded_total`, derived from the list the counter is declared
+ * at 0 with (`SCHEMA_RECORDING_SOURCES`), so a door added here is a series on the scrape. The list stays in the registry: this module
+ * imports the registry, and the registry importing a list from here back would be a runtime cycle.
+ */
+export type RecordingSource = typeof SCHEMA_RECORDING_SOURCES[number];
 
 /** Documents judged between two turns of the event loop, so a page of five hundred never holds it (R6-1). */
 const YIELD_EVERY = 50;
@@ -71,18 +75,6 @@ export function schemaKindOf(collection: BrainCollection): KnowledgeType | undef
   return type !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(type) ? type as KnowledgeType : undefined;
 }
 
-/**
- * What the validator says about `doc` as a record of `kind` — one switch, written by name, so every door reaches the validator of its kind
- * through here. The view is made from the document as it is (`recordViewOf`), never from a literal of the fields a rule happens to read.
- */
-function rowsOf(meta: SpaceMeta, kind: KnowledgeType, doc: object): SchemaViolation[] {
-  switch (kind) {
-    case 'entity': return validateEntity(meta, recordViewOf('entity', doc));
-    case 'edge': return validateEdge(meta, recordViewOf('edge', doc));
-    case 'chrono': return validateChrono(meta, recordViewOf('chrono', doc));
-    case 'fact': return validateFact(meta, recordViewOf('fact', doc));
-  }
-}
 
 /** The state {@link watchArrivals} takes before a write and {@link recordedOf} reads after it. */
 export interface ArrivalWatch {
@@ -109,7 +101,8 @@ export async function watchArrivals(spaceId: string, collection: BrainCollection
     const found = new Map<Doc, SchemaViolation[]>();
     let judged = 0;
     for (const doc of docs) {
-      const rows = rowsOf(meta, kind, doc);
+      // The one switch by kind (`violationsOfRecord`), handed the document whole: never a literal of the fields a rule happens to read.
+      const rows = violationsOfRecord(meta, kind, doc);
       if (rows.length > 0) found.set(doc, rows);
       if (++judged % YIELD_EVERY === 0) await yieldToEventLoop();
     }
@@ -117,7 +110,7 @@ export async function watchArrivals(spaceId: string, collection: BrainCollection
     // The copies these documents replace, read once and only for the documents that have something to say: a clean page reads nothing.
     const copies = await readStoredById<Doc>(spaceCollection(spaceId, collection), [...new Set([...found.keys()].map(d => d._id))], 'all');
     const held = new Map<string, { rows: SchemaViolation[]; view: RecordView }>();
-    for (const [id, copy] of copies) held.set(id, { rows: rowsOf(meta, kind, copy), view: recordViewOf(kind, copy) });
+    for (const [id, copy] of copies) held.set(id, { rows: violationsOfRecord(meta, kind, copy), view: recordViewOf(kind, copy) });
     return { spaceId, kind, meta, found, held };
   } catch (err) {
     recorderFailed(spaceId, source, err);

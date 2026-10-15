@@ -37,11 +37,12 @@ import { z } from 'zod';
 import { getSchemaLibrary } from '../config/loader.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 import { canonicalJson } from '../util/canonical-json.js';
+import { libraryEntryNameOf } from './library-ref-name.js';
 
 /** The library entry's definition for a `library:<name>` reference, or undefined when there is none. */
 function definitionOf(ref: string): Record<string, unknown> | undefined {
-  if (!ref.startsWith('library:')) return undefined;
-  const name = ref.slice('library:'.length);
+  const name = libraryEntryNameOf(ref);
+  if (name === undefined) return undefined;
   return getSchemaLibrary().find(e => e.name === name)?.schema as Record<string, unknown> | undefined;
 }
 
@@ -92,7 +93,7 @@ export function takeBackLibraryDefinition(
   const fields = def
     ? [...new Set([...Object.keys(rest), ...Object.keys(def)])].filter(k => canonicalJson(rest[k]) !== canonicalJson(def[k]))
     : Object.keys(rest);
-  const entry = $ref.startsWith('library:') ? $ref.slice('library:'.length) : $ref;
+  const entry = libraryEntryNameOf($ref) ?? $ref;
   ctx.addIssue({
     code: 'custom',
     input: value,

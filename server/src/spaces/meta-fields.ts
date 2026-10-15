@@ -36,6 +36,7 @@
  */
 
 import { NAME_QUOTED, peerText } from '../util/log.js';
+import { isPlainObject, ownValue } from '../util/plain-object.js';
 
 /** How a merge treats one key of a meta. */
 export type MetaFieldKind = 'scalar' | 'object-replaced-whole' | 'per-type' | 'replaced-whole';
@@ -67,6 +68,41 @@ export const PER_TYPE_META_FIELD: string = Object.entries(META_FIELD_KINDS).find
 type Obj = Record<string, unknown>;
 
 /**
+ * Every type definition `meta` holds under {@link PER_TYPE_META_FIELD}, with the kind and the name it is filed under, in the order the
+ * meta holds them. Own keys only, and a kind or a definition that is not an object is passed over: a meta a peer or a caller shaped is
+ * walked, never trusted. The walk that a reader of the types writes as three nested loops over `isPlainObject` checks.
+ */
+export function eachTypeDefinition(meta: unknown): Array<{ kind: string; type: string; def: Obj }> {
+  const out: Array<{ kind: string; type: string; def: Obj }> = [];
+  const held = ownValue(meta, PER_TYPE_META_FIELD);
+  for (const [kind, types] of Object.entries(isPlainObject(held) ? held : {})) {
+    for (const [type, def] of Object.entries(isPlainObject(types) ? types : {})) {
+      if (isPlainObject(def)) out.push({ kind, type, def });
+    }
+  }
+  return out;
+}
+
+/**
+ * One type definition laid over another: `incoming`'s fields over `local`'s, and the two property maps unioned — the merge of a network
+ * layer's type into the local one (`sync/replicated-meta.ts`) and of a library PATCH's schema into the entry (`api/schema-library.ts`).
+ * A type that is a schema-library reference (`$ref`) on either side is one unit — a reference cannot carry properties, so `incoming`
+ * replaces `local` whole.
+ *
+ * Every OTHER field of a type is `incoming`'s value where it states one: a type's `rules` (F-46) are one of those, so a layer's rules for a
+ * type replace the local ones and are never unioned (R6-5). `propertySchemas` is the one map that is unioned, and it is the owner's
+ * additive ruling that makes it so. The library PATCH wrote the same rule out by hand beside this one.
+ */
+export function mergeTypeDefinition(local: unknown, incoming: Obj): Obj {
+  if (!isPlainObject(local) || '$ref' in local || '$ref' in incoming) return incoming;
+  const merged: Obj = { ...local };
+  for (const [key, value] of Object.entries(incoming)) if (value !== undefined) merged[key] = value;
+  const lp = local['propertySchemas'], ip = incoming['propertySchemas'];
+  if (isPlainObject(lp) || isPlainObject(ip)) merged['propertySchemas'] = { ...(isPlainObject(lp) ? lp : {}), ...(isPlainObject(ip) ? ip : {}) };
+  return merged;
+}
+
+/**
  * `incoming`'s fields laid over `base` by the kind of each, as a new object. An `undefined` value is "not stated" and changes
  * nothing; a key with no kind is not carried. `mergeTypes` merges the per-type field: `(what base holds, what arrives)`.
  */
@@ -86,12 +122,15 @@ export function unknownMetaFields(keys: Iterable<string>): string[] {
   return [...keys].filter(k => metaFieldKind(k) === undefined);
 }
 
-/** How many unknown names a tolerant reader keeps; the rest are counted. What a peer chose is never echoed whole or without end. */
+/** How many names one report lists; the rest are counted. What a peer or a caller chose is never echoed whole or without end. */
 export const MAX_UNKNOWN_NAMES = 50;
 
 /**
- * `names` as a reader reports them: at most {@link MAX_UNKNOWN_NAMES}, each one bounded in length and made safe for a line
+ * `names` as a report lists them: at most {@link MAX_UNKNOWN_NAMES}, each one bounded in length and made safe for a line
  * (`peerText`), then `…(+N more)`. `total` is how many there were when the caller stopped collecting at the bound.
+ *
+ * Read by the tolerant meta reader (the keys it does not know) and by an undeclared-key row (the keys its type declares) — the second
+ * used to cut at the same fifty and drop the count, so a row about a type with sixty properties said it declares fifty.
  */
 export function boundedNames(names: readonly string[], total: number = names.length): string[] {
   const shown = names.slice(0, MAX_UNKNOWN_NAMES).map(n => peerText(n, { max: NAME_QUOTED }));

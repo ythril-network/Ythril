@@ -54,6 +54,8 @@ import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
 import { NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal } from '../util/log.js';
 import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames } from './meta-fields.js';
+import { isPlainObject } from '../util/plain-object.js';
+import { libraryEntryNameOf } from './library-ref-name.js';
 import {
   TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
   readingStoredRules, type RuleIssue,
@@ -392,8 +394,10 @@ export function findBrokenLibraryRefs(typeSchemas: z.infer<typeof TypeSchemasZ> 
     for (const schema of Object.values(ktMap)) {
       if (typeof schema === 'object' && schema !== null && '$ref' in schema) {
         const ref = (schema as { $ref: string }).$ref;
-        const name = ref.startsWith('library:') ? ref.slice('library:'.length) : ref;
-        if (!library.some(e => e.name === name) && !broken.includes(name)) {
+        // A `$ref` that names no entry (a bare name) is broken by the same words: it is said as it was written.
+        const entry = libraryEntryNameOf(ref);
+        const name = entry ?? ref;
+        if ((entry === undefined || !library.some(e => e.name === entry)) && !broken.includes(name)) {
           broken.push(name);
         }
       }
@@ -417,9 +421,10 @@ export function withoutBrokenLibraryRefs(meta: ParsedSpaceMeta): { meta: ParsedS
     if (!ktMap) continue;
     out[kt] = {};
     for (const [type, schema] of Object.entries(ktMap)) {
-      const ref = typeof schema === 'object' && schema !== null && '$ref' in schema ? String((schema as { $ref: unknown }).$ref) : null;
-      const name = ref?.startsWith('library:') ? ref.slice('library:'.length) : ref;
-      if (name !== null && !names.has(name)) { dropped.push(`${kt}:${type}`); continue; }
+      const ref = typeof schema === 'object' && schema !== null && '$ref' in schema ? (schema as { $ref: unknown }).$ref : null;
+      // A reference that names no entry here — a missing one, or a `$ref` that is not `library:<name>` at all — is dropped alike.
+      const name = libraryEntryNameOf(ref);
+      if (ref !== null && (name === undefined || !names.has(name))) { dropped.push(`${kt}:${type}`); continue; }
       out[kt]![type] = schema;
     }
   }
@@ -451,9 +456,10 @@ export function findWrongKindLibraryRefs(typeSchemas: z.infer<typeof TypeSchemas
   for (const [kind, types] of Object.entries(typeSchemas)) {
     if (!types) continue;
     for (const [type, schema] of Object.entries(types)) {
-      const ref = typeof schema === 'object' && schema !== null && '$ref' in schema ? String((schema as { $ref: unknown }).$ref) : null;
-      if (ref === null) continue;
-      const entry = library.find(e => e.name === (ref.startsWith('library:') ? ref.slice('library:'.length) : ref));
+      const ref = typeof schema === 'object' && schema !== null && '$ref' in schema ? (schema as { $ref: unknown }).$ref : null;
+      const name = libraryEntryNameOf(ref);
+      if (name === undefined) continue; // no reference, or one that names no entry: the broken-reference refusal's
+      const entry = library.find(e => e.name === name);
       if (entry && entry.knowledgeType !== kind) wrong.push({ entry: entry.name, kind, type, entryKind: entry.knowledgeType });
     }
   }
@@ -583,7 +589,6 @@ export type ParsedSpaceMeta = SpaceMeta & { readonly [PARSED]: 'space-meta' };
 export type ParsedLibraryEntry = SchemaLibraryEntry & { schema: ParsedTypeSchema };
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** An OWN property, even for a name that would reach the prototype by assignment (a hostile type name must reach the parse intact). */
 function setOwn(into: Obj, key: string, value: unknown): void {
@@ -603,7 +608,7 @@ const keysOf = (schema: { shape: Record<string, unknown> }): Set<string> => new 
 
 /** `value` without the keys `known` lacks, each one named under `path`. A value that is not an object is left for the body to refuse. */
 function withoutUnknownKeys(value: unknown, known: Set<string>, path: string, names: UnknownNames): unknown {
-  if (!isObj(value)) return value;
+  if (!isPlainObject(value)) return value;
   const out: Obj = {};
   for (const [k, v] of Object.entries(value)) {
     if (known.has(k)) setOwn(out, k, v); else names.add(`${path}.${k}`);
@@ -613,17 +618,17 @@ function withoutUnknownKeys(value: unknown, known: Set<string>, path: string, na
 
 /** One type definition read for what this release knows. A `$ref` is one unit the body judges, and is left alone. */
 function readKnownType(def: unknown, path: string, names: UnknownNames): unknown {
-  if (!isObj(def) || typeof def['$ref'] === 'string') return def;
+  if (!isPlainObject(def) || typeof def['$ref'] === 'string') return def;
   const out = withoutUnknownKeys(def, keysOf(InlineTypeSchemaZ), path, names) as Obj;
   const props = out['propertySchemas'];
-  if (isObj(props)) {
+  if (isPlainObject(props)) {
     const known = keysOf(PropertySchemaZ);
     const next: Obj = {};
     for (const [name, ps] of Object.entries(props)) setOwn(next, name, withoutUnknownKeys(ps, known, `${path}.propertySchemas.${name}`, names));
     out['propertySchemas'] = next;
   }
-  if (isObj(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), `${path}.retention`, names);
-  if (isObj(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), `${path}.endpoints`, names);
+  if (isPlainObject(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), `${path}.retention`, names);
+  if (isPlainObject(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), `${path}.endpoints`, names);
   return out;
 }
 
@@ -637,12 +642,12 @@ function readKnownMeta(raw: Obj, names: UnknownNames): Obj {
   const out: Obj = {};
   for (const [k, v] of Object.entries(raw)) {
     if (!metaKeys.has(k)) { names.add(k); continue; }
-    if (k !== PER_TYPE_META_FIELD || !isObj(v)) { setOwn(out, k, v); continue; }
+    if (k !== PER_TYPE_META_FIELD || !isPlainObject(v)) { setOwn(out, k, v); continue; }
     const kinds = new Set<string>(KNOWLEDGE_TYPES);
     const types: Obj = {};
     for (const [kind, defs] of Object.entries(v)) {
       if (!kinds.has(kind)) { names.add(`${k}.${kind}`); continue; }
-      if (!isObj(defs)) { setOwn(types, kind, defs); continue; }
+      if (!isPlainObject(defs)) { setOwn(types, kind, defs); continue; }
       const defsOut: Obj = {};
       for (const [name, def] of Object.entries(defs)) setOwn(defsOut, name, readKnownType(def, `${k}.${kind}.${name}`, names));
       setOwn(types, kind, defsOut);
@@ -716,7 +721,7 @@ export interface MetaParseOptions {
  */
 export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): MetaParse {
   const stripped = stripServerOwnedMeta(input);
-  if (!isObj(stripped)) return { ok: false, message: 'a meta must be an object', failed: ['meta'] };
+  if (!isPlainObject(stripped)) return { ok: false, message: 'a meta must be an object', failed: ['meta'] };
   const names = new UnknownNames();
   const candidate = options.tolerant ? readKnownMeta(stripped, names) : stripped;
 
@@ -726,15 +731,15 @@ export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): 
   if (options.against) {
     toParse = {};
     for (const [k, v] of Object.entries(candidate)) {
-      if (k !== PER_TYPE_META_FIELD || !isObj(v)) {
+      if (k !== PER_TYPE_META_FIELD || !isPlainObject(v)) {
         if (!isDeepStrictEqual(v, stored[k])) setOwn(toParse, k, v);
         continue;
       }
-      const storedTypes = isObj(stored[k]) ? stored[k] as Obj : {};
+      const storedTypes = isPlainObject(stored[k]) ? stored[k] as Obj : {};
       const changed: Obj = {};
       for (const [kind, defs] of Object.entries(v)) {
-        if (!isObj(defs)) { setOwn(changed, kind, defs); continue; }
-        const storedDefs = isObj(storedTypes[kind]) ? storedTypes[kind] as Obj : {};
+        if (!isPlainObject(defs)) { setOwn(changed, kind, defs); continue; }
+        const storedDefs = isPlainObject(storedTypes[kind]) ? storedTypes[kind] as Obj : {};
         const changedDefs: Obj = {};
         for (const [name, def] of Object.entries(defs)) if (!isDeepStrictEqual(def, storedDefs[name])) setOwn(changedDefs, name, def);
         if (Object.keys(changedDefs).length > 0) setOwn(changed, kind, changedDefs);
@@ -756,8 +761,8 @@ export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): 
   // F-46: what APPLIES to one record is judged on the meta as it will be stored — the part parsed above cannot see a stored type's rules
   // beside new space rules — and only for what this write changed, so an unrelated edit never re-judges a stored type.
   const changedTypes = new Set<string>();
-  for (const [kind, defs] of Object.entries(isObj(toParse[PER_TYPE_META_FIELD]) ? toParse[PER_TYPE_META_FIELD] as Obj : {})) {
-    for (const name of Object.keys(isObj(defs) ? defs : {})) changedTypes.add(`${kind}:${name}`);
+  for (const [kind, defs] of Object.entries(isPlainObject(toParse[PER_TYPE_META_FIELD]) ? toParse[PER_TYPE_META_FIELD] as Obj : {})) {
+    for (const name of Object.keys(isPlainObject(defs) ? defs : {})) changedTypes.add(`${kind}:${name}`);
   }
   const applicable = applicableRuleIssues(candidate, { spaceRules: Object.hasOwn(toParse, 'rules'), types: changedTypes });
   if (applicable.length > 0) {
@@ -768,12 +773,12 @@ export function parseSpaceMeta(input: unknown, options: MetaParseOptions = {}): 
   // Put the parts back in the order they arrived: a parsed part where one was parsed, the carried one where it was not.
   const out: Obj = {};
   for (const [k, v] of Object.entries(candidate)) {
-    if (k !== PER_TYPE_META_FIELD || !isObj(v)) { setOwn(out, k, Object.hasOwn(parsed, k) ? parsed[k] : v); continue; }
-    const parsedTypes = isObj(parsed[k]) ? parsed[k] as Obj : {};
+    if (k !== PER_TYPE_META_FIELD || !isPlainObject(v)) { setOwn(out, k, Object.hasOwn(parsed, k) ? parsed[k] : v); continue; }
+    const parsedTypes = isPlainObject(parsed[k]) ? parsed[k] as Obj : {};
     const types: Obj = {};
     for (const [kind, defs] of Object.entries(v)) {
-      if (!isObj(defs)) { setOwn(types, kind, defs); continue; }
-      const parsedDefs = isObj(parsedTypes[kind]) ? parsedTypes[kind] as Obj : {};
+      if (!isPlainObject(defs)) { setOwn(types, kind, defs); continue; }
+      const parsedDefs = isPlainObject(parsedTypes[kind]) ? parsedTypes[kind] as Obj : {};
       const defsOut: Obj = {};
       for (const [name, def] of Object.entries(defs)) setOwn(defsOut, name, Object.hasOwn(parsedDefs, name) ? parsedDefs[name] : def);
       setOwn(types, kind, defsOut);
@@ -806,7 +811,7 @@ export function readStoredMeta(stored: unknown): { meta: Obj; skipped: string[] 
 
 function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } {
   const stripped = stripServerOwnedMeta(stored);
-  if (!isObj(stripped)) return { meta: {}, skipped: [] };
+  if (!isPlainObject(stripped)) return { meta: {}, skipped: [] };
   const known = readKnownMeta(stripped, new UnknownNames());
   const whole = SpaceMetaBody.safeParse(known);
   if (whole.success) return { meta: whole.data as Obj, skipped: [] };
@@ -818,19 +823,19 @@ function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } 
     return part.success ? part.data as Obj : undefined;
   };
   for (const [key, value] of Object.entries(known)) {
-    if (key !== PER_TYPE_META_FIELD || !isObj(value)) {
+    if (key !== PER_TYPE_META_FIELD || !isPlainObject(value)) {
       const part = accept({ [key]: value });
       if (part && Object.hasOwn(part, key)) setOwn(out, key, part[key]); else skipped.add(key);
       continue;
     }
     const kinds: Obj = {};
     for (const [kind, defs] of Object.entries(value)) {
-      if (!isObj(defs)) { skipped.add(`${key}.${kind}`); continue; }
+      if (!isPlainObject(defs)) { skipped.add(`${key}.${kind}`); continue; }
       const kept: Obj = {};
       for (const [name, def] of Object.entries(defs)) {
         const part = accept({ [key]: { [kind]: { [name]: def } } });
-        const types = isObj(part?.[key]) ? (part![key] as Obj)[kind] : undefined;
-        if (isObj(types) && Object.hasOwn(types, name)) setOwn(kept, name, types[name]); else skipped.add(`${kind}:${name}`);
+        const types = isPlainObject(part?.[key]) ? (part![key] as Obj)[kind] : undefined;
+        if (isPlainObject(types) && Object.hasOwn(types, name)) setOwn(kept, name, types[name]); else skipped.add(`${kind}:${name}`);
       }
       if (Object.keys(kept).length > 0 || Object.keys(defs).length === 0) setOwn(kinds, kind, kept);
     }
@@ -849,7 +854,7 @@ export function parseTypeSchema(kind: KnowledgeType, typeName: string, input: un
   const result = TypeSchemasZ.safeParse({ [kind]: { [typeName]: input } });
   if (!result.success) return { ok: false, message: refusalOfParse(result.error, { unionBranch: branchAboutTheField }).error };
   const schema = (result.data[kind] as Obj | undefined)?.[typeName];
-  if (!isObj(schema)) return { ok: false, message: `type '${peerText(typeName, { max: NAME_QUOTED })}' did not parse to a definition` };
+  if (!isPlainObject(schema)) return { ok: false, message: `type '${peerText(typeName, { max: NAME_QUOTED })}' did not parse to a definition` };
   return { ok: true, schema: schema as unknown as ParsedTypeSchema };
 }
 
