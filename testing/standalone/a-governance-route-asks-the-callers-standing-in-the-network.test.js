@@ -46,8 +46,10 @@ const UNLISTED = 'aaaaaaaa-0000-4000-8000-0000000000d1';
 const OPEN_JOINER = 'aaaaaaaa-0000-4000-8000-0000000000b1';
 const DENIED_JOINER = 'aaaaaaaa-0000-4000-8000-0000000000b2';
 const EXPIRED_JOINER = 'aaaaaaaa-0000-4000-8000-0000000000b3';
+const TREE_PARENT = 'aaaaaaaa-0000-4000-8000-0000000000e1';
 const NET = 'net-a';
 const OTHER_NET = 'net-b';
+const TREE_NET = 'net-tree';
 const KNOWN_ROUND = '11111111-1111-4111-8111-111111111111';
 const FORBIDDEN = { error: 'Forbidden' };
 
@@ -74,6 +76,12 @@ const NETWORKS = () => [
     id: OTHER_NET, label: 'Net B', type: 'closed', origin: 'created', syncSchedule: '', spaces: ['general'], votingDeadlineHours: 24,
     createdAt: '2026-01-01T00:00:00.000Z', members: [member(OTHER_NET_PEER)], pendingRounds: [],
   },
+  // A braintree child: its parent is declared in `myParentInstanceId` and is NOT in `members` - the shape a node registers when it
+  // joins a tree by declaring its parent (testing/sync/braintree-governance.test.js registers B this way).
+  {
+    id: TREE_NET, label: 'Tree', type: 'braintree', origin: 'created', syncSchedule: '', spaces: ['general'], votingDeadlineHours: 24,
+    createdAt: '2026-01-01T00:00:00.000Z', members: [], pendingRounds: [], myParentInstanceId: TREE_PARENT,
+  },
 ];
 
 // Write-capable on `general` through a space-admin grant (`canWriteAnywhere`): a relay refuses a read-only token before it asks anything else,
@@ -91,6 +99,7 @@ const CALLERS = {
   userPat:      () => token('user-pat'),
   unlistedPeer: () => token('unlisted', { peerInstanceId: UNLISTED }),
   otherNetPeer: () => token('other-net-peer', { peerInstanceId: OTHER_NET_PEER }),
+  treeParent:   () => token('tree-parent', { peerInstanceId: TREE_PARENT }),
 };
 
 /** The governance routes that name a network in their path, with what each is called with. Derived from the routers' stacks below. */
@@ -170,6 +179,17 @@ describe('the governance routes ask the caller\'s standing in the network', () =
     }
     assert.deepEqual(refused, [], 'callers without standing must be answered 403 { error: "Forbidden" }');
     assert.deepEqual(served, [], 'an instance administrator has standing on the reads');
+  });
+
+  it('a braintree node\'s declared parent has standing though the node does not list it among its members: it reads and relays', async () => {
+    // The root of a tree pulls a node's rounds and relays its casts to it; refusing it stops every vote that needs an ancestor (the
+    // A0 Full run 38819800862: braintree-governance and join-governance timed out waiting for the root to see the round).
+    const got = {};
+    for (const route of GOVERNANCE) got[`${route.method} ${route.path}`] = (await call(route, CALLERS.treeParent(), TREE_NET, 'no-such-round')).code;
+    const refused = Object.entries(got).filter(([, code]) => code === 403);
+    assert.deepEqual(refused, [], `the tree parent was refused: ${JSON.stringify(got)}`);
+    // And the same peer has no standing in a network it is not above.
+    assert.equal((await call(GOVERNANCE[0], CALLERS.treeParent(), NET)).code, 403, 'a tree parent of one network is a stranger in another');
   });
 
   it('R-W12: a member with an unknown round reaches the 404 — the uniform 403 is for callers without standing', async () => {
