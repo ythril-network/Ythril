@@ -39,7 +39,13 @@ import assert from 'node:assert/strict';
 
 const log = await import('../../server/dist/util/log.js');
 const { SchemaViolationError, describeUpdateViolations } = await import('../../server/dist/brain/write-validation.js');
-const { unknownFieldWarnings, SHARED_WRITE_BODY_KEYS } = await import('../../server/dist/api/brain/unknown-fields.js');
+// The rows a write answers an unknown field with come from the ONE judge now (`contract/write-accepts.ts`); `api/brain/unknown-fields.ts` and its
+// per-route key lists are gone (bundle-128, Q-320). Asked as an entity create in a warn space (no target: the default setting), so every case
+// below still holds the BOUND on what an answer quotes of a caller's keys.
+const { answerUnknownWriteFields, acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
+const ACCEPTED = [...acceptedWriteKeys('entity.create')];
+assert.ok(ACCEPTED.length >= 5, `only ${ACCEPTED.length} accepted keys were derived`);
+const unknownFieldWarnings = (body) => answerUnknownWriteFields(body, 'entity.create', undefined, 'rest').rows;
 const { peerText, NAME_QUOTED, LOG_VALUE_MAX } = log;
 
 const HUGE = 'k'.repeat(1_000_000);
@@ -132,11 +138,10 @@ describe('the sentence a refusal says lists the fields it names bounded', () => 
 });
 
 describe('unknown-field warning rows: at most ten, then a count, with the accepted list built once', () => {
-  const KNOWN = ['name', 'type', 'description', 'tags', 'properties'];
   const bodyOf = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`extra${String(i).padStart(4, '0')}`, i]));
 
   it('500 unknown keys name the first ten and count the other 490', () => {
-    const rows = unknownFieldWarnings({ name: 'n', ...bodyOf(500) }, KNOWN);
+    const rows = unknownFieldWarnings({ name: 'n', ...bodyOf(500) });
     assert.ok(rows.length <= 11, `${rows.length} rows came back for 500 unknown keys`);
     assert.deepEqual(rows.slice(0, 10).map(r => r.field), Array.from({ length: 10 }, (_, i) => `extra${String(i).padStart(4, '0')}`),
       'the rows shown are not the first ten unknown keys, in order');
@@ -144,27 +149,27 @@ describe('unknown-field warning rows: at most ten, then a count, with the accept
   });
 
   it('ten or fewer unknown keys are each named, with no count row', () => {
-    const rows = unknownFieldWarnings(bodyOf(10), KNOWN);
+    const rows = unknownFieldWarnings(bodyOf(10));
     assert.equal(rows.length, 10);
     assert.deepEqual(rows.map(r => r.field), Object.keys(bodyOf(10)));
     assert.doesNotMatch(JSON.stringify(rows), /…\(\+\d+ more\)|left out/);
   });
 
-  it('a row still says what the route accepts, from the shared keys and the route\'s own', () => {
-    const [row] = unknownFieldWarnings({ bogus: 1 }, KNOWN);
+  it('a row still says what the write accepts, from the one accepted set', () => {
+    const [row] = unknownFieldWarnings({ bogus: 1 });
     assert.equal(row.field, 'bogus');
     assert.equal(row.value, 1);
-    for (const k of [...KNOWN, ...SHARED_WRITE_BODY_KEYS]) assert.ok(row.reason.includes(k), `the reason does not list the accepted key ${k}`);
+    for (const k of ACCEPTED) assert.ok(row.reason.includes(k), `the reason does not list the accepted key ${k}`);
   });
 
   it('a megabyte unknown key is named at NAME_QUOTED', () => {
-    const [row] = unknownFieldWarnings({ [HUGE]: 1 }, KNOWN);
+    const [row] = unknownFieldWarnings({ [HUGE]: 1 });
     assert.equal(row.field, peerText(HUGE, { max: NAME_QUOTED }));
     assert.match(row.field, CUT);
   });
 
   it('a megabyte STRING value is not echoed whole (the row is a warning, not a reflection of the payload)', () => {
-    const [row] = unknownFieldWarnings({ bogus: HUGE }, KNOWN);
+    const [row] = unknownFieldWarnings({ bogus: HUGE });
     assert.ok(JSON.stringify(row).length < 2 * LOG_VALUE_MAX, `the row is ${JSON.stringify(row).length} characters`);
   });
 
@@ -173,7 +178,7 @@ describe('unknown-field warning rows: at most ten, then a count, with the accept
     let sorts = 0;
     const original = Array.prototype.sort;
     Array.prototype.sort = function counted(...args) { sorts++; return original.apply(this, args); };
-    try { unknownFieldWarnings(bodyOf(500), KNOWN); } finally { Array.prototype.sort = original; }
+    try { unknownFieldWarnings(bodyOf(500)); } finally { Array.prototype.sort = original; }
     assert.ok(sorts <= 1, `the accepted list was sorted ${sorts} times for 500 unknown keys — it is rebuilt per key`);
   });
 });

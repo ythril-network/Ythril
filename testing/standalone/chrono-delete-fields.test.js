@@ -125,11 +125,15 @@ describe('both doors take it', () => {
     assert.match(tool, /validateDeleteFields\(a\['deleteFields'\]\)/, 'and validated with the shared helper');
   });
 
-  it('the REST route accepts and validates it, with the same helper', () => {
+  it('the REST route accepts and validates it, with the same helper', async () => {
     // MCP/REST parity is the owner rule this repo pays most for. Same parameter, same helper, same commit.
     const src = stripComments(readFileSync('server/src/api/brain/chrono.ts', 'utf8'));
-    assert.match(src, /'deleteFields'/, 'listed as patchable, so it alone satisfies "at least one field"');
-    assert.match(src, /validateDeleteFields\(body\['deleteFields'\]\)/, 'and validated identically');
+    // bundle-128: "patchable" is no longer a list beside the route — it is the accepted set the paired tool declares, which is
+    // also what decides "at least one field" (`carriesAnyAcceptedField`). The assertion is the same one, asked of that set.
+    const { acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
+    assert.ok(acceptedWriteKeys('chrono.update').has('deleteFields'), 'declared as patchable, so it alone satisfies "at least one field"');
+    assert.match(src, /carriesAnyAcceptedField\(req\.body, 'chrono\.update'\)/, 'and the route asks the accepted set whether anything was sent');
+    assert.match(src, /validateDeleteFields\(deleteFields\)/, 'and validated identically');
   });
 
   it('and the description no longer says it cannot be done', () => {

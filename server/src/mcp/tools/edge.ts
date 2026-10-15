@@ -1,12 +1,12 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
@@ -31,7 +31,8 @@ export const save_edgeTool: ToolHandler = {
     + 'DIRECTION IS PART OF THE MEANING. `from`/`to` are not interchangeable, and `depends_on` reversed is a different claim about the world. A traversal follows them separately (`direction: outbound|inbound|both`), so a reversed edge is not merely untidy — it is unreachable from the side that should have found it.\n\n'
     + 'Both endpoints must name records that exist when the space uses strict linkage — entities by default, or a fact, chrono entry or file when `fromKind`/`toKind` says so; that is a refusal, not a dangling edge. And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
     + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. A subject holds at most ONE edge under a functional label, whatever its `to`; "another edge" means a different `to` or end kind. Re-writing the same edge is never a cardinality breach — an edge is not its own duplicate. Writers that run at the same time cannot both win: in a strict space the loser is refused exactly as a sequential second write is, and only one that keeps losing answers a conflict (409). An endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
-    + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.',
+    + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -71,6 +72,7 @@ export const save_edgeTool: ToolHandler = {
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            waitForEmbedding: waitForEmbeddingSchema('edge', false),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
             ttlDays: TTL_DAYS_SCHEMA,
@@ -138,6 +140,7 @@ export const save_edgeTool: ToolHandler = {
     // refused record write gets, `violations` as data and not as a tail on the sentence.
     const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
       {
+        ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
         ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
         ...(susCreate.value !== undefined ? { superseded: susCreate.value } : {}),
         ...(a['fromKind'] !== undefined ? { fromKind } : {}),
@@ -195,7 +198,8 @@ export const update_edgeTool: ToolHandler = {
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the edge.\n\n'
     + 'RESPONSE: one line with the edge\'s id and its new `seq` — the sync sequence number, which increments on '
     + 'every write and is how a peer knows this version is newer. An id that does not exist is an error, not a '
-    + 'silent no-op.',
+    + 'silent no-op.\n\n'
+    + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -286,7 +290,10 @@ export const update_edgeTool: ToolHandler = {
     if (typeof a['fromKind'] === 'string') updates.fromKind = a['fromKind'] as RefKind;
     if (typeof a['toKind'] === 'string') updates.toKind = a['toKind'] as RefKind;
     const ttlDays = ttlDaysFromArgs(a);
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined) throw new Error('At least one of label, description, tags, properties, weight, type, fromKind, toKind, suppressEmbeddings, deleteFields, or ttlDays must be provided');
+    // Nothing to change, answered in the one sentence every update door says, over the one set of fields the write takes.
+    // Loaded here, not at the top: the judge's module imports this tool to read its schema (no-runtime-import-cycles).
+    const { atLeastOneFieldRefusal, carriesAnyAcceptedField } = await import('../../contract/write-accepts.js');
+    if (!carriesAnyAcceptedField(a, 'edge.update')) throw new Error(atLeastOneFieldRefusal('edge.update'));
 
     // Validate the edge AS IT WILL BE, against the meta of the member space it actually lives in. This
     // path had no schema validation at all, so `label` could be moved outside the allowlist that
@@ -299,7 +306,7 @@ export const update_edgeTool: ToolHandler = {
      */
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
-    const audit = await readEditAudit(wt.target, mid => getEdgeById(mid, id), id, a);
+    const audit = await readEditAudit(wt.target, mid => getEdgeById(mid, id), id, a, 'edge');
     let updCheck: UpdateValidation | undefined;
     const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEdge) { const s = audit.snapshots(updatedEdge); ctx.recordChanges?.(s.before, s.after); }

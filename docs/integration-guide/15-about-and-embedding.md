@@ -43,9 +43,9 @@ So a peer cannot start a line of its own, and a megabyte `_id` or `seq` makes a 
 bound applies where such a value is named back in an answer: a sync refusal's reason, the fork-limit `400`, and an
 admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries; a write refused for a malformed or
 missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`; and a key a door
-does not take is quoted the same way on both doors. A brain write refused for one (a space set to `refuse`) names its first
-**10** unknown keys (`unrecognized_keys` lists them), and the same keys are named as `warnings` rows under `warn`; each
-unknown key is cut at **256** characters. A call to a tool the setting does not judge names an undeclared argument as
+does not take is quoted the same way on both doors. A brain write refused for one (a space set to `refuse`) names
+its first **10** unknown keys (`unrecognized_keys` lists them), and the same keys are named as `warnings` rows under
+`warn`, each unknown key cut at **256** characters. A call to a tool the setting does not judge names an undeclared argument as
 `unexpected property`, with its key and path, cut the same way. A body that fails validation is quoted the same way on every REST route that parses one:
 `{ "error", "issues": [{ "code", "path", "keys"? }] }`, ten issues at most, each path segment and each unknown key cut at
 **256** characters, and **no received value** in it ([Error Format](03-auth-and-limits.md#error-format)); a schema

@@ -81,8 +81,11 @@ describe('the refusal keeps its classification', () => {
      * error carries no such key at all. Asserted by finding every spread of it and requiring each to be
      * conditional.
      */
-    const catchAt = router.indexOf('} catch (err) {');
-    assert.ok(catchAt > -1, 'the shared catch is gone — re-anchor this gate');
+    // The classification of a thrown error is `answerThrown`, which stands before the judge call (bundle-128: every `return` of
+    // `callTool` after the judge goes through `withUnknownFieldRows`, so the returns that only CLASSIFY live in a function the catch
+    // arm calls). Anchored on it, the rule below reads the same returns it always read.
+    const catchAt = router.indexOf('function answerThrown(');
+    assert.ok(catchAt > -1, 'the shared classification of a thrown error is gone — re-anchor this gate');
     /*
      * Every RETURN in the catch, checked one at a time. The subject is the returned object, which is what
      * the caller sees, so a return that carries the key must also carry the classification that earned it.

@@ -33,20 +33,17 @@ import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { unknownFieldWarnings } from './unknown-fields.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
 import { webhookToken } from './_shared.js';
 import { sendReadFailure } from './_read-failure.js';
 import { refusalText } from '../../brain/store-failure.js';
 
 export const linksRouter = Router();
 
-/**
- * The body keys the create reads — see `unknownFieldWarnings`.
- *
- * Four, and there is no fifth on purpose. A `label` here would be the one degree of freedom the arrays never
- * had, and the label a reader prints is derived from the two kinds (`linkLabel`).
- */
-const LINKS_CREATE_BODY_KEYS = ['from', 'fromKind', 'to', 'toKind'];
+// What a body may carry is `acceptedWriteKeys('link.create')`: four keys, and there is no fifth on purpose. A `label` here would be the
+// one degree of freedom the arrays never had, and the label a reader prints is derived from the two kinds (`linkLabel`). The seven shared
+// write options (`ttlDays`, `checkDuplicates` …) are not among them: this route never read them, and they are unknown keys here.
 
 /** Every legal class as `fact.entityIds`, for a refusal that names what the caller could have sent. */
 const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
@@ -66,8 +63,10 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'link.create', wt.target, 'rest'))) return;
 
   const { from, fromKind, to, toKind } = req.body ?? {};
   if (!from || typeof from !== 'string') { res.status(400).json({ error: '`from` string required' }); return; }
@@ -112,10 +111,8 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     throw err;
   }
 
-  const result: Record<string, unknown> = { ...link, label: linkLabel(link.fromKind, link.toKind) };
-  const warnings = unknownFieldWarnings(req.body, LINKS_CREATE_BODY_KEYS);
-  if (warnings.length > 0) result['warnings'] = warnings;
-  res.status(200).json(result);
+  // The unknown-field rows, if the body carried any, are put on this answer (and every other) by the judge's decoration.
+  res.status(200).json({ ...link, label: linkLabel(link.fromKind, link.toKind) });
 });
 
 // DELETE /api/brain/spaces/:spaceId/links/:id — remove one link by its derived id

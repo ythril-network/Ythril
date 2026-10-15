@@ -79,20 +79,40 @@ export { LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 export const LINK_INPUT_NAMES: readonly string[] = Object.freeze(Object.values(LINK_INPUT_FIELDS));
 
 /**
- * Read the `link*` fields out of a request body.
+ * The record kinds a write of THIS kind can attach — one per link class the kind holds (`LINK_CLASSES`): a fact names entities, a
+ * chrono entry entities and facts, a file all three, and an entity or an edge names none (an entity is only ever the far end).
+ *
+ * The one answer to *"which `link*` fields does this write READ"*, so every connection helper below is bounded by it. Walking every
+ * field of the body instead — what these helpers did — read a link key the kind cannot hold: under `warn`, a `linkFiles` sent to an
+ * entity or to `update_file_meta` (whose record kind holds no such class) was audited as a link change, counted as "something to
+ * update" and refused by the class check, while the answer's own row said the field was ignored.
+ */
+function linkTargetsHeldBy(kind: ConnectionKind): readonly RefKind[] {
+  return linkClassesFrom(kind).map(c => c.toKind);
+}
+
+/**
+ * The record kind a connection helper is asked on behalf of: the four reference kinds and `edge`. **It is a REQUIRED argument of every
+ * helper that reads a body's `link*` fields**, so a caller cannot leave it out and read every class (`a-route-reads-what-its-tool-declares`
+ * refuses a call that passes none).
+ */
+export type ConnectionKind = RefKind | 'edge';
+
+/**
+ * Read the `link*` fields a record of `kind` can hold out of a request body.
  *
  * Returns `null` when the body names none of them — which a caller must treat as "this write has nothing to
  * say about links", NOT as "remove them all". An empty object would be the same value as
  * `{ entity: [] }` to `reconcileLinks`, and those two mean opposite things.
  */
-export function desiredLinksFrom(body: unknown): DesiredLinks | null {
+export function desiredLinksFrom(body: unknown, kind: ConnectionKind): DesiredLinks | null {
   if (!body || typeof body !== 'object') return null;
   const bag = body as Record<string, unknown>;
   const desired: Record<string, readonly string[]> = {};
-  for (const kind of REF_KINDS) {
-    const field = LINK_INPUT_FIELDS[kind];
-    if (!(field in bag)) continue;
-    desired[kind] = (bag[field] as string[] | null) ?? [];
+  for (const toKind of linkTargetsHeldBy(kind)) {
+    const field = LINK_INPUT_FIELDS[toKind];
+    if (!Object.hasOwn(bag, field)) continue;
+    desired[toKind] = (bag[field] as string[] | null) ?? [];
   }
   return Object.keys(desired).length > 0 ? desired as DesiredLinks : null;
 }
@@ -105,8 +125,8 @@ export function desiredLinksFrom(body: unknown): DesiredLinks | null {
  * not name is ABSENT from the result rather than empty, because those two mean opposite things to
  * `reconcileLinks` — omitted leaves the class alone, `[]` detaches it.
  */
-export function linkFieldsFrom(body: unknown): Record<string, string[]> {
-  const desired = desiredLinksFrom(body);
+export function linkFieldsFrom(body: unknown, kind: ConnectionKind): Record<string, string[]> {
+  const desired = desiredLinksFrom(body, kind);
   if (!desired) return {};
   const out: Record<string, string[]> = {};
   for (const kind of Object.keys(desired) as RefKind[]) {
@@ -140,13 +160,13 @@ export function linkFieldsFrom(body: unknown): Record<string, string[]> {
  * rule, and the weaker one won because it runs first: a caller who sent a name got "linkEntities must
  * contain UUIDs" where the writer would have told them which value was the name.
  */
-export function linkInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
+export function linkInputError(body: unknown, kind: ConnectionKind, opts: { strict?: boolean } = {}): string | null {
   if (!body || typeof body !== 'object') return null;
   const bag = body as Record<string, unknown>;
 
-  for (const kind of REF_KINDS) {
-    const field = LINK_INPUT_FIELDS[kind];
-    if (!(field in bag)) continue;
+  for (const toKind of linkTargetsHeldBy(kind)) {
+    const field = LINK_INPUT_FIELDS[toKind];
+    if (!Object.hasOwn(bag, field)) continue;
 
     const value = bag[field];
     if (value === null) continue;
@@ -157,7 +177,7 @@ export function linkInputError(body: unknown, opts: { strict?: boolean } = {}): 
       if (typeof ref !== 'string' || !ref.trim()) return `${field} must contain non-empty ids`;
     }
     if (opts.strict === false) continue;
-    const malformed = invalidRefsMessage(field, kind, value as string[]);
+    const malformed = invalidRefsMessage(field, toKind, value as string[]);
     if (malformed) return malformed;
   }
   return null;
@@ -378,8 +398,8 @@ export function edgeInputError(body: unknown): string | null {
  * checked first, so a caller still on the 4.x spelling is told what to send instead of being told their
  * ids are the wrong shape for a field they did not mention.
  */
-export function connectionInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
-  return retiredWriteFieldError(body) ?? linkInputError(body, opts) ?? edgeInputError(body);
+export function connectionInputError(body: unknown, kind: ConnectionKind, opts: { strict?: boolean } = {}): string | null {
+  return retiredWriteFieldError(body) ?? linkInputError(body, kind, opts) ?? edgeInputError(body);
 }
 
 /**
@@ -423,8 +443,9 @@ export async function linkAuditSnapshots(
   spaceId: string,
   from: string,
   body: unknown,
+  kind: ConnectionKind,
 ): Promise<{ before: Record<string, string[]>; after: Record<string, string[]> }> {
-  const desired = desiredLinksFrom(body);
+  const desired = desiredLinksFrom(body, kind);
   if (!desired) return { before: {}, after: {} };
 
   const rows = await linksStartingFrom(spaceId, [from]);
@@ -524,9 +545,9 @@ export async function assertConnections(
   subject: EdgeSubject | null,
   body: unknown,
 ): Promise<void> {
-  const malformed = connectionInputError(body, { strict: isStrictLinkage(spaceId) });
+  const malformed = connectionInputError(body, fromKind, { strict: isStrictLinkage(spaceId) });
   if (malformed) throw new ReferenceRefusal(malformed);
-  const desired = desiredLinksFrom(body);
+  const desired = desiredLinksFrom(body, fromKind);
   if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
 
   const edges = edgeInputsFrom(body);
@@ -611,7 +632,7 @@ export function inlineEdgeWarnings(index: number, check: UpdateValidation): Sche
  */
 export function connectionsOf(body: unknown, from: string, fromKind: RefKind): { desired: DesiredLinks | null; edges: EdgeWriteInput[] } {
   return {
-    desired: desiredLinksFrom(body),
+    desired: desiredLinksFrom(body, fromKind),
     edges: (edgeInputsFrom(body) ?? []).map(e => ({
       from, to: e.to, label: e.label, weight: e.weight, type: e.type, description: e.description,
       properties: e.properties, tags: e.tags,

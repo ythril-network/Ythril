@@ -42,21 +42,23 @@ describe('a quantity over its bound is refused, by name', () => {
       assert.equal(shapeError(type, { tags: strings(100) }), null, `${type}: 100 tags must be accepted`);
     }
     const edge = (tags) => ({ edges: [{ to: randomUUID(), label: 'knows', tags }] });
-    refusesNaming(connectionInputError(edge(strings(101)), { strict: false }), 'tags');
-    assert.equal(connectionInputError(edge(strings(100)), { strict: false }), null);
+    refusesNaming(connectionInputError(edge(strings(101)), 'fact', { strict: false }), 'tags');
+    assert.equal(connectionInputError(edge(strings(100)), 'fact', { strict: false }), null);
   });
 
   it('link targets: 1000 per link field', () => {
+    // Asked as a FILE, the one record kind that holds all three link classes: the helper reads only the classes the kind
+    // holds (bundle-128, design-v3 2.4), so a kind that holds fewer would not read the others.
     for (const field of ['linkEntities', 'linkFacts', 'linkChronos']) {
-      refusesNaming(connectionInputError({ [field]: strings(1001, () => randomUUID()) }, { strict: false }), field);
-      assert.equal(connectionInputError({ [field]: strings(1000, () => randomUUID()) }, { strict: false }), null);
+      refusesNaming(connectionInputError({ [field]: strings(1001, () => randomUUID()) }, 'file', { strict: false }), field);
+      assert.equal(connectionInputError({ [field]: strings(1000, () => randomUUID()) }, 'file', { strict: false }), null);
     }
   });
 
   it('inline edges: 500 per record', () => {
     const edges = n => ({ edges: strings(n, () => ({ to: randomUUID(), label: 'knows' })) });
-    refusesNaming(connectionInputError(edges(501), { strict: false }), 'edges');
-    assert.equal(connectionInputError(edges(500), { strict: false }), null);
+    refusesNaming(connectionInputError(edges(501), 'fact', { strict: false }), 'edges');
+    assert.equal(connectionInputError(edges(500), 'fact', { strict: false }), null);
   });
 
   it('deleteFields: 100 paths', () => {

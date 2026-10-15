@@ -9,7 +9,8 @@ import { assertRefs, assertRefsResolve, edgeEndpointKind } from '../../brain/ent
 import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
-import { unknownFieldWarnings } from './unknown-fields.js';
+import { applyJudgment } from './_judged-write.js';
+import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById } from '../../brain/edges.js';
 import { edgeIdentityTakenAnswer } from '../../brain/edge-rekey.js';
@@ -31,19 +32,7 @@ export const edgesRouter = Router();
 
 
 // POST /api/brain/spaces/:spaceId/edges — create/upsert an edge
-/**
- * The body keys the edges create reads.
- *
- * Declared so the route can say what it did NOT understand — see `unknownFieldWarnings`. It is a
- * second list beside the destructure below, which is exactly the kind of pair that drifts, so
- * `a-create-says-which-fields-it-did-not-understand.test.js` requires every destructured name to
- * appear here. A field added below and not here would produce an "unknown field" warning about a
- * parameter that works.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const EDGES_CREATE_BODY_KEYS = ['from', 'to', 'label', 'weight', 'type', 'description', 'properties', 'tags', 'fromKind', 'toKind'];
+// What a body may carry is `acceptedWriteKeys('edge.create')`: the paired tool's own schema, not a list kept beside this route.
 edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -51,8 +40,10 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.create', wt.target, 'rest'))) return;
   const { from, to, label, weight, type, description, properties, tags, fromKind, toKind } = req.body ?? {};
   if (!from || typeof from !== 'string') {
     res.status(400).json({ error: '`from` string required' });
@@ -172,10 +163,8 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     throw err;
   }
   const result: Record<string, unknown> = { ...edge };
-  // The schema warnings a `warn` space produces, plus the keys this route did not understand — one
-  // array, one shape. A second channel for the second kind would be worse than the silence it replaces.
-  const warnings = [...(check?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_CREATE_BODY_KEYS)];
-  Object.assign(result, writeWarningFields(warnings));
+  // The schema warnings a `warn` space produces; the unknown-field rows are put in front of them by the answer's decoration.
+  Object.assign(result, writeWarningFields(check?.warnings ?? []));
   res.status(201).json(result);
 });
 
@@ -191,18 +180,7 @@ edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
 
 
 // PATCH /api/brain/spaces/:spaceId/edges/:id — partial update an edge by ID
-/**
- * The body keys the edges UPDATE reads.
- *
- * Its own list, not the create's: `deleteFields` is an update field and `id` is a path parameter
- * here. Copying the create's would produce an "unknown field" warning about a parameter that works,
- * which is what the drift check in
- * `an-update-answers-the-same-questions-a-create-does-db.test.js` exists to refuse.
- *
- * The shared write options — ttlDays, waitForEmbedding, the duplicate flags and the two suppression
- * spellings — are NOT listed: they are read by helpers, and live in `SHARED_WRITE_BODY_KEYS`.
- */
-const EDGES_UPDATE_BODY_KEYS = ['label', 'description', 'tags', 'properties', 'weight', 'type', 'deleteFields', 'fromKind', 'toKind'];
+// What a body may carry is `acceptedWriteKeys('edge.update')` (the id is the path's, so it is not among them).
 edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
@@ -211,10 +189,12 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.update', wt.target, 'rest'))) return;
   const { label, description, tags, properties, weight, type, deleteFields, fromKind, toKind } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
@@ -227,7 +207,6 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   // must not.
   const shapeErr = shapeError('edge', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
-  const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { label?: string; description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; weight?: number; type?: string; suppressEmbeddings?: boolean; superseded?: boolean; fromKind?: RefKind; toKind?: RefKind } = {};
   if (label !== undefined) {
@@ -306,7 +285,8 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   const sus = parseRecordSuperseded(req.body);
   if (!sus.ok) { res.status(400).json({ error: sus.error }); return; }
   if (sus.value !== undefined) updates.superseded = sus.value;
-  if (Object.keys(updates).length === 0 && !dfPaths && !ttlDaysProvided) { res.status(400).json({ error: 'At least one field must be provided' }); return; }
+  // PRESENCE of any field the write takes (`ttlDays: null` and `deleteFields` included), from the one accepted set; the sentence names it.
+  if (!carriesAnyAcceptedField(req.body, 'edge.update')) { res.status(400).json({ error: atLeastOneFieldRefusal('edge.update') }); return; }
   const memberIds = resolveMemberSpaces(wt.target);
   for (const mid of memberIds) {
     // Validate the edge AS IT WILL BE, on every patch — not only when `deleteFields` is present. That
@@ -342,7 +322,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
       req.auditSnapshots = { before: existing ?? {}, after: updated };
       // The `warnings` array an update response did not have — see the facts route, where the
       // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
-      const updateWarnings = [...(updateCheck?.warnings ?? []), ...unknownFieldWarnings(req.body, EDGES_UPDATE_BODY_KEYS)];
+      const updateWarnings = updateCheck?.warnings ?? [];
       res.json(updateWarnings.length > 0 ? { ...updated, ...writeWarningFields(updateWarnings) } : updated);
       return;
     }

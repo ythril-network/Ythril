@@ -42,7 +42,7 @@ import { retiredWriteFieldError, retiredWriteFieldHint } from '../brain/retired-
 import { unknownWriteFieldsMode } from '../spaces/spaces.js';
 import { findSpace } from '../spaces/proxy.js';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText, unrecognizedKeysIssue, type ParseRefusalIssue } from '../util/log.js';
-import { unknownWriteFieldsTotal, type UNKNOWN_WRITE_FIELD_DOORS } from '../metrics/registry.js';
+import { unknownWriteFieldsTotal } from '../metrics/registry.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
 import { JUDGED_WRITE_OPERATIONS, isJudgedWriteOperation, toolOfJudgedOperation } from './judged-write-operations.js';
 import {
@@ -50,8 +50,9 @@ import {
   UNKNOWN_FIELD_CODE, type UnknownFieldOutcome, type UnknownFieldRow,
 } from './unknown-field-rows.js';
 
-/** Which door asked: REST, an MCP tool call, or `POST /api/<tool>` (on the tool side, `caller.transport` says which of the last two). */
-export type WriteDoor = (typeof UNKNOWN_WRITE_FIELD_DOORS)[number];
+// The door vocabulary lives in the leaf module, so a tool module can name its door without importing this one (which imports the tools).
+export { writeDoorOfTransport, type WriteDoor } from './judged-write-operations.js';
+import type { WriteDoor } from './judged-write-operations.js';
 
 // ── What a write accepts ─────────────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,23 @@ function addressingOf(operation: string): ReadonlySet<string> {
   else if (operation === 'file.meta.update') keys.push('path');
   else if (operation.endsWith('.update')) keys.push('id');
   return new Set(keys);
+}
+
+/**
+ * The body a TOOL call's arguments make, for the judge: the arguments minus what ADDRESSES the write (`space`, `targetSpace`, the record's
+ * `id` on an update, a file's `path`, a merge's two ids). A REST body carries none of those (they ride in the path and the query), so a REST
+ * route judges its body as it is; a tool call carries them beside the payload, and judging them would name `space` an unknown field on every
+ * call. One function, so a door that judges arguments cannot forget the half of the arguments that are not the record.
+ *
+ * A copy: the arguments are the caller's and the handler receives them whole (`validate` strips nothing either).
+ */
+export function writeBodyOfToolCall(args: Readonly<Record<string, unknown>>, operation: string): Record<string, unknown> {
+  const addressing = addressingOf(operation);
+  const body: Record<string, unknown> = {};
+  for (const key of Object.keys(args)) {
+    if (!addressing.has(key)) Object.defineProperty(body, key, { value: args[key], enumerable: true, writable: true, configurable: true });
+  }
+  return body;
 }
 
 /** One memoised derivation: the set, its sorted spelling and the sentence that says it, so none of them is rebuilt per request. */

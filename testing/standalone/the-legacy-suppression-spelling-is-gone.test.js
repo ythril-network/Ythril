@@ -70,15 +70,27 @@ describe('the legacy spelling is gone from the server', () => {
 });
 
 describe('the doors refuse it rather than ignoring it', () => {
-  it('the REST unknown-field list no longer excuses it', () => {
+  it('no brain write door\'s accepted set excuses it', async () => {
     /*
-     * `unknown-fields.ts` is what turns an unrecognised key into a refusal. While the legacy name sits on
-     * its allowed list, a body carrying it is accepted and dropped — a 201 for a field nothing reads, which
-     * is the exact failure `.strict()` exists to prevent one file over.
+     * What a write ACCEPTS is `acceptedWriteKeys(operation)` (`contract/write-accepts.ts`) — the paired tool's own schema, one set for
+     * both doors, which replaced the REST door's hand-kept `*_BODY_KEYS` lists and `SHARED_WRITE_BODY_KEYS` (bundle-128, Q-320). While
+     * the legacy name is in it, a body carrying it is accepted and dropped — a 201 for a field nothing reads. It is an ORDINARY
+     * unknown key now (design-v3 N1): no retired row and no exception here — under `warn` its row says it was ignored, and under
+     * `refuse` it is a 400, like any name the write does not take.
+     *
+     * The operations are DERIVED from the judge's own list, with a floor: an empty list passes every loop written over it. A bulk
+     * item is asked per collection.
      */
-    const src = stripComments(readFileSync('server/src/api/brain/unknown-fields.ts', 'utf8'));
-    assert.ok(!src.includes(LEGACY) && !src.includes('LEGACY_RECORD_SUPPRESS_FIELD'),
-      'the REST doors still allow the legacy field through, so it is accepted and silently dropped');
+    const { acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
+    const { JUDGED_WRITE_OPERATIONS } = await import('../../server/dist/contract/judged-write-operations.js');
+    const { BULK_BODY_KEYS } = await import('../../server/dist/brain/bulk.js');
+    assert.ok(JUDGED_WRITE_OPERATIONS.length >= 10, `only ${JUDGED_WRITE_OPERATIONS.length} judged operations were derived`);
+    const sets = JUDGED_WRITE_OPERATIONS.flatMap(op => (op === 'bulk.write'
+      ? BULK_BODY_KEYS.map(c => [`${op}/${c}`, acceptedWriteKeys(op, c)])
+      : [[op, acceptedWriteKeys(op)]]));
+    assert.ok(sets.length >= 13, `only ${sets.length} accepted sets were read`);
+    const offenders = sets.filter(([, keys]) => keys.has(LEGACY)).map(([name]) => name);
+    assert.deepEqual(offenders, [], 'these writes still accept the legacy field, so it is accepted and silently dropped');
   });
 
   it('and no MCP tool schema declares it', () => {

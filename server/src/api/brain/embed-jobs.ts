@@ -94,8 +94,9 @@ embedJobsRouter.post('/spaces/:spaceId/embedding-queue/records/retry', globalRat
   }
 
   // A proxy space stores nothing itself, so a retry has to name the member. Same helper the write routes use, so the
-  // error text a caller gets is the one they already know from every other proxy write.
-  const wt = resolveWriteTarget(spaceId, typeof body.targetSpace === 'string' ? body.targetSpace : undefined);
+  // error text a caller gets is the one they already know from every other proxy write — including its refusal of a
+  // `targetSpace` that is not a string, which this door used to read as absent and answer with a misleading "specify one".
+  const wt = resolveWriteTarget(spaceId, body.targetSpace);
   if (!wt.ok) {
     res.status(400).json({ error: wt.error });
     return;

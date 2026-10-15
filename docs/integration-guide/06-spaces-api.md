@@ -15,10 +15,7 @@ GET /api/spaces?counts=true
 
 Returns spaces accessible to the requesting token. Tokens with a `spaces`
 scope restriction only receive spaces in their allowlist; full-access tokens
-receive all spaces.
-
-A space whose instance refuses unknown top-level fields on brain writes carries `"unknownWriteFields": "refuse"`; the
-key is absent when the space warns (the default). See [Update a Space](#unknown-top-level-fields-on-a-brain-write-unknownwritefields).
+receive all spaces. A space set to refuse unknown write fields carries `"unknownWriteFields": "refuse"` ([below](#unknown-top-level-fields-on-a-brain-write-unknownwritefields)).
 
 Add `?counts=true` to include per-space document counts (facts, entities,
 edges, chrono). Useful for agents deciding which spaces are populated and
@@ -513,28 +510,8 @@ stored rule is fixed in the same save. On a space in networks the write is merge
 
 #### Unknown top-level fields on a brain write (`unknownWriteFields`)
 
-`unknownWriteFields` is this instance's answer, for this space, to a top-level field a brain write does not take. It
-goes at the top level of the body, beside `label`:
-
-```http
-PATCH /api/spaces/research   { "unknownWriteFields": "refuse" }
-```
-
-- `"refuse"` refuses such a write with a `400` and stores nothing. `"warn"`, `""` and `null` clear it back to the
-  default, under which the write is stored and each unknown field is named in `warnings`. Any other value is a `400`
-  on every door.
-- It is **this instance's** setting. It is not carried in `meta`, is never replicated to a network and is never voted
-  on, so each member decides its own answer. On a networked space the key takes effect at once, even when the meta
-  change in the same body waits for its vote.
-- It needs `schema` admin, the rung of `meta.validationMode`, because it makes writes that succeeded start failing. The
-  instance administrator and the space's own administrator may always set it.
-- A meta-only `PATCH` (the `meta` body on the meta route) drops the key silently: on that door it is server-owned.
-  Set it on the top level.
-- It is read back on `GET /api/spaces`, `GET /api/spaces/:id/meta`, `list_spaces` and `space_meta`. The key appears
-  only as `"refuse"`; when the space warns it is absent, as the neighbouring settings are.
-
-See [Brain API](04-brain-api.md#a-create-tells-you-which-fields-it-did-not-understand) for the rows a write answers
-with, and [Tokens API](07-tokens-api.md) for the rights table.
+This instance's answer to a top-level field a brain write does not take (`"refuse"`; `"warn"`, `""` or `null` clear
+it): [Brain API](04-brain-api.md#a-create-tells-you-which-fields-it-did-not-understand) describes it.
 
 #### What each field in the update body requires
 

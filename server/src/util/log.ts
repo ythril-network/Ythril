@@ -330,7 +330,7 @@ export function peerList(values: Iterable<unknown>, sep = ', ', { count, each }:
 
 /**
  * How many names or issues of one refusal are shown before the rest are counted: the issues of a failed parse (`refusalOfParse`), the
- * unknown keys a write body is told about (`unknownFieldWarnings`), and the fields a schema refusal's sentence names
+ * unknown keys a write is told about (`answerUnknownWriteFields`), and the fields a schema refusal's sentence names
  * (`describeUpdateViolations`, a refused merge). One number, so they read alike.
  */
 export const REFUSAL_NAMES_MAX = 10;
