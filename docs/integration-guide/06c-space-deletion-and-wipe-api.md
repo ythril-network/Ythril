@@ -4,7 +4,7 @@
 
 Deleting a space and emptying one are the two acts that remove data. A space in a network is changed by a governance vote, so their answers depend on the vote as well as on this instance. The wipe of a space's collections is answered in [Brain API](04-brain-api.md) (`delete_space_data`) and [Admin API](12-admin-api.md) (the admin wipe route); the rules below are the same for both.
 
-### Delete a Space
+## Delete a Space
 
 ```http
 DELETE /api/spaces/:id
