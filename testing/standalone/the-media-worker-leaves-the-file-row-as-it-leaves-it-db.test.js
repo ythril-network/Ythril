@@ -359,7 +359,10 @@ describe('the real media worker leaves the file row as it leaves it today (real 
 
       worker.startMediaEmbeddingWorker();
       try {
-        await waitFor(async () => (await jobOf(rel)) === null, 60_000, 100, async () => JSON.stringify(await jobOf(rel)));
+        // Until the ROW is gone too: the reconcile cancels the job first and retires the row LAST (`removeFileHere`), so a wait on
+        // the job alone read the row between the two steps and closed the store under the rest (Full run 39067730979).
+        await waitFor(async () => (await jobOf(rel)) === null && (await rowOf(rel)) === null, 60_000, 100,
+          async () => JSON.stringify({ job: await jobOf(rel), row: await rowOf(rel) }));
       } finally { worker.stopMediaEmbeddingWorker(); }
 
       assert.equal(await jobOf(rel), null, 'the job is gone');
