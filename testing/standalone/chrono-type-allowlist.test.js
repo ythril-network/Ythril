@@ -44,7 +44,18 @@ before(async () => {
 
 after(() => { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ } });
 
-const ctx = args => ({ args: { space: 'ops', ...args }, callSpace: 'ops', actor: undefined });
+/**
+ * A tool context for `tool`, whose caller holds `write` on `ops`. The handler resolves its write target against the caller's grant
+ * (`toolWriteGrant`: the tool's own `TOOL_RIGHTS` row and the context's `rights`), so a context that names no tool and carries no
+ * matrix is refused before the allowlist is asked — which is what these cases drive.
+ */
+const ctx = (name, args) => ({
+  name,
+  args: { space: 'ops', ...args },
+  callSpace: 'ops',
+  actor: undefined,
+  rights: { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { ops: { knowledge: 'write', files: 'write', schema: 'read', dataQuality: 'read', networks: 'none' } } },
+});
 
 /** The allowlist rejection, told apart from any later failure (database, quota, …). */
 const isAllowlistRejection = err => /type must be one of/.test(String(err?.message ?? err));
@@ -52,14 +63,14 @@ const isAllowlistRejection = err => /type must be one of/.test(String(err?.messa
 describe('update_chrono — the gap this closes', () => {
   it('REJECTS a type outside the space allowlist', async () => {
     await assert.rejects(
-      () => update_chronoTool.handle(ctx({ id: 'c1', type: 'event' })),
+      () => update_chronoTool.handle(ctx('update_chrono', { id: 'c1', type: 'event' })),
       isAllowlistRejection,
       'the space declares incident/maintenance, so the built-in "event" must be refused',
     );
   });
 
   it('names the allowed types, so the caller can correct itself', async () => {
-    const err = await update_chronoTool.handle(ctx({ id: 'c1', type: 'nonsense' })).catch(e => e);
+    const err = await update_chronoTool.handle(ctx('update_chrono', { id: 'c1', type: 'nonsense' })).catch(e => e);
     assert.match(String(err.message), /incident/);
     assert.match(String(err.message), /maintenance/);
   });
@@ -67,13 +78,13 @@ describe('update_chrono — the gap this closes', () => {
   it('does NOT reject an allowed type — the guard gates the bad value, not the field', async () => {
     // This one gets past the allowlist and fails later (no database in a standalone run). Telling the
     // two apart is the point: a guard that rejected everything would pass the test above and be useless.
-    const err = await update_chronoTool.handle(ctx({ id: 'c1', type: 'incident' })).catch(e => e);
+    const err = await update_chronoTool.handle(ctx('update_chrono', { id: 'c1', type: 'incident' })).catch(e => e);
     assert.ok(err, 'no database here, so it must fail somewhere');
     assert.ok(!isAllowlistRejection(err), `expected a later failure, got the allowlist rejection: ${err.message}`);
   });
 
   it('an update that does not touch `type` is not gated on it', async () => {
-    const err = await update_chronoTool.handle(ctx({ id: 'c1', title: 'renamed' })).catch(e => e);
+    const err = await update_chronoTool.handle(ctx('update_chrono', { id: 'c1', title: 'renamed' })).catch(e => e);
     assert.ok(!isAllowlistRejection(err), 'renaming an entry must not require a valid type argument');
   });
 });
@@ -81,15 +92,15 @@ describe('update_chrono — the gap this closes', () => {
 describe('create_chrono still enforces the same rule', () => {
   it('REJECTS a type outside the space allowlist', async () => {
     await assert.rejects(
-      () => save_chronoTool.handle(ctx({ title: 'x', type: 'event', startsAt: '2026-01-01T00:00:00Z' })),
+      () => save_chronoTool.handle(ctx('save_chrono', { title: 'x', type: 'event', startsAt: '2026-01-01T00:00:00Z' })),
       isAllowlistRejection,
     );
   });
 
   it('and both surfaces reject with the SAME message', async () => {
     // Two rules that agree in effect but differ in wording still read as two rules to whoever hits them.
-    const a = await save_chronoTool.handle(ctx({ title: 'x', type: 'nope', startsAt: '2026-01-01T00:00:00Z' })).catch(e => e);
-    const b = await update_chronoTool.handle(ctx({ id: 'c1', type: 'nope' })).catch(e => e);
+    const a = await save_chronoTool.handle(ctx('save_chrono', { title: 'x', type: 'nope', startsAt: '2026-01-01T00:00:00Z' })).catch(e => e);
+    const b = await update_chronoTool.handle(ctx('update_chrono', { id: 'c1', type: 'nope' })).catch(e => e);
     assert.equal(a.message, b.message);
   });
 });

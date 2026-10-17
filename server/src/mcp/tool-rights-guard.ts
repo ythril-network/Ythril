@@ -2,6 +2,10 @@ import { TOOL_RIGHTS } from '../auth/space-rights.js';
 import { effectiveRung } from '../auth/mint-cap.js';
 import { satisfies } from '../auth/required-rung.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
+import { holdsRung } from '../auth/reachable-spaces.js';
+import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
+import type { ResolvedWriteTarget, WriteGrant } from '../spaces/proxy.js';
+import { ToolRefusal } from '../util/errors.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
 /**
@@ -13,14 +17,57 @@ import type { TokenRights } from '../config/rights-shape.js';
  * reach is not the area, so a token holding only `files: read` in a space had that space's knowledge ranked. The
  * REST `/similar` route narrowed its own set, and moving it onto the tool is what showed the tool never did.
  *
- * Read rows only. A write tool's named space is already checked at the rung it needs, and narrowing the members
- * a proxy write may reach by that rung is a separate decision this function must not make on the way past.
+ * Read rows only, and that is not the whole of a write's reach: a write tool's named space is checked at the rung it
+ * needs by the dispatcher, but only on the id the call NAMED — for a proxy, the proxy's own id — so the member a write
+ * lands in is judged by the one resolver of a write target (`resolveWriteTarget`, with `toolWriteGrant`), and a sweep over
+ * a proxy's members by `toolMemberReach` (`Q-440`). This function stays out of it: it decides what a handler is GIVEN to
+ * search, and giving a write tool fewer spaces would change every tool that lists them.
  */
 export function toolReach(toolName: string, rights: TokenRights | undefined, reachable: readonly string[]): string[] {
   const need = TOOL_RIGHTS.find(r => r.tool === toolName);
   if (!need || need.needs !== 'read') return [...reachable];
   if (!rights) return [];
   return reachable.filter(id => satisfies(effectiveRung(rights, id, need.area), 'read'));
+}
+
+/**
+ * The grant a tool's write-target resolution is judged by: the caller's matrix and the area and rung of the tool's own
+ * `TOOL_RIGHTS` row (`Q-440`) — read from the row, never respelled at the handler, so what a tool needs where it lands cannot
+ * drift from what the dispatcher checked on the space it was addressed through.
+ *
+ * **A tool with no row THROWS.** The resolver judges a rung, and a handler that asks for a write target is by definition a
+ * tool the inventory prices; an absent row answered with some default rung would be the ungoverned write this exists to end.
+ */
+export function toolWriteGrant(tool: { name: string; rights?: TokenRights | undefined }): WriteGrant {
+  const need = TOOL_RIGHTS.find(r => r.tool === tool.name);
+  if (!need) throw new Error(`tool '${tool.name}' resolves a write target and has no TOOL_RIGHTS row to say what rung it needs`);
+  return { rights: tool.rights, area: need.area, needs: need.needs };
+}
+
+/**
+ * Throws the resolution's refusal as a `ToolRefusal` carrying ITS status, so the dispatcher answers a reach refusal as a 400
+ * and a rung refusal as a 403 — the one way an MCP handler says a write target was refused, and the only way a gate lets it.
+ * Narrows `wt` to the resolved target for the lines after it.
+ */
+export function assertWriteTarget(wt: ResolvedWriteTarget): asserts wt is Extract<ResolvedWriteTarget, { ok: true }> {
+  if (!wt.ok) throw new ToolRefusal(wt.status, wt.error);
+}
+
+/**
+ * The members of the space a tool was addressed to that it may act on: the members the connection reaches, kept where the token
+ * holds the tool's own rung (`Q-440`). A write tool addressed to a proxy sweeps its members, and the dispatcher checked the rung on
+ * the proxy id alone — so a member the token only READS was written. This is the MCP half of what REST states with
+ * `memberSpacesForRequest` under the route's area guard; a tool with no `TOOL_RIGHTS` row keeps the reach narrowing alone.
+ */
+export function toolMemberReach(
+  tool: { name: string; rights?: TokenRights | undefined }, callSpace: string, accessible: readonly string[],
+): string[] {
+  const members = memberSpacesWithin(callSpace, accessible);
+  const need = TOOL_RIGHTS.find(r => r.tool === tool.name);
+  if (!need) return members;
+  if (!tool.rights) return [];
+  const rights = tool.rights;
+  return members.filter(id => holdsRung(rights, id, need.area, need.needs));
 }
 
 /**

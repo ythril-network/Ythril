@@ -14,6 +14,7 @@ import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import { getAllowedChronoTypes, type SchemaViolation } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
@@ -43,8 +44,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.create', wt.target, 'rest'))) return;
 
@@ -178,8 +179,8 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }

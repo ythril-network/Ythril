@@ -49,7 +49,7 @@ function productionDeps(spaceId: string): IngestDeps {
 
 export type BeginIngest =
   | { status: 202; run: IngestRun }
-  | { status: 400 | 404 | 429; error: string }
+  | { status: 400 | 403 | 404 | 429; error: string }
   | { status: 409; error: string; refusals: string[] };
 
 export async function beginIngest(
@@ -58,8 +58,9 @@ export async function beginIngest(
   callerKey: string,
 ): Promise<BeginIngest> {
   if (!getConfig().spaces.some(s => s.id === spaceId)) return { status: 404, error: `Space '${spaceId}' not found` };
-  const wt = resolveWriteTarget(spaceId, targetSpace);
-  if (!wt.ok) return { status: 400, error: wt.error };
+  // The grant of a START: write on knowledge in the member the run lands in. An absent matrix is refused inside the resolver.
+  const wt = resolveWriteTarget(spaceId, targetSpace, { rights, area: 'knowledge', needs: 'write' });
+  if (!wt.ok) return wt;
   const parsed = parseIngestRequest(body);
   if (!parsed.ok) return { status: 400, error: parsed.error };
   const ctx = spaceContextFrom(getConfig().spaces.find(s => s.id === wt.target)?.meta);
@@ -78,8 +79,12 @@ export async function beginIngest(
 /**
  * A run, looked up under the space it was started in. A run started through a proxy is held under the MEMBER it
  * wrote into, so the lookup resolves the same write target the start did.
+ *
+ * A READ through the write-target resolver, so the grant it carries needs the `read` rung and not `write` (`Q-440`): a read-only
+ * token still reads its run. A run in a member the caller does not reach is answered as no run, exactly as one in a space that
+ * does not exist — the refusal is not told apart from "nothing there".
  */
-export function ingestStatus(spaceId: string, targetSpace: string | undefined, runId: string): IngestRun | undefined {
-  const wt = resolveWriteTarget(spaceId, targetSpace);
+export function ingestStatus(spaceId: string, targetSpace: string | undefined, runId: string, rights: TokenRights | undefined): IngestRun | undefined {
+  const wt = resolveWriteTarget(spaceId, targetSpace, { rights, area: 'knowledge', needs: 'read' });
   return wt.ok ? ingestRuns.get(wt.target, runId) : undefined;
 }

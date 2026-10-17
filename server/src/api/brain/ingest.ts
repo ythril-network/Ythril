@@ -20,7 +20,8 @@ ingestRouter.post('/spaces/:spaceId/ingest', globalRateLimit, requireSpaceAuth, 
 });
 
 ingestRouter.get('/spaces/:spaceId/ingest/:runId', globalRateLimit, requireSpaceAuth, (req, res) => {
-  const run = ingestStatus(req.params['spaceId'] as string, req.query['targetSpace'] as string | undefined, req.params['runId'] as string);
+  const run = ingestStatus(req.params['spaceId'] as string, req.query['targetSpace'] as string | undefined, req.params['runId'] as string,
+    (req.authToken as { rights?: TokenRights } | undefined)?.rights);
   if (!run) {
     res.status(404).json({ error: `No ingest run '${req.params['runId']}' in this space. Runs are held in memory, so a restart forgets them — not the records a finished run wrote.` });
     return;

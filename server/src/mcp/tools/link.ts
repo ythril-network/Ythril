@@ -10,6 +10,7 @@ import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
 import { DELETION_REACH } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
@@ -95,8 +96,8 @@ export const save_linkTool: ToolHandler = {
       throw new Error(`a ${fromKind} cannot link to a ${toKind} — the link classes are: ${PAIR_LABELS}`);
     }
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     if (isStrictLinkage(wt.target)) {
       await assertRefsResolve(wt.target, 'from', fromKind, [from]);
@@ -151,8 +152,8 @@ export const delete_linkTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     const removed = await findFirstAcrossMembers(wt.target, mid => removeLink(mid, id, ctx.actor));
     if (!removed) throw new Error(`Link '${id}' not found`);

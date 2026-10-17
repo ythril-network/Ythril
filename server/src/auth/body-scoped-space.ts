@@ -49,7 +49,7 @@
  */
 import type { SpaceArea, TokenRights } from '../config/rights-shape.js';
 import type { Rung } from './space-rights.js';
-import { holdsRung } from './reachable-spaces.js';
+import { holdsRung, rungRefusal } from './reachable-spaces.js';
 
 export interface BodyScopedRequest {
   /**
@@ -110,7 +110,7 @@ export function spacesForBodyScopedRequest(req: BodyScopedRequest): BodyScopedVe
   }
 
   if (!rights) {
-    return { spaces: [], refusal: `Token needs '${needs}' on ${area}, and presented no rights matrix` };
+    return { spaces: [], refusal: rungRefusal(needs, area) };
   }
 
   // The shared predicate, not a fifth copy of `satisfies(effectiveRung(...), needs)`.
@@ -128,7 +128,7 @@ export function spacesForBodyScopedRequest(req: BodyScopedRequest): BodyScopedVe
         return { spaces: [], refusal: `Token does not have access to space '${sid}'` };
       }
       if (!holds(sid)) {
-        return { spaces: [], refusal: `Token needs '${needs}' on ${area} in space '${sid}'` };
+        return { spaces: [], refusal: rungRefusal(needs, area, sid) };
       }
     }
     return { spaces: asked, refusal: null };

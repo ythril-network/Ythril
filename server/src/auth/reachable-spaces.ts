@@ -82,6 +82,17 @@ export function holdsRung(rights: TokenRights, space: string, area: SpaceArea, n
 }
 
 /**
+ * The sentence a refusal gives when a token reaches a space but lacks the rung an act needs there — the one spelling of it, so a
+ * door built on `holdsRung` says what the REST area guard says. `space` is omitted when the refusal is about the matrix itself:
+ * a token that presented none holds nothing anywhere.
+ */
+export function rungRefusal(needs: Rung, area: SpaceArea, space?: string): string {
+  return space === undefined
+    ? `Token needs '${needs}' on ${area}, and presented no rights matrix`
+    : `Token needs '${needs}' on ${area} in space '${space}'`;
+}
+
+/**
  * Does this token hold `needs` or better on `area` in EVERY one of these spaces?
  *
  * **An empty list is `false`, and that is the forgettable part.** `[].every(...)` is `true`, so a hand-written

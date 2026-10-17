@@ -36,6 +36,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { adminRights } from './_cel-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
@@ -65,7 +66,7 @@ const fail = (method, part, err, opts) => faults.fail(method, `${S}_${part}`, er
 
 /** A route handler as a caller reaches it past rate limit and auth, with a response that records what was sent. */
 async function rest(method, query, body = {}) {
-  const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
+  const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test', rights: await adminRights() }, get: () => undefined, headers: {} };
   const res = { code: 200, body: undefined, headers: {}, headersSent: false,
     status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
     json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };

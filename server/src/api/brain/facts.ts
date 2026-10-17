@@ -17,6 +17,7 @@ import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import {
   UUID_V4_RE,
   webhookToken,
@@ -44,8 +45,8 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
     return;
   }
   // Proxy space: resolve target space for write
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   const targetSpace = wt.target;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.create', targetSpace, 'rest'))) return;
@@ -212,8 +213,8 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }

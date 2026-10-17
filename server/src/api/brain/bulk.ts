@@ -9,6 +9,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { bulkWrite, bulkWriteTotal, bulkSizeRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { webhookToken } from './_shared.js';
 
@@ -40,8 +41,8 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   const targetSpace = wt.target;
 
   // A name this door does not know is refused at the TOP level and a retired name on an item, in every mode — the same check the MCP

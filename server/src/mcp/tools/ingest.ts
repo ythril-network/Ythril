@@ -89,7 +89,7 @@ export const ingest_statusTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const run = ingestStatus(ctx.callSpace, ctx.args['targetSpace'] as string | undefined, String(ctx.args['runId'] ?? ''));
+    const run = ingestStatus(ctx.callSpace, ctx.args['targetSpace'] as string | undefined, String(ctx.args['runId'] ?? ''), ctx.rights);
     if (!run) return text(`No ingest run '${ctx.args['runId']}' in this space. Runs are held in memory, so a restart forgets them — not the records a finished run wrote.`, true);
     return { ...text(`ingest ${run.runId}: ${run.phase}${run.error ? ` — ${run.error}` : ''}`), structuredContent: { ...run } };
   },

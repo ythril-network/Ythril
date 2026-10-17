@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { adminRights } from './_cel-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
 
 const skip = await mongoSkipReason();
@@ -42,7 +43,7 @@ const read = (p) => fs.readFileSync(path.join(root(), p), 'utf8');
 const record = (p, extra = {}) => ({ _id: p, spaceId: S, path: p, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0, ...extra });
 
 async function rest(method, query, body = {}) {
-  const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
+  const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test', rights: await adminRights() }, get: () => undefined, headers: {} };
   const res = { code: 200, body: undefined, headers: {}, headersSent: false,
     status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
     json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
