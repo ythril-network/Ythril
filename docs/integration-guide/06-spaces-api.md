@@ -19,7 +19,7 @@ receive all spaces. A space set to refuse unknown write fields carries `"unknown
 
 Add `?counts=true` to include per-space document counts (facts, entities,
 edges, chrono). Useful for agents deciding which spaces are populated and
-worth querying.
+worth querying. A space's `actPending` (here and on MCP `list_spaces`) is the deletion, wipe or rename owed or running on it, shown to instance administrators only; a space with one takes no writes until it completes.
 
 **Response** `200`:
 

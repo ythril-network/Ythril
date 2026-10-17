@@ -126,7 +126,12 @@ async function appRouter() {
 async function callTool(module, name, args, rights = ADMIN.rights) {
   const tool = (await import(`../../server/dist/mcp/tools/${module}.js`))[`${name}Tool`];
   assert.ok(tool?.handle, `no ${name}Tool export on mcp/tools/${module}.js — re-anchor this harness`);
-  const out = await tool.handle({ args, rights, callSpace: args['space'] });
+  // A handler REFUSES by throwing, and the dispatcher (`callTool`) answers the throw as an error result (400 on the REST tool door):
+  // read here the way the dispatcher reads it, so a refusal is `isError` and not a harness crash.
+  let out;
+  try { out = await tool.handle({ args, rights, callSpace: args['space'] }); } catch (err) {
+    return { isError: true, structured: undefined, text: `Error: ${err instanceof Error ? err.message : String(err)}` };
+  }
   return { isError: out.isError === true, structured: out.structuredContent, text: (out.content ?? []).map(c => c.text ?? '').join('\n') };
 }
 
@@ -211,7 +216,12 @@ export async function retryEveryHeldRound(loader, netIndex = 0) {
   const cfg = loader.getConfig();
   const net = cfg.networks[netIndex];
   const held = [...net.pendingRounds];
-  if (typeof mod.settleRounds === 'function') return mod.settleRounds(net, cfg, [], 'retry', Date.now(), held).settled;
+  if (typeof mod.settleRounds === 'function') {
+    // Saved at once, as the gossip pass saves what its settle wrote: a marking left in memory is read away by any writer's reload.
+    const out = mod.settleRounds(net, cfg, [], 'retry', Date.now(), held);
+    if (out.wrote) loader.saveConfig(cfg);
+    return out.settled;
+  }
   mod.applyRoundConclusion(net, cfg, [], 'retry', held);
   return undefined;
 }

@@ -217,8 +217,11 @@ export function applyPassedJoin(
   if (round.votes.some(v => v.vote === 'veto')) return null;
   if (net.members.some(m => m.instanceId === round.subjectInstanceId)) return null;
   const pm = round.pendingMember;
+  // R11 (bundle-106): the instance whose operator added the member, holding its credential, admits it, whatever parent the operator
+  // recorded — the root recording a grandchild under its parent is a used capability (N-7's auto-adopt reads those records).
+  // `proposedHere` is local and stripped from every peer copy, and a gossip copy has no token hash, so no peer reaches this branch.
   const mayAdmit = !!pm && (net.type === 'braintree'
-    ? (!pm.parentInstanceId || pm.parentInstanceId === selfId)
+    ? (!pm.parentInstanceId || pm.parentInstanceId === selfId || (round.proposedHere === true && Boolean(pm.tokenHash)))
     : Boolean(pm.tokenHash));
   if (mayAdmit) { net.members.push(pm!); return 'admitted'; }
   return introduceFromPassedJoin(net, selfId, round) ? 'introduced' : null;

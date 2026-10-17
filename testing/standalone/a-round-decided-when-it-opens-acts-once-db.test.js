@@ -30,6 +30,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { removeInstanceDir, startFakePeer, allowEngineToDialPrivatePeers, settled } from './_vote-round-instance.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { resetRunnerForTest } from './_space-act-harness.mjs';
 import {
   SELF, M1, M2, tempInstance, networkOf, boot, seedFacts, factCount, requireExport, roundsOf, doors, until, member, databaseTakesCollections,
 } from './_round-open-fixtures.mjs';
@@ -64,6 +65,9 @@ describe('a round the proposer alone decides is decided and applied when it open
 
   /** Boot `row`'s network over a space with data, run the door for `kind`, and say what came back and what is left. */
   async function run(row, kind) {
+    // The runner's body count is per process: reset it per row, so "acts once" counts this row's bodies and not the rows before it.
+    const runner = await import('../../server/dist/spaces/space-act-runner.js').catch(() => null);
+    if (runner?.reopenSpaceActsForTest) resetRunnerForTest(runner);
     const loader = await boot(dir, { networks: [shape(row)] });
     await mongo.getDb().dropDatabase();
     await seedFacts(mongo, 'notes', 3);
@@ -255,7 +259,9 @@ describe('D-36: the proposer counts as a yes on every join and every removal', {
   });
 
   it('R-D36 (control): with another member still to vote the same add and removal stay open', async () => {
-    const loader = await boot(dir, { networks: [networkOf('closed', [M1])] });
+    // Two other members: removing M1 leaves M2 to vote. With M1 alone, M1 is the removal's subject and the proposer's yes IS the
+    // quorum — the row above (R-D36), which this control would otherwise contradict for the removal.
+    const loader = await boot(dir, { networks: [networkOf('closed', [M1, M2])] });
     const add = await doors.addMember('net-1', newPeer);
     assert.equal(add.code, 202, JSON.stringify(add.body)?.slice(0, 200));
     const rm = await doors.removeMember('net-1', M1);

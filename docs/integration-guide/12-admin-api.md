@@ -265,6 +265,8 @@ Content-Type: application/json
 > of `rounds` is `{ "networkId", "networkLabel", "roundId", "round" }`, `round` being the round as
 > `GET /api/networks/:id/votes` shows it. Watch the rounds there.
 >
+> **A pub/sub subscriber wipes its own copy only**: it opens no round, the answer is `200` with `refills: true`, and the copy refills from its publisher at the next sync.
+>
 > **A space in no network is unaffected**: it wipes immediately and answers `200` with counts, exactly as
 > before.
 >
@@ -350,10 +352,10 @@ In **Settings → Spaces**, every space row has a ⊘ **Wipe space** button.  Cl
 #### MCP tool
 
 ```text
-wipe_space(types?: string[])
+delete_space_data(space: string, confirm: true, types?: string[])
 ```
 
-Available in MCP-connected clients.  Requires an admin token on the MCP session.  When `types` is omitted all collections are wiped.  Returns a plain-text summary of deleted counts.
+Available in MCP-connected clients, and answered by the same planner as the admin route above. It needs space admin on the space named in `space`, not the instance admin rung. When `types` is omitted all collections are wiped. On a networked space it answers the vote, the same as the route; the answer carries `status` (`wiped`, `vote_pending` or `passed`), `rounds` and, where the wipe ran here, the counts. The full contract is in [Space Deletion and Wipe](06c-space-deletion-and-wipe-api.md) and [Brain API](04-brain-api.md).
 
 ---
 

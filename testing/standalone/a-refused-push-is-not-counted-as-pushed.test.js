@@ -47,7 +47,8 @@ describe('both ends are wired', () => {
     for (const f of families) assert.match(body, new RegExp(`${f}: \\{[^}]*rejected:`), `${f} answers without a rejected count`);
   });
   it('the engine subtracts the refused count and makes the cycle partial — without failing the member', () => {
-    const src = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
+    // The cycle is the engine plus the per-space turn it hands each space to (`sync/space-exchange.ts`, bundle-106 §3.4).
+    const src = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
     // The per-batch subtraction moved with the family push (bundle-52: `pushCollection` -> `pushFamily`, `sync/push-family.ts`).
     const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
     assert.match(family, /pushed \+= batch\.length - r;/);

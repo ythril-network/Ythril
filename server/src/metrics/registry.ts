@@ -39,6 +39,7 @@ import { warnOnce } from '../util/warn-once.js';
 import { ruleEngineStats, onRuleEvaluated } from '../spaces/schema-rules.js';
 import { spaceActsRunning, waitingSpaceActs, owedSpaceActCount, oldestOwedSpaceActSeconds } from '../spaces/space-act-runner.js';
 import { allSpaceTransfersRunning } from '../sync/space-transfer-fence.js';
+import { heldExchangePairs } from '../sync/space-exchange-set.js';
 
 export const register = new Registry();
 
@@ -503,12 +504,16 @@ export const roundSettleFailuresTotal = new Counter({
   registers: [register],
 });
 
-/** Held (member, space) pairs, by network — set by the hold, never counting a declined space. */
+/** Held (member, space) pairs, by network — read from the hold over `getConfig()` at scrape, never counting a declined space (X10, X15). */
 export const spaceExchangeHeld = new Gauge({
   name: 'ythril_space_exchange_held',
   help: 'Member and space pairs whose exchange is held because a space act stands, by network',
   labelNames: ['network'] as const,
   registers: [register],
+  collect() {
+    this.reset();
+    for (const [network, pairs] of heldExchangePairs()) this.set({ network }, pairs);
+  },
 });
 
 export const spaceHeldRefusalsTotal = new Counter({

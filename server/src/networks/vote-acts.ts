@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
-import { concludeRoundIfReady, planPassedMetaChange } from '../sync/governance.js';
+import { planPassedMetaChange } from '../sync/governance.js';
 import { getSyncHistory } from '../sync/history.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { parseStrictLimit } from '../util/strict-limit.js';
@@ -24,7 +24,7 @@ import type { NetworkActResult } from './network-acts.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { roundIsOpen, roundClosedRefusal, type RoundRefusal } from './round-state.js';
 import { outcomesFor, roundSummary } from './round-outcomes.js';
-import { applyRoundConclusion } from './round-conclusion.js';
+import { settleRounds } from './round-conclusion.js';
 
 export const CastVoteBody = z.object({ vote: z.enum(['yes', 'veto']) });
 
@@ -77,6 +77,23 @@ export interface RoundAnswer {
   networkLabel: string;
   roundId: string;
   round: OperatorRound;
+  /**
+   * What proposing it decided here (design v5 §2.2, OQ-9, additive): `passed` when the proposer's own yes carried it, `vote_pending`
+   * while it is open, `failed` for a round that concluded without passing. Present on the answers of the doors that open a round.
+   */
+  outcome?: 'passed' | 'vote_pending' | 'failed';
+  /** The door answered a round it had already opened instead of opening another (W1): the round is open, or its act is under way. */
+  repeated?: true;
+}
+
+/** What opening a round decided here, read from the round's own `concluded` and `passed` — never from its local `outcome` label. */
+export type RoundDecided = 'passed' | 'open' | 'failed';
+
+/** The decision a round's state says, for the one answer shape. */
+export function roundDecided(round: Pick<VoteRound, 'concluded' | 'passed'>): RoundDecided {
+  // Decided or not — not "open for votes" (`roundIsOpen`): a round past its deadline that nothing has concluded is not decided either.
+  if (round.concluded === true) return round.passed ? 'passed' : 'failed';
+  return 'open';
 }
 
 /**
@@ -88,8 +105,11 @@ export interface RoundAnswer {
  * bare id, and the operator had to make a second call to learn what it was voting on. `every-answer-that-carries-a-round-is-projected-*`
  * hold that no other file spells the pointer, so an answer cannot go back to a bare id on one door.
  */
-export function roundAnswer(net: NetworkConfig, round: VoteRound): RoundAnswer {
-  return { networkId: net.id, networkLabel: net.label, roundId: round.roundId, round: roundForOperator(net, round) };
+export function roundAnswer(net: NetworkConfig, round: VoteRound, decided?: RoundDecided): RoundAnswer {
+  return {
+    networkId: net.id, networkLabel: net.label, roundId: round.roundId, round: roundForOperator(net, round),
+    ...(decided ? { outcome: decided === 'open' ? 'vote_pending' as const : decided } : {}),
+  };
 }
 
 /**
@@ -154,12 +174,14 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   if (existing >= 0) round.votes[existing] = cast;
   else round.votes.push(cast);
 
-  concludeRoundIfReady(net, round, now);
-  // What a conclusion does here — admit or introduce a passed join, apply a deletion, wipe or addition, tell an ejected member —
-  // is written once (`networks/round-conclusion.ts`), for this cast, a peer's relayed cast, a gossip pass and the expiry job.
-  applyRoundConclusion(net, cfg, [round], 'local vote');
+  // What a conclusion does here — admit or introduce a passed join, register a deletion's or wipe's act, add a space, tell an ejected
+  // member — is written once (`networks/round-conclusion.ts`), for this cast, a peer's relayed cast, a gossip pass, the tick and the open.
+  const out = settleRounds(net, cfg, [round], 'local vote', now);
 
   saveConfig(cfg);
+  // A concluding cast answers before its act completes (W7): the act runs after, and a failure is owed and retried.
+  void out.settled;
+  out.throwIfFailed();
   log.info(`Vote cast in round ${peerText(round.roundId)}: ${parsed.data.vote} (concluded=${round.concluded})`);
   return { status: 200, body: { concluded: round.concluded ?? false, round: roundForOperator(net, round) } };
 }

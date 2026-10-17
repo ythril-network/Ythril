@@ -77,6 +77,36 @@ export function openSpaceTransfer(localSpaceId: string): SpaceTransfer {
   return { signal: controller.signal, mayContinue: () => !controller.signal.aborted, release };
 }
 
+/** An inbound stream a transfer is carried on: a response, as far as the fence needs one. */
+export interface TransferStream {
+  once(event: 'close', listener: () => void): unknown;
+  destroy(): unknown;
+}
+
+/**
+ * Keep an INBOUND transfer counted for exactly as long as the stream carrying it is open: released when the stream closes
+ * (an answer sent, an error, a client that walked away — every road ends in `close`), destroyed by the server past `boundMs`
+ * (one inbound transfer is bounded on the server, not only by the sender), and, with `cutOnAct`, destroyed the moment an act on
+ * the space registers, so the act does not wait out a sender's stream.
+ *
+ * Returns `false` for a stream that cannot report its close: the caller releases at once, since a count nothing will ever
+ * release would block every later act's drain.
+ */
+export function holdTransferWhileOpen(stream: unknown, transfer: SpaceTransfer, boundMs: number, cutOnAct: boolean): boolean {
+  const s = stream as Partial<TransferStream> | null;
+  if (!s || typeof s.once !== 'function' || typeof s.destroy !== 'function') return false;
+  const cut = (): void => { s.destroy!(); };
+  const timer = setTimeout(cut, boundMs);
+  timer.unref?.();
+  if (cutOnAct) transfer.signal.addEventListener('abort', cut, { once: true });
+  s.once('close', () => {
+    clearTimeout(timer);
+    transfer.signal.removeEventListener('abort', cut);
+    transfer.release();
+  });
+  return true;
+}
+
 /** An act on `localSpaceId` registered: every open exchange of it stops at its next unit, and the unit in flight is cut. */
 export function abortTransfersOf(localSpaceId: string): void {
   const u = bySpace.get(localSpaceId);

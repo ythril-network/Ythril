@@ -6,7 +6,10 @@
  */
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
-import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows, UnknownWriteFieldAnswer } from '../config/types.js';
+import type { Config, SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows, UnknownWriteFieldAnswer } from '../config/types.js';
+import type { TokenRights } from '../config/rights-shape.js';
+import { isInstanceAdmin } from '../auth/instance-admin.js';
+import { spaceActsOfSpace } from './space-act-runner.js';
 import { normalizeUnknownWriteFields } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import type { ParsedSpaceMeta } from './body-schemas.js';
@@ -59,6 +62,26 @@ export function unknownWriteFieldsMode(space: { unknownWriteFields?: unknown } |
  */
 export function unknownWriteFieldsToReport(space: { unknownWriteFields?: unknown } | undefined | null): 'refuse' | undefined {
   return unknownWriteFieldsMode(space) === 'refuse' ? 'refuse' : undefined;
+}
+
+/** What a space's own entry says of a deletion, wipe or rename of it that this instance still has to finish. */
+export interface ActPending { kind: string; since: string; attempts: number; nextRetryAt?: string; state: string }
+
+/**
+ * The `actPending` of a space's entry — for an INSTANCE ADMINISTRATOR only, `undefined` otherwise (bundle-106, design v5 §2.6, W17,
+ * X14, X18). `GET /api/spaces` and `list_spaces` both build their entry with it, the way they both read `unknownWriteFieldsToReport`,
+ * so neither door spells the rule. It is where an act with no round shows — unnetworked, a subscriber's own, one left after the network
+ * was left — beside the network answer's `owedSpaceActs`; every failure sentence and `queued` answer points at one of the two. An
+ * instance's debts are not a space reader's business, so a token that only reads the space sees no such field.
+ */
+export function spaceActPendingField(cfg: Config, spaceId: string, token: { admin?: boolean; rights?: TokenRights | null } | undefined | null): ActPending | undefined {
+  if (!token || !isInstanceAdmin(token)) return undefined;
+  const entry = spaceActsOfSpace(cfg, spaceId)[0];
+  if (!entry) return undefined;
+  return {
+    kind: entry.kind, since: entry.registeredAt, attempts: entry.attempts,
+    ...(entry.retryAt ? { nextRetryAt: entry.retryAt } : {}), state: entry.state,
+  };
 }
 
 /** Update mutable fields (label, meta, quotas, ladders) of an existing space in config.

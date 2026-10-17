@@ -9,9 +9,11 @@
  *
  * ## What a tick does, and why it is SYNCHRONOUS
  *
- * It reads the config, concludes every round past its deadline through `concludeRoundIfReady` (never by setting fields: what
- * concluding does — revoking a failed join's credentials, recording the outcome — is written once, there), applies what concluded
- * through `applyRoundConclusion`, prunes what is prunable (recording it first), and saves ONCE if anything changed. There is no
+ * It reads the config, settles every round past its deadline through `settleRounds` (never by setting fields: what concluding does —
+ * revoking a failed join's credentials, recording the outcome — is written once, in `concludeRoundIfReady`, and what a conclusion does
+ * here once, in the settle), hands each network's owed space rounds back to the settle (`'retry'`: a round with nothing to do here is
+ * settled there, one this instance must act on registers or joins its act), prunes what is prunable (recording it first), and saves
+ * ONCE if anything changed. Then it starts every owed space act whose `retryAt` has passed — the runner's retry clock. There is no
  * `await` between the read and the save: a config reload landing between them would be overwritten by a snapshot older than it. So
  * the tick returns nothing to await, and the walk is `eachNetwork`, which is synchronous too (config work has no database operation
  * for the space walk's bound to end).
@@ -26,23 +28,24 @@
  * What an EXPIRED round does here, by round type and network type: nothing — except a failed join, whose provisioned credentials
  * are revoked once nothing else references the instance, as a vetoed or expired join always did. A round that has a quorum yet was
  * never evaluated (a `space_deletion` or `space_wipe` nobody concluded at open) is not this job's: it ends as expired, as it would
- * have when anything touched it past the deadline.
+ * have when anything touched it past the deadline. D-39 = C (owner, 2026-10-15): a round within its deadline is never evaluated for
+ * passing here — rounds open at the upgrade run to their deadline and expire, and the operator proposes again.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { ROUND_EXPIRED_OPERATION } from '../audit/middleware.js';
 import { roundExpiryFailuresTotal } from '../metrics/registry.js';
-import { concludeRoundIfReady } from '../sync/governance.js';
 import { pruneExpiredRounds } from '../sync/vote-round-retention.js';
+import { retryOwedSpaceActs } from '../spaces/space-act-runner.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { eachNetwork } from '../util/housekeeping-walk.js';
 import { intervalJob } from '../util/interval-job.js';
 import { log, peerText } from '../util/log.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { warnOnce } from '../util/warn-once.js';
-import { applyRoundConclusion } from './round-conclusion.js';
-import { roundPastDeadline } from './round-state.js';
+import { settleRounds } from './round-conclusion.js';
+import { roundPastDeadline, spaceActOwed } from './round-state.js';
 
 /** The label of the job: the `job` of `ythril_interval_tick_skipped_total` and the head of its failure lines. Kept equal to the one literal `intervalJob` is registered under, below. */
 const LABEL = 'Vote round expiry';
@@ -88,20 +91,34 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
   const walked = eachNetwork(LABEL, networks, (net) => {
     const concluded: VoteRound[] = [];
     const rounds = Array.isArray(net.pendingRounds) ? [...net.pendingRounds] : [];
+    // The lazy heal (design v5 §3.1, VR1): a stored round that is NOT concluded but says `passed` can only have come from a peer — an
+    // older build adopted an upgraded proposer's passed round with its `passed` kept — and every reader requires `concluded` with it,
+    // but a stored contradiction is one reader away from deciding something. Cleared once, in this tick's one save.
+    for (const round of rounds) {
+      if (round.concluded !== true && round.passed !== undefined) { delete round.passed; dirty = true; }
+    }
     const walkedRounds = eachNetwork(`${LABEL} (network ${net.label ?? net.id})`, rounds, (round) => {
       if (round.concluded || !roundPastDeadline(round, now)) return;
       // Before the call, not after: a conclusion that throws once it has marked the round still changed what the save must write.
       dirty = true;
-      concludeRoundIfReady(net, round, now);
+      // At once and per round: it IS concluded in memory, and the save keeps it, so what it decided is applied even when another
+      // round of the network fails. The tick awaits no act (it stays synchronous); a failure is counted below.
+      const out = settleRounds(net, cfg, [round], 'expiry', now);
+      failures += out.failed.length;
       if (round.concluded) {
         concluded.push(round);
-        // At once and per round: it IS concluded in memory, and the save keeps it, so what it decided is applied even when another
-        // round of the network fails.
-        applyRoundConclusion(net, cfg, [round], 'expiry');
         auditExpired(net, round);
       }
     });
     failures += walkedRounds.failed.length;
+    // The owed space rounds of this network, handed back once per tick: one with nothing to do here (stored by an older build, or
+    // whose space this instance no longer carries) is settled, one this instance must act on registers or joins its act (X1, X7).
+    const owed = rounds.filter(spaceActOwed);
+    if (owed.length > 0) {
+      const out = settleRounds(net, cfg, [], 'retry', now, owed);
+      if (out.wrote) dirty = true;
+      failures += out.failed.length;
+    }
     if (concluded.length > 0) {
       const byType: Record<string, number> = {};
       for (const round of concluded) byType[round.type] = (byType[round.type] ?? 0) + 1;
@@ -123,6 +140,9 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
     }
   }
   if (failures > 0) roundExpiryFailuresTotal.inc(failures);
+  // The runner's retry clock: every owed act whose `retryAt` has passed at `now` is started (it joins a run already going). Never
+  // awaited and never rejected — a run answers, and a failure leaves its entry owed with the next `retryAt`.
+  void retryOwedSpaceActs(now);
 }
 
 const job = intervalJob('Vote round expiry', 60_000, () => runRoundExpiryTick());

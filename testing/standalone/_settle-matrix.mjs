@@ -77,7 +77,9 @@ export const AFTER_AT_OPEN = {
   remove: { applied: false, members: [], spaces: ['general', 'notes'], pending: [], layers: [], notified: true, runs: {} },
   space_deletion: { applied: true, members: [], spaces: ['general'], pending: [], layers: [], notified: false, runs: { delete: 1 } },
   space_wipe: { applied: true, members: [], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: { wipe: 1 } },
-  meta_change: { applied: false, members: [], spaces: ['general', 'notes'], pending: [], layers: ['notes'], notified: false, runs: {} },
+  // A third difference, the governance's own (F-39.2, `planPassedMetaChange`): the proposer's own schema edit lands in its OWN
+  // definitions, and a network layer is written here only where this instance already holds one — a fresh network holds none.
+  meta_change: { applied: false, members: [], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
   space_addition: { applied: false, members: [], spaces: ['fresh', 'general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
 };
 
@@ -189,6 +191,12 @@ export async function bootCell(dir, via, roundType, netType, peer) {
   }
   const site = via === 'local vote' ? 'cast' : via === 'peer vote' ? 'relay' : 'gossip';
   const scen = scenario(roundType, netType, site, peer.url);
+  // On pub/sub a deletion or wipe that passes by a vote is the PUBLISHER's, reaching a subscriber (D-40, X10): a publisher never passes
+  // one it did not open. So in those cells this instance subscribes — it pulls from P1, its publisher.
+  if (netType === 'pubsub' && (roundType === 'space_deletion' || roundType === 'space_wipe')) {
+    const publisher = scen.net.members.find(m => m.instanceId === P1);
+    if (publisher) publisher.direction = 'pull';
+  }
   const loader = await bootScenario(dir, scen);
   assert.equal(loader.getConfig().networks[0].pendingRounds[0].concluded, false, 'the scenario starts concluded');
   return { loader, peer, scen, roundId: ROUND_ID, expected: AFTER_A_VOTE[roundType] };

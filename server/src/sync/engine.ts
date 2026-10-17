@@ -19,40 +19,23 @@ import { getConfig, saveConfig, saveConfigSoon, getSecrets } from '../config/loa
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
-import { refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
 import { recordSyncResult, type SyncCounts, type SyncSchemaRecording } from './history.js';
 import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
+import type { SyncHeldSpace, SyncDeclinedSpace } from './history.js';
 import { log, peerText } from '../util/log.js';
-import { resolveWatermark, type TransferOutcome } from './watermark.js';
-import { pullFamily, type PullResult } from './pull-family.js';
-import { pushFamily } from './push-family.js';
-import { pushTombstones } from './tombstone-transfer.js';
-import { pullSpaceTombstones } from './pull-space-tombstones.js';
-import { concreteSpaces } from '../spaces/proxy.js';
-import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases, isDirectionalNetwork } from '../networks/network-spaces.js';
+import { exchangeSpacesWithMember, type MemberExchange } from './space-exchange.js';
+import { liftDeclinesFromAnnounce } from './space-exchange-set.js';
+import { takeServedRounds } from './served-rounds.js';
+import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
-import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
-import { concludeRoundIfReady } from './governance.js';
-import { adoptPeerRound, adoptionRefusal, type AdoptionRefusal } from '../networks/round-local-state.js';
-import { roundIsOpen } from '../networks/round-state.js';
-import { applyRoundConclusion } from '../networks/round-conclusion.js';
+import { settleRounds } from '../networks/round-conclusion.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
-import { LinkageCheck } from './linkage-check.js';
-import { syncFiles } from './file-sync.js';
-import { checkMerkleWithPeer } from './merkle-check.js';
-import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
-import { readMemberSpaceMark } from './member-space-mark.js';
-import {
-  syncCyclesTotal,
-  syncItemsPulledTotal,
-  syncItemsPushedTotal,
-  syncDurationSeconds,
-} from '../metrics/registry.js';
+import { syncCyclesTotal, syncItemsPulledTotal, syncItemsPushedTotal, syncDurationSeconds } from '../metrics/registry.js';
 import type {
   NetworkConfig,
   NetworkMember,
@@ -60,14 +43,10 @@ import type {
   EntityDoc,
   EdgeDoc,
   ChronoEntry,
-  VoteRound,
-  VoteCast,
 } from '../config/types.js';
-import { resolveSafePath } from '../files/sandbox.js';
-import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
+import { pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
-import { isRoundPrunable, pruneExpiredRounds } from './vote-round-retention.js';
+import { roundCastsStillPropagate, pruneExpiredRounds } from './vote-round-retention.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
@@ -88,7 +67,6 @@ const refusedGovernancePull = warnOnce<string>({ max: 500, every: SKIP_WARNING_W
 // Moved to ./space-map.ts (pure). Re-exported so existing importers are unaffected.
 
 export { remoteToLocal, localToRemote } from './space-map.js';
-import { reverseSpaceMap as reverseSpaceMapOf } from './space-map.js';
 
 // ── Cron scheduler ─────────────────────────────────────────────────────────
 // Moved to ./scheduler.ts, on the god-file gate's own instruction: "put the new behaviour beside it rather than
@@ -144,7 +122,15 @@ export function isNetworkSyncing(networkId: string): boolean {
  *  schedule exactly one follow-up. Resolves with the result of the cycle the caller JOINED, not of
  *  any rerun. */
 export async function runSyncForNetwork(networkId: string): Promise<{ synced: number; errors: number }> {
-  return _syncRunner.run(networkId, () => _runSyncForNetworkImpl(networkId));
+  return _syncRunner.run(networkId, () => inCycle(() => _runSyncForNetworkImpl(networkId)));
+}
+
+let cyclesInFlight = 0;
+/** Sync cycles running now, network and single-peer alike: the quiescence a test or a shutdown waits for. */
+export function syncCyclesInFlight(): number { return cyclesInFlight; }
+async function inCycle<T>(run: () => Promise<T>): Promise<T> {
+  cyclesInFlight++;
+  try { return await run(); } finally { cyclesInFlight--; }
 }
 
 async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: number; errors: number }> {
@@ -158,6 +144,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const errorMessages: string[] = [];
   // What the cycle's pulls stored against the local schemas' rules, per space across every member (`sync/arrival-recording.ts`, R6-9).
   const recordedBySpace = new Map<string, RecordedSummary>();
+  // Spaces not exchanged and why, per space across every member: a hold or a decline is not a failure (W9, X10).
+  const heldBySpace = new Map<string, SyncHeldSpace>(); const declinedBySpace = new Map<string, SyncDeclinedSpace>();
 
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
   let synced = 0; let errors = 0; let refusals = 0;
@@ -169,6 +157,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       // Every family, links included: a hand-written list of five here never summed links into the cycle (Q-59).
       for (const k of Object.keys(pulled) as (keyof SyncCounts)[]) { pulled[k] += counts.pulled[k]; pushed[k] += counts.pushed[k]; }
       for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
+      for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason }).get(h.spaceId)!).members.push(member.instanceId);
+      for (const d of counts.declined) (declinedBySpace.get(d) ?? declinedBySpace.set(d, { spaceId: d, members: [] }).get(d)!).members.push(member.instanceId);
       // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
       // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
       // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
@@ -245,6 +235,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
     // Per space, in names and counts: what the pulled pages stored that the local schema does not accept (R6-9). Absent when nothing was.
     ...(recordedBySpace.size > 0 ? { schemaViolations: [...recordedBySpace].map(([spaceId, r]): SyncSchemaRecording => ({ spaceId, records: r.records, top: r.top })) } : {}),
+    ...(heldBySpace.size > 0 ? { held: [...heldBySpace.values()] } : {}),
+    ...(declinedBySpace.size > 0 ? { declined: [...declinedBySpace.values()] } : {}),
   }).catch(err => log.error(`Failed to record sync history: ${peerText(err)}`));
 
   // ── Orphan detection (braintree only) ──────────────────────────────────
@@ -326,7 +318,7 @@ export async function runSyncForPeer(
   let errors = 0;
   for (const { net, member } of matches) {
     try {
-      await runSyncForMember(net, member);
+      await inCycle(() => runSyncForMember(net, member));
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
@@ -342,19 +334,14 @@ export async function runSyncForPeer(
 async function runSyncForMember(
   net: NetworkConfig,
   member: NetworkMember,
-): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[]; refused: string[]; recorded: SyncSchemaRecording[] }> {
-  const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  // What did not complete this cycle, one entry per space and direction. Non-empty makes the member's sync a
-  // failure in the cycle's accounting (`Q-48`) — the watermarks were held correctly; what was missing was saying so.
-  const incomplete: string[] = []; const refused: string[] = [];
-  // What this member's pulled pages stored against the local schema's rules, per space (`sync/arrival-recording.ts`, R6-9).
-  const recorded: SyncSchemaRecording[] = [];
-  const secrets = getSecrets();
-  const peerToken = secrets.peerTokens[member.instanceId];
+): Promise<MemberExchange> {
+  // `incomplete`, one entry per space and direction, makes the member's sync a failure in the cycle's accounting (`Q-48`); a HELD
+  // or DECLINED space is not in it (W9, X10).
+  const peerToken = getSecrets().peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${peerText(member.label)} (${peerText(member.instanceId)}) — skipping sync`);
-    return { pulled, pushed, incomplete: ['no peer token for this member'], refused, recorded };
+    const none: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+    return { pulled: none, pushed: { ...none }, incomplete: ['no peer token for this member'], refused: [], recorded: [], held: [], declined: [] };
   }
 
   const headers: Record<string, string> = {
@@ -432,58 +419,8 @@ async function runSyncForMember(
    */
   assertPeerAtFloor(net.id, member.instanceId, member.version);
 
-  // Local -> network id, built once per cycle. FIRST match, as `localToRemote` answers (Q-133): a later key for the
-  // same space is an inbound alias a rename left behind, and pulling by it would address the space by a name the
-  // network does not use. The inline Map this replaced kept the LAST key, the opposite of the documented rule.
-  const toNetworkId = reverseSpaceMapOf(net);
-
-  for (const spaceId of net.spaces) {
-    // Peers reference a space by the network's id, which differs from ours once it has been renamed or mapped.
-    const remoteSpaceId = toNetworkId.get(spaceId) ?? spaceId;
-
-    // Skip spaces that don't exist in local config — prevents orphan data and collection access
-    // for space IDs that were registered on the network but never created locally.
-    if (!concreteSpaces().some(s => s.id === spaceId)) {
-      log.warn(`Skipping sync for space '${peerText(spaceId)}' in network '${peerText(net.label)}': space not in local config`);
-      continue;
-    }
-
-    // Push to this member if the direction allows it (push or both).
-    // Pull from this member if bidirectional (both), or for non-directional networks.
-    // Braintree/Pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
-    const isDirectional = isDirectionalNetwork(net);
-    const shouldPull = !isDirectional || member.direction === 'both' || member.direction === 'pull';
-    const shouldPush = !isDirectional || member.direction === 'both' || member.direction === 'push';
-
-    if (shouldPull) {
-      await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts); // F-39.1: only from upstream, never throws
-      const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
-      pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono; pulled.links += pc.links;
-      if (pc.recorded.records > 0) recorded.push({ spaceId, ...pc.recorded });
-      if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
-      // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
-      await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts });
-    }
-    if (shouldPush) {
-      const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
-      pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono; pushed.links += pc.links;
-      if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')} stopped early`);
-      if (pc.refused.length > 0) refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
-    }
-
-    // Sync file manifest — respect direction guards like pull/push above
-    if (shouldPull || shouldPush) {
-      const fc = await syncFiles(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, shouldPull, shouldPush);
-      pulled.files += fc.pulledFiles; pushed.files += fc.pushedFiles;
-      // A pulled file is processed where it is recorded (`recordArrivedBytes`, `files/bytes-arrived.ts`): a pulled image gets its
-      // media job there, the one face path — no second job is queued for it here.
-    }
-
-    // Merkle integrity check (opt-in: network.merkle === true); its verdict arms or clears the file-row re-read.
-    if (net.merkle) {
-      recordFileMetaMerkleComparison(member, spaceId, await checkMerkleWithPeer(net, member, spaceId, remoteSpaceId, fetchOpts));
-    }
-  }
+  // The per-space turns, the hold that chooses them and the marks they write: `sync/space-exchange.ts`.
+  const exchanged = await exchangeSpacesWithMember(net, member, headers, fetchOpts, batchFetchOpts);
 
   // Update lastSyncAt
   const freshCfg = getConfig();
@@ -492,7 +429,7 @@ async function runSyncForMember(
   // Hot-path bookkeeping: a cosmetic timestamp written every member every cycle.
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfigSoon(freshCfg); }
 
-  return { pulled, pushed, incomplete, refused, recorded };
+  return exchanged;
 }
 
 // ── Gossip: member list exchange ────────────────────────────────────────────
@@ -566,6 +503,7 @@ async function gossipWithPeer(
                */
               if (!local.versionCheckedAt) { local.versionCheckedAt = new Date().toISOString(); changed = true; }
               if (pinMemberSigningKey(local, peerSelf.signingPublicKey, peerSelf.signingKeyRotation)) changed = true;
+              if (liftDeclinesFromAnnounce(freshNet, member.instanceId, announced.spaces)) changed = true; // AM2: announced again, asked again
               if (changed) {
                 log.info(`Gossip: updated ${peerText(member.label)} via self-piggyback (${peerText(net.id)})`);
                 saveConfig(freshCfg);
@@ -662,7 +600,8 @@ async function propagateVotesWithPeer(
       refusedGovernancePull(`votes ${net.id} ${member.instanceId} ${resp.status}`, () => log.warn(`Vote pull from ${peerText(member.label)} for network ${peerText(net.id)}: HTTP ${resp.status}`));
       return;
     }
-    const { rounds: peerRounds } = await boundedJson<{ rounds: (Omit<VoteRound, 'concluded'>)[] }>(resp, 'sync peer');
+    // Unread: every served round is read by its declared shape where it is taken (`sync/served-rounds.ts`, X11).
+    const { rounds: peerRounds } = await boundedJson<{ rounds?: unknown }>(resp, 'sync peer');
     if (!Array.isArray(peerRounds)) return;
 
     const fresh = getConfig();
@@ -671,76 +610,19 @@ async function propagateVotesWithPeer(
 
     // One reading of the clock for the whole pass: what is adopted, merged into and concluded is judged at the same instant.
     const now = Date.now();
-    const refused = new Map<AdoptionRefusal, number>();
-    let changed = false;
-    for (const peerRound of peerRounds) {
-      if (!peerRound.roundId) continue;
-
-      let local = freshNet.pendingRounds.find(r => r.roundId === peerRound.roundId);
-      if (!local) {
-        // Round is new to us — adopt it, if it can still be voted on here. The peer list also serves PASSED space_addition and
-        // meta_change rounds (for a late joiner) and any round its owner chose a deadline for: one that ended elsewhere is not
-        // brought back to life to end again as a failure, and one this instance already recorded is not recorded twice.
-        // Counted, never a warning per round: a mixed fleet would raise one every cycle.
-        const why = adoptionRefusal(freshNet, peerRound as VoteRound, now);
-        if (why) { refused.set(why, (refused.get(why) ?? 0) + 1); continue; }
-        // Nothing local is taken from it (S-7, S-9); votes are merged below, one cast at a time.
-        local = adoptPeerRound(freshNet, peerRound as VoteRound);
-        changed = true;
-        log.info(`Vote gossip: adopted round ${peerText(peerRound.roundId)} (${peerRound.type}) from ${peerText(member.label)}`);
-      }
-      if (!roundIsOpen(local, now)) continue;
-
-      // Merge vote casts.
-      //
-      // SECURITY: a signed cast is accepted from any reporter (its signature
-      // proves the voter cast it, so multi-hop relay is safe); an unsigned cast
-      // is accepted only when the reporting peer IS the voter. This blocks the
-      // forgery where a malicious peer serves a round pre-stuffed with `yes`
-      // votes forged for other members, while allowing signed votes to relay
-      // through intermediate nodes (deep braintree trees).
-      for (const peerCast of (peerRound.votes ?? []) as VoteCast[]) {
-        if (!peerCast.instanceId || !['yes', 'veto'].includes(peerCast.vote)) continue;
-        const decision = acceptVoteCast(freshNet, local, peerCast, member.instanceId);
-        if (!decision.accept) {
-          log.warn(
-            `Vote gossip: rejecting cast for '${peerText(peerCast.instanceId)}' relayed by '${peerText(member.instanceId)}' ` +
-            `(round ${peerText(peerRound.roundId)}) — ${peerText(decision.reason)}`,
-          );
-          continue;
-        }
-        const idx = local.votes.findIndex(v => v.instanceId === peerCast.instanceId);
-        if (idx >= 0) {
-          // Only replace if the new cast changes the vote value; preserve the
-          // signature that came with it.
-          const had = local.votes[idx]!;
-          if (had.vote !== peerCast.vote || had.sig !== peerCast.sig || had.bsig !== peerCast.bsig) {
-            local.votes[idx] = castForWire(peerCast);
-            changed = true;
-          }
-        } else {
-          local.votes.push(castForWire(peerCast));
-          changed = true;
-        }
-      }
-    }
+    // Evidence, adoptions and merged casts: what this list changes here (`sync/served-rounds.ts`).
+    const { changed, refused } = takeServedRounds(freshNet, peerRounds, member, now);
 
     if (refused.size > 0) {
       log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);
     }
 
     if (changed) {
-      // Re-evaluate all undecided rounds — new votes may push them over the threshold. The set of rounds handed on is what
-      // concluded NOW: the gossip pass concludes rounds nobody here voted on, so this is where a decision made elsewhere lands.
-      const concludedNow: VoteRound[] = [];
-      for (const round of freshNet.pendingRounds) {
-        if (!round.concluded) {
-          concludeRoundIfReady(freshNet, round, now);
-          if (round.concluded) concludedNow.push(round);
-        }
-      }
-      // Every held round is also handed to the space-scoped step, so a space_addition that did not land is tried again.
-      applyRoundConclusion(freshNet, fresh, concludedNow, 'gossip', freshNet.pendingRounds);
+      // Re-evaluate every undecided round — new votes may carry one — and apply what concluded, through the one settle step (design
+      // v5 section 1.1). Every held round is handed to the space-scoped step too, so an addition that did not land is tried again. The
+      // pass does NOT await the acts it starts (VR6): the hold keeps their spaces out of this cycle's exchange while they run.
+      const settled = settleRounds(freshNet, fresh, freshNet.pendingRounds, 'gossip', now, freshNet.pendingRounds);
+      void settled.settled;
       saveConfig(fresh);
     }
   } catch (err) {
@@ -764,7 +646,7 @@ async function propagateVotesWithPeer(
     const cfg = getConfig();
     const localNet = cfg.networks.find(n => n.id === net.id);
     const now = Date.now();
-    const roundsToPush = (localNet?.pendingRounds ?? []).filter(r => !isRoundPrunable(r, now));
+    const roundsToPush = (localNet?.pendingRounds ?? []).filter(r => roundCastsStillPropagate(r, now));
     for (const round of roundsToPush) {
       for (const cast of round.votes) {
         await peerSafeFetch(`${base}/votes/${encodeURIComponent(round.roundId)}`, {
@@ -782,210 +664,4 @@ async function propagateVotesWithPeer(
   }
 }
 
-// ── Pull (ingest from peer) ─────────────────────────────────────────────────
 
-async function pullFromPeer(
-  member: NetworkMember,
-  spaceId: string,
-  remoteSpaceId: string,
-  networkId: string,
-  opts: () => RequestInit,
-  batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; recorded: RecordedSummary }> {
-  let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0, pulledChrono = 0, pulledLinks = 0;
-  const sinceSeq = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqReceived') ?? 0;
-
-  // Tombstones first, so deletions apply before anything that would re-upsert a deleted doc. Both directions
-  // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
-  const tombstones = await pullSpaceTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts });
-
-  let highestSeq = sinceSeq;
-
-  /*
-   * What lands in this space's transfer is checked for strict linkage ONCE, after every family (below) — page by
-   * page, an edge to a chrono entry pulled later in the same cycle was recorded missing (bundle-30 I8).
-   */
-  const linkage = new LinkageCheck(spaceId, member.instanceId);
-
-  /*
-   * SEQUENTIAL, not `Promise.all`. Each transfer pages against the same peer and applies as it goes, so
-   * running them together multiplies the concurrent load on the side of the cycle that is already slow,
-   * and interleaves the writes a truncated transfer's watermark has to reason about.
-   *
-   * EVERY BRAIN COLLECTION: `files` as the `filemeta` family (its metadata; the bytes arrive as blob plus manifest in
-   * `syncFiles`), and `links` — a collection missing here is one a peer never sends us, and nothing reports that, because
-   * a peer holding no links hashes none either.
-   */
-  const pulled = {} as Record<PayloadKey, PullResult>;
-  try {
-    for (const family of REPLICATED_FAMILIES) {
-      pulled[family.payloadKey] = await pullFamily({ family, member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: batchOpts, linkage });
-    }
-  } finally {
-    /*
-     * What landed is checked even when a fetch REJECTS part-way (bundle-30 I13): edges that landed before it are
-     * re-served next cycle at an equal seq and plan as skipped, so they are never checked again. A family whose
-     * transfer stopped early, or never ran (the one that threw and every one after), may still hold a target: its
-     * ends are not judged missing this cycle.
-     */
-    await linkage.run({ stillToCome: REPLICATED_FAMILIES
-      .filter(f => pulled[f.payloadKey] === undefined || pulled[f.payloadKey].truncated).map(f => f.collection) });
-  }
-
-  pulledMemories = pulled.facts.count;
-  pulledEntities = pulled.entities.count;
-  pulledEdges = pulled.edges.count;
-  pulledChrono = pulled.chrono.count;
-  pulledLinks = pulled.links.count;
-
-  /*
-   * ONE WATERMARK, FIVE TRANSFERS — so the max is only safe if all five finished.
-   *
-   * `Math.max` across the four types was the old rule, and it moved `lastSeqReceived` to a position a
-   * truncated type had not reached: its unserved records then sat behind the watermark for ever, while every
-   * later cycle reported success. `safeWatermark` lowers the ceiling to whatever the stopped transfers can
-   * actually vouch for. EVERY transfer is passed — an omitted one places no ceiling, which makes it
-   * exactly the one that gets skipped.
-   */
-  const stoppedEarly: string[] = [];
-  highestSeq = resolveWatermark({
-    heldBack: stoppedEarly, direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
-    from: sinceSeq,
-    transfers: pulled,
-    // Bounds the advance, never raises it: a tombstone seq is not a position in the data stream.
-    alsoCheck: { tombstones },
-    seqOf: (t) => t.highSeq,
-    warn: log.warn,
-  });
-  // No counter bump here: every record this pull received was bumped over by the page accept, per page
-  // (`acceptArrivingPage`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
-
-  // Persist the high-water mark
-  if (highestSeq > sinceSeq) {
-    const freshCfg = getConfig();
-    const freshNet2 = freshCfg.networks.find(n => n.id === networkId);
-    const m = freshNet2?.members.find(m => m.instanceId === member.instanceId);
-    if (m) {
-      m.lastSeqReceived ??= {};
-      m.lastSeqReceived[spaceId] = highestSeq;
-      // Hot-path watermark: written per space per member per cycle. Coalesced
-      // async write — if lost on crash the next pull simply re-pulls from the
-      // older watermark (idempotent by seq), never dropping data.
-      saveConfigSoon(freshCfg);
-    }
-  }
-
-  return {
-    facts: pulledMemories, entities: pulledEntities, edges: pulledEdges, chrono: pulledChrono,
-    links: pulledLinks, stoppedEarly,
-    // What every family of this space's pull stored against the local schema's rules, by names and counts.
-    recorded: REPLICATED_FAMILIES.reduce((sum, f) => mergeSummaries(sum, pulled[f.payloadKey]?.recorded), NOTHING_RECORDED),
-  };
-}
-
-// ── Push (upload our changes to peer) ──────────────────────────────────────
-
-async function pushToPeer(
-  member: NetworkMember,
-  spaceId: string,
-  remoteSpaceId: string,
-  networkId: string,
-  opts: () => RequestInit,
-  batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; refused: string[] }> {
-  let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0, pushedChrono = 0, pushedLinks = 0;
-  const cfg = getConfig();
-  const freshNet = cfg.networks.find(n => n.id === networkId);
-  const lastSeqPushed = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqPushed') ?? 0;
-
-  // Tombstones first — paged, with no hard cap, since one would silently drop deletions after a long absence.
-  const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts });
-
-  // Only docs changed since the last push, read and sent in batches (`sync/push-family.ts`) straight from MongoDB, so the
-  // push is O(changed) and its heap is flat however much has accumulated since the last sync.
-  // Braintree nodes relay docs from all peers; other topologies only push their own authored docs
-  // to prevent foreign docs (e.g. received from a third instance) from polluting peers' watermarks.
-  const isDirectionalType = isDirectionalNetwork(freshNet);
-  const ownedFilter = isDirectionalType ? {} : { 'author.instanceId': cfg.instanceId };
-
-  let maxSeqPushed = lastSeqPushed;
-
-  /*
-   * Sequential for the same reason as the pull, and the parents-only filter comes from the row rather than from a
-   * special case here — see `REPLICATED_FAMILIES`.
-   *
-   * EVERY BRAIN COLLECTION — `files` as the `filemeta` family (its METADATA; the bytes cross as blob plus manifest in
-   * `syncFiles`), and `links` included: a collection missing from this union is
-   * written locally and never offered to a peer, which for a record type whose entire purpose is to be shared ships the
-   * feature and none of it. And it would not even be reported: `brain/merkle.ts` hashes the links collection, so the two
-   * roots would differ for ever — except that a peer which never RECEIVES a link has nothing to hash either, so both
-   * sides agree on a root computed from data only one of them holds.
-   */
-  const pushed = {} as Record<PayloadKey, { pushed: number; maxSeq: number; refused: number } & TransferOutcome>;
-  for (const family of REPLICATED_FAMILIES) {
-    pushed[family.payloadKey] = await pushFamily({
-      family, member, spaceId, remoteSpaceId, networkId, lastSeqPushed, owned: ownedFilter, instanceId: cfg.instanceId, requestInit: batchOpts,
-    });
-  }
-
-  pushedMemories = pushed.facts.pushed;
-  pushedEntities = pushed.entities.pushed;
-  pushedEdges = pushed.edges.pushed;
-  pushedChrono = pushed.chrono.pushed;
-  pushedLinks = pushed.links.pushed;
-  /*
-   * Same rule as the pull, same function, AND NOW THE SAME LIST — which is what this comment used to claim
-   * while the line below it disproved it.
-   *
-   * It read *"see `sync/watermark.ts` for why it is not two implementations"*, and the `candidate`
-   * argument directly beneath was the second implementation: pull's enumerated six families, this one five,
-   * with `filemeta` present in `transfers` and missing from the max. So a file-metadata transfer could hold
-   * this watermark back and never advance it, and a cycle whose only change was file metadata re-pushed the
-   * same page for ever. The candidate is derived from the transfers now.
-   */
-  const stoppedEarly: string[] = [];
-  maxSeqPushed = resolveWatermark({
-    heldBack: stoppedEarly, direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
-    from: lastSeqPushed,
-    transfers: pushed,
-    alsoCheck: { tombstones },
-    seqOf: (t) => t.maxSeq,
-    warn: log.warn,
-  });
-  const refused = refusedTransfers(pushed); // Q-59: the peer answered, so this is not a failure — see runSyncForNetwork
-
-  /*
-   * The other half of the X-20 instrumentation: what the cycle DECIDED, beside what it found.
-   *
-   * A watermark that moves while every transfer reported zero documents is the shape that would explain the
-   * stall — the cursor advancing past a record nothing sent, after which every later cycle correctly finds
-   * nothing and the record is never offered again. That combination is invisible without both numbers in one
-   * line, which is why they are logged together rather than at four separate call sites.
-   */
-  log.debug(`Push cycle to ${peerText(member.label ?? member.instanceId)} space '${peerText(spaceId)}': watermark ${lastSeqPushed} -> `
-    + `${maxSeqPushed}, pushed ${pushedMemories}m/${pushedEntities}e/${pushedEdges}g/${pushedChrono}c/${pushedLinks}l`);
-
-  // Persist the push high-water mark so next sync only sends new/changed docs
-  if (maxSeqPushed > lastSeqPushed) {
-    const freshCfg = getConfig();
-    const freshNet2 = freshCfg.networks.find(n => n.id === networkId);
-    const m = freshNet2?.members.find(m => m.instanceId === member.instanceId);
-    if (m) {
-      m.lastSeqPushed ??= {};
-      m.lastSeqPushed[spaceId] = maxSeqPushed;
-      // Hot-path watermark: written per space per member per cycle. Coalesced
-      // async write — if lost on crash the next push simply re-pushes from the
-      // older watermark (idempotent by seq), never dropping data.
-      saveConfigSoon(freshCfg);
-    }
-  }
-
-  return {
-    facts: pushedMemories, entities: pushedEntities, edges: pushedEdges, chrono: pushedChrono,
-    links: pushedLinks, stoppedEarly, refused,
-  };
-}
-
-
-// Silence unused import warning — resolveSafePath may be used by future file push refinement
-void resolveSafePath;

@@ -20,6 +20,7 @@ import { log, peerList, peerText } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { isUpstreamPeer } from '../networks/network-spaces.js';
 import { peerSafeFetch } from './peer-fetch.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 
 /** @returns whether the local meta changed. */
 export async function pullSpaceMetaFromUpstream(
@@ -28,13 +29,18 @@ export async function pullSpaceMetaFromUpstream(
   spaceId: string,
   remoteSpaceId: string,
   opts: () => RequestInit,
+  turn?: ExchangeTurn,
 ): Promise<boolean> {
   if (!isUpstreamPeer(net, member.instanceId)) return false;
   try {
     const q = new URLSearchParams({ spaceId: remoteSpaceId, networkId: net.id });
-    const resp = await peerSafeFetch(`${member.url}/api/sync/meta?${q}`, opts());
+    const init = opts();
+    const resp = await peerSafeFetch(`${member.url}/api/sync/meta?${q}`, { ...init, signal: turnSignal(init.signal, turn) });
     if (!resp.ok) {
-      log.warn(`Schema from ${peerText(member.label)} for '${peerText(spaceId)}': HTTP ${resp.status}`);
+      // A new build never holds this door (schema propagation is not data); an older one may, and that is a hold, not a failure.
+      const verdict = await transferRefusal(resp);
+      turn?.refusedBy(verdict);
+      if (verdict === 'failed') log.warn(`Schema from ${peerText(member.label)} for '${peerText(spaceId)}': HTTP ${resp.status}`);
       return false;
     }
     const { meta: incoming } = await boundedJson<{ meta?: unknown }>(resp, 'sync peer');

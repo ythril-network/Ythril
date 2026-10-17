@@ -34,7 +34,7 @@ import { parseSource, ts, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
 const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all']);
 const GATE = 'requireNetworkStanding';
-const REACH = /\b(?:spaceAllowed|pushAllowed|refusePeerSpace|requireSpaceAuthScoped|requireBodyScopedSpace)\s*\(/;
+const REACH = /\b(?:spaceAllowed|pushAllowed|refusePeerSpace|refusePeerReach|requireSpaceAuthScoped|requireBodyScopedSpace)\s*\(/;
 
 /** Routes that name a network and are neither gated nor a data route, each with the reason, keyed `VERB path`. */
 const EXEMPT = Object.freeze({

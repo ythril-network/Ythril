@@ -48,6 +48,7 @@ import { foldRepairMark, readMemberSpaceMark } from './member-space-mark.js';
 import type { MerkleComparison } from './merkle-check.js';
 import { pullFamily } from './pull-family.js';
 import { familyOf } from './replicated-families.js';
+import type { ExchangeTurn } from './held-answer.js';
 
 /** How many full re-reads a divergence may cost before it is said and left alone. */
 export const FILE_META_REREAD_CAP = 3;
@@ -142,15 +143,17 @@ export async function rereadFileMeta(o: {
   remoteSpaceId: string;
   networkId: string;
   requestInit: () => RequestInit;
+  /** The space's turn with this member: the re-read's fetches take its signal and a refusal goes to it (design v5 X5). */
+  turn?: ExchangeTurn;
 }): Promise<void> {
-  const { member, spaceId, remoteSpaceId, networkId, requestInit } = o;
+  const { member, spaceId, remoteSpaceId, networkId, requestInit, turn } = o;
   const start = fileMetaRereadStart(readMemberSpaceMark(networkId, member.instanceId, spaceId, 'fileMetaRereadAt'));
   if (start === null) return;
   try {
     // Its own linkage check: a file row is a target, so what it lands is checked like any other pull, never skipped.
     const linkage = new LinkageCheck(spaceId, member.instanceId);
     const res = await pullFamily({
-      family: familyOf('filemeta'), member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, linkage,
+      family: familyOf('filemeta'), member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, linkage, turn,
     });
     await linkage.run();
     const complete = !res.truncated;

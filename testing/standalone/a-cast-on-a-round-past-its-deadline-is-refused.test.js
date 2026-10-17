@@ -163,12 +163,13 @@ describe('what each reader lists as open', () => {
     assert.ok(meta.summary.length > 0);
   });
 
-  it('a peer is served the open round, and the PASSED meta_change / space_addition rounds, and nothing else', async () => {
+  it('a peer is served the open round, and the PASSED meta_change / space_addition rounds within their deadline, and nothing else', async () => {
     await boot(rounds());
     const { syncVotesRouter } = await import('../../server/dist/api/sync/votes.js');
     const res = await callRoute(syncVotesRouter, 'get', '/networks/:networkId/votes', { params: { networkId: 'n' }, authToken: { peerInstanceId: P1 } });
     assert.equal(res.code, 200);
-    assert.deepEqual(res.body.rounds.map(r => r.roundId).sort(), ['open', 'passed-addition', 'passed-meta']);
+    // `passed-meta` is past its deadline: X15 (bundle-106 §3.1) serves no passed round past its deadline - a receiver refuses one at adoption.
+    assert.deepEqual(res.body.rounds.map(r => r.roundId).sort(), ['open', 'passed-addition']);
   });
 
   it('the space chip asks for a vote only on a round that can still be voted on', async () => {

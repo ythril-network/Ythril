@@ -56,6 +56,7 @@ const NOT_ROUTE_FILES = new Set(['_shared.ts', 'index.ts', 'space-alias.ts']);
 /** The sync route blocks that name a space at 84f0b3cc (record pages and by id, the push doors, manifest, merkle, meta, tombstones). A smaller number means the derivation stopped seeing routes. */
 const SYNC_DOOR_FLOOR = 24;
 /** The functions of the middleware module that resolve a token's reach into a space, at 84f0b3cc: five. */
+// `enforceSpaceScope` is the resolver the guards call, not a guard: its own declaration matched `enforceSpaceScope(` (the derivation counted it as calling itself).
 const RIGHTS_DOOR_FLOOR = 5;
 
 /** The schema door asks reach only: a wipe changes no schema, and a subscriber takes its type schemas through it (section 3.3 v5, X17, INT S14). */
@@ -260,13 +261,13 @@ describe('the helpers ask the one hold question', () => {
 
 describe('every rights door a peer token passes asks refuseHeldPeer', () => {
   it('the guards of the middleware module that resolve a space number at least the floor', () => {
-    const guards = functionsOf(parsed(MIDDLEWARE)).filter(([, text]) => calls(text, 'enforceSpaceScope') || calls(text, 'spacesForBodyScopedRequest'));
+    const guards = functionsOf(parsed(MIDDLEWARE)).filter(([name, text]) => name !== 'enforceSpaceScope' && (calls(text, 'enforceSpaceScope') || calls(text, 'spacesForBodyScopedRequest')));
     assert.ok(guards.length >= RIGHTS_DOOR_FLOOR, `only ${guards.length} guard(s) resolve a token's reach into a space (floor ${RIGHTS_DOOR_FLOOR}): ${guards.map(g => g[0]).join(', ')}`);
   });
 
   it('each guard asks refuseHeldPeer, or is space management listed with its reason', () => {
     const exempt = new Map(NOT_THE_EXCHANGE.map(e => [e.fn, e.why]));
-    const guards = functionsOf(parsed(MIDDLEWARE)).filter(([, text]) => calls(text, 'enforceSpaceScope') || calls(text, 'spacesForBodyScopedRequest'));
+    const guards = functionsOf(parsed(MIDDLEWARE)).filter(([name, text]) => name !== 'enforceSpaceScope' && (calls(text, 'enforceSpaceScope') || calls(text, 'spacesForBodyScopedRequest')));
     const names = new Set(guards.map(g => g[0]));
     for (const [fn, why] of exempt) {
       assert.ok(names.has(fn), `${fn} is in the not-the-exchange table and is no guard of ${MIDDLEWARE}: the table went stale`);

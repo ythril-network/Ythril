@@ -597,7 +597,9 @@ belonging to the types you named.
 
 **Response** `200` `{ "ok": true, "text": "The answer is in data…", "data": { "facts": 12, "entities": 3, ... } }` — the
 [tool-door envelope](16-mcp.md#the-same-tools-over-plain-http), because this path IS the `delete_space_data`
-tool. Zeroes mean the space was already empty, not that anything refused. Throttled to 5 calls a minute per
+tool. Zeroes mean the space was already empty, not that anything refused.
+
+`data.status` says what the call came to. `"wiped"`: the data is gone from this instance, and `data.deleted` holds the counts (a repeat carries `repeated: true` and no counts). Where a network carries the space, the proposer's own yes decided it (a club, a publisher, or the only member), so the wipe ran in this call and `data.rounds` lists the rounds that passed. A pub/sub subscriber wipes its own copy only, with `refills: true`, and it refills from its publisher at the next sync. `"vote_pending"`: no round has passed; nothing is wiped here yet, and `data.rounds` lists the open votes. Each member is wiped when a round passes there, and a single veto stops it there. `"passed"` with `queued: true`: a round passed and its change is still running, or is owed and retried at `data.retryAt`. Do not repeat the call. If this instance's change failed during the call, the answer is `ok: false` with `data.status: "passed"`, `data.rounds`, and `data.code: "space_act_failed"` (or the store's `503` code); do not retry, because the instance retries the change itself. A repeat of the call while its vote is open or its change is applying answers that round with `data.repeated: true`. Throttled to 5 calls a minute per
 token **on both doors**, and rejected on a proxy space (`400`) — target member spaces individually.
 
 `confirm: true` is required. The act is irreversible: no undo, no trash.

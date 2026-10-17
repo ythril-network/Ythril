@@ -26,23 +26,24 @@ import bcrypt from 'bcrypt';
 import { BCRYPT_ROUNDS } from '../api/networks/_shared.js';
 import { recordOrigin } from '../auth/network-membership.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
+import { getConfig, saveConfig } from '../config/loader.js';
+import type { Config, NetworkConfig, SpaceMeta } from '../config/types.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
-import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { introductionView } from './member-introductions.js';
-import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
-import { concludeRoundIfReady } from '../sync/governance.js';
+import { addSpacesToNetwork } from './network-spaces.js';
 import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, recordSpaceAlias } from '../sync/space-map.js';
-import { makeSignedOwnCast } from '../util/signing.js';
-import { openRoundHere } from './round-local-state.js';
 import { roundIsOpen, MAX_VOTING_DEADLINE_HOURS } from './round-state.js';
 import { roundAnswer, roundForOperator } from './vote-acts.js';
+import { proposeRound } from './propose-round.js';
+import { sendNotice } from './notify-members.js';
+import { ownYesCarries } from './round-forecast.js';
+import { isInstanceAdmin } from '../auth/instance-admin.js';
+import { spaceActsOfNetwork } from '../spaces/space-act-runner.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
@@ -115,10 +116,31 @@ export function networkView(net: NetworkConfig): Record<string, unknown> {
 
 const notFound = { status: 404 as const, error: 'Network not found' };
 
+/**
+ * A network as the read doors answer it — `GET /api/networks[/:id]` and MCP `network_get` call this one function, so the doors stay one
+ * (design v5 §2.6, W17, X14). `networkView`, plus `ownYesCarries` (would this instance's own yes alone pass a deletion or wipe it proposes
+ * here — the client says "acts now" or "opens a vote" from it), plus, for an INSTANCE ADMINISTRATOR only, `owedSpaceActs`: the deletions
+ * and wipes this instance still has to carry out for the network, with their retry clock. Every pointer a refusal or a `queued` answer
+ * gives leads here. A token that may only read the network sees no such field at all — an instance's debts are not the network's state.
+ */
+export function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Config = getConfig()): Record<string, unknown> {
+  const view = networkView(net);
+  view['ownYesCarries'] = ownYesCarries(net, cfg);
+  if (!isInstanceAdmin(caller)) return view;
+  view['owedSpaceActs'] = spaceActsOfNetwork(cfg, net.id)
+    .map(e => ({
+      entryId: e.id, kind: e.kind, localSpaceId: e.localId,
+      ...(net.spaces.includes(e.localId) ? { networkSpaceId: localToRemote(net, e.localId) } : {}),
+      rounds: e.rounds.filter(r => r.networkId === net.id).map(r => ({ roundId: r.roundId })),
+      attempts: e.attempts, ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), since: e.registeredAt, state: e.state,
+    }));
+  return view;
+}
+
 /** One network the caller may see. */
 export function readNetworkAct(caller: Caller, id: string): NetworkActResult {
   const net = visibleNetworks(caller, getConfig().networks).find(n => n.id === id);
-  return net ? { status: 200, body: networkView(net) } : notFound;
+  return net ? { status: 200, body: networkAnswer(net, caller) } : notFound;
 }
 
 /** Create a network carrying `spaces`; the membership is recorded as the caller's. */
@@ -225,9 +247,9 @@ const ADD_SPACE_POSITION: Record<NetworkConfig['type'], { direct: boolean; posit
  * here when it is carried; the other members add it from the announcement or from the passed round
  * (`networks/network-spaces.ts`). `audit` carries the space list before and after.
  */
-export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): NetworkActResult & {
+export async function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): Promise<NetworkActResult & {
   audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
-} {
+}> {
   const parsed = AddNetworkSpaceBody.safeParse(input);
   if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   const { spaceId } = parsed.data;
@@ -261,32 +283,36 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   const added = cfg.spaces.find(s => s.id === spaceId)!;
   const layerOnAdd = replicatedMetaOf(added.ownMeta ?? added.meta) as SpaceMeta;
   if (!rule.direct) {
-    const now = new Date().toISOString();
-    const round: VoteRound = {
-      roundId: uuidv4(), type: 'space_addition', spaceId: networkSpaceId,
+    const proposed = proposeRound(net, cfg, {
+      type: 'space_addition', spaceId: networkSpaceId,
       subjectInstanceId: cfg.instanceId, subjectLabel: cfg.instanceLabel, subjectUrl: '',
-      deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(), openedAt: now, votes: [],
       ...(Object.keys(layerOnAdd).length ? { pendingMeta: layerOnAdd } : {}),
-    };
-    round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
-    openRoundHere(net, round);
-    // Evaluated now: on a club, and on a network with no other member, the proposer's yes already carries it (Q-49).
-    if (!concludeRoundIfReady(net, round)) {
-      saveConfig(cfg);
+    });
+    saveConfig(cfg);
+    const { round } = proposed;
+    if (proposed.decided !== 'passed') {
       log.info(`Network ${peerText(net.id)}: opened space_addition round ${peerText(round.roundId)} for '${peerText(spaceId)}'`);
       // `round` stays the key the client reads, now as the vote list shows it (no `pendingMeta`: the space's schema is not for the
       // answer); `rounds` is the shape every other opening door answers.
-      return { status: 202, body: { status: 'vote_pending', round: roundForOperator(net, round), rounds: [roundAnswer(net, round)] } };
+      return { status: 202, body: { status: 'vote_pending', round: roundForOperator(net, round), rounds: [roundAnswer(net, round, proposed.decided)] } };
     }
+    // Passed at open — on a club, and on a network with no other member, the proposer's yes carries it (Q-49). It landed through
+    // the one settle (`applySpaceAdditionRound` → `addSpacesToNetwork`, the one place a network gains a space); this door waits.
+    const landed = (await proposed.settled).find(s => s.roundId === round.roundId);
+    if (landed && !landed.ok) return { status: 500, error: landed.error ?? `Could not add '${spaceId}' to the network.` };
+  } else {
+    // pub/sub's publisher and a tree's root add directly (§1.5), through the same one place.
+    const direct = await addSpacesToNetwork(net.id, [{ networkId: networkSpaceId, localId: spaceId }], `added by ${caller.id ?? 'an instance admin'}`, { tokenId: caller.id ?? null });
+    if (direct.failed) return { status: 500, error: direct.failed };
   }
-  net.spaces.push(spaceId);
-  if (caller.id) net.spaceOrigins = recordOrigin(net.spaceOrigins ?? {}, spaceId, caller.id);
-  widenPeerTokens(cfg, net, [spaceId]);
-  saveConfig(cfg);
+  const after = getConfig();
+  const netAfter = after.networks.find(n => n.id === id) ?? net;
+  if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, spaceId, caller.id);
+  saveConfig(after);
   log.info(`Network ${peerText(net.id)}: added space '${peerText(spaceId)}'`);
   // F-42: a structural change drafts its own note for the members below (a no-op where nobody is below).
   void queueGeneratedNote(net.id, `${cfg.instanceLabel} added the space '${spaceId}' to '${net.label}'. It is adopted with its schema${layerOnAdd.validationMode ? ` and its ${layerOnAdd.validationMode} validation` : ''} where the token that joined the network may create spaces; otherwise it waits under "Announced, waiting for you".`, [spaceId]);
-  return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces] } } };
+  return { status: 200, body: networkView(netAfter), audit: { before, after: { spaces: [...netAfter.spaces] } } };
 }
 
 export const ResolvePendingSpaceBody = z.object({
@@ -368,13 +394,13 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   if (refusal) return { status: 403, error: refusal };
   dropPending();
   saveConfig(cfg);
-  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`, { tokenId: caller.id ?? null });
+  const accepted = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`, { tokenId: caller.id ?? null });
   const after = getConfig();
   const netAfter = after.networks.find(n => n.id === id);
-  if (!netAfter || !added.includes(localId)) {
+  if (!netAfter || accepted.failed || !accepted.added.includes(localId)) {
     // Put the proposal back: an accept that did not add must not silently lose it.
     if (netAfter && !(netAfter.pendingSpaces ?? []).some(p => p.networkId === spaceId)) { (netAfter.pendingSpaces ??= []).push(entry); saveConfig(after); }
-    return { status: 500, error: `Could not add '${localId}' to the network; the pending entry is kept.` };
+    return { status: 500, error: `${accepted.failed ?? `Could not add '${localId}' to the network.`} The pending entry is kept.` };
   }
   if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, localId, caller.id);
   saveConfig(after);
@@ -397,19 +423,12 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
   const leaveRefusal = networkLeaveRefusal(caller, net);
   if (leaveRefusal) return { status: 403, error: leaveRefusal };
 
-  const secrets = getSecrets();
   const warnings: string[] = [];
   await Promise.all(net.members.map(async (member) => {
-    const peerToken = secrets.peerTokens[member.instanceId];
-    if (!peerToken) return;
     try {
-      const r = await peerSafeFetch(`${member.url}/api/notify`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${peerToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ networkId: net.id, instanceId: cfg.instanceId, event: 'member_departed' }),
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (!r.ok) warnings.push(`${member.label}: HTTP ${r.status}`);
+      // Through the one notice sender (`notify-members.ts`): the token is read as it is sent, and a member without one is skipped.
+      const status = await sendNotice(net.id, member, 'member_departed');
+      if (status !== null && (status < 200 || status >= 300)) warnings.push(`${member.label}: HTTP ${status}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.warn(`member_departed to ${peerText(member.label)}: ${peerText(msg)}`);

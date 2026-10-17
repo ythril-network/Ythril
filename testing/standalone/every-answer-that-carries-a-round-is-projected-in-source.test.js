@@ -41,8 +41,12 @@ import { DOORS } from './_round-answer-doors.mjs';
 const POINTER_KEYS = ['networkId', 'networkLabel', 'roundId'];
 const PROJECTION = /\b(?:roundForOperator|roundAnswer|proposeRound)\s*\(/;
 const BUILDER_FILE = 'server/src/networks/vote-acts.ts';
-/** The sites found when this gate was written, `0f704f66`: a floor on the derivation, so an empty set cannot pass. */
-const SITE_FLOOR = 11;
+/**
+ * A floor on the derivation, so an empty set cannot pass. It was the eleven `openRoundHere` sites of `0f704f66`; bundle-106 made
+ * `proposeRound` the one open path, and the openers call it once each — the eight doors the table names (the six openers, the invite
+ * handshake, the wipe planner). Fewer sites is the consolidation, not a lost door: every door is still a table row.
+ */
+const SITE_FLOOR = 8;
 
 const keyName = (p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name))) ? p.name.text : null;
 const keysOf = (obj) => obj.properties.map(keyName).filter(Boolean);

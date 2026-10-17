@@ -9,7 +9,7 @@ import { requireAuth } from '../../auth/middleware.js';
 import { buildFileManifest } from '../../files/manifest.js';
 import { isInstanceLocalFile } from '../../sync/file-conflict.js';
 import { computeMerkleRoot } from '../../brain/merkle.js';
-import { spaceAllowed } from './_shared.js';
+import { refusePeerSpace } from './_shared.js';
 import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncManifestRouter = Router();
@@ -28,7 +28,7 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
   try {
     const { spaceId, networkId, since } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
     const sinceDate = since ? new Date(since) : undefined;
     // A conflict copy or schema snapshot is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
@@ -63,7 +63,7 @@ syncManifestRouter.get('/merkle', syncRateLimit, requireAuth, async (req, res) =
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
     const result = await computeMerkleRoot(spaceId);
     res.json({ ...result, networkId: networkId ?? null });

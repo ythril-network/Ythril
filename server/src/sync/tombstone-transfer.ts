@@ -37,6 +37,7 @@
  * start and outcome (never part of the receive watermark), its own wording, and its stops said once per window.
  */
 import { peerSafeFetch } from './peer-fetch.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { listTombstones } from '../brain/tombstones.js';
 import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
@@ -83,8 +84,10 @@ export async function pullTombstones(opts: {
   repair?: boolean;
   /** The records deleted per ground are added here, for the re-read's own completion line. */
   tally?: { issuer: number; upstream: number };
+  /** The space's turn with this member: its signal cuts the page in flight, and a refusal the peer answers is handed to it. */
+  turn?: ExchangeTurn;
 }): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, tally } = opts;
+  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, tally, turn } = opts;
   const repair = opts.repair === true;
   const outcome: TransferOutcome = { deliveredThrough: sinceSeq, truncated: false };
   const peer = logSafe(member.label ?? member.instanceId);
@@ -108,8 +111,9 @@ export async function pullTombstones(opts: {
         const url = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
           + `&networkId=${encodeURIComponent(networkId)}&sinceSeq=${ask.sinceSeq}&limit=${limit}`
           + `&cursor=${ask.cursor ?? encodeSeqCursor({ seq: ask.sinceSeq })}`;
-        const resp = await peerSafeFetch(url, requestInit());
-        if (!resp.ok) { await resp.body?.cancel().catch(() => {}); return { status: resp.status }; }
+        const init = requestInit();
+        const resp = await peerSafeFetch(url, { ...init, signal: turnSignal(init.signal, turn) });
+        if (!resp.ok) { turn?.refusedBy(await transferRefusal(resp)); await resp.body?.cancel().catch(() => {}); return { status: resp.status }; }
         // Keyed by COLLECTION name, as `GET /api/sync/tombstones` derives them from `TOMBSTONE_TYPES`. A key missing
         // here is a delete a peer told us about and we dropped on the floor.
         const data = await boundedJson<Record<string, unknown>>(resp, 'sync peer');
@@ -156,8 +160,10 @@ export async function pushTombstones(opts: {
   networkId: string;
   lastSeqPushed: number;
   requestInit: () => RequestInit;
+  /** The space's turn with this member: its signal cuts the page in flight, and a refusal the peer answers is handed to it. */
+  turn?: ExchangeTurn;
 }): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit } = opts;
+  const { member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit, turn } = opts;
   const outcome: TransferOutcome = { deliveredThrough: lastSeqPushed, truncated: false };
   const peer = logSafe(member.label ?? member.instanceId);
   const endpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
@@ -171,10 +177,11 @@ export async function pushTombstones(opts: {
     maxPages: MAX_TRANSFER_PAGES,
     read: (after, limit) => listTombstones(spaceId, after, limit),
     send: async (rows) => {
+      const init = requestInit();
       const resp = await peerSafeFetch(endpoint, {
-        ...requestInit(), method: 'POST', body: JSON.stringify({ tombstones: rows }),
+        ...init, signal: turnSignal(init.signal, turn), method: 'POST', body: JSON.stringify({ tombstones: rows }),
       });
-      if (!resp.ok) { await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
+      if (!resp.ok) { turn?.refusedBy(await transferRefusal(resp)); await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
       // `refused` is additive (bundle-46): an older peer does not send it. A refusal is by shape or seq, which a
       // re-send cannot change, so the push still advances past it — as a record push does past `rejected`.
       // `declined` is additive too (bundle-51): the peer's deletion authority did not honour that many. A re-send is

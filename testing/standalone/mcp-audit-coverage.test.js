@@ -256,7 +256,8 @@ describe('MCP audit coverage', () => {
   it('the dispatcher actually calls the recorder', () => {
     // The map is inert on its own. This is the wiring, and it is the line a refactor would drop.
     const src = readFileSync(ROUTER, 'utf8');
-    assert.match(src, /const status = result\?\.isError \? 422 : 200;/,
+    // A failed act after a passed vote is the one error result answered 500 (bundle-106, design v5 section 2.2 v4 (3)); still from the RESULT.
+    assert.match(src, /const status = result\?\.isError \? (?:\(isSpaceActFailure\(result\) \? 500 : 422\)|422) : 200;/,
       'the audit status must be taken from the RESULT, not from the transport');
     assert.match(src, /recordToolCall\(caller, name, callSpace, status,/,
       'the dispatch must record every call, whichever door it arrived at');

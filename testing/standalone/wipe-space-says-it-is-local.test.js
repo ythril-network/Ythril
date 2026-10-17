@@ -49,9 +49,12 @@ describe('wipe_space says a networked space VOTES', () => {
    * happens on a networked space, unmissably**, because the failure mode is a caller who thinks the data is
    * gone when it is not — or now, one who reads `vote_pending` as an error and retries into a second round.
    */
-  it('says it opens a vote and wipes nothing yet', () => {
-    assert.match(WIPE, /OPENS A VOTE AND WIPES NOTHING YET/,
-      'the single most consequential fact about this tool');
+  // Since bundle-106 (Q-453) a networked wipe the proposer's own yes decides acts in the call: the most consequential fact is now
+  // WHERE it wipes at once and where it only opens a vote — both said, unmissably.
+  it('says it opens a vote, where it wipes at once, and where nothing is wiped yet', () => {
+    assert.match(WIPE, /ON A NETWORKED SPACE IT OPENS A VOTE/, 'the single most consequential fact about this tool');
+    assert.match(WIPE, /HERE IN THIS CALL/, 'where the proposer\'s yes decides, the space is wiped in the call');
+    assert.match(WIPE, /nothing is wiped yet/, 'elsewhere nothing is wiped until a round passes');
   });
 
   it('says a reply with no counts is the SUCCESS case', () => {
@@ -113,7 +116,10 @@ describe('the claim matches the implementation', () => {
 
   it('omitting `types` really wipes everything', () => {
     // The parameter where a wrong assumption is destructive: an omitted filter is not a safe default.
-    assert.match(WIPE, /OMIT IT TO WIPE ALL FIVE/, 'a caller must not read absence as "nothing"');
+    assert.match(WIPE, /OMIT IT TO WIPE THEM ALL/, 'a caller must not read absence as "nothing"');
+    // The list the description names is the one the schema's enum is built from, never a hand-written count: it said
+    // "all five" while the wipe covered six (links), which is the wrong answer to exactly the question this row asks.
+    assert.match(WIPE, /a subset of \$\{BRAIN_COLLECTIONS\.map\(/, 'the description lists the types from BRAIN_COLLECTIONS, as the enum does');
     assert.match(LIFECYCLE, /types && types\.length > 0 \? types : WIPE_COLLECTION_TYPES/,
       'and that is what the code does');
   });

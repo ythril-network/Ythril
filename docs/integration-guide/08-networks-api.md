@@ -269,8 +269,8 @@ POST /api/networks/:id/members
 }
 ```
 
-In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash). Where this instance's own yes passes the round (the proposer's yes always counts, and a closed or democratic network where the two are its only members passes at open), the answer is `200` with the member added.
-In `club` networks the member is added immediately.
+In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash). Where this instance's own yes passes the round (the proposer's yes always counts, and a closed or democratic network where the two are its only members passes at open), the answer is `201` with the member added.
+In `club` networks the member is added immediately (`201`).
 In `braintree` networks all ancestors up to the root must approve.
 In `pubsub` networks the subscriber is added immediately with `direction` forced to `push` (publisher pushes to subscriber) regardless of the request body value.
 
@@ -354,7 +354,7 @@ re-apply it.
 
 **A passed `space_deletion` never deletes a member's space.** It takes the space out of the network on every member,
 which keeps its copy and data as a local space; only the proposer deletes its own copy, once no other network carries
-it. `DELETE /api/spaces/:id` on a networked space answers `200` when this instance's own yes passes the round, and otherwise `202` with the rounds it opened, each as `{ "networkId", "networkLabel", "roundId", "round" }` with `round` the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
+it. `DELETE /api/spaces/:id` on a networked space answers `200` when this instance's own yes passes the round, and otherwise `202` (`vote_pending`, or `passed` while its change runs) with the rounds it opened; the `confirm` rule and the `500`, `503` and `204` answers are in [Space Deletion and Wipe](06c-space-deletion-and-wipe-api.md), each as `{ "networkId", "networkLabel", "roundId", "round" }` with `round` the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
 
 The instance that opens a round other than a join or a removal is one of its voters: its signed `yes` is in `votes`
 from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
@@ -460,7 +460,7 @@ afterwards; this is where the answer to *"what happened to that vote?"* stays. `
 | `type` | the round's type (`join`, `remove`, `space_deletion`, `space_wipe`, `meta_change`, `space_addition`) |
 | `space` | the space as THIS instance calls it; absent for a round that is not about a space |
 | `subjectLabel` | the member or space the vote was about, as the round named it |
-| `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes) `interrupted` (a passed deletion or wipe whose change a restart interrupted; it is finished on the next start, not failed), or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |
+| `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes), or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |
 | `yes`, `veto`, `eligible` | the tally this instance counted, and how many members could vote |
 | `summary` | the proposed change of a `meta_change` round, as on [the open list](#list-open-vote-rounds) |
 
@@ -735,7 +735,7 @@ The fork gets a fresh UUID, no members, no pending rounds. You become the root. 
 DELETE /api/networks/:id/members/:instanceId
 ```
 
-In `closed`/`democratic` networks this opens a removal voting round (**202**). In `club` networks the member is removed immediately (**204**), and the removal reaches every other member on their next sync cycle (`Q-135`). In `braintree` networks the ancestor path must vote; if the subject is a direct child, the round auto-concludes.
+In `closed`/`democratic` networks this opens a removal voting round (**202**), unless this instance's own yes passes it at open (the proposer's yes always counts, and where the two are its only members, or the yes is the quorum, the member is removed at once, **204**). In `club` networks the member is removed immediately (**204**), and the removal reaches every other member on their next sync cycle (`Q-135`). In `braintree` networks the ancestor path must vote; if the subject is a direct child, the round auto-concludes.
 
 **Response** `204` (immediate removal) or `202`:
 

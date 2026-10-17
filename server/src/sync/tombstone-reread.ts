@@ -42,6 +42,7 @@ import { deliveryOfMember, nextRereadState } from './deletion-authority.js';
 import { foldRepairMark, readMemberSpaceMark } from './member-space-mark.js';
 import { pullTombstones } from './tombstone-transfer.js';
 import type { TransferOutcome } from './watermark.js';
+import type { ExchangeTurn } from './held-answer.js';
 
 const STEP = 'sync tombstone re-read';
 
@@ -75,8 +76,10 @@ export async function rereadUpstreamTombstones(o: {
   requestInit: () => RequestInit;
   /** The ordinary tombstone pull this cycle made: where it started and how it ended. */
   ordinary: { sinceSeq: number; outcome: TransferOutcome };
+  /** The space's turn with this member: the re-read's fetches take its signal (design v5 X5). */
+  turn?: ExchangeTurn;
 }): Promise<void> {
-  const { member, spaceId, remoteSpaceId, networkId, requestInit, ordinary } = o;
+  const { member, spaceId, remoteSpaceId, networkId, requestInit, ordinary, turn } = o;
   if (!deliveryOfMember(spaceId, member).upstream) return;
   const current = stateOf(networkId, member.instanceId, spaceId);
   if (current === 'done') return;
@@ -87,7 +90,7 @@ export async function rereadUpstreamTombstones(o: {
   const start = startOf(current);
   const tally = { issuer: 0, upstream: 0 };
   try {
-    const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, repair: true, tally });
+    const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, repair: true, tally, turn });
     const complete = !outcome.truncated;
     const progressed = outcome.deliveredThrough > start;
     record(member.instanceId, spaceId, {

@@ -26,6 +26,7 @@
  * and answer different questions (`sync/watermark.ts`).
  */
 import { peerSafeFetch } from './peer-fetch.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
 import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
@@ -62,6 +63,8 @@ export async function pullFamily(o: {
   /** The request init for a batch-sized answer (`BATCH_FETCH_TIMEOUT_MS`). */
   requestInit: () => RequestInit;
   linkage: LinkageCheck;
+  /** The space's turn with this member: its signal cuts the page in flight, and a refusal the peer answers is handed to it. */
+  turn?: ExchangeTurn;
 }): Promise<PullResult> {
   const { family, member, spaceId, remoteSpaceId, networkId, sinceSeq } = o;
   const key = family.payloadKey;
@@ -80,8 +83,9 @@ export async function pullFamily(o: {
         spaceId: remoteSpaceId, networkId, sinceSeq: String(ask.sinceSeq), limit: String(limit), full: 'true',
         ...(ask.cursor ? { cursor: ask.cursor } : {}),
       });
-      const resp = await peerSafeFetch(`${member.url}/api/sync/${key}?${params}`, o.requestInit());
-      if (!resp.ok) return { status: resp.status };
+      const init = o.requestInit();
+      const resp = await peerSafeFetch(`${member.url}/api/sync/${key}?${params}`, { ...init, signal: turnSignal(init.signal, o.turn) });
+      if (!resp.ok) { o.turn?.refusedBy(await transferRefusal(resp)); return { status: resp.status }; }
       const page = await boundedJson<ServedPage>(resp, 'sync peer');
       return {
         groups: [(Array.isArray(page.items) ? page.items : []).filter(item => !isRider(item))],

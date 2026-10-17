@@ -166,7 +166,11 @@ export const FROZEN = {
   // LOWERED 733 -> 640 with bundle-52 (`Q-277`): the per-family pull (`pullType`) and push (`pushCollection`) left for
   // `sync/pull-family.ts` and `sync/push-family.ts`, over the two pagers that own a position inside a run of equal seqs
   // (`sync/seq-run-pager.ts`, `sync/push-seq-runs.ts`). The ceiling follows the file down.
-  'server/src/sync/engine.ts': 640,
+  // LOWERED 640 -> 453 with bundle-106 PR A (§3.3a, §3.4): the per-space turn, the pull and the push moved out to
+  // `sync/space-exchange.ts`, where the hold chooses the spaces, the turn enters the fence and every mark asks the hold.
+  // LOWERED 453 -> 406 with bundle-106 X11: what a served vote list changes here (shape, evidence, adoption, cast merge) moved out to
+  // `sync/served-rounds.ts`; the engine fetches the list and settles what changed.
+  'server/src/sync/engine.ts': 406,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

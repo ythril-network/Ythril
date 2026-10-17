@@ -96,8 +96,9 @@ export interface RouteRight {
  *
  * **What deliberately did NOT move:**
  * - The **collection wipes** (`DELETE /facts`, `/entities`, `/edges`, `/chrono`) stay `admin`. Their MCP
- *   counterpart `delete_space_data` is `admin: true`, so those two doors already agree — and emptying a collection is not
- *   the same act as deleting a row.
+ *   counterpart `delete_space_data` is governed by its `spaceAdmin` flag (D-41), not by this table: emptying a whole
+ *   space is the space admin's act, while a collection wipe here stays the area's `admin` rung — and emptying a
+ *   collection is not the same act as deleting a row.
  * - `DELETE /api/brain/spaces/:spaceId/files` (the file-META record) stays `admin`. No tool mirrors it, so
  *   lowering it would weaken a door for parity with nothing.
  * - `schema_update` used to be listed here as the one known difference in the OTHER direction — REST
@@ -446,7 +447,10 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
    */
   { route: '/api/:tool', why: 'the generic tool door. Every tool is priced in `TOOL_RIGHTS` and enforced '
     + 'per call by `callTool`, which is what both doors dispatch through. A single area/rung row here '
-    + 'would govern forty-five different capabilities with one number, and would run first.' },
+    + 'would govern forty-five different capabilities with one number, and would run first. '
+    + 'Space admin may empty a networked space too (owner, 2026-10-15, D-41): the network\'s own rules decide whether the '
+    + 'wipe acts at once, and a member that does not want to be emptied leaves the network — `delete_space_data` is '
+    + 'governed by its `spaceAdmin` flag, the one rights decision for both tool doors.' },
 
   /*
    * THE SPACE'S SETTINGS AND ITS DESTRUCTION. Neither is a view of one area's data.

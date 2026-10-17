@@ -70,10 +70,11 @@ export const BOUND_CASTS_SINCE = '5.6.0';
 /**
  * What a round would DO, as a cast's bound signature covers it (`Q-138`): its type and its target. `pendingMeta` is
  * not here: a sender inlines library references into it on the way out (`roundForPeer`), so honest copies differ.
- * `wipeTypes` is sorted, because its order is not content.
+ * `wipeTypes` is sorted and deduplicated, because neither its order nor a repeat is content: adoption stores the list canonical
+ * (bundle-106, X11), and a cast signed over the list as an older proposer sent it must verify against what is stored.
  */
 function roundTargetFields(round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>): string[] {
-  return [round.type, round.spaceId ?? '', round.networkSpaceId ?? '', [...(round.wipeTypes ?? [])].sort().join(',')];
+  return [round.type, round.spaceId ?? '', round.networkSpaceId ?? '', [...new Set(round.wipeTypes ?? [])].sort().join(',')];
 }
 
 /**

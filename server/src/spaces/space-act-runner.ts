@@ -53,7 +53,7 @@ import { classifyReadFailure } from '../brain/store-failure.js';
 import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
 import { abortTransfersOf, awaitSpaceTransfersDrained, resetSpaceTransfersForTest } from '../sync/space-transfer-fence.js';
 import { forgetReceiveMarks } from '../sync/member-space-mark.js';
-import { settleSpaceAct } from './apply-wipe-round.js';
+import type * as SpaceRounds from './apply-wipe-round.js';
 import { keyedLimiter, type KeyedLimiter } from '../util/keyed-limiter.js';
 import { warnOnce } from '../util/warn-once.js';
 import { backoffDelayMs } from '../util/backoff.js';
@@ -61,6 +61,7 @@ import { withinTimeBound, withinFsBound, isTimeBoundEnded } from '../util/time-b
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { log, peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
+import { auditRoundEffect, ROUND_SPACE_ACT_OPERATION, SPACE_ACT_COMPLETED_OPERATION } from '../networks/round-audit.js';
 import type * as Registry from '../metrics/registry.js';
 
 /*
@@ -71,8 +72,13 @@ import type * as Registry from '../metrics/registry.js';
 let counters: typeof Registry | null = null;
 async function countersLoaded(): Promise<typeof Registry> {
   counters ??= await import('../metrics/registry.js');
+  // The settle of the rounds an act carries, loaded the same way and for a reason of its own: the settle registers acts here, so a
+  // static import both ways is a module cycle. Loaded before any body runs, so the completion's one synchronous write has it.
+  spaceRounds ??= await import('./apply-wipe-round.js');
   return counters;
 }
+
+let spaceRounds: typeof SpaceRounds | null = null;
 
 export type { SpaceActKind } from '../config/types.js';
 
@@ -280,6 +286,34 @@ export function spaceActStands(
     return { entryId: '', kind: op.type, types: 'all', state: 'running', ...(op.newId ? { newId: op.newId } : {}) };
   }
   return null;
+}
+
+/*
+ * The other readers of the act list: what a settle, a door and the network answer need to know about the entries — answered here,
+ * because the runner is the one module that reads the list (`one-standing-predicate`), so no second reading of it can drift.
+ */
+
+/** The entry that carries round `roundId` of network `networkId`, if one stands: a pass that meets the round again joins it, never doubles it. */
+export function spaceActOfRound(cfg: Pick<Config, 'pendingSpaceActs'>, networkId: string, roundId: string): SpaceActEntry | undefined {
+  return (cfg.pendingSpaceActs ?? []).find(e => e.rounds.some(r => r.networkId === networkId && r.roundId === roundId));
+}
+
+/** The entry `req` would join — the same act by key — if one stands: a door that repeats a local act answers that one. */
+export function spaceActJoinedBy(cfg: Pick<Config, 'pendingSpaceActs'>, req: SpaceActRequest): SpaceActEntry | undefined {
+  const types = req.kind === 'wipe' ? canonicalWipeTypes(req.types) : undefined;
+  const key = keyOf({ kind: req.kind, localId: req.localId, types, networkId: req.kind === 'delete' ? req.networkId : undefined,
+    newId: req.kind === 'rename' ? req.newId : undefined });
+  return (cfg.pendingSpaceActs ?? []).find(e => keyOf(e) === key);
+}
+
+/** The entries standing for space `localId`, every kind, in registration order. */
+export function spaceActsOfSpace(cfg: Pick<Config, 'pendingSpaceActs'>, localId: string): readonly SpaceActEntry[] {
+  return (cfg.pendingSpaceActs ?? []).filter(e => e.localId === localId);
+}
+
+/** The entries that carry a round of network `networkId`, or its deletion's network half: what the network answer lists as owed. */
+export function spaceActsOfNetwork(cfg: Pick<Config, 'pendingSpaceActs'>, networkId: string): readonly SpaceActEntry[] {
+  return (cfg.pendingSpaceActs ?? []).filter(e => e.rounds.some(r => r.networkId === networkId) || (e.kind === 'delete' && e.networkId === networkId));
 }
 
 // ── register ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -497,7 +531,7 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
       for (const r of e.rounds) {
         const net = cfg.networks.find(n => n.id === r.networkId);
         const round = net?.pendingRounds.find(x => x.roundId === r.roundId);
-        if (net && round) settleSpaceAct(net, round, e.id === id && !outcome.absent ? 'completed' : 'absent');
+        if (net && round) spaceRounds!.settleSpaceAct(net, round, e.id === id && !outcome.absent ? 'completed' : 'absent');
       }
     }
   });
@@ -510,6 +544,10 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
     logInternalAudit({ method: 'DELETE', path: `internal:space-act:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId });
+  } else if (!waiters.has(id)) {
+    // A passed round's act nobody is waiting for — a relay, gossip, the tick, or a door that already answered (X17, VR7): one entry
+    // per round it carried out. The request a door is still waiting on is that door's route's own entry.
+    for (const r of covered) auditRoundEffect(ROUND_SPACE_ACT_OPERATION, r.networkId, r.roundId, entry.localId);
   }
   return result(entry, id, {
     ok: true, rounds: covered,
@@ -519,8 +557,9 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   });
 }
 
-/** The audit operation of an act with no round that completed after its door answered (or with no door at all). */
-export const SPACE_ACT_COMPLETED_OPERATION = 'space.act_completed';
+/** The audit operation of an act with no round that completed after its door answered (or with no door at all). Declared beside the
+ *  round effects (`networks/round-audit.ts`), which `audit/middleware.ts` re-exports without importing this module. */
+export { SPACE_ACT_COMPLETED_OPERATION };
 
 function failed(id: string, entry: SpaceActEntry, err: unknown, via: string): SpaceRoundSettled {
   if (closed) {
@@ -602,7 +641,10 @@ export async function resumeSpaceActs(now: number = Date.now()): Promise<void> {
   const entries = standingEntries().filter(e => due(e, now));
   if (entries.length === 0) return;
   const bySpace = new Map<string, string[]>();
-  for (const e of entries) bySpace.set(e.localId, [...(bySpace.get(e.localId) ?? []), e.id]);
+  for (const e of entries) {
+    const ids = bySpace.get(e.localId);
+    if (ids) ids.push(e.id); else bySpace.set(e.localId, [e.id]);
+  }
   await eachSpace('Resume of space acts', [...bySpace.keys()], async (spaceId) => {
     for (const id of bySpace.get(spaceId) ?? []) {
       const r = await runSpaceAct(id, { via: 'resume' });

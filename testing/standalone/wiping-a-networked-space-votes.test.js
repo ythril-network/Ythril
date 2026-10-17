@@ -37,7 +37,8 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
 describe('the decision lives in one place, and both doors ask it', () => {
   it('the REST route calls the planner', () => {
-    assert.match(src('server/src/app.ts'), /planSpaceWipe\(spaceId, rawTypes\)/,
+    // bundle-106: the planner opens the rounds AND waits for what passed (`wipeSpaceAsRequested`); the route only renders it.
+    assert.match(src('server/src/app.ts'), /wipeSpaceAsRequested\(spaceId, types\)/,
       'the wipe route must not decide for itself whether a space is governed');
   });
 
@@ -52,7 +53,7 @@ describe('the decision lives in one place, and both doors ask it', () => {
      * rule" is structural rather than something two greps agree about. What is asserted is that neither
      * adapter has grown a copy back.
      */
-    assert.match(src('server/src/spaces/delete-space-data.ts'), /planSpaceWipe\(space, types\)/,
+    assert.match(src('server/src/spaces/delete-space-data.ts'), /wipeSpaceAsRequested\(space, covered\)/,
       'the shared module must be the thing that asks whether this space is governed');
 
     assert.match(src('server/src/mcp/tools/spaces.ts'), /deleteSpaceData\(/,
@@ -68,7 +69,7 @@ describe('the decision lives in one place, and both doors ask it', () => {
      */
     const restDoor = src('server/src/api/tools.ts');
     assert.match(restDoor, /callTool\(/, 'the REST door must dispatch through the shared function');
-    for (const reachingPast of [/wipeSpace\(/, /bulkDelete/, /planSpaceWipe\(/, /deleteSpaceData\(/]) {
+    for (const reachingPast of [/wipeSpace\(/, /bulkDelete/, /wipeSpaceAsRequested\(/, /openSpaceWipeRounds\(/, /deleteSpaceData\(/]) {
       assert.doesNotMatch(restDoor, reachingPast,
         'the REST door names the wipe directly — a door with its own path to the data is how the five old '
         + 'routes came to skip the network vote the tool opened');
@@ -85,20 +86,22 @@ describe('the decision lives in one place, and both doors ask it', () => {
   });
 
   it('and a wipe is not started when the plan says governed', () => {
-    // The assertion that makes this a behaviour change rather than a notification: the governed branch must
-    // RETURN before `wipeSpace` runs, on both doors.
-    const app = src('server/src/app.ts');
-    const governedAt = app.indexOf('if (plan.governed)');
-    const wipeAt = app.indexOf('await wipeSpace(spaceId');
+    // The assertion that makes this a behaviour change rather than a notification: the rounds are opened FIRST, and the local
+    // wipe runs only when no network votes on the space — on both doors, which share the planner (bundle-106: a governed wipe
+    // acts through the round that passed, never through the local path).
+    const plan = src('server/src/spaces/wipe-vote.ts');
+    const body = plan.slice(plan.indexOf('export async function wipeSpaceAsRequested('));
+    const governedAt = body.indexOf('openSpaceWipeRounds(spaceId, types)');
+    const wipeAt = body.indexOf('wipeLocally(spaceId, types)');
     assert.ok(governedAt > 0 && wipeAt > governedAt,
-      'the governed branch must come BEFORE the wipe, or the vote is decoration');
-    assert.match(app.slice(governedAt, wipeAt), /return;/, 'and it must return');
+      'the governed rounds must be opened BEFORE the local wipe is chosen, or the vote is decoration');
+    assert.match(body.slice(governedAt, wipeAt), /const local = opened\.length === 0;/, 'and the local wipe runs only when no round opened');
   });
 });
 
 describe('a space in no network is untouched by this', () => {
   it('the planner says not-governed when nothing holds the space', () => {
-    assert.match(src('server/src/spaces/wipe-vote.ts'), /if \(nets\.length === 0\) return \{ governed: false \}/,
+    assert.match(src('server/src/spaces/wipe-vote.ts'), /if \(voting\.length === 0\) return \[\];/,
       'an unnetworked wipe stays immediate, final, and exactly what it was');
   });
 });
@@ -106,7 +109,7 @@ describe('a space in no network is untouched by this', () => {
 describe('the round carries what was voted for', () => {
   it('wipeTypes rides on the round rather than being resolved later', () => {
     const plan = src('server/src/spaces/wipe-vote.ts');
-    assert.match(plan, /wipeTypes: \[\.\.\.types\]/, 'stored when a subset was asked for');
+    assert.match(plan, /wipeTypes: \[\.\.\.stored\]/, 'stored when a subset was asked for (canonical, so the signature covers one list)');
     assert.match(plan, /type: 'space_wipe'/, 'under its own round type');
   });
 
@@ -138,8 +141,9 @@ describe('every conclusion site applies it, through one function', () => {
     ['server/src/networks/round-expiry.ts', 'the expiry job'],
   ];
   for (const [file, where] of SITES) {
+    // bundle-106: each site settles through the one step (`settleRounds`), which concludes and applies.
     it(`${where} concludes the wipe`, () => {
-      assert.match(src(file), /\bapplyRoundConclusion\(/,
+      assert.match(src(file), /\bsettleRounds\(/,
         `${file} must apply a concluded wipe — a site that misses it leaves this instance holding data every peer deleted`);
     });
   }
@@ -172,17 +176,20 @@ describe('peers are told a round is open', () => {
   it('and it triggers an immediate sync, like space_deletion_pending', () => {
     // A deadline that expires before anyone sees the round is a vote nobody got to cast.
     assert.match(src('server/src/api/notify.ts'),
-      /event === 'space_deletion_pending' \|\| event === 'space_wipe_pending'/,
+      /SYNC_TRIGGER_EVENTS\s*=\s*\[[^\]]*'space_deletion_pending'[^\]]*'space_wipe_pending'/,
       'both irreversible space-scoped rounds pull immediately rather than waiting for the schedule');
   });
 
   it('the peers are told, and from the one place that decides', () => {
     // Notifying from an adapter would be a second copy of the same decision: the door that forgot would
-    // open a round its peers never heard about, and a round nobody sees is a vote nobody casts.
-    assert.match(src('server/src/spaces/delete-space-data.ts'), /notifyPeersOfWipe\(/,
-      'the shared capability must tell the peers');
-    assert.match(src('server/src/app.ts'), /notifyPeersOfWipe\(/,
-      'the admin-side space wipe is a different route and still notifies on its own');
+    // open a round its peers never heard about, and a round nobody sees is a vote nobody casts. Since bundle-106 the one place is
+    // the open path itself (`proposeRound` -> `notifyMembersToPull`), which every opener — both wipe doors included — goes through.
+    assert.match(src('server/src/networks/propose-round.ts'), /notifyMembersToPull\(/,
+      'the open path must tell the members');
+    assert.match(src('server/src/spaces/wipe-vote.ts'), /proposeRound\(/,
+      'the wipe planner both doors share must open its rounds through the open path');
+    assert.match(src('server/src/networks/notify-members.ts'), /event: 'space_wipe_pending'/,
+      'the wipe is told under its own event');
   });
 });
 
@@ -195,8 +202,9 @@ describe('the tool says what actually happens', () => {
     return s.slice(d, d + end);
   })();
 
-  it('says a networked space votes and wipes nothing yet', () => {
-    assert.match(DESC, /OPENS A VOTE AND WIPES NOTHING YET/,
+  it('says a networked space votes, and where nothing is wiped yet', () => {
+    assert.match(DESC, /ON A NETWORKED SPACE IT OPENS A VOTE/, 'a networked wipe is governed');
+    assert.match(DESC, /nothing is wiped yet \(`status: vote_pending`\)/,
       'a caller must not read the absence of counts as a failure and retry');
   });
 

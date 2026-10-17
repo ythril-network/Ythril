@@ -35,7 +35,7 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach, peerHoldRefusal, withoutHeldForPeer } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -105,6 +105,12 @@ export interface ToolCallOutcome {
  * body a refusal carries beside its prose — the judge's `{ error, issues, warnings }` — so a client that reads that half and not the
  * text sees the same refusal.
  */
+/** Is a tool's error result the failed-act answer (`spaces/space-act-failure.ts`: our sentence, `space_act_failed`, `status: 'passed'`)? */
+function isSpaceActFailure(result: { structuredContent?: Record<string, unknown> } | undefined): boolean {
+  const body = result?.structuredContent;
+  return body?.['code'] === 'space_act_failed' && body?.['status'] === 'passed';
+}
+
 function refuse(status: number, text: string, callSpace = '', structuredContent?: Record<string, unknown>): ToolCallOutcome {
   return {
     result: { content: [{ type: 'text' as const, text }], isError: true, ...(structuredContent ? { structuredContent } : {}) },
@@ -271,6 +277,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // administering *a* space, because it runs before a space is named; this is where one exists.
     const adminRefusal = spaceAdminRefusal(tool, rights, sid);
     if (adminRefusal) return refuseAudited(403, adminRefusal, sid);
+    // A peer token naming a space held while a wipe is applied on one side: the sync doors' 423, on this door too (W13).
+    const held = peerHoldRefusal(caller.tokenId, sid);
+    if (held) return refuseAudited(held.status, held.text, sid, '', { ...held.body });
   }
   const callSpace = rawSpace;
   // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
@@ -457,7 +466,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return withUnknownFieldRows(refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace), rows);
     }
     let snapshots: AuditSnapshots | undefined;
-    const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
+    const handlerSpaceIds = withoutHeldForPeer(caller.tokenId, toolReach(name, rights, accessibleSpaceIds));
     const result = await tool.handle({
       args: a,
       callSpace,
@@ -481,7 +490,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     });
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
-    const status = result?.isError ? 422 : 200;
+    // A failed act after a passed vote is a FAILURE the act's tool answers with `spaceActFailureAnswer`'s body (design v5 section 2.2
+    // v4 (3)): 500, as the REST route answers it - not the 422 of a call that was refused.
+    const status = result?.isError ? (isSpaceActFailure(result) ? 500 : 422) : 200;
     recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
     return withUnknownFieldRows({ result, status, callSpace }, rows);
   } catch (err) {

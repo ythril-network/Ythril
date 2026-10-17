@@ -84,9 +84,14 @@ export function runnerIsIdle(runner, loader, now = Date.now()) {
 
 /** Resolve once {@link runnerIsIdle}; throws (never returns) when it is not idle after `maxTurns` turns of the event loop. */
 export async function untilRunnerIdle(runner, loader, { maxTurns = 4000, now } = {}) {
+  // waits-differently: bounded by TURNS of the event loop, not by a deadline read from the clock (design v5 TS-2) — a turn count is the
+  // bound this harness promises its callers, and it throws naming what stayed busy.
   for (let i = 0; i < maxTurns; i++) {
     if (runnerIsIdle(runner, loader, now ?? Date.now())) return;
-    await new Promise(resolve => setImmediate(resolve));
+    // waits-differently: every fiftieth turn is a zero timer — an act's body is store work, and four thousand `setImmediate` turns passed
+    // in a few milliseconds while one wipe batch was still on the wire; a timer turn costs a clock tick (about 15 ms on Windows), so
+    // only some turns are one, and a wait for something that never happens still ends in about a second.
+    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 0) : setImmediate(resolve)));
   }
   throw new Error(`the runner never went idle: running=${runner.spaceActsRunning()}, entries=${JSON.stringify(entriesOf(loader).map(e => [e.kind, e.localId, e.state]))}`);
 }

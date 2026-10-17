@@ -8,8 +8,8 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { isProxy } from '../../spaces/proxy.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
-import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
-import { spacePurpose, unknownWriteFieldsToReport } from '../../spaces/spaces.js';
+import { deleteSpaceData, wipeToolResult } from '../../spaces/delete-space-data.js';
+import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
@@ -69,7 +69,10 @@ export const list_spacesTool: ToolHandler = {
       // Q-320: this instance's answer to a top-level field a write does not take, so an integrator learns the mode BEFORE it writes.
       // `'refuse'`, absent when the space warns — the same convention and the same reader as `GET /api/spaces`.
       const unknownWriteFields = unknownWriteFieldsToReport(s);
+      // An owed or running act of the space, for an instance administrator only — the reader `GET /api/spaces` asks too (W17).
+      const actPending = spaceActPendingField(getConfig(), s.id, { rights: ctx.rights });
       return {
+      ...(actPending ? { actPending } : {}),
       id: s.id,
       label: s.label ?? null,
       purpose: spacePurpose(s) ?? null,
@@ -761,31 +764,36 @@ export const delete_space_dataTool: ToolHandler = {
     + 'grant, which is its own right and is not the same as holding the admin rung on all four areas. '
     + 'IRREVERSIBLE: there is no undo and no trash, so `confirm: true` is required, and the call that '
     + 'arrives carrying it is the call that runs. Throttled to five calls a minute, on both doors.\n\n'
-    + 'ON A NETWORKED SPACE IT OPENS A VOTE AND WIPES NOTHING YET. Emptying a space the network shares is a '
-    + 'governed act, like deleting one: a round opens in every network that holds the space, this instance '
-    + 'votes yes, and the wipe happens on EVERY member when a round passes. A single veto stops it there. So '
-    + 'a reply saying `vote_pending` is the success case — do not retry it, and do not read the absence of '
-    + 'counts as a failure. Watch the rounds: `rounds` carries each, as the vote list shows it.\n\n'
-    + 'ON A SPACE IN NO NETWORK it wipes immediately and finally, exactly as it always has. Nothing about an '
-    + 'unnetworked instance changed.\n\n'
+    + 'ON A NETWORKED SPACE IT OPENS A VOTE in every network that holds the space, and this instance votes yes. '
+    + 'Where that yes decides — a club, a pub/sub network this instance publishes, a network where it is the only '
+    + 'member — the round passes at once and the space is wiped HERE IN THIS CALL (`status: wiped`, with the counts), '
+    + 'and on every other member when it applies the round. Elsewhere nothing is wiped yet (`status: vote_pending`): '
+    + 'the wipe happens on every member when a round passes, and a single veto stops it there. A pub/sub SUBSCRIBER '
+    + 'wipes only its own copy, opens no vote, and refills from the publisher (`refills: true`). `status: passed` with '
+    + '`queued: true` means the vote passed and the change here is still running, or failed and is retried at '
+    + '`retryAt` — see `network_get` (`owedSpaceActs`). Every answer carries `rounds`, each with its `outcome`.\n\n'
+    + 'ON A SPACE IN NO NETWORK it wipes immediately and finally, exactly as it always has.\n\n'
     + 'WHY IT VOTES RATHER THAN PROPAGATING. A wipe writes NO tombstones and deletes the existing ones, and '
     + 'tombstones are the only thing that tells a peer a record is gone — so a local wipe on a shared space '
     + 'used to be undone by the next sync, which offered everything back to an instance with no record of any '
     + 'deletion. Voting removes that problem rather than solving it: the peers are wiping too.\n\n'
-    + 'IT IS IDEMPOTENT. Wiping an empty space succeeds and returns zeroes rather than erroring, so a retry '
-    + 'after a dropped connection is safe.\n\n'
+    + 'A REPEAT answers the vote while it is open, or the change while it is still being applied here, in each '
+    + 'network (`repeated: true`), and opens no second vote; in a network where the change has completed, the same '
+    + 'call is a new request. Wiping an empty space succeeds and returns zeroes rather than erroring.\n\n'
     + 'WHAT ELSE GOES WITH IT: the review queues are cleared for whatever you wiped — duplicate and '
     + 'contradiction findings are claims ABOUT two records, so once those records are gone the finding is not '
     + 'merely stale, it is unopenable. Wiping `files` also deletes the space\'s file directory on disk and '
     + 'recreates it empty.\n\n'
     + 'PARAMETERS:\n'
-    + '- `types` — a subset of `facts`, `entities`, `edges`, `chrono`, `files`. OMIT IT TO WIPE ALL FIVE; '
+    + `- \`types\` — a subset of ${BRAIN_COLLECTIONS.map(t => `\`${t}\``).join(', ')}. OMIT IT TO WIPE THEM ALL; `
     + 'an omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings '
     + 'belonging to the types you named.\n'
     + '- `space` — the space to empty. On a proxy this is the proxy\'s own id and there is no `targetSpace` '
     + 'here, so do not reach for this tool to empty one member.\n\n'
-    + 'RESPONSE: a per-collection count of what was deleted. Zeroes mean the space was already empty, not '
-    + 'that anything refused.',
+    + 'RESPONSE: `status`, `types`, `rounds` when the space is networked, and when it was wiped here the '
+    + 'per-collection counts, both flat and in `deleted`. Zeroes mean the space was already empty, not that '
+    + 'anything refused. A failure after a passed vote is an error with `code: space_act_failed` and '
+    + '`status: passed`: do not retry it — the vote stands and this instance retries the change itself.',
   mutating: true,
   /*
    * SPACE-admin, not instance-admin. Owner, 2026-09-16: *"Sync both doors!!! Space admin to wipe space"*.
@@ -794,6 +802,11 @@ export const delete_space_dataTool: ToolHandler = {
    * meant INSTANCE admin — not a stricter door, a DIFFERENT question, so the administrator of a space
    * could empty it over REST and was refused over MCP. The two were recorded as agreeing; they agreed on
    * the word and not on its scope.
+   *
+   * This flag is the ONE rights decision for both tool doors, networked or not (D-41, owner 2026-10-15: *"space admin can do it
+   * and as always a network member may decide to leave the network instead of wiping"*): space admin may empty a networked
+   * space too — the network's own rules decide whether the wipe acts at once, and a member that does not want to be emptied
+   * leaves the network. No ROUTE_RIGHTS or TOOL_RIGHTS row governs it; changing the answer is one edit, here.
    */
   spaceAdmin: true,
   spaceRequired: true,
@@ -840,32 +853,7 @@ export const delete_space_dataTool: ToolHandler = {
     const out = await deleteSpaceData({ space: callSpace, confirm: a['confirm'], types: a['types'] });
 
     if (!out.ok) throw new Error(out.error);
-
-    const label = wipeTypesLabel(out.types);
-    if (out.outcome === 'vote_pending') {
-      const where = out.rounds.map(r => r.networkLabel).join(', ');
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Nothing has been wiped yet. '${callSpace}' belongs to ${out.rounds.length} network`
-            + `${out.rounds.length === 1 ? '' : 's'} (${where}), so emptying it is a governed act: a vote is `
-            + `now open in each, and this instance has voted yes. [${label}] is wiped on every member `
-            + 'when a round passes, and a single veto stops it there. Watch the rounds rather than expecting '
-            + 'counts from this call.',
-        }],
-        structuredContent: { status: 'vote_pending', rounds: out.rounds, types: out.types },
-      };
-    }
-
-    const d = out.deleted;
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Wiped [${label}] in space '${callSpace}': ${d.facts} facts, ${d.entities} entities, `
-          + `${d.edges} edges, ${d.chrono} chrono, ${d.files} files.`,
-      }],
-      structuredContent: d as unknown as Record<string, unknown>,
-    };
+    return wipeToolResult(callSpace, out.outcome, out.types);
   },
 };
 

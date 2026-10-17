@@ -65,6 +65,7 @@ describe('a passed round with nothing to do here settles at once, and one this i
 
   it('R-X7b: a passed, un-applied wipe of an uncarried space stored by an older build is settled by the first tick, in one save, and acts on nothing', async () => {
     const loader = await boot(dir, { spaces: ['s'], networks: [club([passedSpaceRound('w1', 'space_wipe', 's', { proposedHere: false })])] });
+    await mongo.col('s_facts').deleteMany({});   // the row above leaves its three records in `s`, on purpose: this row counts its own
     await seedFacts(mongo, 's', 2, 'old');
     const configWriteGeneration = await requireExport('../../server/dist/config/loader.js', 'configWriteGeneration', 'design v5 section 6.1: a read-only export of the write generation, the way a save is counted');
     const { runRoundExpiryTick } = await import('../../server/dist/networks/round-expiry.js');
@@ -108,6 +109,9 @@ describe('a passed round with nothing to do here settles at once, and one this i
     const runner = await requireRunner();
     const { runRoundExpiryTick } = await import('../../server/dist/networks/round-expiry.js');
     runRoundExpiryTick(Date.now());
+    // This is the file's first wipe body, and a cold one loads its modules on the way: the wait is bounded by store round trips,
+    // as the rows below are, rather than by event-loop turns, which a cold body outlasts.
+    await untilOrBound(mongo, async () => runner.spaceActsRunning() === 0 && entriesOf(loader).length === 0, 3000);
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount(mongo, 's'), 0, 'the tick did not complete the owed wipe');
     assert.equal(loader.getConfig().networks[0].pendingRounds[0].appliedHere, true);

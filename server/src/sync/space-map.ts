@@ -191,6 +191,22 @@ export class SpaceNameInUseError extends Error {
 }
 
 /**
+ * The NETWORK's id for the space a round is about — "the same network space" read one way (design v5 §2.3, VR11, W23), whether or
+ * not this network still carries it.
+ *
+ * An addition names it by the network's id; a deletion or wipe carries `networkSpaceId` since `Q-133`. A deletion from an older
+ * release has none and names the proposer's LOCAL id, so that is mapped through the alias table (first match) and falls back to the
+ * id itself. Asked before any act of the call forgets an alias: a deletion without `networkSpaceId` that first arrives after the
+ * alias is gone and names a renamed space is not matched — it then fails to retire an addition, and re-creates nothing.
+ */
+export function networkSpaceKey(
+  net: NetworkConfig,
+  round: { spaceId?: string; networkSpaceId?: string },
+): string | null {
+  return round.networkSpaceId ?? (round.spaceId === undefined ? null : localToRemote(net, round.spaceId));
+}
+
+/**
  * The local space a space round is about here, or `null` when this network does not carry it.
  *
  * A round names its space twice since `Q-133`: `spaceId` as it always did (a 5.0 or 5.1 peer applies it raw), and

@@ -142,8 +142,12 @@ describe('pub/sub: a subscriber acts locally, the publisher acts at once and tel
     assert.equal(round().passed === true, false, 'a subscriber\'s round passed on the publisher: its yes alone passes a pub/sub round (governance: yes >= 1), so it would empty the publisher\'s whole space');
     assert.equal(await factCount(mongo, 'notes'), 2);
     const { runRoundExpiryTick } = await import('../../server/dist/networks/round-expiry.js');
+    // Held before the tick: the tick that concludes a round past its deadline also prunes it (recording how it ended), so the round is
+    // read on the object the config held, and its end in the outcome log.
+    const held = round();
     runRoundExpiryTick(Date.now() + 24 * HOUR);
-    assert.deepEqual([round()?.concluded, round()?.outcome], [true, 'expired']);
+    assert.deepEqual([held?.concluded, held?.outcome], [true, 'expired']);
+    assert.equal((loader.getConfig().networks[0].roundOutcomes ?? []).find(e => e.roundId === 'old-sub')?.outcome, 'expired');
   });
 
   it('R-D40d: the publisher\'s deletion acts at once, and a notice to its subscribers was queued before the space left the network', async () => {

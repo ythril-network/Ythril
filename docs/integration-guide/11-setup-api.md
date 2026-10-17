@@ -107,14 +107,15 @@ ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
 | `ythril_functional_race_lost_total` | counter | Edge writes under a `functional` label that **lost a race**, by `space`: two writers found the same subject free and stored an edge at the same moment, and the store kept the first. The loser is decided again against the winner and answered as the ordinary `functional` violation, so this is the rate at which concurrent writers meet on one subject, **not** a rate of failed requests. The series exists from the first scrape |
 | `ythril_housekeeping_records_failed_total` | counter | Records a step could not delete or process, by `step` — a count of records, not of cycles. The retention sweep skips a record it cannot delete and reports it here with its count, instead of letting it hold up the others; a rate above `0` for a step that was working is the record to look for. Reports `0` from process start |
 | `ythril_interval_tick_skipped_total` | counter | Ticks of a repeating background job that were skipped because the previous tick was still running, by `job` — the job's own name, the one its log lines carry: `TTL sweep`, `Candidate prune`, `Tombstone prune`, `Stale chunk cleanup`, `Audit change retention`, `Invite session purge`, `Space activity flush`, `Horizon hold watchdog`, `Webhook retry poll`, `Vote round expiry`, `Reindex watcher`, `Brain embedding heartbeat`, `Brain embedding stall sweep`, `Media stall sweep` and `Media provider refresh`. A job that skips one tick now and then is slow, one that skips every tick is stuck. Every job reports `0` from process start |
-| `ythril_space_acts_total` | counter | Space acts (a deletion, wipe or rename that a passed vote or a request started) finished on this instance. |
-| `ythril_space_act_retries_total` | counter | Retries of a space act that failed and is retried with a backoff. |
-| `ythril_space_acts_running` | gauge | Space acts running now. |
-| `ythril_space_acts_owed` | gauge | Space acts owed and not yet finished. |
-| `ythril_space_acts_waiting` | gauge | Space acts registered and waiting for a slot. |
-| `ythril_space_act_batches_retried_total` | counter | Batches of a wipe that were retried. |
-| `ythril_round_settle_failures_total` | counter | Settle steps that failed, on any path that settles a round. |
-| `ythril_space_exchange_held` | gauge | Spaces whose peer exchange is held while a wipe or deletion is applied. |
+| `ythril_space_acts_total` | counter | Space acts that ended on this instance (a deletion, wipe or rename that a passed vote or a request started), by `kind`, `via` (what started it) and `outcome`: `completed`, `failed` or `interrupted`. |
+| `ythril_space_act_retries_total` | counter | Space acts that failed and were scheduled for a retry, by `kind`. |
+| `ythril_space_acts_running` | gauge | Space act bodies running now. |
+| `ythril_space_acts_owed` | gauge | Space acts that failed and are owed a retry. Their spaces take no writes and are held from exchanges until one completes. |
+| `ythril_space_act_oldest_owed_seconds` | gauge | Age in seconds of the oldest owed space act, counted from its registration; `0` when none is owed. |
+| `ythril_space_acts_waiting` | gauge | Space acts waiting for the transfers of their space to end, by `kind`. Waiting is not failing. |
+| `ythril_space_act_batches_retried_total` | counter | Wipe batches that the per-operation bound ended after the batch before them made progress, run again inside the same attempt. |
+| `ythril_round_settle_failures_total` | counter | Concluded vote rounds whose settlement here failed, by `via` (where they were settled). |
+| `ythril_space_exchange_held` | gauge | Per `network`: the member and space pairs whose exchange is held because a space act stands. Read from the live config at each scrape; a declined space is never counted. |
 | `ythril_space_held_refusals_total` | counter | Peer requests refused with `423 space_held`. |
 | `ythril_space_transfers_running` | gauge | Transfers of a space's data running now. |
 | `ythril_round_clock_ahead_total` | counter | Vote rounds whose opening time is ahead of this instance's clock; they are adopted and warned about. |

@@ -28,6 +28,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { removeInstanceDir, settled, startFakePeer, allowEngineToDialPrivatePeers } from './_vote-round-instance.mjs';
 import { startVotesPeer } from './_vote-round-sites.mjs';
+import { auditRowsOf } from './_space-act-harness.mjs';
 import { SELF, M1, tempInstance, networkOf, boot, databaseTakesCollections, warmSpaceCreation } from './_round-open-fixtures.mjs';
 
 const dir = tempInstance('ythril-readd-');
@@ -59,8 +60,11 @@ async function settleEverything(loader, id, mongo) {
   const net = cfg.networks[0];
   const held = [...net.pendingRounds];
   if (typeof mod.settleRounds === 'function') {
-    // The settle's own promise covers the deferred add (design v5 section 2.2), so the state is read when the act has ended.
-    await mod.settleRounds(net, cfg, [], 'retry', Date.now(), held).settled;
+    // The settle's own promise covers the deferred add (design v5 section 2.2), so the state is read when the act has ended. Saved at
+    // once, as every caller of the settle saves: a marking left in memory is read away by any background writer's reload.
+    const out = mod.settleRounds(net, cfg, [], 'retry', Date.now(), held);
+    if (out.wrote) loader.saveConfig(cfg);
+    await out.settled;
     return settled(() => observe(loader, id));
   }
   // The base commit's spelling of the same retry. Its deferred add (a dynamic import, then createSpace against Mongo, which builds the space's
@@ -88,6 +92,8 @@ describe('R3: a space deleted after its addition is not added back', { skip }, (
     assert.equal(got.additionApplied, true, 'the addition is not marked appliedHere, so it will be tried again and its retirement is lost with the deletion\'s prune');
     const audit = await import('../../server/dist/audit/middleware.js');
     assert.equal(typeof audit.ROUND_ADDITION_RETIRED_OPERATION, 'string', 'server/src/audit/middleware.ts does not export ROUND_ADDITION_RETIRED_OPERATION (design v5 section 2.3: every retirement is audited)');
+    // The audit write is queued, not awaited: poll for the entry (bounded by turns), then count — a read made at once is not a zero.
+    await auditRowsOf(mongo, audit.ROUND_ADDITION_RETIRED_OPERATION, { atLeast: 1 });
     const rows = (await mongo.col('audit_log').find({}).toArray()).filter(r => JSON.stringify(r).includes(audit.ROUND_ADDITION_RETIRED_OPERATION));
     assert.equal(rows.length, 1, 'one audit entry per retired addition');
   });

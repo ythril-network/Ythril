@@ -154,7 +154,7 @@ describe('every door plans by this accept, and the writer applies it only at the
     const pull = bodyOf(stripComments(readFileSync('server/src/sync/pull-family.ts', 'utf8')), 'pullFamily');
     assert.match(pull, /acceptArrivingPage\([^)]*door: 'pull'/s, 'the pull no longer hands its pages to the page accept');
     assert.doesNotMatch(pull, /writeArrivals\(/, 'the pull writes its pages without the page accept again');
-    const engine = bodyOf(stripComments(readFileSync('server/src/sync/engine.ts', 'utf8')), 'pullFromPeer');
+    const engine = bodyOf(stripComments(readFileSync('server/src/sync/space-exchange.ts', 'utf8')), 'pullFromPeer'); // moved out of engine.ts (bundle-106 §3.4)
     assert.match(engine, /await pullFamily\(/, 'the engine\'s pull no longer goes through the per-family pull');
     assert.doesNotMatch(engine, /writeArrivals\(|acceptArrivingPage\(/, 'the engine writes pulled pages itself again');
     const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');

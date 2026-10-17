@@ -29,6 +29,7 @@ import { removeInstanceDir, callRoute } from './_vote-round-instance.mjs';
 import { deferred, seedActEntry, untilRunnerIdle, resetRunnerForTest, entriesOf } from './_space-act-harness.mjs';
 import {
   SELF, M1, tempInstance, networkOf, boot, seedFacts, factCount, roundsOf, doors, requireRunner, databaseTakesCollections, warmSpaceCreation, ADMIN,
+  untilOrBound,
 } from './_round-open-fixtures.mjs';
 
 const dir = tempInstance('ythril-door-answers-');
@@ -182,6 +183,8 @@ describe('R-W7 and R-W20: a concluding relay answers before the act finishes, an
     assert.equal(answered, true, 'the relay awaited the act: the sender\'s whole serial vote push (and its cycle) stalls behind a wipe (W7)');
     latch.release();
     assert.equal((await call).code, 200);
+    // The act's body is store work: its end is waited for in store round trips (bounded), then the idle check holds it.
+    await untilOrBound(mongo, async () => runner.spaceActsRunning() === 0 && entriesOf(loader).length === 0, 3000);
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount(mongo, 'notes'), 0);
     resetRunnerForTest(runner);
@@ -205,13 +208,28 @@ describe('R-W7 and R-W20: a concluding relay answers before the act finishes, an
     assert.equal(tool.isError, true, tool.text);
     assert.equal(tool.structured?.code, 'space_act_failed', 'a failed act after a passed vote is a FAILURE, not a ToolRefusal (which means "refused, nothing failed")');
     assert.equal(tool.structured?.status, 'passed');
+    // The dispatcher's STATUS for that answer (design v5 section 2.2 v4 (3)): the REST tool door answers what the dispatcher says, and a
+    // failed act after a passed vote is a server-side failure - 500, as the REST route answers - never the 422 of a refusal.
+    resetRunnerForTest(runner);
+    runner.setSpaceActHooksForTest({ beforeBatch: async () => { throw new Error('and again'); } });
+    await boot(dir, { spaces: ['notes'], networks: [networkOf('club', [M1], { spaces: ['general', 'notes'] })] });
+    const { callTool: dispatch } = await import('../../server/dist/mcp/call-tool.js');
+    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
+    // The dispatcher reads a whole matrix (reach, rung): an instance administrator's, as a minted admin token carries.
+    const adminMatrix = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
+    const viaDoor = await dispatch({ name: 'delete_space_data', args: { space: 'notes', confirm: true },
+      caller: { rights: adminMatrix, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'rest', tokenId: 't', tokenLabel: 't' } });
+    assert.equal(viaDoor.result.structuredContent?.code, 'space_act_failed', `the dispatched call did not fail as an act: ${JSON.stringify(viaDoor.result).slice(0, 300)}`);
+    assert.equal(viaDoor.status, 500, 'the tool door answered a failed act after a passed vote with a refusal\'s status: the REST route answers it 500');
     resetRunnerForTest(runner);
   });
 
   it('R-W20: a store-side cause answers 503 with Retry-After and the same body', async () => {
     const runner = await requireRunner();
     await boot(dir, { spaces: ['notes'], networks: [networkOf('club', [M1], { spaces: ['general', 'notes'] })] });
-    runner.setSpaceActHooksForTest({ beforeBatch: async () => { throw Object.assign(new Error('connection closed'), { name: 'MongoNetworkError' }); } });
+    // The driver's own class: the server's one store classifier reads the error's class, never a name any Error could carry.
+    const { MongoNetworkError } = await import('mongodb');
+    runner.setSpaceActHooksForTest({ beforeBatch: async () => { throw new MongoNetworkError('connection closed'); } });
     const { createApp } = await import('../../server/dist/app.js');
     const app = createApp();
     const res = await (async () => {

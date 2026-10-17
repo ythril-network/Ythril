@@ -26,6 +26,11 @@ import type { TokenRights } from '../config/rights-shape.js';
 export { isInstanceAdmin } from './instance-admin.js';
 import { isInstanceAdmin } from './instance-admin.js';
 import { createSpacesRefusal } from './create-spaces.js';
+import { spaceHold, enterSpaceTransfer } from '../sync/space-exchange-set.js';
+import { holdTransferWhileOpen } from '../sync/space-transfer-fence.js';
+import { SPACE_HELD_ANSWER } from '../sync/held-answer.js';
+import { spaceActKnob } from '../spaces/space-act-runner.js';
+import { spaceHeldRefusalsTotal } from '../metrics/registry.js';
 
 // Augment Express Request type
 declare global {
@@ -626,6 +631,30 @@ export async function acceptSchemaLibraryToken(
  * So the binding is explicit and asserted: `space-routes-honour-token-scope.test.js` requires a route declaring `:id`
  * to use a guard bound to `'id'`, which a bare `requireSpaceAuth` cannot satisfy.
  */
+/**
+ * Is `spaceId` held for the PEER this token is bound to (a deletion or wipe applied on one side, design v5 section 3.3 v4 (5), W13)?
+ * Answers `423 space_held` itself and returns true when it is; otherwise admits the call as a transfer of the space, counted in the
+ * fence for as long as its response is open - destroyed the moment an act on the space registers (a file stream must not make the
+ * act wait for the sender) and by the server past `INBOUND_TRANSFER_MS`.
+ *
+ * The rights doors' half of the hold: the sync routes ask `refusePeerSpace`, these doors ask this, and both ask `spaceHold`. A token
+ * bound to no peer is the operator's own tooling, not the exchange, and is never held.
+ */
+export function refuseHeldPeer(res: Response, spaceId: string | undefined, record: unknown): boolean {
+  const peerId = (record as { peerInstanceId?: unknown } | undefined)?.peerInstanceId;
+  if (typeof peerId !== 'string' || !peerId || !spaceId) return false;
+  const transfer = spaceHold(getConfig(), spaceId, peerId) ? null : enterSpaceTransfer(spaceId, peerId);
+  if (!transfer) {
+    spaceHeldRefusalsTotal.inc({ door: 'rights' });
+    res.status(423).json(SPACE_HELD_ANSWER);
+    return true;
+  }
+  // Counted until the response closes, however it closes; a response that cannot say so is not counted at all.
+  let kept = false;
+  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), true); } finally { if (!kept) transfer.release(); }
+  return false;
+}
+
 export function requireSpaceAuthScoped(paramName: string) {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
     const auth = await resolveAuthOrFail(req, res, { recordInvalidMetric: true });
@@ -635,6 +664,8 @@ export function requireSpaceAuthScoped(paramName: string) {
     const spaceId = req.params[paramName] as string | undefined;
     if (!enforceSpaceScope(res, record, spaceId)) return;
     if (!enforceAreaRung(res, record, req, spaceTargets(spaceId, record))) return;
+    // After the rung: a token without the rung gets its 403 and never learns a space is held.
+    if (refuseHeldPeer(res, spaceId, record)) return;
 
     authAttemptsTotal.inc({ result: 'success' });
     req.resolvedSpaceId = spaceId;
@@ -704,6 +735,12 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
       res.status(verdict.refusal.startsWith('The \'space\'') ? 400 : 403).json({ error: verdict.refusal });
       return;
     }
+
+    // A peer token: a held space it NAMED is refused 423; one it did not name is left out of the set it searches.
+    const namedIds = new Set(namedList.filter((s): s is string => typeof s === 'string').map(s => s.trim()));
+    for (const sid of verdict.spaces) if (namedIds.has(sid) && refuseHeldPeer(res, sid, record)) return;
+    const peerId = (record as { peerInstanceId?: unknown }).peerInstanceId;
+    if (typeof peerId === 'string' && peerId) verdict.spaces = verdict.spaces.filter(sid => namedIds.has(sid) || !spaceHold(cfg, sid, peerId));
 
     authAttemptsTotal.inc({ result: 'success' });
     req.authorisedSpaces = verdict.spaces;

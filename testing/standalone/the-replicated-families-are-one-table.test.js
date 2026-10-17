@@ -26,6 +26,8 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const ENGINE = 'server/src/sync/engine.ts';
+/** The per-space turn the engine hands each space to: the pull and the push moved there (bundle-106 §3.4). */
+const EXCHANGE = 'server/src/sync/space-exchange.ts';
 /*
  * The list lives in its OWN module, not in the engine. Which record types replicate is a fact about
  * replication rather than about the engine's loop — the merkle hash, the ingest schemas and the
@@ -59,9 +61,9 @@ describe('one list of families, iterated by both directions', () => {
    * is FOUND before it counts, so a rename that leaves it matching nothing fails here rather than passing.
    */
   it('PULL iterates it instead of naming each family', () => {
-    const src = code(ENGINE);
+    const src = code(ENGINE) + code(EXCHANGE);
     assert.match(src, /import \{[^}]*\bpullFamily\b[^}]*\} from '\.\/pull-family\.js'/, 'the engine no longer imports the per-family pull — re-anchor this case');
-    const loop = src.search(/for \(const family of REPLICATED_FAMILIES\) \{\s*pulled\[family\.payloadKey\] = await pullFamily\(/);
+    const loop = src.search(/for \(const family of REPLICATED_FAMILIES\) \{\s*(?:if \(!turn\.mayContinue\(\)\) break;\s*)?pulled\[family\.payloadKey\] = await pullFamily\(/);
     assert.notEqual(loop, -1, 'the pull is no longer a loop over REPLICATED_FAMILIES calling pullFamily — re-anchor this case');
     const calls = [...src.matchAll(/await pullFamily[<(]/g)].length;
     assert.equal(calls, 1,
@@ -70,12 +72,12 @@ describe('one list of families, iterated by both directions', () => {
   });
 
   it('and PUSH iterates it too', () => {
-    const src = code(ENGINE);
+    const src = code(ENGINE) + code(EXCHANGE);
     assert.match(src, /import \{[^}]*\bpushFamily\b[^}]*\} from '\.\/push-family\.js'/, 'the engine no longer imports the per-family push — re-anchor this case');
     const calls = [...src.matchAll(/await pushFamily[<(]/g)].length;
     assert.equal(calls, 1,
       `${calls} pushFamily call sites — the push side must call it once, inside the loop`);
-    assert.match(src, /for \(const family of REPLICATED_FAMILIES\) \{\s*pushed\[family\.payloadKey\] = await pushFamily\(/,
+    assert.match(src, /for \(const family of REPLICATED_FAMILIES\) \{\s*(?:if \(!turn\.mayContinue\(\)\) break;\s*)?pushed\[family\.payloadKey\] = await pushFamily\(/,
       'the push call is not inside the loop over REPLICATED_FAMILIES');
     // And the engine must not have grown a per-family transfer of its own back.
     assert.doesNotMatch(src, /\basync function (?:pullType|pushCollection|pullFamily|pushFamily)\b/, 'a per-family transfer is declared in the engine again');

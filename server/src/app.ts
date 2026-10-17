@@ -21,7 +21,8 @@ import { duplicatesRouter } from './api/duplicates.js';
 import { contradictionsRouter } from './api/contradictions.js';
 import { syncRouter } from './api/sync/index.js';
 import { editorScopeFor } from './auth/editor-scope.js';
-import { planSpaceWipe, notifyPeersOfWipe } from './spaces/wipe-vote.js';
+import { wipeSpaceAsRequested } from './spaces/wipe-vote.js';
+import { spaceActFailureAnswer } from './spaces/space-act-failure.js';
 import { networksRouter } from './api/networks/index.js';
 import { notifyRouter } from './api/notify.js';
 import { inviteRouter } from './api/invite.js';
@@ -55,7 +56,7 @@ import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
-import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
+import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
 import { col } from './db/mongo.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
@@ -382,31 +383,40 @@ export function createApp() {
       res.status(404).json({ error: `Space '${spaceId}' not found` });
       return;
     }
-    // Optional `types` body parameter — validate each value.
-    const rawTypes = req.body?.types;
-    if (rawTypes !== undefined) {
-      if (!Array.isArray(rawTypes) || rawTypes.some((t: unknown) => !WIPE_COLLECTION_TYPES.includes(t as WipeCollectionType))) {
-        res.status(400).json({
-          error: `'types' must be an array of: ${WIPE_COLLECTION_TYPES.join(', ')}`,
-        });
-        return;
-      }
-    }
-    // X-5: on a space that belongs to a network, emptying it is a governed act and opens a vote instead of
-    // happening now. A space in no network is unaffected — `planSpaceWipe` says which, and the same planner
-    // answers for the `delete_space_data` tool so the two doors cannot drift.
-    const plan = planSpaceWipe(spaceId, rawTypes);
-    if (plan.governed) {
-      notifyPeersOfWipe(spaceId, rawTypes);
-      res.status(202).json({ status: 'vote_pending', rounds: plan.rounds });
+    // The same `confirm` the tool demands (R4): on a club, a pub/sub this instance publishes, or a network where it is the
+    // only member, this instance's yes passes the round and the data goes in this request.
+    if (req.body?.confirm !== true) {
+      res.status(400).json({ error: '`confirm: true` required' });
       return;
     }
-
+    // Optional `types`: deduplicated, ordered and capped once (`wipeTypesOf`), so the round, its signature and the act read one list.
+    const types = wipeTypesOf(req.body?.types);
+    if (types === 'refused') {
+      res.status(400).json({ error: `'types' must be an array of at most ${WIPE_COLLECTION_TYPES.length} of: ${WIPE_COLLECTION_TYPES.join(', ')}` });
+      return;
+    }
+    // X-5: on a space that belongs to a network, emptying it is a governed act — the same planner answers for the
+    // `delete_space_data` tool, so the two doors cannot drift; this door only renders what it came to.
+    const where = 'POST /api/admin/spaces/:spaceId/wipe';
     try {
-      const deleted = await wipeSpace(spaceId, rawTypes);
-      res.json({ deleted });
+      const outcome = await wipeSpaceAsRequested(spaceId, types);
+      const repeated = 'repeated' in outcome && outcome.repeated ? { repeated: true } : {};
+      if (outcome.status === 'vote_pending') { res.status(202).json({ status: 'vote_pending', rounds: outcome.rounds, ...repeated }); return; }
+      if (outcome.status === 'passed') {
+        res.status(202).json({ status: 'passed', rounds: outcome.rounds, queued: true, ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}), ...repeated });
+        return;
+      }
+      if (outcome.status === 'failed') {
+        const answer = spaceActFailureAnswer(outcome.cause, outcome.rounds, where);
+        if (answer.store) sendStoreFailure(res, answer.store, answer.body); else res.status(answer.status).json(answer.body);
+        return;
+      }
+      res.json({
+        status: 'wiped', ...(outcome.deleted ? { deleted: outcome.deleted } : {}), ...(outcome.rounds?.length ? { rounds: outcome.rounds } : {}),
+        ...repeated, ...(outcome.refills ? { refills: true } : {}),
+      });
     } catch (err) {
-      sendCaughtFailure(res, 'POST /api/admin/spaces/:spaceId/wipe', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
+      sendCaughtFailure(res, where, err, { error: 'The wipe did not complete; see the log.' });
     }
   });
 

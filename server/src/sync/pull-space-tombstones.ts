@@ -22,6 +22,7 @@ import { pullTombstones } from './tombstone-transfer.js';
 import { rereadUpstreamTombstones } from './tombstone-reread.js';
 import type { NetworkMember } from '../config/types.js';
 import type { TransferOutcome } from './watermark.js';
+import type { ExchangeTurn } from './held-answer.js';
 
 export async function pullSpaceTombstones(opts: {
   member: NetworkMember;
@@ -30,10 +31,12 @@ export async function pullSpaceTombstones(opts: {
   networkId: string;
   sinceSeq: number;
   requestInit: () => RequestInit;
+  /** The space's turn with this member, handed to both pulls: their fetches take its signal and a refusal goes to it (design v5 X5). */
+  turn?: ExchangeTurn;
 }): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit } = opts;
+  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, turn } = opts;
   await stampDeliveriesOnce(spaceId);
-  const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit });
-  await rereadUpstreamTombstones({ member, spaceId, remoteSpaceId, networkId, requestInit, ordinary: { sinceSeq, outcome } });
+  const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, turn });
+  await rereadUpstreamTombstones({ member, spaceId, remoteSpaceId, networkId, requestInit, ordinary: { sinceSeq, outcome }, turn });
   return outcome;
 }

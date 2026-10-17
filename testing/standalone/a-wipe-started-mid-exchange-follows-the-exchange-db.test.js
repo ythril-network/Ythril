@@ -16,8 +16,8 @@
  * and an exchange of the space is refused for as long as the act stands. So, per row:
  *
  * - **R-W4a** a wipe started while a PAGE of the pull is in flight (the first family's page has landed, the second's is parked at the peer): the page in
- *   flight is cut, both families' records are gone when the act ends, the receive mark is absent, and no write to the space's collections ended after
- *   the act's first delete.
+ *   flight is cut, both families' records are gone when the act ends, the receive mark is absent, and no EXCHANGE write to the space's collections
+ *   ended after the act's first delete (the act's own writes - learnt from the act run alone, `actOperationsOf` - are the act and do not count).
  * - **R-W4b** the same while a PUSH is in flight: the request is cut and no push mark is written past data that is about to go.
  * - **R-W4c** the same between FILES of a multi-file manifest: no file's bytes or row survive, and no file is requested after the act began.
  * - **R-X5a** the multi-file case again, for the transfer module's own answers: the turn stops before the next file, the download in flight is aborted,
@@ -71,6 +71,20 @@ const wipe = (space) => lifecycle.wipeSpace(space);
 const ownAuthor = () => ({ instanceId: door.instanceId, instanceLabel: 'Receiver' });
 
 const quiet = () => settleActs(door, loader);
+
+/**
+ * The operations the act body issues on `space`'s data collections, learnt from the same act run ALONE (nothing exchanging): its own writes
+ * (the wipe's face unlabel on the files rows) are the act, not a write it raced, so the order rule leaves them out by WHAT they are - never
+ * by when they ran. Every other write still counts.
+ */
+async function actOperationsOf(space) {
+  cmd.reset();
+  await wipe(space);
+  await quiet();
+  const ops = cmd.writeShapes(space, dataParts);
+  cmd.reset();
+  return ops;
+}
 
 /** Two families in the order the pull takes them, and a record of each on the peer: the first is on disk before the second is asked for. */
 async function seedPeerPages() {
@@ -133,6 +147,7 @@ describe('a wipe started in the middle of an exchange follows it', { skip }, () 
   });
 
   it('R-W4a: a wipe started while a PAGE of the pull is in flight cuts it, deletes after the exchange\'s last write, and nothing the pull moved survives', T, async () => {
+    const actOperations = await actOperationsOf(S);
     await seedPeerPages();
     const stall = proxy.stallNext(r => r.method === 'GET' && r.path === '/api/sync/entities' && r.query.spaceId === S);
     const cycle = door.sync();
@@ -149,7 +164,7 @@ describe('a wipe started in the middle of an exchange follows it', { skip }, () 
     }
     rules.that(door.member().lastSeqReceived?.[S] === undefined, 'a receive mark was written for a space that was wiped under the pull');
     rules.that(cmd.firstDeleteStart(S, dataParts) >= 0, 'fixture: the act deleted nothing from the space\'s data collections, so no order was observed');
-    rules.that(cmd.writesEndedAfterFirstDelete(S, dataParts).length === 0, `a write to the space ended after the act's first delete started: ${cmd.describe(S, dataParts)}`);
+    rules.that(cmd.writesEndedAfterFirstDelete(S, dataParts, { actOperations }).length === 0, `an exchange write to the space ended after the act's first delete started: ${cmd.describe(S, dataParts)}`);
     rules.that(out.cut, 'the page in flight when the act began was not cut: the receiver kept waiting for the peer');
     rules.done();
   });
